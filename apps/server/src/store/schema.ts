@@ -258,6 +258,10 @@ CREATE TABLE IF NOT EXISTS audit_items (
   UNIQUE (kind, subject)
 );
 CREATE INDEX IF NOT EXISTS audit_items_at ON audit_items(at);
+-- The last successful occurrence of each routine event watched by Audit for a silence.
+CREATE TABLE IF NOT EXISTS audit_events (
+  kind TEXT PRIMARY KEY, last_seen_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
   text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER

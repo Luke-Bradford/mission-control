@@ -55,6 +55,7 @@ import {
   messageUnpausedSeat,
   pauseAwareSupervisor,
   pausedSeat,
+  readCrewPause,
   startUnpausedRun,
 } from "./config/crew-pause.ts";
 import { loadProfiles, PROFILES_FILE } from "./config/profiles.ts";
@@ -755,7 +756,11 @@ export async function main(): Promise<void> {
             ready: (runId) => reviewPreviews.ready(runId),
             identity: (runId) => reviewPreviews.identity(runId),
             browse: (job, guard) => previewBrowserInHelper(job, guard),
-            saveShot: (png) => reviewShots.save(png),
+            saveShot: (png) => {
+              const id = reviewShots.save(png);
+              store.recordSilenceEvent("screenshot-captured", Date.now());
+              return id;
+            },
           },
         }),
   };
@@ -1315,6 +1320,10 @@ export async function main(): Promise<void> {
   const audit = () => {
     try {
       runCodeHealthAudit({ store, config, now: Date.now });
+      store.checkSilenceAlarms(Date.now(), {
+        crewPaused: readCrewPause(store) !== null,
+        budgetStopped: store.silenceAlarmsBudgetStopped(),
+      });
     } catch (e) {
       log(`code-health audit failed: ${e instanceof Error ? e.message : String(e)}`);
     }

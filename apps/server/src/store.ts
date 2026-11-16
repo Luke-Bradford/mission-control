@@ -126,6 +126,8 @@ import {
   reviewTimings,
   reworkRatios,
   type SeatSessionRow,
+  SILENCE_WATCHED_EVENTS,
+  type SilenceWatchedEventKind,
   type StoredFinding,
   type StrayKind,
   type Telemetry,
@@ -215,7 +217,14 @@ import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
-import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
+import {
+  auditEventLastSeen,
+  auditItems,
+  markTokenTimesChecked,
+  recordAuditEvent,
+  recordAuditItem,
+  recordSilenceAlarm,
+} from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -590,6 +599,15 @@ export class Store {
     this.transaction(() => {
       changed = recordMergedReviews(this.db, repoId, at);
     }, true);
+    if (
+      changed > 0 &&
+      this.db
+        .prepare(
+          "SELECT 1 FROM code_health_merged_reviews WHERE repo_id = ? AND recorded_at = ? AND review_id IS NOT NULL LIMIT 1",
+        )
+        .get(repoId, at) !== undefined
+    )
+      this.recordSilenceEvent("merged-pr-review-recorded", at);
     return changed;
   }
   codeHealthMergedReviews(repoId: string) {
@@ -948,7 +966,9 @@ export class Store {
    * row's loop is never rewritten here (`setRunLoop`).
    */
   upsertRun(r: Run, folded = false): void {
+    const isNew = this.run(r.id) === null;
     this.runQ.upsertRun(r, folded);
+    if (isNew) this.recordSilenceEvent("seat-run-started", r.startedAt);
   }
 
   /**
@@ -2588,6 +2608,8 @@ export class Store {
             readAt,
             readAt,
           );
+      if (p.headSha && (p.checks?.length ?? 0) > 0)
+        this.recordSilenceEvent("ci-result-observed", readAt);
       const runs = this.db
         .prepare(
           `SELECT id FROM runs INDEXED BY runs_loop_pr_number
@@ -3034,6 +3056,36 @@ export class Store {
     at: number;
   }): void {
     recordAuditItem(this.db, i);
+  }
+
+  /** Records a successful occurrence of a routine event watched by Audit. */
+  recordSilenceEvent(kind: SilenceWatchedEventKind, at: number): void {
+    recordAuditEvent(this.db, kind, at);
+  }
+
+  /** Opens alarms for routine events that stopped during active crew work, and clears resumed ones. */
+  checkSilenceAlarms(at: number, quiet: { crewPaused: boolean; budgetStopped: boolean }): void {
+    if (quiet.crewPaused || quiet.budgetStopped) return;
+    const ran = this.db.prepare("SELECT 1 FROM runs LIMIT 1").get() !== undefined;
+    if (!ran) return;
+    for (const event of SILENCE_WATCHED_EVENTS) {
+      const lastSeenAt = auditEventLastSeen(this.db, event.kind);
+      if (lastSeenAt === null) continue;
+      const silent = at - lastSeenAt > event.gapMs;
+      const detail = silent
+        ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
+        : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
+      recordSilenceAlarm(this.db, event.kind, silent ? "open" : "done", detail, at);
+    }
+  }
+
+  /** A token-budget park stops routine work, so its quiet period is not a silence alarm. */
+  silenceAlarmsBudgetStopped(): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM runs WHERE json_extract(loop, '$.parked.kind') = 'budget' LIMIT 1")
+        .get() !== undefined
+    );
   }
 
   /** Items recorded in range, newest first. */
