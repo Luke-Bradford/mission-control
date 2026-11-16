@@ -6,7 +6,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { closeAnsweredItems } from "../src/attention/answered.ts";
-import { withRepoWatch } from "../src/attention/unwatched-repos.ts";
+import { closeUnwatchedRepoItems, withRepoWatch } from "../src/attention/unwatched-repos.ts";
 import { chooseBrief } from "../src/brief/choices.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { routineBriefChoices } from "../src/brief/routine.ts";
@@ -61,7 +61,9 @@ afterEach(() => store.close());
 const needsYou = () => needsYouItems(attentionItems(config, store, AT)).find((i) => i.key === KEY);
 const find = () => attentionItems(config, store, AT).find((i) => i.key === KEY);
 
-async function answer() {
+async function answer(
+  actor: { operator: true } | { seatId: string; runId: string } = { operator: true },
+) {
   const item = find();
   if (!item) throw new Error("missing source");
   const content: AttentionBrief = {
@@ -74,7 +76,14 @@ async function answer() {
     did: [],
     checked: [],
     decision: {
-      whyOperator: { kind: "product-direction", explanation: "The operator decides." },
+      ...("seatId" in actor
+        ? {}
+        : {
+            whyOperator: {
+              kind: "product-direction" as const,
+              explanation: "The operator decides.",
+            },
+          }),
       consulted: [],
       costOfDelay: "None.",
       waiting: "An explicit operator choice.",
@@ -127,7 +136,7 @@ async function answer() {
       optionId: "clear",
       requestId: "r1",
     },
-    { operator: true },
+    actor,
   );
 }
 
@@ -149,8 +158,12 @@ it("the sweep records an answer chosen before closures were written", async () =
   (store as unknown as { db: { prepare(s: string): { run(): unknown } } }).db
     .prepare("DELETE FROM question_closures")
     .run();
+  // the scheduler's order: answers first, then unwatched cleanup, which must leave them alone
   expect(closeAnsweredItems({ config, store, now: AT })).toBe(1);
-  expect(store.questionClosures(0, 10)).toHaveLength(1);
+  expect(closeUnwatchedRepoItems({ config, store, now: AT })).toBe(0);
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ kind: "answered", reason: "You chose: Not now, clear it." }),
+  ]);
   expect(closeAnsweredItems({ config, store, now: AT })).toBe(0);
 });
 

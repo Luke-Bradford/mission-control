@@ -613,13 +613,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         lock: deps.lockState?.(),
         deliver: deps.deliverDefault,
       });
-      const unwatched = closeUnwatchedRepoItems({
+      const answered = closeAnsweredItems({
         config,
         store,
         now: now(),
         lock: deps.lockState?.(),
       });
-      const answered = closeAnsweredItems({
+      const unwatched = closeUnwatchedRepoItems({
         config,
         store,
         now: now(),

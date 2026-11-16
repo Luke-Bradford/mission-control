@@ -3079,11 +3079,13 @@ Choosing an option of a bound brief (`POST /api/attention/:key/choice`) that the
 leaves Needs you at once, whatever the item's repo: the item is read and carries its applied choice,
 so `needsYouItems` (the list, the header count) omits it, and the choice is stored as an `answered`
 closure that `GET /api/attention/answered` lists ("You chose: <option>."). A scheduler pass stores
-the closure for any choice made before this existed. A changed source is unread again and returns.
+the closure for any choice made before this existed, before the unwatched-repo cleanup, which
+skips applied choices. A choice made by a FLIGHT seat (a declared actor or an FYI default) reads
+"<seat> chose: ...", not "You chose". A changed source is unread again and returns.
 
 An operator item raised in a repo that is not in `config.repos` carries `repoUnwatched` (the repo
 and a plain sentence that its plan and materials are not loaded because the repo is not watched);
-the panel shows that sentence instead of load errors.
+the panel is to show that sentence instead of requesting the plan and materials (a web follow-up).
 
 ### Retained Needs-you materials
 

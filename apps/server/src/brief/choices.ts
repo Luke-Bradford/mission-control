@@ -344,6 +344,7 @@ export async function chooseBrief(
         aliases,
         current.options.find((option) => option.id === request.optionId)?.label ?? text,
         deps.now(),
+        "seatId" in actor ? { seatId: actor.seatId } : { operator: true },
       );
       return save("applied", text);
     } catch (error) {

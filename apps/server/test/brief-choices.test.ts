@@ -359,6 +359,20 @@ it("does not let an old successful claim hide a changed same-key source", async 
     brief: { state: { freshness: "stale" } },
   });
 });
+it("attributes an applied FYI default to FLIGHT and an operator choice to the operator", async () => {
+  const key = source();
+  now += DECISION_DEFAULT_WAIT_MS;
+  expect(await applyDecisionDefaults({ config, store, now, choices: choices() })).toBe(1);
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ key, kind: "answered", by: "FLIGHT-1" }),
+  ]);
+  expect(store.questionClosures(0, 10)[0]?.reason).toMatch(/^FLIGHT-1 chose: /);
+  const other = flightSource();
+  await chooseBrief(choices(), other.key, request(other.key), { operator: true });
+  expect(store.questionClosures(0, 10)).toContainEqual(
+    expect.objectContaining({ key: other.key, by: "operator" }),
+  );
+});
 it("serializes competing manual and timer choices to one durable epoch", async () => {
   const key = source(),
     req = request(key);

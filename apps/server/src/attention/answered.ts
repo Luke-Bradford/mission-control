@@ -4,8 +4,12 @@ import { attentionItems, NO_LOCK } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
 import { questionAskAt } from "./holds.ts";
 
-/** The line the Answered group shows for a question the operator settled by choosing an option. */
-export const answeredReason = (label: string): string => `You chose: ${label}.`;
+/** Who chose: the operator, or a FLIGHT seat acting under a declared actor or an FYI default. */
+export type AnsweredBy = { operator: true } | { seatId: string };
+
+/** The line the Answered group shows for a question settled by choosing an option. */
+export const answeredReason = (label: string, by: AnsweredBy): string =>
+  "seatId" in by ? `${by.seatId} chose: ${label}.` : `You chose: ${label}.`;
 
 /**
  * Records that the operator answered this item's question, under each of its keys, so it leaves
@@ -17,6 +21,7 @@ export function recordAnswered(
   keys: readonly string[],
   label: string,
   at: number,
+  by: AnsweredBy = { operator: true },
 ): boolean {
   let recorded = false;
   for (const key of keys)
@@ -25,8 +30,8 @@ export function recordAnswered(
         key,
         askAt: questionAskAt(item, item.brief),
         kind: "answered",
-        reason: answeredReason(label),
-        by: "operator",
+        reason: answeredReason(label, by),
+        by: "seatId" in by ? by.seatId : "operator",
         question: item.brief?.ask || item.text,
         ticket: item.ticket,
         operator: true,

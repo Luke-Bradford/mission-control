@@ -40,6 +40,8 @@ export function closeUnwatchedRepoItems(d: {
     const comms = item.key.startsWith(COMMS_OPEN_PREFIX);
     const source = comms || item.key.startsWith("ask:") || item.key.startsWith("note:");
     if (!source) continue;
+    // an applied choice is an answer: the answered sweep records it, not this one
+    if (item.brief?.choice?.state === "applied") continue;
     const repo = itemRepo(item);
     if (repo === null || watched.has(repo)) continue;
     const question = item.brief?.ask || item.text;
