@@ -252,6 +252,12 @@ export const LINK_MAP: Record<
       rule(/^Merged: /, /^\/board$/, "Merged PRs are the Board's merged stage."),
       rule(/^Tightest quota: /, /^\/telemetry\?tab=cost$/, "Quota used is on the Cost tab."),
       rule(/^Machine: /, /^\/telemetry\?tab=machine$/, "CPU and memory are on the Machine tab."),
+      rule(
+        /^(Running|Waiting|Parked|Idle) seats: /,
+        /^\/agent$/,
+        "A state count leads to the Agents page, where the seats are.",
+      ),
+      rule(/^[\w-]+ working share: /, /^\/agent\/[\w-]+$/, "A seat's share opens its Agent page."),
       rule(/^Table$/, /^\/telemetry\?view=table$/, "The Table view of the same tab."),
       rule(
         /^Cost and tokens$/,
@@ -383,6 +389,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/shell/keys.ts": "page: g-key shortcuts",
   "src/shell/overlays.ts": "pane: openItem itself",
   "src/pages/Telemetry.tsx": "page: the same page, another tab or view",
+  "src/telemetry/CrewTab.tsx": "page: Agents, a seat's Agent page, Needs you, Overview",
   "src/telemetry/Kpis.tsx": "page: the KPI's source",
   "src/telemetry/Stat.tsx": "page: Needs you, Board, Overview, another Telemetry tab",
 };
