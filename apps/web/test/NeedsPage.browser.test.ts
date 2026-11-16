@@ -601,8 +601,8 @@ describeRendered("Needs you page", () => {
           await page.screenshot(join(SHOTS, "needs-protected-before-1600x1000.png"));
         }
         await page.click("#needsOpts button");
-        // the options block unmounts as soon as the question leaves the list, so its receipt
-        // line is checked in the ItemPanel test; here the POST and the list are the proof
+        // The options block unmounts once the question leaves the list, so its receipt line
+        // and disabled options are checked in the ItemPanel test; here the POST and the list prove it.
         expect(
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
