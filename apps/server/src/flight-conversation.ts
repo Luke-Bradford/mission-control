@@ -103,49 +103,43 @@ async function codexTurnStarts(transcriptPath: string): Promise<TurnStart[]> {
 }
 
 /**
- * Ids of the end-of-turn texts to leave out of the thread: a turn (from one `op` line to the next)
- * that ends on text, after FLIGHT messaged the operator in it. The reply is the answer; the end
- * text stays in the transcript and on the run. A turn with no wake line before it is never cut.
+ * Ids of the texts to leave out of the thread. A turn (from one wake line to the next) shows only its
+ * last text block, and none when FLIGHT messaged the operator in it: the reply is the answer. The
+ * progress lines stay in the transcript and on the run. Text before any wake line is never cut.
  */
-function endTextsAfterOwnReply(
+function progressTexts(
   events: readonly StreamEvent[],
   replies: readonly number[],
   starts: readonly TurnStart[],
 ): Set<string> {
   const dropped = new Set<string>();
   let turnStart: number | null = null;
-  let last: StreamEvent | null = null;
-  // the events of the line `last` sits on: a frame can hold several text blocks
-  let frame: StreamEvent[] = [];
-  let frameOffset = -1;
-  const close = () => {
-    const start = turnStart;
-    if (start !== null && last?.kind === "msg" && last.at !== null) {
-      const end = last.at;
-      if (replies.some((at) => at >= start && at <= end))
-        for (const e of frame) if (e.kind === "msg") dropped.add(e.id);
+  let started = false;
+  let texts: StreamEvent[] = [];
+  const close = (end: number | null) => {
+    if (started) {
+      const start = turnStart;
+      const replied =
+        start !== null && replies.some((at) => at >= start && (end === null || at < end));
+      for (const e of replied ? texts : texts.slice(0, -1)) dropped.add(e.id);
     }
-    last = null;
-    frame = [];
+    texts = [];
   };
   let next = 0;
   for (const event of events) {
     const offset = Number(event.id.split(":")[0]);
     while (next < starts.length && starts[next].offset <= offset) {
-      close();
+      close(starts[next].at);
       turnStart = starts[next++].at;
+      started = true;
     }
     if (event.kind === "op") {
-      close();
+      close(event.at);
       turnStart = event.at;
-    } else if (event.kind === "msg" || event.kind === "tool") {
-      if (offset !== frameOffset) frame = [];
-      frameOffset = offset;
-      frame.push(event);
-      last = event;
-    }
+      started = true;
+    } else if (event.kind === "msg" && !internal(event.text)) texts.push(event);
   }
-  close();
+  close(null);
   return dropped;
 }
 
@@ -205,7 +199,7 @@ async function runLines(store: Store, flightId: string, run: SourceRun): Promise
       ordered.push(event);
     }
   const starts = run.vendor === "codex" ? await codexTurnStarts(run.transcriptPath) : [];
-  const posted = endTextsAfterOwnReply(ordered, store.flightOperatorMessageTimes(flightId), starts);
+  const posted = progressTexts(ordered, store.flightOperatorMessageTimes(flightId), starts);
   for (const event of ordered) {
     if (event.at !== null) orderAt = event.at;
     if (event.kind !== "msg" || internal(event.text) || posted.has(event.id)) continue;
