@@ -120,4 +120,17 @@ describe("traceFix", () => {
     commit("root");
     expect(await traceFix(dir, "--output=/tmp/x")).toBeNull();
   });
+
+  it("runs no object command when git cannot promise no lazy fetch", async () => {
+    const { fix } = mergeStyleRepo();
+    const seen: string[][] = [];
+    const exec = async (args: string[]): Promise<string> => {
+      seen.push(args);
+      if (args.includes("--no-lazy-fetch")) throw new Error("unknown option");
+      return "";
+    };
+    expect(await traceFix(dir, fix, exec)).toBeNull();
+    // only the capability probe ran
+    expect(seen).toEqual([["--no-lazy-fetch", "version"]]);
+  });
 });

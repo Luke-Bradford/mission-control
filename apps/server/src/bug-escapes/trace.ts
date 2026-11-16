@@ -1,4 +1,4 @@
-import { type GitExec, readOnlyBase, realGitExec } from "../repo/files.ts";
+import { type GitExec, readOnlyObjectBase, realGitExec } from "../repo/files.ts";
 
 /** Where a fix's changed lines came from. */
 export interface FixTrace {
@@ -73,7 +73,8 @@ export async function traceFix(
 ): Promise<FixTrace | null> {
   if (!FULL_SHA.test(fixSha)) return null;
   try {
-    const base = await readOnlyBase(checkout, exec);
+    // fail closed: a git that cannot promise no lazy fetch reads nothing (it could reach a remote)
+    const base = await readOnlyObjectBase(checkout, exec);
     const parent = (
       await exec([...base, "rev-parse", "--verify", "--end-of-options", `${fixSha}^1`])
     ).trim();

@@ -230,4 +230,26 @@ describe("sweepBugEscapes", () => {
     expect(store.audit(0, NOW).bugEscapes?.map((e) => e.issue)).toEqual([20, 30]);
     expect(store.audit(NOW - 5 * DAY, NOW).bugEscapes?.map((e) => e.issue)).toEqual([20]);
   });
+
+  it("reaches every repo over several passes, however many are configured", async () => {
+    const ids = Array.from({ length: 21 }, (_, i) => `r${i + 1}`);
+    const visited: string[] = [];
+    const spy = {
+      bugFixCandidates: (repoId: string) => {
+        visited.push(repoId);
+        return [];
+      },
+    } as unknown as Store;
+    const cfg = {
+      repos: ids.map((id) => ({ id })),
+      crew: { sessions: ids.map((id) => ({ repoId: id, checkout: repo })) },
+    } as unknown as Parameters<typeof sweepBugEscapes>[0]["config"];
+    const cursor = { next: 0 };
+    await sweepBugEscapes({ config: cfg, store: spy, exec, cursor });
+    expect(visited).toHaveLength(20);
+    expect(visited).not.toContain("r21");
+    await sweepBugEscapes({ config: cfg, store: spy, exec, cursor });
+    expect(visited).toContain("r21");
+    expect(new Set(visited)).toEqual(new Set(ids));
+  });
 });

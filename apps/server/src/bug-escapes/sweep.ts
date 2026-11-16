@@ -7,6 +7,9 @@ import { traceFix } from "./trace.ts";
 /** Bugs traced per repo in one pass; the rest wait for the next. */
 export const BUG_ESCAPE_BATCH = 10;
 
+/** Repos visited per pass. */
+export const BUG_ESCAPE_REPOS_PER_PASS = 20;
+
 /**
  * Traces each closed bug with a merged fix to the commit and PR that introduced it, and records
  * why it was missed. Local git only, read-only; no network and no GitHub write. A bug git cannot
@@ -17,10 +20,18 @@ export async function sweepBugEscapes(deps: {
   store: Store;
   exec?: GitExec;
   stopped?: () => boolean;
+  /** Where the next pass starts; kept between passes so every repo is reached. */
+  cursor?: { next: number };
 }): Promise<number> {
   const exec = deps.exec ?? realGitExec;
   let added = 0;
-  for (const repo of deps.config.repos.slice(0, 20)) {
+  const all = deps.config.repos;
+  const cursor = deps.cursor ?? { next: 0 };
+  const visit = Math.min(all.length, BUG_ESCAPE_REPOS_PER_PASS);
+  const first = all.length === 0 ? 0 : cursor.next % all.length;
+  cursor.next = all.length === 0 ? 0 : (first + visit) % all.length;
+  for (let i = 0; i < visit; i++) {
+    const repo = all[(first + i) % all.length];
     const checkout = deps.config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
     if (checkout === undefined) continue;
     for (const bug of deps.store.bugFixCandidates(repo.id, BUG_ESCAPE_BATCH)) {
@@ -61,10 +72,11 @@ export function createBugEscapeCollector(deps: {
 }) {
   let stopped = false,
     running: Promise<void> | null = null;
+  const cursor = { next: 0 };
   const tick = (): Promise<void> => {
     if (stopped) return Promise.resolve();
     if (running) return running;
-    running = sweepBugEscapes({ ...deps, stopped: () => stopped })
+    running = sweepBugEscapes({ ...deps, cursor, stopped: () => stopped })
       .then(() => undefined)
       .catch(() => undefined)
       .finally(() => {
