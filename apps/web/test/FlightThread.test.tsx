@@ -1,3 +1,4 @@
+import type { ConfigView } from "@mc/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, streamStatus } from "../src/data.ts";
@@ -19,11 +20,16 @@ const msg = (id: string, text: string, operator = false) => ({
   operator,
 });
 
-function stub(messages: unknown[], live = true, post?: () => { status: number; body: unknown }) {
+function stub(
+  messages: unknown[],
+  live = true,
+  post?: () => { status: number; body: unknown },
+  config: ConfigView = CONFIG,
+) {
   return stubFetch({
     "/api/comms/flight": { messages, hasMore: false },
     "/api/flight": seat(live),
-    "/api/config": CONFIG,
+    "/api/config": config,
     "/api/crew?shape=summary": { rows: [seatRow()] },
     "POST /api/comms": post ?? (() => ({ status: 200, body: { state: "stored" } })),
   });
@@ -45,12 +51,22 @@ describe("FlightThread", () => {
   });
 
   it("shows FLIGHT's Markdown as formatted text with ticket links", async () => {
-    stub([msg("comms:1", "**Done** - see shop-app#12 and `#5`\n\n- one\n- two")]);
+    // One repo with github set, so a bare PR number means that repo's pull request.
+    const onlyRepo = { ...CONFIG, repos: CONFIG.repos.slice(0, 1) };
+    stub(
+      [msg("comms:1", "**Done** - see shop-app#12, PR 34 and `#5`\n\n- one\n- two")],
+      true,
+      undefined,
+      onlyRepo,
+    );
     const { container } = render(<FlightThread />);
     await screen.findByText("Done");
     expect(container.textContent).not.toContain("**");
     expect(container.querySelectorAll("li")).toHaveLength(2);
     await waitFor(() => expect(screen.getByRole("link", { name: "shop-app#12" })).toBeTruthy());
+    expect(screen.getByRole("link", { name: "PR 34" }).getAttribute("href")).toBe(
+      "https://github.com/octo-org/shop-app/pull/34",
+    );
   });
 
   it("takes text while FLIGHT is stopped and says it reads it when it starts", async () => {
