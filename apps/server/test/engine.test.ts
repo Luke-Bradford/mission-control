@@ -6487,9 +6487,6 @@ describe("the engine runs reviews", () => {
 
       it("rereview resolves the review-rounds alarm with FLIGHT's basis, and the review runs", async () => {
         const third = await heldAtLimit();
-        syncWasteAlarms(config, store, clock);
-        const alarm = openWasteAlarms(store).find((a) => a.check === "review-rounds");
-        expect(alarm).toMatchObject({ subject: RUN, level: 3 });
         await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
         expect(
           await h.engine.onOperatorMessage(RUN, "FLIGHT", {
@@ -6499,9 +6496,9 @@ describe("the engine runs reviews", () => {
           }),
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
-        expect(store.waste.alarms("WHERE id = ?", alarm?.id ?? 0)[0]).toMatchObject({
-          basis: "the findings are fixed",
-        });
+        expect(
+          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+        ).toMatchObject({ basis: "the findings are fixed", level: 3 });
         await h.engine.tick();
         await h.engine.reconcileRun(RUN);
         const fresh = store

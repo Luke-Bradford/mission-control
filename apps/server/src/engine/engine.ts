@@ -169,7 +169,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
-import { resolveWasteAlarm, restartHold, reviewsHeld } from "../spend/waste.ts";
+import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { fixWakeReason, reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
@@ -3349,13 +3349,9 @@ export function createEngine(deps: EngineDeps): Engine {
           opts?.action === "rereview" ||
           opts?.action === "accept" ||
           opts?.action === "second_review";
-        if (by === "FLIGHT" && reopens && reviewsHeld(store, run.id)) {
-          const alarm = store.waste.alarms(
-            "WHERE check_id = 'review-rounds' AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",
-            run.id,
-          )[0];
+        if (by === "FLIGHT" && reopens) {
           const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
-          if (alarm !== undefined && resolveWasteAlarm(store, alarm.id, at, basis))
+          if (settleReviewRounds(store, run, at, basis))
             store.addLoopEvent(
               `${run.id}:review-rounds-resolved:${next.epoch}`,
               run.id,
