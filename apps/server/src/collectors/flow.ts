@@ -303,7 +303,11 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       }
       // A card presently in Done without an observed Done event is not a flow fact. Open cards,
       // however, must remain visible even before their first Ready transition is observed.
-      if (flow.doneAt === null && !openNumbers.has(i.issueNumber) && !trackedNumbers.has(i.issueNumber)) {
+      if (
+        flow.doneAt === null &&
+        !openNumbers.has(i.issueNumber) &&
+        !trackedNumbers.has(i.issueNumber)
+      ) {
         continue;
       }
       issues.push({
