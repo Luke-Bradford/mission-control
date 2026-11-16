@@ -160,6 +160,7 @@ import {
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
+import { openWasteAlarms, reviewsHeld, syncWasteAlarms } from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
@@ -6482,6 +6483,39 @@ describe("the engine runs reviews", () => {
         await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
         expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
+      });
+
+      it("rereview resolves the review-rounds alarm with FLIGHT's basis, and the review runs", async () => {
+        const third = await heldAtLimit();
+        syncWasteAlarms(config, store, clock);
+        const alarm = openWasteAlarms(store).find((a) => a.check === "review-rounds");
+        expect(alarm).toMatchObject({ subject: RUN, level: 3 });
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review", "review-ruling", "review-failed"],
+            action: "rereview",
+            basis: "the findings are fixed",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(store.waste.alarms("WHERE id = ?", alarm?.id ?? 0)[0]).toMatchObject({
+          basis: "the findings are fixed",
+        });
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const fresh = store
+          .reviewsOfRun(RUN)
+          .filter((r) => r.id > third && r.state !== "superseded");
+        expect(fresh).toHaveLength(1);
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("a run past its rounds with no settle stays held", async () => {
+        await heldAtLimit();
+        syncWasteAlarms(config, store, clock);
+        expect(reviewsHeld(store, RUN)).toBe(true);
+        expect(loopOf().phase).toBe("parked");
       });
 
       it("accept moves the run on, with no review on the same head", async () => {
