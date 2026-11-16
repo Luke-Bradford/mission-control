@@ -143,6 +143,11 @@ export const BACKGROUND_SUITE_TEXT =
 const HOOK_TIMEOUT_SEEN_MS = 660_000;
 /** How long a full suite waits for the test lock before it is told to come back later. */
 export const LOCK_WAIT_MS = Math.min(HOOK_TIMEOUT_SEEN_MS - 60_000, 10 * 60_000);
+/**
+ * How long a Codex seat's check waits for the test lock. Codex approvals have no hook timeout, so
+ * the wait outlasts the longest normal related-test run (13 minutes and more on a server branch).
+ */
+export const CODEX_LOCK_WAIT_MS = 60 * 60_000;
 /** The CLI's `timeout` (s) on the guard hook: the lock wait plus room for the round trip. */
 export const GUARD_HOOK_TIMEOUT_S = LOCK_WAIT_MS / 1000 + 30;
 /** The hook's own deadline, inside the CLI's timeout (which would run the tool): then it denies. */
