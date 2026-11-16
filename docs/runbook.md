@@ -3073,6 +3073,18 @@ keep their permission checks.
   them keep 365.
 
 
+### Answered and unwatched Needs-you items
+
+Choosing an option of a bound brief (`POST /api/attention/:key/choice`) that the hub applies
+leaves Needs you at once, whatever the item's repo: the item is read and carries its applied choice,
+so `needsYouItems` (the list, the header count) omits it, and the choice is stored as an `answered`
+closure that `GET /api/attention/answered` lists ("You chose: <option>."). A scheduler pass stores
+the closure for any choice made before this existed. A changed source is unread again and returns.
+
+An operator item raised in a repo that is not in `config.repos` carries `repoUnwatched` (the repo
+and a plain sentence that its plan and materials are not loaded because the repo is not watched);
+the panel shows that sentence instead of load errors.
+
 ### Retained Needs-you materials
 
 A Needs-you item can keep two kinds of display material, each tied to a named commit of a

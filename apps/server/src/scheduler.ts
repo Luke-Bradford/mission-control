@@ -29,6 +29,7 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
+import { closeAnsweredItems } from "./attention/answered.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
 import { closeSettledQuestions } from "./attention/question-watch.ts";
 import { closeUnwatchedRepoItems } from "./attention/unwatched-repos.ts";
@@ -618,7 +619,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         now: now(),
         lock: deps.lockState?.(),
       });
-      if (closed + unwatched > 0) bus.emit("attention");
+      const answered = closeAnsweredItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
+      if (closed + unwatched + answered > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,

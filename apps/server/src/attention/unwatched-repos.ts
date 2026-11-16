@@ -2,6 +2,7 @@ import {
   type AttentionItem,
   COMMS_OPEN_PREFIX,
   REPO_UNWATCHED_REASON,
+  repoUnwatchedPanelText,
   type TestLockState,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
@@ -10,8 +11,15 @@ import type { Store } from "../store.ts";
 import { questionAskAt, releaseHold } from "./holds.ts";
 
 /** The repo an item was raised in: its ticket's, else the repo of the seat that raised it. */
-const itemRepo = (item: AttentionItem): string | null =>
+export const itemRepo = (item: AttentionItem): string | null =>
   /^(.+)#\d+$/.exec(item.ticket ?? "")?.[1] ?? item.repoId;
+
+/** The item with `repoUnwatched` set when it was raised in a repo this hub does not watch. */
+export function withRepoWatch(item: AttentionItem, config: CcConfig): AttentionItem {
+  const repo = itemRepo(item);
+  if (repo === null || config.repos.some((r) => r.id === repo)) return item;
+  return { ...item, repoUnwatched: { repoId: repo, text: repoUnwatchedPanelText(repo) } };
+}
 
 /**
  * Closes each open question or blocker raised in a repo the hub no longer watches, even a
