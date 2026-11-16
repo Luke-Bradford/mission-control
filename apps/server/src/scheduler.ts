@@ -31,6 +31,7 @@ import {
 import { codexProfile } from "./accounts/bindings.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
 import { closeSettledQuestions } from "./attention/question-watch.ts";
+import { closeUnwatchedRepoItems } from "./attention/unwatched-repos.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
 import { applyDecisionDefaults } from "./brief/decision-defaults.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
@@ -611,7 +612,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         lock: deps.lockState?.(),
         deliver: deps.deliverDefault,
       });
-      if (closed > 0) bus.emit("attention");
+      const unwatched = closeUnwatchedRepoItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
+      if (closed + unwatched > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,
