@@ -1,17 +1,12 @@
+import type { RepoRuleSource, RepoRulesView } from "@mc/core";
+
 /**
  * Setup › Roles & guards: the repo rules the page lists, with where each value comes from. The
  * keys, groups and plain labels follow the approved mockup (`mockups/setup-roles-guards`); the
  * values come from one `RepoRulesView` per repo.
  */
 
-export const RULE_SOURCES = [
-  "set-here",
-  "repo-file",
-  "default",
-  "config-file",
-  "built-in",
-] as const;
-export type RuleSource = (typeof RULE_SOURCES)[number];
+export type RuleSource = RepoRuleSource;
 
 /** The badge for each source: its word, and what it means for the reader. */
 export const SOURCE_TEXT: Record<RuleSource, { label: string; hint: string }> = {
@@ -91,18 +86,14 @@ export const READ_ONLY_RULES: ReadonlySet<RuleKey> = new Set<RuleKey>([
   "flight_powers",
 ]);
 
-export interface RuleValue {
-  source: RuleSource;
-  /** What applies now: a list, or one word for an on/off or choice key. */
-  value: string[];
-  /** Values the repo file adds to a list the user also sets (shown dashed, never removable). */
-  repoAdds?: string[];
-}
-
-/** One repo's rules and where each came from. */
-export interface RepoRulesView {
-  repoId: string;
-  /** Whether the repo's CLAUDE.md holds a rules block. */
-  repoFile: boolean;
-  rules: Record<RuleKey, RuleValue>;
+/** One rule's value as the chips show it: a list, or one word for an on/off or choice key. */
+export function ruleChips(view: RepoRulesView, key: RuleKey): string[] {
+  const value: unknown = view.rules[key].value;
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "boolean") return [value ? "On" : "Off"];
+  if (typeof value === "object" && value !== null)
+    return Object.entries(value).map(([name, globs]) =>
+      Array.isArray(globs) ? `${name}: ${globs.join(", ")}` : name,
+    );
+  return value === undefined || value === null ? [] : [String(value)];
 }

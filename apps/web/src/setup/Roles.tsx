@@ -8,6 +8,7 @@ import {
   type GuardRule,
   LOCK_WAIT_MS,
   ROLES,
+  type RepoRulesView,
   type RoleRow,
 } from "@mc/core";
 import { useEffect, useId, useRef, useState } from "react";
@@ -23,10 +24,10 @@ import {
   EDIT_SOON,
   READ_ONLY_RULES,
   REPO_FILE_WINS,
-  type RepoRulesView,
   RULE_GROUPS,
   type RuleKey,
   type RuleSource,
+  ruleChips,
   SOURCE_TEXT,
 } from "./repoRules.ts";
 import { ROLE_HEADINGS } from "./roleHeadings.ts";
@@ -109,7 +110,7 @@ function RuleRow({ rule, label, view }: { rule: RuleKey; label: string; view: Re
         <small>{label}</small>
       </div>
       <div className="rg-chips">
-        <Chips id={rule} values={v.value} adds={v.repoAdds ?? []} />
+        <Chips id={rule} values={ruleChips(view, rule)} adds={v.repoAdds ?? []} />
         {readOnly && <span className="rg-reason">{AUTHORITY_NOTE}</span>}
       </div>
       <div>
@@ -170,7 +171,7 @@ function RepoRules({ config }: { config: ConfigView }) {
       </Panel>
     );
   const sub = rules.data
-    ? `${rules.data.repoId} · ${rules.data.repoFile ? "repo file found" : "no repo file"}`
+    ? `${repoId} · ${rules.data.repoFileError ? "repo file not read" : "repo file read"}`
     : repoId;
   return (
     <Panel
@@ -208,6 +209,13 @@ function RepoRules({ config }: { config: ConfigView }) {
             <div className="pb">
               <p className="note warn" role="status">
                 Showing the last rules read. Refreshing them failed: {rules.error.message}
+              </p>
+            </div>
+          )}
+          {rules.data.repoFileError && (
+            <div className="pb">
+              <p className="note warn" role="status">
+                The repo file's rules are not shown. {rules.data.repoFileError}
               </p>
             </div>
           )}

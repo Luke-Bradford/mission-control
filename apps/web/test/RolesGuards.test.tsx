@@ -113,6 +113,26 @@ describe("Setup › Roles & guards", () => {
     expect(fetch.mock.calls.some(([p]) => String(p).includes("/rules"))).toBe(false);
   });
 
+  it("Repo rules: shows a record, a boolean and a word as chips, and says when the repo file was not read", async () => {
+    load({
+      [`/api/repos/${REPO}/rules`]: {
+        ...rulesFixture(REPO),
+        repoFileError: "CLAUDE.md block is invalid",
+      },
+    });
+    page();
+    const rules = await rulesPanel();
+    const areas = rules.querySelector("[data-key=areas]") as HTMLElement;
+    expect(within(areas).getByText("web: apps/web/**")).toBeTruthy();
+    const promote = rules.querySelector("[data-key=promote_backlog]") as HTMLElement;
+    expect(within(promote).getByText("Off")).toBeTruthy();
+    const autonomy = rules.querySelector("[data-key=autonomy]") as HTMLElement;
+    expect(within(autonomy).getByText("draft")).toBeTruthy();
+    expect(rules.textContent).toContain(
+      "The repo file's rules are not shown. CLAUDE.md block is invalid",
+    );
+  });
+
   it("Repo rules: keeps the last rules and warns when a refresh fails", async () => {
     let fail = false;
     load({
