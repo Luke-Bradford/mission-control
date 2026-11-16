@@ -6,6 +6,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { closeAnsweredItems } from "../src/attention/answered.ts";
+import { withRepoWatch } from "../src/attention/unwatched-repos.ts";
 import { chooseBrief } from "../src/brief/choices.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { routineBriefChoices } from "../src/brief/routine.ts";
@@ -151,4 +152,16 @@ it("the sweep records an answer chosen before closures were written", async () =
   expect(closeAnsweredItems({ config, store, now: AT })).toBe(1);
   expect(store.questionClosures(0, 10)).toHaveLength(1);
   expect(closeAnsweredItems({ config, store, now: AT })).toBe(0);
+});
+
+it("flags an item from an unwatched repo so its panel can say its plan is not loaded", () => {
+  const item = find();
+  if (!item) throw new Error("missing source");
+  expect(withRepoWatch(item, config).repoUnwatched).toEqual({
+    repoId: "studio",
+    text: repoUnwatchedPanelText("studio"),
+  });
+  expect(
+    withRepoWatch({ ...item, repoId: "repo", ticket: "repo#1" }, config).repoUnwatched,
+  ).toBeUndefined();
 });
