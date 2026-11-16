@@ -628,3 +628,23 @@ it("a gzipped Codex transcript cuts the end text after a reply too", async () =>
   stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
   expect(texts(await page())).toEqual(["Here is your answer."]);
 });
+
+it("a closing frame with several text blocks is cut whole after a reply", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Looking at it.", AT + 2),
+    toolUse(AT + 3),
+    {
+      type: "assistant",
+      timestamp: new Date(AT + 5).toISOString(),
+      message: {
+        content: [
+          { type: "text", text: "Summary, part one." },
+          { type: "text", text: "Summary, part two." },
+        ],
+      },
+    },
+  ]);
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Looking at it.", "Here is your answer."]);
+});

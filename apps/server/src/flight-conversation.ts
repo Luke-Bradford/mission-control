@@ -115,13 +115,18 @@ function endTextsAfterOwnReply(
   const dropped = new Set<string>();
   let turnStart: number | null = null;
   let last: StreamEvent | null = null;
+  // the events of the line `last` sits on: a frame can hold several text blocks
+  let frame: StreamEvent[] = [];
+  let frameOffset = -1;
   const close = () => {
     const start = turnStart;
     if (start !== null && last?.kind === "msg" && last.at !== null) {
       const end = last.at;
-      if (replies.some((at) => at >= start && at <= end)) dropped.add(last.id);
+      if (replies.some((at) => at >= start && at <= end))
+        for (const e of frame) if (e.kind === "msg") dropped.add(e.id);
     }
     last = null;
+    frame = [];
   };
   let next = 0;
   for (const event of events) {
@@ -133,7 +138,12 @@ function endTextsAfterOwnReply(
     if (event.kind === "op") {
       close();
       turnStart = event.at;
-    } else if (event.kind === "msg" || event.kind === "tool") last = event;
+    } else if (event.kind === "msg" || event.kind === "tool") {
+      if (offset !== frameOffset) frame = [];
+      frameOffset = offset;
+      frame.push(event);
+      last = event;
+    }
   }
   close();
   return dropped;
