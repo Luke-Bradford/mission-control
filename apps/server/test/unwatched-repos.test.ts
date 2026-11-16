@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMS_OPEN_PREFIX, REPO_UNWATCHED_REASON, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { closeUnwatchedRepoItems } from "../src/attention/unwatched-repos.ts";
 import { holdItem, holds } from "../src/attention/holds.ts";
+import { closeUnwatchedRepoItems } from "../src/attention/unwatched-repos.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
@@ -150,7 +150,14 @@ describe("items from a repo the hub no longer watches", () => {
       `${COMMS_OPEN_PREFIX}${blocker.id}`,
       "note:blocked:studio:9",
     ];
-    holdItem(store, "note:blocked:studio:9", "Wait for the studio", { kind: "manual" }, "CAPCOM", NOW - 1);
+    holdItem(
+      store,
+      "note:blocked:studio:9",
+      "Wait for the studio",
+      { kind: "manual" },
+      "CAPCOM",
+      NOW - 1,
+    );
     expect(openKeys()).toEqual(expect.arrayContaining(keys));
 
     expect(closeUnwatchedRepoItems({ config: config(), store, now: NOW })).toBe(3);

@@ -47,9 +47,7 @@ export function closeUnwatchedRepoItems(d: {
       at: now,
     } as const;
     const ask = /^ask:(\d+)$/.exec(item.key);
-    const stored = ask
-      ? store.closeQuestion(closure)
-      : store.clearAttention(closure);
+    const stored = ask ? store.closeQuestion(closure) : store.clearAttention(closure);
     if (!stored) continue;
     if (ask) store.answerQuestion(Number(ask[1]), now);
     // Held sources must leave their hold as well as Needs you. Otherwise a later source with the
