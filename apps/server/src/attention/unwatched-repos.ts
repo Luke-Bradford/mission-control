@@ -1,6 +1,5 @@
 import {
   type AttentionItem,
-  COMMS_MC,
   COMMS_OPEN_PREFIX,
   REPO_UNWATCHED_REASON,
   type TestLockState,
@@ -31,11 +30,12 @@ export function closeUnwatchedRepoItems(d: {
   let closed = 0;
   for (const item of attentionItems(config, store, now, d.lock ?? NO_LOCK, undefined, null, true)) {
     const comms = item.key.startsWith(COMMS_OPEN_PREFIX);
-    if (!comms && !item.key.startsWith("ask:")) continue;
+    const source = comms || item.key.startsWith("ask:") || item.key.startsWith("note:");
+    if (!source) continue;
     const repo = itemRepo(item);
     if (repo === null || watched.has(repo)) continue;
     const question = item.brief?.ask || item.text;
-    const stored = store.closeQuestion({
+    const stored = store.clearAttention({
       key: item.key,
       askAt: questionAskAt(item, item.brief),
       kind: "repo-unwatched",
@@ -48,13 +48,6 @@ export function closeUnwatchedRepoItems(d: {
     });
     if (!stored) continue;
     closed++;
-    if (comms)
-      store.settleCommsItem(
-        item.key.slice(COMMS_OPEN_PREFIX.length),
-        COMMS_MC,
-        REPO_UNWATCHED_REASON,
-        now,
-      );
     store.addFlightDecision({
       at: now,
       kind: "settle",

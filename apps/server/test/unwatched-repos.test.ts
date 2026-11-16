@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REPO_UNWATCHED_REASON, type Run } from "@mc/core";
+import { COMMS_OPEN_PREFIX, REPO_UNWATCHED_REASON, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeUnwatchedRepoItems } from "../src/attention/unwatched-repos.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -114,5 +114,63 @@ describe("items from a repo the hub no longer watches", () => {
     expect(
       attentionItems(back, store, NOW + 1, undefined, undefined, null, true).map((i) => i.key),
     ).not.toContain(gone);
+  });
+
+  it("settles open Comms questions and blockers, and dismisses a held blocker", () => {
+    const question = store.addComms({
+      at: NOW - 16 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "studio#7",
+      text: "Which studio should run?",
+      label: "question",
+    });
+    const blocker = store.addComms({
+      at: NOW - 16 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "studio#8",
+      text: "Studio switch-over is held.",
+      label: "blocker",
+    });
+    if (!question || !blocker) throw new Error("Comms item missing");
+    store.raiseNote({
+      key: "blocked:studio:9",
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "studio",
+      text: "Studio hold",
+      at: NOW - 60_000,
+    });
+    const keys = [
+      `${COMMS_OPEN_PREFIX}${question.id}`,
+      `${COMMS_OPEN_PREFIX}${blocker.id}`,
+      "note:blocked:studio:9",
+    ];
+    expect(openKeys()).toEqual(expect.arrayContaining(keys));
+
+    expect(closeUnwatchedRepoItems({ config: config(), store, now: NOW })).toBe(3);
+
+    expect(openKeys()).not.toEqual(expect.arrayContaining(keys));
+    for (const key of keys)
+      expect(
+        store.questionClosure(key, key.startsWith("note:") ? NOW - 60_000 : NOW - 16 * 60_000),
+      ).toMatchObject({
+        kind: "repo-unwatched",
+        reason: REPO_UNWATCHED_REASON,
+        by: "hub",
+      });
+    expect(store.commsSettlement(question.id)).toMatchObject({ reason: REPO_UNWATCHED_REASON });
+    expect(store.commsSettlement(blocker.id)).toMatchObject({ reason: REPO_UNWATCHED_REASON });
+    expect(store.notes().find((n) => n.key === "blocked:studio:9")?.dismissedAt).toBe(NOW);
+    expect(
+      store.flightDecisions(0, 10).filter((d) => d.basis.includes("studio is not")),
+    ).toHaveLength(3);
+
+    expect(closeUnwatchedRepoItems({ config: config(), store, now: NOW + 1 })).toBe(0);
+    expect(
+      store.flightDecisions(0, 10).filter((d) => d.basis.includes("studio is not")),
+    ).toHaveLength(3);
   });
 });
