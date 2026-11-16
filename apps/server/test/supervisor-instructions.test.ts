@@ -340,7 +340,7 @@ it.each(["saved instruction", "initial legacy focus import"])(
   "keeps %s durable and unread while paused, then delivers on an authorised ordinary turn",
   async (source) => {
     const { commsInboxContext } = await import("../src/comms/index.ts");
-    const { messageUnpausedSeat } = await import("../src/crew-pause.ts");
+    const { messageUnpausedSeat } = await import("../src/config/crew-pause.ts");
     const { announceInstruction, flushInstructionNotices, importInstructionFocus } = await import(
       "../src/instructions/notices.ts"
     );

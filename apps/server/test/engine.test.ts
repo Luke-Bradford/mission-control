@@ -35,7 +35,10 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
+  fixArmEventText,
   fixSentText,
+  freshFallbackEventText,
+  freshWokenEventText,
   globMatches,
   hardRulesBySettingKey,
   hardRulesFlagKey,
@@ -111,8 +114,8 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { writeCrewPause } from "../src/config/crew-pause.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { writeCrewPause } from "../src/crew-pause.ts";
 import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
@@ -392,6 +395,10 @@ interface Harness {
   asides: string[];
   /** wakeRun's calls, and what it throws (null: it puts the run back on its seat). */
   wakes: string[];
+  /** The options of each wakeRun call, and what the next ones answer (a fresh start, or a fallback text). */
+  wakeOptions: ({ reviewResume?: boolean; fresh?: "ci" | "review" } | undefined)[];
+  freshStart: boolean;
+  freshFallback: string | null;
   wakeError: Error | null;
   /** The run's local branch no longer exists (localBranchGone answers true). */
   branchGone: boolean;
@@ -471,6 +478,9 @@ function harness(): Harness {
     endBlocked: false,
     asides: [],
     wakes: [],
+    wakeOptions: [],
+    freshStart: false,
+    freshFallback: null,
     wakeError: null,
     branchGone: false,
     rulingReruns: [],
@@ -674,13 +684,19 @@ function harness(): Harness {
             store.setSeatSession({ ...row, runId: null, cliSessionId: null, worktree: null });
             return { worktree: row.worktree };
           },
-          async wakeRun(runId) {
+          async wakeRun(runId, options) {
             x.wakes.push(runId);
+            x.wakeOptions.push(options);
             if (x.wakeError !== null) throw x.wakeError;
             const r = store.run(runId);
             const aside = r?.loop?.aside;
             if (r === null || !aside) throw new SupervisorError(409, "the run is not waiting");
             seatIdle(runId, r.agentId);
+            return {
+              freshSessionId:
+                options?.fresh !== undefined && x.freshStart ? "fresh-session-1" : null,
+              fallback: options?.fresh !== undefined ? x.freshFallback : null,
+            };
           },
           busy: () => x.busyList,
           async startReview(seat, id) {
@@ -3368,6 +3384,9 @@ describe("the engine runs reviews", () => {
           async ensure(t: { pr: number; sha: string; paths: readonly string[] }) {
             ensured.push({ pr: t.pr, sha: t.sha, paths: t.paths });
           },
+          async pages() {
+            return [];
+          },
           gate(t: { sha: string; paths: readonly string[] }) {
             const web = t.paths.some((p) => p.startsWith("apps/web/") && !p.includes("test"));
             return !web || have.has(t.sha)
@@ -4283,7 +4302,7 @@ describe("the engine runs reviews", () => {
       });
     });
 
-    it("a queued review of a change past two review rounds stays queued", async () => {
+    it("a queued review of a change past two review rounds does not start; the run parks for FLIGHT", async () => {
       await toReview();
       const review = first();
       const author = store.run(review.authorRunId);
@@ -4305,12 +4324,16 @@ describe("the engine runs reviews", () => {
         at: clock,
       });
       await h.engine.tick();
-      expect(store.review(third ?? 0)?.state).toBe("queued");
+      await vi.waitFor(() =>
+        expect(store.run(review.authorRunId)?.loop).toMatchObject({
+          phase: "parked",
+          parked: { kind: "review" },
+        }),
+      );
       expect(h.starts).toHaveLength(startsBefore);
-      expect(reviewHoldOf(store, third ?? 0)).toEqual({
-        reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
-        prNumber: null,
-      });
+      // the parked run's review is closed, so it never runs on the same head
+      await h.engine.reconcileRun(review.authorRunId);
+      expect(store.review(third ?? 0)?.state).toBe("superseded");
     });
 
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
@@ -6419,6 +6442,72 @@ describe("the engine runs reviews", () => {
       }
     });
 
+    describe("a review held at the review-round limit", () => {
+      // round 1 reported blocking; round 3 is queued and held by the waste check
+      const heldAtLimit = async (
+        checks: Parameters<typeof reported>[2] = [],
+        reviewerBusy = false,
+      ) => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        const one = first();
+        reported(one.id, [finding("Important")], checks);
+        const third = store.requestReview({
+          authorRunId: one.authorRunId,
+          repoId: one.repoId,
+          seatId: RETRO,
+          prNumber: one.prNumber,
+          sha: one.sha,
+          epoch: one.epoch,
+          attempt: one.attempt + 1,
+          round: 3,
+          at: clock,
+        });
+        setLoop({ reviewReplyTo: one.id });
+        if (reviewerBusy) h.busyList = [{ seatId: RETRO, state: "running" }];
+        await h.engine.tick();
+        return need(third);
+      };
+
+      it("parks the run for FLIGHT's decision and drops the held review", async () => {
+        const third = await heldAtLimit();
+        expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "review" } });
+        await h.engine.reconcileRun(RUN);
+        expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("parks the run although the reviewer is busy on another run", async () => {
+        await heldAtLimit([], true);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
+      });
+
+      it("accept moves the run on, with no review on the same head", async () => {
+        const third = await heldAtLimit();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
+        // the accepted head goes on to the merge, as after any accepted review
+        expect(loopOf()).toMatchObject({ reviewWaivedSha: SHA });
+        expect(loopOf().phase).not.toBe("parked");
+        expect(h.steps).toContain("merge");
+        expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("rework grants the next round and sends the findings to the seat", async () => {
+        await heldAtLimit();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
+        expect(h.sent.at(-1)?.text).toContain("Important");
+      });
+
+      it("accept is refused when the last review failed the design check", async () => {
+        await heldAtLimit([{ check: "design", result: "fail" }]);
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(false);
+        expect(loopOf().phase).toBe("parked");
+      });
+    });
+
     const parkedForRework = async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
@@ -7700,6 +7789,162 @@ describe("the engine runs reviews", () => {
       await h.engine.reconcileRun(RUN);
       expect(h.wakes).toEqual([RUN]);
       expect(sentKeys()).toEqual([wakeDue(first().id)]);
+    });
+
+    describe("the fix-session trial", () => {
+      const trialOn = (size: string | null = "S") => {
+        need(config.crew).fixSessionTrial = true;
+        store.replaceBoard(REPO, [
+          item({ size }),
+          item({ issueNumber: 50, itemId: "PVTI_50", size: size ?? "S" }),
+        ]);
+      };
+      /** Another ticket's run, already in `arm` and ended: it tips the tie in RUN's stratum. */
+      const inTrial = (arm: "continue" | "fresh") =>
+        store.upsertRun(
+          run({
+            id: "guido-1:other",
+            seq: 2,
+            ticket: `${REPO}#50`,
+            endedAt: clock,
+            status: "ok",
+            loop: { ...NEW_LOOP, phase: "done", fixArm: arm },
+          }),
+        );
+      const wakeForFix = async () => {
+        await setAside();
+        reported(first().id, [finding("Important")]);
+        await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+        await vi.waitFor(() => expect(asideRun()).toBeNull());
+      };
+
+      it("starts the fresh arm's wake in a fresh session, and records it", async () => {
+        trialOn();
+        inTrial("continue");
+        h.freshStart = true;
+        await wakeForFix();
+        expect(h.wakeOptions).toEqual([{ fresh: "review" }]);
+        expect(loopOf().fixArm).toBe("fresh");
+        expect(loopOf().fixSessions).toEqual([
+          { sessionId: "fresh-session-1", at: expect.any(Number), reason: "review" },
+        ]);
+        expect(loopTexts()).toContain(fixArmEventText(`${REPO}#7`, "fresh", "small"));
+        expect(loopTexts()).toContain(freshWokenEventText("GUIDO-1"));
+        expect(loopTexts()).not.toContain(wokenEventText("GUIDO-1"));
+      });
+
+      it("a fresh start that fell back resumed: the receipt names why", async () => {
+        trialOn();
+        inTrial("continue");
+        h.freshFallback = "spawn failed";
+        await wakeForFix();
+        expect(loopOf().fixSessions ?? []).toEqual([]);
+        expect(loopOf().fixFallbacks).toEqual([{ at: expect.any(Number), reason: "spawn failed" }]);
+        expect(loopTexts()).toContain(freshFallbackEventText("GUIDO-1", "spawn failed"));
+        expect(loopTexts()).toContain(wokenEventText("GUIDO-1"));
+      });
+
+      it("keeps the continue arm resuming, as today", async () => {
+        trialOn();
+        inTrial("fresh");
+        await wakeForFix();
+        expect(loopOf().fixArm).toBe("continue");
+        expect(h.wakeOptions).toEqual([undefined]);
+        expect(loopTexts()).toContain(fixArmEventText(`${REPO}#7`, "continue", "small"));
+      });
+
+      it("with the switch off, assigns no arm and sends no fresh option", async () => {
+        store.replaceBoard(REPO, [item({ size: "S" })]);
+        await wakeForFix();
+        expect(loopOf().fixArm).toBeUndefined();
+        expect(h.wakeOptions).toEqual([undefined]);
+      });
+
+      it("assigns no ticket that has no Size", async () => {
+        trialOn(null);
+        store.replaceBoard(REPO, [item({ size: null })]);
+        await wakeForFix();
+        expect(loopOf().fixArm).toBeUndefined();
+      });
+
+      it("never assigns a Codex run", async () => {
+        trialOn();
+        inTrial("continue");
+        const db = new DatabaseSync(join(dir, "mc.sqlite"));
+        try {
+          db.prepare("UPDATE runs SET vendor = 'codex' WHERE id = ?").run(RUN);
+        } finally {
+          db.close();
+        }
+        await wakeForFix();
+        expect(loopOf().fixArm).toBeUndefined();
+        expect(h.wakeOptions).toEqual([undefined]);
+      });
+
+      it("assigns nothing when the ticket already has a run in the trial", async () => {
+        trialOn();
+        store.upsertRun(
+          run({
+            id: "guido-1:earlier",
+            seq: 3,
+            ticket: `${REPO}#7`,
+            endedAt: clock,
+            status: "failed",
+            loop: { ...NEW_LOOP, phase: "done", fixArm: "continue" },
+          }),
+        );
+        await wakeForFix();
+        expect(loopOf().fixArm).toBeUndefined();
+        expect(h.wakeOptions).toEqual([undefined]);
+      });
+
+      it("an account at its stop gives no wake, no arm and no session", async () => {
+        trialOn();
+        inTrial("continue");
+        await setAside();
+        for (const window of ["5h", "7d"] as const) {
+          store.addUsage({
+            accountId: "claude-main",
+            window,
+            at: clock - 1000,
+            pct: 96,
+            resetAt: clock + 60 * MIN,
+            source: "test",
+          });
+        }
+        reported(first().id, [finding("Important")]);
+        await vi.waitFor(() => expect(asideRun()?.wake).toBe(true));
+        await h.engine.reconcileRun(RUN);
+        expect(h.wakes).toEqual([]);
+        expect(loopOf().fixArm).toBeUndefined();
+        expect(loopOf().fixSessions).toBeUndefined();
+      });
+
+      it("a paused seat gives no wake, no arm and no session", async () => {
+        trialOn();
+        inTrial("continue");
+        await setAside();
+        writeCrewPause(
+          store,
+          { seats: [SEAT], reason: "Keep new work paused", at: clock, by: "operator" },
+          clock,
+        );
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        expect(h.wakes).toEqual([]);
+        expect(loopOf().fixArm).toBeUndefined();
+      });
+
+      it("a displaced run resumes, whatever its arm", async () => {
+        trialOn();
+        inTrial("continue");
+        await setAside();
+        setLoop({ aside: { worktree: WT, wake: true, displaced: true } });
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
+        expect(h.wakeOptions).toEqual([undefined]);
+        expect(loopOf().fixArm).toBeUndefined();
+      });
     });
 
     it("waits for a busy seat, and comes back when the other run ends", async () => {

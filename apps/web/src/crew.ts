@@ -577,6 +577,8 @@ export const WAIT_TEXT = {
   operator: "waiting on you",
   lock: "in line for the test lock",
 } as const;
+/** The lead of a parked run's wait line; the park's reason follows. */
+export const PARKED_WAIT_LEAD = "Held";
 /** A set-aside run whose rework or park is due back on its seat. */
 export const seatWaitText = (call: string): string => `waiting on ${call} for rework`;
 /** Waits shown amber, as the mockup's lock line. */
@@ -615,9 +617,11 @@ export function waitText(
     case "main":
       return WAIT_TEXT[wait];
     case "operator":
-      return loop.phase === "parked" && loop.parked
-        ? `${WAIT_TEXT.operator}: ${loop.parked}`
-        : WAIT_TEXT.operator;
+      // a park's reason names who settles it (FLIGHT, or the operator's acceptance), so the line
+      // does not claim the operator for every park
+      if (loop.phase === "parked")
+        return loop.parked ? `${PARKED_WAIT_LEAD}: ${loop.parked}` : PARKED_WAIT_LEAD;
+      return WAIT_TEXT.operator;
     case "lock":
       return lockSince === null
         ? WAIT_TEXT.lock

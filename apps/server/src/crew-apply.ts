@@ -9,6 +9,7 @@ import {
   seatDef,
 } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
+import { ConfigWriteError, noSessionText, sessionActiveText } from "./config/config-write.ts";
 import {
   type CcConfig,
   ConfigError,
@@ -21,7 +22,6 @@ import {
   seatInput,
   writerAreaConflict,
 } from "./config.ts";
-import { ConfigWriteError, noSessionText, sessionActiveText } from "./config-write.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 

@@ -18,7 +18,7 @@ import {
 } from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
-import { accountBindingProblem } from "./accounts/bindings.ts";
+import { accountBindingProblem } from "../accounts/bindings.ts";
 import {
   areaGlob,
   type CcConfig,
@@ -36,14 +36,14 @@ import {
   seatEffort,
   seatInput,
   ticketState,
-} from "./config.ts";
-import { seatFocus } from "./instructions/focus.ts";
+} from "../config.ts";
+import { seatFocus } from "../instructions/focus.ts";
 import {
   CheckoutError,
   createSessionCheckout,
   removeSessionCheckout,
   validateSessionCheckout,
-} from "./runtime/checkouts.ts";
+} from "../runtime/checkouts.ts";
 
 /** Backups (`config.yaml.bak-<UTC>`) kept beside the file; older ones are deleted. */
 export const CONFIG_BACKUPS_KEEP = 10;

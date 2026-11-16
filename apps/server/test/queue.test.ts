@@ -29,8 +29,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
+import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
+import { ProfilesError } from "../src/config/profiles.ts";
 import type { CcConfig } from "../src/config.ts";
-import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
@@ -48,7 +49,6 @@ import {
   takeNext,
 } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
-import { ProfilesError } from "../src/profiles.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
