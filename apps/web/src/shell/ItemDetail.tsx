@@ -63,7 +63,6 @@ import {
 import { agentPath, followLink } from "../router.ts";
 import { openItem, useOpenedItem } from "./overlays.ts";
 import { useStore } from "./store.ts";
-import { toast } from "./Toast.tsx";
 import "./ItemPanel.css";
 
 /**

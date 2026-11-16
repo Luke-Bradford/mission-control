@@ -1,6 +1,7 @@
 .optlist {
   display: grid;
   gap: var(--sp-1);
+  container-type: inline-size;
 }
 
 .nopts {
@@ -73,10 +74,6 @@ div.opt {
 }
 
 /* An option stacks its parts; with room (a 640px+ list) it reads as a row. */
-.optlist {
-  container-type: inline-size;
-}
-
 .opt-head {
   display: flex;
   flex-wrap: wrap;

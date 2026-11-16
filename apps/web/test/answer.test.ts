@@ -83,10 +83,19 @@ describe("boundChoice", () => {
       { ...bound, brief: { ...bound.brief, state: state("stale") } },
       { ...bound, brief: { ...bound.brief, state: state("unknown") } },
       { ...bound, brief: { ...bound.brief, state: undefined } },
-      { ...bound, hold: { by: "CAPCOM", reason: "wait", condition: { kind: "manual" as const }, at: 1 } },
+      {
+        ...bound,
+        hold: { by: "CAPCOM", reason: "wait", condition: { kind: "manual" as const }, at: 1 },
+      },
       { ...bound, brief: { ...bound.brief, binding: undefined } },
       { ...bound, brief: { ...bound.brief, id: undefined } },
-      { ...bound, brief: { ...bound.brief, binding: { ...(bound.brief.binding as BriefBinding), actions: [] } } },
+      {
+        ...bound,
+        brief: {
+          ...bound.brief,
+          binding: { ...(bound.brief.binding as BriefBinding), actions: [] },
+        },
+      },
     ];
     for (const c of cases) expect(boundChoice(c, option(0))).toBeNull();
     expect(boundChoice(bound, { label: "x", answer: "y" })).toBeNull();
