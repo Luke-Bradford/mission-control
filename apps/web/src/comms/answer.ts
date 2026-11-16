@@ -142,6 +142,15 @@ export const boundChoiceStands = (r: BriefChoiceReceipt): boolean =>
   r.state !== "refused" && r.state !== "stale";
 
 /**
+ * A fresh request id. crypto.randomUUID is missing on a hub served over plain http from a
+ * non-local address, so fall back to random bytes; the server accepts letters, digits, `:_-`.
+ */
+const requestId = (): string =>
+  typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `req-${Date.now().toString(36)}-${Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+
+/**
  * Picks `option` through the bound choice route. Resolves to the server's receipt, or the text
  * of its refusal. A refused or stale receipt comes back as an error so the options stay open.
  */
@@ -155,7 +164,7 @@ export async function sendBoundChoice(
     const receipt = await apiPost<BriefChoiceReceipt>(ACTIONS.briefChoice(item.key), {
       ...bound,
       optionId: option.id,
-      requestId: crypto.randomUUID(),
+      requestId: requestId(),
     });
     hub.refetch(RESOURCES.attention.path);
     return boundChoiceStands(receipt) ? { receipt } : { error: receipt.text };

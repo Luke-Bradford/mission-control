@@ -599,6 +599,19 @@ describe("ItemPanel, acting on an item", () => {
       ).toBe(true);
     });
 
+    it("still posts when the page is served over plain http, where crypto.randomUUID is missing", async () => {
+      const original = crypto.randomUUID;
+      Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+      try {
+        const fn = acting([bound()], { [`POST ${BOUND}`]: applied() });
+        fireEvent.click(await enabled("Not now, clear it"));
+        await waitFor(() => expect(posts(fn, BOUND)).toHaveLength(1));
+        expect(posts(fn, BOUND)[0].requestId).toMatch(/^[a-zA-Z0-9:_-]{1,100}$/);
+      } finally {
+        Object.defineProperty(crypto, "randomUUID", { value: original, configurable: true });
+      }
+    });
+
     it("shows the server's refusal and leaves the options clickable", async () => {
       acting([bound()], {
         [`POST ${BOUND}`]: () => ({
