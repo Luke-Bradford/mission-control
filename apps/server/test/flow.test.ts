@@ -238,6 +238,34 @@ describe("collectFlow issues", () => {
     expect(series?.every((point) => point.tickets === 1)).toBe(true);
   });
 
+  it("fills recent history for a ticket already returned to Backlog on the first collection", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+      board(2, { status: "Backlog", state: "planned", closed: false }),
+    ]);
+    await run(
+      stub({
+        1: timeline(ev("In Progress", 5)),
+        2: timeline(ev("In Progress", 4), ev("Backlog", 1)),
+      }).gql,
+    );
+
+    const series = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "6h",
+      NOW,
+      { agent: null, account: null },
+    ).series?.ticketsInProgress;
+    expect(series?.find((point) => point.day === "2026-10-15")?.tickets).toBe(2);
+  });
+
   it("clears an earlier Done timestamp when a ticket is active again", async () => {
     store.replaceBoard("shop-app", [
       board(1, { status: "In Progress", state: "in progress", closed: false }),

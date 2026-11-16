@@ -220,9 +220,10 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         !i.closed &&
         ["Ready", "Blocked", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
     );
-    // A ticket can leave active work for Backlog before the next collection. Keep reading a
-    // recently observed ticket until its saved moves age out, so that exit remains available to
-    // the telemetry history even though Backlog is not an open flow column.
+    // A recent board update can be a move back to Backlog before the first flow collection. Keep
+    // those tickets, and previously observed ones, in the history read even though Backlog is not
+    // an open flow column.
+    const recentlyUpdated = board.filter((i) => i.updatedAt >= since);
     const storedMoves = store.flowColumnMoves().filter((move) => move.repoId === repo.id);
     const savedMoves = storedMoves.filter((move) => move.at >= since);
     const trackedNumbers = new Set(savedMoves.map((move) => move.number));
@@ -234,6 +235,12 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
           trackedNumbers.has(i.issueNumber) &&
           !done.some((d) => d.issueNumber === i.issueNumber) &&
           !open.some((o) => o.issueNumber === i.issueNumber),
+      ),
+      ...recentlyUpdated.filter(
+        (i) =>
+          !done.some((d) => d.issueNumber === i.issueNumber) &&
+          !open.some((o) => o.issueNumber === i.issueNumber) &&
+          !trackedNumbers.has(i.issueNumber),
       ),
     ];
     const openNumbers = new Set(open.map((issue) => issue.issueNumber));
@@ -272,22 +279,6 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       const node = timelines.get(i.issueNumber);
       if (!isObj(node)) continue;
       const flow = issueFlow(repo, node);
-      // A card presently in Done without an observed Done event is not a flow fact. Open cards,
-      // however, must remain visible even before their first Ready transition is observed.
-      if (
-        flow.doneAt === null &&
-        !openNumbers.has(i.issueNumber) &&
-        !trackedNumbers.has(i.issueNumber)
-      ) {
-        continue;
-      }
-      issues.push({
-        repoId: repo.id,
-        number: i.issueNumber,
-        size: i.size,
-        ...flow,
-        doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
-      });
       const openingMove = flow.moves.filter((move) => move.at < since).at(-1);
       if (openingMove) {
         const savedAnchor = savedAnchors.get(i.issueNumber);
@@ -310,6 +301,18 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         moves.push({ ...move, repoId: repo.id, number: i.issueNumber });
         knownMoves.add(key);
       }
+      // A card presently in Done without an observed Done event is not a flow fact. Open cards,
+      // however, must remain visible even before their first Ready transition is observed.
+      if (flow.doneAt === null && !openNumbers.has(i.issueNumber) && !trackedNumbers.has(i.issueNumber)) {
+        continue;
+      }
+      issues.push({
+        repoId: repo.id,
+        number: i.issueNumber,
+        size: i.size,
+        ...flow,
+        doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
+      });
     }
     const prs: FlowPr[] = [];
     for (const p of merged) {
