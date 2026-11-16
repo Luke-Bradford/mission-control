@@ -458,7 +458,8 @@ export const UPDATE_HOLD_MAX_MS = 15 * 60_000;
  * mid-turn seat keeps working under its keeper through the restart, so only a seat that is
  * starting still refuses (`crewRefusal`). A long turn can never keep an Update held for good. A
  * Claude keeper whose link drops in the restart is dialled again and never ended while it runs. A
- * Codex seat whose reattach is not confirmed in time is resumed, not failed.
+ * Codex seat whose reattach is not confirmed in time is resumed, not failed. A run is taken back
+ * once; the mark is stored, so a later restart does not allow a second.
  */
 export const UPDATE_FORCE_AFTER_MS = 10 * 60_000;
 /** The reason shown while new runs are held for Update. */
