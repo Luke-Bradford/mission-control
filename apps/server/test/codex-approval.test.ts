@@ -377,6 +377,45 @@ describe("Codex check records", () => {
     expect(begun).toEqual([]);
   });
 
+  it("tells the seat the rerun text when an unchanged rerun is refused", async () => {
+    const { checks } = recorder();
+    checks.rerun = async () => "Not run: unchanged.";
+    const tell = vi.fn();
+    const h = approver("writer", [], undefined, checks, new TestLock(), false, tell);
+    const out = await h.approve(
+      request("pnpm -s typecheck", { itemId: "item-30" }),
+      undefined,
+      signal(),
+    );
+    expect(out).toBe("decline");
+    expect(tell).toHaveBeenCalledTimes(1);
+    expect(tell).toHaveBeenCalledWith("Not run: unchanged.");
+  });
+
+  it("tells the seat the rule's text when a guard rule refuses", async () => {
+    const tell = vi.fn();
+    const h = approver("writer", [], undefined, undefined, new TestLock(), false, tell);
+    const out = await h.approve(
+      request("git push origin x", { itemId: "item-31" }),
+      undefined,
+      signal(),
+    );
+    expect(out).toBe("decline");
+    expect(tell).toHaveBeenCalledTimes(1);
+    expect(tell.mock.calls[0]?.[0]).toBeTruthy();
+  });
+
+  it("tells the seat nothing when the signal is aborted", async () => {
+    const tell = vi.fn();
+    const h = approver("writer", [], undefined, undefined, new TestLock(), false, tell);
+    const stopped = new AbortController();
+    stopped.abort();
+    expect(await h.approve(request("ls", { itemId: "item-32" }), undefined, stopped.signal)).toBe(
+      "decline",
+    );
+    expect(tell).not.toHaveBeenCalled();
+  });
+
   it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
     const { checks } = recorder();
     const lock = new TestLock();
