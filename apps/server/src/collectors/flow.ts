@@ -213,19 +213,29 @@ function firstPushCi(node: unknown, required: readonly string[]): FlowPr["firstP
 export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: number): Promise<void> {
   const since = now - FLOW_DAYS * DAY_MS;
   try {
-    const done = store
-      .board(repo.id)
-      .filter((i) => hudColumnOf(i) === "Done" && i.updatedAt >= since);
-    const open = store
-      .board(repo.id)
-      .filter(
-        (i) =>
-          !i.closed &&
-          ["Ready", "Blocked", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
-      );
+    const board = store.board(repo.id);
+    const done = board.filter((i) => hudColumnOf(i) === "Done" && i.updatedAt >= since);
+    const open = board.filter(
+      (i) =>
+        !i.closed &&
+        ["Ready", "Blocked", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
+    );
+    // A ticket can leave active work for Backlog before the next collection. Keep reading a
+    // recently observed ticket until its saved moves age out, so that exit remains available to
+    // the telemetry history even though Backlog is not an open flow column.
+    const savedMoves = store
+      .flowColumnMoves()
+      .filter((move) => move.repoId === repo.id && move.at >= since);
+    const trackedNumbers = new Set(savedMoves.map((move) => move.number));
     const flowIssues = [
       ...done,
       ...open.filter((i) => !done.some((d) => d.issueNumber === i.issueNumber)),
+      ...board.filter(
+        (i) =>
+          trackedNumbers.has(i.issueNumber) &&
+          !done.some((d) => d.issueNumber === i.issueNumber) &&
+          !open.some((o) => o.issueNumber === i.issueNumber),
+      ),
     ];
     const openNumbers = new Set(open.map((issue) => issue.issueNumber));
     const merged = store
@@ -249,14 +259,21 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
     );
 
     const issues: FlowIssue[] = [];
-    const moves: FlowColumnMove[] = [];
+    const moves: FlowColumnMove[] = [...savedMoves];
+    const knownMoves = new Set(moves.map((move) => `${move.number}:${move.at}:${move.column}`));
     for (const i of flowIssues) {
       const node = timelines.get(i.issueNumber);
       if (!isObj(node)) continue;
       const flow = issueFlow(repo, node);
       // A card presently in Done without an observed Done event is not a flow fact. Open cards,
       // however, must remain visible even before their first Ready transition is observed.
-      if (flow.doneAt === null && !openNumbers.has(i.issueNumber)) continue;
+      if (
+        flow.doneAt === null &&
+        !openNumbers.has(i.issueNumber) &&
+        !trackedNumbers.has(i.issueNumber)
+      ) {
+        continue;
+      }
       issues.push({
         repoId: repo.id,
         number: i.issueNumber,
@@ -264,9 +281,13 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         ...flow,
         doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
-      moves.push(
-        ...flow.moves.map((move) => ({ ...move, repoId: repo.id, number: i.issueNumber })),
-      );
+      for (const move of flow.moves) {
+        if (move.at < since) continue;
+        const key = `${i.issueNumber}:${move.at}:${move.column}`;
+        if (knownMoves.has(key)) continue;
+        moves.push({ ...move, repoId: repo.id, number: i.issueNumber });
+        knownMoves.add(key);
+      }
     }
     const prs: FlowPr[] = [];
     for (const p of merged) {
