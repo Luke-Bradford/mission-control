@@ -542,6 +542,11 @@ export const asideForReworkEventText = (call: string): string =>
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
+/** A wake that failed twice running for the same reason: the hub keeps trying, FLIGHT is told once. */
+export const WAKE_STUCK_KEY_SUFFIX = ":wake-stuck";
+export const wakeStuckKey = (runId: string): string => `${runId}${WAKE_STUCK_KEY_SUFFIX}`;
+export const wakeStuckText = (reason: string): string =>
+  `could not go back to its seat, twice running: ${reason}; the hub keeps trying`;
 export const reworkFirstText = (call: string, ref: string): string =>
   `${call} has rework waiting on ${ref}; that goes first`;
 

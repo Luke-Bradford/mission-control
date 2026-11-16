@@ -1126,6 +1126,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "waste_alarm",
   "stuck_pr",
   "budget_unused",
+  "wake_stuck",
 ] as const;
 /** A seat idle while its account is under this share of its week raises `budget_unused`. */
 export const FLIGHT_BUDGET_UNUSED_PCT = 50;

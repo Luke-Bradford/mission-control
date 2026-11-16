@@ -625,7 +625,8 @@ async function refuseUnsafeTree(
  * resolves. Every install input found on the way is added to `found`. Lookups go through the
  * filesystem (`lstat(join(dir, name))`), so its case and Unicode folding apply (a tracked
  * `NODE_MODULES` is `node_modules` on APFS). This, not the tree listing, is authoritative: the
- * ref another seat can move is not necessarily what was checked out.
+ * ref another seat can move is not necessarily what was checked out. The top-level `.mc-tmp` is
+ * not walked (see the loop below).
  */
 async function inspectDisk(
   root: string,
@@ -659,6 +660,10 @@ async function inspectDisk(
     // A reused pnpm worktree verifies its inputs before deleting this one directory.
     if (allowRootInstallDir && rel === "" && d.name === tool.installDir) continue;
     if (allowedInstallDirs.has(`${prefix}${d.name}`)) continue;
+    // The worktree's own scratch folder (git-ignored): a test run leaves fixtures there, links
+    // included, and the install never reads it. Only the real folder at the top is skipped; a
+    // link in its place, or a same-named folder deeper down, is still refused.
+    if (rel === "" && d.name === MC_TMP_DIR_NAME && d.isDirectory()) continue;
     if (d.isSymbolicLink()) return `has a symlink at ${prefix}${d.name}`;
     if (d.isDirectory()) {
       const unsafe = await inspectDisk(

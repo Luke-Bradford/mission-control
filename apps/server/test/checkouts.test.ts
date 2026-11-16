@@ -1482,6 +1482,41 @@ describe("prepareCheckout", () => {
       expect(existsSync(wtPath())).toBe(false);
     });
 
+    describe("symlinks a test run left in the worktree's own scratch folder", () => {
+      beforeEach(() => {
+        commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+        git(seed, "push", "-q", "origin", "main");
+      });
+      const plant = (root: string, rel: string) => {
+        const roles = join(root, rel, "mc-hub-abc", "roles");
+        mkdirSync(roles, { recursive: true });
+        symlinkSync(outside, join(roles, "LINK.md"));
+      };
+
+      it("still reuses and reinstalls the worktree (16 Nov)", async () => {
+        const first = await prepareCheckout(input(), payloadInstall);
+        plant(first.path, join(MC_TMP_DIR_NAME, "t1"));
+        expect(await prepareCheckout(input(), payloadInstall)).toMatchObject({ path: first.path, created: false });
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+      });
+
+      it("still refuses a link in a same-named folder anywhere else", async () => {
+        const first = await prepareCheckout(input(), payloadInstall);
+        plant(first.path, join("docs", MC_TMP_DIR_NAME, "t1"));
+        const e = await fail(prepareCheckout(input(), payloadInstall));
+        expect(e.code).toBe("protected");
+        expect(e.message).toContain(`has a symlink at docs/${MC_TMP_DIR_NAME}/t1/`);
+      });
+
+      it("still refuses a scratch folder that is itself a symlink", async () => {
+        const first = await prepareCheckout(input(), payloadInstall);
+        symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME));
+        const e = await fail(prepareCheckout(input(), payloadInstall));
+        expect(e.code).toBe("protected");
+        expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}`);
+      });
+    });
+
     it("refuses the same on a reused branch", async () => {
       git(seed, "push", "-q", "origin", "main");
       git(clone, "pull", "-q");
