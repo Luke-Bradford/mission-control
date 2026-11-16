@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS escaped_defects (
   PRIMARY KEY (repo_id, issue_number, pr_number)
 );
 CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
+-- A closed bug traced to the commit and PR that introduced it, and why it was missed; one row per bug.
+CREATE TABLE IF NOT EXISTS bug_escapes (
+  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, filed_at INTEGER NOT NULL,
+  fix_pr INTEGER NOT NULL, commit_sha TEXT NOT NULL, introduced_pr INTEGER,
+  merged_at INTEGER NOT NULL, missed TEXT NOT NULL, PRIMARY KEY (repo_id, issue_number)
+);
+CREATE INDEX IF NOT EXISTS bug_escapes_filed ON bug_escapes(filed_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)

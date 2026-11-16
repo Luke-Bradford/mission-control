@@ -123,6 +123,30 @@ export interface AuditImprovement {
   chars?: number;
 }
 
+/** Why a bug got past the PR that introduced it, worked out from the hub's own records. */
+export const BUG_MISSED_REASONS = ["requirement", "test", "review", "none"] as const;
+export type BugMissedReason = (typeof BUG_MISSED_REASONS)[number];
+
+/** A closed bug traced to the commit and PR that introduced it. */
+export interface AuditBugEscape {
+  repoId: string;
+  /** The bug ticket's number. */
+  issue: number;
+  /** When the bug was filed. */
+  filedAt: number;
+  /** The merged PR that fixed it. */
+  fixPr: number;
+  /** The commit that introduced the bug. */
+  commit: string;
+  /** The PR that commit came in on; null when git names none. */
+  introducedPr: number | null;
+  /** When that PR was merged. */
+  mergedAt: number;
+  missed: BugMissedReason;
+  /** Time from that merge to the bug being filed, in ms. */
+  discoveryMs: number;
+}
+
 /** The `/api/audit` response for one range. */
 export interface AuditView {
   range: { since: number; until: number };
@@ -190,6 +214,11 @@ export interface AuditView {
    * server always sets it; optional so web fixtures built before it type-check.
    */
   improvements?: AuditImprovement[];
+  /**
+   * Bugs filed in range that are closed with a merged fix, each traced to the commit and PR that
+   * introduced it, newest first. The server always sets it; optional so web fixtures built before it type-check.
+   */
+  bugEscapes?: AuditBugEscape[];
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
   /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
@@ -260,6 +289,7 @@ export function capAudit(audit: AuditView): AuditView {
     changes: cut("changes", audit.changes),
     surgeonProposals: cut("surgeonProposals", audit.surgeonProposals),
     ...(audit.items === undefined ? {} : { items: cut("items", audit.items) }),
+    ...(audit.bugEscapes === undefined ? {} : { bugEscapes: cut("bugEscapes", audit.bugEscapes) }),
     ...(audit.improvements === undefined
       ? {}
       : { improvements: cut("improvements", audit.improvements) }),
