@@ -402,7 +402,7 @@ describe("Codex check records", () => {
     );
     expect(out).toBe("decline");
     expect(tell).toHaveBeenCalledTimes(1);
-    expect(tell.mock.calls[0]?.[0]).toBeTruthy();
+    expect(tell).toHaveBeenCalledWith(`${GUARD_RULES["git-write"]}: git push`);
   });
 
   it("tells the seat nothing when the signal is aborted", async () => {
