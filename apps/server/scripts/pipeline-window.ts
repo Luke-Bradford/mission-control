@@ -72,7 +72,7 @@ export function pipelineWindow(db: DatabaseSync, input: PipelineWindowInput): Pi
   const rows = db
     .prepare(
       `SELECT pr_number, sha, name, conclusion, url FROM ci_runs
-       WHERE repo_id = ? AND at >= ? AND at < ? AND pr_number IN (${crew}) ORDER BY at, name, attempt`,
+       WHERE repo_id = ? AND first_seen_at >= ? AND first_seen_at < ? AND pr_number IN (${crew}) ORDER BY first_seen_at, name, attempt`,
     )
     .all(repoId, from, until, repoId) as Row[];
   const failed = new Set(CI_FAILED_STATES);

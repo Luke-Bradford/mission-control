@@ -37,7 +37,14 @@ function crewRun(pr: number): void {
     )
     .run(`run-${pr}`, REPO, FROM, JSON.stringify({ prNumber: pr }));
 }
-function ci(pr: number, name: string, conclusion: string, at = FROM + 1000, attempt = 1): void {
+function ci(
+  pr: number,
+  name: string,
+  conclusion: string,
+  firstSeen = FROM + 1000,
+  attempt = 1,
+  at = firstSeen,
+): void {
   raw
     .prepare(
       `INSERT INTO ci_runs (repo_id, run_key, sha, name, attempt, pr_number, state, conclusion, url, first_seen_at, at)
@@ -45,13 +52,13 @@ function ci(pr: number, name: string, conclusion: string, at = FROM + 1000, atte
     )
     .run(
       REPO,
-      `${pr}:${name}:${attempt}:${at}`,
+      `${pr}:${name}:${attempt}:${firstSeen}`,
       name,
       attempt,
       pr,
       conclusion,
       `https://ci/${name}`,
-      at,
+      firstSeen,
       at,
     );
 }
@@ -100,6 +107,19 @@ describe("pipelineWindow", () => {
       "  PR 10 abcdef1 server (1) https://ci/server (1)",
       "  PR 10 abcdef1 validate https://ci/validate",
     ]);
+  });
+
+  it("places a CI job by when it was first seen, not by its last poll", () => {
+    crewRun(10);
+    // first seen inside the window, polled again after it ends: still counted
+    ci(10, "validate", "FAILURE", FROM + 1000, 1, UNTIL + 5000);
+    // first seen before the window, polled inside it: not counted
+    ci(10, "server (1)", "FAILURE", FROM - 5000, 1, FROM + 1000);
+    // first seen exactly at the end: outside
+    ci(10, "web-core", "FAILURE", UNTIL, 1, UNTIL);
+    const r = pipelineWindow(raw, input);
+    expect(r.ciResults).toBe(1);
+    expect(r.byClass).toEqual({ "lint-typecheck-build": 1, tests: 0, other: 0 });
   });
 
   it("lists blocking findings that ask for controller-only evidence and counts Controller check summaries", () => {

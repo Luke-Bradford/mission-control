@@ -9,17 +9,17 @@ What landed for each of the ticket's five items, and how to measure the outcome.
 
 ## What landed
 
-| # | Item | Where | Tests |
-| --- | --- | --- | --- |
-| 1 | Pre-push gate (lint, typecheck, related tests) | merge `c3192017a` adds the related-test push check; the exact-head rule followed later (`docs/reviews/2026-11-13/repeated-review-findings.md`) | push-gate tests under `apps/server/test` |
-| 2 | Controller check is a merge step, not a finding | `controllerCheckHold`, `controllerCheck`, `ticketControllerCheck` in `apps/server/src/engine/engine.ts`; `edcf13795` keeps the section on edit; `roles/RETRO.md` line 23 | `apps/server/test/engine.test.ts` |
-| 3 | UI checks without the controller (**revised**) | No FLIGHT tool for a PR head. A review of a web PR gets a preview hub of the PR head (`apps/server/src/preview/review.ts`, `6e3d58bdc`); RETRO's preview browser renders it in both themes (`PREVIEW_THEMES` in `apps/server/src/preview/browser.ts`). FLIGHT's `screenshot_hud` covers the live hub. | preview tests under `apps/server/test` |
-| 4 | One CI run proves a flake fix | `.github/workflows/repeat-test.yml`, `397a7a299` | the workflow itself |
-| 5 | Round cap (**revised**) | A change past its review rounds is held for FLIGHT (`reviewsHeld`, `settleReviewRounds` in `apps/server/src/spend/waste.ts`); FLIGHT settles with accept, a second review or rework (`roles/FLIGHT.md` line 71). `24cee2dce` (5 November) made the cap end in accept unless a finding is Critical. | `apps/server/test` waste and review-round tests |
+| # | Item | Primary PR and where | Tests (tracked files) | Later follow-ups (not the primary delivery) |
+| --- | --- | --- | --- | --- |
+| 1 | Pre-push gate (lint, typecheck, related tests) | PR 1339, merge `c3192017a` | `apps/server/test/related-check.test.ts`, `apps/server/test/mcp-tools.test.ts` | PR 1485 (gate-refused push gives way to rework), PR 1919 (every spelling of the check takes the test lock); exact-head rule in `docs/reviews/2026-11-13/repeated-review-findings.md` |
+| 2 | Controller check is a merge step, not a finding | PR 952, `controllerCheckHold` and `ticketControllerCheck` in `apps/server/src/engine/engine.ts`; `roles/RETRO.md` line 23 | `apps/server/test/engine.test.ts`, `apps/server/test/api.test.ts`, `apps/server/test/flight-tools.test.ts` | commit `edcf13795` (edit_issue keeps the section), test `apps/server/test/flight-tools.test.ts` |
+| 3 | UI checks without the controller (**revised**) | No FLIGHT tool for a PR head. PR 1316 (`8bd999eab`): a review of a web PR gets a preview hub of its head (`apps/server/src/preview/review.ts`), rendered in both themes (`PREVIEW_THEMES` in `apps/server/src/preview/browser.ts`). Hub itself: commit `6e3d58bdc`. FLIGHT's `screenshot_hud` covers the live hub. | `apps/server/test/review-preview.test.ts`, `apps/server/test/review-shots.test.ts`, `apps/server/test/supervisor-review.test.ts`; hub: `apps/server/test/previews.test.ts` | none |
+| 4 | One CI run proves a flake fix | PR 1333, `.github/workflows/repeat-test.yml` (`397a7a299`), merged into PR 1339's branch | `apps/server/test/repeat-test.test.ts` | none |
+| 5 | Round cap (**revised**) | PR 1776 added the review-rounds hold for FLIGHT (`reviewsHeld` in `apps/server/src/spend/waste.ts`); PR 1471 (`24cee2dce`) made the cap end in accept unless a finding is Critical (no test of its own); PR 1951 made a FLIGHT settle close the hold. FLIGHT settles with accept, a second review or rework (`roles/FLIGHT.md` line 71). | `apps/server/test/waste.test.ts`, `apps/server/test/engine.test.ts` ("past the round cap" cases) | PR 1471 had no test change |
+
+Each item reached main as its own PR with tests, except that item 5's `24cee2dce` change (PR 1471) carried none; the hold and the settle that it relies on are tested in the files named. Items 3 and 5 landed under other tickets' PRs, in revised form.
 
 Standing decisions behind the two revisions: item 3 renders the PR head through the review preview instead of a FLIGHT tool; item 5 holds for FLIGHT instead of sending the ticket back to planning. If "back to planning" is still wanted, it is a new ticket.
-
-Check the test files with `git ls-files` before relying on a name above.
 
 ## Measuring the window
 
@@ -30,7 +30,7 @@ sqlite3 <hub db> ".backup <copy>"
 node --experimental-strip-types apps/server/scripts/pipeline-window.ts --db <copy> --repo mission-control --from <ISO time> [--hours 24]
 ```
 
-It reports crew-PR CI job failures split into lint/typecheck/build and tests, the blocking findings that match wording asking for controller-only evidence (candidates: read each), and how many reviews named a `Controller check:`. The `check` summary job is left out; a PR with no crew run is not counted. Test: `apps/server/test/pipeline-window.test.ts`.
+It places each CI job by `first_seen_at`, the time the hub first saw it, which a later poll does not change (`at` is rewritten on every poll, so it is not used). It reports crew-PR CI job failures split into lint/typecheck/build and tests, the blocking findings that match wording asking for controller-only evidence (candidates: read each), and how many reviews named a `Controller check:`. The `check` summary job is left out; a PR with no crew run is not counted. Test: `apps/server/test/pipeline-window.test.ts`.
 
 ## 24-hour result
 
