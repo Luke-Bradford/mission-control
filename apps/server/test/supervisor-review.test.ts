@@ -54,7 +54,6 @@ import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/preview/review.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import { fixBriefKey, reviewBrief, watchBrief } from "../src/runtime/brief.ts";
-import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store/crew-paths.ts";
@@ -1833,7 +1832,7 @@ describe("startReview", () => {
   });
 
   it("a review run resumes in its scratch worktree", async () => {
-    const { sup, reviewId } = await started();
+    const { sup } = await started();
     await sup.stopAll();
     await noKeepers();
     const again = make({ scratchRetro: true });

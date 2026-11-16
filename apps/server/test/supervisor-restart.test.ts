@@ -629,7 +629,10 @@ describe("reattach after a restart", () => {
     const { runId } = await leftActive();
     const other = join(dir, "other");
     git(dir, "init", "-q", other);
-    writeFileSync(join(root, "mc-crew", "guido-1-tree", ".git"), `gitdir: ${join(other, ".git")}\n`);
+    writeFileSync(
+      join(root, "mc-crew", "guido-1-tree", ".git"),
+      `gitdir: ${join(other, ".git")}\n`,
+    );
     const { sup } = make();
     sup.start();
     await until(() =>
