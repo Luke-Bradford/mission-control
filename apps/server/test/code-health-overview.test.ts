@@ -323,9 +323,19 @@ describe("Audit first-screen summary", () => {
       finding(id, `src/f${n}.ts`, `s${n}`);
     }
     for (let n = 0; n < CODE_HEALTH_OVERVIEW_PAST_MAX + 5; n++) proposal(`acc${n}`, "accepted");
+    // The hub derives one repeated-rounds proposal per PR at round 3 or more; rounds 3..14 give twelve, ranked by round.
+    const extra = 2;
+    for (let n = 0; n < CODE_HEALTH_OVERVIEW_ROWS_MAX + extra; n++)
+      merged(100 + n, NOW - DAY, review(100 + n, 3 + n));
     db.exec("COMMIT");
     const view = await overview();
-    expect(view.rows.length).toBeLessThanOrEqual(CODE_HEALTH_OVERVIEW_ROWS_MAX);
+    expect(view.rows).toHaveLength(CODE_HEALTH_OVERVIEW_ROWS_MAX);
+    expect(view.rows.map((row) => row.target.baseline)).toEqual(
+      Array.from(
+        { length: CODE_HEALTH_OVERVIEW_ROWS_MAX },
+        (_, i) => 3 + extra + CODE_HEALTH_OVERVIEW_ROWS_MAX - 1 - i,
+      ),
+    );
     expect(view.landing.files).toHaveLength(CODE_HEALTH_OVERVIEW_FILES_MAX);
     expect(view.past.items).toHaveLength(CODE_HEALTH_OVERVIEW_PAST_MAX);
     expect(view.past.funnel).toContainEqual({
