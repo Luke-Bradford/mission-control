@@ -324,7 +324,7 @@ describe("reattach after a restart", () => {
         expect.any(Number),
         expect.any(Function),
       );
-      expect(store.run(runId)).toMatchObject({ status: "failed" });
+      expect(store.run(runId)?.endedAt).not.toBeNull();
       expect(seen).toContainEqual({ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" });
       expect(starts()).toHaveLength(1);
     } finally {
@@ -1037,6 +1037,30 @@ describe("a seat keeps running through a restart", () => {
     expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
+  it("a run whose resumed keeper is lost again is failed, not taken back twice (#1912)", async () => {
+    const { sup } = make();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const kill = () =>
+      process.kill(readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number, "SIGKILL");
+    kill();
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    await until(() => expect(starts()).toHaveLength(2));
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    kill(); // the resumed keeper goes the same way
+    await until(() => expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1));
+    expect(store.run(runId)).toMatchObject({ status: "failed" });
+    expect(store.seatSession("guido-1")?.state).toBe("error");
+    await sleep(500);
+    expect(starts()).toHaveLength(2);
+    expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1);
   });
 
   it("a seat mid-turn at attach is not sent Carry on", async () => {
