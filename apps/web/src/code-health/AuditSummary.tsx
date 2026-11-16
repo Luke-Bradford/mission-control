@@ -6,6 +6,7 @@ import type {
   CodeHealthWasteAlarmRow,
 } from "@mc/core";
 import { type ReactNode, useState } from "react";
+import { percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import type { Action } from "./dialogs.tsx";
@@ -286,7 +287,7 @@ const figureValue = (f: CodeHealthFigure | undefined): string =>
   !f || f.value === null
     ? "—"
     : f.unit.startsWith("%")
-      ? `${num(f.value)}%`
+      ? percent(f.value, 1)
       : f.unit.startsWith("USD")
         ? `$${f.value.toFixed(2)}`
         : num(f.value);

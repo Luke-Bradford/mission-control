@@ -35,7 +35,8 @@ describeRendered("code health in a real browser", () => {
               undefined,
             );
             expect(metrics.docWidth).toBeLessThanOrEqual(metrics.width);
-            expect(metrics.bottom).toBeLessThanOrEqual(1000);
+            // The Summary stacks below 1400 px and the page then scrolls; Review quality must still fit.
+            if (tab === "review") expect(metrics.bottom).toBeLessThanOrEqual(1000);
             expect(metrics.small).toBe(0);
             expect((await page.reachable(".code-health button")).every(Boolean)).toBe(true);
           }

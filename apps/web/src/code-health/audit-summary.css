@@ -200,7 +200,7 @@
   color: var(--muted);
 }
 .as-c-n {
-  width: 36px;
+  width: 40px;
 }
 .as-c-meas {
   width: 200px;
@@ -258,7 +258,7 @@
   font-style: normal;
   color: var(--muted);
   display: inline-block;
-  width: 14px;
+  width: var(--sp-4);
   font-size: var(--fs-micro);
 }
 .as-rt-static {
@@ -267,7 +267,7 @@
 }
 .as-why {
   color: var(--fg-2);
-  padding-left: 14px;
+  padding-left: var(--sp-4);
   display: -webkit-box;
   -webkit-line-clamp: 1;
   line-clamp: 1;
@@ -284,7 +284,7 @@
 .as-meas .as-v {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-1) 6px;
+  gap: var(--sp-1) var(--sp-2);
   font-family: var(--mono);
   color: var(--fg);
 }
@@ -309,7 +309,7 @@
 .as-btn {
   min-height: 24px;
   min-width: 24px;
-  padding: 0 6px;
+  padding: 0 var(--sp-2);
   font-size: var(--fs-s);
   color: var(--fg-2);
 }
@@ -346,7 +346,7 @@
   background: var(--surface-2);
   padding-top: 0;
   padding-bottom: var(--sp-3);
-  padding-left: calc(var(--sp-4) + 36px);
+  padding-left: calc(var(--sp-4) + var(--sp-5));
 }
 .as-mg {
   display: grid;
@@ -354,7 +354,7 @@
   gap: var(--sp-4);
 }
 .as-mg h3 {
-  margin: 0 0 2px;
+  margin: 0 0 var(--sp-1);
   font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
@@ -368,15 +368,15 @@
 .as-steps {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 6px;
-  margin: 0 0 2px;
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0 0 var(--sp-1);
   padding: 0;
   list-style: none;
   color: var(--muted);
 }
 .as-steps li:not(:last-child)::after {
   content: "›";
-  margin-left: 6px;
+  margin-left: var(--sp-2);
   color: var(--line-2);
 }
 .as-steps li[aria-current="step"] {
@@ -437,7 +437,7 @@
   display: inline-block;
   width: 9px;
   height: 9px;
-  margin-right: 4px;
+  margin-right: var(--sp-1);
 }
 .as-k0 {
   border: 1px solid var(--muted);
