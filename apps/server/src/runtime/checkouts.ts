@@ -762,10 +762,12 @@ async function baseBlob(read: ReadObject, baseSha: string, file: string): Promis
 }
 
 /**
- * True when the install cannot read the worktree's `.mc-tmp`: pnpm, whose workspace importers (the
- * verified base lockfile's) include no package at or under it. Any other tool, or an importer
- * there, keeps the folder in the disk check: a trusted workspace could make the install follow a
- * link inside it.
+ * True when the install cannot read the worktree's `.mc-tmp`: pnpm, where neither the verified base
+ * `pnpm-workspace.yaml` (pnpm finds projects from its patterns, not the lockfile) nor the verified
+ * lockfile's importers can select a package at or under it. Fails closed: a missing-but-unreadable,
+ * malformed or unexpected workspace file, a pattern whose first segment is `.mc-tmp` or could match
+ * it (any glob character, `..`, or a non-string entry) keeps the folder in the disk check, as does
+ * any other tool.
  */
 async function scratchIsOutsideInstall(
   tool: InstallTool,
@@ -773,12 +775,36 @@ async function scratchIsOutsideInstall(
   baseSha: string,
 ): Promise<boolean> {
   if (tool !== PNPM_TOOL) return false;
+  const reaches = (path: string) => {
+    const norm = path
+      .replace(/^!/, "")
+      .replace(/^(\.\/)+/, "")
+      .replace(/\/+$/, "");
+    const first = norm.split("/")[0] ?? "";
+    return (
+      first === MC_TMP_DIR_NAME ||
+      /[*?[\]{}()!]/.test(first) ||
+      norm.split("/").includes("..") ||
+      first === ""
+    );
+  };
   for (const importer of await pnpmWorkspaceImporters(read, baseSha)) {
-    const norm = importer.replace(/^(\.\/)+/, "").replace(/\/+$/, "");
-    if (norm === MC_TMP_DIR_NAME || norm.startsWith(`${MC_TMP_DIR_NAME}/`)) return false;
-    if (norm.split("/").includes("..")) return false;
+    if (reaches(importer)) return false;
   }
-  return true;
+  const entry = await baseEntry(read, baseSha, "pnpm-workspace.yaml");
+  if (entry === null) return true;
+  if (entry.mode !== "100644" && entry.mode !== "100755") return false;
+  try {
+    const doc = parseYaml((await read("blob", entry.id, "pnpm-workspace.yaml")).toString("utf8"));
+    if (doc === null || doc === undefined) return true;
+    if (typeof doc !== "object" || Array.isArray(doc)) return false;
+    const packages = (doc as { packages?: unknown }).packages;
+    if (packages === undefined) return true;
+    if (!Array.isArray(packages)) return false;
+    return packages.every((p) => typeof p === "string" && !reaches(p));
+  } catch {
+    return false;
+  }
 }
 
 /** The exact package directories pnpm's verified lockfile records as workspace importers. */
