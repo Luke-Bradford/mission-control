@@ -104,6 +104,11 @@ CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
 );
+CREATE TABLE IF NOT EXISTS flow_column_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, number INTEGER NOT NULL,
+  at INTEGER NOT NULL, column TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS flow_column_moves_order ON flow_column_moves(at, repo_id, number);
 CREATE TABLE IF NOT EXISTS flow_prs (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, first_push_ci TEXT,
   PRIMARY KEY (repo_id, number)
