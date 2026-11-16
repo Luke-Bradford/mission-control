@@ -1639,7 +1639,7 @@ describe("prepareCheckout", () => {
           if (synced?.kind !== "merged") throw new Error("expected merge");
           rmSync(join(first.path, "node_modules"), { recursive: true, force: true });
           linkAt(first.path);
-          const note = await installAfterSync(clone, { ...again, synced }, synced.before, root);
+          const note = await installAfterSync(clone, again, synced.before, root);
           expect(note).toContain("install refused:");
           expect(note).toContain(`${MC_TMP_DIR_NAME}/deps`);
           expect(readdirSync(outside)).toEqual(["keep.txt"]);
