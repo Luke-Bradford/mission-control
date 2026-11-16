@@ -776,7 +776,7 @@ describe("Agents", () => {
   it("where agent time goes: four shares per seat, each on a shape, rounded for display", async () => {
     await loaded(undefined, undefined, undefined, "crew");
     const row = panel("tUtil").querySelector("li.row") as HTMLElement;
-    expect(row.textContent).toBe("shop-app-ta64% working");
+    expect(row.querySelector("a")?.textContent).toBe("64% working");
     const bar = row.querySelector(".bar") as HTMLElement;
     expect(bar.getAttribute("aria-label")).toBe(
       "shop-app-ta: Working 64% · Waiting 8% · Parked or stalled 6% · Idle 22%",

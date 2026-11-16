@@ -1,13 +1,13 @@
-import { type Crew, TELEMETRY_RANGES, type Telemetry } from "@mc/core";
+import { type Crew, type HudState, TELEMETRY_RANGES, type Telemetry } from "@mc/core";
 import { useNow, useTz } from "../clock.ts";
 import { useSeatName } from "../crew.ts";
 import { dur, hhmm, kTokens, percent } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { NEEDS_YOU_PATH, PAGE_PATHS, type TelemetryView } from "../router.ts";
+import { agentPath, NEEDS_YOU_PATH, PAGE_PATHS, type TelemetryView } from "../router.ts";
 import { Subagents, ToolLatency } from "./AgentsGroup.tsx";
 import { DASH, indexOf, type Scope } from "./common.ts";
-import { Stat, type StatSpec } from "./Stat.tsx";
+import { Cell, Stat, type StatSpec } from "./Stat.tsx";
 
 type SpanState = NonNullable<Telemetry["series"]>["stateSpans"][number]["state"];
 
@@ -31,13 +31,24 @@ function axisLabels(from: number, to: number, tz: string | null): { at: number; 
   }));
 }
 
+/** The lane state a live seat state reads as; absent for states the four lanes do not draw. */
+const LIVE_LANE: Partial<Record<HudState, SpanState>> = {
+  running: "running",
+  waiting: "waiting",
+  parked: "parked",
+  idle: "idle",
+  stopped: "idle",
+};
+
 function Lanes({
   t,
+  crew,
   scope,
   from,
   to,
 }: {
   t: Telemetry | undefined;
+  crew: Crew | undefined;
   scope: Scope;
   from: number;
   to: number;
@@ -48,9 +59,12 @@ function Lanes({
     const mine = spans
       .filter((s) => s.agentId === a.id && s.endedAt >= from && s.startedAt <= to)
       .sort((x, y) => x.startedAt - y.startedAt);
-    return { agent: a, spans: mine, now: mine.at(-1)?.state ?? null };
+    // A terminal span ends at its last observation, so "now" is the live crew row, never the span.
+    const live = crew?.rows.find((r) => r.id === a.id)?.hudState ?? null;
+    return { agent: a, spans: mine, live };
   });
-  const nowCount = (state: SpanState) => lanes.filter((l) => l.now === state).length;
+  const nowCount = (state: SpanState) =>
+    lanes.filter((l) => l.live !== null && LIVE_LANE[l.live] === state).length;
   const width = to - from;
   if (t && !t.series)
     return (
@@ -62,13 +76,11 @@ function Lanes({
     <div className="pbody">
       <div className="lanes-chart">
         <ul className="crew-lanes" aria-label="Seat state lanes">
-          {lanes.map(({ agent, spans: mine, now }) => (
+          {lanes.map(({ agent, spans: mine, live }) => (
             <li className="lane" key={agent.id}>
               <AgentTag id={agent.id} index={agent.index} sm bare />
               <div className="lane-track">
-                <span className="sr-only">
-                  {now ? `now ${now}` : "no observations in this range"}
-                </span>
+                <span className="sr-only">{live ? `now ${live}` : "state not known"}</span>
                 {mine.map((s) => {
                   const left = (Math.max(s.startedAt, from) - from) / width;
                   const right = (Math.min(Math.max(s.endedAt, s.startedAt), to) - from) / width;
@@ -102,13 +114,17 @@ function Lanes({
       </div>
       <ul className="readout" aria-label="Seats in each state now">
         {STATES.map((s) => (
-          <li
-            key={s.key}
-            title={`Seats in the ${s.label.toLowerCase()} state now, of the seats in view`}
-          >
+          <li key={s.key}>
             <i className={`crew-sw st ${s.key}`} aria-hidden="true" />
             <span className="nm">{s.label}</span>
-            <span className="vl num">{nowCount(s.key)} now</span>
+            <span className="vl">
+              <Cell
+                text={`${nowCount(s.key)} now`}
+                label={`${s.label} seats`}
+                definition={`Seats in the ${s.label.toLowerCase()} state now, of the seats in view. Opens the Agents page.`}
+                href={PAGE_PATHS.agent}
+              />
+            </span>
           </li>
         ))}
       </ul>
@@ -155,7 +171,14 @@ function AgentTime({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
                     <i className="share unknown" style={{ width: `${r.unknown}%` }} />
                   )}
                 </div>
-                <span className="vl num">{percent(r.working)} working</span>
+                <span className="vl">
+                  <Cell
+                    text={`${percent(r.working)} working`}
+                    label={`${r.agentId} working share`}
+                    definition={`Share of ${r.agentId}'s day spent working, today. Opens its Agent page.`}
+                    href={agentPath(r.agentId)}
+                  />
+                </span>
               </li>
             );
           })}
@@ -287,11 +310,13 @@ export function CrewSummaryRow(props: {
 /** The Crew tab's panels: lanes and agent time as charts, tool latency and subagents as tables. */
 export function CrewPanels({
   t,
+  crew,
   scope,
   view,
   dim,
 }: {
   t: Telemetry | undefined;
+  crew: Crew | undefined;
   scope: Scope;
   view: TelemetryView;
   dim: boolean;
@@ -313,7 +338,7 @@ export function CrewPanels({
         title="Crew state"
         sub={`running, waiting, parked and idle · last ${scope.range}`}
       >
-        <Lanes t={t} scope={scope} from={from} to={to} />
+        <Lanes t={t} crew={crew} scope={scope} from={from} to={to} />
         <p className="pnote">
           Running is solid, Waiting is hatched, Parked is dotted and Idle is an underline, so a
           state never rests on colour alone.

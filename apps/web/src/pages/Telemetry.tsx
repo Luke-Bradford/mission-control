@@ -277,7 +277,7 @@ export function Telemetry() {
                 <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
               </div>
             ) : (
-              <CrewPanels t={t} scope={scope} view={view} dim={dim} />
+              <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
             )
           ) : (
             <ComingTab

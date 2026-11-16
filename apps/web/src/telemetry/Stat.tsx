@@ -1,6 +1,7 @@
 import type { MetricId } from "@mc/core";
 import { useId } from "react";
 import { followLink } from "../router.ts";
+import { DASH } from "./common.ts";
 
 /** Where a number leads: a page that exists today, or a list that needs a new route. */
 export type Drill =
@@ -47,16 +48,24 @@ export function Stat({
   const verdictClass = s.verdict
     ? ` v-${s.verdict === "Needs attention" ? "attention" : s.verdict.toLowerCase()}`
     : "";
+  // No figure, nothing to open: the value stays focusable but does nothing until one arrives.
+  const unavailable = s.value === DASH;
   const value =
     s.drill.kind === "link" ? (
       <a
         className="num stat-value"
-        href={s.drill.href}
+        href={unavailable ? undefined : s.drill.href}
+        role={unavailable ? "link" : undefined}
+        tabIndex={unavailable ? 0 : undefined}
+        aria-disabled={unavailable || undefined}
         aria-describedby={def}
         aria-label={nameOf(s)}
         data-drill="exists"
         data-metric={s.metric}
-        onClick={(e) => followLink(e, (s.drill as { href: string }).href)}
+        onClick={(e) => {
+          if (unavailable) e.preventDefault();
+          else followLink(e, (s.drill as { href: string }).href);
+        }}
       >
         {s.value}
       </a>
@@ -64,11 +73,14 @@ export function Stat({
       <button
         type="button"
         className="num stat-value"
+        aria-disabled={unavailable || undefined}
         aria-describedby={def}
         aria-label={nameOf(s)}
         data-drill="needs-route"
         data-metric={s.metric}
-        onClick={() => onNeedsRoute(s)}
+        onClick={() => {
+          if (!unavailable) onNeedsRoute(s);
+        }}
       >
         {s.value}
       </button>
@@ -92,5 +104,40 @@ export function Stat({
         {s.definition}
       </div>
     </div>
+  );
+}
+
+/**
+ * A figure inside a chart's readout: a link to the page behind it, focusable, with its definition
+ * on hover and keyboard focus.
+ */
+export function Cell({
+  text,
+  label,
+  definition,
+  href,
+}: {
+  text: string;
+  label: string;
+  definition: string;
+  href: string;
+}) {
+  const def = useId();
+  return (
+    <span className="crew-cell">
+      <a
+        className="num crew-cell-value"
+        href={href}
+        aria-describedby={def}
+        aria-label={`${label}: ${text}. ${definition}`}
+        data-drill="exists"
+        onClick={(e) => followLink(e, href)}
+      >
+        {text}
+      </a>
+      <span className="crew-cell-def" id={def} role="tooltip">
+        {definition}
+      </span>
+    </span>
   );
 }

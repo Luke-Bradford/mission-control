@@ -398,7 +398,11 @@ describe("the Crew tab", () => {
   it("draws a lane per seat, each state with its own shape, and counts the seats in each state", async () => {
     await open();
     const lanes = [...document.querySelectorAll("#tCrewState .lane")];
-    expect(lanes.map((l) => l.textContent)).toEqual(["shop-app-tanow waiting", "studionow idle"]);
+    // the last recorded spans (waiting, idle) ended earlier; the live rows say running, waiting
+    expect(lanes.map((l) => l.textContent)).toEqual([
+      "shop-app-tanow running",
+      "studionow waiting",
+    ]);
     const spans = [...(lanes[0] as Element).querySelectorAll(".span")].map((s) => s.className);
     expect(spans).toEqual(["span running", "span waiting"]);
     const first = (lanes[0] as Element).querySelector(".span") as HTMLElement;
@@ -406,8 +410,10 @@ describe("the Crew tab", () => {
     expect(Number.parseFloat(first.style.left)).toBeCloseTo((4 / 24) * 100, 1);
     expect(Number.parseFloat(first.style.width)).toBeCloseTo((10 / 24) * 100, 1);
     expect(
-      [...document.querySelectorAll("#tCrewState .readout li")].map((li) => li.textContent),
-    ).toEqual(["Running0 now", "Waiting1 now", "Parked0 now", "Idle1 now"]);
+      [...document.querySelectorAll("#tCrewState .readout li")].map(
+        (li) => `${li.querySelector(".nm")?.textContent} ${li.querySelector("a")?.textContent}`,
+      ),
+    ).toEqual(["Running 1 now", "Waiting 1 now", "Parked 0 now", "Idle 0 now"]);
     const css = readStyle("telemetry/telemetry.css");
     for (const state of ["running", "waiting", "parked", "idle"])
       expect(css).toContain(`.span.${state}`);
@@ -439,6 +445,62 @@ describe("the Crew tab", () => {
     );
     expect(screen.queryByLabelText("Account")).toBeNull();
     expect(screen.queryByLabelText("Ticket")).toBeNull();
+  });
+});
+
+describe("figures that cannot be opened and figures in the readouts", () => {
+  it("blocks click and Enter on a value with no figure, and opens again once one arrives", async () => {
+    await open("", tel({ capcom: undefined }));
+    const value = within(stat("Your response")).getByRole("button");
+    expect(value.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(value);
+    fireEvent.keyDown(value, { key: "Enter" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // a link value is blocked the same way
+    const link = within(stat("Merged")).getByRole("link");
+    expect(link.getAttribute("aria-disabled")).toBeNull();
+    cleanup();
+    await open("", tel());
+    const ready = within(stat("Your response")).getByRole("button");
+    expect(ready.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(ready);
+    screen.getByRole("dialog", { name: "Runs behind this number" });
+  });
+
+  it("keeps a figure's element, and its focus, when its value arrives", async () => {
+    const { fetch } = await open("", tel({ capcom: undefined }));
+    const value = within(stat("Your response")).getByRole("button");
+    value.focus();
+    expect(document.activeElement).toBe(value);
+    expect(value.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "6h" }),
+    );
+    expect(fetch).toBeTruthy();
+    expect(document.activeElement).toBe(value);
+  });
+
+  it("makes every Crew readout value a focusable link with its definition", async () => {
+    await open();
+    const counts = [...document.querySelectorAll("#tCrewState .readout a")] as HTMLAnchorElement[];
+    expect(counts).toHaveLength(4);
+    for (const a of counts) {
+      expect(a.getAttribute("href")).toBe("/agent");
+      expect(a.tabIndex).toBe(0);
+      const def = document.getElementById(a.getAttribute("aria-describedby") as string);
+      expect(def?.getAttribute("role")).toBe("tooltip");
+    }
+    const shares = [...document.querySelectorAll("#tUtil li.row a")] as HTMLAnchorElement[];
+    expect(shares.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
+      ["60% working", "/agent/shop-app-ta"],
+      ["30% working", "/agent/studio"],
+    ]);
+    fireEvent.click(shares[0] as HTMLAnchorElement);
+    expect(window.location.pathname).toBe("/agent/shop-app-ta");
+    const css = readStyle("telemetry/telemetry.css");
+    expect(css).toMatch(
+      /\.crew-cell:hover \.crew-cell-def,\s*\.crew-cell:focus-within \.crew-cell-def \{\s*display: block/,
+    );
   });
 });
 
