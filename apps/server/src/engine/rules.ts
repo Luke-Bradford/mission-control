@@ -13,7 +13,7 @@ import { DEFAULT_REPO_RULES, type RepoRules } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { readRepoClaudeMd } from "../runtime/brief.ts";
 import { crewGit } from "../runtime/git.ts";
-import { overlayRepoBlock, repoRulesSchema } from "./rule-config.ts";
+import { overlayRepoBlock, type RepoBlock, repoRulesSchema } from "./rule-config.ts";
 
 export class RepoRulesError extends Error {
   constructor(message: string) {
@@ -105,8 +105,18 @@ export function parseRepoRules(
   base: RepoRules = DEFAULT_REPO_RULES,
   notes: string[] = [],
 ): RepoRules {
+  const parsed = parseRepoBlock(markdown, base, notes);
+  return parsed === null ? base : overlayRepoBlock(base, parsed);
+}
+
+/** The keys the repo's own block declares (null when it has none); `parseRepoRules` overlays it. */
+export function parseRepoBlock(
+  markdown: string | null,
+  base: RepoRules = DEFAULT_REPO_RULES,
+  notes: string[] = [],
+): RepoBlock | null {
   const block = markdown === null ? null : mcBlock(markdown);
-  if (block === null) return base;
+  if (block === null) return null;
   let doc: unknown;
   try {
     doc = parseYaml(block);
@@ -140,7 +150,43 @@ export function parseRepoRules(
     }
     throw new RepoRulesError(`mc.${issue.path.map(String).join(".")}: ${issue.message}`);
   }
-  return overlayRepoBlock(base, parsed.data);
+  return parsed.data;
+}
+
+async function originHeadSha(checkout: string, mainSha?: string): Promise<string> {
+  const common = await realpath(join(checkout, ".git"));
+  if (mainSha !== undefined) return mainSha;
+  // The full ref name: a local branch called `origin/HEAD` would shadow the short one.
+  return (
+    await crewGit(
+      checkout,
+      ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"],
+      common,
+      {
+        gitDir: common,
+      },
+    )
+  ).trim();
+}
+
+/**
+ * The block the repo's `CLAUDE.md` declares at `origin/HEAD` (null when it has none), so a caller
+ * can tell which keys the repo file set. Uncached; returns the error rather than throwing.
+ */
+export async function readRepoBlock(
+  repo: string,
+  checkout: string,
+  base: RepoRules = DEFAULT_REPO_RULES,
+): Promise<RepoBlock | null | RepoRulesError> {
+  try {
+    const markdown = await readRepoClaudeMd(checkout, await originHeadSha(checkout));
+    return parseRepoBlock(markdown, base);
+  } catch (e) {
+    if (e instanceof RepoRulesError) return new RepoRulesError(`${repo}: ${e.message}`);
+    return new RepoRulesError(
+      `${repo}: cannot read CLAUDE.md at origin/HEAD: ${(e as Error).message}`,
+    );
+  }
 }
 
 /** The latest `origin/HEAD` sha read per checkout, and what it came to. */
@@ -164,18 +210,7 @@ export async function readRepoRules(
   mainSha?: string,
 ): Promise<RepoRules | RepoRulesError> {
   try {
-    const common = await realpath(join(checkout, ".git"));
-    // The full ref name: a local branch called `origin/HEAD` would shadow the short one.
-    const sha =
-      mainSha ??
-      (
-        await crewGit(
-          checkout,
-          ["rev-parse", "--verify", "refs/remotes/origin/HEAD^{commit}"],
-          common,
-          { gitDir: common },
-        )
-      ).trim();
+    const sha = await originHeadSha(checkout, mainSha);
     const known = cache.get(checkout);
     if (known !== undefined && known.sha === sha && known.base === base) return known.outcome;
     const markdown = await readRepoClaudeMd(checkout, sha);

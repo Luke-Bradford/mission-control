@@ -665,6 +665,7 @@ export const ticketClosedReason = (ticket: string): string => `${ticket} was clo
 export const prMergedReason = (n: number): string => `PR ${n} merged.`;
 export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
 export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
+export const REPO_UNWATCHED_REASON = "repo no longer watched";
 
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;

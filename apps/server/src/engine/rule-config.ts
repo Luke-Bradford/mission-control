@@ -58,6 +58,9 @@ export const repoRulesSchema = z.strictObject({
   checks: z.array(checkCommand).optional(),
 });
 
+/** What a repo block or the config.yaml `rules` key declares, before defaults fill in. */
+export type RepoBlock = z.infer<typeof repoRulesSchema>;
+
 /** Resolve user config over defaults; supplied maps and lists replace defaults. */
 export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules {
   const base = DEFAULT_REPO_RULES;

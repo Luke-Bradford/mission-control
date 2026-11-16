@@ -485,4 +485,119 @@ describeRendered("Needs you page", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+  it(
+    "clicking an option on a briefed protected item from an unwatched repo records the answer",
+    async () => {
+      const key = "hold:studio";
+      const choicePath = `/api/attention/${encodeURIComponent(key)}/choice`;
+      const protectedAsk = item({
+        key,
+        kind: "decision",
+        agentId: "studio",
+        repoId: "autonomy-engine",
+        escalationId: null,
+        ticket: null,
+        url: null,
+        offers: [],
+        text: "The studio switch-over is still open.",
+        at: NOW - 2 * HOUR,
+        brief: {
+          ...brief({
+            for: "operator",
+            by: "hub",
+            ask: "Should the old studio switch-over stay open?",
+            recommendation: "Not now, clear it.",
+            recommendedOptionId: "clear",
+            options: [
+              { id: "clear", label: "Not now, clear it", answer: "Clear it." },
+              { id: "keep", label: "Keep it", answer: "Keep it open." },
+            ],
+          }),
+          id: 31,
+          binding: {
+            version: 2,
+            sourceRevision: "c".repeat(64),
+            meaningKey: "m",
+            epoch: "e1",
+            epochId: 31,
+            preparedAt: NOW,
+            preparedBy: { service: "stalled-comms" },
+            actions: [
+              {
+                optionId: "clear",
+                action: { kind: "record-decision" },
+                defaultable: false,
+                effect: "Records the decision.",
+              },
+              {
+                optionId: "keep",
+                action: { kind: "record-decision" },
+                defaultable: false,
+                effect: "Records the decision.",
+              },
+            ],
+          },
+        },
+      });
+      const receipt = {
+        epoch: "e1",
+        requestId: "r",
+        optionId: "clear",
+        at: NOW,
+        state: "applied",
+        text: "Decision recorded. No external action was performed.",
+        actor: { operator: true },
+      };
+      const page = await renderAt({
+        page: "test/needsBrowser.html",
+        width: 1600,
+        height: 1000,
+        api: {
+          ...api(),
+          "/api/attention": [protectedAsk],
+          [discussionPath(key)]: { id: "d2", itemKey: key, version: "v1", messages: [] },
+          [`${discussionPath(key)}?id=d2`]: { id: "d2", itemKey: key, version: "v1", messages: [] },
+          // the harness answers by path, so the receipt route's GET and the choice POST share it
+          [choicePath]: receipt,
+        },
+      });
+      try {
+        await ready(page);
+        const buttons = () =>
+          page.evaluate(
+            () =>
+              [...document.querySelectorAll("#needsOpts button")].map((b) => ({
+                text: b.textContent,
+                disabled: (b as HTMLButtonElement).disabled,
+              })),
+            undefined,
+          );
+        await page.boxes("#needsOpts button");
+        expect(await buttons()).toEqual([
+          { text: "Not now, clear it", disabled: false },
+          { text: "Keep it", disabled: false },
+        ]);
+        if (SHOTS) {
+          mkdirSync(SHOTS, { recursive: true });
+          await page.screenshot(join(SHOTS, "needs-protected-before-1600x1000.png"));
+        }
+        await page.click("#needsOpts button");
+        await page.boxes("[data-testid=choice-line]");
+        expect(
+          await page.evaluate(
+            () => document.querySelector("#needsOpts")?.textContent ?? "",
+            undefined,
+          ),
+        ).toContain("Decision recorded. No external action was performed.");
+        expect(
+          page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
+        ).toHaveLength(1);
+        expect((await buttons()).every((b) => b.disabled)).toBe(true);
+        if (SHOTS) await page.screenshot(join(SHOTS, "needs-protected-after-1600x1000.png"));
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

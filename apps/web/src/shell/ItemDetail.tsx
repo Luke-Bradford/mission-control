@@ -1,5 +1,6 @@
 import type {
   AttentionItem,
+  BriefChoiceReceipt,
   BriefOption,
   ChoiceReceipt,
   Crew,
@@ -14,10 +15,13 @@ import { useNow, useTz } from "../clock.ts";
 import {
   answerTarget,
   askFlight,
+  boundChoice,
+  boundChoiceStands,
   choiceLine,
   choosable,
   dismissItem,
   sendAnswer,
+  sendBoundChoice,
   sendChoice,
 } from "../comms/answer.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
@@ -111,6 +115,7 @@ export function useItemDetail(key: string | null) {
   >({});
   const [chosenLocal, setChosen] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
+  const [boundReceipts, setBoundReceipts] = useState<Record<string, BriefChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
   // When a typed reply last went through, per item: the conversation opens to show it.
   const [replied, setReplied] = useState<Record<string, number>>({});
@@ -135,8 +140,18 @@ export function useItemDetail(key: string | null) {
       ? choiceRes.data
       : undefined;
   const recorded = choices[k] ?? serverChoice;
+  // The bound choice made on this item: this page's receipt, else the one the hub stored.
+  const boundReceipt = boundReceipts[k] ?? item?.brief?.choice;
+  const boundLabel =
+    boundReceipt && boundChoiceStands(boundReceipt)
+      ? item?.brief?.options.find((o) => o.id === boundReceipt.optionId)?.label
+      : undefined;
   const chosen =
-    recorded && !chosenLocal[k] ? { ...chosenLocal, [k]: recorded.label } : chosenLocal;
+    recorded && !chosenLocal[k]
+      ? { ...chosenLocal, [k]: recorded.label }
+      : boundLabel && !chosenLocal[k]
+        ? { ...chosenLocal, [k]: boundLabel }
+        : chosenLocal;
   const esc = item?.escalationId ? escalations?.find((e) => e.id === item.escalationId) : undefined;
   // An escalation item waits for its escalations rather than flash the generic view.
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
@@ -199,6 +214,17 @@ export function useItemDetail(key: string | null) {
               ? e.message
               : String(e);
         }
+      });
+      return;
+    }
+    if (item && boundChoice(item, o)) {
+      if (busy || chosen[item.key]) return;
+      void act(async () => {
+        const result = await sendBoundChoice(item, o);
+        if ("error" in result) return result.error;
+        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+        setBoundReceipts((prev) => ({ ...prev, [item.key]: result.receipt }));
+        return null;
       });
       return;
     }
@@ -306,6 +332,7 @@ export function useItemDetail(key: string | null) {
     err,
     chosen,
     recorded,
+    boundReceipt,
     receipts,
     replied,
     handledHow,
@@ -353,6 +380,7 @@ export function ItemDetail({
     err,
     chosen,
     recorded,
+    boundReceipt,
     receipts,
     replied,
     handledHow,
@@ -439,6 +467,9 @@ export function ItemDetail({
       )}
     </div>
   );
+  // Every option has an action the server prepared: they go through the bound choice route.
+  const bound =
+    item !== undefined && options.length > 0 && options.every((o) => boundChoice(item, o));
   const answerBlock = (
     <>
       {item?.brief && !holding && <h3 className="bsec answer-heading">Your answer</h3>}
@@ -460,16 +491,22 @@ export function ItemDetail({
                       · {choiceLine(recorded, tz ?? "UTC")}
                     </span>
                   )}
+                  {!recorded && boundReceipt && (
+                    <span className="note" data-testid="choice-line">
+                      {" "}
+                      · {boundReceipt.text}
+                    </span>
+                  )}
                 </p>
               )}
               <BriefOptions
                 options={options}
                 recommendedOptionId={item.brief?.recommendedOptionId}
                 recommendation={item.brief?.recommendation}
-                live={queueApproval || target?.to !== "github"}
-                disabled={busy || (!queueApproval && !replyOk) || Boolean(chosen[k])}
+                live={queueApproval || bound || target?.to !== "github"}
+                disabled={busy || (!queueApproval && !bound && !replyOk) || Boolean(chosen[k])}
                 title={
-                  !queueApproval && target?.to === "github"
+                  !queueApproval && !bound && target?.to === "github"
                     ? "Reply on GitHub to answer this item."
                     : undefined
                 }
