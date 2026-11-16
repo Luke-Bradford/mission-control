@@ -6380,6 +6380,41 @@ describe("the engine runs reviews", () => {
         expect(loopOf().parked).not.toBeNull();
       });
 
+      it("past the round cap, resolves the live-level alarm and starts the independent review", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        const one = first();
+        store.requestReview({
+          authorRunId: one.authorRunId,
+          repoId: one.repoId,
+          seatId: RETRO,
+          prNumber: one.prNumber,
+          sha: one.sha,
+          epoch: one.epoch,
+          attempt: one.attempt + 1,
+          round: 3,
+          at: clock,
+        });
+        expect(reviewsHeld(store, RUN)).toBe(true);
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "second_review",
+            basis: "the floor review looks wrong",
+            note: "the floor review looks wrong",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(
+          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+        ).toMatchObject({ basis: "the floor review looks wrong", level: 3 });
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        expect(secondReview().state).toBe("running");
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
       it("refuses off the floor paths, and when the review is not blocking", async () => {
         addSecondReviewer();
         await parkOnBlocking();
@@ -6569,6 +6604,22 @@ describe("the engine runs reviews", () => {
         expect(loopOf().phase).not.toBe("parked");
         expect(h.steps).toContain("merge");
         expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("accept resolves the live-level alarm with FLIGHT's basis", async () => {
+        await heldAtLimit();
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "accept",
+            basis: "the findings are minor",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(
+          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+        ).toMatchObject({ basis: "the findings are minor", level: 3 });
+        expect(loopOf().phase).not.toBe("parked");
       });
 
       it("rework grants the next round and sends the findings to the seat", async () => {
