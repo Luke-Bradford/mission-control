@@ -247,6 +247,56 @@ describe("durable code-health decisions", () => {
     expect(row.measure?.coverage).toContain("newer PR head");
     expect(row.target.value).toBe(0);
   });
+  it("a busy repo yields eight distinct real-shaped causes, five with a complete number now and target", () => {
+    const causes = [
+      ["boundary-check", "Missing boundary check", "Validate the input at the route"],
+      ["spec", "Spec line out of date", "Update the spec in the same commit"],
+      ["tests", "Test skips the failure path", "Add the failing-case test"],
+      ["security", "Query built from input", "Bind it as a parameter"],
+      ["style", "Magic string for a table", "Use the typed table constant"],
+      ["docs", "Runbook step is stale", "Rewrite the runbook step"],
+    ] as const;
+    let id = 1;
+    causes.forEach(([category, summary, fix], n) => {
+      const first = 100 + n * 2,
+        second = first + 1;
+      review(id, first);
+      review(id + 1, second);
+      finding(id, 0, `src/area${n}/a.ts`, category, summary, fix);
+      finding(id, 1, `src/area${n}/a.ts`, category, summary, fix);
+      finding(id + 1, 0, `src/area${n}/b.ts`, category, summary, fix);
+      // The last cause's PR has a new head nobody has reviewed: unknown, not zero.
+      currentHead(first, "a".repeat(40));
+      currentHead(second, n === causes.length - 1 ? "c".repeat(40) : "a".repeat(40));
+      id += 2;
+    });
+    review(id, 200, 3);
+
+    store.refreshCodeHealthRecommendations("sample", NOW);
+
+    const rows = store.codeHealthRecommendations("sample");
+    expect(new Set(rows.map((row) => row.causeId)).size).toBe(8);
+    expect(rows).toHaveLength(8);
+    const recurring = rows.filter((row) => row.rule === "recurring-correction");
+    expect(recurring).toHaveLength(6);
+    const complete = rows.filter(
+      (row) => typeof row.measure?.current === "number" && typeof row.target.value === "number",
+    );
+    expect(complete).toHaveLength(5);
+    for (const row of recurring) {
+      expect(row.title).toMatch(/^Apply recorded .+ fix: .+/);
+      expect(row.target).toMatchObject({ value: 0, source: "clean-review target" });
+      expect(row.decision).toEqual({ owner: "operator", tier: "operator" });
+      expect(row.measure?.unit).toBe("findings");
+    }
+    for (const row of complete) expect(row.measure?.current).toBe(3);
+    const unknown = recurring.filter((row) => row.measure?.current === null);
+    expect(unknown).toHaveLength(1);
+    for (const row of rows.filter((value) => !complete.includes(value) && value !== unknown[0])) {
+      expect(row.target.value).toBeNull();
+      expect(row.target.source).toMatch(/^Missing /);
+    }
+  });
   it("keeps resolved historical findings as evidence but excludes them from the current measure", () => {
     review(1, 10);
     review(2, 11);
