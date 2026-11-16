@@ -491,6 +491,40 @@ export function setRepoRoles(
 
 const repoRolesHash = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * One repo as config.yaml holds it right now: the digest of the bytes read, the loaded repo and
+ * its raw `repos[]` entry (so a caller can tell a key set in the file from one left to a default).
+ * Every value the Roles & guards page shows comes from this one read.
+ */
+export async function readRepoRolesConfig(
+  path: string,
+  repoId: string,
+): Promise<{ base: string; repo: ConfigRepo; raw: Record<string, unknown> }> {
+  const { bytes, text, current } = await readCurrent(path);
+  const repo = current.repos.find((item) => item.id === repoId);
+  if (!repo) throw new ConfigWriteError("missing", `unknown repo ${repoId}`);
+  const rawRepos = (parseDocument(text).toJS() as { repos?: unknown }).repos;
+  const raw = Array.isArray(rawRepos)
+    ? rawRepos.find((item) => isPlainObject(item) && item.id === repoId)
+    : undefined;
+  return { base: repoRolesHash(bytes), repo, raw: isPlainObject(raw) ? raw : {} };
+}
+
+/**
+ * `commands` and `uat` save one leaf at a time: a body naming only `writer` or `labels` keeps the
+ * sibling already in the file (or, for `commands`, the default), so the page edits one list.
+ */
+function leafMerge(key: string, value: unknown, holder: YAMLMap): unknown {
+  if ((key !== "commands" && key !== "uat") || !isPlainObject(value)) return value;
+  const existing = holder.get(key, true);
+  const kept = isMap(existing) ? existing.toJSON() : {};
+  const fallback = key === "commands" && !isMap(existing) ? defaultSeatCommands() : kept;
+  return { ...fallback, ...value };
+}
+
 async function setRoles(
   path: string,
   repoId: string,
@@ -524,12 +558,13 @@ async function setRoles(
     "always_ask",
   ] as const) {
     const value = parsed.data.rules[key];
-    if (value !== undefined) configRules.set(key, doc.createNode(value));
+    if (value !== undefined)
+      configRules.set(key, doc.createNode(leafMerge(key, value, configRules)));
   }
   repo.set("rules", configRules);
   for (const key of ["protected", "commands", "full_suite", "required_checks"] as const) {
     const value = parsed.data.rules[key];
-    if (value !== undefined) repo.set(key, doc.createNode(value));
+    if (value !== undefined) repo.set(key, doc.createNode(leafMerge(key, value, repo)));
   }
   const newText = doc.toString({ lineWidth: 0 });
   let next: CcConfig;
