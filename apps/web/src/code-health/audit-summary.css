@@ -25,15 +25,27 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     min-height: 0;
+  }
+  /* The title and its question share one line, and the view tabs sit close to the figures. */
+  .code-health.as-fit .ch-heading > div:first-child {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-3);
+  }
+  .code-health.as-fit .ch-heading p {
+    margin: 0;
+  }
+  .code-health.as-fit .ch-tabs {
+    padding-bottom: var(--sp-1);
   }
   .code-health.as-fit #ch-panel {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
+    gap: var(--sp-2);
   }
 }
 .as-cols,
@@ -384,7 +396,7 @@
   color: var(--fg);
   font-weight: 600;
 }
-@container (max-width: 1700px) {
+@container (max-width: 1000px) {
   .as-mg {
     grid-template-columns: 1fr 1fr;
   }
@@ -524,4 +536,7 @@
 .as-cell:first-child {
   border-left: 0;
   padding-left: var(--sp-4);
+}
+.as-scroll .as-rec > td {
+  padding-block: var(--sp-1);
 }

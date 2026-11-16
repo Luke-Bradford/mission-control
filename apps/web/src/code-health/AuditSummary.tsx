@@ -413,8 +413,7 @@ export function AuditSummary({
             sub={
               <>
                 <b className="as-count">{rows.length}</b> ranked
-                {alarms.length > 0 && <> · {alarms.length} waste alarms</>} · what blocks the
-                evidence first, then measured size
+                {alarms.length > 0 && <> · {alarms.length} waste alarms</>}
               </>
             }
             actions={
