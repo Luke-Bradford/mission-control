@@ -70,9 +70,10 @@ function endTextsAfterOwnReply(
   let turnStart: number | null = null;
   let last: StreamEvent | null = null;
   const close = () => {
-    if (turnStart !== null && last?.kind === "msg" && last.at !== null) {
+    const start = turnStart;
+    if (start !== null && last?.kind === "msg" && last.at !== null) {
       const end = last.at;
-      if (replies.some((at) => at >= turnStart && at <= end)) dropped.add(last.id);
+      if (replies.some((at) => at >= start && at <= end)) dropped.add(last.id);
     }
     last = null;
   };
