@@ -7,8 +7,8 @@ import {
   type GuardHitsView,
   type GuardRule,
   LOCK_WAIT_MS,
-  ROLES,
   type RepoRulesView,
+  ROLES,
   type RoleRow,
 } from "@mc/core";
 import { useEffect, useId, useRef, useState } from "react";
