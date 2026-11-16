@@ -6,6 +6,7 @@ import {
   fstatSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   readSync,
   rmSync,
 } from "node:fs";
@@ -14,6 +15,7 @@ import { join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { readVitestReportTotals, vitestVerdict } from "../apps/server/src/ci-vitest.ts";
 
 export function relatedBase(cwd: string): string {
   const git = (...args: string[]) =>
@@ -39,12 +41,23 @@ export async function checkRelated(cwd: string): Promise<number> {
     return 1;
   }
   // Keep the complete output on disk: large failures must survive without a maxBuffer limit.
-  const args = ["-s", "test", `--changed=${base}`, "--reporter=dot", "--silent=passed-only"];
   const dir = mkdtempSync(join(tmpdir(), "mc-related-output-"));
+  const report = join(dir, "report.json");
+  const args = [
+    "-s",
+    "test",
+    `--changed=${base}`,
+    "--reporter=dot",
+    "--reporter=json",
+    `--outputFile.json=${report}`,
+    "--silent=passed-only",
+  ];
   const fd = openSync(join(dir, "output"), "w+", 0o600);
   try {
     const result = spawnSync("pnpm", args, { cwd, stdio: ["inherit", fd, fd] });
-    if (result.status === 0) {
+    const output = result.status === 0 ? "" : readFileSync(join(dir, "output"), "utf8");
+    const verdict = vitestVerdict(result.status ?? 1, readVitestReportTotals(report), output);
+    if (verdict === 0) {
       const size = fstatSync(fd).size;
       const tail = Buffer.alloc(Math.min(size, 64 * 1024));
       readSync(fd, tail, 0, tail.length, size - tail.length);
