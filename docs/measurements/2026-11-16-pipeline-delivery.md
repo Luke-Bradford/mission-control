@@ -17,7 +17,7 @@ What landed for each of the ticket's five items, and how to measure the outcome.
 | 4 | One CI run proves a flake fix | PR 1333, `.github/workflows/repeat-test.yml` (`397a7a299`), merged into PR 1339's branch | `apps/server/test/repeat-test.test.ts` | none |
 | 5 | Round cap (**revised**) | PR 1776 added the review-rounds hold for FLIGHT (`reviewsHeld` in `apps/server/src/spend/waste.ts`); PR 1471 (`24cee2dce`) made the cap end in accept unless a finding is Critical (no test of its own); PR 1951 made a FLIGHT settle close the hold. FLIGHT settles with accept, a second review or rework (`roles/FLIGHT.md` line 71). | `apps/server/test/waste.test.ts`, `apps/server/test/engine.test.ts` ("past the round cap" cases) | PR 1471 had no test change |
 
-Each item reached main as its own PR with tests, except that item 5's `24cee2dce` change (PR 1471) carried none; the hold and the settle that it relies on are tested in the files named. Items 3 and 5 landed under other tickets' PRs, in revised form.
+**Outstanding gap:** item 5's `24cee2dce` (PR 1471) reached main without a test of its own, so the per-item "own PR with tests" requirement is not met for it. The adjacent hold (PR 1776) and settle (PR 1951) are tested in the files named, but that does not prove PR 1471's cap-ends-in-accept change. Items 1 to 4 each have a primary PR with tests. Items 3 and 5 landed under other tickets' PRs, in revised form.
 
 Standing decisions behind the two revisions: item 3 renders the PR head through the review preview instead of a FLIGHT tool; item 5 holds for FLIGHT instead of sending the ticket back to planning. If "back to planning" is still wanted, it is a new ticket.
 
