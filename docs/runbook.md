@@ -1852,7 +1852,9 @@ repo it makes no call at all. The engine moves only a looped run's own card. Eve
 Activity (`{repo}#{issue} → {column}`, or `… failed: {reason}`); a card already in place makes no
 write and no row.
 
-**Per-repo board rules.** Set `repos[].rules` on the matching repo in
+## Per-repo board rules
+
+Set `repos[].rules` on the matching repo in
 `~/.config/mission-control/config.yaml` (or the file selected by `MC_CONFIG`). The target repo
 needs no Mission Control file, heading or block. `config.example.yaml` shows the shape. Keys:
 
@@ -1876,6 +1878,26 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
 from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
+
+**Roles & guards API.** `GET /api/repos/:repoId/rules` reads config.yaml fresh and returns 17 keys,
+each as `{ value, source }`: `pick_from`, `needs`, `areas`, `promote_backlog`, `protected`,
+`hard_rules`, `hard_rules_by`, `commands.writer`, `commands.review`, `full_suite`, `required_checks`,
+`checks`, `uat.labels`, `uat.paths`, `always_ask`, and the read-only `autonomy` and `flight_powers`.
+The source is `set-here` (saved in config.yaml), `repo-file` (the repo's CLAUDE.md block),
+`default`, or `config-file` (Authority). The repo file owns `pick_from` and `areas` whenever its
+block names them, fills `needs`, `promote_backlog` and `hard_rules` that config.yaml leaves out, and
+only adds to `hard_rules` (when set here), `checks`, `uat.*` and `always_ask`: those keep their
+config source and list the additions in `repoAdds`. A block that cannot be read shows its reason in
+`repoFileError` and the config values still show. The response's `base` is the digest of the same
+config.yaml bytes every value came from.
+
+`POST` to the same route saves the approved keys only; `commands` and `uat` may name one leaf and
+keep the other. Send `base` from the read: a changed file answers `config.yaml changed since this
+page loaded it; reload and try again` and writes nothing. Each save keeps the normal adjacent
+config backup, validates with the config schema's own messages, and refuses `autonomy` and
+`flight_powers` (and any other key). It makes the saved rules, commands, checks and protected files
+live; any other change already on disk (Authority, crew, rotation) stays unapplied until the hub
+restarts. It makes no GitHub call.
 
 A repo block optionally tightens the rules in the first fenced `yaml` block under
 `## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
