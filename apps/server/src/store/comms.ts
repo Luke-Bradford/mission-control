@@ -631,6 +631,16 @@ export class CommsQueries {
     return row.at as number | null;
   }
 
+  /** When FLIGHT sent the operator a message of its own (not a hub notice), oldest first. */
+  flightOperatorMessageTimes(flightId: string): number[] {
+    const rows = this.db
+      .prepare(`SELECT at FROM comms WHERE from_id = ? AND to_id = ? AND sender_kind IS NOT 'hub'
+      AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'
+      ORDER BY at`)
+      .all(flightId, COMMS_CAPCOM) as Row[];
+    return rows.map((r) => r.at as number);
+  }
+
   flightConversationUnread(
     flightId: string,
     seats: readonly string[],
