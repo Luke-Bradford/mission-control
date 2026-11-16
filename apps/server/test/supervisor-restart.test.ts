@@ -41,6 +41,7 @@ import {
 import { restoreRuns } from "../src/runtime/restore.ts";
 import { attachSession } from "../src/runtime/session.ts";
 import { CREW_LOCK_FILE, crewTempRoot, type SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { onSignal } from "../src/shutdown.ts";
 import {
   crewCodexDir,
   crewKeeperDir,
@@ -48,6 +49,7 @@ import {
   crewPromptPath,
   crewTokenPath,
 } from "../src/store/crew-paths.ts";
+import { createQuietGate, crewRefusal } from "../src/update.ts";
 import { sleep } from "../src/util.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -974,6 +976,66 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(starts()).toHaveLength(2)); // the resumed CLI records its start once up
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
+  it("a link that drops while its keeper runs does not end the keeper (#1912)", async () => {
+    const { sup } = make();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    seen.length = 0;
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperPid = readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number;
+    prep.links.at(-1)?.destroy();
+    await until(() =>
+      expect(seen).toContainEqual({ kind: "idle", seatId: "guido-1", runId, resumed: false }),
+    );
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(starts()).toHaveLength(1);
+    expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain("echo: SLOW");
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
+  it("a mid-turn keeper survives a forced Update restart and the new hub gets its turn (#1912)", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperPid = readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number;
+    // FLIGHT's call after the ten-minute wait takes the forced path
+    const gate = createQuietGate(new CliHold(), { forceAfterMs: 0 });
+    expect(await gate.wait(() => first.sup.busy(), "flight-1")).toBeNull();
+    expect(crewRefusal(first.cfg, first.sup, (id) => store.seatSession(id))).toBeNull();
+    const exit = vi.fn();
+    await onSignal({
+      drain: async () => {},
+      stopCrew: () => first.sup.stopAll(),
+      stop: async () => {},
+      close: async () => {},
+      log: { info() {}, warn() {} },
+      exit,
+    })("update");
+    await until(() => expect(exit).toHaveBeenCalledWith(0));
+    const second = make();
+    const seen: SupervisorEvent[] = [];
+    second.sup.on((e) => seen.push(e));
+    second.sup.start();
+    await until(() => expect(second.sup.seatFacts("guido-1")?.inTurn).toBe(true));
+    prep.links.at(-1)?.destroy(); // the new hub's link drops once
+    await until(() =>
+      expect(seen).toContainEqual({ kind: "idle", seatId: "guido-1", runId, resumed: false }),
+    );
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(starts()).toHaveLength(1);
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
   });
 
@@ -2024,6 +2086,31 @@ describe("Codex restart", () => {
     await next.sup.interrupt("guido-1");
     await until(() => expect(next.lock.state().holder).toBeNull());
     await next.sup.endRunByEngine(runId);
+  });
+
+  it("a Codex reattach that is not confirmed in time is resumed, not failed (#1912)", async () => {
+    const first = codexSupervisor({ holdTurn: true, noReattachResponse: true });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await first.sup.stopAll();
+    const next = codexSupervisor();
+    const seen: SupervisorEvent[] = [];
+    next.sup.on((e) => seen.push(e));
+    next.sup.start();
+    await until(() => expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(2));
+    await until(() =>
+      expect(recorded().filter((m) => m.method === "thread/resume")).toHaveLength(2),
+    );
+    await until(() =>
+      expect(store.seatSession("guido-1")?.reason).toBe(
+        "resumed after a restart; send a message to continue",
+      ),
+    );
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+    expect(store.seatSession("guido-1")?.state).not.toBe("error");
   });
 
   it("resumes the saved thread with the floor overrides when no keeper survives", async () => {

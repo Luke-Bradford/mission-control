@@ -330,7 +330,7 @@ function createDriver(i: {
   };
 
   /** Reports the exit, once. A line cut off by the exit was kept by the keeper but never sent. */
-  function end(info: { code: number | null; signal: string | null; keeperLost?: true }): void {
+  function end(info: { code: number | null; signal: string | null; retake?: true }): void {
     if (finished) return;
     finished = true;
     alive = false;
@@ -341,7 +341,7 @@ function createDriver(i: {
       kind: "exit",
       code: info.code,
       signal: info.signal,
-      ...(info.keeperLost ? { keeperLost: true as const } : {}),
+      ...(info.retake ? { retake: true as const } : {}),
     });
     resolveExit(info.code);
   }
@@ -459,6 +459,10 @@ function createDriver(i: {
    * be mid-turn for another hub. Only a keeper that is gone is cleaned up by its pids (nothing may be
    * left running), and the exit it left is reported; with none left, the exit says the keeper was
    * lost, which the supervisor resumes instead of failing the run.
+   *
+   * It used to end the keeper on any close without an `exit`, alive or not (SIGTERM to the keeper
+   * and the CLI: exit 143, "the keeper ended unexpectedly"). A forced Update ended INCO-1's mid-turn
+   * run that way when its link dropped (#1912).
    */
   async function lost(): Promise<void> {
     if (finished || detached) return;
@@ -488,7 +492,7 @@ function createDriver(i: {
     end({
       code: e?.code ?? null,
       signal: e?.signal ?? null,
-      ...(e === null ? { keeperLost: true as const } : {}),
+      ...(e === null ? { retake: true as const } : {}),
     });
   }
 

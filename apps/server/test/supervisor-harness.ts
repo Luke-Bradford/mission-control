@@ -26,7 +26,7 @@ import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import type { ReviewPreviews } from "../src/preview/review.ts";
-import { endKeeper } from "../src/runtime/keeper.ts";
+import { endKeeper, KEEPER_SOCKET } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
   type Supervisor,
@@ -88,7 +88,19 @@ const prep = vi.hoisted(() => ({
   handoffChecks: 0,
   /** Set: the install command a review's checkout runs (the real one when null). */
   installRunner: null as import("../src/runtime/checkouts.ts").InstallRunner | null,
+  /** Every socket the hub opened to a keeper, in order (a test drops one to cut the link). */
+  links: [] as import("node:net").Socket[],
 }));
+vi.mock("node:net", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:net")>();
+  const connect = ((...a: Parameters<typeof real.connect>) => {
+    const s = real.connect(...a);
+    const first = a[0];
+    if (typeof first === "string" && first.endsWith(`/${KEEPER_SOCKET}`)) prep.links.push(s);
+    return s;
+  }) as typeof real.connect;
+  return { ...real, connect, default: { ...real, connect } };
+});
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
   return {
@@ -491,6 +503,7 @@ beforeEach(() => {
   prep.failWrite = false;
   prep.dropWrite = false;
   prep.sessions = [];
+  prep.links = [];
   prep.peers = [];
   prep.handoffGate = null;
   prep.handoffChecks = 0;

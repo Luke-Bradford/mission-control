@@ -457,7 +457,8 @@ export const UPDATE_HOLD_MAX_MS = 15 * 60_000;
  * Once FLIGHT has waited this long, its next call runs Update even with seats mid-turn: a
  * mid-turn seat keeps working under its keeper through the restart, so only a seat that is
  * starting still refuses (`crewRefusal`). A long turn can never keep an Update held for good. A
- * keeper lost in the restart is dialled again, or its run resumed once (`lost()` in session.ts).
+ * Claude keeper whose link drops in the restart is dialled again and never ended while it runs. A
+ * Codex seat whose reattach is not confirmed in time is resumed, not failed.
  */
 export const UPDATE_FORCE_AFTER_MS = 10 * 60_000;
 /** The reason shown while new runs are held for Update. */

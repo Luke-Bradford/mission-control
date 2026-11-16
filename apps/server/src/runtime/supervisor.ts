@@ -279,6 +279,7 @@ import {
   keeperAlive,
   pidAlive,
   processInfo,
+  readKeeperExit,
 } from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
 import { nodeFirstPath, ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "./node-first.ts";
@@ -970,7 +971,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
   /** Runs whose lost keeper was already taken back once: a second loss ends the run as a crash. */
-  const keeperLostRuns = new Set<string>();
+  const retakenRuns = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
@@ -1211,9 +1212,34 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /**
+   * Takes back a run whose process did not end on its own. A keeper that is still alive is attached
+   * to; one that has gone (or left an exit) has its folder removed first, so the run resumes with
+   * `--resume` / `thread/resume` instead of failing as "exited". Never throws.
+   */
+  async function retake(l: Live): Promise<void> {
+    const seatId = l.info.seat.id;
+    const runId = l.run.id;
+    try {
+      const row = store.seatSession(seatId);
+      if (row === null || row.runId !== runId || row.state === "stopped") return;
+      if (store.run(runId)?.endedAt !== null) return;
+      const dir = crewKeeperDir(deps.dbPath, runId);
+      if (readKeeperExit(dir) !== null || !keeperAlive(dir)) {
+        if (!(await endAndRemoveKeeper(seatId, runId))) {
+          failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
+          return;
+        }
+      }
+      await recoverSession(row);
+    } catch (e) {
+      log(`${seatId}: could not take back ${runId}: ${errText(e)}`);
+    }
+  }
+
   function onExit(
     l: Live,
-    e: { code: number | null; signal: string | null; reason?: string; keeperLost?: true },
+    e: { code: number | null; signal: string | null; reason?: string; retake?: true },
   ): void {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
@@ -1225,20 +1251,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       fold(l);
       return;
     }
-    // The keeper went and left no word on the CLI: the run is not over. It is taken back (attached
-    // if the keeper is up after all, else resumed with --resume) once; the next loss is a crash.
+    // The run did not end on its own (its keeper was lost, or a reattach was not confirmed in time):
+    // it is taken back once, not failed. The next such exit is a crash.
     if (
-      e.keeperLost === true &&
+      e.retake === true &&
       l.ending === null &&
       l.endedBy === null &&
-      !keeperLostRuns.has(l.run.id) &&
+      !retakenRuns.has(l.run.id) &&
       !checkRuns.has(l.run.id)
     ) {
-      keeperLostRuns.add(l.run.id);
+      retakenRuns.add(l.run.id);
       fold(l);
-      log(`${seatId}: the keeper of ${l.run.id} was lost; taking the run back`);
-      const row = store.seatSession(seatId);
-      if (row !== null) void recoverSession(row);
+      log(`${seatId}: run ${l.run.id} did not end on its own; taking it back`);
+      void retake(l);
       return;
     }
     // The engine's end was recorded when it began (its time and status stand).
