@@ -324,7 +324,7 @@ describe("reattach after a restart", () => {
         expect.any(Number),
         expect.any(Function),
       );
-      expect(store.run(runId)?.endedAt).not.toBeNull();
+      expect(store.run(runId)).toMatchObject({ status: "failed" });
       expect(seen).toContainEqual({ kind: "run-ended", seatId: "guido-1", runId, endedBy: "exit" });
       expect(starts()).toHaveLength(1);
     } finally {
