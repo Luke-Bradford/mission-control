@@ -761,6 +761,18 @@ async function baseBlob(read: ReadObject, baseSha: string, file: string): Promis
   return entry.id;
 }
 
+/** The root files pnpm takes settings from. */
+const PNPM_SETTINGS_FILES = [
+  ".npmrc",
+  "pnpm-workspace.yaml",
+  "package.json",
+  "package.yaml",
+  "package.json5",
+] as const;
+/** A setting that moves a path the install reads or writes, in `.npmrc` (kebab), YAML or JSON (camel) spelling. */
+const PNPM_PATH_SETTING =
+  /modules[-_]?dir|virtual[-_]?store[-_]?dir|lockfile[-_]?dir|workspace[-_]?dir|node[-_]?modules[-_]?dir|shared[-_]?workspace/i;
+
 /**
  * True when the install cannot read the worktree's `.mc-tmp`: pnpm, where neither the verified base
  * `pnpm-workspace.yaml` (pnpm finds projects from its patterns, not the lockfile) nor the verified
@@ -790,6 +802,17 @@ async function scratchIsOutsideInstall(
   };
   for (const importer of await pnpmWorkspaceImporters(read, baseSha)) {
     if (reaches(importer)) return false;
+  }
+  // Every verified root file pnpm reads settings from: none may redirect where the install reads
+  // or writes (modules, virtual store, lockfile, workspace root), name `.mc-tmp`, or build a path
+  // from a variable. Any such mention keeps the folder in the check.
+  for (const file of PNPM_SETTINGS_FILES) {
+    const e = await baseEntry(read, baseSha, file);
+    if (e === null) continue;
+    if (e.mode !== "100644" && e.mode !== "100755") return false;
+    const text = (await read("blob", e.id, file)).toString("utf8");
+    if (text.includes(MC_TMP_DIR_NAME) || text.includes("${")) return false;
+    if (PNPM_PATH_SETTING.test(text)) return false;
   }
   const entry = await baseEntry(read, baseSha, "pnpm-workspace.yaml");
   if (entry === null) return true;

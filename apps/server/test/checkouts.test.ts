@@ -1595,6 +1595,57 @@ describe("prepareCheckout", () => {
         });
       });
 
+      describe("when a verified pnpm setting redirects the install through .mc-tmp", () => {
+        const cases: [string, Record<string, string>][] = [
+          [".npmrc modules-dir", { ".npmrc": `modules-dir=${MC_TMP_DIR_NAME}/deps\n` }],
+          [
+            "workspace virtualStoreDir",
+            { "pnpm-workspace.yaml": `virtualStoreDir: ${MC_TMP_DIR_NAME}/store\n` },
+          ],
+          [
+            ".npmrc virtual-store-dir (path built from a variable)",
+            { ".npmrc": "virtual-store-dir=${X}/s\n" },
+          ],
+          [
+            "workspace lockfileDir elsewhere",
+            { "pnpm-workspace.yaml": "lockfileDir: ../shared\n" },
+          ],
+        ];
+        const linkAt = (root: string) => {
+          const target = join(root, MC_TMP_DIR_NAME);
+          mkdirSync(target, { recursive: true });
+          symlinkSync(outside, join(target, "deps"));
+        };
+
+        it.each(cases)("refuses a link there on a reused checkout: %s", async (_n, files) => {
+          commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
+          git(seed, "push", "-q", "origin", "main");
+          const first = await prepareCheckout(input(), payloadInstall);
+          linkAt(first.path);
+          const e = await fail(prepareCheckout(input(), payloadInstall));
+          expect(e.code).toBe("protected");
+          expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}/deps`);
+          expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        });
+
+        it.each(cases)("refuses a link there after a sync: %s", async (_n, files) => {
+          commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
+          git(seed, "push", "-q", "origin", "main");
+          const first = await prepareCheckout(input(), payloadInstall);
+          commit(seed, { "pnpm-lock.yaml": `${EMPTY_LOCK}\n# changed\n` });
+          git(seed, "push", "-q", "origin", "main");
+          const again = await prepareCheckout(input(), payloadInstall);
+          const synced = await syncReusedWorktree(clone, again, { syncMain: true });
+          if (synced?.kind !== "merged") throw new Error("expected merge");
+          rmSync(join(first.path, "node_modules"), { recursive: true, force: true });
+          linkAt(first.path);
+          const note = await installAfterSync(clone, { ...again, synced }, synced.before, root);
+          expect(note).toContain("install refused:");
+          expect(note).toContain(`${MC_TMP_DIR_NAME}/deps`);
+          expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        });
+      });
+
       it.each([
         ["a wildcard first segment", "*/pkg"],
         ["a recursive pattern", "**"],
