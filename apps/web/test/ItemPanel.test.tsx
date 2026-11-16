@@ -483,7 +483,7 @@ describe("ItemPanel, acting on an item", () => {
       expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
         "Recorded. mc-dev-1 took it at",
       );
-      expect(within(panel()).getByText("You chose:").textContent).toContain("5174");
+      expect(within(panel()).queryByText(/You chose/)).toBeNull();
       const pick = (await within(panel()).findByRole("button", {
         name: "5174",
       })) as HTMLButtonElement;
@@ -595,7 +595,7 @@ describe("ItemPanel, acting on an item", () => {
       expect(typeof posts(fn, BOUND)[0].requestId).toBe("string");
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
       expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(c.text);
-      expect(within(panel()).getByText("You chose:").parentElement?.textContent).toContain(c.label);
+      expect(within(panel()).queryByText(/You chose/)).toBeNull();
       for (const name of [c.label, c.other])
         expect((within(panel()).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
           true,
@@ -1286,7 +1286,7 @@ describe("ItemPanel choice state", () => {
     act(() => openItem(SEAT_Q.key));
     const choice = await screen.findByRole("button", { name: "5174" });
     fireEvent.click(choice);
-    await screen.findByText("You chose:");
+    await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(true));
     expect((choice as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -1402,10 +1402,14 @@ describe("ItemPanel beside the one FLIGHT thread", () => {
     expect(
       fn.mock.calls.filter(([p, init]) => p === "/api/comms" && init?.method === "POST"),
     ).toHaveLength(0);
-    const log = within(document.querySelector("#discuss") as HTMLElement).getByRole("log", {
-      name: "Messages with FLIGHT",
-    });
-    expect(within(log).getAllByText("You chose: 5174")).toHaveLength(1);
+    const flyout = within(document.querySelector("#discuss") as HTMLElement);
+    await flyout.findAllByText("You chose: 5174");
+    await waitFor(() =>
+      expect((flyout.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
+    expect(flyout.getAllByText(/You chose/)).toHaveLength(1);
   });
 
   it("keeps the brief and options while a thread send is pending, and a late failure stays with the send", async () => {
@@ -1755,13 +1759,15 @@ it.each(["seat", "flight"] as const)(
       release();
       await gate;
     });
-    expect(screen.queryByText("You chose:")).toBeNull();
     expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
       false,
     );
     act(() => openItem(first.key));
-    await screen.findByText("You chose:");
-    expect(screen.getByText("You chose:").querySelector("b")?.textContent).toBe("5174");
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
     for (const label of ["5174", "5180"]) {
       const button = screen.getByRole("button", { name: label }) as HTMLButtonElement;
       expect(button.disabled).toBe(true);

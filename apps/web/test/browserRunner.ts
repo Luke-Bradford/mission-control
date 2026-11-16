@@ -76,14 +76,17 @@ export interface RenderOptions {
   search?: string;
   /** The `prefers-color-scheme` to emulate; the browser's own (light) when omitted. */
   colorScheme?: "light" | "dark";
-  /** JSON answers by request path and query (`/api/limits`); any other request is a 404. */
+  /**
+   * JSON answers by request path and query (`/api/limits`); any other request is a 404. A function
+   * answers with what it returns for the request's method, so a fixture can change after a POST.
+   */
   api?: Record<string, unknown>;
   /** Explicit raw asset replies by URL; keeps fixture images independent of external networking. */
   assets?: Record<string, { contentType: string; body: string | Buffer; status?: number }>;
 }
 
 interface Route {
-  request(): { url(): string };
+  request(): { url(): string; method(): string };
   fulfill(options: { status?: number; contentType?: string; body: string | Buffer }): Promise<void>;
 }
 interface Page {
@@ -266,7 +269,9 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
         const url = new URL(route.request().url());
         const key = `${url.pathname}${url.search}`;
         if (key in api) {
-          await route.fulfill({ contentType: "application/json", body: JSON.stringify(api[key]) });
+          const answer = api[key];
+          const body = typeof answer === "function" ? answer(route.request().method()) : answer;
+          await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
           return;
         }
         const file = normalize(join(root, url.pathname));

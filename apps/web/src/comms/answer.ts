@@ -141,6 +141,7 @@ export async function sendBoundChoice(
       requestId: requestId(),
     });
     hub.refetch(RESOURCES.attention.path);
+    hub.refetchTopic("agents");
     return boundChoiceStands(receipt) ? { receipt } : { error: receipt.text };
   } catch (e) {
     return { error: e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e) };
@@ -160,6 +161,7 @@ export async function sendChoice(
       briefAt: item.brief.at,
     });
     hub.refetch(RESOURCES.attention.path);
+    hub.refetchTopic("agents");
     return { receipt };
   } catch (e) {
     return { error: e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e) };

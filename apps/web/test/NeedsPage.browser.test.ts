@@ -547,16 +547,37 @@ describeRendered("Needs you page", () => {
         text: "Decision recorded. No external action was performed.",
         actor: { operator: true },
       };
+      const other = item({
+        key: "question:other",
+        kind: "question",
+        escalationId: null,
+        text: "Another ask still waiting",
+      });
+      let chosen = false;
+      const choiceMessage = {
+        id: "comms:900",
+        at: NOW,
+        from: "CAPCOM",
+        to: "flight-1",
+        text: "",
+        operator: true,
+        itemKey: key,
+        choice: { label: "Not now, clear it" },
+      };
       const page = await renderAt({
         page: "test/needsBrowser.html",
         width: 1600,
         height: 1000,
         api: {
           ...api(),
-          "/api/attention": [protectedAsk],
-          "/api/comms/flight": { messages: [] },
-          // the harness answers by path, so the receipt route's GET and the choice POST share it
-          [choicePath]: receipt,
+          // the question is listed until the choice is posted, then the refetch leaves it out
+          "/api/attention": () => (chosen ? [other] : [protectedAsk, other]),
+          "/api/comms/flight": () => ({ messages: chosen ? [choiceMessage] : [] }),
+          // the receipt route's GET and the choice POST share the path
+          [choicePath]: (method: string) => {
+            if (method === "POST") chosen = true;
+            return receipt;
+          },
         },
       });
       try {
@@ -591,6 +612,43 @@ describeRendered("Needs you page", () => {
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
         expect((await buttons()).every((b) => b.disabled)).toBe(true);
+        // the answered question leaves "Waiting on you" (and its count); the thread shows the pick once
+        const listText = () =>
+          page.evaluate(
+            () =>
+              new Promise<string>((resolve) => {
+                const started = Date.now();
+                const look = () => {
+                  const text = document.querySelector(".needs-list")?.textContent ?? "";
+                  if (
+                    !text.includes("The studio switch-over is still open.") ||
+                    Date.now() - started > 5000
+                  )
+                    resolve(text);
+                  else setTimeout(look, 50);
+                };
+                look();
+              }),
+            undefined,
+          );
+        const after = await listText();
+        expect(after).not.toContain("The studio switch-over is still open.");
+        expect(after).toContain("Waiting on you · 1");
+        expect(
+          await page.evaluate(
+            () => document.querySelector(".needs-list")?.textContent ?? "",
+            undefined,
+          ),
+        ).toContain("Another ask still waiting");
+        expect(
+          await page.evaluate(
+            () =>
+              [...document.querySelectorAll("#needsSide .flight-thread-message")].filter((m) =>
+                m.textContent?.includes("You chose: Not now, clear it"),
+              ).length,
+            undefined,
+          ),
+        ).toBe(1);
         if (SHOTS) await page.screenshot(join(SHOTS, "needs-protected-after-1600x1000.png"));
       } finally {
         await page.close();

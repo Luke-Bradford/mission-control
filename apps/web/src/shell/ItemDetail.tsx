@@ -439,21 +439,10 @@ export function ItemDetail({
         <div className="composer" id={`${p}Opts`}>
           {options.length > 0 && (
             <>
-              {chosen[k] && (
-                <p>
-                  You chose: <b>{chosen[k]}</b>
-                  {recorded && (
-                    <span className="note" data-testid="choice-line">
-                      {" "}
-                      · {choiceLine(recorded, tz ?? "UTC")}
-                    </span>
-                  )}
-                  {!recorded && boundReceipt && (
-                    <span className="note" data-testid="choice-line">
-                      {" "}
-                      · {boundReceipt.text}
-                    </span>
-                  )}
+              {/* The pick itself shows once, in the FLIGHT thread; here only where it went. */}
+              {chosen[k] && (recorded || boundReceipt) && (
+                <p className="note" data-testid="choice-line">
+                  {recorded ? choiceLine(recorded, tz ?? "UTC") : boundReceipt?.text}
                 </p>
               )}
               <BriefOptions
