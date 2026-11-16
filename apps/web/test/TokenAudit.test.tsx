@@ -160,7 +160,9 @@ it("opens as the tab before Workflow history, reached by keyboard, without a cod
   const { CodeHealth } = await import("../src/code-health/CodeHealth.tsx");
   render(<CodeHealth />);
   fireEvent.keyDown(await screen.findByRole("tab", { name: "Summary" }), { key: "End" });
-  fireEvent.keyDown(screen.getByRole("tab", { name: "Workflow history" }), { key: "ArrowLeft" });
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Workflow history and earlier proposals" }), {
+    key: "ArrowLeft",
+  });
   expect(screen.getByRole("tab", { name: "Tokens" }).getAttribute("aria-selected")).toBe("true");
   await screen.findByRole("list", { name: "Token figures" });
   expect(fetch.mock.calls.some(([url]) => String(url).includes("tab=tokens"))).toBe(false);

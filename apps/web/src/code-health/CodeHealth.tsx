@@ -303,20 +303,19 @@ export function CodeHealth() {
         </button>
       </div>
       <div role="tablist" aria-label="Code-health view" className="ch-tabs">
-        {TABS.map((t, i) => (
-          <button
-            type="button"
-            key={t}
-            ref={(el) => {
+        {TABS.map((t, i) => {
+          const props = {
+            type: "button" as const,
+            role: "tab",
+            id: `ch-tab-${t}`,
+            "aria-selected": tab === t,
+            "aria-controls": "ch-panel",
+            tabIndex: tab === t ? 0 : -1,
+            ref: (el: HTMLButtonElement | null) => {
               tabRefs.current[i] = el;
-            }}
-            role="tab"
-            id={`ch-tab-${t}`}
-            aria-selected={tab === t}
-            aria-controls="ch-panel"
-            tabIndex={tab === t ? 0 : -1}
-            onClick={() => changeScope(() => setTab(t))}
-            onKeyDown={(e) => {
+            },
+            onClick: () => changeScope(() => setTab(t)),
+            onKeyDown: (e: React.KeyboardEvent) => {
               let next: number | undefined;
               if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
               if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
@@ -327,11 +326,19 @@ export function CodeHealth() {
                 tabRefs.current[next]?.click();
                 tabRefs.current[next]?.focus();
               }
-            }}
-          >
-            {TAB_LABEL[t]}
-          </button>
-        ))}
+            },
+          };
+          // The evidence capture finds this tab by its text (apps/server/test/qa-labels.test.ts).
+          return t === "history" ? (
+            <button key={t} {...props}>
+              Workflow history and earlier proposals
+            </button>
+          ) : (
+            <button key={t} {...props}>
+              {TAB_LABEL[t]}
+            </button>
+          );
+        })}
         <span className="ch-links">
           <a href="/audit?tab=risk">Code risk in Audit</a>
           <a href="/qa">PR readiness and tests in QA</a>

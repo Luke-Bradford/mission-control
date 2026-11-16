@@ -440,7 +440,7 @@ it("keeps every earlier Audit view one click away", async () => {
     "Code risk",
     "Test health",
     "Tokens",
-    "Workflow history",
+    "Workflow history and earlier proposals",
     "Summary",
   ]) {
     fireEvent.click(screen.getByRole("tab", { name }));
@@ -453,7 +453,7 @@ it("keeps every earlier Audit view one click away", async () => {
   expect(screen.getByRole("link", { name: "Cost and flow context" }).getAttribute("href")).toBe(
     "/telemetry",
   );
-  fireEvent.click(screen.getByRole("tab", { name: "Workflow history" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Workflow history and earlier proposals" }));
   await screen.findByRole("heading", { name: "Workflow history", level: 2 });
   fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
   fireEvent.click(screen.getByRole("button", { name: "Recommendation history" }));
