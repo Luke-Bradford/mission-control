@@ -1054,8 +1054,7 @@ describe("capacity", () => {
     // Only the old buckets are gaps, and none of them reads zero.
     expect(m.filter((p) => p.swapPct === null).length).toBeGreaterThan(0);
     expect(m.some((p) => p.swapPct === 0 || p.agentGb === 0)).toBe(false);
-    // The four added series cost about 60 bytes a point, so 72 points stay far under 16 KB.
-    expect(JSON.stringify(m).length).toBeLessThan(16_000);
+    // The whole route response is held to its byte budget in api.test.ts.
   });
 });
 

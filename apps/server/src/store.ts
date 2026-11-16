@@ -326,6 +326,9 @@ const memPct = (s: MachineSample): number | null =>
 
 const GIB = 1024 ** 3;
 
+/** Two decimals keep the served series short; null stays null. */
+const round2 = (n: number | null): number | null => (n === null ? null : Math.round(n * 100) / 100);
+
 /** Swap in use as a percentage of the swap file; null when unmeasured or there is no swap file. */
 const swapPct = (s: MachineSample): number | null =>
   s.swapUsedBytes != null && s.swapTotalBytes != null && s.swapTotalBytes > 0
@@ -3746,10 +3749,10 @@ export class Store {
       at: r.at,
       cpuPct: r.cpu,
       memPct: r.mem,
-      swapPct: r.swap,
-      pressurePct: r.pressure,
-      agentGb: r.agent,
-      testRunGb: r.test,
+      swapPct: round2(r.swap),
+      pressurePct: round2(r.pressure),
+      agentGb: round2(r.agent),
+      testRunGb: round2(r.test),
     }));
   }
 
