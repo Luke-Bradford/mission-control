@@ -80,7 +80,9 @@ export function FlightThread({
   const loaded = res.data !== undefined;
   useLayoutEffect(() => {
     if (!jumpId || !loaded) return;
-    const target = document.getElementById(`comms-message-${jumpId}`);
+    const target = Array.from(
+      log.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? [],
+    ).find((el) => el.dataset.messageId === jumpId);
     if (target) {
       setHighlightId(jumpId);
       target.scrollIntoView?.({ block: "center" });
@@ -168,7 +170,7 @@ export function FlightThread({
         {messages.map((message) => (
           <article
             className={`flight-thread-message${message.operator ? " operator" : ""}${highlightId === message.id ? " highlighted" : ""}`}
-            id={`comms-message-${message.id}`}
+            data-message-id={message.id}
             key={message.id}
           >
             <b>

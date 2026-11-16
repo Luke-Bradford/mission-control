@@ -156,7 +156,9 @@ describe("FlightThread senders, jumps and older pages", () => {
     const onJumped = vi.fn();
     const { container } = render(<FlightThread jumpId="comms:1" onJumped={onJumped} />);
     await waitFor(() => expect(onJumped).toHaveBeenCalled());
-    expect(container.querySelector("#comms-message-comms\\:1")?.className).toContain("highlighted");
+    expect(container.querySelector('[data-message-id="comms:1"]')?.className).toContain(
+      "highlighted",
+    );
   });
 
   it("spends a jump to a message that is not in the thread", async () => {
