@@ -192,7 +192,13 @@ describe("collectFlow issues", () => {
       { repoId: "shop-app", number: 1, at: Date.parse(at(1)), column: "Backlog" },
     ]);
     const series = telemetry(
-      { operator: { id: "operator", timezone: "UTC" }, accounts: [], repos: [repo], loops: [], poll: { usageMinutes: 30, githubSeconds: 60 } },
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
       store,
       "6h",
       NOW,
