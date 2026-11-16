@@ -351,6 +351,8 @@ export interface CheckoutInput {
   pending?: PendingCheckouts;
   /** Checked at this start against the clone's git repository; none given, none checked. */
   peers?: readonly RepoPeer[];
+  /** A seat tree another run holds (an adopted handoff): this seat's tree is not moved while it does. */
+  inUse?: (path: string) => boolean;
   /**
    * Use the seat's one tree (`seatTreePath`), moved onto this ticket's branch, instead of a tree
    * per ticket. A per-ticket tree already there for this ticket is still reused where it is.
@@ -1833,11 +1835,8 @@ export async function prepareCheckout(
     i.seatTree === true && !(await succeeds(inClone(["cat-file", "-e", `${baseSha}:uv.lock`])));
   // a seat start takes the seat's one tree, unless this ticket still has a per-ticket tree of its own
   if (seatTree && !(await succeeds(lstat(path)))) path = seatPath;
-  // another seat's tree is never adopted: the branch is moved into this seat's own
-  const handoffTree =
-    i.handoff?.worktree && !(seatTree && isSeatTree(i.handoff.worktree))
-      ? i.handoff.worktree
-      : null;
+  // a handoff adopts the ended author's tree where it is, even a seat's, so its unpushed work stays
+  const handoffTree = i.handoff?.worktree ?? null;
   if (handoffTree && (await succeeds(lstat(handoffTree)))) {
     path = (await checkedHandoffCheckout(i.checkout, handoffTree, branch, i.worktreesRoot)).path;
   }
@@ -1870,6 +1869,9 @@ export async function prepareCheckout(
       ? await crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }).catch(() => "")
       : "";
     let moved: { fresh: boolean } | null = null;
+    if (path === seatPath && i.inUse?.(path) === true) {
+      throw new CheckoutError("path", `${path} is held by another seat's run; it was not moved`);
+    }
     if (gitDir !== null && path === seatPath && head.trim() !== `refs/heads/${branch}`) {
       const fresh = await moveSeatTree({
         w: (args) => crewGit(path, args, common, { gitDir }),

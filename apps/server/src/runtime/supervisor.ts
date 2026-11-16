@@ -3701,6 +3701,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 seatTree: true,
+                // an adopted handoff leaves another seat's run in this seat's tree
+                inUse: (path) =>
+                  info.session.seats.some(
+                    (x) => x.id !== seatId && store.seatSession(x.id)?.worktree === path,
+                  ),
                 title,
                 ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {

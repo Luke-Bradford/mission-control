@@ -453,7 +453,7 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("is exit when a resume fails", async () => {
       const runId = await leftActive();
-      rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+      rmSync(join(root, "mc-crew", "guido-1-tree"), { recursive: true, force: true });
       const { sup } = make();
       const seen = watch(sup);
       sup.start();
@@ -543,7 +543,7 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("ends the run ok, endedBy engine, leaves the seat idle and preserves unfinished work", async () => {
       const { sup, seen, runId } = await idleRun();
-      const wt = join(root, "mc-crew", "guido-1-42");
+      const wt = join(root, "mc-crew", "guido-1-tree");
       writeFileSync(join(wt, "wip.txt"), "wip\n");
       await sup.endRunByEngine(runId);
       expect(ended(seen)).toEqual([
@@ -623,7 +623,7 @@ describe("supervisor events (Plan 7a)", () => {
         }),
       ]);
       expect(log.mock.calls.some((c) => c[0].includes("could not remove"))).toBe(true);
-      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
+      expect(existsSync(join(root, "mc-crew", "guido-1-tree"))).toBe(true);
     });
 
     it("ends a run with no live process", async () => {
@@ -638,7 +638,7 @@ describe("supervisor events (Plan 7a)", () => {
       ]);
       expect(seatState("guido-1")).toBe("idle");
       expect(store.seatSession("guido-1")?.runId).toBeNull();
-      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
+      expect(existsSync(join(root, "mc-crew", "guido-1-tree"))).toBe(true);
       expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
       await sup.stopAll();
       release();
@@ -861,7 +861,7 @@ describe("supervisor events (Plan 7a)", () => {
       const { sup, runId, seen } = await idleRun();
       prep.sessions[0]?.detach();
       await noKeepers();
-      rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+      rmSync(join(root, "mc-crew", "guido-1-tree"), { recursive: true, force: true });
       await sup.resumeRun(runId);
       await sup.resumeRun(runId);
       expect(store.run(runId)).toMatchObject({ status: "failed", endedBy: "exit" });
@@ -1023,7 +1023,7 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("failResume", async () => {
       const runId = await leftActive();
-      rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+      rmSync(join(root, "mc-crew", "guido-1-tree"), { recursive: true, force: true });
       const { sup } = make();
       const snaps = watchStored(sup);
       sup.start();
@@ -1120,7 +1120,7 @@ describe("supervisor events (Plan 7a)", () => {
       await sup.endRunByEngine(runId);
       release();
       await settle();
-      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
+      expect(existsSync(join(root, "mc-crew", "guido-1-tree"))).toBe(true);
       expect(launches()).toBe(1); // the first supervisor's only
       expect(sup.seatFacts("guido-1")).toBeNull();
       expect(snaps).toHaveLength(1);
@@ -1162,7 +1162,7 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("an ended run whose worktree check fails does not overwrite the seat", async () => {
       const runId = await leftActive();
-      rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });
+      rmSync(join(root, "mc-crew", "guido-1-tree"), { recursive: true, force: true });
       const { sup } = make();
       const snaps = watchStored(sup);
       const release = holdResume();
@@ -1185,7 +1185,7 @@ describe("supervisor events (Plan 7a)", () => {
       const snaps = watchStored(sup);
       await sup.endRunByEngine(runId);
       expect(await sup.send(runId, "k", "x")).toBe("busy");
-      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
+      expect(existsSync(join(root, "mc-crew", "guido-1-tree"))).toBe(true);
       expect(store.run(runId)?.endedAt).toBeNull();
       expect(store.seatSession("guido-1")).toMatchObject({ runId });
       expect(snaps).toEqual([]);
@@ -1250,7 +1250,7 @@ describe("supervisor events (Plan 7a)", () => {
       ]);
       expect(store.run(runId)?.endedBy).toBe("operator");
       expect(seatState("guido-1")).toBe("idle");
-      expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
+      expect(existsSync(join(root, "mc-crew", "guido-1-tree"))).toBe(true);
     });
   });
 });

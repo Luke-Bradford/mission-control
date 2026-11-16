@@ -623,7 +623,10 @@ describe("startWatch", () => {
 
 describe("startReview", () => {
   const RESUMED = "resumed after a restart; send a message to continue";
+  // a per-review worktree (an older run's, or one a start must not make)
   const scratch = (id: number) => join(root, "mc-crew", `retro-review-${id}`);
+  // the review seat's one tree (#1976)
+  const reviewTree = () => join(root, "mc-crew", "retro-review");
 
   /** An author run with a pushed PR head, and a review of it in `starting`. */
   function reviewOfPush(
@@ -681,7 +684,7 @@ describe("startReview", () => {
       cliSessionId: "c",
       state: "running",
       reason: null,
-      worktree: join(root, "mc-crew", "guido-1-42"),
+      worktree: join(root, "mc-crew", "guido-1-tree"),
       updatedAt: 1,
     });
     const reviewId = store.requestReview({
@@ -1550,14 +1553,14 @@ describe("startReview", () => {
     });
     expect(store.seatSession("retro")).toMatchObject({
       runId,
-      worktree: scratch(r.reviewId),
+      worktree: reviewTree(),
     });
-    expect(git(scratch(r.reviewId), "rev-parse", "HEAD")).toBe(r.sha);
-    expect(existsSync(join(scratch(r.reviewId), ".mc-review", "pr.diff"))).toBe(true);
+    expect(git(reviewTree(), "rev-parse", "HEAD")).toBe(r.sha);
+    expect(existsSync(join(reviewTree(), ".mc-review", "pr.diff"))).toBe(true);
     await until(() => expect(userLines()).toHaveLength(1));
     const [start] = recorded();
     const argv = start.argv as string[];
-    expect(start.cwd).toBe(scratch(r.reviewId));
+    expect(start.cwd).toBe(reviewTree());
     expect(argv).toContain("mcp__mc__report_findings");
     expect(userLines()[0]).toBe(
       reviewBrief({
@@ -1585,7 +1588,7 @@ describe("startReview", () => {
       }),
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
-    expect(fs.denyRead).toContain(join(root, "mc-crew", "guido-1-42"));
+    expect(fs.denyRead).toContain(join(root, "mc-crew", "guido-1-tree"));
   });
 
   describe("a PR that changes package.json", () => {
@@ -1807,30 +1810,26 @@ describe("startReview", () => {
     expect([e.status, e.message]).toEqual([409, "RETRO is not a review seat"]);
   });
 
-  it("a review run's worktree goes when it crashes", async () => {
+  it("a review run's tree stays for the seat's next review when it crashes", async () => {
     const { sup, reviewId } = await started();
     await sup.message("retro", "DIE", { interrupt: false });
     await until(() => expect(seatState("retro")).toBe("error"));
-    await until(() => expect(existsSync(scratch(reviewId))).toBe(false));
-  });
-
-  it("a review run's worktree goes when it is stopped", async () => {
-    const { sup, reviewId } = await started();
-    const pnpmStore = codexPnpmStoreDir(scratch(reviewId));
-    mkdirSync(pnpmStore, { recursive: true });
-    writeFileSync(join(pnpmStore, "marker"), "x\n");
-    await sup.endRun("retro");
-    await until(() => expect(existsSync(scratch(reviewId))).toBe(false));
-    await until(() => expect(existsSync(pnpmStore)).toBe(false));
-  });
-
-  it("a review run's worktree goes when the engine ends it", async () => {
-    const { sup, reviewId, runId } = await started();
-    const pnpmStore = codexPnpmStoreDir(scratch(reviewId));
-    mkdirSync(pnpmStore, { recursive: true });
-    await sup.endRunByEngine(runId);
+    expect(existsSync(reviewTree())).toBe(true);
     expect(existsSync(scratch(reviewId))).toBe(false);
-    expect(existsSync(pnpmStore)).toBe(false);
+  });
+
+  it("a review run's tree stays when it is stopped", async () => {
+    const { sup, reviewId } = await started();
+    await sup.endRun("retro");
+    expect(existsSync(reviewTree())).toBe(true);
+    expect(existsSync(scratch(reviewId))).toBe(false);
+  });
+
+  it("a review run's tree stays when the engine ends it", async () => {
+    const { sup, reviewId, runId } = await started();
+    await sup.endRunByEngine(runId);
+    expect(existsSync(reviewTree())).toBe(true);
+    expect(existsSync(scratch(reviewId))).toBe(false);
   });
 
   it("a review run resumes in its scratch worktree", async () => {
@@ -1842,8 +1841,8 @@ describe("startReview", () => {
     await until(() => expect(store.seatSession("retro")?.reason).toBe(RESUMED));
     expect(seatState("retro")).toBe("idle");
     await until(() => expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(2));
-    expect(recorded().filter((l) => Array.isArray(l.argv))[1].cwd).toBe(scratch(reviewId));
-    expect(existsSync(scratch(reviewId))).toBe(true);
+    expect(recorded().filter((l) => Array.isArray(l.argv))[1].cwd).toBe(reviewTree());
+    expect(existsSync(reviewTree())).toBe(true);
   });
 
   it("fails a review run whose seat is no longer a scratch seat", async () => {
@@ -1859,7 +1858,9 @@ describe("startReview", () => {
     expect(store.run(runId)?.status).toBe("failed");
     expect(store.run(runId)?.noReport).toBeUndefined();
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
-    await until(() => expect(existsSync(scratch(reviewId))).toBe(false));
+    // the seat's tree is not removed with the run
+    expect(existsSync(reviewTree())).toBe(true);
+    expect(existsSync(scratch(reviewId))).toBe(false);
     expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(1);
   });
 
@@ -1898,7 +1899,7 @@ describe("startReview", () => {
 
 describe("a run set aside in review", () => {
   const REVIEW: RunLoop = { ...NEW_LOOP, phase: "review", prNumber: 12 };
-  const wt = () => join(root, "mc-crew", "guido-1-42");
+  const wt = () => join(root, "mc-crew", "guido-1-tree");
   const starts = () => recorded().filter((l) => Array.isArray(l.argv));
   const ended = (seen: SupervisorEvent[]) => seen.filter((e) => e.kind === "run-ended");
 
