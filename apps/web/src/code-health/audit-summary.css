@@ -1,4 +1,5 @@
-/* The Audit first screen. Tokens, fonts and Panel come from the HUD; only the page fit lives here. */
+/* The Audit first screen. Tokens, fonts and Panel come from the HUD; only the page fit lives here.
+   Two columns need a page 1400 px wide; narrower, the columns stack and the page scrolls. */
 .code-health.as-fit {
   --as-side: clamp(440px, 34vw, 600px);
   --as-out-max: 160px;
