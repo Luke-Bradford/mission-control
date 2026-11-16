@@ -4,6 +4,7 @@ import {
   FLOW_DAYS,
   FLOW_TIMELINE_MAX_PAGES,
   FLOW_TIMELINE_PAGE_SIZE,
+  type FlowColumnMove,
   type FlowIssue,
   type FlowPr,
   flowCollector,
@@ -160,7 +161,14 @@ function isDone(repo: Repo, status: string): boolean {
 }
 
 /** Start and done times from one issue's Status-change events on the repo's own project. */
-function issueFlow(repo: Repo, node: unknown): { startAt: number | null; doneAt: number | null } {
+function issueFlow(
+  repo: Repo,
+  node: unknown,
+): {
+  startAt: number | null;
+  doneAt: number | null;
+  moves: Pick<FlowColumnMove, "at" | "column">[];
+} {
   const raw = path(node, "timelineItems", "nodes");
   const events = (Array.isArray(raw) ? raw : [])
     .filter(isObj)
@@ -174,7 +182,16 @@ function issueFlow(repo: Repo, node: unknown): { startAt: number | null; doneAt:
     if (startAt === null && startsWork(e.status)) startAt = e.at;
     if (isDone(repo, e.status)) doneAt = e.at;
   }
-  return { startAt, doneAt };
+  return {
+    startAt,
+    doneAt,
+    moves: events.map((event) => {
+      const state = Object.hasOwn(repo.statusMap, event.status)
+        ? repo.statusMap[event.status]
+        : "planned";
+      return { at: event.at, column: hudColumnOf({ status: event.status, state, closed: false }) };
+    }),
+  };
 }
 
 /** The rollup of the earliest commit that has one; CI runs on pushed heads, so most have none. */
@@ -232,6 +249,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
     );
 
     const issues: FlowIssue[] = [];
+    const moves: FlowColumnMove[] = [];
     for (const i of flowIssues) {
       const node = timelines.get(i.issueNumber);
       if (!isObj(node)) continue;
@@ -246,6 +264,9 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         ...flow,
         doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
+      moves.push(
+        ...flow.moves.map((move) => ({ ...move, repoId: repo.id, number: i.issueNumber })),
+      );
     }
     const prs: FlowPr[] = [];
     for (const p of merged) {
@@ -258,7 +279,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         firstPushCi: firstPushCi(node, repo.requiredChecks ?? []),
       });
     }
-    store.replaceFlow(repo.id, issues, prs);
+    store.replaceFlow(repo.id, issues, prs, moves);
     const stored = issues.filter((i) => i.doneAt !== null);
     const unstarted = stored.filter((i) => i.startAt === null).length;
     const notes = [

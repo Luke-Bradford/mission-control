@@ -152,6 +152,10 @@ describe("collectFlow issues", () => {
         doneAt: null,
       },
     ]);
+    expect(store.flowColumnMoves()).toEqual([
+      { repoId: "shop-app", number: 1, at: Date.parse(at(3)), column: "Ready" },
+      { repoId: "shop-app", number: 1, at: Date.parse(at(2)), column: "In progress" },
+    ]);
   });
 
   it("retains open work when its board card becomes Blocked", async () => {
