@@ -408,6 +408,8 @@ export const ACTIONS = {
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{ briefId, sourceRevision, optionId, requestId }`; answers a `BriefChoiceReceipt`. */
+  briefChoice: (key: string) => `/api/attention/${enc(key)}/choice`,
   /** Body `{ optionId, briefAt }`; answers a `ChoiceReceipt`. */
   choose: (key: string) => `/api/attention/${enc(key)}/choose`,
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */

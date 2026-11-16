@@ -1,4 +1,11 @@
-import type { AttentionItem, BriefOption, ChoiceReceipt, CrewRow, ItemDiscussion } from "@mc/core";
+import type {
+  AttentionItem,
+  BriefChoiceReceipt,
+  BriefOption,
+  ChoiceReceipt,
+  CrewRow,
+  ItemDiscussion,
+} from "@mc/core";
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
@@ -111,6 +118,59 @@ export function choosable(item: AttentionItem, option: BriefOption): boolean {
     option.id !== undefined &&
     item.escalationId === null
   );
+}
+
+/**
+ * The brief and source the server bound `option` to, when it prepared a typed action for it and
+ * the plain choose route would refuse the item: an escalation, or a brief the hub wrote (a hold
+ * or a protected decision). The page sends only these ids; the server holds the action.
+ */
+export function boundChoice(
+  item: AttentionItem,
+  option: BriefOption,
+): { briefId: number; sourceRevision: string } | null {
+  const brief = item.brief;
+  if (!brief || brief.id === undefined || !brief.binding || option.id === undefined) return null;
+  if (item.escalationId === null && brief.by !== "hub") return null;
+  const id = option.id;
+  if (!brief.binding.actions.some((a) => a.optionId === id)) return null;
+  return { briefId: brief.id, sourceRevision: brief.binding.sourceRevision };
+}
+
+/** Whether a receipt means the choice stands (or may yet), so its options stay shut. */
+export const boundChoiceStands = (r: BriefChoiceReceipt): boolean =>
+  r.state !== "refused" && r.state !== "stale";
+
+/**
+ * A fresh request id. crypto.randomUUID is missing on a hub served over plain http from a
+ * non-local address, so fall back to random bytes; the server accepts letters, digits, `:_-`.
+ */
+const requestId = (): string =>
+  typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `req-${Date.now().toString(36)}-${Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+
+/**
+ * Picks `option` through the bound choice route. Resolves to the server's receipt, or the text
+ * of its refusal. A refused or stale receipt comes back as an error so the options stay open.
+ */
+export async function sendBoundChoice(
+  item: AttentionItem,
+  option: BriefOption,
+): Promise<{ receipt: BriefChoiceReceipt } | { error: string }> {
+  const bound = boundChoice(item, option);
+  if (!bound || option.id === undefined) return { error: "That option cannot be picked here." };
+  try {
+    const receipt = await apiPost<BriefChoiceReceipt>(ACTIONS.briefChoice(item.key), {
+      ...bound,
+      optionId: option.id,
+      requestId: requestId(),
+    });
+    hub.refetch(RESOURCES.attention.path);
+    return boundChoiceStands(receipt) ? { receipt } : { error: receipt.text };
+  } catch (e) {
+    return { error: e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e) };
+  }
 }
 
 /** Picks `option` on the item's brief. Resolves to the server's receipt, or the text of its refusal. */

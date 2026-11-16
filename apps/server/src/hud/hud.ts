@@ -55,6 +55,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  NOTE_ITEM_PREFIX,
   needsYouAlert,
   needsYouEntryFaults,
   OPERATOR_CALL_KINDS,
@@ -141,7 +142,7 @@ import { runEvents, runEventsIndex } from "./views.ts";
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
 export const CREW_ERROR_KEY = "crew-error:";
 /** An engine note's Needs-you key: this, then the note's own key. */
-export const NOTE_KEY = "note:";
+export const NOTE_KEY = NOTE_ITEM_PREFIX;
 
 /** Runs read per loop for its view (state, context-window fallback). */
 const AGENT_RUNS = 50;
