@@ -1282,7 +1282,8 @@ export type QuestionClosureKind =
   | "ticket-closed"
   | "pr-merged"
   | "pr-closed"
-  | "run-ended";
+  | "run-ended"
+  | "repo-unwatched";
 /** A question closed without an answer, with the reason; shown under Answered. */
 export interface QuestionClosure {
   key: string;
