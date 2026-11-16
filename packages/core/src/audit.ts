@@ -1,6 +1,7 @@
 import { MC_TOOL_NAMES } from "./mcp.ts";
 import type { FindingCategory } from "./review.ts";
 import type { LoopKind } from "./runtime-model.ts";
+import type { AuditSpecBounce, AuditSpecBounceCount } from "./spec-bounce.ts";
 
 /** A merged PR at or above this many changed lines (additions plus deletions) is a size outlier. */
 export const AUDIT_PR_OUTLIER_LINES = 800;
@@ -219,6 +220,11 @@ export interface AuditView {
    * introduced it, newest first. The server always sets it; optional so web fixtures built before it type-check.
    */
   bugEscapes?: AuditBugEscape[];
+  /**
+   * PRs whose review failed on spec (not only quality), by cause, and the rounds per cause over
+   * 7 and 30 days up to the range end. The server always sets it; optional so web fixtures built before it type-check.
+   */
+  specBounces?: { rows: AuditSpecBounce[]; counts: AuditSpecBounceCount[] };
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
   /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
@@ -288,6 +294,14 @@ export function capAudit(audit: AuditView): AuditView {
     flakes: cut("flakes", audit.flakes),
     changes: cut("changes", audit.changes),
     surgeonProposals: cut("surgeonProposals", audit.surgeonProposals),
+    ...(audit.specBounces === undefined
+      ? {}
+      : {
+          specBounces: {
+            ...audit.specBounces,
+            rows: cut("specBounces.rows", audit.specBounces.rows),
+          },
+        }),
     ...(audit.items === undefined ? {} : { items: cut("items", audit.items) }),
     ...(audit.bugEscapes === undefined ? {} : { bugEscapes: cut("bugEscapes", audit.bugEscapes) }),
     ...(audit.improvements === undefined

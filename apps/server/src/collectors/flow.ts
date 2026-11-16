@@ -4,6 +4,7 @@ import {
   FLOW_DAYS,
   FLOW_TIMELINE_MAX_PAGES,
   FLOW_TIMELINE_PAGE_SIZE,
+  type FlowColumnMove,
   type FlowIssue,
   type FlowPr,
   flowCollector,
@@ -160,7 +161,14 @@ function isDone(repo: Repo, status: string): boolean {
 }
 
 /** Start and done times from one issue's Status-change events on the repo's own project. */
-function issueFlow(repo: Repo, node: unknown): { startAt: number | null; doneAt: number | null } {
+function issueFlow(
+  repo: Repo,
+  node: unknown,
+): {
+  startAt: number | null;
+  doneAt: number | null;
+  moves: Pick<FlowColumnMove, "at" | "column">[];
+} {
   const raw = path(node, "timelineItems", "nodes");
   const events = (Array.isArray(raw) ? raw : [])
     .filter(isObj)
@@ -174,7 +182,16 @@ function issueFlow(repo: Repo, node: unknown): { startAt: number | null; doneAt:
     if (startAt === null && startsWork(e.status)) startAt = e.at;
     if (isDone(repo, e.status)) doneAt = e.at;
   }
-  return { startAt, doneAt };
+  return {
+    startAt,
+    doneAt,
+    moves: events.map((event) => {
+      const state = Object.hasOwn(repo.statusMap, event.status)
+        ? repo.statusMap[event.status]
+        : "planned";
+      return { at: event.at, column: hudColumnOf({ status: event.status, state, closed: false }) };
+    }),
+  };
 }
 
 /** The rollup of the earliest commit that has one; CI runs on pushed heads, so most have none. */
@@ -196,19 +213,35 @@ function firstPushCi(node: unknown, required: readonly string[]): FlowPr["firstP
 export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: number): Promise<void> {
   const since = now - FLOW_DAYS * DAY_MS;
   try {
-    const done = store
-      .board(repo.id)
-      .filter((i) => hudColumnOf(i) === "Done" && i.updatedAt >= since);
-    const open = store
-      .board(repo.id)
-      .filter(
-        (i) =>
-          !i.closed &&
-          ["Ready", "Blocked", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
-      );
+    const board = store.board(repo.id);
+    const done = board.filter((i) => hudColumnOf(i) === "Done" && i.updatedAt >= since);
+    const open = board.filter(
+      (i) =>
+        !i.closed &&
+        ["Ready", "Blocked", "In progress", "In review", "Ready for QA"].includes(hudColumnOf(i)),
+    );
+    // A recent board update can be a move back to Backlog before the first flow collection. Keep
+    // those tickets, and previously observed ones, in the history read even though Backlog is not
+    // an open flow column.
+    const recentlyUpdated = board.filter((i) => i.updatedAt >= since);
+    const storedMoves = store.flowColumnMoves().filter((move) => move.repoId === repo.id);
+    const savedMoves = storedMoves.filter((move) => move.at >= since);
+    const trackedNumbers = new Set(savedMoves.map((move) => move.number));
     const flowIssues = [
       ...done,
       ...open.filter((i) => !done.some((d) => d.issueNumber === i.issueNumber)),
+      ...board.filter(
+        (i) =>
+          trackedNumbers.has(i.issueNumber) &&
+          !done.some((d) => d.issueNumber === i.issueNumber) &&
+          !open.some((o) => o.issueNumber === i.issueNumber),
+      ),
+      ...recentlyUpdated.filter(
+        (i) =>
+          !done.some((d) => d.issueNumber === i.issueNumber) &&
+          !open.some((o) => o.issueNumber === i.issueNumber) &&
+          !trackedNumbers.has(i.issueNumber),
+      ),
     ];
     const openNumbers = new Set(open.map((issue) => issue.issueNumber));
     const merged = store
@@ -231,14 +264,52 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       merged.map((p) => p.number),
     );
 
+    const retainedNumbers = new Set(flowIssues.map((issue) => issue.issueNumber));
+    const savedAnchors = new Map<number, FlowColumnMove>();
+    for (const move of storedMoves) {
+      if (move.at >= since || !retainedNumbers.has(move.number)) continue;
+      const previous = savedAnchors.get(move.number);
+      if (!previous || previous.at <= move.at) savedAnchors.set(move.number, move);
+    }
+
     const issues: FlowIssue[] = [];
+    const moves: FlowColumnMove[] = [...savedMoves, ...savedAnchors.values()];
+    const knownMoves = new Set(moves.map((move) => `${move.number}:${move.at}:${move.column}`));
     for (const i of flowIssues) {
       const node = timelines.get(i.issueNumber);
       if (!isObj(node)) continue;
       const flow = issueFlow(repo, node);
+      const openingMove = flow.moves.filter((move) => move.at < since).at(-1);
+      if (openingMove) {
+        const savedAnchor = savedAnchors.get(i.issueNumber);
+        if (!savedAnchor || savedAnchor.at <= openingMove.at) {
+          if (savedAnchor) {
+            const index = moves.indexOf(savedAnchor);
+            if (index !== -1) moves.splice(index, 1);
+            knownMoves.delete(`${savedAnchor.number}:${savedAnchor.at}:${savedAnchor.column}`);
+          }
+          const anchor = { ...openingMove, repoId: repo.id, number: i.issueNumber };
+          moves.push(anchor);
+          savedAnchors.set(i.issueNumber, anchor);
+          knownMoves.add(`${anchor.number}:${anchor.at}:${anchor.column}`);
+        }
+      }
+      for (const move of flow.moves) {
+        if (move.at < since) continue;
+        const key = `${i.issueNumber}:${move.at}:${move.column}`;
+        if (knownMoves.has(key)) continue;
+        moves.push({ ...move, repoId: repo.id, number: i.issueNumber });
+        knownMoves.add(key);
+      }
       // A card presently in Done without an observed Done event is not a flow fact. Open cards,
       // however, must remain visible even before their first Ready transition is observed.
-      if (flow.doneAt === null && !openNumbers.has(i.issueNumber)) continue;
+      if (
+        flow.doneAt === null &&
+        !openNumbers.has(i.issueNumber) &&
+        !trackedNumbers.has(i.issueNumber)
+      ) {
+        continue;
+      }
       issues.push({
         repoId: repo.id,
         number: i.issueNumber,
@@ -258,7 +329,7 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         firstPushCi: firstPushCi(node, repo.requiredChecks ?? []),
       });
     }
-    store.replaceFlow(repo.id, issues, prs);
+    store.replaceFlow(repo.id, issues, prs, moves);
     const stored = issues.filter((i) => i.doneAt !== null);
     const unstarted = stored.filter((i) => i.startAt === null).length;
     const notes = [

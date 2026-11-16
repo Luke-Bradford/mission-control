@@ -2779,6 +2779,7 @@ branch previews do.
   A message row links to its message's ticket or PR, else its sending run's ticket, else its reference; a row that cannot be linked to either is left out.
 
   Thresholds are in `config.yaml` under `audit:`, with these defaults: `question_wait_minutes` 120, `controller_wait_minutes` 240, `ticket_text_factor` 3, `notice_repeats` 3.
+- `specBounces`: PRs whose review failed on spec (a quality-only failure is left out). `rows` are for the range: one per PR and cause, with the ticket, the count of spec-failed rounds, the finding text and when the latest ended. `counts` give the rounds per cause over the 7 and 30 days up to the range end. The cause comes from fixed keyword rules on the findings that back the spec verdict (those categorised `spec` or `scope`; for reviews recorded before categories, the uncategorised ones; correctness and style findings are left out)  (`classifySpecBounce` in mc/core, no model): `scope-wider`, `missing-reference` (a mockup or page the ticket did not name), `ambiguous-wording`, `no-done-when` (the text says so, or the run had no Done-when lines recorded), else `other`. Use it to see what tickets keep missing and fix the ticket template.
 - `surgeonProposals`: always empty until SURGEON proposals are stored.
 
 The route only reads data the hub already stores.
