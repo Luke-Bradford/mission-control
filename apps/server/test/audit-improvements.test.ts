@@ -133,11 +133,21 @@ describe("silence alarms", () => {
     store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok" }));
     store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
     store.checkSilenceAlarms(NOW, { crewPaused: false, budgetStopped: false });
-    expect(store.audit(SINCE, NOW).items?.filter((item) => item.kind === "silence-alarm")).toEqual([]);
+    expect(store.audit(SINCE, NOW).items?.filter((item) => item.kind === "silence-alarm")).toEqual(
+      [],
+    );
   });
 
   it("does not let an ended budget park suppress alarms", () => {
-    store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok", loop: { parked: { kind: "budget", reason: "limit", ended: false } } as NonNullable<Run["loop"]> }));
+    store.upsertRun(
+      run({
+        endedAt: NOW - HOUR,
+        status: "ok",
+        loop: { parked: { kind: "budget", reason: "limit", ended: false } } as NonNullable<
+          Run["loop"]
+        >,
+      }),
+    );
     expect(store.silenceAlarmsBudgetStopped()).toBe(false);
   });
 
