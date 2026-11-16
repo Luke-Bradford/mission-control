@@ -970,8 +970,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
-  /** Runs whose lost keeper was already taken back once: a second loss ends the run as a crash. */
-  const retakenRuns = new Set<string>();
+  /**
+   * The setting that marks a run as already taken back once (a second such exit ends it as a crash).
+   * Kept in settings, so a hub restart does not forget it; `recordEnded` clears it with the run.
+   */
+  const retakenKey = (runId: string) => `retaken:${runId}`;
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
@@ -1023,6 +1026,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     removedAside = false,
   ): void {
     store.setRunEnded(runId, at, status, by);
+    store.deleteSetting(retakenKey(runId));
     const run = store.run(runId);
     if (!run || (!findSeat(run.agentId) && !removedAside)) return;
     const row = store.seatSession(run.agentId);
@@ -1257,10 +1261,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       e.retake === true &&
       l.ending === null &&
       l.endedBy === null &&
-      !retakenRuns.has(l.run.id) &&
+      store.getSetting(retakenKey(l.run.id)) === null &&
       !checkRuns.has(l.run.id)
     ) {
-      retakenRuns.add(l.run.id);
+      store.setSetting(retakenKey(l.run.id), String(now()));
       fold(l);
       log(`${seatId}: run ${l.run.id} did not end on its own; taking it back`);
       void retake(l);
