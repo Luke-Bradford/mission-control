@@ -1006,7 +1006,56 @@ describe("capacity", () => {
       diskTotalBytes: null,
       agents: null,
     });
-    expect(tel("1h").machine).toEqual([{ at: NOW - MIN, cpuPct: null, memPct: null }]);
+    expect(tel("1h").machine).toEqual([
+      {
+        at: NOW - MIN,
+        cpuPct: null,
+        memPct: null,
+        swapPct: null,
+        pressurePct: null,
+        agentGb: null,
+        testRunGb: null,
+      },
+    ]);
+  });
+
+  it("serves swap, memory pressure and agent and test-run memory as 24 h series within the point cap", () => {
+    const GB = 1024 ** 3;
+    for (let i = 0; i < 24 * 60; i += 1) {
+      const old = i < 600; // the oldest samples predate the new fields
+      store.addMachineSample({
+        at: NOW - (24 * 60 - i) * MIN,
+        cpuPct: 10,
+        cores: 8,
+        memUsedBytes: 4,
+        memTotalBytes: 8,
+        diskFreeBytes: null,
+        diskTotalBytes: null,
+        ...(old
+          ? { agents: null }
+          : {
+              swapUsedBytes: 2 * GB,
+              swapTotalBytes: 8 * GB,
+              memoryPressureFreePct: 60,
+              agents: { count: 3, rssBytes: 6 * GB, cpuPct: 1 },
+              testRun: i % 2 === 0 ? { count: 5, rssBytes: 4 * GB, cpuPct: 9 } : null,
+            }),
+      });
+    }
+    const m = tel("24h").machine;
+    expect(m.length).toBeLessThanOrEqual(72);
+    expect(m[0]).toMatchObject({ swapPct: null, pressurePct: null, agentGb: null });
+    expect(m[m.length - 1]).toMatchObject({
+      swapPct: 25,
+      pressurePct: 40,
+      agentGb: 6,
+      testRunGb: 4,
+    });
+    // Only the old buckets are gaps, and none of them reads zero.
+    expect(m.filter((p) => p.swapPct === null).length).toBeGreaterThan(0);
+    expect(m.some((p) => p.swapPct === 0 || p.agentGb === 0)).toBe(false);
+    // The four added series cost about 60 bytes a point, so 72 points stay far under 16 KB.
+    expect(JSON.stringify(m).length).toBeLessThan(16_000);
   });
 });
 
