@@ -26,7 +26,7 @@ export function SafeLink({
 }: {
   url: string;
   children?: ReactNode;
-  /** False leaves the host off the page; it stays in the link's title and description. */
+  /** False leaves the host off the page; it is then said to screen readers inside the link. */
   showHost?: boolean;
 }) {
   const href = openableHref(url);
@@ -41,13 +41,14 @@ export function SafeLink({
   const host = hostOf(href);
   return (
     <span className="safe-link">
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={host && !showHost ? `Opens ${host} in a new tab` : undefined}
-      >
+      <a href={href} target="_blank" rel="noopener noreferrer">
         {children ?? url}
+        {host && !showHost && (
+          <>
+            {" "}
+            <span className="sr-only">{`(opens ${host} in a new tab)`}</span>
+          </>
+        )}
       </a>
       {host && showHost && <span className="safe-link-host s"> {host}</span>}
     </span>

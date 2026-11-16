@@ -64,9 +64,11 @@ describe("FlightThread", () => {
     expect(container.textContent).not.toContain("**");
     expect(container.querySelectorAll("li")).toHaveLength(2);
     await waitFor(() => expect(screen.getByRole("link", { name: "shop-app#12" })).toBeTruthy());
-    expect(screen.getByRole("link", { name: "PR 34" }).getAttribute("href")).toBe(
-      "https://github.com/octo-org/shop-app/pull/34",
-    );
+    expect(
+      screen
+        .getByRole("link", { name: "PR 34 (opens github.com in a new tab)" })
+        .getAttribute("href"),
+    ).toBe("https://github.com/octo-org/shop-app/pull/34");
   });
 
   it("takes text while FLIGHT is stopped and says it reads it when it starts", async () => {
@@ -121,14 +123,23 @@ describe("FlightThread", () => {
     expect(await screen.findByText("FLIGHT is working… since 09:05")).toBeTruthy();
   });
 
-  it("shows a PR link as its text only, with no host after it", async () => {
-    stub([msg("comms:1", "See [PR 1959](https://github.com/o/r/pull/1959) now")]);
+  it("shows a configured repo's PR link as its text only, naming the host to screen readers", async () => {
+    stub([msg("comms:1", "See [PR 1959](https://github.com/octo-org/shop-app/pull/1959) now")]);
     render(<FlightThread />);
-    const link = await screen.findByRole("link", { name: /PR 1959/ });
-    expect(link.getAttribute("href")).toBe("https://github.com/o/r/pull/1959");
+    const link = await screen.findByRole("link", {
+      name: "PR 1959 (opens github.com in a new tab)",
+    });
+    expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/1959");
     const article = link.closest("article") as HTMLElement;
-    expect(article.textContent).not.toContain("github.com");
     expect(article.querySelector(".safe-link-host")).toBeNull();
+  });
+
+  it("keeps the host beside a friendly link to another site", async () => {
+    stub([msg("comms:1", "See [the report](https://attacker.example/login) now")]);
+    render(<FlightThread />);
+    const link = await screen.findByRole("link", { name: "the report" });
+    const article = link.closest("article") as HTMLElement;
+    expect(article.querySelector(".safe-link-host")?.textContent?.trim()).toBe("attacker.example");
   });
 
   it("shows no working line when the server omits it", async () => {
