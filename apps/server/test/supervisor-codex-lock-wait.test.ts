@@ -7,7 +7,7 @@ import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { recorded, until } from "./supervisor-harness.ts";
 
-// The real wait is an hour: shorten it so the run out is quick.
+// The real wait is an hour: shorten it so the wait runs out quickly.
 vi.mock("@mc/core", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@mc/core")>()),
   CODEX_LOCK_WAIT_MS: 300,
