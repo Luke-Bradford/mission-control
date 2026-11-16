@@ -198,7 +198,8 @@ const FORMS = [
     // the real Agent page: the Setup tab of the side panel, where the form is narrowest
     steps: [
       ["css", '.seg[aria-label="Seat details"] button:last-child'],
-      ["css", ".queue-focus button"],
+      // Change stays disabled until the focus read lands; a click before then does nothing
+      ["css", ".queue-focus button:not(:disabled)"],
     ],
   },
   {
