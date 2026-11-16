@@ -217,6 +217,15 @@ import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
 import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
+import {
+  type BugFixCandidate,
+  bugEscapes,
+  bugFixCandidates,
+  type IntroducingPrFacts,
+  introducingPrFacts,
+  noteBugTraceTried,
+  recordBugEscape,
+} from "./store/bug-escapes.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -2073,6 +2082,8 @@ export class Store {
         AUDIT_RETENTION_DAYS,
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -3010,6 +3021,7 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
+      bugEscapes: bugEscapes(this.db, since, until),
       improvements: [
         ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
@@ -3023,6 +3035,24 @@ export class Store {
       specBounces: specBounces(this.db, since, until),
       surgeonProposals: [],
     };
+  }
+
+  /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
+  bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
+    return bugFixCandidates(this.db, repoId, limit);
+  }
+
+  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
+    noteBugTraceTried(this.db, repoId, issue, at);
+  }
+
+  introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
+    return introducingPrFacts(this.db, repoId, pr);
+  }
+
+  /** Records a traced bug once per ticket; a repeat leaves the row as it was. */
+  recordBugEscape(e: Parameters<typeof recordBugEscape>[1]): void {
+    recordBugEscape(this.db, e);
   }
 
   /**
