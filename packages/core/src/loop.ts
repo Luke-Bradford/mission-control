@@ -162,6 +162,13 @@ export const cardMark = (phase: string, epoch: number): string => `${phase}:${ep
 export const REWORK_PHASE = "rework";
 /** The key of a run's blocked note for one epoch. */
 export const blockedNoteKey = (runId: string, epoch: number): string => `blocked:${runId}:${epoch}`;
+/** The start every park note key of `runId` shares, whatever its epoch. */
+export const blockedNotePrefix = (runId: string): string => `blocked:${runId}:`;
+/** The prefix of an attention item made from a hub note. */
+export const NOTE_ITEM_PREFIX = "note:";
+/** The start of the Needs-you item key for any park of `runId`. */
+export const blockedItemPrefix = (runId: string): string =>
+  `${NOTE_ITEM_PREFIX}${blockedNotePrefix(runId)}`;
 
 /** Shared prefixes for CI activity events and parking reasons. */
 export const CI_PASSED_EVENT_PREFIX = "CI passed on ";
