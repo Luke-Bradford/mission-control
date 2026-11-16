@@ -8,8 +8,9 @@ import {
   LOCK_FREE_TEXT,
   type TestLockState,
 } from "@mc/core";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { hub } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
 import { editSeatParam } from "../src/router.ts";
 import { SEATS_RULE_LINE } from "../src/setup/Roles.tsx";
@@ -103,6 +104,27 @@ describe("Setup › Roles & guards", () => {
       "Reading the repo's rules",
     );
     await screen.findByText(/Rules did not load/);
+  });
+
+  it("Repo rules: says to add a repo when none is configured, and asks for nothing", async () => {
+    const fetch = load({ "/api/config": { ...CFG, repos: [] } });
+    page();
+    await screen.findByText("Add a repo to see its rules.");
+    expect(fetch.mock.calls.some(([p]) => String(p).includes("/rules"))).toBe(false);
+  });
+
+  it("Repo rules: keeps the last rules and warns when a refresh fails", async () => {
+    let fail = false;
+    load({
+      [`/api/repos/${REPO}/rules`]: () =>
+        fail ? { status: 500, body: { error: "boom" } } : { status: 200, body: rulesFixture(REPO) },
+    });
+    page();
+    await rulesPanel();
+    fail = true;
+    act(() => hub.refetchTopic("config"));
+    await screen.findByText(/Refreshing them failed/);
+    expect(screen.getByText("pick_from")).toBeTruthy();
   });
 
   it("Built-in guard: each stop with its 7-day count, the note, and — when unreachable", async () => {

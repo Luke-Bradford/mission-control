@@ -66,6 +66,17 @@ describeRendered("Setup › Roles & guards, rendered", () => {
             }, null),
           ).toBe(true);
           expect(await page.unclipped("#rg-rules, #rg-guard, #rg-roles")).not.toContain(false);
+          // every guard rule shows in full: none is cut short
+          expect(
+            await page.evaluate(
+              () =>
+                [...document.querySelectorAll<HTMLElement>("#rg-guard .rg-rule")].filter(
+                  (r) => r.scrollHeight > r.clientHeight + 1,
+                ).length,
+              null,
+            ),
+            `${width} ${colorScheme}`,
+          ).toBe(0);
           // the Seats link and Read prompt button sit in the middle of their row
           const centred = await page.evaluate(() => {
             const bad: string[] = [];

@@ -161,6 +161,14 @@ function RepoRules({ config }: { config: ConfigView }) {
     chosen ??
     (config.repos.some((r) => r.id === scoped) ? (scoped as string) : config.repos[0]?.id);
   const rules = useResource<RepoRulesView>(repoId ? RESOURCES.repoRules(repoId) : null);
+  if (!repoId)
+    return (
+      <Panel id="rg-rules" title="Repo rules" sub="No repo">
+        <div className="pb">
+          <p className="muted s">Add a repo to see its rules.</p>
+        </div>
+      </Panel>
+    );
   const sub = rules.data
     ? `${rules.data.repoId} · ${rules.data.repoFile ? "repo file found" : "no repo file"}`
     : repoId;
@@ -195,20 +203,29 @@ function RepoRules({ config }: { config: ConfigView }) {
           <p className="muted s">Reading the repo's rules…</p>
         </div>
       ) : (
-        RULE_GROUPS.map((g) => (
-          <div className="rg-group" key={g.title}>
-            <h3>{g.title}</h3>
-            {g.rules.map((r) => (
-              <RuleRow
-                key={r.key}
-                rule={r.key}
-                label={r.label}
-                view={rules.data as RepoRulesView}
-              />
-            ))}
-            {g.title === "Checks" && <LockRow />}
-          </div>
-        ))
+        <>
+          {rules.error && (
+            <div className="pb">
+              <p className="note warn" role="status">
+                Showing the last rules read. Refreshing them failed: {rules.error.message}
+              </p>
+            </div>
+          )}
+          {RULE_GROUPS.map((g) => (
+            <div className="rg-group" key={g.title}>
+              <h3>{g.title}</h3>
+              {g.rules.map((r) => (
+                <RuleRow
+                  key={r.key}
+                  rule={r.key}
+                  label={r.label}
+                  view={rules.data as RepoRulesView}
+                />
+              ))}
+              {g.title === "Checks" && <LockRow />}
+            </div>
+          ))}
+        </>
       )}
     </Panel>
   );
@@ -229,9 +246,7 @@ function Guard({ hits }: { hits: GuardHitsView | undefined }) {
       )}
       {GUARD_IDS.map((r) => (
         <div className="rg-guard-row" key={r} data-rule={r}>
-          <span className="rg-rule" title={GUARD_RULES[r]}>
-            {GUARD_RULES[r]}
-          </span>
+          <span className="rg-rule">{GUARD_RULES[r]}</span>
           <span className="rg-count">
             {hits ? hits.counts[r] : "—"}
             <span className="sr-only"> refusals{hits ? "" : ", unknown"}</span>
