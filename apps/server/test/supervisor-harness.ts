@@ -103,6 +103,11 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
       if (prep.resumeGate) await prep.resumeGate;
       return real.existingCheckout(...a);
     },
+    resumeSeatCheckout: async (...a: Parameters<typeof real.resumeSeatCheckout>) => {
+      prep.resumeChecks++;
+      if (prep.resumeGate) await prep.resumeGate;
+      return real.resumeSeatCheckout(...a);
+    },
     removeCheckout: async (...a: Parameters<typeof real.removeCheckout>) => {
       if (prep.failRemove) throw new Error("worktree is locked");
       return real.removeCheckout(...a);

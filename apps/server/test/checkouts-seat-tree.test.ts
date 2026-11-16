@@ -250,7 +250,6 @@ describe("a parked ticket", () => {
       { checkout: clone, worktreesRoot: root, sessionId: "a", seatId: "guido" },
       a.path,
       a.branch,
-      run,
     );
     expect(back.path).toBe(a.path);
     expect(git(a.path, "rev-parse", "HEAD")).toBe(sha);

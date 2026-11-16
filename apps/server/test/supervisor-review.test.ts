@@ -2549,7 +2549,8 @@ describe("a run set aside in review", () => {
       ...store.run(runId)?.loop,
       ...NEW_LOOP,
       phase: "done",
-      aside: { worktree: wt(), wake: false },
+      // a per-ticket worktree, as a run from before the seat's one tree has: it is removed
+      aside: { worktree: join(root, "mc-crew", "guido-1-42"), wake: false },
     });
     prep.failRemove = true;
     await sup.endRunByEngine(runId);

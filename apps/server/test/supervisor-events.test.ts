@@ -606,23 +606,15 @@ describe("supervisor events (Plan 7a)", () => {
       expect(ended(seen).map((e) => e.endedBy)).toEqual(["operator"]);
     });
 
-    it("leaves a blocked note when a completed run's worktree cannot be removed", async () => {
+    it("keeps the seat's tree, and tries no removal, when a completed run ends", async () => {
       const { sup, seen, runId, log } = await idleRun();
       store.setRunLoop(runId, { ...NEW_LOOP, phase: "done", prNumber: 7 });
-      prep.failRemove = true;
+      prep.failRemove = true; // a removal would fail: none is tried
       await sup.endRunByEngine(runId);
       expect(ended(seen)).toHaveLength(1);
       expect(store.run(runId)).toMatchObject({ status: "ok", endedBy: "engine" });
-      expect(store.notes()).toEqual([
-        expect.objectContaining({
-          key: `cleanup:${runId}`,
-          kind: "blocked",
-          runId,
-          seatId: "guido-1",
-          repoId: "mc",
-        }),
-      ]);
-      expect(log.mock.calls.some((c) => c[0].includes("could not remove"))).toBe(true);
+      expect(store.notes()).toEqual([]);
+      expect(log.mock.calls.some((c) => c[0].includes("could not remove"))).toBe(false);
       expect(existsSync(join(root, "mc-crew", "guido-1-tree"))).toBe(true);
     });
 

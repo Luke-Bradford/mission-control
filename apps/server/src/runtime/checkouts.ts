@@ -1732,7 +1732,6 @@ async function moveSeatTree(m: {
   inClone: (args: string[], timeoutMs?: number) => Promise<string>;
   common: string;
   path: string;
-  worktreesRoot: string;
   branch: string;
   baseSha: string;
   handoff: boolean;
@@ -1878,7 +1877,6 @@ export async function prepareCheckout(
         inClone,
         common,
         path,
-        worktreesRoot: i.worktreesRoot,
         branch,
         baseSha,
         handoff: i.handoff !== undefined,
@@ -2058,12 +2056,13 @@ export async function resumeSeatCheckout(
   },
   path: string,
   branch: string,
-  runInstall: InstallRunner = execFileP,
 ): Promise<Pick<Checkout, "branch" | "path" | "gitDir">> {
   if (path !== seatTreePath(i.worktreesRoot, i.sessionId, i.seatId)) {
     return existingCheckout(i.checkout, path, branch);
   }
-  const { common, inClone, baseSha } = await fetchBaseAs(i, `${i.seatId}-tree`);
+  const common = await cloneGitDir(i.checkout, i.peers);
+  const inClone = (args: string[], timeoutMs?: number) =>
+    crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
   const gitDir = await adminDirOf(common, path);
   if (gitDir === null) throw new CheckoutError("path", `${path} is not this run's checkout`);
   const w = (args: string[]) => crewGit(path, args, common, { gitDir });
@@ -2080,35 +2079,10 @@ export async function resumeSeatCheckout(
       ]),
     );
     if (!local) throw new CheckoutError("path", `${branch} is gone; it was not recreated`);
-    await moveSeatTree({
-      w,
-      inClone,
-      common,
-      path,
-      worktreesRoot: i.worktreesRoot,
-      branch,
-      baseSha,
-      handoff: true,
-    });
+    // the branch exists, so no base is needed; dependencies come back in `reinstallTrimmed`
+    await moveSeatTree({ w, inClone, common, path, branch, baseSha: "", handoff: true });
   }
-  const rev = `refs/heads/${branch}`;
-  await installReusedPnpm(
-    {
-      checkout: i.checkout,
-      common,
-      inClone,
-      path,
-      rev,
-      base: baseSha,
-      compare: true,
-      subject: `branch ${branch}`,
-      name: branch,
-      worktreesRoot: i.worktreesRoot,
-      state: join(i.worktreesRoot, INSTALL_STATE_DIR, i.sessionId, basename(path)),
-    },
-    runInstall,
-  );
-  return { branch, path, gitDir };
+  return existingCheckout(i.checkout, path, branch);
 }
 
 /**
@@ -2127,8 +2101,22 @@ export async function reinstallTrimmed(
   branch: string,
   runInstall: InstallRunner = execFileP,
 ): Promise<boolean> {
-  if (await succeeds(lstat(join(path, PNPM_TOOL.installDir)))) return false;
+  const state = isSeatTree(path)
+    ? join(i.worktreesRoot, INSTALL_STATE_DIR, i.sessionId, basename(path))
+    : undefined;
+  const hasModules = await succeeds(lstat(join(path, PNPM_TOOL.installDir)));
+  if (hasModules && state === undefined) return false;
   if (!(await succeeds(lstat(join(path, PNPM_TOOL.lockfile))))) return false;
+  if (hasModules && state !== undefined) {
+    // A seat's moved tree keeps its install: it is reinstalled only when the inputs differ from
+    // the ones it was made from, judged here from the clone's objects with no network.
+    const common = await cloneGitDir(i.checkout, i.peers);
+    const here = await installInputsHash(
+      (args) => crewGit(i.checkout, args, common, { gitDir: common }),
+      `refs/heads/${branch}`,
+    ).catch(() => null);
+    if (here !== null && here === (await readInstallState(state))) return false;
+  }
   const { common, inClone, baseSha } = await fetchBaseAs(i, branch);
   const gitDir = await adminDirOf(common, path);
   if (gitDir === null) throw new CheckoutError("path", `${path} is not this run's checkout`);
@@ -2146,6 +2134,7 @@ export async function reinstallTrimmed(
       subject,
       name: branch,
       worktreesRoot: i.worktreesRoot,
+      ...(state === undefined ? {} : { state }),
     },
     runInstall,
   );
