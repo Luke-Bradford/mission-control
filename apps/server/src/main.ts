@@ -37,8 +37,8 @@ import {
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
-import { ChangeBus } from "./bus.ts";
 import { createBugEscapeCollector } from "./bug-escapes/sweep.ts";
+import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
 import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
 import { createFileContext } from "./code-health/file-context.ts";
