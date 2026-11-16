@@ -507,6 +507,7 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    bugEscapes: [],
     improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
       subject: name,
