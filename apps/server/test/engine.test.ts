@@ -160,7 +160,7 @@ import {
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
-import { openWasteAlarms, reviewsHeld, syncWasteAlarms } from "../src/spend/waste.ts";
+import { reviewsHeld, syncWasteAlarms } from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
