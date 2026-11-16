@@ -3082,9 +3082,9 @@ export class Store {
   silenceAlarmsBudgetStopped(): boolean {
     return (
       this.db
-          .prepare(
-            "SELECT 1 FROM runs WHERE ended_at IS NULL AND json_extract(loop, '$.parked.kind') = 'budget' LIMIT 1",
-          )
+        .prepare(
+          "SELECT 1 FROM runs WHERE ended_at IS NULL AND json_extract(loop, '$.parked.kind') = 'budget' LIMIT 1",
+        )
         .get() !== undefined
     );
   }
