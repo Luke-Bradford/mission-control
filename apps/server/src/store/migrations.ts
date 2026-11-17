@@ -10,7 +10,7 @@ export const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 /** Tables an older release made and this one does not use; an existing database drops them. */
-const RETIRED_TABLES = ["run_handoffs"];
+const RETIRED_TABLES = ["run_handoffs", "ticket_waits"];
 
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
