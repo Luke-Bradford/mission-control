@@ -342,9 +342,13 @@ export interface Telemetry {
       projectedExhaustionAt?: number | null;
       resets: { at: number; resetAt: number; cause: string }[];
     }[];
-    /** The board and run facts used to plot a ticket's cycle in hours. Null means that fact was not observed. */
+    /** The board and run facts used to plot a ticket's cycle in hours, for the last 14 days whatever the range. Null means that fact was not observed. */
     tickets: {
       ticket: string;
+      /** The board card's title, or null when the board no longer holds the card. */
+      title: string | null;
+      /** The board Size, or null when the board has none. */
+      size: string | null;
       readyAt: number | null;
       startedAt: number | null;
       mergedAt: number | null;
