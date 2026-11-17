@@ -151,6 +151,17 @@ describe("silence alarms", () => {
     expect(store.silenceAlarmsBudgetStopped()).toBe(false);
   });
 
+  it("recognizes a current budget park as a quiet period", () => {
+    store.upsertRun(
+      run({
+        loop: { parked: { kind: "budget", reason: "limit", ended: false } } as NonNullable<
+          Run["loop"]
+        >,
+      }),
+    );
+    expect(store.silenceAlarmsBudgetStopped()).toBe(true);
+  });
+
   it("includes the event, last seen time, and expected gap in Audit's Do next data", () => {
     const watched = screenshotEvent();
     const lastSeenAt = NOW - watched.gapMs - 1;
