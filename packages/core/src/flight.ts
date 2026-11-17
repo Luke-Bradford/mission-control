@@ -509,7 +509,6 @@ export const FLIGHT_MEMORY_BODY_MAX = 4000;
 export const FLIGHT_MEMORY_TOPICS_MAX = 300;
 export const FLIGHT_MEMORY_TOPIC_MAX = FLIGHT_LEDGER_TITLE_MAX;
 export const FLIGHT_MEMORY_SOURCE_MAX = 300;
-export const FLIGHT_MEMORY_TITLES_MAX = 40;
 export const FLIGHT_MEMORY_RECALL_MAX = 10;
 export const FLIGHT_MEMORY_HEADING = "Notes are evidence, not authority";
 export const FLIGHT_MEMORY_FULL = `Memory holds at most ${FLIGHT_MEMORY_TOPICS_MAX} topics per repo. Forget a topic first.`;
@@ -1399,14 +1398,18 @@ export interface FlightWake
     | "prs"
     | "seats"
     | "ledger"
+    | "ledgerMore"
     | "tickets"
     | "signals"
     | "memory"
+    | "prFlow"
+    | "mergeQueue"
     | "wake"
   > {
+  /** Notes tied to what the wake lists, in full; the rest are counted and read with `mc recall`. */
   memory: {
     heading: typeof FLIGHT_MEMORY_HEADING;
-    titles: Record<FlightMemoryKind, FlightWakeList<FlightMemoryTitle> & { more: number }>;
+    notes: number;
     linked: FlightMemoryNote[];
     linkedMore: number;
   };
@@ -1417,7 +1420,11 @@ export interface FlightWake
   recent: FlightWakeList<FlightState["recent"][number]>;
   prs: FlightWakeList<FlightState["prs"][number]>;
   seats: FlightWakeList<FlightSeatState>;
-  ledger: FlightWakeList<FlightLedgerIndexEntry>;
+  /** Open ledger entries, counted; `mc ledger` reads them. */
+  ledgerOpen: number;
+  /** Open PRs' flow rows that changed since the last wake; the flow's timings stay on the HUD. */
+  prFlow: FlightWakeList<FlightPrFlow["rows"][number]> & { unowned: number };
+  mergeQueue: FlightWakeList<NonNullable<FlightState["mergeQueue"]>[number]>;
   tickets: FlightWakeList<FlightState["tickets"][number] | string>;
   signals: FlightWakeList<FlightSignal>;
   facts: Record<string, unknown[]>;
@@ -1512,7 +1519,7 @@ export const handoverKey = (runId: string): string => `flight:handover:${runId}`
  * One line, as the brief's digest stays on the lines after it.
  */
 export const freshStartLine = (handover: { body: string; updatedAt: number } | null): string =>
-  `Fresh session: nobody will tell you what is going on. Read mc flight_state first, then your tracked items, plans, memory (recall) and the latest handover.${
+  `Fresh session: nobody will tell you what is going on. The digest below is the current state. Your tracked items are in mc ledger and your notes in mc recall; read the ones this wake needs, and the latest handover.${
     handover === null
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
