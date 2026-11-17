@@ -427,6 +427,25 @@ export interface Telemetry {
     /** Mean commits per finished, looped, non-review crew run started over FLOW_DAYS; null when none. */
     commitsPerRun?: number | null;
   };
+  /**
+   * FLOW_DAYS local days, oldest first, whatever range was asked for; zeros kept for a quiet day.
+   * Counts, so the reader can total several days before dividing: green over ci, first pass over
+   * reviewed, roundsSum over reviewed.
+   */
+  quality14?: {
+    /** Local YYYY-MM-DD. */
+    day: string;
+    /** Merged PRs that day whose first-push CI is known. */
+    ciPrs: number;
+    /** Of those, first push passing. */
+    ciGreenPrs: number;
+    /** Merged PRs that day with a reported review. */
+    reviewedPrs: number;
+    /** Of those, round 1 had no blocking findings. */
+    firstPassPrs: number;
+    /** Sum of each reviewed PR's last review round. */
+    roundsSum: number;
+  }[];
   /** TELEMETRY_POINTS points over the range, tokens per minute. */
   tokensPerMinute: AgentSeries[];
   /** The last LIVE_MINUTES minutes, oldest first, from the digests' minute buckets. */

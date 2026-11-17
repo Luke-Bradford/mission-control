@@ -486,9 +486,13 @@ export async function main(): Promise<void> {
               return { stop: async () => await stopPreview(child) };
             },
           }),
-          render: (origin, path, colorScheme, signal) => {
+          render: (origin, path, colorScheme, signal, operatorToken) => {
             const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, { colorScheme, signal });
+            return renderHudInHelper(guard.page(path), guard, {
+              colorScheme,
+              signal,
+              ...(operatorToken === undefined ? {} : { operatorToken }),
+            });
           },
           renderDemo: (origin, path, viewport, signal) => {
             const guard = hudRenderRequest(origin);

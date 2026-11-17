@@ -5,12 +5,12 @@ import {
   type Telemetry as TelemetryData,
   type TestLockState,
 } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RESOURCES } from "../src/data.ts";
-import { kTokens, narrowDay } from "../src/fmt.ts";
+import { narrowDay } from "../src/fmt.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
-import { setSelectedAgent } from "../src/shell/selection.ts";
+import { type TelemetryTab, type TelemetryView, telemetryPath } from "../src/router.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { NOT_TRACKED, NOT_TRACKED_TITLE } from "../src/telemetry/common.ts";
 import { Kpis } from "../src/telemetry/Kpis.tsx";
@@ -225,9 +225,9 @@ function stub(data: TelemetryData = tel(), config: ConfigView = CFG, machine?: u
     "/api/telemetry?range=6h": data,
     "/api/telemetry?range=24h": data,
     "/api/telemetry?range=7d": data,
-    "/api/telemetry?range=6h&agent=studio": data,
-    "/api/telemetry?range=6h&account=codex-main": data,
-    "/api/telemetry?range=6h&agent=studio&account=codex-main": data,
+    "/api/telemetry?range=24h&agent=studio": data,
+    "/api/telemetry?range=24h&account=codex-main": data,
+    "/api/telemetry?range=24h&agent=studio&account=codex-main": data,
     "/api/config": config,
     "/api/metrics": METRICS_VIEW,
   });
@@ -235,19 +235,45 @@ function stub(data: TelemetryData = tel(), config: ConfigView = CFG, machine?: u
 
 const panel = (id: string): HTMLElement => document.getElementById(id) as HTMLElement;
 
+/** Open the page on a tab, as a deep link does. */
+function open(tab: TelemetryTab, view: TelemetryView = "charts") {
+  window.history.replaceState(null, "", telemetryPath(tab, view));
+}
+
+/** Render the page on a tab and wait until the tab's telemetry has loaded. */
+async function show(tab: TelemetryTab, view: TelemetryView = "charts") {
+  open(tab, view);
+  const view_ = render(<Telemetry />);
+  await settled();
+  return view_;
+}
+
+/** The tab's telemetry has answered: the tab panel is no longer busy. */
+const settled = () =>
+  waitFor(() =>
+    expect(document.getElementById("telemetry-tabpanel")?.getAttribute("aria-busy")).toBe("false"),
+  );
+
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
+  window.history.replaceState(null, "", "/telemetry");
 });
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
 });
 
-async function loaded(data?: TelemetryData, config?: ConfigView, machine?: unknown) {
+async function loaded(
+  data?: TelemetryData,
+  config?: ConfigView,
+  machine?: unknown,
+  tab: TelemetryTab = "cost",
+  mode: TelemetryView = "charts",
+) {
   const fetch = stub(data, config, machine);
-  const view = render(<Telemetry />);
-  await screen.findByText("61.2k");
+  const view = await show(tab, mode);
   return { fetch, ...view };
 }
 
@@ -261,11 +287,11 @@ describe("Telemetry refetch", () => {
       release = r;
     });
     fetch.mockImplementation(async (...a: unknown[]) => {
-      if (a[0] === "/api/telemetry?range=24h") await gate;
+      if (a[0] === "/api/telemetry?range=6h") await gate;
       return answer(...a);
     });
     fireEvent.click(
-      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "24h" }),
+      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "6h" }),
     );
     await waitFor(() => expect(document.querySelectorAll(".kpi.live")).toHaveLength(0));
     expect(document.querySelectorAll(".nowc.live")).toHaveLength(0);
@@ -281,13 +307,13 @@ describe("Telemetry refetch", () => {
       release = r;
     });
     fetch.mockImplementation(async (...a: unknown[]) => {
-      if (a[0] === "/api/telemetry?range=24h") await gate;
+      if (a[0] === "/api/telemetry?range=6h") await gate;
       return answer(...a);
     });
     const page = document.getElementById("page-telemetry") as HTMLElement;
     expect(page.classList.contains("refetching")).toBe(false);
     fireEvent.click(
-      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "24h" }),
+      within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "6h" }),
     );
     await waitFor(() => expect(page.classList.contains("refetching")).toBe(true));
     expect(screen.getByText("61.2k")).toBeTruthy();
@@ -298,25 +324,29 @@ describe("Telemetry refetch", () => {
 });
 
 describe("Telemetry toolbar", () => {
-  it("uses h2 headings for its top-level data groups", async () => {
+  it("names the tab it shows and, on an unbuilt tab, says what is coming over the current panels", async () => {
     await loaded();
-    for (const name of ["Flow of work", "Agents", "Capacity", "Cost"]) {
-      expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
-    }
-  });
-
-  it("asks for 6h by default and the picked range on a switch", async () => {
-    const { fetch } = await loaded();
-    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=6h", expect.anything());
-    const range = screen.getByRole("group", { name: "Range" });
-    expect(within(range).getByRole("button", { name: "6h" }).getAttribute("aria-pressed")).toBe(
+    expect(screen.getByRole("tab", { name: "Cost and tokens" }).getAttribute("aria-selected")).toBe(
       "true",
     );
-    fireEvent.click(within(range).getByRole("button", { name: "24h" }));
-    await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=24h", expect.anything()),
-    );
+    screen.getByRole("heading", { level: 2, name: "Cost and tokens is coming" });
+    // the current panels stay under the note, so nothing disappears meanwhile
+    for (const id of ["tTok", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"])
+      expect(panel(id)).toBeTruthy();
+  });
+
+  it("asks for 24h by default and the picked range on a switch", async () => {
+    const { fetch } = await loaded();
+    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=24h", expect.anything());
+    const range = screen.getByRole("group", { name: "Range" });
     expect(within(range).getByRole("button", { name: "24h" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    fireEvent.click(within(range).getByRole("button", { name: "6h" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=6h", expect.anything()),
+    );
+    expect(within(range).getByRole("button", { name: "6h" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
   });
@@ -348,12 +378,15 @@ describe("scoped telemetry", () => {
     const { fetch } = await loaded();
     fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "studio" } });
     await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=6h&agent=studio", expect.anything()),
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/telemetry?range=24h&agent=studio",
+        expect.anything(),
+      ),
     );
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "codex-main" } });
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
-        "/api/telemetry?range=6h&agent=studio&account=codex-main",
+        "/api/telemetry?range=24h&agent=studio&account=codex-main",
         expect.anything(),
       ),
     );
@@ -362,12 +395,12 @@ describe("scoped telemetry", () => {
   it("choosing All again drops the Agent or Account filter and shows the unscoped numbers", async () => {
     const scoped = tel({ today: { ...tel().today, tokens: 42_100 } });
     stubFetch({
-      [RESOURCES.telemetry("6h").path]: tel(),
-      [RESOURCES.telemetry("6h", "studio").path]: scoped,
-      [RESOURCES.telemetry("6h", "", "codex-main").path]: scoped,
+      [RESOURCES.telemetry("24h").path]: tel(),
+      [RESOURCES.telemetry("24h", "studio").path]: scoped,
+      [RESOURCES.telemetry("24h", "", "codex-main").path]: scoped,
       "/api/config": CFG,
     });
-    render(<Telemetry />);
+    await show("cost");
     await screen.findByText("61.2k");
     for (const [label, value] of [
       ["Agent", "studio"],
@@ -438,7 +471,12 @@ describe("KPI tiles", () => {
   });
 
   it("Commits shows today’s count with commits per run in its title", async () => {
-    const a = await loaded(tel({ today: { ...tel().today, commits: 7 }, quality: Q }));
+    const a = await loaded(
+      tel({ today: { ...tel().today, commits: 7 }, quality: Q }),
+      undefined,
+      undefined,
+      "throughput",
+    );
     expect(kpi(a.container, "Commits")).toEqual({
       value: "7",
       detail: "today",
@@ -448,6 +486,9 @@ describe("KPI tiles", () => {
     a.unmount();
     const b = await loaded(
       tel({ today: { ...tel().today, commits: 0 }, quality: { ...Q, commitsPerRun: null } }),
+      undefined,
+      undefined,
+      "throughput",
     );
     expect(kpi(b.container, "Commits")).toMatchObject({
       value: "0",
@@ -456,7 +497,10 @@ describe("KPI tiles", () => {
   });
 
   it("a tile with no data source says not tracked yet", async () => {
-    const { container } = await loaded();
+    stub();
+    const { container } = render(<Kpis t={tel()} />);
+    // the stub serves no lock history, so that read fails and its tile is not tracked
+    await waitFor(() => expect(kpi(container, "Lock wait").value).toBe(NOT_TRACKED));
     for (const label of ["Commits", "Lock wait", "Your response"]) {
       expect(kpi(container, label)).toMatchObject({
         value: NOT_TRACKED,
@@ -464,16 +508,20 @@ describe("KPI tiles", () => {
         nt: true,
       });
     }
-    const notTracked = [
-      ...panel("tQual").querySelectorAll(".stat2 b"),
-      ...panel("tCapcom").querySelectorAll(".stat2 b"),
-    ].filter((b) => b.textContent === NOT_TRACKED);
-    expect(notTracked).toHaveLength(9);
+  });
+
+  it("the quality panel says which of its figures are not tracked yet", async () => {
+    await loaded(undefined, undefined, undefined, "quality");
+    const notTracked = [...panel("tQual").querySelectorAll(".stat2 b")].filter(
+      (b) => b.textContent === NOT_TRACKED,
+    );
+    expect(notTracked).toHaveLength(5);
     for (const b of notTracked) expect(b.classList.contains("nt")).toBe(true);
   });
 
   it("computed tiles show today's numbers; the others show — with the phase that brings them", async () => {
-    const { container } = await loaded();
+    stub();
+    const { container } = render(<Kpis t={tel()} />);
     await screen.findByText("~$24.31");
     const tiles = [...container.querySelectorAll(".kpi")].map((k) => ({
       label: k.querySelector(".lbl")?.textContent,
@@ -508,7 +556,8 @@ describe("KPI tiles", () => {
   });
 
   it("names the session a registry tile follows, since Telemetry's own figures ignore it", async () => {
-    const { container } = await loaded();
+    stub();
+    const { container } = render(<Kpis t={tel()} />);
     act(() => setSession("shop-app-session"));
     const labels = () =>
       [...container.querySelectorAll(".kpi .lbl")].map((l) => l.textContent ?? "");
@@ -533,7 +582,7 @@ describe("KPI tiles", () => {
         await new Promise(() => {});
       return answer(...a);
     });
-    const { container } = render(<Telemetry />);
+    const { container } = render(<Kpis t={undefined} />);
     await waitFor(() => expect(container.querySelector(".kpi")).toBeTruthy());
     expect(["Commits", "Lock wait", "Your response"].map((l) => kpi(container, l).value)).toEqual([
       "—",
@@ -546,7 +595,7 @@ describe("KPI tiles", () => {
 describe("Flow of work", () => {
   it("throughput: 14 bars, the last in the accent", async () => {
     const data = tel();
-    await loaded(data);
+    await loaded(data, undefined, undefined, "throughput");
     const svg = within(panel("tThru")).getByRole("img");
     expect(svg.getAttribute("aria-label")).toBe(
       `PRs merged per day: ${data.throughput
@@ -562,7 +611,7 @@ describe("Flow of work", () => {
   });
 
   it("cycle time: a row per size, — where none, and the measurement note", async () => {
-    await loaded();
+    await loaded(undefined, undefined, undefined, "throughput");
     const p = panel("tCycle");
     screen.getByText("Ready to Done, p50 and p85 hours by size · last 14 days");
     expect([...p.querySelectorAll(".hrow")].map((r) => r.textContent)).toEqual([
@@ -596,6 +645,9 @@ describe("Flow of work", () => {
           excluded: 0,
         },
       }),
+      undefined,
+      undefined,
+      "throughput",
     );
     const widths = [...panel("tCycle").querySelectorAll<HTMLElement>(".hrow .track i")].map(
       (i) => i.style.width,
@@ -604,7 +656,7 @@ describe("Flow of work", () => {
   });
 
   it("quality: CI green on first push rounded; the rest — with their reasons", async () => {
-    await loaded();
+    await loaded(undefined, undefined, undefined, "quality");
     const stats = [...panel("tQual").querySelectorAll(".stat2")].map((s) => [
       s.querySelector("span")?.textContent,
       s.querySelector("b")?.textContent,
@@ -621,7 +673,7 @@ describe("Flow of work", () => {
   });
 
   it("quality: review rounds and first-pass rate show the hub's numbers", async () => {
-    const a = await loaded(tel({ quality: Q }));
+    const a = await loaded(tel({ quality: Q }), undefined, undefined, "quality");
     expect(quality()).toEqual(
       expect.arrayContaining([
         ["review rounds per PR", "1.5", "2 merged PRs with a review"],
@@ -638,6 +690,9 @@ describe("Flow of work", () => {
           retroFindingsPerPr: null,
         },
       }),
+      undefined,
+      undefined,
+      "quality",
     );
     const none = "No merged PRs with a review in the last 14 days.";
     expect(quality()).toEqual(
@@ -648,18 +703,12 @@ describe("Flow of work", () => {
     );
   });
 
-  it("You as CAPCOM: omitted fields are not tracked", async () => {
-    await loaded();
-    const stats = [...panel("tCapcom").querySelectorAll(".stat2")];
-    expect(stats.map((s) => s.querySelector("span")?.textContent)).toEqual([
-      "decisions today",
-      "median response",
-      "slowest 10%",
-      "runs you stopped",
-    ]);
-    for (const s of stats) {
-      expect(s.querySelector("b")?.textContent).toBe(NOT_TRACKED);
-      expect(s.querySelector("b")?.getAttribute("title")).toBe(NOT_TRACKED_TITLE);
+  it("Your response figures on Crew read — when the hub sends none", async () => {
+    await loaded(undefined, undefined, undefined, "crew");
+    const summary = within(screen.getByRole("region", { name: "Crew summary" }));
+    for (const label of ["Median response", "Slowest 10%", "Runs you stopped"]) {
+      const stat = summary.getByText(label).closest(".stat") as HTMLElement;
+      expect(within(stat).getByRole("button").textContent).toBe("—");
     }
   });
 });
@@ -676,9 +725,9 @@ describe("Agents", () => {
       "codex-ta",
     ]);
     fireEvent.click(within(p).getByRole("button", { name: "History" }));
-    within(p).getByText("history · last 6h, by agent");
+    within(p).getByText("history · last 24h, by agent");
     expect(within(p).getByRole("img").getAttribute("aria-label")).toBe(
-      "Tokens per minute, last 6h: shop-app-ta latest 1.2k, peak 1.2k; studio latest 300, peak 300; codex-ta latest 50, peak 50",
+      "Tokens per minute, last 24h: shop-app-ta latest 1.2k, peak 1.2k; studio latest 300, peak 300; codex-ta latest 50, peak 50",
     );
   });
 
@@ -689,11 +738,16 @@ describe("Agents", () => {
     expect([...panel("tTok").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "studio",
     ]);
-    expect(panel("tUtil").querySelectorAll(".hrow")).toHaveLength(1);
-    within(panel("tTurn")).getByText("studio · latest run");
-    expect([...panel("tSubs").querySelectorAll("tbody tr")]).toHaveLength(1);
     // studio has no totals row in range
-    within(panel("tTotals")).getByText("No usage for this filter in the last 6h.");
+    within(panel("tTotals")).getByText("No usage for this filter in the last 24h.");
+  });
+
+  it("the Agent filter on Crew limits time, subagents and the summary to that agent", async () => {
+    await loaded(undefined, undefined, undefined, "crew");
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "studio" } });
+    expect(panel("tUtil").querySelectorAll("li.row")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    expect([...panel("tSubs").querySelectorAll("tbody tr")]).toHaveLength(1);
   });
 
   it("the Account filter limits agents to the account's loops, quota and totals to the account", async () => {
@@ -713,57 +767,31 @@ describe("Agents", () => {
     [1, "of 1 agent"],
     [3, "of 3 agents"],
   ])("counts the agents behind a filtered working figure: %s", async (agents, detail) => {
-    const { container } = await loaded(tel({ today: { ...tel().today, agents } }));
-    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "shop-app-ta" } });
+    stub();
+    const { container } = render(<Kpis t={tel({ today: { ...tel().today, agents } })} filtered />);
     await screen.findByText("Working · now · filtered");
     expect(kpi(container, "Working · now · filtered").detail).toBe(detail);
   });
 
-  it("where agent time goes: four labelled shares, rounded for display", async () => {
-    await loaded();
-    const row = panel("tUtil").querySelector(".hrow") as HTMLElement;
-    expect(row.textContent).toBe("shop-app-ta64%");
-    expect([...row.querySelectorAll(".ubar i")].map((i) => i.getAttribute("title"))).toEqual([
-      "working 64%",
-      "waiting (lock, reviews) 8%",
-      "blocked, parked or stalled 6%",
-      "idle 22%",
+  it("where agent time goes: four shares per seat, each on a shape, rounded for display", async () => {
+    await loaded(undefined, undefined, undefined, "crew");
+    const row = panel("tUtil").querySelector("li.row") as HTMLElement;
+    expect(row.querySelector("a")?.textContent).toBe("64% working");
+    const bar = row.querySelector(".bar") as HTMLElement;
+    expect(bar.getAttribute("aria-label")).toBe(
+      "shop-app-ta: Working 64% · Waiting 8% · Parked or stalled 6% · Idle 22%",
+    );
+    expect(bar.tabIndex).toBe(0);
+    expect([...panel("tUtil").querySelectorAll(".readout .nm")].map((x) => x.textContent)).toEqual([
+      "Working",
+      "Waiting",
+      "Parked or stalled",
+      "Idle",
     ]);
-    expect([...panel("tUtil").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
-      "working",
-      "waiting (lock, reviews)",
-      "blocked, parked or stalled",
-      "idle",
-    ]);
-  });
-
-  it("tokens per turn: the selected agent's latest run, else the first", async () => {
-    const data = tel();
-    await loaded(data);
-    within(panel("tTurn")).getByText("shop-app-ta · latest run");
-    // two turns × three kinds
-    expect(panel("tTurn").querySelectorAll("path.bar")).toHaveLength(6);
-    expect([...panel("tTurn").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
-      "input",
-      "output",
-      "cache read",
-    ]);
-    const svg = within(panel("tTurn")).getByRole("img");
-    const turns = data.turnUsage[0]?.turns ?? [];
-    const hits = svg.querySelectorAll("rect.hit");
-    turns.forEach((turn, i) => {
-      fireEvent.pointerEnter(hits[i] as Element);
-      expect(panel("tTurn").querySelector(".tip")?.textContent).toBe(
-        `turn ${i + 1}cache read${kTokens(turn.cacheRead)}output${kTokens(turn.output)}input${kTokens(turn.input)}`,
-      );
-    });
-    setSelectedAgent("codex-ta");
-    await within(panel("tTurn")).findByText("codex-ta · latest run");
-    within(panel("tTurn")).getByText("No turns recorded for codex-ta yet.");
   });
 
   it("tool latency and subagents tables", async () => {
-    await loaded();
+    await loaded(undefined, undefined, undefined, "crew", "table");
     const lat = panel("tLat");
     expect([...lat.querySelectorAll("th")].map((t) => t.textContent)).toEqual([
       "Tool",
@@ -800,7 +828,7 @@ describe("Capacity and cost", () => {
     expect(p.querySelectorAll("path.line")).toHaveLength(2);
     expect(p.querySelector("line.limit")).not.toBeNull();
     expect([...p.querySelectorAll("text")].map((t) => t.textContent)).toEqual(
-      expect.arrayContaining(["0%", "50%", "100%", "-6h", "now"]),
+      expect.arrayContaining(["0%", "50%", "100%", "-24h", "now"]),
     );
     // Room above the limit line, but no tick past 100 %.
     expect([...p.querySelectorAll("text")].map((t) => t.textContent)).not.toContain("110%");
@@ -881,11 +909,12 @@ describe("Capacity and cost", () => {
       ],
     });
     stubFetch({
-      [RESOURCES.telemetry("6h").path]: data,
+      [RESOURCES.telemetry("24h").path]: data,
       [RESOURCES.config.path]: CFG,
       [RESOURCES.metrics().path]: METRICS_VIEW,
       [RESOURCES.limits.path]: [limit5h({ alertAt: 85, stopAt: 95 })],
     });
+    open("cost");
     render(<Telemetry />);
     await screen.findByText("61.2k");
     const quota = panel("tQuota");
@@ -899,7 +928,7 @@ describe("Capacity and cost", () => {
       quota: [{ accountId: "codex-main", window: "7d", points: [{ at: NOW - MIN, pct: 41 }] }],
     });
     stubFetch({
-      [RESOURCES.telemetry("6h").path]: data,
+      [RESOURCES.telemetry("24h").path]: data,
       [RESOURCES.config.path]: CFG,
       [RESOURCES.metrics().path]: METRICS_VIEW,
       [RESOURCES.limits.path]: [
@@ -911,6 +940,7 @@ describe("Capacity and cost", () => {
         }),
       ],
     });
+    open("cost");
     render(<Telemetry />);
     await screen.findByText("61.2k");
     const quota = panel("tQuota");
@@ -927,7 +957,7 @@ describe("Capacity and cost", () => {
 
   it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
     const data = tel();
-    await loaded(data);
+    await loaded(data, undefined, undefined, "machine");
     const p = panel("tMach");
     expect(p.querySelectorAll("path.line")).toHaveLength(2);
     expect([...p.querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
@@ -943,6 +973,10 @@ describe("Capacity and cost", () => {
       expect(p.querySelector(".tip")?.textContent).toContain(`Memory${percent(sample.memPct)}`);
     });
     within(panel("tLock")).getByText(NOT_TRACKED);
+  });
+
+  it("loop-step spend is not tracked when the hub sends none", async () => {
+    await loaded();
     within(panel("tStepBars")).getByText(NOT_TRACKED);
   });
 
@@ -970,7 +1004,7 @@ describe("Capacity and cost", () => {
     });
 
     it("normal: swap used of total and disk free, no warning", async () => {
-      await loaded(undefined, undefined, view());
+      await loaded(undefined, undefined, view(), "machine");
       const p = panel("tMach");
       await waitFor(() => expect(p.textContent).toContain("Swap 3.5 GB (22% of RAM)"));
       expect(p.textContent).toContain("Disk 40 GB free");
@@ -978,7 +1012,7 @@ describe("Capacity and cost", () => {
     });
 
     it("constrained: a warn Pill carries the reason", async () => {
-      await loaded(undefined, undefined, view({ warning: "swap 21.5 of 22.5 GB used" }));
+      await loaded(undefined, undefined, view({ warning: "swap 21.5 of 22.5 GB used" }), "machine");
       const pill = await waitFor(() => {
         const el = panel("tMach").querySelector<HTMLElement>(".pill");
         if (!el) throw new Error("no pill");
@@ -996,6 +1030,7 @@ describe("Capacity and cost", () => {
         view({
           latest: { ...latest, swapUsedBytes: null, swapTotalBytes: null, diskFreeBytes: null },
         }),
+        "machine",
       );
       const p = panel("tMach");
       await waitFor(() => expect(p.textContent).toContain("Swap —"));
@@ -1039,7 +1074,7 @@ describe("Capacity and cost", () => {
     );
     stubFetch({
       [RESOURCES.config.path]: CFG,
-      [RESOURCES.telemetry("6h").path]: tel({
+      [RESOURCES.telemetry("24h").path]: tel({
         tokensByTicket: items.map((item) => ({
           ticket: `${item.repoId}#${item.issueNumber}`,
           tokens: 1000,
@@ -1053,6 +1088,7 @@ describe("Capacity and cost", () => {
         ]),
       ),
     });
+    open("cost");
     render(<Telemetry />);
     await within(panel("tTicketBars")).findByText(items[11]?.title as string);
     const rows = panel("tTicketBars").querySelectorAll(".hrow");
@@ -1072,7 +1108,7 @@ describe("Capacity and cost", () => {
     const item = boardItem({ repoId: "shop-app", issueNumber: 1, title: "Configured ticket" });
     const fetch = stubFetch({
       [RESOURCES.config.path]: { ...CFG, repos: CFG.repos.filter((r) => r.id === "shop-app") },
-      [RESOURCES.telemetry("6h").path]: tel({
+      [RESOURCES.telemetry("24h").path]: tel({
         tokensByTicket: [
           { ticket: "shop-app#1", tokens: 1000, costUsd: null },
           { ticket: "site-builder#2", tokens: 500, costUsd: null },
@@ -1081,6 +1117,7 @@ describe("Capacity and cost", () => {
       }),
       [RESOURCES.boards("shop-app").path]: [item],
     });
+    open("cost");
     render(<Telemetry />);
     await within(panel("tTicketBars")).findByText(item.title);
     expect(panel("tTicketBars").querySelectorAll(".hrow")).toHaveLength(3);
@@ -1106,10 +1143,11 @@ describe("Capacity and cost", () => {
     };
     stubFetch({
       [RESOURCES.config.path]: CFG,
-      [RESOURCES.telemetry("6h").path]: tel(),
+      [RESOURCES.telemetry("24h").path]: tel(),
       [RESOURCES.testLock.path]: lock,
       [RESOURCES.crew.path]: { rows: [seatRow({ id: "inco-1", hudState: "stalled" })] },
     });
+    open("machine");
     render(<Telemetry />);
     const p = within(panel("tLock"));
     const row = (await p.findByText("no output")).closest("tr") as HTMLTableRowElement;
@@ -1131,32 +1169,55 @@ describe("Capacity and cost", () => {
 });
 
 describe("empty and failing telemetry", () => {
-  it("every panel shows its empty state", async () => {
+  it("Crew says nothing ran, instead of empty panels", async () => {
     stub(EMPTY, { ...CFG, loops: [] });
-    render(<Telemetry />);
-    await within(panel("tThru")).findByText("No days to show yet.");
-    within(panel("tTok")).getByText("No tokens in the last 60 minutes.");
-    within(panel("tUtil")).getByText("No agents configured.");
-    within(panel("tTurn")).getByText("No agents configured.");
-    within(panel("tLat")).getByText("No tool calls in the last 6h.");
+    await show("crew");
+    screen.getByText("Nothing ran in the last 24h.");
+    expect(document.getElementById("tCrewState")).toBeNull();
+    // the band still answers, with — for each figure that has none
+    expect(
+      within(screen.getByRole("region", { name: "Health band" })).getAllByRole("link").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("Crew tables show their empty states", async () => {
+    stub(tel({ toolLatency: [], subagents: [] }));
+    await show("crew", "table");
+    within(panel("tLat")).getByText("No tool calls in the last 24h.");
     within(panel("tSubs")).getByText("No subagents spawned today.");
-    within(panel("tQuota")).getByText("No quota readings in the last 6h.");
-    within(panel("tMach")).getByText("No machine samples in the last 6h.");
-    within(panel("tTicketBars")).getByText("No ticket work in the last 6h.");
-    within(panel("tTotals")).getByText("No usage for this filter in the last 6h.");
+  });
+
+  it("every panel on Cost and tokens shows its empty state", async () => {
+    stub(EMPTY, { ...CFG, loops: [] });
+    await show("cost");
+    within(panel("tTok")).getByText("No tokens in the last 60 minutes.");
+    within(panel("tQuota")).getByText("No quota readings in the last 24h.");
+    within(panel("tTicketBars")).getByText("No ticket work in the last 24h.");
+    within(panel("tTotals")).getByText("No usage for this filter in the last 24h.");
+    // the cost tile is the registry's figure, not this page's
+    const costTile = [...document.querySelectorAll(".kpi")].find(
+      (k) => k.querySelector(".lbl")?.textContent === "Cost · today",
+    );
+    expect(costTile).toBeUndefined();
+  });
+
+  it("every panel on Throughput, Quality and Machine shows its empty state", async () => {
+    stub(EMPTY, { ...CFG, loops: [] });
+    await show("throughput");
+    await within(panel("tThru")).findByText("No days to show yet.");
     expect([...panel("tCycle").querySelectorAll(".hrow")].map((r) => r.textContent)).toContain(
       "XS—0 tickets",
     );
+    cleanup();
+    await show("quality");
     const ci = [...panel("tQual").querySelectorAll(".stat2")].at(-1);
     expect(ci?.querySelector("b")?.textContent).toBe("—");
     expect(ci?.querySelector("b")?.getAttribute("title")).toBe(
       "No merged PRs with a known first-push CI result in the last 14 days.",
     );
-    // the cost tile is the registry's figure, not this page's
-    const costTile = [...document.querySelectorAll(".kpi")].find(
-      (k) => k.querySelector(".lbl")?.textContent === "Cost · today",
-    );
-    expect(costTile?.querySelector(".v")?.getAttribute("data-metric")).toBe("cost");
+    cleanup();
+    await show("machine");
+    within(panel("tMach")).getByText("No machine samples in the last 24h.");
   });
 
   it("all-zero tokens show the empty state, not a flat chart", async () => {
@@ -1165,48 +1226,61 @@ describe("empty and failing telemetry", () => {
         liveMinutes: [{ agentId: "shop-app-ta", points: flat(LIVE_MINUTES, 0) }],
       }),
     );
-    render(<Telemetry />);
+    await show("cost");
     await within(panel("tTok")).findByText("No tokens in the last 60 minutes.");
   });
 
-  it("does not invent v2 history from aggregate telemetry", async () => {
-    await loaded();
-    for (const id of ["tCrewState", "tFlow", "tCycleControl", "tQualityTrend", "tCostMerged"]) {
-      expect(panel(id).textContent).toContain("data is not available for the last 6h yet.");
+  it.each([
+    ["crew", ["tCrewState"]],
+    ["throughput", ["tFlow", "tCycleControl", "tForecast"]],
+    ["quality", ["tQualityTrend"]],
+    ["cost", ["tCostMerged"]],
+  ] as const)("does not invent v2 history from aggregate telemetry on %s", async (tab, ids) => {
+    await loaded(undefined, undefined, undefined, tab);
+    for (const id of ids) {
+      expect(panel(id).textContent).toContain("data is not available for the last 24h yet.");
     }
   });
 
-  it("a failed fetch says so", async () => {
+  it("a failed fetch says so, on Crew and on a tab not built yet", async () => {
     stubFetch({ "/api/config": CFG });
-    render(<Telemetry />);
+    await show("crew");
+    screen.getByText("Telemetry did not load.");
+    screen.getByRole("button", { name: "Try again" });
+    cleanup();
+    await show("cost");
     await screen.findByText(/^Could not load telemetry:/);
   });
 });
 
 describe("engine telemetry", () => {
-  it("shows seeded review, CAPCOM, commits and loop-step figures", async () => {
-    const { container } = await loaded(
-      tel({
-        today: { ...tel().today, commits: 7 },
-        quality: Q,
-        capcom: {
-          answered: 11,
-          medianMs: 240000,
-          p90Ms: 1320000,
-          stopped: 2,
-          longest: { agentId: "inco-1", ms: 2280000 },
-          agentWaitMs: 4320000,
-        },
-        tokensByStep: ["plan", "build", "review"].map((step) => ({
-          step: step as "plan" | "build" | "review",
-          tokens: 1000,
-          costUsd: 0.5,
-          runs: 3,
-        })),
-      }),
-    );
-    expect(kpi(container, "Your response").value).toBe("4m 00s");
-    expect(kpi(container, "Commits").value).toBe("7");
+  const ENGINE = () =>
+    tel({
+      today: { ...tel().today, commits: 7 },
+      quality: Q,
+      capcom: {
+        answered: 11,
+        medianMs: 240000,
+        p90Ms: 1320000,
+        stopped: 2,
+        longest: { agentId: "inco-1", ms: 2280000 },
+        agentWaitMs: 4320000,
+      },
+      tokensByStep: ["plan", "build", "review"].map((step) => ({
+        step: step as "plan" | "build" | "review",
+        tokens: 1000,
+        costUsd: 0.5,
+        runs: 3,
+      })),
+    });
+  /** The figure on the stat tile with this label, in the band or the summary row. */
+  const statValue = (label: string): string | null =>
+    (
+      screen.getByText(label, { selector: ".stat-label" }).closest(".stat") as HTMLElement
+    ).querySelector(".stat-value")?.textContent ?? null;
+
+  it("shows seeded review figures and the human wait on Quality", async () => {
+    await loaded(ENGINE(), undefined, undefined, "quality");
     expect(quality()).toEqual(
       expect.arrayContaining([
         ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
@@ -1218,21 +1292,32 @@ describe("engine telemetry", () => {
         ],
       ]),
     );
-    expect([...panel("tCapcom").querySelectorAll("b")].map((x) => x.textContent)).toEqual([
-      "11",
-      "4m 00s",
-      "22m 00s",
-      "2",
-    ]);
-    within(panel("tCapcom")).getByText(
-      "Longest wait today: INCO-1's question, 38m 00s. Agent time spent waiting on you today: 1h 12m.",
-    );
+    expect(statValue("First-pass review")).toBe("50%");
+  });
+
+  it("shows commits on Throughput and loop-step spend on Cost", async () => {
+    const a = await loaded(ENGINE(), undefined, undefined, "throughput");
+    expect(kpi(a.container, "Commits").value).toBe("7");
+    a.unmount();
+    await loaded(ENGINE());
     expect([...panel("tStepBars").querySelectorAll(".hrow")].map((x) => x.textContent)).toEqual([
       "plan1.0k~$0.50 · 3 runs",
       "build1.0k~$0.50 · 3 runs",
       "review1.0k~$0.50 · 3 runs",
     ]);
   });
+
+  it("shows CAPCOM figures in the band and the Crew summary, with the longest wait", async () => {
+    await loaded(ENGINE(), undefined, undefined, "crew");
+    expect(statValue("Your response")).toBe("4m 00s");
+    expect(statValue("Median response")).toBe("4.0");
+    expect(statValue("Slowest 10%")).toBe("22.0");
+    expect(statValue("Runs you stopped")).toBe("2");
+    within(panel("tUtil")).getByText(
+      "Longest wait today: INCO-1's question, 38m 00s. Agent time spent waiting on you today: 1h 12m.",
+    );
+  });
+
   it.each(["running", "stalled"])("shows stored runs and a %s live holder", async (state) => {
     vi.useRealTimers();
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
@@ -1275,6 +1360,7 @@ describe("engine telemetry", () => {
               : null;
       return data ? new Response(JSON.stringify(data)) : answer(...args);
     });
+    open("machine");
     const { container } = render(<Telemetry />);
     await within(panel("tLock")).findByText("freed with its run");
     expect([...panel("tLock").querySelectorAll("th")].map((x) => x.textContent)).toEqual([
@@ -1327,9 +1413,10 @@ describe("ticket scope", () => {
         ],
         firstRunToday: null,
       },
-      [RESOURCES.telemetry("6h").path]: tel(),
-      [RESOURCES.telemetry("6h", "", "", "mission-control#398").path]: EMPTY,
+      [RESOURCES.telemetry("24h").path]: tel(),
+      [RESOURCES.telemetry("24h", "", "", "mission-control#398").path]: EMPTY,
     });
+    open("cost");
     render(<Telemetry />);
     const select = screen.getByLabelText("Ticket") as HTMLSelectElement;
     await waitFor(() =>
@@ -1341,7 +1428,7 @@ describe("ticket scope", () => {
       ]),
     );
     fireEvent.change(select, { target: { value: "mission-control#398" } });
-    await within(panel("tTotals")).findByText("No usage for this filter in the last 6h.");
+    await within(panel("tTotals")).findByText("No usage for this filter in the last 24h.");
     expect(select.value).toBe("mission-control#398");
   });
 
@@ -1349,20 +1436,21 @@ describe("ticket scope", () => {
     const data = tel();
     const routes: Record<string, unknown> = {
       [RESOURCES.config.path]: CFG,
-      "/api/telemetry?range=6h": data,
+      "/api/telemetry?range=24h": data,
     };
     for (const row of data.tokensByTicket) {
-      routes[`/api/telemetry?range=6h&ticket=${encodeURIComponent(row.ticket)}`] = tel({
+      routes[`/api/telemetry?range=24h&ticket=${encodeURIComponent(row.ticket)}`] = tel({
         tokensByTicket: [{ ...row, tokens: 123 }],
         totals: [{ ...(data.totals[0] as TelemetryData["totals"][number]), input: 321 }],
       });
     }
-    routes["/api/telemetry?range=6h&agent=studio"] = data;
-    routes["/api/telemetry?range=6h&agent=studio&ticket=site-builder%2312"] = EMPTY;
-    routes["/api/telemetry?range=6h&agent=studio&account=codex-main"] = data;
-    routes["/api/telemetry?range=6h&agent=studio&account=codex-main&ticket=site-builder%2312"] =
+    routes["/api/telemetry?range=24h&agent=studio"] = data;
+    routes["/api/telemetry?range=24h&agent=studio&ticket=site-builder%2312"] = EMPTY;
+    routes["/api/telemetry?range=24h&agent=studio&account=codex-main"] = data;
+    routes["/api/telemetry?range=24h&agent=studio&account=codex-main&ticket=site-builder%2312"] =
       EMPTY;
     const fetch = stubFetch(routes);
+    open("cost");
     render(<Telemetry />);
     const select = await screen.findByLabelText("Ticket");
     await waitFor(() => expect((select as HTMLSelectElement).options).toHaveLength(3));
@@ -1375,11 +1463,11 @@ describe("ticket scope", () => {
       within(panel("tTotals")).getByText("321");
     }
     fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "studio" } });
-    await within(panel("tTotals")).findByText("No usage for this filter in the last 6h.");
+    await within(panel("tTotals")).findByText("No usage for this filter in the last 24h.");
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "codex-main" } });
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(
-        "/api/telemetry?range=6h&agent=studio&account=codex-main&ticket=site-builder%2312",
+        "/api/telemetry?range=24h&agent=studio&account=codex-main&ticket=site-builder%2312",
         expect.anything(),
       ),
     );
@@ -1392,11 +1480,12 @@ describe("ticket scope", () => {
   it("resets a ticket absent from a new range", async () => {
     stubFetch({
       [RESOURCES.config.path]: CFG,
-      "/api/telemetry?range=6h": tel(),
-      "/api/telemetry?range=6h&ticket=shop-app%233349": tel(),
+      "/api/telemetry?range=24h": tel(),
+      "/api/telemetry?range=24h&ticket=shop-app%233349": tel(),
       "/api/telemetry?range=1h": EMPTY,
       "/api/telemetry?range=1h&ticket=shop-app%233349": EMPTY,
     });
+    open("cost");
     render(<Telemetry />);
     const select = await screen.findByLabelText("Ticket");
     await waitFor(() => expect((select as HTMLSelectElement).options).toHaveLength(3));
@@ -1415,31 +1504,40 @@ it("keeps telemetry controls and wide tables usable on narrow screens", async ()
   expect(readStyle("telemetry/telemetry.css")).toMatch(
     /@media \(max-width: 999px\) \{[^}]*\.tgrid \{[^}]*grid-template-columns: minmax\(0, 1fr\)/,
   );
-  for (const id of ["tLat", "tTotals"]) {
-    expect(panel(id).querySelector("table")?.parentElement?.classList.contains("tw")).toBe(true);
-  }
+  expect(panel("tTotals").querySelector("table")?.parentElement?.classList.contains("tw")).toBe(
+    true,
+  );
+  cleanup();
+  await loaded(undefined, undefined, undefined, "crew", "table");
+  expect(panel("tLat").querySelector("table")?.parentElement?.classList.contains("tw")).toBe(true);
 });
 
-it("preserves unknown time and independently unavailable line and slowest details", async () => {
+it("preserves unknown time on Crew and unavailable line and slowest details", async () => {
   const data = tel();
+  const unknown = tel({
+    utilisation: [
+      { agentId: "shop-app-ta", working: 20, waiting: 10, blocked: 5, idle: 15, unknown: 50 },
+    ],
+    toolLatency: [
+      {
+        ...(data.toolLatency[0] as TelemetryData["toolLatency"][number]),
+        slowest: { detail: null, agentId: "studio", durationMs: 1000 },
+      },
+    ],
+  });
+  await loaded(unknown, undefined, undefined, "crew");
+  expect(panel("tUtil").querySelector(".bar")?.getAttribute("aria-label")).toContain("Unknown 50%");
+  cleanup();
+  await loaded(unknown, undefined, undefined, "crew", "table");
+  within(panel("tLat")).getByText("— (1.0s, studio)");
+  cleanup();
   await loaded(
     tel({
-      utilisation: [
-        { agentId: "shop-app-ta", working: 20, waiting: 10, blocked: 5, idle: 15, unknown: 50 },
-      ],
       totals: [
         { ...(data.totals[0] as TelemetryData["totals"][number]), additions: 0, deletions: null },
       ],
-      toolLatency: [
-        {
-          ...(data.toolLatency[0] as TelemetryData["toolLatency"][number]),
-          slowest: { detail: null, agentId: "studio", durationMs: 1000 },
-        },
-      ],
     }),
   );
-  within(panel("tLat")).getByText("— (1.0s, studio)");
-  expect(panel("tUtil").querySelector('[title="unknown 50%"]')).toBeTruthy();
   within(panel("tTotals")).getByText("+0");
   expect(panel("tTotals").querySelector(".del")?.textContent).toBe("—");
 });

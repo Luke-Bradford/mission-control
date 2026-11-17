@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { OPERATOR_TOKEN_FILE } from "../src/operator.ts";
 import {
   createPrEvidence,
   type EvidenceTarget,
@@ -95,6 +96,42 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
 }
 
 const WEB = ["apps/web/src/board/Card.tsx"];
+
+describe("token-guarded pages", () => {
+  it("renders each side with the token its own hub wrote, and never stores or logs it", async () => {
+    const logs: string[] = [];
+    const seen: { sha: string; token: string | undefined }[] = [];
+    const t = setup({
+      log: (line) => logs.push(line),
+      startSide: async ({ sha, db }) => {
+        // each hub writes its own token beside its database copy, as the real hub does
+        mkdirSync(dirname(db), { recursive: true });
+        writeFileSync(join(dirname(db), OPERATOR_TOKEN_FILE), `token-of-${sha.slice(0, 4)}\n`);
+        return { origin: `http://side/${sha}`, stop: async () => {} };
+      },
+      render: async (origin, _path, scheme, _signal, token) => {
+        const sha = origin.split("/").pop() ?? "";
+        seen.push({ sha, token });
+        // a guarded page shows its data only with the side's own token, else the 401 state
+        return encodePng(
+          token === `token-of-${sha.slice(0, 4)}`
+            ? pageBox(sha, scheme)
+            : fixtureRaster(320, 200, [], [200, 0, 0]),
+        );
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const s of seen) expect(s.token).toBe(`token-of-${s.sha.slice(0, 4)}`);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    // the 401 state is identical on both sides: any difference is the populated page
+    expect(m.pairs.find((p) => p.scheme === "light")?.changedPixels).toBeGreaterThan(0);
+    const stored = JSON.stringify(m) + logs.join("\n");
+    expect(stored).not.toContain("token-of-");
+    expect(t.posted.length).toBe(1);
+    expect(JSON.stringify(t.posted)).not.toContain("token-of-");
+  });
+});
 
 describe("Demo renders of the head", () => {
   const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));

@@ -1403,7 +1403,10 @@ export function createEngine(deps: EngineDeps): Engine {
       );
       out.again = true;
     };
-    /** A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. */
+    /**
+     * A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. It is
+     * for this run alone: the seat's next run, on another ticket, never reads it in its inbox.
+     */
     const handOff = (from: string, text: string): void => {
       store.addComms({
         at,
@@ -1411,6 +1414,7 @@ export function createEngine(deps: EngineDeps): Engine {
         senderKind: from === COMMS_MC ? "hub" : "seat",
         to: run.agentId,
         ticket: run.ticket ?? null,
+        targetRunId: run.id,
         text,
       });
       bus.emit("agents");
