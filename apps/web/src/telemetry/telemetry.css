@@ -8,7 +8,8 @@
 }
 
 /* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
-#page-telemetry[data-tab="crew"] {
+#page-telemetry[data-tab="crew"],
+#page-telemetry[data-tab="cost"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(var(--crew-min, 520px), 1fr);
   overflow: visible;
@@ -277,9 +278,27 @@
   grid-template-rows: minmax(240px, 1fr);
 }
 
+/* Cost and tokens: four chart panels in two rows, or the tables, which scroll inside their panels. */
+.tabpanel .grid[data-n="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(220px, 1fr));
+}
+
+.tabpanel .grid.cost-tables {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: none;
+  grid-auto-rows: minmax(240px, auto);
+  align-content: start;
+  overflow: auto;
+}
+
+.cost-tables .tgrid {
+  display: contents;
+}
+
 /* Wide work areas put the two crew panels side by side. */
 @media (min-width: 2200px) {
-  .tabpanel .grid[data-view="charts"]:not([data-state]) {
+  .tabpanel .grid[data-view="charts"][data-n="2"]:not([data-state]) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: minmax(256px, 1fr);
   }
@@ -791,4 +810,124 @@
 .crew-cell:hover .crew-cell-def,
 .crew-cell:focus-within .crew-cell-def {
   display: block;
+}
+
+/* cost and tokens */
+.spend-stack {
+  display: flex;
+  height: 14px;
+  margin-bottom: var(--sp-2);
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  overflow: hidden;
+  gap: 2px;
+}
+
+.spend-stack i {
+  display: block;
+  height: 100%;
+}
+
+.step-sw {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--sp-1);
+  border-radius: var(--r-s);
+}
+
+.ticket-label {
+  display: block;
+  min-width: 0;
+  position: relative;
+}
+
+.ticket-label:focus-visible::after,
+.ticket-label:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  top: 100%;
+  max-width: min(480px, 60vw);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.quota-meters {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  list-style: none;
+  display: grid;
+  align-content: start;
+  gap: var(--sp-2);
+}
+
+.quota-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 22%) minmax(0, 1fr) minmax(64px, 18%) minmax(120px, auto);
+  gap: var(--sp-2);
+  align-items: center;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.quota-row .lb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-row .tr {
+  position: relative;
+  height: 10px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.quota-row .tr i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-s);
+}
+
+.quota-row[data-level="alert"] .tr i {
+  background: var(--warn);
+}
+
+.quota-row[data-level="stop"] .tr i {
+  background: var(--crit);
+}
+
+.quota-row .tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  border-left: 1px dashed var(--warn);
+}
+
+.quota-row .tick.stop {
+  border-left-color: var(--crit);
+}
+
+.quota-row .hist {
+  width: 100%;
+  height: 20px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.quota-row .hist path {
+  stroke: var(--accent);
+}
+
+.quota-row .vl {
+  text-align: right;
+  white-space: nowrap;
 }

@@ -386,7 +386,6 @@ describe("the tabs", () => {
 
   it("shows a short coming note, never an empty chart, on each tab not built yet", async () => {
     for (const [tab, name] of [
-      ["cost", "Cost and tokens is coming"],
       ["throughput", "Throughput is coming"],
       ["quality", "Quality is coming"],
       ["machine", "Machine is coming"],
@@ -399,7 +398,7 @@ describe("the tabs", () => {
 
   it("keeps each earlier panel on the tab that will take it", async () => {
     const expected: Record<string, string[]> = {
-      cost: ["tTok", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"],
+      cost: ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"],
       throughput: ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"],
       quality: ["tQual", "tQualityTrend"],
       machine: ["tMach", "tLock"],
@@ -412,8 +411,21 @@ describe("the tabs", () => {
       // moved to the Crew tab, or to the seat's Agent page
       for (const id of ["tCrewState", "tUtil", "tLat", "tSubs", "tCapcom", "tTurn"])
         expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
+      // the Cost and tokens tab's table view holds these, and no other tab does
+      for (const id of ["tTotals", "tCostTable", "tStepTable", "quotaP", "tQuota", "tCostMerged"])
+        expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
       cleanup();
     }
+  });
+
+  it("keeps the earlier cost, token and quota panels, whole, in the Cost and tokens table view", async () => {
+    await open("?tab=cost&view=table");
+    for (const id of ["tTotals", "tCostTable", "tStepTable", "quotaP", "tQuota", "tCostMerged"])
+      expect(document.getElementById(id) !== null, id).toBe(true);
+    cleanup();
+    await open("?tab=cost");
+    for (const id of ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"])
+      expect(document.getElementById(id) !== null, id).toBe(true);
   });
 });
 

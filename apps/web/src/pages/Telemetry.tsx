@@ -23,6 +23,7 @@ import {
 } from "../router.ts";
 import { useStore } from "../shell/store.ts";
 import { ComingTab } from "../telemetry/ComingTab.tsx";
+import { CostPanels, CostSummaryRow } from "../telemetry/CostTab.tsx";
 import { CrewPanels, CrewSummaryRow } from "../telemetry/CrewTab.tsx";
 import type { AgentInfo, Scope } from "../telemetry/common.ts";
 import { HealthBand } from "../telemetry/HealthBand.tsx";
@@ -260,7 +261,10 @@ export function Telemetry() {
             </span>
           )}
         </div>
-        {def.built && <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />}
+        {tab === "crew" && (
+          <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />
+        )}
+        {tab === "cost" && <CostSummaryRow t={t} scope={scope} onNeedsRoute={setRuns} />}
         <section
           id={TAB_PANEL_ID}
           className="tabpanel"
@@ -276,12 +280,14 @@ export function Telemetry() {
               <div className="grid" data-state={state}>
                 <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
               </div>
+            ) : tab === "cost" ? (
+              <CostPanels t={t} scope={scope} view={view} dim={dim} />
             ) : (
               <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
             )
           ) : (
             <ComingTab
-              tab={tab as Exclude<TelemetryTab, "crew">}
+              tab={tab as Exclude<TelemetryTab, "crew" | "cost">}
               label={def.label}
               t={t}
               scope={scope}

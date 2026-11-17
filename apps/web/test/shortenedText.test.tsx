@@ -63,7 +63,7 @@ it("gives every named shortened chip or value a title", () => {
     "agent/Tiles.tsx": "title={text}",
     "agent/StreamPanel.tsx": 'title={live ? live.name : "no tool running"}',
     "agent/LoopTimeline.tsx": "title={LOOP_PHASE_LABEL[step]}",
-    "telemetry/CostGroup.tsx": "title={r.step}",
+    "telemetry/CostTab.tsx": "title={name}",
     "telemetry/FlowOfWork.tsx": 'title={r.size === NO_SIZE ? "no size" : r.size}',
     "components/TicketDetail.tsx": "title={name}",
   };
