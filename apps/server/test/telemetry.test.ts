@@ -1743,8 +1743,68 @@ describe("crew seats", () => {
     });
   });
 
+  describe("quality14, daily counts over the flow window", () => {
+    const MIDNIGHT = at("2026-10-16T23:00:00Z"); // local midnight starting 2026-10-17 (BST)
+    const seed = () => {
+      store.replaceFlow(
+        "shop-app",
+        [],
+        [
+          { repoId: "shop-app", number: 1, mergedAt: MIDNIGHT - 1, firstPushCi: "passing" },
+          { repoId: "shop-app", number: 2, mergedAt: MIDNIGHT, firstPushCi: "failing" },
+          { repoId: "shop-app", number: 3, mergedAt: MIDNIGHT + HOUR, firstPushCi: "passing" },
+          { repoId: "shop-app", number: 4, mergedAt: MIDNIGHT + 2 * HOUR, firstPushCi: null },
+        ],
+      );
+      store.replacePullRequests(
+        "shop-app",
+        [pr(1, MIDNIGHT - 1), pr(2, MIDNIGHT), pr(3, MIDNIGHT + HOUR)],
+        0,
+      );
+      reported("a1", 1, 1, 0);
+      reported("a2", 2, 1, 1);
+      reported("b2", 2, 2, 0);
+      reported("a3", 3, 1, 0);
+    };
+
+    it("counts a PR on its local day, with zeros for a day with no activity", () => {
+      seed();
+      const q = tel("7d").quality14 ?? [];
+      expect(q).toHaveLength(14);
+      expect(q[13]).toEqual({
+        day: "2026-10-17",
+        ciPrs: 2,
+        ciGreenPrs: 1,
+        reviewedPrs: 2,
+        firstPassPrs: 1,
+        roundsSum: 3,
+      });
+      expect(q[12]).toEqual({
+        day: "2026-10-16",
+        ciPrs: 1,
+        ciGreenPrs: 1,
+        reviewedPrs: 1,
+        firstPassPrs: 1,
+        roundsSum: 1,
+      });
+      expect(q[0]).toEqual({
+        day: "2026-10-04",
+        ciPrs: 0,
+        ciGreenPrs: 0,
+        reviewedPrs: 0,
+        firstPassPrs: 0,
+        roundsSum: 0,
+      });
+    });
+
+    it("is the same whichever range is asked for", () => {
+      seed();
+      expect(tel("1h").quality14).toEqual(tel("7d").quality14);
+    });
+  });
+
   describe("a seat's waiting share", () => {
-    const NOON = at("2026-10-17T15:00:00Z");
+    const NOON =at("2026-10-17T15:00:00Z");
     // local midnight 2026-10-16T23:00Z: 16h elapsed at NOON
     const seatShare = () => tel("6h", NOON).utilisation.find((u) => u.agentId === "GUIDO-1");
     const ran = () => {
