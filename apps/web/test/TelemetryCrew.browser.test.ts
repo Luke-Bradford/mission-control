@@ -116,6 +116,40 @@ describeRendered("Telemetry, Crew tab, in a browser", () => {
     }
   }
 
+  for (const scheme of ["dark", "light"] as const) {
+    it(
+      `shows every band label and unit in full at 1280x800, ${scheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1280,
+          height: 800,
+          colorScheme: scheme,
+          api: api(),
+          search: "?path=/telemetry",
+        });
+        try {
+          await ready(page);
+          const clipped = await page.evaluate(
+            () =>
+              [...document.querySelectorAll(".band .stat-unit, .band .stat-label")]
+                .filter((e) => e.scrollWidth > e.clientWidth)
+                .map((e) => e.textContent),
+            undefined,
+          );
+          expect(clipped).toEqual([]);
+          if (evidence) {
+            mkdirSync(evidence, { recursive: true });
+            await page.screenshot(join(evidence, `telemetry-crew-1280x800-${scheme}.png`));
+          }
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
   it(
     "keeps lanes and agent time readable at 1600x700 and scrolls them inside their panels",
     async () => {

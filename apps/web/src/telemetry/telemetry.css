@@ -30,6 +30,13 @@
   gap: var(--sp-2);
 }
 
+/* where eight tiles cannot show their full labels and units, the band takes two rows of four */
+@media (max-width: 1199px) {
+  .band {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .stat {
   position: relative;
   display: grid;
@@ -45,13 +52,12 @@
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   color: var(--fg-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .stat-main {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-1);
   min-width: 0;
@@ -82,14 +88,13 @@
   color: var(--accent);
 }
 
+/* a unit is fixed text, so it wraps rather than truncates */
 .stat-unit {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* the window and its comparison: two lines at most, the full text in the tile's title */
