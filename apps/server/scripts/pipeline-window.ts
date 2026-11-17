@@ -72,7 +72,7 @@ export function pipelineWindow(db: DatabaseSync, input: PipelineWindowInput): Pi
   const rows = db
     .prepare(
       `SELECT pr_number, sha, name, conclusion, url FROM ci_runs
-       WHERE repo_id = ? AND first_seen_at >= ? AND first_seen_at < ? AND pr_number IN (${crew}) ORDER BY first_seen_at, name, attempt`,
+       WHERE repo_id = ? AND at >= ? AND at < ? AND pr_number IN (${crew}) ORDER BY at, name, attempt`,
     )
     .all(repoId, from, until, repoId) as Row[];
   const failed = new Set(CI_FAILED_STATES);
@@ -167,14 +167,24 @@ function usage(): never {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
-  const get = (flag: string): string | undefined => {
-    const i = args.indexOf(flag);
-    return i >= 0 ? args[i + 1] : undefined;
-  };
-  const dbPath = get("--db");
-  const repoId = get("--repo");
-  const fromText = get("--from");
-  const hours = Number(get("--hours") ?? 24);
+  const values = new Map<string, string>();
+  for (let i = 0; i < args.length; i += 2) {
+    const flag = args[i];
+    const value = args[i + 1];
+    if (
+      flag === undefined ||
+      value === undefined ||
+      !["--db", "--repo", "--from", "--hours"].includes(flag) ||
+      value.startsWith("--") ||
+      values.has(flag)
+    )
+      usage();
+    values.set(flag, value);
+  }
+  const dbPath = values.get("--db");
+  const repoId = values.get("--repo");
+  const fromText = values.get("--from");
+  const hours = Number(values.get("--hours") ?? 24);
   if (!dbPath || !repoId || !fromText) usage();
   const from = Date.parse(fromText);
   if (!Number.isFinite(from) || !Number.isFinite(hours) || hours <= 0) usage();

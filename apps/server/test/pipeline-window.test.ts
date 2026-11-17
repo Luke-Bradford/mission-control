@@ -111,17 +111,17 @@ describe("pipelineWindow", () => {
     ]);
   });
 
-  it("places a CI job by when it was first seen, not by its last poll", () => {
+  it("places a CI job by its result timestamp at the window boundaries", () => {
     crewRun(10);
-    // first seen inside the window, polled again after it ends: still counted
-    ci(10, "validate", "FAILURE", FROM + 1000, 1, UNTIL + 5000);
-    // first seen before the window, polled inside it: not counted
-    ci(10, "server (1)", "FAILURE", FROM - 5000, 1, FROM + 1000);
-    // first seen exactly at the end: outside
-    ci(10, "web-core", "FAILURE", UNTIL, 1, UNTIL);
+    // First seen before the window, result inside it: counted.
+    ci(10, "validate", "FAILURE", FROM - 5000, 1, FROM);
+    // First seen inside the window, result after it: not counted.
+    ci(10, "server (1)", "FAILURE", FROM + 1000, 1, UNTIL);
+    // The upper boundary is exclusive.
+    ci(10, "web-core", "FAILURE", UNTIL - 1, 1, UNTIL - 1);
     const r = pipelineWindow(raw, input);
-    expect(r.ciResults).toBe(1);
-    expect(r.byClass).toEqual({ "lint-typecheck-build": 1, tests: 0, other: 0 });
+    expect(r.ciResults).toBe(2);
+    expect(r.byClass).toEqual({ "lint-typecheck-build": 1, tests: 1, other: 0 });
   });
 
   it("lists blocking findings that ask for controller-only evidence and counts Controller check summaries", () => {
@@ -189,6 +189,14 @@ describe("command line", () => {
     ["a missing --db", ["--repo", REPO, "--from", "2026-11-16T00:00:00Z"]],
     ["a missing --repo", ["--db", "x", "--from", "2026-11-16T00:00:00Z"]],
     ["a missing --from", ["--db", "x", "--repo", REPO]],
+    ["a missing --db value", ["--db", "--repo", REPO, "--from", "2026-11-16T00:00:00Z"]],
+    ["a missing --repo value", ["--db", "x", "--repo", "--from", "2026-11-16T00:00:00Z"]],
+    ["a missing --from value", ["--db", "x", "--repo", REPO, "--from", "--hours", "1"]],
+    [
+      "a duplicate flag",
+      ["--db", "x", "--db", "y", "--repo", REPO, "--from", "2026-11-16T00:00:00Z"],
+    ],
+    ["a stray argument", ["oops", "--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z"]],
     ["an unparseable --from", ["--db", "x", "--repo", REPO, "--from", "not a date"]],
     ["zero hours", ["--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "0"]],
     [

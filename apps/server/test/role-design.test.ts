@@ -32,6 +32,12 @@ it("RETRO records the design check for web PRs", () => {
   expect(read("roles/RETRO.md")).toContain("`design` check");
 });
 
+it("RETRO keeps a late round finding blocking only when it is Critical", () => {
+  const text = read("roles/RETRO.md");
+  expect(text).toContain("unless it is Critical");
+  expect(text).toContain("list it as Minor");
+});
+
 it("every section the checklist cites is a heading of the design system", () => {
   const headings = [...read("docs/design/system.md").matchAll(/^## ([\d–]+)\./gm)].map((m) => m[1]);
   const cited = [...checklist.matchAll(/§([\d–]+)/g)].map((m) => m[1]);
