@@ -44,7 +44,26 @@ export function pathsNeedingGrant(
   paths: readonly string[],
   extra: readonly string[] = [],
 ): string[] {
-  return paths.filter((path) => !pathInArea(area, path) || isProtectedPath(path, extra));
+  return paths.filter((path) => !entryInArea(area, path) || isProtectedPath(path, extra));
+}
+
+/**
+ * Whether every path `entry` can match lies in `area`. A plain file is matched as `pathInArea` does.
+ * A glob counts as inside only when it is an area glob itself, or its folder before the first
+ * wildcard sits under a wildcard-free `X/**` area glob; anything else is kept for the grant checks.
+ */
+function entryInArea(area: readonly string[], entry: string): boolean {
+  if (!entry.includes("*")) return pathInArea(area, entry);
+  if (area.length === 0 || area.includes(entry)) return true;
+  const segs = entry.split("/");
+  if (segs.includes("..")) return false;
+  const wild = segs.findIndex((s) => s.includes("*"));
+  const folder = segs.slice(0, wild);
+  return area.some((g) => {
+    if (!g.endsWith("/**") || g.slice(0, -3).includes("*")) return false;
+    const base = g.slice(0, -3).split("/");
+    return base.length <= folder.length && base.every((s, i) => s === folder[i]);
+  });
 }
 
 /**

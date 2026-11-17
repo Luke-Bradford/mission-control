@@ -41,6 +41,13 @@ describe("ticketPathGrants", () => {
         ticketPathGrants("Paths: apps/server/**, package.json"),
       ),
     ).toEqual(["package.json"]);
+    // a glob that can expand outside a wildcarded area is kept
+    expect(pathsNeedingGrant(["apps/*/server/**"], ["apps/**/server/**"])).toEqual([
+      "apps/**/server/**",
+    ]);
+    expect(
+      pathsNeedingGrant(["apps/server/**"], ["apps/server*/x/**", "apps/server/../web/**"]),
+    ).toEqual(["apps/server*/x/**", "apps/server/../web/**"]);
     expect(pathsNeedingGrant(["apps/**"], ["apps/web/package.json"])).toEqual([
       "apps/web/package.json",
     ]);
