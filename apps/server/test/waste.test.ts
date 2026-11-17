@@ -674,9 +674,13 @@ describe("an external PR's reviews", () => {
 });
 
 describe("the waste_alarm FLIGHT signal", () => {
-  it("is raised once for an open alarm and stays told across ticks", () => {
-    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));
+  it("is raised once for an alarm that parks a ticket and stays told across ticks", () => {
+    for (let i = 0; i < 2; i++)
+      store.upsertRun(
+        run("guido-1", { ticket: "mc#1596", startedAt: NOW - (i + 1) * HOUR, status: "failed" }),
+      );
     syncWasteAlarms(config, store, NOW);
+    expect(ticketParked(store, "mc#1596")).not.toBeNull();
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const read = (at: number) =>
@@ -692,13 +696,17 @@ describe("the waste_alarm FLIGHT signal", () => {
     expect(next[0]?.told).toBe(true);
   });
 
-  it("does not wake FLIGHT for an unchanged rerun the hook already refused", () => {
+  it("does not wake FLIGHT for an alarm that parks no ticket", () => {
     const r = run("guido-1", { ticket: "mc#1596" });
     store.upsertRun(r);
     for (let i = 0; i < 3; i++)
       store.addRerunRefusal(r.id, "pnpm -s lint", "abc1234def", NOW - i * MIN);
+    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-2", { startedAt: NOW - i * MIN }));
     syncWasteAlarms(config, store, NOW);
-    expect(openWasteAlarms(store).map((a) => a.check)).toContain("unchanged-rerun");
+    const open = openWasteAlarms(store).map((a) => a.check);
+    expect(open).toContain("unchanged-rerun");
+    expect(open).toContain("restart-storm");
+    expect(open).not.toContain("retry-loop");
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const signals = flightSignals({ config, store, session, seats: [], now: NOW }).signals;

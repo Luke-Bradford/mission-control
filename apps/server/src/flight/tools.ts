@@ -3854,7 +3854,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const superTools = [
     superTool(
       MC_TOOL_NAMES.resolveWasteAlarm,
-      "Close an open waste alarm's hold: a parked ticket may start again, a stopped review may run, a restarted agent may start. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
+      "Close a retry-loop waste alarm's hold: the parked ticket may be dealt again. The alarm id is the key of the waste_alarm signal. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
       ResolveWasteAlarmArgs,
       "status",
       async (a) => {

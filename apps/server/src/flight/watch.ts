@@ -14,6 +14,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_FULL_BUILTINS,
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_GUARD_SETTING,
@@ -147,10 +148,14 @@ export const changedWakeFacts = (previous: string, current: string): string[] =>
     });
 };
 
-/** The tool set a FLIGHT run started with is what it keeps: a digest of the names it was offered. */
+/**
+ * The tool set a FLIGHT run started with is what it keeps: a digest of the names it was offered,
+ * hub tools and built-ins. A resumed session keeps its old context, so a change to either list
+ * starts a fresh one.
+ */
 export const flightToolsDigest = (): string =>
   createHash("sha256")
-    .update([...FLIGHT_TOOLS].sort().join(","))
+    .update([...FLIGHT_TOOLS, ...FLIGHT_FULL_BUILTINS].sort().join(","))
     .digest("hex")
     .slice(0, 16);
 
