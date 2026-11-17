@@ -3647,7 +3647,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const grants: string[] = [];
       if (def.mode === "writer" && !planner) {
         const extra = info.repo.protectedFiles ?? [];
-      for (const p of pathsNeedingGrant(info.seat.area, ticketPathGrants(ticket.body), extra)) {
+        for (const p of pathsNeedingGrant(info.seat.area, ticketPathGrants(ticket.body), extra)) {
           const why = pathGrantProblem(p, extra);
           if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
           grants.push(p);
