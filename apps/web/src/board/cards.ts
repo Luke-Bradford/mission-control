@@ -275,7 +275,7 @@ export function cardColumn(item: BoardItem, index?: DependencyIndex | null): Boa
   const col = hudColumnOf(item);
   if (item.waiting && col !== "Done") return WAITING_COLUMN;
   if (!NOT_STARTED.includes(col)) return col;
-  // only a wait on one of the ticket's own `Depends on` issues moves it: a held or stacked one stays
+  // only a wait on one of the ticket's own `Depends on` issues moves it; a held or stacked one stays
   const dependsOn = waitsOf(item, index).some((w) =>
     (item.after?.issues ?? []).some((n) => w.ref === `${item.repoId}#${n}`),
   );
