@@ -829,7 +829,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       void check();
     },
     start() {
-      // left by the retired wake audit and waits: an open note is cleared and the stored waits go
+      // left by the retired wake audit and waits: an open note is cleared and the stored waits go.
+      // One-off clean-up: delete this block once every hub has started on a build that has it.
       const left = "flight:left";
       if (store.notes().some((n) => n.key === left)) {
         store.clearNote(left, now());

@@ -86,7 +86,7 @@ export const stuckPrRepo = (config: CcConfig, repoId: RepoId): boolean =>
   );
 
 /**
- * The open crew PRs that are stuck now, whatever the wait: conflicting with main, or with red CI,
+ * The open crew PRs that are stuck now: conflicting with main, or with red CI,
  * with no run working on them and nobody holding them. `since` says how long.
  */
 export function stuckPrs(i: {
@@ -120,7 +120,7 @@ export function stuckPrs(i: {
     // a merge hold from the operator or FLIGHT outlives the run that made it
     const latest = [...runs].sort((a, b) => b.startedAt - a.startedAt)[0];
     if (latest?.loop?.mergeHold) continue;
-    // two failed reviews, or a run FLIGHT ended: the call is FLIGHT's, however long its wait ran
+    // two failed reviews, or a run FLIGHT ended: the call is FLIGHT's
     if (
       store
         .reviewsOfPr(repoId, pr.number)

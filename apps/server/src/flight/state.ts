@@ -1792,7 +1792,7 @@ export const itemFactId = (x: { kind: string; key: string; text: string }): stri
 
 /**
  * The free build seats that have a Ready ticket to take, and those tickets. A seat or ticket with
- * no fit, or one FLIGHT waits on, is not a reason to wake: nothing could start there.
+ * no fit is not a reason to wake: nothing could start there.
  */
 const startableFor = (s: FlightState): { free: string[]; startable: string[] } => {
   const fit = s.wake?.fit;

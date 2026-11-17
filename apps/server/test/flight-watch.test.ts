@@ -4930,7 +4930,7 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(Object.keys(saved.signals ?? {})).not.toContain("idle_no_work:inco-1:1");
   });
 
-  it("a stored wait_over signal, the left-undecided note and the stored waits go when the watch starts", () => {
+  it("a stored wait_over signal is dropped on read; the left-undecided note and the stored waits go when the watch starts", () => {
     store.setSetting(
       `${FLIGHT_SIGNALS_SETTING}:mc`,
       JSON.stringify({
@@ -4957,9 +4957,11 @@ describe("the sweep's new checks hold back until their time", () => {
       at: nowMs,
     });
     expect(kinds()).not.toContain("wait_over");
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    expect(Object.keys(saved.signals ?? {})).not.toContain("wait_over:mc#9:1");
     watch.start();
     expect(store.notes().some((n) => n.key === "flight:left")).toBe(false);
-    expect(store.getSetting("flight.waits") ?? "").toBe("");
+    expect(store.getSetting("flight.waits")).toBeNull();
   });
 
   it("an idle seat with startable work counts after 10 minutes, not before", () => {

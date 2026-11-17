@@ -79,7 +79,7 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
 - **Going live:** run the waiting hub Update yourself with `mc operator` when the hub is idle. Then check that the hub answers.
 - **Recurring stalls:** when the same thing stalls twice, find the cause and fix it (a ticket and a seat), not just the instance.
 
-What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. To look again at a set time, add a planned entry to your brief with `mc update_brief`. To keep the engine off a PR, use a hold; nothing else holds it back. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
+What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. To look at a PR again at a set time, add a planned `PR recheck` entry with `mc update_brief`. To keep the engine from starting a seat on a stuck PR whose run has ended, hold its Needs-you item with `mc hold_item`. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
 
 ## How to pass things on
 
