@@ -65,6 +65,7 @@ export type Page =
   | "agent"
   | "comms"
   | "qa"
+  | "planner"
   | "telemetry"
   | "audit"
   | "setup";
@@ -91,6 +92,8 @@ export type Route =
   | { page: "commsChart" }
   | { page: "telemetry" }
   | { page: "qa" }
+  /** Plans to sign off (`/planner`), and past ones (`?view=history`). */
+  | { page: "planner" }
   | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
 
@@ -127,6 +130,7 @@ const { map: _removedMapPath, ...HUD_PAGE_PATHS_WITHOUT_MAP } = HUD_PAGE_PATHS;
 export const PAGE_PATHS: Record<Page, string> = {
   ...HUD_PAGE_PATHS_WITHOUT_MAP,
   needs: "/needs-you",
+  planner: "/planner",
 };
 
 /** Telemetry on `tab` (and its table view); the default tab and the charts view are the bare page. */
@@ -257,6 +261,7 @@ export function route(path: string, search = ""): Route | null {
   if (p === "/telemetry") return { page: "telemetry" };
   if (p === "/audit") return { page: "audit" };
   if (p === "/qa") return { page: "qa" };
+  if (p === PAGE_PATHS.planner) return { page: "planner" };
   const board = withId(path, "board");
   if (board) return { page: "board", repoId: board.id, ticket: null };
   const ticket = boardTicket(path);

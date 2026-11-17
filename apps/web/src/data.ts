@@ -78,6 +78,7 @@ const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
+const PLAN_TOPICS: readonly Topic[] = ["boards", "flight"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 type PageDocument = {
@@ -141,6 +142,11 @@ export const RESOURCES = {
   attentionMaterials: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/materials`,
     topic: "attention",
+  }),
+  /** Plans to sign off and past ones; every repo's when `repoId` is empty. */
+  plans: (repoId = ""): ResourceRef => ({
+    path: `/api/plans${repoId ? `?repoId=${enc(repoId)}` : ""}`,
+    topic: PLAN_TOPICS,
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
   answeredAttention: { path: "/api/attention/answered", topic: "attention" },
@@ -426,6 +432,9 @@ export const ACTIONS = {
   /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
   onboardRepo: "/api/repos/onboard",
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
+  approvePlan: (id: string) => `/api/plans/${enc(id)}/approve`,
+  /** Body `{ note }`. */
+  sendBackPlan: (id: string) => `/api/plans/${enc(id)}/send-back`,
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => RESOURCES.boardSetup(repoId).path,

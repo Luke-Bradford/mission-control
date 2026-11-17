@@ -5,6 +5,8 @@ import { hub, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
+import { ticketNumberOf } from "../plans/types.ts";
 import { NOTHING_TO_SEE } from "./nothingToSee.ts";
 import "./qa-report.css";
 
@@ -178,17 +180,26 @@ export function QaReportArchive({
   );
 }
 
+/** The ticket a branch is for, when it is named like `feature/2037-planner-tab`. */
+const branchTicket = (branch: string | undefined): number | null => {
+  const m = /^[a-z]+\/([1-9]\d*)-/.exec(branch ?? "");
+  return m ? Number(m[1]) : null;
+};
+
 /** The selected head is mandatory: an older approval never fills a new head's evidence gap. */
 export function CurrentQaReport({
   repo,
   pr,
   head,
   awaiting,
+  ticket,
   children,
 }: {
   repo: string;
   pr: number;
   head: string | null;
+  /** The PR's ticket as `repo#number`, when known. */
+  ticket?: string | null;
   /** Whether the PR waits for the operator's acceptance; the gaps list is for that decision only. */
   awaiting: boolean;
   children?: ReactNode;
@@ -216,7 +227,7 @@ export function CurrentQaReport({
           </button>
         </p>
       ) : report ? (
-        <QaReportRead report={report} currentHead={head} awaiting={awaiting} />
+        <QaReportRead report={report} currentHead={head} awaiting={awaiting} ticket={ticket} />
       ) : (
         <p className="uat-banner" role="status">
           {resource.loading
@@ -426,7 +437,9 @@ export const QaReportRead = memo(function QaReportRead({
   currentHead,
   archived = false,
   awaiting = true,
+  ticket,
 }: {
+  ticket?: string | null;
   report: QaReport;
   currentHead?: string | null;
   awaiting?: boolean;
@@ -459,6 +472,20 @@ export const QaReportRead = memo(function QaReportRead({
   const checks = new Map(r.coverage.map((c) => [c.check, c]));
   return (
     <article className="qa-report" aria-label={`QA report for PR #${r.prNumber}`}>
+      <SignedOffPlan
+        repoId={r.repoId}
+        number={(ticket ? ticketNumberOf(ticket) : null) ?? branchTicket(r.branch)}
+        built={
+          <>
+            <p>{r.summary}</p>
+            <p className="muted">
+              {r.visual.applicability === "not_applicable"
+                ? "Screenshots are not applicable to this change."
+                : `${r.visual.pairs.length} before and after ${r.visual.pairs.length === 1 ? "pair" : "pairs"} in Visual confirmation below.`}
+            </p>
+          </>
+        }
+      />
       <Panel title="QA report" sub={`${r.repoId} · PR #${r.prNumber}`}>
         <div className="pb uat-stack">
           <header className="qa-report-heading">

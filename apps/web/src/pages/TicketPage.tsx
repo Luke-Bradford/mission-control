@@ -10,6 +10,7 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
 import { TicketQaReports } from "../qa/TicketQaReports.tsx";
 import { boardPath, followLink } from "../router.ts";
 import {
@@ -292,6 +293,27 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
           </div>
         </Panel>
         <div className={`tk-main${questions.length > 0 ? " has-questions" : ""}`}>
+          <SignedOffPlan
+            repoId={repoId}
+            number={number}
+            built={
+              <>
+                <p className="tk-text">{t.outcome ?? "The ticket has no outcome section."}</p>
+                <p className="muted">
+                  {`${t.doneWhen.filter((d) => d.checked).length} of ${t.doneWhen.length} done-when items checked`}
+                </p>
+                {t.prs.length > 0 && (
+                  <ul aria-label="Pull requests built">
+                    {t.prs.map((p) => (
+                      <li key={p.number}>
+                        <ExternalLink url={p.url}>{`PR #${p.number}`}</ExternalLink> {p.title}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            }
+          />
           {questions.length > 0 && (
             <Panel id="questionsP" title="Questions" sub="newest first" className="tk-questions">
               <div className="pb scroll">

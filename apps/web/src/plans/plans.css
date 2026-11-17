@@ -1,0 +1,53 @@
+.plan-parts {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.plan-parts h3 {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs);
+  line-height: var(--lh);
+  color: var(--fg-2);
+}
+.plan-parts p {
+  margin: 0;
+}
+.plan-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.plan-decide {
+  display: grid;
+  gap: var(--sp-2);
+}
+.plan-decide-buttons {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.plan-decide textarea {
+  width: 100%;
+  min-height: 72px;
+}
+.plan-note {
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+.plan-beside {
+  display: grid;
+  gap: var(--sp-3);
+}
+.plan-beside-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+.plan-beside-grid > * {
+  min-width: 0;
+}
+.plan-history-status {
+  white-space: nowrap;
+}

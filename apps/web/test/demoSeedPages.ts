@@ -931,6 +931,8 @@ export function demoPageAnswers(
     ...qaPrApi(tickets),
     ...ticketItems(tickets),
     "/api/qa/queue": qaQueue(tickets),
+    "/api/plans": plansView(),
+    [`/api/plans?repoId=${DEMO_REPO}`]: plansView(),
     "/api/dependencies": [],
     "/api/audit?range=7d": auditView(),
     "/api/audit?range=24h": auditView(),
@@ -946,6 +948,62 @@ export function demoPageAnswers(
       SEAT_IDS.filter((id) => id !== "flight-1"),
       tickets,
     ),
+  };
+}
+
+const planPicture = (c: string, caption: string) => ({
+  url: `/api/attention-material-assets/${c.repeat(64)}`,
+  caption,
+});
+
+/** Plans to sign off: one waiting, one sent back, one approved (the Retry ticket's). */
+function plansView() {
+  const base = { repoId: DEMO_REPO, risks: "", pictures: [] as ReturnType<typeof planPicture>[] };
+  const at = Date.now() - 3 * 3_600_000;
+  return {
+    pending: [
+      {
+        ...base,
+        id: "plan-201",
+        ticket: `${DEMO_REPO}#201`,
+        title: "Audit the coupon rules",
+        status: "pending",
+        asks: "List every coupon rule, say which overlap, and flag any that can stack to a free order.",
+        proposed:
+          "Read the coupon rules, add a table of overlaps to the audit page, and a test that no stack goes below zero.",
+        pictures: [planPicture("a", "Audit table with overlaps marked")],
+        size: "M",
+        risks: "Old coupons have no owner, so some overlaps may be on purpose.",
+      },
+    ],
+    history: [
+      {
+        ...base,
+        id: "plan-104",
+        ticket: `${DEMO_REPO}#104`,
+        title: "Fix the address form on narrow screens",
+        status: "sent-back",
+        asks: "The address form overflows below 360px.",
+        proposed: "Rebuild the form as one column.",
+        size: "S",
+        risks: "None known.",
+        note: "Keep the postcode lookup on narrow screens.",
+        decidedAt: at,
+      },
+      {
+        ...base,
+        id: "plan-102",
+        ticket: `${DEMO_REPO}#102`,
+        title: "Retry failed payment webhooks",
+        status: "approved",
+        asks: "Failed payment webhooks are dropped; retry them.",
+        proposed: "Queue each failed webhook and retry with backoff, five tries over an hour.",
+        pictures: [planPicture("b", "Retry queue in the admin screen")],
+        size: "M",
+        risks: "A retry could double-charge if the first call did land.",
+        decidedAt: at - 86_400_000,
+      },
+    ],
   };
 }
 

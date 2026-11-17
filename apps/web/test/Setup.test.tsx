@@ -1575,6 +1575,34 @@ describe("Setup › Repos & seats cards", () => {
     });
   });
 
+  it("shows each repo's plan sign-off setting and saves a change to it", async () => {
+    const withSetting = {
+      ...CREW_CONFIG,
+      repos: CREW_CONFIG.repos.map((r) =>
+        r.id === "shop-app" ? { ...r, planSignOff: "always" } : r,
+      ),
+    };
+    load({
+      "/api/config": withSetting,
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    const select = within(card).getByLabelText("Plan sign-off") as HTMLSelectElement;
+    expect(select.value).toBe("always");
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "Every ticket",
+      "Larger work only",
+      "Never",
+    ]);
+    fireEvent.change(select, { target: { value: "never" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ planSignOff: "never" });
+    });
+  });
+
   it("walks all add steps, then atomically onboards the repo and empty crew session", async () => {
     load({
       "POST /api/repos/preview": PREVIEW,

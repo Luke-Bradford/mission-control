@@ -55,6 +55,7 @@ const PAGE_TITLES: Record<Page, string> = {
   telemetry: "Telemetry",
   audit: "Audit",
   qa: "QA",
+  planner: "Planner",
   setup: "Setup",
 };
 

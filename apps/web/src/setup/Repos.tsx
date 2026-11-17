@@ -24,12 +24,19 @@ import { callSign } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
 import { OwnershipLens } from "../lenses/lenses.tsx";
+import {
+  DEFAULT_PLAN_SIGN_OFF,
+  PLAN_SIGN_OFF_LABELS,
+  PLAN_SIGN_OFFS,
+  type PlanSignOff,
+} from "../plans/types.ts";
 import { useReturnFocus } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
 import { CALL_SIGN, CALL_SIGN_HINT } from "./Sessions.tsx";
 
-type Repo = ConfigView["repos"][number];
+/** `planSignOff` is the server's plan sign-off setting; a server that has none leaves it out. */
+type Repo = ConfigView["repos"][number] & { planSignOff?: PlanSignOff };
 type Session = NonNullable<ConfigView["crew"]>["sessions"][number];
 type Guidance = NonNullable<Repo["guidance"]>;
 const EMPTY_GUIDANCE: Guidance = {
@@ -125,8 +132,12 @@ function RepoCard({
   const [open, setOpen] = useState(false);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
+  const [planSignOff, setPlanSignOff] = useState<PlanSignOff>(
+    repo.planSignOff ?? DEFAULT_PLAN_SIGN_OFF,
+  );
   const [saving, setSaving] = useState(false);
   useEffect(() => {
+    setPlanSignOff(repo.planSignOff ?? DEFAULT_PLAN_SIGN_OFF);
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
     setAccount(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
   }, [repo, config.accounts]);
@@ -136,6 +147,10 @@ function RepoCard({
       const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
         defaultAccountId: account || null,
         guidance,
+        // Left out until it is set or changed, so a save never writes a setting nobody chose.
+        ...(repo.planSignOff !== undefined || planSignOff !== DEFAULT_PLAN_SIGN_OFF
+          ? { planSignOff }
+          : {}),
       });
       toast(`Saved ${repo.id}. Backup: ${result.backup}.`);
       hub.refetch(RESOURCES.config.path);
@@ -176,6 +191,19 @@ function RepoCard({
                 {config.accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Plan sign-off
+              <select
+                value={planSignOff}
+                onChange={(e) => setPlanSignOff(e.target.value as PlanSignOff)}
+              >
+                {PLAN_SIGN_OFFS.map((v) => (
+                  <option key={v} value={v}>
+                    {PLAN_SIGN_OFF_LABELS[v]}
                   </option>
                 ))}
               </select>
