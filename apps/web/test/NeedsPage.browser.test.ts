@@ -681,7 +681,7 @@ describeRendered("Needs you page", () => {
                     underDrawer,
                     `${label}: no horizontal overflow, drawer open`,
                   ).toBeLessThanOrEqual(0);
-                  await page.keyboard.press("Escape");
+                  await page.press("Escape");
                 }
                 await page.boxes(".needs-answer .decision-facts");
                 const overflow = await page.evaluate(
