@@ -42,7 +42,6 @@ export const HUD_PAGE_PATHS = {
   telemetry: "/telemetry",
   audit: "/audit",
   setup: "/setup",
-  planner: "/planner",
 } as const;
 
 export const watchStartRefusedText = (call: string): string =>
