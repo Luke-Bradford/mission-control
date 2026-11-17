@@ -977,6 +977,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const checkRuns = new Map<string, { stderr: string | null }>();
   const handoffJobs = new Map<string, Promise<void>>();
   const handoffWorktrees = new Map<string, string>();
+  /** Runs the engine is waking for rework: that is a fix, not a "carry on" resume the waste alarm counts. */
+  const wakingRuns = new Set<string>();
   const deferredRecoveries = new Set<string>();
   let recoveringDeferred: Promise<void> | null = null;
   let unpauseResume: (() => void) | undefined;
@@ -2285,7 +2287,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       spawnedAt: resume ? Date.now() : null,
     });
     // a carry-on resume is recorded: three without a report is a retry loop (waste alarm)
-    if (l.resumedAt !== null) store.addResumeAttempt(run.id, l.resumedAt);
+    if (l.resumedAt !== null && !wakingRuns.has(run.id))
+      store.addResumeAttempt(run.id, l.resumedAt);
     // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
     if (resume) {
       void session.ready.then(() => {
@@ -4982,6 +4985,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
     starting.add(seatId);
+    wakingRuns.add(runId);
     try {
       /** The run cannot go back: it ends `failed`, the seat (another run's now) untouched. */
       const fail = (reason: string, cause?: unknown): never => {
@@ -5219,6 +5223,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       return result;
     } finally {
+      wakingRuns.delete(runId);
       starting.delete(seatId);
       startingWorktrees.delete(aside.worktree);
     }

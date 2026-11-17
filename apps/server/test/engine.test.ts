@@ -3330,6 +3330,28 @@ describe("the engine runs reviews", () => {
     expect(h.sent[0]?.text).toContain("a Important thing");
   });
 
+  it("files the findings' Comms row for its own run, so the seat's next run on another ticket never reads it", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    const id = first().id;
+    store.recordFindings(id, need(store.review(id)?.runId), {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "broken",
+      findings: [finding("Important")],
+      at: clock,
+    });
+    emit({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent[0]?.key).toMatch(/^fix:/);
+    const fromRetro = (rows: { from: string; to: string }[]) =>
+      rows.filter((m) => m.from === RETRO && m.to === SEAT);
+    expect(fromRetro(store.commsInboxRun(SEAT, RUN)).length).toBeGreaterThan(0);
+    // the seat's next run, on another ticket, is not handed the first run's findings
+    expect(fromRetro(store.commsInboxRun(SEAT, "another-run"))).toEqual([]);
+  });
+
   /** A blocking review reported on the pushed head, then the author's passes. */
   async function toRework(): Promise<void> {
     await toReview();

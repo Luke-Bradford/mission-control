@@ -438,8 +438,9 @@ async function startOnStuckPr(
     });
     if (refusal !== null) continue;
     const text = stuckLineText(pr);
+    let started: { runId: string };
     try {
-      await deps.supervisor.startRun(seat.id, pr.issue, {
+      started = await deps.supervisor.startRun(seat.id, pr.issue, {
         loop: { ...NEW_LOOP, pendingLine: { key: stuckLineKey(pr), text } },
       });
     } catch (e) {
@@ -454,6 +455,7 @@ async function startOnStuckPr(
       senderKind: "hub",
       to: seat.id,
       ticket: pr.ticket,
+      targetRunId: started.runId,
       text,
     });
     deps.log?.(`stuck PR #${pr.number} (${pr.ticket}): ${seat.id} took it (${pr.kind})`);

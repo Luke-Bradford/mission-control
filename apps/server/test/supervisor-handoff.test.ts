@@ -242,3 +242,61 @@ it("starts the returned seat on the open PR's own ref, not the ended run's local
   expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${head}`);
   expect(git(worktree, "rev-parse", "HEAD")).toBe(tip);
 });
+
+it("keeps a crashed rework round with its own ticket: a start on another ticket gets no handoff", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const reviewId = store.requestReview({
+    authorRunId: first.runId,
+    repoId: "mc",
+    seatId: "retro",
+    prNumber: 9,
+    sha: "b".repeat(40),
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: 2,
+  });
+  if (reviewId === null) throw new Error("review not queued");
+  store.setReviewState(reviewId, ["queued"], "running", { runId: "retro:x", at: 3 });
+  store.recordFindings(reviewId, "retro:x", {
+    verdict: { spec: "pass", quality: "fail" },
+    summary: "one finding",
+    findings: [
+      {
+        severity: "Important",
+        file: "a.txt",
+        line: 1,
+        summary: "ticket 42's own finding",
+        scenario: "it breaks",
+        fix: "fix a.txt",
+      },
+    ],
+    at: 4,
+  });
+  await sup.endRun("guido-1");
+  expect(store.openHandoff("mc", "mc#42")?.runId).toBe(first.runId);
+  const other = await sup.startRun("guido-1", 43);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  expect(store.receivedHandoff(other.runId)).toBeNull();
+  expect(store.openHandoff("mc", "mc#42")?.acceptedRunId).toBeNull();
+  expect(userLines().some((l) => l.includes("ticket 42's own finding"))).toBe(false);
+  expect(userLines().some((l) => l.includes("Handoff from"))).toBe(false);
+});
+
+it("does not count a rework wake as a carry-on resume for the retry-loop alarm", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  for (let i = 0; i < 3; i++) {
+    const aside = await sup.setAside(first.runId);
+    if (!aside) throw new Error("missing aside");
+    store.setRunLoop(first.runId, { ...NEW_LOOP, aside: { ...aside, wake: true } });
+    await sup.wakeRun(first.runId);
+    await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  }
+  expect(store.waste.unreportedResumes(0, 1)).toEqual([]);
+});
