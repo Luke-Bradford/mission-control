@@ -193,7 +193,9 @@ function RoundsPanel({ t }: { t: Telemetry | undefined }) {
   if (!plot)
     return (
       <Panel id="qRounds" title="Rounds per PR" sub={sub}>
-        <p className="pb s muted">{t ? "No reviewed PRs in the last 7 days." : "Loading…"}</p>
+        <p className="pb s muted">
+          {t ? `No reviewed PRs in the last ${DAILY_DAYS} days.` : "Loading…"}
+        </p>
         <p className="pnote">{gap}</p>
       </Panel>
     );
