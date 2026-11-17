@@ -1493,14 +1493,17 @@ describe("prepareCheckout", () => {
         symlinkSync(outside, join(roles, "LINK.md"));
       };
 
-      it("still reuses and reinstalls the worktree (16 Nov)", async () => {
+      it("empties the scratch folder, never following a link, and reuses the worktree (16 Nov)", async () => {
         const first = await prepareCheckout(input(), payloadInstall);
         plant(first.path, join(MC_TMP_DIR_NAME, "t1"));
+        writeFileSync(join(first.path, MC_TMP_DIR_NAME, "note.txt"), "x\n");
         expect(await prepareCheckout(input(), payloadInstall)).toMatchObject({
           path: first.path,
           created: false,
         });
+        expect(readdirSync(join(first.path, MC_TMP_DIR_NAME))).toEqual([]);
         expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        expect(existsSync(join(first.path, "node_modules"))).toBe(true);
       });
 
       it("still refuses a link in a same-named folder anywhere else", async () => {
@@ -1509,178 +1512,52 @@ describe("prepareCheckout", () => {
         const e = await fail(prepareCheckout(input(), payloadInstall));
         expect(e.code).toBe("protected");
         expect(e.message).toContain(`has a symlink at docs/${MC_TMP_DIR_NAME}/t1/`);
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
       });
 
-      describe("when the base workspace makes .mc-tmp an install importer", () => {
-        beforeEach(() => {
-          commit(seed, {
-            "package.json": PAYLOAD_PKG,
-            "pnpm-lock.yaml": `${EMPTY_LOCK}\n  ${MC_TMP_DIR_NAME}/pkg: {}\n`,
-            "pnpm-workspace.yaml": `packages:\n  - ${MC_TMP_DIR_NAME}/pkg\n`,
-            [`${MC_TMP_DIR_NAME}/pkg/package.json`]: PKG,
-          });
-          git(seed, "push", "-q", "origin", "main");
-        });
-
-        it("refuses a linked manifest there", async () => {
-          const first = await prepareCheckout(input(), payloadInstall);
-          const manifest = join(first.path, MC_TMP_DIR_NAME, "pkg", "package.json");
-          rmSync(manifest);
-          symlinkSync(join(outside, "keep.txt"), manifest);
-          const e = await fail(prepareCheckout(input(), payloadInstall));
-          expect(e.code).toBe("protected");
-          expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}/pkg/package.json`);
-        });
-
-        it("refuses a linked workspace node_modules there", async () => {
-          const first = await prepareCheckout(input(), payloadInstall);
-          symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME, "pkg", "node_modules"));
-          const e = await fail(prepareCheckout(input(), payloadInstall));
-          expect(e.code).toBe("protected");
-          expect(e.message).toContain(`${MC_TMP_DIR_NAME}/pkg/node_modules`);
-          expect(readdirSync(outside)).toEqual(["keep.txt"]);
-        });
-      });
-
-      describe("when only pnpm-workspace.yaml (not the lockfile) selects .mc-tmp", () => {
-        beforeEach(() => {
-          commit(seed, {
-            "package.json": PAYLOAD_PKG,
-            "pnpm-lock.yaml": EMPTY_LOCK, // stale: its only importer is "."
-            "pnpm-workspace.yaml": `packages:\n  - ${MC_TMP_DIR_NAME}/pkg\n`,
-            [`${MC_TMP_DIR_NAME}/pkg/package.json`]: PKG,
-          });
-          git(seed, "push", "-q", "origin", "main");
-        });
-
-        it.each(["manifest", "node_modules"])(
-          "refuses a linked %s on a reused checkout",
-          async (what) => {
-            const first = await prepareCheckout(input(), payloadInstall);
-            const pkg = join(first.path, MC_TMP_DIR_NAME, "pkg");
-            if (what === "manifest") {
-              rmSync(join(pkg, "package.json"));
-              symlinkSync(join(outside, "keep.txt"), join(pkg, "package.json"));
-            } else {
-              symlinkSync(outside, join(pkg, "node_modules"));
-            }
-            const e = await fail(prepareCheckout(input(), payloadInstall));
-            expect(e.code).toBe("protected");
-            expect(e.message).toContain(`${MC_TMP_DIR_NAME}/pkg/`);
-            expect(readdirSync(outside)).toEqual(["keep.txt"]);
-          },
-        );
-
-        it.each(["manifest", "node_modules"])("refuses a linked %s after a sync", async (what) => {
-          const first = await prepareCheckout(input(), payloadInstall);
-          commit(seed, { "pnpm-lock.yaml": `${EMPTY_LOCK}\n# changed\n` });
-          git(seed, "push", "-q", "origin", "main");
-          const again = await prepareCheckout(input(), payloadInstall);
-          const synced = await syncReusedWorktree(clone, again, { syncMain: true });
-          if (synced?.kind !== "merged") throw new Error("expected merge");
-          const reused = { ...again, synced };
-          // the sync step meets a worktree with no root node_modules, as after the crew tidy
-          rmSync(join(first.path, "node_modules"), { recursive: true, force: true });
-          const pkg = join(first.path, MC_TMP_DIR_NAME, "pkg");
-          if (what === "manifest") {
-            rmSync(join(pkg, "package.json"));
-            symlinkSync(join(outside, "keep.txt"), join(pkg, "package.json"));
-          } else {
-            symlinkSync(outside, join(pkg, "node_modules"));
-          }
-          const note = await installAfterSync(clone, reused, reused.synced.before, root);
-          expect(note).toContain("install refused:");
-          expect(note).toContain(`${MC_TMP_DIR_NAME}/pkg/`);
-          expect(readdirSync(outside)).toEqual(["keep.txt"]);
-        });
-      });
-
-      describe("when a verified pnpm setting redirects the install through .mc-tmp", () => {
-        const cases: [string, Record<string, string>][] = [
-          [".npmrc modules-dir", { ".npmrc": `modules-dir=${MC_TMP_DIR_NAME}/deps\n` }],
-          [
-            "workspace virtualStoreDir",
-            { "pnpm-workspace.yaml": `virtualStoreDir: ${MC_TMP_DIR_NAME}/store\n` },
-          ],
-          [
-            ".npmrc virtual-store-dir (path built from a variable)",
-            { ".npmrc": `virtual-store-dir=$\u007bX}/s\n` },
-          ],
-          [
-            "workspace lockfileDir elsewhere",
-            { "pnpm-workspace.yaml": "lockfileDir: ../shared\n" },
-          ],
-        ];
-        const linkAt = (root: string) => {
-          const target = join(root, MC_TMP_DIR_NAME);
-          mkdirSync(target, { recursive: true });
-          symlinkSync(outside, join(target, "deps"));
-        };
-
-        it.each(cases)("refuses a link there on a reused checkout: %s", async (_n, files) => {
-          commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
-          git(seed, "push", "-q", "origin", "main");
-          const first = await prepareCheckout(input(), payloadInstall);
-          linkAt(first.path);
-          const e = await fail(prepareCheckout(input(), payloadInstall));
-          expect(e.code).toBe("protected");
-          expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}/deps`);
-          expect(readdirSync(outside)).toEqual(["keep.txt"]);
-        });
-
-        it.each(cases)("refuses a link there after a sync: %s", async (_n, files) => {
-          commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
-          git(seed, "push", "-q", "origin", "main");
-          const first = await prepareCheckout(input(), payloadInstall);
-          commit(seed, { "pnpm-lock.yaml": `${EMPTY_LOCK}\n# changed\n` });
-          git(seed, "push", "-q", "origin", "main");
-          const again = await prepareCheckout(input(), payloadInstall);
-          const synced = await syncReusedWorktree(clone, again, { syncMain: true });
-          if (synced?.kind !== "merged") throw new Error("expected merge");
-          rmSync(join(first.path, "node_modules"), { recursive: true, force: true });
-          linkAt(first.path);
-          const note = await installAfterSync(clone, again, synced.before, root);
-          expect(note).toContain("install refused:");
-          expect(note).toContain(`${MC_TMP_DIR_NAME}/deps`);
-          expect(readdirSync(outside)).toEqual(["keep.txt"]);
-        });
-      });
-
-      it.each([
-        ["a wildcard first segment", "*/pkg"],
-        ["a recursive pattern", "**"],
-      ])("keeps .mc-tmp in the check when the workspace has %s", async (_n, pattern) => {
-        commit(seed, {
-          "package.json": PAYLOAD_PKG,
-          "pnpm-lock.yaml": EMPTY_LOCK,
-          "pnpm-workspace.yaml": `packages:\n  - "${pattern}"\n`,
-        });
-        git(seed, "push", "-q", "origin", "main");
+      it("still refuses a link elsewhere while clearing the scratch folder", async () => {
         const first = await prepareCheckout(input(), payloadInstall);
-        plant(first.path, join(MC_TMP_DIR_NAME, "t1"));
+        plant(first.path, MC_TMP_DIR_NAME);
+        symlinkSync(outside, join(first.path, "planted"));
         const e = await fail(prepareCheckout(input(), payloadInstall));
         expect(e.code).toBe("protected");
+        expect(e.message).toContain("has a symlink at planted");
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
       });
 
-      it("keeps .mc-tmp in the check when the workspace file is malformed", async () => {
-        commit(seed, {
-          "package.json": PAYLOAD_PKG,
-          "pnpm-lock.yaml": EMPTY_LOCK,
-          "pnpm-workspace.yaml": "packages: [\n",
-        });
-        git(seed, "push", "-q", "origin", "main");
-        const first = await prepareCheckout(input(), payloadInstall).catch(() => null);
-        if (first === null) return; // refused outright: also closed
-        plant(first.path, join(MC_TMP_DIR_NAME, "t1"));
-        expect((await fail(prepareCheckout(input(), payloadInstall))).code).toBe("protected");
-      });
-
-      it("still refuses a scratch folder that is itself a symlink", async () => {
+      it("leaves a scratch folder that is itself a symlink alone, and refuses it", async () => {
         const first = await prepareCheckout(input(), payloadInstall);
         symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME));
         const e = await fail(prepareCheckout(input(), payloadInstall));
         expect(e.code).toBe("protected");
         expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}`);
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+      });
+
+      describe("a base whose pnpm settings route the install through .mc-tmp", () => {
+        const cases: [string, Record<string, string>][] = [
+          [".npmrc modules-dir", { ".npmrc": `modules-dir=${MC_TMP_DIR_NAME}/deps\n` }],
+          [
+            "workspace virtualStoreDir written with YAML escapes",
+            {
+              "pnpm-workspace.yaml": `${String.raw`"virtual\u0053toreDir": ".mc\u002Dtmp/deps"`}\n`,
+            },
+          ],
+          [
+            "workspace package under .mc-tmp, lockfile stale",
+            { "pnpm-workspace.yaml": `packages:\n  - ${MC_TMP_DIR_NAME}/deps\n` },
+          ],
+        ];
+        it.each(cases)("a link at the target is removed, not followed: %s", async (_n, files) => {
+          commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
+          git(seed, "push", "-q", "origin", "main");
+          const first = await prepareCheckout(input(), payloadInstall);
+          mkdirSync(join(first.path, MC_TMP_DIR_NAME), { recursive: true });
+          symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME, "deps"));
+          await prepareCheckout(input(), payloadInstall);
+          expect(readdirSync(join(first.path, MC_TMP_DIR_NAME))).toEqual([]);
+          expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        });
       });
     });
 

@@ -625,8 +625,7 @@ async function refuseUnsafeTree(
  * resolves. Every install input found on the way is added to `found`. Lookups go through the
  * filesystem (`lstat(join(dir, name))`), so its case and Unicode folding apply (a tracked
  * `NODE_MODULES` is `node_modules` on APFS). This, not the tree listing, is authoritative: the
- * ref another seat can move is not necessarily what was checked out. The top-level `.mc-tmp` is
- * not walked when `skipScratch` says the install cannot read it (see the loop below).
+ * ref another seat can move is not necessarily what was checked out.
  */
 async function inspectDisk(
   root: string,
@@ -637,7 +636,6 @@ async function inspectDisk(
   allowNestedInstallDir?: (rel: string, read: ReadObject) => Promise<boolean>,
   allowedInstallDirs = new Set<string>(),
   read?: ReadObject,
-  skipScratch = false,
 ): Promise<string | null> {
   const dir = join(root, rel);
   const prefix = rel ? `${rel}/` : "";
@@ -661,11 +659,6 @@ async function inspectDisk(
     // A reused pnpm worktree verifies its inputs before deleting this one directory.
     if (allowRootInstallDir && rel === "" && d.name === tool.installDir) continue;
     if (allowedInstallDirs.has(`${prefix}${d.name}`)) continue;
-    // The worktree's own scratch folder (git-ignored): a test run leaves fixtures there, links
-    // included. The caller sets `skipScratch` only once it has shown the install cannot read it
-    // (see `scratchIsOutsideInstall`). Only the real folder at the top is skipped; a link in its
-    // place, or a same-named folder deeper down, is still refused.
-    if (skipScratch && rel === "" && d.name === MC_TMP_DIR_NAME && d.isDirectory()) continue;
     if (d.isSymbolicLink()) return `has a symlink at ${prefix}${d.name}`;
     if (d.isDirectory()) {
       const unsafe = await inspectDisk(
@@ -677,7 +670,6 @@ async function inspectDisk(
         allowNestedInstallDir,
         allowedInstallDirs,
         read,
-        skipScratch,
       );
       if (unsafe !== null) return unsafe;
     }
@@ -759,75 +751,6 @@ async function baseBlob(read: ReadObject, baseSha: string, file: string): Promis
   if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return null;
   await read("blob", entry.id, file);
   return entry.id;
-}
-
-/** The root files pnpm takes settings from. */
-const PNPM_SETTINGS_FILES = [
-  ".npmrc",
-  "pnpm-workspace.yaml",
-  "package.json",
-  "package.yaml",
-  "package.json5",
-] as const;
-/** A setting that moves a path the install reads or writes, in `.npmrc` (kebab), YAML or JSON (camel) spelling. */
-const PNPM_PATH_SETTING =
-  /modules[-_]?dir|virtual[-_]?store[-_]?dir|lockfile[-_]?dir|workspace[-_]?dir|node[-_]?modules[-_]?dir|shared[-_]?workspace/i;
-
-/**
- * True when the install cannot read the worktree's `.mc-tmp`: pnpm, where neither the verified base
- * `pnpm-workspace.yaml` (pnpm finds projects from its patterns, not the lockfile) nor the verified
- * lockfile's importers can select a package at or under it. Fails closed: a missing-but-unreadable,
- * malformed or unexpected workspace file, a pattern whose first segment is `.mc-tmp` or could match
- * it (any glob character, `..`, or a non-string entry) keeps the folder in the disk check, as does
- * any other tool.
- */
-async function scratchIsOutsideInstall(
-  tool: InstallTool,
-  read: ReadObject,
-  baseSha: string,
-): Promise<boolean> {
-  if (tool !== PNPM_TOOL) return false;
-  const reaches = (path: string) => {
-    const norm = path
-      .replace(/^!/, "")
-      .replace(/^(\.\/)+/, "")
-      .replace(/\/+$/, "");
-    const first = norm.split("/")[0] ?? "";
-    return (
-      first === MC_TMP_DIR_NAME ||
-      /[*?[\]{}()!]/.test(first) ||
-      norm.split("/").includes("..") ||
-      first === ""
-    );
-  };
-  for (const importer of await pnpmWorkspaceImporters(read, baseSha)) {
-    if (reaches(importer)) return false;
-  }
-  // Every verified root file pnpm reads settings from: none may redirect where the install reads
-  // or writes (modules, virtual store, lockfile, workspace root), name `.mc-tmp`, or build a path
-  // from a variable. Any such mention keeps the folder in the check.
-  for (const file of PNPM_SETTINGS_FILES) {
-    const e = await baseEntry(read, baseSha, file);
-    if (e === null) continue;
-    if (e.mode !== "100644" && e.mode !== "100755") return false;
-    const text = (await read("blob", e.id, file)).toString("utf8");
-    if (text.includes(MC_TMP_DIR_NAME) || text.includes("${")) return false;
-    if (PNPM_PATH_SETTING.test(text)) return false;
-  }
-  const entry = await baseEntry(read, baseSha, "pnpm-workspace.yaml");
-  if (entry === null) return true;
-  if (entry.mode !== "100644" && entry.mode !== "100755") return false;
-  try {
-    const doc = parseYaml((await read("blob", entry.id, "pnpm-workspace.yaml")).toString("utf8"));
-    if (doc === null || doc === undefined) return true;
-    if (typeof doc !== "object" || Array.isArray(doc)) return false;
-    const packages = (doc as { packages?: unknown }).packages;
-    if (packages === undefined) return true;
-    if (!Array.isArray(packages)) return false;
-    return packages.every((p) => typeof p === "string" && !reaches(p));
-  } catch {
-    return false;
-  }
 }
 
 /** The exact package directories pnpm's verified lockfile records as workspace importers. */
@@ -1130,7 +1053,6 @@ async function verifyInstall(
     allowNestedInstallDir,
     allowedInstallDirs,
     read,
-    await scratchIsOutsideInstall(tool, read, base),
   );
   if (unsafe !== null) throw refuse(s.subject, unsafe);
   await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
@@ -1196,12 +1118,32 @@ async function installAll(
   }
 }
 
+/**
+ * Empties the worktree's own `.mc-tmp` (git-ignored scratch: a test run leaves fixtures there,
+ * links included) so the disk check can walk the whole tree as it always did. Nothing is followed:
+ * the folder must be a real directory that resolves inside the worktree, and each entry is removed
+ * with `rm`, which unlinks a symlink and never enters it. A `.mc-tmp` that is itself a link, or
+ * resolves elsewhere, is left alone for the disk check to refuse. The caller holds the clone lock
+ * and no seat is running in the worktree.
+ */
+async function clearScratch(worktree: string): Promise<void> {
+  const scratch = join(worktree, MC_TMP_DIR_NAME);
+  const stat = await lstat(scratch).catch(() => null);
+  if (stat === null || !stat.isDirectory()) return;
+  const real = await realpath(scratch);
+  if (real !== join(await realpath(worktree), MC_TMP_DIR_NAME)) return;
+  for (const name of await readdir(scratch)) {
+    await rm(join(scratch, name), { recursive: true, force: true });
+  }
+}
+
 /** Reused pnpm worktrees must be relinked to Codex's stable, seat-read-only store. */
 async function installReusedPnpm(
   s: InstallVerification & { name: string },
   run: InstallRunner,
 ): Promise<void> {
   if (!(await succeeds(lstat(join(s.path, PNPM_TOOL.lockfile))))) return;
+  await clearScratch(s.path);
   const modules = join(s.path, PNPM_TOOL.installDir);
   try {
     const stat = await lstat(modules);
@@ -1598,23 +1540,13 @@ export async function installAfterSync(
     const base = await branchBase(w, worktree.baseSha, "HEAD", subject);
     await refuseInstallInputs(w, base, "HEAD", subject, PNPM_TOOL.inputs);
     const inputs: string[] = [];
+    const unsafe = await inspectDisk(worktree.path, PNPM_TOOL, inputs);
+    if (unsafe !== null) throw refuse(subject, unsafe);
     const format = (await g(["rev-parse", "--show-object-format"])).trim();
     if (format !== "sha1") throw refuse(subject, `is in a ${format} repository`);
     const read = verifiedObjects((args, maxBuffer) =>
       crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
     );
-    const unsafe = await inspectDisk(
-      worktree.path,
-      PNPM_TOOL,
-      inputs,
-      "",
-      false,
-      undefined,
-      undefined,
-      read,
-      await scratchIsOutsideInstall(PNPM_TOOL, read, base),
-    );
-    if (unsafe !== null) throw refuse(subject, unsafe);
     await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, base, subject);
     const pnpmStore = await prepareSharedPnpmStore(worktreesRoot, worktree.branch);
     await addMcTmpExclude(common);

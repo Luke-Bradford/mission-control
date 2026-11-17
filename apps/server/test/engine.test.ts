@@ -8145,6 +8145,28 @@ describe("the engine runs reviews", () => {
       expect(asideRun()?.wake).toBe(true);
     });
 
+    it("a 409 between two 502s breaks the streak", async () => {
+      await setAside();
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      const stuck = () => store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN));
+      h.wakeError = new SupervisorError(
+        502,
+        "could not resume: dependencies could not be reinstalled",
+      );
+      await h.engine.reconcileRun(RUN);
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      await h.engine.reconcileRun(RUN);
+      h.wakeError = new SupervisorError(
+        502,
+        "could not resume: dependencies could not be reinstalled",
+      );
+      await h.engine.reconcileRun(RUN);
+      expect(stuck()).toEqual([]);
+      await h.engine.reconcileRun(RUN);
+      expect(stuck()).toHaveLength(1);
+    });
+
     it("a busy seat's 409 is never reported as a stuck wake", async () => {
       await setAside();
       h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");

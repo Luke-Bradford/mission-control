@@ -1739,6 +1739,9 @@ export function createEngine(deps: EngineDeps): Engine {
               wakeRetries.set(run.id, { message, n });
               if (n >= 2)
                 store.addLoopEvent(wakeStuckKey(run.id), run.id, wakeStuckText(message), at);
+            } else {
+              // anything else between two 502s (a busy seat's 409) breaks "twice running"
+              wakeRetries.delete(run.id);
             }
             const holder = supervisor.seat(run.agentId)?.runId ?? null;
             if (
@@ -1749,6 +1752,7 @@ export function createEngine(deps: EngineDeps): Engine {
               void reconcileRun(holder);
             return;
           }
+          wakeRetries.delete(run.id);
           const message = e instanceof Error ? e.message : String(e);
           // (the supervisor ended the run: the next pass parks it ended)
           store.addLoopEvent(
