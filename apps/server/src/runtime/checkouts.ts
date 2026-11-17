@@ -1291,7 +1291,13 @@ async function ticketBranch(
   );
   const merged = new Set(mergedPullRequestBranches);
   const open = new Set(openPullRequestBranches);
-  const reusable = [...branches].filter((branch) => !merged.has(branch) || open.has(branch));
+  const openBranches = [...branches].filter((branch) => open.has(branch));
+  // An open PR is the ticket's active work. Local branches from ended runs must not compete with
+  // it: an earlier stage's branch can remain until the tidy removes it.
+  const reusable =
+    openBranches.length > 0
+      ? openBranches
+      : [...branches].filter((branch) => !merged.has(branch) || open.has(branch));
   if (reusable.length > 1) {
     throw new CheckoutError(
       "branch",
