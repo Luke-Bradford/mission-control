@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { endKeeper, KEEPER_EXIT_FILE, KEEPER_PID_FILE, readPidFile } from "../src/runtime/keeper.ts";
+import {
+  endKeeper,
+  KEEPER_EXIT_FILE,
+  KEEPER_PID_FILE,
+  readPidFile,
+} from "../src/runtime/keeper.ts";
 import {
   type CrewSession,
   endsAtResult,
