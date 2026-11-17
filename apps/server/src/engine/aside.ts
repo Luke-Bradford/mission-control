@@ -1,5 +1,5 @@
 import { carriedFrom, fixKey, type Run, reviewFor, seatIsPaused } from "@mc/core";
-import { readCrewPause } from "../crew-pause.ts";
+import { readCrewPause } from "../config/crew-pause.ts";
 import type { Store } from "../store.ts";
 
 /**
@@ -15,21 +15,30 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   if (aside.wake) return true;
   // parked on the operator's question: not due back until it is answered (the loop then wakes it)
   if (aside.ask !== undefined) return false;
+  return fixDueReason(store, run) !== null;
+}
+
+/**
+ * What a run set aside is owed a fix for, read from the store: "ci" when CI is failing on its
+ * pushed sha after its one re-run, "review" when its current review has reported blocking
+ * findings whose fix line is not yet claimed; else null.
+ */
+function fixDueReason(store: Store, run: Run): "ci" | "review" | null {
   const pushed = store.runPush(run.id);
-  if (pushed === null || run.loop === null || run.loop === undefined) return false;
+  if (pushed === null || run.loop === null || run.loop === undefined) return null;
   if (run.loop.phase === "ci") {
     const prNumber = run.loop.prNumber;
     const pr = store.pullRequests(run.repoId).find((p) => p.number === prNumber);
     // the loop's rule: the first failure on a sha is re-run, not sent; it is due after that re-run
     const rerun = run.loop.rerun;
-    return (
-      pr !== undefined &&
+    return pr !== undefined &&
       pr.headSha === pushed.sha &&
       pr.ci === "failing" &&
       (run.loop.ciFailedSha === pushed.sha ||
         (rerun?.sha === pushed.sha &&
           (store.pullRequestReadAt(run.repoId, pr.number) ?? 0) > rerun.at))
-    );
+      ? "ci"
+      : null;
   }
   const cur = reviewFor(
     store.reviewsOfRun(run.id),
@@ -37,12 +46,12 @@ export function asideWakeDue(store: Store, run: Run): boolean {
     pushed.sha,
     carriedFrom(run.loop.carry, run.loop.reviewWaivedSha, pushed.sha),
   );
-  return (
-    cur !== null &&
+  return cur !== null &&
     cur.state === "reported" &&
     cur.blocking > 0 &&
     !(fixKey(run.id, run.loop.epoch, cur.id) in store.claimedKeys(run.id))
-  );
+    ? "review"
+    : null;
 }
 
 /**
@@ -75,4 +84,18 @@ export function reworkDueBesides(store: Store, run: Run): boolean {
   return unpausedAsideRuns(store, run.agentId).some(
     (r) => r.id !== run.id && !isDisplaced(store, r) && asideWakeDue(store, r),
   );
+}
+
+/**
+ * Why a set-aside run is due back for a fix a fresh session may take (#1643): "ci" or "review".
+ * Null for a displaced run, one parked on a question, one with a line owed on its return, one that
+ * has not reported yet, and a run due back for any other reason (those resume).
+ */
+export function fixWakeReason(store: Store, run: Run): "ci" | "review" | null {
+  if (!asideWakeDue(store, run)) return null;
+  const loop = run.loop;
+  if (!loop?.aside || loop.aside.ask !== undefined || loop.pendingLine) return null;
+  if (isDisplaced(store, run)) return null;
+  if (store.evidenceNotes(run.id).length < 1) return null;
+  return fixDueReason(store, run);
 }

@@ -59,15 +59,32 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
-  const ran = splitCommands(command);
+  const ran = splitCommands(command).map(lockForm);
   for (const check of checks) {
     const want = splitCommands(check)[0];
     if (want === undefined) continue;
-    if (ran.some((argv) => argv.length === want.length && argv.every((w, i) => w === want[i]))) {
+    const form = lockForm(want);
+    if (ran.some((argv) => argv.length === form.length && argv.every((w, i) => w === form[i]))) {
       return check;
     }
   }
   return null;
+}
+
+/** The script the related-tests check runs: `pnpm test:related` is this node call. */
+const RELATED_SCRIPT = ["node", "--experimental-strip-types", "scripts/check-related.ts"];
+
+/**
+ * A command's words with the spellings of one pnpm script folded together: `pnpm -s test:related`,
+ * `pnpm test:related` and `pnpm run test:related` load the Mac alike, so they take the same lock.
+ * The related-tests script run through node folds to `pnpm test:related`.
+ */
+function lockForm(argv: readonly string[]): readonly string[] {
+  if (argv.length === RELATED_SCRIPT.length && argv.every((w, i) => w === RELATED_SCRIPT[i]))
+    return ["pnpm", "test:related"];
+  if (argv[0] !== "pnpm") return argv;
+  const rest = argv.slice(1).filter((w, i) => !(i === 0 && w === "-s"));
+  return ["pnpm", ...(rest[0] === "run" ? rest.slice(1) : rest)];
 }
 
 /** The seat clone's state at one moment: its checked-out commit, and whether the worktree has no change, untracked files included. */

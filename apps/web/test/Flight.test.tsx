@@ -606,7 +606,7 @@ describe("FLIGHT page", () => {
     expect(list.textContent).not.toContain("PR #");
     expect(list.querySelector(".wsteps .w")).not.toBeNull();
     const stuck = list.querySelector(".wif-stuck") as HTMLElement;
-    expect(stuck.textContent).toContain("waiting on you: needs you");
+    expect(stuck.textContent).toContain("Held: needs you");
     expect(stuck.textContent).toContain("since 1h 30m");
   });
 

@@ -17,7 +17,7 @@ import type { AttentionItem } from "./types.ts";
 const ALERT_KEYS = new Set([
   FLIGHT_NOT_TRIAGING_KEY,
   // apps/server/src/update.ts HUB_UPDATE_HELD_KEY and HUB_UPDATE_PERSON_KEY; the server test pins
-  // them together. The held note is FLIGHT's to run while it can (hud.ts) and an alert only once it
+  // them together. The held note is FLIGHT's to run while it can (hud/hud.ts) and an alert only once it
   // reaches the operator (FLIGHT stopped or not on a superuser repo, or its window passed); the
   // person-only note (a shortcut in the change, pnpm, a checkout off main) is one from the start.
   "note:hub-update-held",
@@ -31,7 +31,7 @@ export function needsYouAlert(item: Pick<AttentionItem, "key" | "kind">): boolea
     item.key.startsWith(`note:${GUARD_ACK_PREFIX}`) ||
     item.kind === "ratelimit" ||
     // the operator's own queue reorder, with its choices written by the hub
-    // (apps/server/src/queue-reorder.ts; its test pins the prefix)
+    // (apps/server/src/queue/queue-reorder.ts; its test pins the prefix)
     (item.kind === "approval" && item.key.startsWith(QUEUE_REORDER_ITEM_PREFIX))
   );
 }
@@ -67,6 +67,9 @@ const ID_TEXT: readonly [RegExp, string][] = [
   [/\bmcp__mc__\w+|\bmc\s+[a-z]+(?:_[a-z]+)*\b/i, "a tool name"],
 ];
 
+/** A picture written in a question's text: markdown image from a hub route. */
+const HUB_PICTURE = /!\[[^\]\n]*\]\(\/api\/[^)\s]+\)/;
+
 const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The seat ids (and so their call signs, which differ only in case) as one pattern, or null. */
@@ -78,7 +81,9 @@ const seatPattern = (seatIds: readonly string[]): RegExp | null => {
 };
 
 /** Every unreadable id in `text`, named; `seatIds` are the configured seats' ids. */
-const idKinds = (text: string, seatIds: readonly string[]): string[] => {
+const idKinds = (full: string, seatIds: readonly string[]): string[] => {
+  // the picture rule asks for a hub image, whose link ends in a hex id: it is not an id to read
+  const text = full.replace(new RegExp(HUB_PICTURE, "g"), " ");
   const seat = seatPattern(seatIds);
   return [
     ...ID_TEXT.filter(([re]) => re.test(text)).map(([, what]) => what),
@@ -166,9 +171,6 @@ export interface BriefParts {
   /** A branch preview is published for the question's ticket. */
   hasPreview: boolean;
 }
-
-/** A picture written in a question's text: markdown image from a hub route. */
-const HUB_PICTURE = /!\[[^\]\n]*\]\(\/api\/[^)\s]+\)/;
 
 /**
  * Rule 4's added parts of a question (#1510), each named so FLIGHT fixes the brief in one try.

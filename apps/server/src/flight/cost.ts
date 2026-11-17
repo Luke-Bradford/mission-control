@@ -6,6 +6,7 @@ import {
   type FlightWakeRecord,
   type FlightWakeWaits,
 } from "@mc/core";
+import { endOf } from "../hud/views.ts";
 import { runSpend } from "../spend/spend.ts";
 import type { FinancialRun, Store } from "../store.ts";
 import { flightSignalHistory } from "./signals.ts";
@@ -61,6 +62,31 @@ function factsFor(
   )
     return facts;
   return flightFinancialFacts(store, now, agentIds, days);
+}
+
+/**
+ * API-equivalent cost for FLIGHT's runs that overlap [since, now], from the shared facts (same
+ * timestamped attempt usage and wall-time fallback as the daily wake-cost figure). null when no
+ * FLIGHT run with a recorded cost overlaps the window: no data is not zero.
+ */
+export function flightCostInWindow(
+  facts: FlightFinancialFacts,
+  since: number,
+  now: number,
+  flightId: string,
+): number | null {
+  const runs = facts.runs.filter(
+    (run) =>
+      run.agentId === flightId &&
+      run.costUsd !== null &&
+      run.startedAt < now + 1 &&
+      Math.max(endOf(run, now), run.startedAt + 1) > since,
+  );
+  if (runs.length === 0) return null;
+  return runs.reduce(
+    (total, run) => total + runSpend(run, run, since, now).reduce((n, usd) => n + usd, 0),
+    0,
+  );
 }
 
 const median = (values: number[]): number | null => {

@@ -135,6 +135,12 @@ export interface FlightView {
   wakeHistory?: FlightWakeHistory;
   /** What FLIGHT cost in the last FLIGHT_COST_DAYS days, per day and per wake reason, and its share of the crew's. */
   wakeCost?: FlightWakeCost;
+  /** API-equivalent cost of FLIGHT's sessions in the last 60 minutes; null without session data. */
+  costLastHour?: number | null;
+  /** FLIGHT sessions started in the last 60 minutes; 0 when FLIGHT has run data but none started; null when it has no run data. */
+  sessionsLastHour?: number | null;
+  /** Start time of FLIGHT's current session run; null when there is no current run. */
+  runStartedAt?: number | null;
   /** How long an operator message or a blocker waited for a wake, per day. */
   wakeWaits?: FlightWakeWaits;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
@@ -659,6 +665,10 @@ export const ticketClosedReason = (ticket: string): string => `${ticket} was clo
 export const prMergedReason = (n: number): string => `PR ${n} merged.`;
 export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
 export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
+export const REPO_UNWATCHED_REASON = "repo no longer watched";
+/** What an item's panel says in place of its plan and materials when its repo is not watched. */
+export const repoUnwatchedPanelText = (repoId: string): string =>
+  `The plan and attached materials are not loaded because ${repoId} is not a repo this hub watches.`;
 
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;
@@ -781,7 +791,7 @@ export const syncConflictText = (call: string, files: readonly string[]): string
   syncConflictDecision(call, files) + RECORDED;
 
 export const notEndableRunText = (call: string): string =>
-  `Not ended: ${call}'s run is not parked or stalled.`;
+  `Not ended: ${call}'s run is neither on its seat nor set aside.`;
 export const END_UNREADABLE_TEXT = "Not ended: the run's worktree could not be read.";
 export const endDirtyText = (call: string, paths: readonly string[]): string =>
   `Not ended: ${call} has uncommitted changes in ${pathsText(paths)}.`;
@@ -1223,6 +1233,11 @@ export interface FlightState {
     text: string;
     ageMin: number;
     triageRemainingMs: number;
+    /**
+     * Set on FLIGHT's own question: when it was last briefed (0 if never). Its lines grow the text,
+     * so the wake keys on this, and FLIGHT is woken once per brief, not once per line.
+     */
+    ownBriefAt?: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
     /**
@@ -1259,6 +1274,8 @@ export interface FlightState {
       waitMin?: number;
       /** Free to start a review: not paused, stopped, busy or at its quota stop. */
       idle: boolean;
+      /** Why the engine left a queued review unstarted on its last pass, with the PR it waits on. */
+      holds?: { prNumber: number; reason: string; waitsOn: number | null }[];
     }[];
   };
   /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
@@ -1545,7 +1562,7 @@ export const flightDownText = (reason: string): string =>
 export const flightStartFailedText = (reason: string): string =>
   `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
 export const WAKE_ASK =
-  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary for the operator.";
+  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 
 /** "1 change", "2 changes". */
 export const counted = (n: number, one: string, many: string): string =>

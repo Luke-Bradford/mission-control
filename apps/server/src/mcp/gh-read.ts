@@ -7,7 +7,7 @@ import {
   GH_READ_CUT,
   GH_READ_UNTRUSTED,
 } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import type { GhRunner } from "./gh.ts";
 
 const JOB_LOG_PATH = /^actions\/jobs\/[1-9]\d*\/logs$/;

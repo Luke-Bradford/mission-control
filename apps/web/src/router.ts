@@ -104,12 +104,39 @@ export const tabOf = (r: Route): Page =>
  */
 export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["flight", "needs"]);
 
+/** The Telemetry page's tabs, in display order; the first is the default. */
+export const TELEMETRY_TABS = ["crew", "cost", "throughput", "quality", "machine"] as const;
+export type TelemetryTab = (typeof TELEMETRY_TABS)[number];
+export const DEFAULT_TELEMETRY_TAB: TelemetryTab = TELEMETRY_TABS[0];
+/** The Telemetry page's two views of a tab. */
+export const TELEMETRY_VIEWS = ["charts", "table"] as const;
+export type TelemetryView = (typeof TELEMETRY_VIEWS)[number];
+
+/** The tab a URL's `?tab=` names; an unknown or missing one is the default tab. */
+export const telemetryTabParam = (search: string): TelemetryTab => {
+  const t = new URLSearchParams(search).get("tab");
+  return TELEMETRY_TABS.find((x) => x === t) ?? DEFAULT_TELEMETRY_TAB;
+};
+
+/** The view a URL's `?view=` names; anything but `table` is charts. */
+export const telemetryViewParam = (search: string): TelemetryView =>
+  new URLSearchParams(search).get("view") === "table" ? "table" : "charts";
+
 /** Each page's own path (the header tabs and `g` keys go here). */
 const { map: _removedMapPath, ...HUD_PAGE_PATHS_WITHOUT_MAP } = HUD_PAGE_PATHS;
 export const PAGE_PATHS: Record<Page, string> = {
   ...HUD_PAGE_PATHS_WITHOUT_MAP,
   needs: "/needs-you",
 };
+
+/** Telemetry on `tab` (and its table view); the default tab and the charts view are the bare page. */
+export function telemetryPath(tab: TelemetryTab, view: TelemetryView = "charts"): string {
+  const q = new URLSearchParams();
+  if (tab !== DEFAULT_TELEMETRY_TAB) q.set("tab", tab);
+  if (view === "table") q.set("view", "table");
+  const qs = q.toString();
+  return PAGE_PATHS.telemetry + (qs ? `?${qs}` : "");
+}
 
 const enc = encodeURIComponent;
 /** Needs you's home, where the header's tab, the FLIGHT pulse and every "all of it" link lead. */

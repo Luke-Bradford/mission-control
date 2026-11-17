@@ -113,12 +113,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
+import { ProfilesError } from "../src/config/profiles.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-preview/previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -129,8 +130,7 @@ import {
   pushRun,
   seatWroteBody,
 } from "../src/mcp/tools.ts";
-import { setRunPathGrants } from "../src/path-grants.ts";
-import { ProfilesError } from "../src/profiles.ts";
+import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
@@ -922,7 +922,7 @@ describe("commit: another open run changed the same file", () => {
     writeFileSync(join(wt2, rel), text);
   };
   const clashLine = (paths: string, verb = "is") =>
-    `Note: ${paths} ${verb} also changed by GUIDO-2 on mc#43, which is still open; the two PRs may conflict when the second one is merged, and the operator or the controller will resolve it.`;
+    `Note: ${paths} ${verb} also changed by GUIDO-2 on mc#43, which is still open; the two PRs may conflict when the second one is merged, and FLIGHT will sort out the order.`;
 
   beforeEach(() => {
     wt2 = join(dir, "worktrees", "guido-2-43");
@@ -3703,6 +3703,22 @@ describe("push and draft_pr", () => {
         "Not pushed: No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
       );
       expect(remoteTip()).toBeNull();
+    });
+
+    it("pushes while FLIGHT's watch run is live, even if its row carries the seat's branch", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      store.upsertRun(run({ id: "flight-1:1", agentId: "flight-1", loopKind: "watch" }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-1:1",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+      expect(remoteTip()).toBe(sha);
     });
 
     it("refuses an ended run and a read-only seat", async () => {

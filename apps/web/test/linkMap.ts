@@ -89,7 +89,7 @@ export const LINK_MAP: Record<
         "Setup sessions, with the add-agent form open.",
       ),
       rule(/^head agent/, /^\/flight$/, "FLIGHT's seat opens the FLIGHT page, its own view."),
-      rule(/^(dev|[a-z]+)-\d+$/, /^\/agent\/[\w-]+$/, "A seat's name opens its Agent page."),
+      rule(/^(dev|[a-z]+)-\d+$/i, /^\/agent\/[\w-]+$/, "A seat's name opens its Agent page."),
       rule(
         /^(Ready|Building|In review|Merging|Done)/,
         /^\/board\?stage=\w+$/,
@@ -246,6 +246,31 @@ export const LINK_MAP: Record<
     routes: ["/telemetry"],
     rules: [
       rule(/^\d+$/, /^\/comms#cGuard$/, "A guard count opens the Comms line that explains it."),
+      rule(/^Crew health: /, /^\/needs-you$/, "The verdict leads to what waits on the operator."),
+      rule(/^Waiting on you: /, /^\/needs-you$/, "Seat questions are on the Needs you list."),
+      rule(/^Seats running: /, /^\/$/, "Running seats are on the Overview."),
+      rule(/^Merged: /, /^\/board$/, "Merged PRs are the Board's merged stage."),
+      rule(/^Tightest quota: /, /^\/telemetry\?tab=cost$/, "Quota used is on the Cost tab."),
+      rule(/^Machine: /, /^\/telemetry\?tab=machine$/, "CPU and memory are on the Machine tab."),
+      rule(
+        /^(Running|Waiting|Parked|Idle|Stalled|Blocked|Error|Stopped) seats: /,
+        /^\/agent$/,
+        "A state count leads to the Agents page, where the seats are.",
+      ),
+      rule(/^[\w-]+ working share: /, /^\/agent\/[\w-]+$/, "A seat's share opens its Agent page."),
+      rule(/^Table$/, /^\/telemetry\?view=table$/, "The Table view of the same tab."),
+      rule(
+        /^Cost and tokens$/,
+        /^\/telemetry\?tab=cost$/,
+        "A tab is in the URL, so it can be linked.",
+      ),
+      rule(
+        /^Throughput$/,
+        /^\/telemetry\?tab=throughput$/,
+        "A tab is in the URL, so it can be linked.",
+      ),
+      rule(/^Quality$/, /^\/telemetry\?tab=quality$/, "A tab is in the URL, so it can be linked."),
+      rule(/^Machine$/, /^\/telemetry\?tab=machine$/, "A tab is in the URL, so it can be linked."),
     ],
   },
   audit: {
@@ -363,5 +388,8 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/shell/ItemDetail.tsx": "pane: the item's seat, its decision",
   "src/shell/keys.ts": "page: g-key shortcuts",
   "src/shell/overlays.ts": "pane: openItem itself",
+  "src/pages/Telemetry.tsx": "page: the same page, another tab or view",
+  "src/telemetry/CrewTab.tsx": "page: Agents, a seat's Agent page, Needs you, Overview",
   "src/telemetry/Kpis.tsx": "page: the KPI's source",
+  "src/telemetry/Stat.tsx": "page: Needs you, Board, Overview, another Telemetry tab",
 };

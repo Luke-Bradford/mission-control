@@ -109,7 +109,8 @@ export function evidenceSideStarter(
 
 /**
  * Removes what a capture the hub died in the middle of left behind: its `capture-*` folders (the
- * database copies) and every side folder (a checkout, its build and the git worktree registration
+ * database copies), the `kept-*` snapshots of failed captures (the hub's memory of them died with
+ * it) and every side folder (a checkout, its build and the git worktree registration
  * for it). Run at hub start, before any capture can begin, so nothing in `workDir` is in use.
  */
 export async function removeStaleEvidenceWork(o: {
@@ -121,7 +122,9 @@ export async function removeStaleEvidenceWork(o: {
   const removed: string[] = [];
   const sides = join(o.workDir, "sides");
   const stale = [
-    ...(await readdir(o.workDir).catch(() => [])).filter((n) => n.startsWith("capture-")),
+    ...(await readdir(o.workDir).catch(() => [])).filter(
+      (n) => n.startsWith("capture-") || n.startsWith("kept-"),
+    ),
     ...(await readdir(sides).catch(() => [])).map((n) => join("sides", n)),
   ];
   for (const name of stale) {

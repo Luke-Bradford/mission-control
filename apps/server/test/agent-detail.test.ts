@@ -1,7 +1,7 @@
 import { type CrewRow, NEW_LOOP, type Run, type RunDigest, type RunLoopView } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { crewRow, item, NOW, prView, seatRow } from "../../web/test/fixtures.ts";
-import { agentDetail } from "../src/agent-detail.ts";
+import { agentDetail } from "../src/hud/agent-detail.ts";
 import { Store } from "../src/store.ts";
 
 let store: Store;

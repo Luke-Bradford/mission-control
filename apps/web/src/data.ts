@@ -252,7 +252,8 @@ export const RESOURCES = {
     path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
     topic: "agents",
   }),
-  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  // a mention's needsReply follows its Needs-you item, so attention changes refresh it too
+  commsMentions: { path: "/api/comms/mentions", topic: ITEM_THREAD_TOPICS },
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
@@ -407,6 +408,8 @@ export const ACTIONS = {
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{ briefId, sourceRevision, optionId, requestId }`; answers a `BriefChoiceReceipt`. */
+  briefChoice: (key: string) => `/api/attention/${enc(key)}/choice`,
   /** Body `{ optionId, briefAt }`; answers a `ChoiceReceipt`. */
   choose: (key: string) => `/api/attention/${enc(key)}/choose`,
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */

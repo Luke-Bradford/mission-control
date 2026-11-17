@@ -46,7 +46,7 @@ import {
 import type { CcConfig } from "../config.ts";
 import { observeFlightChecks, observeFlightMain } from "../flight/signals.ts";
 import { singleSelectField } from "../github/fields.ts";
-import { prototypeLinkProblem } from "../prototype-links.ts";
+import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import { hasQuestionFence, parseAutonomyQuestion } from "../sd32.ts";
 import type { Store } from "../store.ts";
 import { str } from "../util.ts";
@@ -214,7 +214,7 @@ export const PR_FILES_MAX = 100;
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
-export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state description targetUrl } } } }`;
+export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion startedAt completedAt detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state description targetUrl } } } }`;
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
@@ -1090,6 +1090,12 @@ export function parseChecks(rollup: unknown): PrCheck[] {
         conclusion: str(n.conclusion, "") || str(n.status, ""),
         attempt: typeof attempt === "number" ? attempt : null,
         url: str(n.detailsUrl, "") || null,
+        ...(Number.isFinite(Date.parse(str(n.startedAt, "")))
+          ? { startedAt: Date.parse(str(n.startedAt, "")) }
+          : {}),
+        ...(Number.isFinite(Date.parse(str(n.completedAt, "")))
+          ? { completedAt: Date.parse(str(n.completedAt, "")) }
+          : {}),
       });
     } else if (n.__typename === "StatusContext") {
       const name = str(n.context, "");

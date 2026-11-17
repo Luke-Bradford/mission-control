@@ -16,7 +16,7 @@ import {
 } from "../src/collectors/notifications.ts";
 import type { CcConfig } from "../src/config.ts";
 import { operatorItems } from "../src/flight/state.ts";
-import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");

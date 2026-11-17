@@ -54,7 +54,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
-import { setRunPathGrants } from "../src/path-grants.ts";
+import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { Store } from "../src/store.ts";
 
 const tools = vi.hoisted(() => ({

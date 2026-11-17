@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { DEFAULT_PROFILES, type LoopDef, loopOf, type Profile, standardLoop } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { stringify } from "yaml";
-import { chooseRunProfile, loadProfiles, ProfilesError, profileHash } from "../src/profiles.ts";
+import {
+  chooseRunProfile,
+  loadProfiles,
+  ProfilesError,
+  profileHash,
+} from "../src/config/profiles.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "mc-profiles-"));
 let n = 0;
@@ -36,7 +41,7 @@ describe("loadProfiles", () => {
     expect(chooseRunProfile(ps, [], "S", null)).toMatchObject({
       profile: { name: "small-change", steps, tries: 2, rounds: 2, planRequired: false },
     });
-    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const { createProfile, profilesVersion } = await import("../src/config/profiles.ts");
     await createProfile(
       path,
       {
@@ -305,6 +310,7 @@ describe("loops in the file", () => {
   });
 
   it.each([
+    [{ name: "other" }, "name does not match the loop's name"],
     [{ labels: ["x"] }, "labels do not match the loop's trigger labels"],
     [{ plan_required: false }, "plan_required does not match the loop's plan step"],
     [{ rounds: 3 }, "rounds does not match the cap of review-changes"],
@@ -374,7 +380,9 @@ describe("profile creation", () => {
     budget: 100000,
   };
   it("enforces step count and name limits on creation", async () => {
-    const { createProfile, NewProfileBody, profilesVersion } = await import("../src/profiles.ts");
+    const { createProfile, NewProfileBody, profilesVersion } = await import(
+      "../src/config/profiles.ts"
+    );
     const path = file(two);
     const base = profilesVersion(loadProfiles(path) as Profile[]);
     for (const steps of [
@@ -389,7 +397,7 @@ describe("profile creation", () => {
   });
 
   it("refuses a bad loop on creation and leaves the file unchanged", async () => {
-    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const { createProfile, profilesVersion } = await import("../src/config/profiles.ts");
     const path = file(two);
     const before = readFileSync(path, "utf8");
     const base = profilesVersion(loadProfiles(path) as Profile[]);
@@ -430,7 +438,7 @@ describe("profile creation", () => {
   });
 
   it("creates and reloads, preserving fallbacks and a started snapshot", async () => {
-    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const { createProfile, profilesVersion } = await import("../src/config/profiles.ts");
     const path = join(dir, `new-${n++}.yaml`);
     const snapshot = structuredClone(DEFAULT_PROFILES[0] as Profile);
     const hash = profileHash(snapshot);
@@ -443,7 +451,7 @@ describe("profile creation", () => {
     expect(snapshot).toEqual(DEFAULT_PROFILES[0]);
   });
   it("refuses duplicate, invalid graph, unknown execution and stale writes without changing the file", async () => {
-    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const { createProfile, profilesVersion } = await import("../src/config/profiles.ts");
     const path = file(two);
     const { readFileSync } = await import("node:fs");
     const before = readFileSync(path, "utf8");
@@ -481,7 +489,7 @@ describe("profile creation", () => {
 });
 
 it("exposes multiple current occupants of the same step", async () => {
-  const { profilesView } = await import("../src/profiles.ts");
+  const { profilesView } = await import("../src/config/profiles.ts");
   const view = profilesView(join(dir, "absent.yaml"), [
     { id: "guido-1", loop: { profile: "feature", step: "verify" } },
     { id: "guido-2", loop: { profile: "feature", step: "verify" } },
@@ -515,7 +523,7 @@ it("matches the catalogue descriptions, with the folded developer path correctio
 });
 
 it("keeps the original profiles when atomic replacement fails and refuses symbolic links", async () => {
-  const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+  const { createProfile, profilesVersion } = await import("../src/config/profiles.ts");
   const { mkdirSync, readFileSync, symlinkSync } = await import("node:fs");
   const path = file(two);
   const before = readFileSync(path, "utf8");

@@ -3,7 +3,6 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlit
 import type {
   AttentionMaterials,
   BriefChoiceReceipt,
-  ChoiceTargetKind,
   ItemChatMessage,
   ItemDiscussion,
   PersonSource,
@@ -15,6 +14,7 @@ import type {
   RunHandoff,
   RunTokenAudit,
   TicketQuestion,
+  TokenAuditSession,
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
@@ -39,31 +39,19 @@ import {
   type AuditThresholds,
   type AuditTokenOveruse,
   type AuditView,
-  auditTier,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
-  CHATTER_NOTE_PREFIX,
   type CiRunView,
   CODE_HEALTH_FLIGHT_REVIEW_DAYS,
   CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_CAPCOM,
-  COMMS_CHATTER_ROUNDS,
-  COMMS_CHATTER_WINDOW_MS,
-  COMMS_CONTROLLER,
-  COMMS_CREW,
   COMMS_MC,
-  COMMS_NOTICE,
   COMMS_OPEN_PREFIX,
-  COMMS_TEXT_MAX,
   type CodeHealthWindow,
-  type CommsKind,
-  type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
-  type CommsSenderKind,
   classifyOveruse,
-  commsCutMarker,
   DECISION_DEFAULT_WAIT_MS,
   type DefectRefs,
   type DefectVia,
@@ -72,16 +60,8 @@ import {
   estimateTokens,
   type FindingResolution,
   FLIGHT_INCOMING_LIMIT,
-  FLIGHT_LEDGER_OPEN,
-  FLIGHT_MEMORY_FULL,
-  FLIGHT_MEMORY_TOPICS_MAX,
-  FLIGHT_PLAN_LIMIT,
-  FLIGHT_POINTER_CHANGE_MAX,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_WAKE_HEAD,
-  FLIGHT_WAKE_STORED_BYTES,
-  FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
   type FlightDecision,
   type FlightDecisionKind,
@@ -91,11 +71,11 @@ import {
   type FlightMovedPointer,
   type FlightPlanInput,
   type FlightPlanOperation,
-  type FlightPointer,
   type FlightPointerKind,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
+  type FlowColumnMove,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -106,14 +86,12 @@ import {
   type HealthRow,
   type HudColumn,
   type HudState,
-  inferTicket,
   isBugLabelled,
   type LoopEvent,
   type LoopKind,
   linkEscapedDefect,
   type MachineSample,
   type MergedPrFacts,
-  memoryTopicKey,
   OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
@@ -130,7 +108,6 @@ import {
   type QaFlowView,
   type QaReviewRoundView,
   type QuestionClosure,
-  type QuestionClosureKind,
   type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
@@ -155,16 +132,12 @@ import {
   type Telemetry,
   type TestLockRun,
   TICKET_SIZES,
-  TITLE_MARKERS,
   type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
   type UsageSample,
-  validateMemoryNote,
-  wakeKeyPrefix,
 } from "@mc/core";
-import { auditThresholds, messageImprovements, toolImprovements } from "./audit-improvements.ts";
 import { CodeHealthReadError } from "./code-health/error.ts";
 import {
   failGitFileSource,
@@ -242,26 +215,36 @@ import { StandingInstructions } from "./instructions/standing.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
-import { strayKey } from "./store/crew-paths.ts";
+import * as attention from "./store/attention.ts";
+import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
 import {
-  compactFlightWake,
+  type BugFixCandidate,
+  bugEscapes,
+  bugFixCandidates,
+  type IntroducingPrFacts,
+  introducingPrFacts,
+  noteBugTraceTried,
+  recordBugEscape,
+} from "./store/bug-escapes.ts";
+import { CommsQueries, cutCommsText } from "./store/comms.ts";
+import { strayKey } from "./store/crew-paths.ts";
+import { flightQueries } from "./store/flight.ts";
+import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
+import * as reviewsStore from "./store/reviews.ts";
+import {
   evidenceOf,
-  queueRow,
-  seatRow,
   toBoardItem,
   toCiRun,
   toEscalation,
-  toFlightDecision,
   toGuardHit,
-  toQuestion,
   toReview,
   toRun,
-  toSample,
 } from "./store/rows.ts";
+import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
+import { seatQueries } from "./store/seats.ts";
 import {
   ACK_ABSENT_MS,
-  ACTIVE_SEAT_STATES,
   type AgentEvent,
   type AttentionNote,
   AUDIT_RETENTION_DAYS,
@@ -274,8 +257,6 @@ import {
   type CommsRow,
   type CommsSettlement,
   type CrewError,
-  commsMessageNumber,
-  commsPosition,
   type Evidence,
   type FinancialRun,
   FLIGHT_DECISIONS_RETENTION_DAYS,
@@ -284,26 +265,32 @@ import {
   HISTORY_SWEEP_MAX_BATCHES,
   type Hold,
   type KeeperCursor,
-  LIVE_COMMS_LIMIT,
   LIVE_LOOP_EVENTS_LIMIT,
   type LockHoldRow,
   MACHINE_RETENTION_MS,
-  MAX_OPEN_RUN_AGE_MS,
   type NewCommsRow,
   type NoteInput,
-  type NoteKind,
   type NotificationRead,
   type NotificationRow,
   OPERATIONAL_RETENTION_DAYS,
   type QuestionChoiceRow,
   type QueueRow,
   type SeatLine,
-  type SeatLineOrigin,
   type SeatQuestion,
   type Stray,
-  THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
+import {
+  type ControllerMessageUsage,
+  type ControllerUsageTotals,
+  usageQueries,
+} from "./store/usage.ts";
 import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
+import {
+  auditThresholds,
+  messageImprovements,
+  toolImprovements,
+} from "./telemetry/audit-improvements.ts";
+import { specBounces } from "./telemetry/spec-bounces.ts";
 
 export * from "./store/types.ts";
 
@@ -348,8 +335,21 @@ const notificationRow = (r: Row): NotificationRow => ({
 const memPct = (s: MachineSample): number | null =>
   s.memUsedBytes !== null && s.memTotalBytes > 0 ? (s.memUsedBytes / s.memTotalBytes) * 100 : null;
 
-/** `PRAGMA user_version` once the usage_samples dedupe and its unique index are in place. */
-const USAGE_DEDUPE_VERSION = 1;
+const GIB = 1024 ** 3;
+
+/** Two decimals keep the served series short; null stays null. */
+const round2 = (n: number | null): number | null => (n === null ? null : Math.round(n * 100) / 100);
+
+/** Swap in use as a percentage of the swap file; null when unmeasured or there is no swap file. */
+const swapPct = (s: MachineSample): number | null =>
+  s.swapUsedBytes != null && s.swapTotalBytes != null && s.swapTotalBytes > 0
+    ? (s.swapUsedBytes / s.swapTotalBytes) * 100
+    : null;
+
+/** 100 minus the free percentage `memory_pressure` reports; null when unmeasured. */
+const pressurePct = (s: MachineSample): number | null =>
+  s.memoryPressureFreePct == null ? null : 100 - s.memoryPressureFreePct;
+
 /**
  * A stored digest; one persisted before `background` existed has none in flight, one before
  * `compactions` existed has none counted, one before `lastText` existed has no text.
@@ -371,20 +371,14 @@ const REPO_TABLES = {
 } as const;
 type RepoTable = keyof typeof REPO_TABLES;
 
-/** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
-const COMMS_LINK_PREVIEW = 200;
-
-function cutCommsText(text: string): string {
-  const chars = Array.from(text);
-  return chars.length > COMMS_TEXT_MAX
-    ? `${chars.slice(0, COMMS_TEXT_MAX).join("")}${commsCutMarker(COMMS_TEXT_MAX, chars.length)}`
-    : text;
-}
-
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
-const DIGEST_CONTEXT_WINDOW_SQL =
-  "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
+
+/** The `sessions` of a stored audit: set only when the run had a fresh session. */
+const sessionsOf = (raw: unknown): { sessions?: TokenAuditSession[] } => {
+  const list = JSON.parse(typeof raw === "string" ? raw : "[]") as TokenAuditSession[];
+  return list.length > 0 ? { sessions: list } : {};
+};
 
 const toTokenCall = (r: Row): TokenCall => ({
   at: (r.at as number | null) ?? null,
@@ -394,6 +388,11 @@ const toTokenCall = (r: Row): TokenCall => ({
   output: r.output as number,
   added: JSON.parse(r.added as string) as TokenSourceAdd[],
 });
+
+/** How many of a repo's latest merged PRs feed a job's p90 run time. */
+const CI_P90_PRS = 40;
+/** A job needs this many timed runs before its p90 stands in for the fixed limit. */
+const CI_P90_MIN_SAMPLES = 5;
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -437,7 +436,7 @@ export class Store {
       this.db.exec(
         "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
       );
-    this.migrate();
+    migrate(this.db, (fn, writeLock) => this.transaction(fn, writeLock));
     this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
     installRiskMemberships(this.db);
@@ -839,434 +838,6 @@ export class Store {
     this.db.close();
   }
 
-  private hasColumn(table: string, column: string): boolean {
-    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[];
-    return cols.some((c) => c.name === column);
-  }
-
-  /**
-   * Runs `fn` if `table` lacks `column`. The check is made again inside a write-locked transaction
-   * so a second process opening the same file waits, then finds the column added and skips it,
-   * rather than failing on a duplicate ALTER.
-   */
-  private whenColumnMissing(table: string, column: string, fn: () => void): void {
-    if (this.hasColumn(table, column)) return;
-    this.transaction(() => {
-      if (!this.hasColumn(table, column)) fn();
-    }, true);
-  }
-
-  /** Adds `column` to `table` when it is missing. */
-  private addColumn(table: string, column: string, type: string): void {
-    this.whenColumnMissing(table, column, () =>
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`),
-    );
-  }
-
-  /** Columns added after the first release; each runs once, on a database that lacks it. */
-  private migrate(): void {
-    // the forecast brake's Needs-you note is gone with the brake
-    if (
-      this.db.prepare("SELECT 1 FROM attention_notes WHERE key = 'budget-brake'").get() !==
-      undefined
-    )
-      this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
-    // Token audit call times (#1646): audits stored before this have none until re-read.
-    this.addColumn("run_token_calls", "at", "INTEGER");
-    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
-    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
-    this.addColumn("flight_decisions", "order_id", "INTEGER");
-    this.addColumn("flight_decisions", "wake_id", "TEXT");
-    this.addColumn("flight_wakes", "wake_id", "TEXT");
-    this.db.exec(
-      "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
-    );
-    // Flow now retains open work for the cumulative-flow chart. SQLite cannot drop NOT NULL in
-    // place, so reconstruct databases created before open rows were recorded.
-    const flowDone = this.db.prepare("PRAGMA table_info(flow_issues)").all() as Row[];
-    if (flowDone.find((column) => column.name === "done_at")?.notnull === 1) {
-      this.transaction(() => {
-        const current = this.db.prepare("PRAGMA table_info(flow_issues)").all() as Row[];
-        if (current.find((column) => column.name === "done_at")?.notnull !== 1) return;
-        this.db.exec(`
-          ALTER TABLE flow_issues RENAME TO flow_issues_before_open_work;
-          CREATE TABLE flow_issues (
-            repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
-            done_at INTEGER, PRIMARY KEY (repo_id, number)
-          );
-          INSERT INTO flow_issues (repo_id, number, size, start_at, done_at)
-            SELECT repo_id, number, size, start_at, done_at FROM flow_issues_before_open_work;
-          DROP TABLE flow_issues_before_open_work;
-        `);
-      }, true);
-    }
-    if (this.getSetting("flight-wake-compact-v1") === null) {
-      this.transaction(() => {
-        if (this.getSetting("flight-wake-compact-v1") !== null) return;
-        const rows = this.db
-          .prepare(
-            "SELECT key, text FROM seat_lines WHERE key LIKE 'flight:wake:%' AND length(CAST(text AS BLOB)) > ?",
-          )
-          .all(FLIGHT_WAKE_STORED_BYTES) as { key: string; text: string }[];
-        const update = this.db.prepare("UPDATE seat_lines SET text = ? WHERE key = ?");
-        for (const row of rows) update.run(compactFlightWake(row.text), row.key);
-        this.setSetting("flight-wake-compact-v1", "1");
-      }, true);
-    }
-    // Discard the old later-state fallback starts; the next flow collection reads Ready history.
-    if (this.getSetting("flow-ready-start-v1") === null) {
-      this.transaction(() => {
-        if (this.getSetting("flow-ready-start-v1") !== null) return;
-        this.db.exec("DELETE FROM flow_issues");
-        this.setSetting("flow-ready-start-v1", "1");
-      }, true);
-    }
-    this.addColumn("notifications", "source_content", "TEXT");
-    this.addColumn("briefs", "structured", "TEXT");
-    this.addColumn("drafts", "source", "TEXT");
-    this.addColumn("drafts", "metadata", "TEXT");
-    this.addColumn("drafts", "completed_at", "INTEGER");
-    // An ok row last succeeded when it was recorded; a failing row's last success is unknown.
-    this.whenColumnMissing("collector_status", "last_ok_at", () => {
-      this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
-      this.db.exec("UPDATE collector_status SET last_ok_at = at WHERE ok = 1");
-    });
-    // When a failing collector began failing; a row failing at upgrade takes its next poll's time.
-    this.addColumn("collector_status", "failing_since", "INTEGER");
-    this.whenColumnMissing("check_runs", "invoked_command", () => {
-      this.db.exec("ALTER TABLE check_runs ADD COLUMN invoked_command TEXT");
-      this.db.exec("UPDATE check_runs SET invoked_command = command WHERE invoked_command IS NULL");
-    });
-    this.addColumn("check_runs", "exit_code", "INTEGER");
-    // A re-polled fallback reading has the same key every time: keep one row per reading. Once per
-    // database (`PRAGMA user_version`); the unique index keeps it true afterwards. An up-to-date
-    // database takes no write lock; one that is behind re-checks once it holds it.
-    const userVersion = (): number =>
-      (this.db.prepare("PRAGMA user_version").get() as Row).user_version as number;
-    if (userVersion() < USAGE_DEDUPE_VERSION) {
-      this.transaction(() => {
-        if (userVersion() >= USAGE_DEDUPE_VERSION) return;
-        this.db.exec(
-          `DELETE FROM usage_samples WHERE rowid NOT IN (
-             SELECT MIN(rowid) FROM usage_samples GROUP BY account_id, window, at, source
-           )`,
-        );
-        this.db.exec(
-          "CREATE UNIQUE INDEX IF NOT EXISTS usage_unique ON usage_samples(account_id, window, at, source)",
-        );
-        this.db.exec(`PRAGMA user_version = ${USAGE_DEDUPE_VERSION}`);
-      }, true);
-    }
-    // Board columns added with the Stage/Owner/hierarchy fields; the next GitHub poll fills them.
-    const boardColumns: [string, string][] = [
-      ["author", "TEXT"],
-      ["stage", "TEXT"],
-      ["owner", "TEXT"],
-      ["parent", "INTEGER"],
-      ["sub_done", "INTEGER"],
-      ["sub_total", "INTEGER"],
-      ["blocked_by", "TEXT NOT NULL DEFAULT '[]'"],
-      ["milestone", "TEXT"],
-      ["size", "TEXT"],
-      ["closed", "INTEGER NOT NULL DEFAULT 0"],
-      ["priority_source", "TEXT"],
-    ];
-    for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
-    // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
-    this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
-    // What the issue body waits on (`{ issues, prs }` JSON), null for none; the next poll fills it.
-    this.addColumn("board_items", "after_deps", "TEXT");
-    // What a bug card's body names (`{ prs, shas, paths }` JSON), null for none.
-    this.addColumn("board_items", "defect_refs", "TEXT");
-    // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
-    // into the row, so the backfill can skip it.
-    const runColumns: [string, string][] = [
-      ["vendor", "TEXT NOT NULL DEFAULT 'claude'"],
-      ["latest_plan", "TEXT"],
-      ["prs", "TEXT NOT NULL DEFAULT '[]'"],
-      ["summary", "TEXT"],
-      ["folded", "INTEGER NOT NULL DEFAULT 0"],
-      // The first loop's state (JSON) and who ended the run; `upsertRun` never writes them.
-      ["loop", "TEXT"],
-      ["ended_by", "TEXT"],
-      ["no_report", "TEXT"],
-      // The ticket's title as the run started with it; null on rows from before it was stored.
-      ["ticket_title", "TEXT"],
-      // The review a run performs (7b-1); `upsertRun` never rewrites it.
-      ["review_id", "INTEGER"],
-      // The `claude` CLI version the run started on; null on rows from before it was recorded.
-      ["cli_version", "TEXT"],
-      // The template profile the run started with (JSON of profile and route) and its hash;
-      // `upsertRun` writes them on a new row only.
-      ["profile", "TEXT"],
-      ["profile_hash", "TEXT"],
-      // The plan at run creation; later transcript folds never rewrite it.
-      ["plan", "TEXT"],
-      ["account_id", "TEXT"],
-      ["effort", "TEXT"],
-      ["prompt_hash", "TEXT"],
-      // The seat's loop kind at the start; `upsertRun` keeps the first value.
-      ["loop_kind", "TEXT"],
-    ];
-    for (const [column, type] of runColumns) this.addColumn("runs", column, type);
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id);
-      CREATE INDEX IF NOT EXISTS reviews_run ON reviews(run_id);
-      CREATE INDEX IF NOT EXISTS reviews_repo_pr ON reviews(repo_id, pr_number, state);
-      CREATE INDEX IF NOT EXISTS board_moves_run ON board_moves(run_id);
-      CREATE INDEX IF NOT EXISTS flight_decisions_target_kind ON flight_decisions(target_run_id, kind);
-      CREATE INDEX IF NOT EXISTS flight_decisions_ref ON flight_decisions(ref, at);
-      CREATE INDEX IF NOT EXISTS ci_runs_pr ON ci_runs(repo_id, pr_number);
-      CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
-      CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
-      CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
-      CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
-      CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
-      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_merging_started ON runs(json_extract(loop, '$.merging'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_agent_aside_worktree ON runs(agent_id, json_extract(loop, '$.aside.worktree'));
-      CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
-      CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
-      CREATE INDEX IF NOT EXISTS runs_agent_recent ON runs(agent_id, started_at DESC, seq DESC, id);
-      CREATE INDEX IF NOT EXISTS run_digests_context_window ON run_digests(run_id, ${DIGEST_CONTEXT_WINDOW_SQL});
-      CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
-      CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
-      CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS pull_requests_branch ON pull_requests(repo_id, branch, number DESC);
-      CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
-      CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
-      CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
-      CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
-      CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
-      CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
-      CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
-      CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
-      CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
-    `);
-    // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
-    this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
-    // When the seat's last turn ended; the engine's quiet-seat check reads it.
-    this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
-    this.addColumn("comms", "item_key", "TEXT");
-    // A Needs-you item's conversation reads by item (itemThread).
-    this.db.exec("CREATE INDEX IF NOT EXISTS comms_item_key ON comms(item_key, at, id)");
-    // A note's unbroken run walks its episodes by key (noteRunStart).
-    this.db.exec(
-      "CREATE INDEX IF NOT EXISTS attention_episodes_key ON attention_episodes(key, at)",
-    );
-    this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
-    this.addColumn("seat_sessions", "error_since", "INTEGER");
-    // Turns in a row that ended with no new commit; the resume line reads it.
-    this.addColumn("seat_sessions", "quiet_turns", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
-    this.addColumn("seat_sessions", "stop_by", "TEXT");
-    this.addColumn("seat_sessions", "stop_reason", "TEXT");
-    this.addColumn("seat_sessions", "stop_at", "INTEGER");
-    this.addColumn("board_items", "item_id", "TEXT");
-    this.addColumn("board_items", "project_id", "TEXT");
-    // When FLIGHT passed the question to the operator (it stays open until they answer).
-    this.addColumn("seat_questions", "passed_at", "INTEGER");
-    // When the operator set the question aside with Not now; it stays open, out of Needs you.
-    this.addColumn("seat_questions", "aside_at", "INTEGER");
-    // When the operator dismissed the note from Needs you; a re-raised note is shown again.
-    this.addColumn("attention_notes", "dismissed_at", "INTEGER");
-    // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
-    // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
-    this.addColumn("holds", "told_state", "TEXT");
-    this.addColumn("decision_defaults", "target", "TEXT");
-    this.addColumn("decision_defaults", "answer", "TEXT");
-    this.addColumn("decision_defaults", "delivered_at", "INTEGER");
-    this.addColumn("decision_defaults", "binding", "TEXT");
-    this.addColumn("decision_defaults", "delivery_state", "TEXT NOT NULL DEFAULT 'legacy'");
-    this.addColumn("decision_defaults", "delivery_note", "TEXT");
-    this.addColumn("pull_requests", "head_sha", "TEXT");
-    this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
-    this.addColumn("pull_requests", "mergeable", "TEXT");
-    // Who opened the PR and who is assigned: a PR run by another hub's login is that lane's.
-    this.addColumn("pull_requests", "author", "TEXT");
-    this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("run_evidence", "done_when", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("reviews", "changed_since", "TEXT");
-    this.addColumn("reviews", "install_note", "TEXT");
-    this.addColumn("review_findings", "late", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("review_findings", "category", "TEXT");
-    this.addColumn("review_findings", "resolution", "TEXT");
-    this.addColumn("review_findings", "resolved_review_id", "INTEGER");
-    // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
-    this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("pull_requests", "additions", "INTEGER");
-    this.addColumn("pull_requests", "deletions", "INTEGER");
-    this.addColumn("pull_requests", "changed_files", "INTEGER");
-    // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
-    this.addColumn("pull_requests", "base", "TEXT");
-    // On every start: a row whose branch names a ticket the pattern did not know when the row was
-    // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
-    this.transaction(() => {
-      const rows = this.db
-        .prepare("SELECT id, repo_id, branch FROM runs WHERE branch IS NOT NULL AND ticket IS NULL")
-        .all() as { id: string; repo_id: string; branch: string }[];
-      const set = this.db.prepare("UPDATE runs SET ticket = ? WHERE id = ?");
-      for (const r of rows) {
-        const ticket = inferTicket(r.branch, r.repo_id);
-        if (ticket !== null) set.run(ticket, r.id);
-      }
-    });
-    // When we read the row from GitHub, by our own clock (GitHub's updatedAt does not move when a
-    // PR's CI finishes). 0: stored before it existed, older than any read.
-    this.addColumn("pull_requests", "read_at", "INTEGER NOT NULL DEFAULT 0");
-    // 1 while the latest poll failed to read the repo's PRs: the row is the last good read.
-    this.addColumn("pull_requests", "stale", "INTEGER NOT NULL DEFAULT 0");
-    // Machine samples' CPU and memory shares, extracted once so the telemetry ranges average
-    // columns rather than parsing every sample's JSON.
-    this.whenColumnMissing("machine_samples", "cpu_pct", () => {
-      this.db.exec("ALTER TABLE machine_samples ADD COLUMN cpu_pct REAL");
-      this.db.exec("ALTER TABLE machine_samples ADD COLUMN mem_pct REAL");
-      // The same arithmetic as memPct, so a backfilled row equals a freshly stored one.
-      this.db.exec(
-        `UPDATE machine_samples SET
-           cpu_pct = json_extract(sample, '$.cpuPct'),
-           mem_pct = CASE WHEN json_extract(sample, '$.memTotalBytes') > 0
-             THEN json_extract(sample, '$.memUsedBytes') * 1.0
-               / json_extract(sample, '$.memTotalBytes') * 100 END`,
-      );
-    });
-    // Rows from before `source`: a title marker (as the GitHub collector matches it) means
-    // `title`. The next GitHub poll rewrites every row anyway.
-    this.whenColumnMissing("escalations", "source", () => {
-      this.db.exec("ALTER TABLE escalations ADD COLUMN source TEXT NOT NULL DEFAULT 'label'");
-      this.db.exec(
-        `UPDATE escalations SET source = 'title' WHERE ${TITLE_MARKERS.map(
-          (m) => `ltrim(title) LIKE '[${m}]%'`,
-        ).join(" OR ")}`,
-      );
-    });
-    // Stored Comms v2 is deliberately additive: hubs can open databases written by older hubs.
-    this.addColumn(
-      "comms",
-      "label",
-      "TEXT CHECK (label IS NULL OR label IN ('question','handoff','blocker','none'))",
-    );
-    this.addColumn("comms", "ref", "TEXT");
-    this.addColumn("comms", "reply_to", "INTEGER");
-    this.addColumn("comms", "target_run_id", "TEXT");
-    // The hub stamps a seat's message with the run that sent it and that run's newest open PR.
-    this.addColumn("comms", "from_run_id", "TEXT");
-    this.addColumn("comms", "pr", "INTEGER");
-    // Set when waking the recipient failed, so an identical retry wakes them instead of being skipped.
-    this.addColumn("comms", "wake_failed_at", "INTEGER");
-    this.addColumn("comms", "delivered_at", "INTEGER");
-    this.addColumn("question_choices", "chosen_by", "TEXT");
-    // Who sent it, set by the hub; NULL on rows stored before this column.
-    this.addColumn("comms", "sender_kind", "TEXT");
-    // `notice` on a line the hub wrote; NULL on any other message.
-    this.addColumn("comms", "kind", "TEXT");
-    // An up-to-date reader must not take a write lock merely to open the store.
-    if (
-      this.db
-        .prepare("SELECT 1 FROM comms WHERE sender_kind = ? AND kind IS NULL LIMIT 1")
-        .get("hub")
-    )
-      this.db
-        .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
-        .run(COMMS_NOTICE, "hub");
-    this.migrateCommsLabels();
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
-      CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
-      CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
-      CREATE INDEX IF NOT EXISTS comms_ticket_count_refs ON comms(ticket, ref, from_id);
-      -- Preserve reference totals when retention removes bodies. Null flags avoid sentinel collisions.
-      CREATE TABLE IF NOT EXISTS comms_ticket_archived_counts (
-        ticket TEXT NOT NULL, ref TEXT NOT NULL, from_id TEXT NOT NULL,
-        ticket_null INTEGER NOT NULL, ref_null INTEGER NOT NULL, count INTEGER NOT NULL,
-        PRIMARY KEY (ticket, ref, from_id, ticket_null, ref_null)
-      );
-      CREATE TRIGGER IF NOT EXISTS comms_archive_ticket_count BEFORE DELETE ON comms
-      WHEN OLD.ticket IS NOT NULL OR OLD.ref IS NOT NULL
-      BEGIN
-        INSERT INTO comms_ticket_archived_counts (ticket, ref, from_id, ticket_null, ref_null, count)
-        VALUES (COALESCE(OLD.ticket, ''), COALESCE(OLD.ref, ''), OLD.from_id,
-          OLD.ticket IS NULL, OLD.ref IS NULL, 1)
-        ON CONFLICT(ticket, ref, from_id, ticket_null, ref_null)
-        DO UPDATE SET count = comms_ticket_archived_counts.count + 1;
-      END;
-      CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
-      CREATE TABLE IF NOT EXISTS comms_mentions (
-        message_id INTEGER NOT NULL, mentioned_id TEXT NOT NULL, seen_at INTEGER,
-        PRIMARY KEY (message_id, mentioned_id)
-      );
-      CREATE INDEX IF NOT EXISTS comms_mentions_target ON comms_mentions(mentioned_id, seen_at, message_id);
-      CREATE TABLE IF NOT EXISTS comms_reactions (
-        message_id INTEGER NOT NULL, actor_id TEXT NOT NULL, reaction TEXT NOT NULL
-          CHECK (reaction IN ('seen','on_it','done','cant')),
-        reason TEXT, at INTEGER NOT NULL,
-        CHECK ((reaction = 'cant' AND length(trim(reason)) BETWEEN 1 AND 80)
-          OR (reaction != 'cant' AND reason IS NULL)),
-        PRIMARY KEY (message_id, actor_id)
-      );
-      CREATE INDEX IF NOT EXISTS comms_reactions_message ON comms_reactions(message_id);
-      CREATE TABLE IF NOT EXISTS comms_settlements (
-        message_id INTEGER PRIMARY KEY, settled_by TEXT NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS comms_pins (
-        message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS comms_inbox_reads (
-        seat_id TEXT NOT NULL, message_id INTEGER NOT NULL,
-        PRIMARY KEY (seat_id, message_id)
-      );
-      CREATE INDEX IF NOT EXISTS comms_inbox_reads_message ON comms_inbox_reads(message_id);
-      CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_insert
-      BEFORE INSERT ON comms_reactions
-      WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
-        OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
-      BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
-      CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_update
-      BEFORE UPDATE OF reaction, reason ON comms_reactions
-      WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
-        OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
-      BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
-    `);
-  }
-
-  /** Adds the explicit `none` label to databases created before Comms recorded it. */
-  private migrateCommsLabels(): void {
-    const schema = this.db
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'comms'")
-      .get() as { sql?: string } | undefined;
-    if (schema?.sql?.includes("'none'")) {
-      if (this.db.prepare("SELECT 1 FROM comms WHERE label IS NULL LIMIT 1").get())
-        this.db.prepare("UPDATE comms SET label = 'none' WHERE label IS NULL").run();
-      return;
-    }
-    this.transaction(() => {
-      this.db.exec(`
-        ALTER TABLE comms RENAME TO comms_before_none_label;
-        CREATE TABLE comms (
-          id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
-          to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL,
-          label TEXT NOT NULL CHECK (label IN ('question','handoff','blocker','none')),
-          ref TEXT, reply_to INTEGER, target_run_id TEXT, from_run_id TEXT, pr INTEGER,
-          wake_failed_at INTEGER, delivered_at INTEGER, sender_kind TEXT, item_key TEXT
-        );
-        INSERT INTO comms (id, at, from_id, to_id, ticket, text, label, ref, reply_to,
-          target_run_id, from_run_id, pr, wake_failed_at, delivered_at, sender_kind, item_key)
-        SELECT id, at, from_id, to_id, ticket, text, COALESCE(label, 'none'), ref, reply_to,
-          target_run_id, from_run_id, pr, wake_failed_at, delivered_at, sender_kind, item_key
-        FROM comms_before_none_label;
-        DROP TABLE comms_before_none_label;
-        CREATE INDEX comms_at ON comms(at);
-        CREATE INDEX comms_from_id ON comms(from_id, id);
-        CREATE INDEX comms_to_id ON comms(to_id, id);
-      `);
-    }, true);
-  }
-
   /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
   private transaction(fn: () => void, writeLock = false): void {
     this.db.exec(writeLock ? "BEGIN IMMEDIATE" : "BEGIN");
@@ -1306,19 +877,61 @@ export class Store {
   runAttempts(
     runId: string,
   ): { id: number; runId: string; kind: string; at: number; data: Record<string, unknown> }[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT * FROM run_attempts WHERE run_id = ? OR run_id IN (SELECT run_id FROM reviews WHERE author_run_id = ?) ORDER BY id",
-        )
-        .all(runId, runId) as Row[]
-    ).map((r) => ({
-      id: r.id as number,
-      runId: r.run_id as string,
-      kind: r.kind as string,
-      at: r.at as number,
-      data: JSON.parse(r.data as string) as Record<string, unknown>,
-    }));
+    return this.runQ.runAttempts(runId);
+  }
+
+  private usageQueriesCache: ReturnType<typeof usageQueries> | undefined;
+
+  /** The usage sample and controller usage queries (store/usage.ts). */
+  private get usageQ(): ReturnType<typeof usageQueries> {
+    this.usageQueriesCache ??= usageQueries(this.db, (fn) => this.transaction(fn));
+    return this.usageQueriesCache;
+  }
+
+  private runQueriesCache: ReturnType<typeof runQueries> | undefined;
+
+  /** The run and attempt queries (store/runs.ts), over the same connection and statement cache. */
+  private get runQ(): ReturnType<typeof runQueries> {
+    this.runQueriesCache ??= runQueries(this.db, (sql) => this.statement(sql));
+    return this.runQueriesCache;
+  }
+
+  /** The queries over the Comms tables (store/comms.ts); the Comms methods below delegate to it. */
+  private get commsStore(): CommsQueries {
+    return new CommsQueries(this.db, {
+      transaction: (fn, writeLock) => this.transaction(fn, writeLock),
+      statement: (sql) => this.statement(sql),
+      run: (id) => this.run(id),
+      raiseNote: (n) => this.raiseNote(n),
+    });
+  }
+
+  private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
+    return this.commsStore.insertComms(row, text, replyTo);
+  }
+
+  private flightQueriesCache: ReturnType<typeof flightQueries> | undefined;
+
+  /** The queries over FLIGHT's own tables (store/flight.ts); the FLIGHT methods below delegate to it. */
+  private get flightQ(): ReturnType<typeof flightQueries> {
+    this.flightQueriesCache ??= flightQueries(
+      this.db,
+      (fn) => this.transaction(fn),
+      (sql) => this.statement(sql),
+    );
+    return this.flightQueriesCache;
+  }
+
+  private seatQueriesCache: ReturnType<typeof seatQueries> | undefined;
+
+  /** The queries over the seat tables (store/seats.ts); the seat methods below delegate to it. */
+  private get seatQ(): ReturnType<typeof seatQueries> {
+    this.seatQueriesCache ??= seatQueries(
+      this.db,
+      (fn, writeLock) => this.transaction(fn, writeLock),
+      (sql) => this.statement(sql),
+    );
+    return this.seatQueriesCache;
   }
 
   /** The waste checks' queries and the alarms table (spend/waste.ts). */
@@ -1337,17 +950,7 @@ export class Store {
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
-    const encoded = JSON.stringify(data);
-    const previous = this.db
-      .prepare(
-        "SELECT data, at FROM run_attempts WHERE run_id = ? AND kind = ? ORDER BY id DESC LIMIT 1",
-      )
-      .get(runId, kind) as Row | undefined;
-    // Wait completions are events: equal durations at different times are distinct waits.
-    if (previous?.data === encoded && (kind !== "wait-end" || previous.at === at)) return;
-    this.db
-      .prepare("INSERT INTO run_attempts (run_id, kind, at, data) VALUES (?, ?, ?, ?)")
-      .run(runId, kind, at, encoded);
+    this.runQ.appendAttempt(runId, kind, at, data);
   }
 
   /**
@@ -1356,68 +959,7 @@ export class Store {
    * row's loop is never rewritten here (`setRunLoop`).
    */
   upsertRun(r: Run, folded = false): void {
-    this.appendAttempt(r.id, "run", r.endedAt ?? r.startedAt, {
-      model: r.model,
-      profile: r.profile ?? null,
-      reviewId: r.reviewId ?? null,
-      tokens: r.tokens,
-      costUsd: r.costUsd,
-      status: r.status,
-    });
-    this.db
-      .prepare(
-        `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
-           model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash, loop_kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
-           started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
-           session_id = excluded.session_id, model = excluded.model, branch = excluded.branch,
-           ticket = excluded.ticket, cost_usd = excluded.cost_usd, tokens = excluded.tokens,
-           transcript_path = excluded.transcript_path, prs = excluded.prs,
-           summary = excluded.summary, folded = MAX(folded, excluded.folded),
-           ticket_title = COALESCE(excluded.ticket_title, ticket_title),
-           cli_version = COALESCE(excluded.cli_version, cli_version),
-           latest_plan = COALESCE(excluded.latest_plan, latest_plan),
-           account_id = COALESCE(account_id, excluded.account_id),
-           effort = COALESCE(effort, excluded.effort),
-           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
-           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
-      )
-      .run(
-        r.id,
-        r.agentId,
-        r.repoId,
-        r.seq,
-        r.startedAt,
-        r.endedAt,
-        r.status,
-        r.sessionId,
-        r.model,
-        r.branch,
-        r.ticket,
-        r.costUsd,
-        r.tokens === null ? null : JSON.stringify(r.tokens),
-        r.transcriptPath,
-        JSON.stringify(r.prs),
-        r.summary,
-        folded && r.endedAt !== null ? 1 : 0,
-        r.loop === null || r.loop === undefined ? null : JSON.stringify(r.loop),
-        r.ticketTitle ?? null,
-        r.reviewId ?? null,
-        r.cliVersion ?? null,
-        r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
-        r.profile?.hash ?? null,
-        r.plan === undefined ? null : JSON.stringify(r.plan),
-        r.vendor ?? "claude",
-        r.latestPlan ?? null,
-        r.accountId ?? null,
-        r.effort ?? null,
-        r.promptHash ?? null,
-        r.loopKind ?? null,
-      );
+    this.runQ.upsertRun(r, folded);
   }
 
   /**
@@ -1426,12 +968,7 @@ export class Store {
    * Returns how many rows it set.
    */
   backfillRunLoopKinds(kinds: ReadonlyMap<string, LoopKind>): number {
-    const set = this.db.prepare(
-      "UPDATE runs SET loop_kind = ? WHERE agent_id = ? AND loop_kind IS NULL AND review_id IS NULL",
-    );
-    let n = 0;
-    for (const [agentId, kind] of kinds) n += Number(set.run(kind, agentId).changes);
-    return n;
+    return this.runQ.backfillRunLoopKinds(kinds);
   }
 
   /** A prepared first brief may be replaced at final delivery, only while its exact hash still matches. */
@@ -1516,7 +1053,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+             by_source, by_command, sessions, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           runId,
@@ -1532,6 +1069,7 @@ export class Store {
           audit.readAfterReport,
           JSON.stringify(audit.bySource),
           JSON.stringify(audit.byCommand),
+          JSON.stringify(audit.sessions ?? []),
         );
       const insert = this.db.prepare(
         `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
@@ -1575,9 +1113,7 @@ export class Store {
 
   /** Records that a run's transcript could not give call times, so it is not tried again. */
   markTokenTimesChecked(runId: string): void {
-    this.db
-      .prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?")
-      .run(runId);
+    markTokenTimesChecked(this.db, runId);
   }
 
   /**
@@ -1657,7 +1193,8 @@ export class Store {
         `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
            a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
            a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
+           a.sessions AS a_sessions
          FROM run_token_audit a JOIN runs r ON r.id = a.run_id
          WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
       )
@@ -1676,8 +1213,21 @@ export class Store {
         readAfterReport: r.a_after as number | null,
         bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
         byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
+        ...sessionsOf(r.a_sessions),
       },
     }));
+  }
+
+  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
+  fixTrialRuns(): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
+           ORDER BY started_at, seq`,
+        )
+        .all() as Row[]
+    ).map(toRun);
   }
 
   /** Context size of every stored model call of runs that started since `since`. */
@@ -1755,60 +1305,22 @@ export class Store {
    * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
    * session's copy of its history or a subagent file, counts once; the larger output is kept.
    */
-  saveControllerMessages(
-    sessionId: string,
-    messages: readonly {
-      id: string;
-      at: number;
-      input: number;
-      cacheRead: number;
-      cacheWrite: number;
-      output: number;
-    }[],
-  ): void {
-    const insert = this.db.prepare(
-      `INSERT INTO controller_messages (message_id, session_id, at, input, cache_read, cache_write, output)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(message_id) DO UPDATE SET output = MAX(output, excluded.output)`,
-    );
-    this.transaction(() => {
-      for (const m of messages) {
-        insert.run(m.id, sessionId, m.at, m.input, m.cacheRead, m.cacheWrite, m.output);
-      }
-    });
+  saveControllerMessages(sessionId: string, messages: readonly ControllerMessageUsage[]): void {
+    this.usageQ.saveControllerMessages(sessionId, messages);
   }
 
   /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
-  controllerUsageSince(since: number): {
-    sessions: number;
-    calls: number;
-    input: number;
-    cacheRead: number;
-    cacheWrite: number;
-    output: number;
-  } {
-    return this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS calls,
-           COALESCE(SUM(input), 0) AS input, COALESCE(SUM(cache_read), 0) AS cacheRead,
-           COALESCE(SUM(cache_write), 0) AS cacheWrite, COALESCE(SUM(output), 0) AS output
-         FROM controller_messages WHERE at >= ?`,
-      )
-      .get(since) as never;
+  controllerUsageSince(since: number): ControllerUsageTotals {
+    return this.usageQ.controllerUsageSince(since);
   }
 
   /** The mtime a controller file was last read at, or null when it has not been read. */
   controllerFileMtime(path: string): number | null {
-    const r = this.db.prepare("SELECT mtime FROM controller_files WHERE path = ?").get(path) as
-      | { mtime: number }
-      | undefined;
-    return r?.mtime ?? null;
+    return this.usageQ.controllerFileMtime(path);
   }
 
   markControllerFile(path: string, mtime: number): void {
-    this.db
-      .prepare("INSERT OR REPLACE INTO controller_files (path, mtime) VALUES (?, ?)")
-      .run(path, mtime);
+    this.usageQ.markControllerFile(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
@@ -1892,11 +1404,7 @@ export class Store {
 
   /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
   setRunCliVersionIfLive(runId: string, cliVersion: string): boolean {
-    return (
-      this.db
-        .prepare("UPDATE runs SET cli_version = ? WHERE id = ? AND ended_at IS NULL")
-        .run(cliVersion, runId).changes === 1
-    );
+    return this.runQ.setRunCliVersionIfLive(runId, cliVersion);
   }
 
   /** Records the template profile chosen for a ticket; a later choice replaces it. */
@@ -1922,15 +1430,11 @@ export class Store {
   }
 
   run(id: string): Run | null {
-    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as Row | undefined;
-    return row ? toRun(row) : null;
+    return this.runQ.run(id);
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
-    const rows = this.statement(
-      "SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?",
-    ).all(agentId, limit) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runs(agentId, limit);
   }
 
   /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
@@ -1939,65 +1443,22 @@ export class Store {
     limit: number,
     heldRunIds: readonly string[] = [],
   ): Map<AgentId, Run[]> {
-    const out = new Map<AgentId, Run[]>();
-    if (agentIds.length === 0) return out;
-    for (const agentId of agentIds) out.set(agentId, []);
-    const seen = new Set<string>();
-    const take = (row: Row) => {
-      if (seen.has(row.id as string)) return;
-      seen.add(row.id as string);
-      const run = toRun(row);
-      const runs = out.get(run.agentId) ?? [];
-      runs.push(run);
-      out.set(run.agentId, runs);
-    };
-    const recent = this.statement(`SELECT * FROM runs WHERE agent_id = ?
-      ORDER BY started_at DESC, seq DESC
-      LIMIT CASE WHEN ? > 0 THEN CAST(? AS INTEGER) ELSE 0 END`);
-    for (const agentId of out.keys()) {
-      for (const row of recent.all(agentId, limit, limit) as Row[]) take(row);
-    }
-    const held = [...new Set(heldRunIds)];
-    if (held.length > 0)
-      for (const row of this.statement(
-        `SELECT * FROM runs WHERE id IN (${held.map(() => "?").join(", ")})
-        ORDER BY agent_id, started_at DESC, seq DESC`,
-      ).all(...held) as Row[])
-        take(row);
-    for (const runs of out.values())
-      runs.sort((a, b) => b.startedAt - a.startedAt || b.seq - a.seq);
-    return out;
+    return this.runQ.runsForAgents(agentIds, limit, heldRunIds);
   }
 
   /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
   mapAsideRuns(agentId: AgentId): Run[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') > ''",
-        )
-        .all(agentId) as Row[]
-    ).map(toRun);
+    return this.runQ.mapAsideRuns(agentId);
   }
 
   /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
   runBranches(repoId: RepoId): Set<string> {
-    const rows = this.statement(
-      "SELECT DISTINCT branch FROM runs WHERE repo_id = ? AND review_id IS NULL AND branch IS NOT NULL",
-    ).all(repoId) as { branch: string }[];
-    return new Set(rows.map((r) => r.branch));
+    return this.runQ.runBranches(repoId);
   }
 
   /** Runs still open or ended at or after `since`, across seats and repos. */
   runsActiveSince(since: number): Run[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM (
-        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at IS NULL
-        UNION ALL
-        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at >= ?
-      ) ORDER BY started_at, seq`)
-      .all(since) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsActiveSince(since);
   }
 
   /** Complete author bindings for flow reads, plus active runs needed for seat queue order. */
@@ -2005,30 +1466,12 @@ export class Store {
     repoId: RepoId,
     prs: readonly Pick<PullRequestView, "number" | "branch" | "ticket">[],
   ): Run[] {
-    const numbers = JSON.stringify(prs.map((p) => p.number));
-    return (
-      this.statement(`SELECT * FROM runs WHERE repo_id = ? AND review_id IS NULL AND (
-      ended_at IS NULL OR branch IN (SELECT json_extract(value, '$.branch') FROM json_each(?))
-      OR ticket IN (SELECT json_extract(value, '$.ticket') FROM json_each(?))
-      OR json_extract(loop, '$.prNumber') IN (SELECT value FROM json_each(?))
-      OR EXISTS (SELECT 1 FROM json_each(prs) p WHERE json_extract(p.value, '$.number') IN (SELECT value FROM json_each(?)))
-    ) ORDER BY started_at, seq`).all(
-        repoId,
-        JSON.stringify(prs),
-        JSON.stringify(prs),
-        numbers,
-        numbers,
-      ) as Row[]
-    ).map(toRun);
+    return this.runQ.prFlowRuns(repoId, prs);
   }
 
   /** Every recorded run on a branch; review ordering needs merged predecessors too. */
   runsOnBranch(repoId: RepoId, branch: string): Run[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM runs WHERE repo_id = ? AND branch = ? ORDER BY started_at, seq")
-        .all(repoId, branch) as Row[]
-    ).map(toRun);
+    return this.runQ.runsOnBranch(repoId, branch);
   }
 
   /**
@@ -2036,8 +1479,7 @@ export class Store {
    * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
    */
   branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
-    const latest = this.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);
-    return latest?.loop?.mergeHold ?? null;
+    return this.runQ.branchMergeHold(repoId, branch);
   }
 
   /**
@@ -2045,34 +1487,12 @@ export class Store {
    * observed loops' runs and tickets already started before `since` (then handed on) do not count.
    */
   ticketsStartedSince(since: number, seatIds: readonly string[]): number {
-    if (seatIds.length === 0) return 0;
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT r.ticket) AS n FROM runs r
-         WHERE r.started_at >= ? AND r.ticket IS NOT NULL AND r.review_id IS NULL
-           AND r.agent_id IN (SELECT value FROM json_each(?))
-           AND NOT EXISTS (
-             SELECT 1 FROM runs p
-             WHERE p.ticket = r.ticket AND p.review_id IS NULL AND p.started_at < ?
-           )`,
-      )
-      .get(since, JSON.stringify(seatIds), since) as { n: number };
-    return row.n;
+    return this.runQ.ticketsStartedSince(since, seatIds);
   }
 
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM (
-           SELECT * FROM runs WHERE ended_at IS NULL
-           UNION ALL
-           SELECT * FROM runs INDEXED BY runs_merging_started
-             WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
-         ) ORDER BY started_at, seq`,
-      )
-      .all() as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsForAwayDigest();
   }
 
   /**
@@ -2094,60 +1514,27 @@ export class Store {
    * recorded (the last of them may be owed). Oldest first.
    */
   loopRuns(endedSince: number): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM (
-           SELECT * FROM runs WHERE loop IS NOT NULL AND ended_at IS NULL
-           UNION ALL
-           SELECT * FROM runs INDEXED BY runs_ended_started WHERE loop IS NOT NULL AND ended_at >= ?
-             AND (json_extract(loop, '$.phase') != 'done'
-               OR json_extract(loop, '$.merging') > '')
-         ) ORDER BY started_at, seq`,
-      )
-      .all(endedSince) as Row[];
-    return rows.map(toRun);
+    return this.runQ.loopRuns(endedSince);
   }
 
   /** Ended runs still carrying a merge hold or a parked state, oldest first. */
   endedRunsWithHoldOrPark(): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
-           AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
-         ORDER BY started_at, seq`,
-      )
-      .all() as Row[];
-    return rows.map(toRun);
+    return this.runQ.endedRunsWithHoldOrPark();
   }
 
   /** Live acceptance metadata never needs to decode ended loop history. */
   activeLoopRuns(repoId: RepoId): Run[] {
-    const rows = this.statement(
-      "SELECT * FROM runs WHERE repo_id = ? AND ended_at IS NULL AND loop IS NOT NULL ORDER BY started_at, seq",
-    ).all(repoId) as Row[];
-    return rows.map(toRun);
+    return this.runQ.activeLoopRuns(repoId);
   }
 
   /** The runs that have not ended and are off their seat in review, oldest first. */
   asideRuns(): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
-           AND json_extract(loop, '$.aside') IS NOT NULL
-         ORDER BY started_at, seq`,
-      )
-      .all() as Row[];
-    return rows.map(toRun);
+    return this.runQ.asideRuns();
   }
 
   /** The tickets (`repo#n`) of the runs that have not ended. */
   activeTickets(): Set<string> {
-    const rows = this.db
-      .prepare(
-        "SELECT ticket FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND review_id IS NULL",
-      )
-      .all() as Row[];
-    return new Set(rows.map((r) => r.ticket as string));
+    return this.runQ.activeTickets();
   }
 
   /**
@@ -2172,25 +1559,11 @@ export class Store {
    * `since`: a run left open for longer is a dead row, not work in progress.
    */
   hasActiveRunOf(agentIds: readonly string[], since: number): boolean {
-    if (agentIds.length === 0) return false;
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
-             AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
-        )
-        .get(since, ...agentIds) !== undefined
-    );
+    return this.runQ.hasActiveRunOf(agentIds, since);
   }
 
   hasActiveRun(): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
-        )
-        .get() !== undefined
-    );
+    return this.runQ.hasActiveRun();
   }
 
   /**
@@ -2198,57 +1571,27 @@ export class Store {
    * `agentId`'s own run first, any seat's otherwise.
    */
   latestRunOnBranch(repoId: RepoId, branch: string, agentId?: AgentId): Run | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL
-         ORDER BY (agent_id = ?) DESC, started_at DESC, id DESC LIMIT 1`,
-      )
-      .get(repoId, branch, agentId ?? "") as Row | undefined;
-    return row ? toRun(row) : null;
+    return this.runQ.latestRunOnBranch(repoId, branch, agentId);
   }
 
   /** Whether this hub has a run (ended or not) on `branch`. */
   hasRunOnBranch(repoId: RepoId, branch: string): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL LIMIT 1",
-        )
-        .get(repoId, branch) !== undefined
-    );
+    return this.runQ.hasRunOnBranch(repoId, branch);
   }
 
   /** Every run on the ticket, ended ones too; review runs do not count. */
   runsOnTicket(repoId: RepoId, ticket: string): Run[] {
-    const rows = this.db
-      .prepare("SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL")
-      .all(repoId, ticket) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsOnTicket(repoId, ticket);
   }
 
   /** Whether a run is still going on the ticket (`repo#number`); a review run does not count. */
   hasLiveRunOnTicket(repoId: RepoId, ticket: string): boolean {
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM runs WHERE repo_id = ? AND ticket = ? AND status = 'running'
-             AND ended_at IS NULL AND review_id IS NULL LIMIT 1`,
-        )
-        .get(repoId, ticket) !== undefined
-    );
+    return this.runQ.hasLiveRunOnTicket(repoId, ticket);
   }
 
   /** Whether another run on the same ticket started after this one. */
   hasNewerRunOnTicket(run: Run): boolean {
-    if (run.ticket === null) return false;
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM runs WHERE repo_id = ? AND ticket = ? AND started_at > ? AND id != ?
-             AND review_id IS NULL`,
-        )
-        .get(run.repoId, run.ticket, run.startedAt, run.id) !== undefined
-    );
+    return this.runQ.hasNewerRunOnTicket(run);
   }
 
   /**
@@ -2260,25 +1603,11 @@ export class Store {
    * `sinceMs`. Newest first.
    */
   runsOverlapping(sinceMs: number, untilMs: number): Run[] {
-    return this.overlappingRuns("*", sinceMs, untilMs).map(toRun);
+    return this.runQ.runsOverlapping(sinceMs, untilMs);
   }
 
   private overlappingRuns(columns: string, sinceMs: number, untilMs: number): Row[] {
-    return this.db
-      .prepare(
-        `SELECT ${columns} FROM runs WHERE started_at < ?
-           AND (ended_at > ?
-             OR (ended_at IS NULL AND status = ? AND started_at > ?)
-             OR (ended_at IS NULL AND started_at >= ?))
-         ORDER BY started_at DESC, seq DESC`,
-      )
-      .all(
-        untilMs,
-        sinceMs,
-        "running" satisfies RunStatus,
-        untilMs - MAX_OPEN_RUN_AGE_MS,
-        sinceMs,
-      ) as Row[];
+    return this.runQ.overlappingRuns(columns, sinceMs, untilMs);
   }
 
   /**
@@ -2328,13 +1657,7 @@ export class Store {
    * (the backfill's queue).
    */
   runsToFold(limit: number, startedBefore: number): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE folded = 0 AND ended_at IS NOT NULL AND started_at < ?
-         ORDER BY started_at DESC, seq DESC LIMIT ?`,
-      )
-      .all(startedBefore, limit) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsToFold(limit, startedBefore);
   }
 
   /**
@@ -2346,23 +1669,7 @@ export class Store {
     after: { startedAt: number; id: string } | null,
     limit: number,
   ): Run[] {
-    if (agentIds.length === 0) return [];
-    const agents = agentIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND agent_id IN (${agents})
-           AND (? IS NULL OR started_at < ? OR (started_at = ? AND id < ?))
-         ORDER BY started_at DESC, id DESC LIMIT ?`,
-      )
-      .all(
-        ...agentIds,
-        after === null ? null : 1,
-        after?.startedAt ?? 0,
-        after?.startedAt ?? 0,
-        after?.id ?? "",
-        limit,
-      ) as Row[];
-    return rows.map(toRun);
+    return this.runQ.endedRunsPage(agentIds, after, limit);
   }
 
   /**
@@ -2374,49 +1681,22 @@ export class Store {
     after: { startedAt: number; id: string } | null,
     limit: number,
   ): Run[] {
-    if (agentIds.length === 0) return [];
-    const agents = agentIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ticket IS NOT NULL AND ticket_title IS NULL
-           AND agent_id IN (${agents})
-           AND (? IS NULL OR started_at < ? OR (started_at = ? AND id < ?))
-         ORDER BY started_at DESC, id DESC LIMIT ?`,
-      )
-      .all(
-        ...agentIds,
-        after === null ? null : 1,
-        after?.startedAt ?? 0,
-        after?.startedAt ?? 0,
-        after?.id ?? "",
-        limit,
-      ) as Row[];
-    return rows.map(toRun);
+    return this.runQ.untitledRunsPage(agentIds, after, limit);
   }
 
   /** Sets the title of every run of `ticket` in `repoId` that has none; returns how many it set. */
   setTicketTitle(repoId: string, ticket: string, title: string): number {
-    const r = this.db
-      .prepare(
-        "UPDATE runs SET ticket_title = ? WHERE repo_id = ? AND ticket = ? AND ticket_title IS NULL",
-      )
-      .run(title, repoId, ticket);
-    return Number(r.changes);
+    return this.runQ.setTicketTitle(repoId, ticket, title);
   }
 
   /** Rewrites only a run's summary (nothing else on its row). */
   setRunSummary(runId: string, summary: string): void {
-    this.db.prepare("UPDATE runs SET summary = ? WHERE id = ?").run(summary, runId);
+    this.runQ.setRunSummary(runId, summary);
   }
 
   /** How many runs `runsToFold` has left before `startedBefore`. */
   countToFold(startedBefore: number): number {
-    const row = this.db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM runs WHERE folded = 0 AND ended_at IS NOT NULL AND started_at < ?",
-      )
-      .get(startedBefore) as { n: number };
-    return row.n;
+    return this.runQ.countToFold(startedBefore);
   }
 
   setDigest(runId: string, d: RunDigest): void {
@@ -2802,6 +2082,8 @@ export class Store {
         AUDIT_RETENTION_DAYS,
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -2959,30 +2241,16 @@ export class Store {
   }
 
   addUsage(s: UsageSample): void {
-    this.db
-      .prepare(
-        "INSERT OR IGNORE INTO usage_samples (account_id, window, at, pct, reset_at, source) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(s.accountId, s.window, s.at, s.pct, s.resetAt, s.source);
+    this.usageQ.addUsage(s);
   }
 
   usage(accountId: AccountId, window: "5h" | "7d", sinceMs: number): UsageSample[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM usage_samples WHERE account_id = ? AND window = ? AND at >= ? ORDER BY at ASC",
-      )
-      .all(accountId, window, sinceMs) as Row[];
-    return rows.map(toSample);
+    return this.usageQ.usage(accountId, window, sinceMs);
   }
 
   /** The newest sample for an account and window, or null when there is none. */
   latestUsage(accountId: AccountId, window: "5h" | "7d"): UsageSample | null {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM usage_samples WHERE account_id = ? AND window = ? ORDER BY at DESC LIMIT 1",
-      )
-      .get(accountId, window) as Row | undefined;
-    return row ? toSample(row) : null;
+    return this.usageQ.latestUsage(accountId, window);
   }
 
   /** True when any stored row changed. */
@@ -3753,6 +3021,7 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
+      bugEscapes: bugEscapes(this.db, since, until),
       improvements: [
         ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
@@ -3763,8 +3032,27 @@ export class Store {
           this.commsChatter(since, until),
         ),
       ],
+      specBounces: specBounces(this.db, since, until),
       surgeonProposals: [],
     };
+  }
+
+  /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
+  bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
+    return bugFixCandidates(this.db, repoId, limit);
+  }
+
+  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
+    noteBugTraceTried(this.db, repoId, issue, at);
+  }
+
+  introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
+    return introducingPrFacts(this.db, repoId, pr);
+  }
+
+  /** Records a traced bug once per ticket; a repeat leaves the row as it was. */
+  recordBugEscape(e: Parameters<typeof recordBugEscape>[1]): void {
+    recordBugEscape(this.db, e);
   }
 
   /**
@@ -3778,23 +3066,12 @@ export class Store {
     detail: string;
     at: number;
   }): void {
-    this.db
-      .prepare(
-        `INSERT INTO audit_items (kind, subject, tier, state, detail, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(kind, subject) DO UPDATE SET state = excluded.state, detail = excluded.detail
-         WHERE audit_items.state = 'open' AND excluded.state = 'done'`,
-      )
-      .run(i.kind, i.subject, auditTier(i.kind), i.state, i.detail, i.at);
+    recordAuditItem(this.db, i);
   }
 
   /** Items recorded in range, newest first. */
   private auditItems(since: number, until: number): AuditItem[] {
-    return this.db
-      .prepare(
-        `SELECT id, kind, subject, tier, state, detail, at FROM audit_items
-         WHERE at >= ? AND at <= ? ORDER BY at DESC, id DESC`,
-      )
-      .all(since, until) as unknown as AuditItem[];
+    return auditItems(this.db, since, until);
   }
 
   /** Merged PRs in range that have a recorded size, largest first. */
@@ -4043,6 +3320,33 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /**
+   * The p90 run time (ms) of each CI check run in the repo, by name, over its last merged PRs
+   * that kept check timings; a name with fewer than CI_P90_MIN_SAMPLES runs is left out.
+   */
+  ciCheckP90Ms(repoId: RepoId): Record<string, number> {
+    const rows = this.statement(
+      "SELECT checks FROM pull_requests WHERE repo_id = ? AND state = 'merged' ORDER BY merged_at DESC LIMIT ?",
+    ).all(repoId, CI_P90_PRS) as Row[];
+    const byName = new Map<string, number[]>();
+    for (const r of rows) {
+      for (const c of JSON.parse(r.checks as string) as PrCheck[]) {
+        if (c.kind !== "check" || c.state !== "passing") continue;
+        if (c.startedAt === undefined || c.completedAt === undefined) continue;
+        const ms = c.completedAt - c.startedAt;
+        if (ms <= 0) continue;
+        byName.set(c.name, [...(byName.get(c.name) ?? []), ms]);
+      }
+    }
+    const out: Record<string, number> = {};
+    for (const [name, xs] of byName) {
+      if (xs.length < CI_P90_MIN_SAMPLES) continue;
+      xs.sort((a, b) => a - b);
+      out[name] = xs[Math.min(xs.length - 1, Math.ceil(xs.length * 0.9) - 1)] as number;
+    }
+    return out;
+  }
+
   /** The newest PR of a branch, as its number and state: one narrow row, for the design previews. */
   pullRequestOfBranch(
     repoId: RepoId,
@@ -4119,10 +3423,7 @@ export class Store {
 
   /** Every review of a PR, oldest first. */
   reviewsOfPr(repoId: RepoId, prNumber: number): ReviewRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? ORDER BY id")
-      .all(repoId, prNumber) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsOfPr(this.db, repoId, prNumber);
   }
 
   /** Every check run read for a PR's heads, newest first. */
@@ -4146,15 +3447,7 @@ export class Store {
     prRefs: readonly string[],
     limit: number,
   ): CommsRow[] {
-    const marks = prRefs.map((_, i) => `?${i + 4}`).join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM comms WHERE ticket = ?1 OR ticket = ?2 OR ref = ?2 OR ref = ?1
-           ${prRefs.length > 0 ? `OR ticket IN (${marks}) OR ref IN (${marks})` : ""}
-         ORDER BY at DESC, id DESC LIMIT ?3`,
-      )
-      .all(ticket, shortRef, limit, ...prRefs) as Row[];
-    return rows.map((r) => this.commsRow(r));
+    return this.commsStore.commsOnTicket(ticket, shortRef, prRefs, limit);
   }
 
   /** Counts retained and retired reference metadata; never reads text or limits by time. */
@@ -4164,22 +3457,7 @@ export class Store {
     from: string;
     count: number;
   }[] {
-    return (
-      this.statement(`SELECT ticket, ref, sender, SUM(count) AS count FROM (
-        SELECT ticket, ref, from_id AS sender, COUNT(*) AS count
-        FROM comms WHERE ticket IS NOT NULL OR ref IS NOT NULL
-        GROUP BY ticket, ref, from_id
-        UNION ALL
-        SELECT CASE WHEN ticket_null THEN NULL ELSE ticket END,
-          CASE WHEN ref_null THEN NULL ELSE ref END, from_id AS sender, count
-        FROM comms_ticket_archived_counts
-      ) GROUP BY ticket, ref, sender`).all() as Row[]
-    ).map((r) => ({
-      ticket: r.ticket as string | null,
-      ref: r.ref as string | null,
-      from: r.sender as string,
-      count: r.count as number,
-    }));
+    return this.commsStore.commsTicketReferenceCounts();
   }
 
   /** Lightweight links for referenced PR numbers, without parsing unrelated checks or history. */
@@ -4243,20 +3521,7 @@ export class Store {
 
   /** The newest `limit` FLIGHT decisions that name the ticket by ref or target one of its runs. */
   flightDecisionsOnTicket(ref: string, runIds: readonly string[], limit: number): FlightDecision[] {
-    const byRef = this.db
-      .prepare("SELECT * FROM flight_decisions WHERE ref = ? ORDER BY at DESC, id DESC LIMIT ?")
-      .all(ref, limit) as Row[];
-    const byRun = this.statement(
-      "SELECT * FROM flight_decisions WHERE target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
-    );
-    const seen = new Set<number>();
-    const out: FlightDecision[] = [];
-    for (const r of [...byRef, ...runIds.flatMap((id) => byRun.all(id, limit) as Row[])]) {
-      if (seen.has(r.id as number)) continue;
-      seen.add(r.id as number);
-      out.push(toFlightDecision(r));
-    }
-    return out.sort((a, b) => b.at - a.at || b.id - a.id).slice(0, limit);
+    return this.flightQ.flightDecisionsOnTicket(ref, runIds, limit);
   }
 
   /** The stored PRs among `numbers`, as number and title, lowest number first; never parses a row's checks. */
@@ -4399,19 +3664,42 @@ export class Store {
   }
 
   /** Replaces the repo's finished and open flow rows. */
-  replaceFlow(repoId: RepoId, issues: FlowIssue[], prs: FlowPr[]): void {
+  replaceFlow(
+    repoId: RepoId,
+    issues: FlowIssue[],
+    prs: FlowPr[],
+    moves: FlowColumnMove[] = [],
+  ): void {
     this.transaction(() => {
       this.db.prepare("DELETE FROM flow_issues WHERE repo_id = ?").run(repoId);
+      this.db.prepare("DELETE FROM flow_column_moves WHERE repo_id = ?").run(repoId);
       this.db.prepare("DELETE FROM flow_prs WHERE repo_id = ?").run(repoId);
       const insIssue = this.db.prepare(
         "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
       );
       for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
+      const insMove = this.db.prepare(
+        "INSERT INTO flow_column_moves (repo_id, number, at, column) VALUES (?, ?, ?, ?)",
+      );
+      for (const m of moves) insMove.run(repoId, m.number, m.at, m.column);
       const insPr = this.db.prepare(
         "INSERT INTO flow_prs (repo_id, number, merged_at, first_push_ci) VALUES (?, ?, ?, ?)",
       );
       for (const p of prs) insPr.run(repoId, p.number, p.mergedAt, p.firstPushCi);
     });
+  }
+
+  /** Every observed flow-column move, oldest first, for local telemetry reads. */
+  flowColumnMoves(): FlowColumnMove[] {
+    const rows = this.db
+      .prepare("SELECT * FROM flow_column_moves ORDER BY at ASC, repo_id, number, id")
+      .all() as Row[];
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      number: r.number as number,
+      at: r.at as number,
+      column: r.column as FlowColumnMove["column"],
+    }));
   }
 
   /** Issues done at or after `sinceMs`, plus every open flow issue, oldest first. */
@@ -4434,10 +3722,7 @@ export class Store {
 
   /** The first recorded crew run for a ticket, including one before a telemetry chart's range. */
   ticketStartedAt(ticket: string): number | null {
-    const row = this.db
-      .prepare("SELECT MIN(started_at) AS at FROM runs WHERE ticket = ?")
-      .get(ticket) as { at: number | null };
-    return row.at;
+    return this.runQ.ticketStartedAt(ticket);
   }
 
   /** PRs merged at or after `sinceMs`, across repos, oldest first. */
@@ -4460,9 +3745,20 @@ export class Store {
     this.transaction(() => {
       this.db
         .prepare(
-          "INSERT OR REPLACE INTO machine_samples (at, sample, cpu_pct, mem_pct) VALUES (?, ?, ?, ?)",
+          `INSERT OR REPLACE INTO machine_samples
+             (at, sample, cpu_pct, mem_pct, swap_pct, pressure_pct, agent_gb, test_gb)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(s.at, JSON.stringify(s), s.cpuPct, memPct(s));
+        .run(
+          s.at,
+          JSON.stringify(s),
+          s.cpuPct,
+          memPct(s),
+          swapPct(s),
+          pressurePct(s),
+          s.agents ? s.agents.rssBytes / GIB : null,
+          s.testRun ? s.testRun.rssBytes / GIB : null,
+        );
       this.db.prepare("DELETE FROM machine_samples WHERE at < ?").run(s.at - MACHINE_RETENTION_MS);
     });
   }
@@ -4490,7 +3786,9 @@ export class Store {
   ): Telemetry["machine"] {
     const rows = this.db
       .prepare(
-        `SELECT MAX(at) AS at, AVG(cpu_pct) AS cpu, AVG(mem_pct) AS mem FROM machine_samples
+        `SELECT MAX(at) AS at, AVG(cpu_pct) AS cpu, AVG(mem_pct) AS mem, AVG(swap_pct) AS swap,
+                AVG(pressure_pct) AS pressure, AVG(agent_gb) AS agent, AVG(test_gb) AS test
+         FROM machine_samples
          WHERE at >= ? AND at <= ?
          GROUP BY MIN(?, CAST((at - ?) / ? AS INTEGER)) ORDER BY 1 ASC`,
       )
@@ -4498,8 +3796,20 @@ export class Store {
       at: number;
       cpu: number | null;
       mem: number | null;
+      swap: number | null;
+      pressure: number | null;
+      agent: number | null;
+      test: number | null;
     }[];
-    return rows.map((r) => ({ at: r.at, cpuPct: r.cpu, memPct: r.mem }));
+    return rows.map((r) => ({
+      at: r.at,
+      cpuPct: r.cpu,
+      memPct: r.mem,
+      swapPct: round2(r.swap),
+      pressurePct: round2(r.pressure),
+      agentGb: round2(r.agent),
+      testRunGb: round2(r.test),
+    }));
   }
 
   /** Acknowledges attention item keys at `at` (a re-ack moves the time; absence is kept). */
@@ -4921,36 +4231,7 @@ export class Store {
 
   /** Sets the run's loop state (null clears it). */
   setRunLoop(runId: string, loop: RunLoop | null, at = Date.now()): void {
-    const previous = this.run(runId)?.loop;
-    if (JSON.stringify(previous) !== JSON.stringify(loop)) {
-      this.appendAttempt(runId, "loop", at, loop ?? { phase: null });
-      if (
-        previous &&
-        (previous.phase === "ci" || previous.phase === "review" || previous.awaitingFlight)
-      ) {
-        if (previous.phase !== loop?.phase || previous.awaitingFlight !== loop?.awaitingFlight) {
-          const start = this.db
-            .prepare(
-              "SELECT at FROM run_attempts WHERE run_id = ? AND kind = 'wait' ORDER BY id DESC LIMIT 1",
-            )
-            .get(runId) as Row | undefined;
-          this.appendAttempt(runId, "wait-end", at, {
-            on: previous.awaitingFlight ?? previous.phase,
-            durationMs: start ? Math.max(0, at - (start.at as number)) : null,
-          });
-        }
-      }
-      if (
-        loop &&
-        (loop.phase === "ci" || loop.phase === "review" || loop.awaitingFlight) &&
-        (previous?.phase !== loop.phase || previous?.awaitingFlight !== loop.awaitingFlight)
-      ) {
-        this.appendAttempt(runId, "wait", at, { on: loop.awaitingFlight ?? loop.phase, since: at });
-      }
-    }
-    this.db
-      .prepare("UPDATE runs SET loop = ? WHERE id = ?")
-      .run(loop === null ? null : JSON.stringify(loop), runId);
+    this.runQ.setRunLoop(runId, loop, at);
     if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
   }
 
@@ -5058,9 +4339,7 @@ export class Store {
     status: RunStatus,
     endedBy: NonNullable<Run["endedBy"]>,
   ): void {
-    this.db
-      .prepare("UPDATE runs SET ended_at = ?, status = ?, ended_by = ? WHERE id = ?")
-      .run(at, status, endedBy, runId);
+    this.runQ.setRunEnded(runId, at, status, endedBy);
   }
 
   /** Exit diagnostics are controller-owned; transcript upserts never overwrite them. */
@@ -5176,29 +4455,23 @@ export class Store {
   }
 
   review(id: number): ReviewRow | null {
-    const row = this.db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.review(this.db, id);
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
   moveQueuedReview(id: number, seatId: string, at: number): boolean {
-    let moved = false;
-    this.transaction(() => {
-      moved =
-        this.db
-          .prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'")
-          .run(seatId, id).changes === 1;
-      if (moved)
-        this.db
-          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
-          .run(id, seatId, at);
-    });
-    return moved;
+    return reviewsStore.moveQueuedReview(
+      this.db,
+      (write) => this.transaction(write),
+      id,
+      seatId,
+      at,
+    );
   }
 
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
-    return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
+    return reviewsStore.reviewMoved(this.db, id);
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -5451,53 +4724,28 @@ export class Store {
 
   /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
   externalReviewRows(): ReviewRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
-      )
-      .all() as Row[];
-    return rows.map(toReview);
+    return reviewsStore.externalReviewRows(this.db);
   }
 
   reviewsOfRun(authorRunId: string): ReviewRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")
-      .all(authorRunId) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsOfRun(this.db, authorRunId);
   }
 
   /** The latest review of a PR that has reported, else null. */
   latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
-         ORDER BY ended_at DESC, id DESC LIMIT 1`,
-      )
-      .get(repoId, prNumber) as Row | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.latestReportedReview(this.db, repoId, prNumber);
   }
 
   /** The review the run (a review run) performs, else null. */
   reviewOfRun(reviewRunId: string): ReviewRow | null {
-    const row = this.db.prepare("SELECT * FROM reviews WHERE run_id = ?").get(reviewRunId) as
-      | Row
-      | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.reviewOfRun(this.db, reviewRunId);
   }
 
   reviewsIn(
     states: readonly ReviewState[],
     window?: { repo: string; since: number; until: number },
   ): ReviewRow[] {
-    if (states.length === 0) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
-         ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
-         ORDER BY created_at, id`,
-      )
-      .all(...states, ...(window ? [window.repo, window.since, window.until] : [])) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsIn(this.db, states, window);
   }
 
   /** Moves a review from one of `from` to `to`; true only when exactly one row changed. */
@@ -5707,34 +4955,16 @@ export class Store {
 
   /** The files the author changed since the previous reviewed sha, for tagging late findings. */
   setReviewChangedSince(reviewId: number, files: readonly string[]): void {
-    this.db
-      .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
-      .run(JSON.stringify(files), reviewId);
+    reviewsStore.setReviewChangedSince(this.db, reviewId, files);
   }
 
   /** Why this review ran without an install ("reviewed, not installed"), kept with the review. */
   setReviewInstallNote(reviewId: number, note: string): void {
-    this.db.prepare("UPDATE reviews SET install_note = ? WHERE id = ?").run(note, reviewId);
+    reviewsStore.setReviewInstallNote(this.db, reviewId, note);
   }
 
   findingsOf(reviewId: number): StoredFinding[] {
-    const rows = this.db
-      .prepare("SELECT * FROM review_findings WHERE review_id = ? ORDER BY pos")
-      .all(reviewId) as Row[];
-    return rows.map((r) => ({
-      pos: r.pos as number,
-      severity: r.severity as StoredFinding["severity"],
-      file: r.file as string,
-      line: r.line as number,
-      summary: r.summary as string,
-      scenario: r.scenario as string,
-      fix: r.fix as string,
-      category: (r.category as StoredFinding["category"]) ?? undefined,
-      state: r.state as StoredFinding["state"],
-      late: r.late === 1,
-      resolution: (r.resolution as StoredFinding["resolution"]) ?? undefined,
-      resolvedReviewId: (r.resolved_review_id as number | null) ?? undefined,
-    }));
+    return reviewsStore.findingsOf(this.db, reviewId);
   }
 
   /**
@@ -5794,7 +5024,7 @@ export class Store {
       blocking: r.blocking as number,
       minor: r.minor as number,
       endedAt: r.ended_at as number,
-      screenshots: this.reviewShots(r.id as number),
+      screenshots: reviewsStore.reviewShots(this.db, r.id as number),
     }));
   }
 
@@ -5804,11 +5034,7 @@ export class Store {
     shot: { shotId: string; label: string; width: number; theme: ReviewShotView["theme"] },
     at: number,
   ): void {
-    this.db
-      .prepare(
-        "INSERT INTO review_shots (review_id, shot_id, label, width, theme, at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(reviewId, shot.shotId, shot.label, shot.width, shot.theme, at);
+    reviewsStore.addReviewShot(this.db, reviewId, shot, at);
   }
 
   /** The complete paths a PR changes, as GitHub's paged diff listing gave them. */
@@ -5821,74 +5047,26 @@ export class Store {
   }
 
   reviewShots(reviewId: number): ReviewShotView[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT shot_id, label, width, theme, at FROM review_shots WHERE review_id = ? ORDER BY id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      id: r.shot_id as string,
-      label: r.label as string,
-      width: r.width as number,
-      theme: r.theme as ReviewShotView["theme"],
-      at: r.at as number,
-    }));
+    return reviewsStore.reviewShots(this.db, reviewId);
   }
 
   reviewChecks(reviewId: number): ReviewCheck[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT check_id, result, note FROM review_checks WHERE review_id = ? ORDER BY check_id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      check: r.check_id as ReviewCheck["check"],
-      result: r.result as ReviewCheck["result"],
-      ...(r.note === null ? {} : { note: r.note as string }),
-    }));
+    return reviewsStore.reviewChecks(this.db, reviewId);
   }
 
   reviewTests(reviewId: number): (Omit<ReportedTest, "file"> & { file: string | null })[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT command, file, passed, failed, skipped, duration FROM review_tests WHERE review_id = ? ORDER BY id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      command: r.command as string,
-      file: r.file as string | null,
-      passed: r.passed as number,
-      failed: r.failed as number,
-      skipped: r.skipped as number,
-      duration: r.duration as number,
-    }));
+    return reviewsStore.reviewTests(this.db, reviewId);
   }
 
   reviewResolutions(
     reviewId: number,
   ): { reviewId: number; pos: number; outcome: FindingResolution["outcome"] }[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT prior_review_id, finding_pos, outcome FROM review_resolutions WHERE review_id = ? ORDER BY prior_review_id, finding_pos",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      reviewId: r.prior_review_id as number,
-      pos: r.finding_pos as number,
-      outcome: r.outcome as FindingResolution["outcome"],
-    }));
+    return reviewsStore.reviewResolutions(this.db, reviewId);
   }
 
   /** The run that performs the review, else null. */
   runOfReview(reviewId: number): Run | null {
-    const row = this.db.prepare("SELECT * FROM runs WHERE review_id = ?").get(reviewId) as
-      | Row
-      | undefined;
-    return row ? toRun(row) : null;
+    return this.runQ.runOfReview(reviewId);
   }
 
   /** Reviews whose run has not ended although the review no longer needs it. */
@@ -5912,43 +5090,22 @@ export class Store {
 
   /** Records a line under `key`; false (and nothing written) when the key is already there. */
   claimLine(key: string, line: SeatLine): boolean {
-    let text = line.text;
-    if (
-      line.origin === "engine" &&
-      key.startsWith(wakeKeyPrefix(line.runId)) &&
-      text.startsWith(FLIGHT_WAKE_HEAD)
-    ) {
-      text = compactFlightWake(text);
-    }
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO seat_lines (key, run_id, seat_id, origin, text, at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(key, line.runId, line.seatId, line.origin, text, line.at);
-    return r.changes === 1;
+    return this.seatQ.claimLine(key, line);
   }
 
   /** Frees a key, so its line can be claimed (and sent) again. */
   dropLine(key: string): void {
-    this.db.prepare("DELETE FROM seat_lines WHERE key = ?").run(key);
+    this.seatQ.dropLine(key);
   }
 
   /** The run's claimed line keys, each with the time it was claimed. */
   claimedKeys(runId: string): Record<string, number> {
-    const rows = this.db.prepare("SELECT key, at FROM seat_lines WHERE run_id = ?").all(runId) as {
-      key: string;
-      at: number;
-    }[];
-    return Object.fromEntries(rows.map((r) => [r.key, r.at]));
+    return this.seatQ.claimedKeys(runId);
   }
 
   /** When the engine last sent the run a line, else null. */
   lastEngineLineAt(runId: string): number | null {
-    const r = this.db
-      .prepare("SELECT MAX(at) AS at FROM seat_lines WHERE run_id = ? AND origin = ?")
-      .get(runId, "engine" satisfies SeatLineOrigin) as { at: number | null };
-    return r.at;
+    return this.seatQ.lastEngineLineAt(runId);
   }
 
   /** Records a loop event; false when its key is already recorded. */
@@ -6006,205 +5163,17 @@ export class Store {
     /** Server-resolved title for one internal context line accompanying an operator item send. */
     flightContextTitle?: string,
   ): (CommsRow & { repeat?: true }) | null {
-    if (!Number.isFinite(row.at)) throw new Error("Comms messages need a time.");
-    const label = row.label ?? "none";
-    const text = cutCommsText(row.text);
-    const replyTo =
-      row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
-    if (row.replyTo !== undefined && row.replyTo !== null && replyTo === null)
-      throw new Error("Invalid Comms message ID.");
-    let id: number | null = null;
-    let repeat = false;
-    this.transaction(() => {
-      if (repeatSince !== undefined) {
-        const same = this.db
-          .prepare(
-            `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND text = ? AND at >= ?
-               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ? AND item_key IS ?
-             ORDER BY id DESC LIMIT 1`,
-          )
-          .get(
-            row.from,
-            row.to,
-            text,
-            repeatSince,
-            row.ticket,
-            label,
-            replyTo,
-            row.targetRunId ?? null,
-            row.itemKey ?? null,
-          ) as { id: number } | undefined;
-        if (same !== undefined) {
-          id = same.id;
-          repeat = true;
-          this.db
-            .prepare("INSERT INTO comms_repeats (at, from_id, to_id, message_id) VALUES (?,?,?,?)")
-            .run(row.at, row.from, row.to, same.id);
-          return;
-        }
-      }
-      if (rate !== undefined) {
-        const count = this.db
-          .prepare("SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND at >= ?")
-          .get(row.from, rate.since) as { n: number };
-        if (count.n >= rate.limit) return;
-      }
-      id = this.insertComms({ ...row, label }, text, replyTo);
-      if (
-        row.from === COMMS_CAPCOM &&
-        row.itemKey !== undefined &&
-        flightContextTitle !== undefined
-      ) {
-        const context: NewCommsRow = {
-          from: COMMS_MC,
-          to: row.to,
-          senderKind: "hub",
-          at: row.at,
-          ticket: row.ticket,
-          text: `[Mission Control] Needs-you context ${JSON.stringify({
-            messageId: `comms:${id}`,
-            itemKey: row.itemKey,
-            title: flightContextTitle,
-          })}`,
-        };
-        this.insertComms(context, cutCommsText(context.text), null);
-      }
-      this.raiseChatterNote(row);
-    }, true);
-    const stored = id === null ? null : this.commsMessage(`comms:${id}`);
-    return stored !== null && repeat ? { ...stored, repeat: true } : stored;
+    return this.commsStore.addComms(row, rate, repeatSince, flightContextTitle);
   }
 
   /** How many exact repeats of a stored message were turned away at or after `since`. */
   commsRepeatCount(since: number): number {
-    return (
-      this.db.prepare("SELECT COUNT(*) AS n FROM comms_repeats WHERE at >= ?").get(since) as {
-        n: number;
-      }
-    ).n;
-  }
-
-  /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
-  private raiseChatterNote(row: NewCommsRow): void {
-    if (
-      row.ticket === null ||
-      row.to === COMMS_CAPCOM ||
-      row.to === COMMS_CREW ||
-      row.to === COMMS_MC ||
-      row.from === COMMS_CAPCOM ||
-      row.from === COMMS_CREW ||
-      row.from === COMMS_MC ||
-      row.from === COMMS_CONTROLLER ||
-      row.from === row.to
-    )
-      return;
-    const pair = row.from < row.to ? [row.from, row.to] : [row.to, row.from];
-    const crossed = this.commsChatter(row.at - COMMS_CHATTER_WINDOW_MS, row.at).some(
-      (item) => item.ticket === row.ticket && item.from === pair[0] && item.to === pair[1],
-    );
-    if (!crossed) return;
-    this.raiseNote({
-      key: `${CHATTER_NOTE_PREFIX}${row.ticket}:${pair[0]}:${pair[1]}`,
-      kind: "blocked",
-      runId: null,
-      seatId: null,
-      repoId: row.ticket.slice(0, row.ticket.lastIndexOf("#")),
-      text: `${pair[0]} and ${pair[1]} exceeded ${COMMS_CHATTER_ROUNDS} rounds on ${row.ticket}.`,
-      at: row.at,
-    });
-  }
-
-  private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
-    // The sender's name must match its kind: CAPCOM is only ever the operator, and the hub is MC.
-    if (row.from === COMMS_CAPCOM && row.senderKind !== undefined && row.senderKind !== "operator")
-      throw new Error("Only the operator sends as CAPCOM.");
-    if (row.senderKind === "hub" && row.from !== COMMS_MC)
-      throw new Error("A hub message is sent as MC.");
-    const inserted = this.db
-      .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(
-        row.at,
-        row.from,
-        row.to,
-        row.ticket,
-        text,
-        row.label ?? null,
-        row.ref ?? null,
-        replyTo,
-        row.targetRunId ?? null,
-        row.fromRunId ?? null,
-        row.pr ?? null,
-        row.senderKind ?? null,
-        row.kind ?? (row.senderKind === "hub" ? COMMS_NOTICE : null),
-        row.itemKey ?? null,
-      );
-    const id = Number(inserted.lastInsertRowid);
-    const mention = this.db.prepare(
-      "INSERT OR IGNORE INTO comms_mentions (message_id, mentioned_id) VALUES (?, ?)",
-    );
-    for (const target of row.mentions ?? []) mention.run(id, target);
-    return id;
-  }
-
-  private commsRow(r: Row, knownMentions?: string[]): CommsRow {
-    const id = Number(r.id);
-    const mentions =
-      knownMentions ??
-      this.db
-        .prepare(
-          "SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id",
-        )
-        .all(id)
-        .map((m) => m.mentioned_id as string);
-    return {
-      id: `comms:${id}`,
-      at: r.at as number,
-      from: r.from_id as string,
-      to: r.to_id as string,
-      ticket: r.ticket as string | null,
-      text: r.text as string,
-      label: r.label as CommsLabel | null,
-      ref: r.ref as string | null,
-      replyTo: r.reply_to == null ? null : `comms:${r.reply_to}`,
-      mentions,
-      deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
-      senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
-      kind: (r.kind as CommsKind | null) ?? null,
-      ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
-    };
-  }
-
-  /** Bound mention reads per snapshot; retain no message or mention cache between calls. */
-  private commsRows(rows: Row[]): CommsRow[] {
-    const mentions = new Map<number, string[]>();
-    // Stay below even SQLite's older 999-variable limit if the snapshot limit grows.
-    const batchSize = 400;
-    for (let start = 0; start < rows.length; start += batchSize) {
-      const ids = rows.slice(start, start + batchSize).map((row) => Number(row.id));
-      const found = this.db
-        .prepare(
-          `SELECT message_id, mentioned_id FROM comms_mentions WHERE message_id IN (${ids.map(() => "?").join(",")}) ORDER BY message_id, mentioned_id`,
-        )
-        .all(...ids);
-      for (const row of found) {
-        const id = Number(row.message_id);
-        const names = mentions.get(id) ?? [];
-        names.push(row.mentioned_id as string);
-        mentions.set(id, names);
-      }
-    }
-    return rows.map((row) => this.commsRow(row, mentions.get(Number(row.id))?.slice() ?? []));
+    return this.commsStore.commsRepeatCount(since);
   }
 
   /** Records that the recipient took a message; the first time wins. */
   markCommsDelivered(id: string, at: number): void {
-    const n = commsMessageNumber(id);
-    if (n !== null)
-      this.db
-        .prepare("UPDATE comms SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL")
-        .run(at, n);
+    this.commsStore.markCommsDelivered(id, at);
   }
 
   /**
@@ -6212,38 +5181,12 @@ export class Store {
    * call made it, so a second click gets the first receipt.
    */
   claimChoice(c: QuestionChoiceRow): { row: QuestionChoiceRow; fresh: boolean } {
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO question_choices
-           (key, brief_at, option_id, label, answer, question, ticket, target, target_kind, message_id, chosen_at, chosen_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        c.key,
-        c.briefAt,
-        c.optionId,
-        c.label,
-        c.answer,
-        c.question,
-        c.ticket,
-        c.target,
-        c.targetKind,
-        c.messageId === null ? null : commsMessageNumber(c.messageId),
-        c.chosenAt,
-        c.chosenBy,
-      );
-    const row = this.choice(c.key, c.briefAt);
-    if (row === null) throw new Error("Choice was not stored.");
-    return { row, fresh: Number(r.changes) > 0 };
+    return this.seatQ.claimChoice(c);
   }
 
   /** Names the message that carries a claimed choice's answer. */
   setChoiceMessage(key: string, briefAt: number, messageId: string): void {
-    const n = commsMessageNumber(messageId);
-    if (n !== null)
-      this.db
-        .prepare("UPDATE question_choices SET message_id = ? WHERE key = ? AND brief_at = ?")
-        .run(n, key, briefAt);
+    this.seatQ.setChoiceMessage(key, briefAt, messageId);
   }
 
   /**
@@ -6251,122 +5194,51 @@ export class Store {
    * operator owes a reply to leaves these out: they answer, they do not ask.
    */
   isChoiceAnswer(messageId: string): boolean {
-    const n = commsMessageNumber(messageId);
-    return (
-      n !== null &&
-      this.db.prepare("SELECT 1 FROM question_choices WHERE message_id = ?").get(n) !== undefined
-    );
+    return this.seatQ.isChoiceAnswer(messageId);
   }
 
   /** Drops a claim whose answer could not be sent. */
   releaseChoice(key: string, briefAt: number): void {
-    this.db
-      .prepare("DELETE FROM question_choices WHERE key = ? AND brief_at = ?")
-      .run(key, briefAt);
-  }
-
-  private choiceOf(r: Row): QuestionChoiceRow {
-    return {
-      key: r.key as string,
-      briefAt: r.brief_at as number,
-      optionId: r.option_id as string,
-      label: r.label as string,
-      answer: r.answer as string,
-      question: r.question as string,
-      ticket: (r.ticket as string | null) ?? null,
-      target: r.target as string,
-      targetKind: r.target_kind as ChoiceTargetKind,
-      messageId: r.message_id == null ? null : `comms:${r.message_id}`,
-      chosenBy: (r.chosen_by as string | null) ?? "the operator",
-      chosenAt: r.chosen_at as number,
-    };
+    this.seatQ.releaseChoice(key, briefAt);
   }
 
   /** The choice made on one brief of a key; null when none. */
   choice(key: string, briefAt: number): QuestionChoiceRow | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_choices WHERE key = ? AND brief_at = ?")
-      .get(key, briefAt) as Row | undefined;
-    return r ? this.choiceOf(r) : null;
+    return this.seatQ.choice(key, briefAt);
   }
 
   /** The newest choice on a key; null when none. */
   latestChoice(key: string): QuestionChoiceRow | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_choices WHERE key = ? ORDER BY chosen_at DESC LIMIT 1")
-      .get(key) as Row | undefined;
-    return r ? this.choiceOf(r) : null;
+    return this.seatQ.latestChoice(key);
   }
 
   /** The choices made on a ticket, newest first. */
   choicesOnTicket(ticket: string, limit: number): QuestionChoiceRow[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM question_choices WHERE ticket = ? ORDER BY chosen_at DESC LIMIT ?")
-        .all(ticket, limit) as Row[]
-    ).map((r) => this.choiceOf(r));
+    return this.seatQ.choicesOnTicket(ticket, limit);
   }
 
   markCommsWakeFailed(id: string, at: number): void {
-    const n = commsMessageNumber(id);
-    if (n !== null) this.db.prepare("UPDATE comms SET wake_failed_at = ? WHERE id = ?").run(at, n);
+    this.commsStore.markCommsWakeFailed(id, at);
   }
   clearCommsWakeFailed(id: string): void {
-    const n = commsMessageNumber(id);
-    if (n !== null) this.db.prepare("UPDATE comms SET wake_failed_at = NULL WHERE id = ?").run(n);
+    this.commsStore.clearCommsWakeFailed(id);
   }
   commsWakeFailed(id: string): boolean {
-    const n = commsMessageNumber(id);
-    return (
-      n !== null &&
-      this.db.prepare("SELECT wake_failed_at FROM comms WHERE id = ?").get(n)?.wake_failed_at !=
-        null
-    );
+    return this.commsStore.commsWakeFailed(id);
   }
 
   /** The run and PR the hub stamped on a message; nulls for a message it did not stamp. */
   commsStamp(id: string): { runId: string | null; pr: number | null } {
-    const n = commsMessageNumber(id);
-    const r =
-      n === null
-        ? undefined
-        : (this.db.prepare("SELECT from_run_id, pr FROM comms WHERE id = ?").get(n) as
-            | Row
-            | undefined);
-    return {
-      runId: (r?.from_run_id as string | null | undefined) ?? null,
-      pr: (r?.pr as number | null | undefined) ?? null,
-    };
+    return this.commsStore.commsStamp(id);
   }
 
   commsMessage(id: string): CommsRow | null {
-    const n = commsMessageNumber(id);
-    if (n === null) return null;
-    return this.commsMessageByNumber(n);
+    return this.commsStore.commsMessage(id);
   }
 
   /** Fixed delivery target, otherwise the sender's run that was open when it wrote the line. */
   commsRun(id: string, inferSender = true): Run | null {
-    const number = commsMessageNumber(id);
-    if (number === null) return null;
-    const source = this.statement("SELECT target_run_id, from_id, at FROM comms WHERE id = ?").get(
-      number,
-    ) as Row | undefined;
-    if (!source) return null;
-    if (source.target_run_id !== null) return this.run(source.target_run_id as string);
-    if (!inferSender) return null;
-    const row = this.statement(`SELECT * FROM runs WHERE agent_id = ? AND started_at <= ?
-      AND (ended_at IS NULL OR ended_at >= ?) ORDER BY started_at DESC, seq DESC, id DESC LIMIT 1`).get(
-      source.from_id as string,
-      source.at as number,
-      source.at as number,
-    ) as Row | undefined;
-    return row ? toRun(row) : null;
-  }
-
-  private commsMessageByNumber(id: number): CommsRow | null {
-    const row = this.db.prepare("SELECT * FROM comms WHERE id = ?").get(id) as Row | undefined;
-    return row === undefined ? null : this.commsRow(row);
+    return this.commsStore.commsRun(id, inferSender);
   }
 
   addCommsReaction(
@@ -6376,211 +5248,62 @@ export class Store {
     reason: string | undefined,
     at: number,
   ): CommsReaction | null {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return null;
-    const message = this.commsMessageByNumber(id);
-    if (message === null) return null;
-    this.db
-      .prepare(`INSERT INTO comms_reactions (message_id, actor_id, reaction, reason, at) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(message_id, actor_id) DO UPDATE SET reaction=excluded.reaction, reason=excluded.reason, at=excluded.at`)
-      .run(id, actor, reaction, reason ?? null, at);
-    return { messageId: message.id, actor, reaction, reason: reason ?? null, at };
+    return this.commsStore.addCommsReaction(messageId, actor, reaction, reason, at);
   }
 
   setCommsPinned(messageId: string, pinned: boolean, actor: string, at: number): boolean {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return false;
-    const message = this.commsMessageByNumber(id);
-    if (message === null) return false;
-    if (pinned)
-      this.db
-        .prepare(
-          "INSERT INTO comms_pins (message_id, pinned_by, pinned_at) VALUES (?, ?, ?) ON CONFLICT(message_id) DO UPDATE SET pinned_by=excluded.pinned_by, pinned_at=excluded.pinned_at",
-        )
-        .run(id, actor, at);
-    else this.db.prepare("DELETE FROM comms_pins WHERE message_id = ?").run(id);
-    return true;
+    return this.commsStore.setCommsPinned(messageId, pinned, actor, at);
   }
 
   commsPins(): CommsRow[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT c.* FROM comms c JOIN comms_pins p ON p.message_id=c.id ORDER BY p.pinned_at DESC",
-        )
-        .all() as Row[]
-    ).map((r) => this.commsRow(r));
+    return this.commsStore.commsPins();
   }
   commsReactions(messageId: string): CommsReaction[] {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return [];
-    return this.db
-      .prepare(
-        "SELECT actor_id, reaction, reason, at FROM comms_reactions WHERE message_id=? ORDER BY at,actor_id",
-      )
-      .all(id)
-      .map((r) => ({
-        messageId: `comms:${id}`,
-        actor: r.actor_id as string,
-        reaction: r.reaction as CommsReactionKind,
-        reason: r.reason as string | null,
-        at: r.at as number,
-      }));
+    return this.commsStore.commsReactions(messageId);
   }
   commsSettlement(messageId: string): CommsSettlement | null {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return null;
-    const row = this.db
-      .prepare("SELECT settled_by, reason, at FROM comms_settlements WHERE message_id=?")
-      .get(id) as Row | undefined;
-    return row === undefined
-      ? null
-      : {
-          messageId,
-          settledBy: row.settled_by as string,
-          reason: row.reason as string,
-          at: row.at as number,
-        };
+    return this.commsStore.commsSettlement(messageId);
   }
   settleCommsItem(messageId: string, settledBy: string, reason: string, at: number): boolean {
-    const id = commsMessageNumber(messageId);
-    if (id === null || this.commsMessageByNumber(id) === null) return false;
-    this.db
-      .prepare(
-        "INSERT INTO comms_settlements (message_id, settled_by, reason, at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id) DO NOTHING",
-      )
-      .run(id, settledBy, reason, at);
-    return true;
+    return this.commsStore.settleCommsItem(messageId, settledBy, reason, at);
   }
   commsMentions(target: string): CommsRow[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT c.* FROM comms c JOIN comms_mentions m ON m.message_id=c.id WHERE m.mentioned_id=? ORDER BY c.at DESC,c.id DESC",
-        )
-        .all(target) as Row[]
-    ).map((r) => this.commsRow(r));
+    return this.commsStore.commsMentions(target);
   }
   markCommsMentionsSeen(target: string, ids: string[], at: number): void {
-    const q = this.db.prepare(
-      "UPDATE comms_mentions SET seen_at=? WHERE mentioned_id=? AND message_id=?",
-    );
-    for (const id of ids) {
-      const number = commsMessageNumber(id);
-      if (number !== null) q.run(at, target, number);
-    }
+    this.commsStore.markCommsMentionsSeen(target, ids, at);
   }
   commsMentionSeen(target: string, id: string): boolean {
-    const number = commsMessageNumber(id);
-    if (number === null) return false;
-    return (
-      (
-        this.db
-          .prepare("SELECT seen_at FROM comms_mentions WHERE mentioned_id=? AND message_id=?")
-          .get(target, number) as { seen_at: number | null } | undefined
-      )?.seen_at !== null
-    );
+    return this.commsStore.commsMentionSeen(target, id);
   }
   commsForCrew(): CommsRow[] {
-    return this.commsForWhere("to_id = 'crew'");
+    return this.commsStore.commsForCrew();
   }
   /** Seat-side reads include only general Comms and rows targeted at its live run. */
   commsForCrewRun(runId: string): CommsRow[] {
-    return this.commsForRunWhere(runId, "to_id = 'crew'");
+    return this.commsStore.commsForCrewRun(runId);
   }
   commsForAgent(id: string, contact?: string): CommsRow[] {
-    return contact === undefined
-      ? this.commsForWhere("from_id=? OR to_id=?", id, id)
-      : this.commsForPair(id, contact);
+    return this.commsStore.commsForAgent(id, contact);
   }
   commsForAgentRun(id: string, runId: string): CommsRow[] {
-    return this.commsForRunWhere(runId, "from_id=? OR to_id=?", id, id);
+    return this.commsStore.commsForAgentRun(id, runId);
   }
   commsInbox(id: string): CommsRow[] {
-    return this.commsForWhere(
-      `id IN (
-        SELECT id FROM comms WHERE to_id=?
-        UNION
-        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
-        UNION
-        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
-        UNION
-        SELECT message_id FROM comms_pins
-      )`,
-      id,
-      id,
-      id,
-    );
+    return this.commsStore.commsInbox(id);
   }
   commsInboxRun(id: string, runId: string): CommsRow[] {
-    return this.commsForWhere(
-      `(
-        (target_run_id IS NULL OR target_run_id = ?)
-        AND id IN (
-        SELECT id FROM comms WHERE to_id=?
-        UNION
-        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
-        UNION
-        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
-        )
-      ) OR id IN (SELECT message_id FROM comms_pins)`,
-      runId,
-      id,
-      id,
-      id,
-    );
+    return this.commsStore.commsInboxRun(id, runId);
   }
   commsForPair(a: string, b: string): CommsRow[] {
-    return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+    return this.commsStore.commsForPair(a, b);
   }
 
   /** Lightweight retained transcript sources; conversation paging is not limited to recent runs. */
   flightConversationRuns(
     agentId: string,
   ): Pick<Run, "id" | "startedAt" | "endedAt" | "transcriptPath" | "vendor" | "ticket">[] {
-    const rows = this.db
-      .prepare(`SELECT id, started_at, ended_at, transcript_path, vendor, ticket FROM runs
-      WHERE agent_id = ? ORDER BY COALESCE(ended_at, 9223372036854775807) DESC, started_at DESC, seq DESC`)
-      .all(agentId) as Row[];
-    return rows.map((r) => ({
-      id: r.id as string,
-      startedAt: r.started_at as number,
-      endedAt: r.ended_at as number | null,
-      transcriptPath: r.transcript_path as string,
-      ticket: r.ticket as string | null,
-      ...(r.vendor ? { vendor: r.vendor as Run["vendor"] } : {}),
-    }));
-  }
-
-  private flightConversationScope(
-    flightId: string,
-    seats: readonly string[],
-    hideNotices = false,
-  ): { sql: string; args: SQLInputValue[] } {
-    const targets = [...new Set([flightId, ...seats])];
-    // The hub's notices to FLIGHT belong to its conversation; its internal context rows do not.
-    return {
-      sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
-      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")}))
-      OR (c.from_id = ? AND c.to_id = ? AND c.kind = ?))
-      AND (c.sender_kind IS NOT 'hub' OR c.kind = ?)
-      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'${
-        hideNotices ? " AND c.kind IS NOT ?" : ""
-      }`,
-      args: [
-        COMMS_CAPCOM,
-        flightId,
-        flightId,
-        COMMS_CAPCOM,
-        COMMS_CAPCOM,
-        ...targets,
-        COMMS_MC,
-        flightId,
-        COMMS_NOTICE,
-        COMMS_NOTICE,
-        ...(hideNotices ? [COMMS_NOTICE] : []),
-      ],
-    };
+    return this.runQ.flightConversationRuns(agentId);
   }
 
   /** A choice is projected from its durable receipt, never inferred from its rendered text. */
@@ -6592,34 +5315,22 @@ export class Store {
     exactId?: string,
     hideNotices = false,
   ): (CommsRow & { choice?: { label: string } })[] {
-    const scope = this.flightConversationScope(flightId, seats, hideNotices);
-    const id = exactId === undefined ? null : commsMessageNumber(exactId);
-    if (exactId !== undefined && id === null) return [];
-    const rows = this.db
-      .prepare(`SELECT c.*, q.key AS choice_key, q.label AS choice_label FROM comms c
-      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
-      WHERE ${scope.sql}${id === null ? "" : " AND c.id = ?"}${before ? " AND (c.at, c.id) < (?, ?)" : ""}
-      ORDER BY c.at DESC, c.id DESC LIMIT ?`)
-      .all(
-        ...scope.args,
-        ...(id === null ? [] : [id]),
-        ...(before ? [before.at, before.id] : []),
-        limit,
-      ) as Row[];
-    return rows.reverse().map((r) => ({
-      ...this.commsRow(r),
-      ...(typeof r.choice_label === "string"
-        ? { choice: { label: r.choice_label }, itemKey: (r.item_key ?? r.choice_key) as string }
-        : {}),
-    }));
+    return this.commsStore.flightConversationStored(
+      flightId,
+      seats,
+      limit,
+      before,
+      exactId,
+      hideNotices,
+    );
   }
 
   latestFlightStoredReplyAt(flightId: string): number | null {
-    const row = this.db
-      .prepare(`SELECT MAX(at) AS at FROM comms WHERE from_id = ? AND to_id = ? AND sender_kind IS NOT 'hub'
-      AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`)
-      .get(flightId, COMMS_CAPCOM) as Row;
-    return row.at as number | null;
+    return this.commsStore.latestFlightStoredReplyAt(flightId);
+  }
+
+  flightOperatorMessageTimes(flightId: string): number[] {
+    return this.commsStore.flightOperatorMessageTimes(flightId);
   }
 
   flightConversationUnread(
@@ -6628,23 +5339,7 @@ export class Store {
     cursor: string | null,
     bound?: { at: number; source: string; offset: number },
   ): number {
-    const scope = this.flightConversationScope(flightId, seats);
-    const after = bound
-      ? bound.source === "comms"
-        ? "(c.at, c.id) > (?, ?)"
-        : "c.at > ?"
-      : "c.id > ?";
-    const args = bound
-      ? bound.source === "comms"
-        ? [bound.at, bound.offset]
-        : [bound.at]
-      : [cursor ? (commsMessageNumber(cursor) ?? 0) : 0];
-    const row = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM comms c
-      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
-      WHERE ${scope.sql} AND c.kind IS NOT ? AND ${after}`)
-      .get(...scope.args, COMMS_NOTICE, ...args) as Row;
-    return row.n as number;
+    return this.commsStore.flightConversationUnread(flightId, seats, cursor, bound);
   }
 
   flightConversationStoredReadThrough(
@@ -6652,39 +5347,7 @@ export class Store {
     seats: readonly string[],
     bound: { at: number; source: string; offset: number },
   ): number | null {
-    const scope = this.flightConversationScope(flightId, seats);
-    const through = bound.source === "comms" ? "(c.at, c.id) <= (?, ?)" : "c.at <= ?";
-    const row = this.db
-      .prepare(`SELECT MAX(c.id) AS id FROM comms c
-      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
-      WHERE ${scope.sql} AND ${through}`)
-      .get(
-        ...scope.args,
-        ...[bound.at, ...(bound.source === "comms" ? [bound.offset] : [])],
-      ) as Row;
-    return row.id as number | null;
-  }
-  private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
-    if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
-    if ("pair" in scope) {
-      const [a, b] = scope.pair;
-      return { where: "((from_id=? AND to_id=?) OR (from_id=? AND to_id=?))", args: [a, b, b, a] };
-    }
-    if ("agent" in scope)
-      return { where: "(from_id=? OR to_id=?)", args: [scope.agent, scope.agent] };
-    const id = scope.inbox;
-    return {
-      where: `id IN (
-        SELECT id FROM comms WHERE to_id=?
-        UNION
-        SELECT message_id FROM comms_mentions WHERE mentioned_id=?
-        UNION
-        SELECT reply.id FROM comms reply JOIN comms original ON reply.reply_to=original.id WHERE original.from_id=?
-        UNION
-        SELECT message_id FROM comms_pins
-      )`,
-      args: [id, id, id],
-    };
+    return this.commsStore.flightConversationStoredReadThrough(flightId, seats, bound);
   }
   /**
    * The newest `limit` messages of a scope, oldest first, strictly older than `before` when given.
@@ -6697,19 +5360,7 @@ export class Store {
     recentSince?: number,
     hideNotices = false,
   ): { rows: CommsRow[]; hasMore: boolean } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
-    const beforeId = before === undefined ? null : commsMessageNumber(before);
-    const rows = (
-      this.db
-        .prepare(
-          `SELECT * FROM comms WHERE ${where}${
-            beforeId === null ? "" : " AND (at, id) < (SELECT at, id FROM comms WHERE id = ?)"
-          } ORDER BY at DESC, id DESC LIMIT ?`,
-        )
-        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[]
-    ).map((r) => this.commsRow(r));
-    const hasMore = rows.length > limit;
-    return { rows: rows.slice(0, limit).reverse(), hasMore };
+    return this.commsStore.commsPage(scope, limit, before, recentSince, hideNotices);
   }
   /** How many messages a scope holds, and how many of them come after the read cursor. */
   commsCounts(
@@ -6718,48 +5369,14 @@ export class Store {
     recentSince?: number,
     hideNotices = false,
   ): { count: number; unread: number } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
-    const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
-    // a notice is never unread, shown or not
-    const r = this.db
-      .prepare(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ? AND kind IS NOT ?), 0) AS unread
-         FROM comms WHERE ${where}`,
-      )
-      .get(offset, COMMS_NOTICE, ...args) as { count: number; unread: number };
-    return { count: r.count, unread: r.unread };
-  }
-  private commsRecentScopeWhere(scope: CommsReadScope, since?: number, hideNotices = false) {
-    const scoped = this.commsScopeWhere(scope);
-    const base = hideNotices
-      ? { where: `(${scoped.where}) AND kind IS NOT ?`, args: [...scoped.args, COMMS_NOTICE] }
-      : scoped;
-    if (since === undefined) return base;
-    return {
-      where: `(${base.where}) AND at >= ? AND (
-        (target_run_id IS NOT NULL AND EXISTS (SELECT 1 FROM runs r WHERE r.id = comms.target_run_id AND r.ended_at IS NULL))
-        OR (target_run_id IS NULL AND (NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = comms.from_id)
-        OR (SELECT r.ended_at IS NULL FROM runs r WHERE r.agent_id = comms.from_id AND
-          r.started_at <= comms.at AND (r.ended_at IS NULL OR r.ended_at >= comms.at)
-          ORDER BY r.started_at DESC, r.seq DESC, r.id DESC LIMIT 1) = 1))
-      )`,
-      args: [...base.args, since],
-    };
+    return this.commsStore.commsCounts(scope, cursor, recentSince, hideNotices);
   }
   /** Everyone `id` has exchanged messages with, in first-contact order. */
   commsContactIds(id: string): string[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT CASE WHEN from_id=? THEN to_id ELSE from_id END AS contact
-          FROM comms WHERE from_id=? OR to_id=? GROUP BY contact ORDER BY MIN(id)`,
-        )
-        .all(id, id, id) as { contact: string }[]
-    ).map((r) => r.contact);
+    return this.commsStore.commsContactIds(id);
   }
   commsForRefs(refs: string[]): CommsRow[] {
-    if (!refs.length) return [];
-    return this.commsForWhere(`ref IN (${refs.map(() => "?").join(",")})`, ...refs);
+    return this.commsStore.commsForRefs(refs);
   }
   commsForTicket(
     ref: string,
@@ -6770,108 +5387,7 @@ export class Store {
     repoId: string | null;
     rows: CommsRow[];
   } {
-    const prNumber = ref.startsWith("PR ") ? Number(ref.slice(3)) : null;
-    let issueNumber = ref.startsWith("#") ? Number(ref.slice(1)) : null;
-    const qualified = ticketContext?.match(/^(.+)#(\d+)$/);
-    // A #n link may only carry its own ticket. PR links keep their PR number and use the ticket
-    // solely as repository context.
-    const scopedTicket =
-      qualified && (issueNumber === null || Number(qualified[2]) === issueNumber)
-        ? ticketContext
-        : undefined;
-    const scopedRepoId = scopedTicket === undefined ? undefined : (qualified?.[1] as string);
-    let linkedPr: string | null = null;
-    let linkedRows: { number: number; repoId: string; ticket: string | null }[] = [];
-    if (prNumber !== null) {
-      linkedRows = this.db
-        .prepare(
-          `SELECT number, repo_id, ticket FROM pull_requests WHERE number=?${
-            scopedRepoId === undefined ? "" : " AND repo_id=?"
-          } ORDER BY updated_at DESC`,
-        )
-        .all(prNumber, ...(scopedRepoId === undefined ? [] : [scopedRepoId]))
-        .map((row) => ({
-          number: row.number as number,
-          repoId: row.repo_id as string,
-          ticket: row.ticket as string | null,
-        }));
-      const row = linkedRows[0];
-      const match = row?.ticket?.match(/#(\d+)$/);
-      issueNumber = match === null || match === undefined ? null : Number(match[1]);
-      linkedPr = `PR ${prNumber}`;
-    } else if (issueNumber !== null) {
-      linkedRows = this.db
-        .prepare(
-          scopedRepoId === undefined
-            ? "SELECT number, repo_id, ticket FROM pull_requests WHERE ticket GLOB ? ORDER BY updated_at DESC"
-            : "SELECT number, repo_id, ticket FROM pull_requests WHERE ticket=? AND repo_id=? ORDER BY updated_at DESC",
-        )
-        .all(
-          ...(scopedRepoId === undefined
-            ? [`*#${issueNumber}`]
-            : [scopedTicket as string, scopedRepoId]),
-        )
-        .map((row) => ({
-          number: row.number as number,
-          repoId: row.repo_id as string,
-          ticket: row.ticket as string | null,
-        }));
-      linkedPr = linkedRows[0] === undefined ? null : `PR ${linkedRows[0].number}`;
-    }
-    const resolvedRef = issueNumber === null ? ref : `#${issueNumber}`;
-    const refs = linkedPr === null ? [resolvedRef] : [resolvedRef, linkedPr];
-    const predicates = [`ref IN (${refs.map(() => "?").join(",")})`, "text LIKE ?"];
-    const args: SQLInputValue[] = [...refs, `%${resolvedRef}%`];
-    if (linkedPr !== null) {
-      predicates.push("text LIKE ?");
-      args.push(`%${linkedPr}%`);
-    }
-    const ticketPredicate =
-      scopedTicket === undefined
-        ? ""
-        : prNumber === null
-          ? " AND ticket=?"
-          : " AND substr(ticket, 1, length(?))=?";
-    const ticketArgs: SQLInputValue[] =
-      scopedTicket === undefined
-        ? []
-        : prNumber === null
-          ? [scopedTicket]
-          : [`${scopedRepoId}#`, `${scopedRepoId}#`];
-    const rows = this.commsForWhere(
-      `(${predicates.join(" OR ")})${ticketPredicate}`,
-      ...args,
-      ...ticketArgs,
-    ).filter((row) => {
-      if (refs.includes(row.ref ?? "")) return true;
-      return refs.some((candidate) =>
-        new RegExp(`(^|[^A-Za-z0-9])${candidate.replace("#", "\\#")}(?=$|[^A-Za-z0-9])`).test(
-          row.text,
-        ),
-      );
-    });
-    const repoIds = new Set<string>();
-    const repoFor = (ticket: string | null): string | null => {
-      const match = ticket?.match(/^(.+)#(\d+)$/);
-      return match?.[2] === String(issueNumber) ? (match[1] ?? null) : null;
-    };
-    // A clicked hub-set ticket is authoritative. Otherwise the linked PR's repo wins; without
-    // either, only rows explicitly tagged with this ref count. A mere text mention never attributes.
-    if (scopedRepoId !== undefined) repoIds.add(scopedRepoId);
-    else for (const row of linkedRows) repoIds.add(row.repoId);
-    if (repoIds.size === 0) {
-      for (const row of rows) {
-        if (!refs.includes(row.ref ?? "")) continue;
-        const repoId = repoFor(row.ticket);
-        if (repoId !== null) repoIds.add(repoId);
-      }
-    }
-    return {
-      ref: resolvedRef,
-      linkedPr,
-      repoId: repoIds.size === 1 ? [...repoIds][0] : null,
-      rows,
-    };
+    return this.commsStore.commsForTicket(ref, ticketContext);
   }
   commsLinkedPr(ref: string): string | null {
     const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
@@ -6880,52 +5396,18 @@ export class Store {
       .get(ticket) as { number: number } | undefined;
     return row === undefined ? null : `PR ${row.number}`;
   }
-  private commsForWhere(where: string, ...args: SQLInputValue[]): CommsRow[] {
-    return (
-      this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
-    ).map((r) => this.commsRow(r));
-  }
-  private commsForRunWhere(runId: string, where: string, ...args: SQLInputValue[]): CommsRow[] {
-    return this.commsForWhere(
-      `(${where}) AND (target_run_id IS NULL OR target_run_id = ?)`,
-      ...args,
-      runId,
-    );
-  }
   /**
    * Direct-link counts since `since`, each with its newest message (id, time and the first
    * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
    */
   commsLinkCounts(since: number, until = Date.now()): CommsLinkCount[] {
-    const rows = this.db
-      .prepare(
-        `SELECT c.from_id AS 'from', c.to_id AS 'to', g.count AS count, c.id AS lastId,
-          c.at AS lastAt, substr(c.text, 1, ?) AS lastText
-        FROM (SELECT from_id, to_id, COUNT(*) AS count, MAX(id) AS last FROM comms WHERE at>=?
-          GROUP BY from_id,to_id) g
-        JOIN comms c ON c.id = g.last
-        ORDER BY c.from_id, c.to_id`,
-      )
-      .all(COMMS_LINK_PREVIEW, since) as Row[];
-    return rows.map((r) => ({
-      from: r.from as string,
-      to: r.to as string,
-      count: r.count as number,
-      lastId: `comms:${r.lastId as number}`,
-      lastAt: r.lastAt as number,
-      lastText: r.lastText as string,
-      tokens: this.commsTokenTotal(r.from as string, r.to as string, null, since, until),
-    }));
+    return this.commsStore.commsLinkCounts(since, until);
   }
   /** Hourly direct-link counts for the Comms Traffic chart. */
   commsHourlyLinkCounts(
     since: number,
   ): { hour: number; from: string; to: string; count: number }[] {
-    return this.db
-      .prepare(
-        "SELECT (at / 3600000) * 3600000 AS hour, from_id AS 'from', to_id AS 'to', COUNT(*) AS count FROM comms WHERE at>=? GROUP BY hour, from_id, to_id ORDER BY hour, from_id, to_id",
-      )
-      .all(since) as { hour: number; from: string; to: string; count: number }[];
+    return this.commsStore.commsHourlyLinkCounts(since);
   }
   /** Back-and-forth pairs on one ticket; a round needs a message in each direction. */
   commsChatter(
@@ -6940,112 +5422,7 @@ export class Store {
     tokens: number;
     flightSteppedInAt: number | null;
   }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT "from", "to", ticket, first_at, last_at,
-          CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END AS rounds
-        FROM (
-          SELECT CASE WHEN from_id < to_id THEN from_id ELSE to_id END AS 'from',
-            CASE WHEN from_id < to_id THEN to_id ELSE from_id END AS 'to', ticket,
-            SUM(CASE WHEN from_id < to_id THEN 1 ELSE 0 END) AS forward_count,
-            SUM(CASE WHEN from_id > to_id THEN 1 ELSE 0 END) AS reverse_count,
-            MIN(at) AS first_at, MAX(at) AS last_at
-          FROM comms
-          WHERE at >= ? AND at <= ? AND ticket IS NOT NULL
-            AND from_id NOT IN (?, ?, ?) AND to_id NOT IN (?, ?, ?) AND from_id != to_id
-          GROUP BY ticket, CASE WHEN from_id < to_id THEN from_id ELSE to_id END,
-            CASE WHEN from_id < to_id THEN to_id ELSE from_id END
-        )
-        WHERE CASE WHEN forward_count < reverse_count THEN forward_count ELSE reverse_count END > ?
-        ORDER BY rounds DESC, ticket, "from", "to"`,
-      )
-      .all(
-        since,
-        until,
-        COMMS_CAPCOM,
-        COMMS_MC,
-        COMMS_CREW,
-        COMMS_CAPCOM,
-        COMMS_MC,
-        COMMS_CREW,
-        COMMS_CHATTER_ROUNDS,
-      ) as Row[];
-    return rows.map((row) => {
-      const from = row.from as string;
-      const to = row.to as string;
-      const ticket = row.ticket as string;
-      const thresholdAt = this.chatterThresholdAt(from, to, ticket, since, until);
-      return {
-        from,
-        to,
-        ticket,
-        rounds: row.rounds as number,
-        tokens: this.commsTokenTotal(
-          from,
-          to,
-          ticket,
-          row.first_at as number,
-          row.last_at as number,
-        ),
-        flightSteppedInAt:
-          flightId === undefined || thresholdAt === null
-            ? null
-            : ((
-                this.db
-                  .prepare(
-                    "SELECT MIN(at) AS at FROM comms WHERE from_id = ? AND to_id IN (?, ?) AND ticket = ? AND at >= ? AND at <= ?",
-                  )
-                  .get(flightId, from, to, ticket, thresholdAt, until) as { at: number | null }
-              ).at ?? null),
-      };
-    });
-  }
-
-  /** The message which first completes the over-limit reciprocal exchange in this rolling window. */
-  private chatterThresholdAt(
-    from: string,
-    to: string,
-    ticket: string,
-    since: number,
-    until: number,
-  ): number | null {
-    const messages = this.db
-      .prepare(
-        `SELECT at, from_id FROM comms WHERE ticket = ? AND at >= ? AND at <= ?
-         AND ((from_id = ? AND to_id = ?) OR (from_id = ? AND to_id = ?)) ORDER BY at, id`,
-      )
-      .all(ticket, since, until, from, to, to, from) as { at: number; from_id: string }[];
-    let forward = 0;
-    let reverse = 0;
-    for (const message of messages) {
-      if (message.from_id === from) forward++;
-      else reverse++;
-      if (Math.min(forward, reverse) > COMMS_CHATTER_ROUNDS) return message.at;
-    }
-    return null;
-  }
-
-  /** Tokens consumed by either end's runs overlapping a Comms link's observed window. */
-  private commsTokenTotal(
-    from: string,
-    to: string,
-    ticket: string | null,
-    since: number,
-    until: number,
-  ): number {
-    const rows = this.db
-      .prepare(
-        `SELECT tokens FROM runs WHERE agent_id IN (?, ?) AND started_at <= ?
-         AND (ended_at IS NULL OR ended_at >= ?)${ticket === null ? "" : " AND ticket = ?"}`,
-      )
-      .all(
-        ...(ticket === null ? [from, to, until, since] : [from, to, until, since, ticket]),
-      ) as Row[];
-    return rows.reduce((total, row) => {
-      if (row.tokens === null) return total;
-      const tokens = JSON.parse(row.tokens as string) as TokenUsage;
-      return total + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
-    }, 0);
+    return this.commsStore.commsChatter(since, until, flightId);
   }
 
   /**
@@ -7055,24 +5432,7 @@ export class Store {
    * episodes, since a refresh moves the note's own time forward. 0 for a key never raised.
    */
   noteRunStart(noteKey: string): number {
-    const latest = this.db
-      .prepare(
-        `SELECT at FROM attention_episodes WHERE key = ?
-         ORDER BY (cleared_at IS NULL) DESC, at DESC LIMIT 1`,
-      )
-      .get(noteKey) as { at: number } | undefined;
-    if (latest === undefined) return 0;
-    const before = this.db.prepare(
-      `SELECT at FROM attention_episodes WHERE key = ? AND at < ? AND cleared_at >= ?
-       ORDER BY at DESC LIMIT 1`,
-    );
-    let start = latest.at;
-    for (let i = 0; i < 1000; i++) {
-      const row = before.get(noteKey, start, start - 60_000) as { at: number } | undefined;
-      if (row === undefined) break;
-      start = row.at;
-    }
-    return start;
+    return attention.noteRunStart(this.db, noteKey);
   }
 
   /** An item's conversation since its current run (`noteRunStart` for a note key, else all). */
@@ -7089,40 +5449,12 @@ export class Store {
    * item). The hub's own context lines and notices stay out; a picked option carries its label.
    */
   itemThread(itemKey: string, since = 0, limit = 100): (CommsRow & { choice?: string })[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM (
-           SELECT c.*, q.label AS choice_label FROM comms c
-           LEFT JOIN question_choices q ON q.message_id = c.id
-           WHERE c.item_key = ? AND c.at >= ? AND c.from_id != ? AND c.kind IS NULL
-           ORDER BY c.at DESC, c.id DESC LIMIT ?
-         ) ORDER BY at ASC, id ASC`,
-      )
-      .all(itemKey, since, COMMS_MC, limit) as Row[];
-    return rows.map((r) => ({
-      ...this.commsRow(r),
-      ...(typeof r.choice_label === "string" ? { choice: r.choice_label } : {}),
-    }));
+    return this.commsStore.itemThread(itemKey, since, limit);
   }
 
   /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
   openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
-    const rows = this.db
-      .prepare(
-        `SELECT c.* FROM comms c
-         WHERE c.label IN ('question', 'blocker') AND c.to_id != ?
-           AND NOT EXISTS (
-             SELECT 1 FROM comms_reactions r WHERE r.message_id = c.id AND r.actor_id = c.to_id
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM comms reply
-             WHERE reply.reply_to = c.id AND reply.from_id = c.to_id
-           )
-           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
-         ORDER BY c.at ASC, c.id ASC`,
-      )
-      .all(COMMS_CREW) as Row[];
-    return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
+    return this.commsStore.openCommsItems();
   }
   /** The newest `limit` messages with an id above `sinceId`, newest first; text cut to `textMax`. */
   commsFeed(
@@ -7130,58 +5462,21 @@ export class Store {
     limit: number,
     textMax: number,
   ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text" | "senderKind">[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, at, from_id, to_id, label, ref, sender_kind, substr(text, 1, ?) AS text FROM comms
-         WHERE id > ? ORDER BY id DESC LIMIT ?`,
-      )
-      .all(textMax, sinceId, limit) as Row[];
-    return rows.map((r) => ({
-      id: `comms:${Number(r.id)}`,
-      at: Number(r.at),
-      from: r.from_id as string,
-      to: r.to_id as string,
-      label: (r.label as CommsLabel | null) ?? null,
-      ref: (r.ref as string | null) ?? null,
-      text: r.text as string,
-      senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
-    }));
+    return this.commsStore.commsFeed(sinceId, limit, textMax);
   }
   markCommsScopeRead(scope: string, messageId: string): void {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return;
-    this.db
-      .prepare(
-        `INSERT INTO comms_reads(thread_id,source_id,offset,block) VALUES (?, 'comms', ?, 0) ON CONFLICT(thread_id,source_id) DO UPDATE SET offset=MAX(offset,excluded.offset)`,
-      )
-      .run(scope, id);
+    this.commsStore.markCommsScopeRead(scope, messageId);
   }
   commsScopeCursor(scope: string): string | null {
-    const r = this.db
-      .prepare("SELECT offset FROM comms_reads WHERE thread_id=? AND source_id='comms'")
-      .get(scope) as { offset: number } | undefined;
-    return r ? `comms:${r.offset}` : null;
+    return this.commsStore.commsScopeCursor(scope);
   }
   /** Seat delivery receipts, deliberately separate from the operator's UI cursor. */
   commsInboxRead(seatId: string, messageId: string): boolean {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return false;
-    return (
-      this.db
-        .prepare("SELECT 1 FROM comms_inbox_reads WHERE seat_id=? AND message_id=?")
-        .get(seatId, id) !== undefined
-    );
+    return this.commsStore.commsInboxRead(seatId, messageId);
   }
   /** Ids of messages `from` sent `to` at or after `since` that `to` has not read, oldest first. */
   unreadCommsFrom(from: string, to: string, since: number): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?
-           AND id NOT IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
-         ORDER BY id`,
-      )
-      .all(from, to, since, to) as { id: number }[];
-    return rows.map((r) => String(r.id));
+    return this.commsStore.unreadCommsFrom(from, to, since);
   }
   /**
    * Ids of messages `from` sent `to` at or after `since` that `to` has read and not answered (no
@@ -7189,161 +5484,54 @@ export class Store {
    * settled: the same closes an open Comms item), oldest first.
    */
   owedCommsFrom(from: string, to: string, since: number): string[] {
-    const rows = this.db
-      .prepare(
-        `SELECT c.id FROM comms c WHERE c.from_id = ? AND c.to_id = ? AND c.at >= ?
-           AND c.id IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
-           AND NOT EXISTS (SELECT 1 FROM comms r WHERE r.from_id = ? AND r.reply_to = c.id)
-           AND NOT EXISTS (
-             SELECT 1 FROM comms_reactions x WHERE x.message_id = c.id AND x.actor_id = c.to_id
-           )
-           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
-           AND NOT EXISTS (SELECT 1 FROM question_choices q WHERE q.message_id = c.id)
-         ORDER BY c.id`,
-      )
-      .all(from, to, since, to, to) as { id: number }[];
-    return rows.map((r) => String(r.id));
+    return this.commsStore.owedCommsFrom(from, to, since);
   }
   markCommsInboxRead(seatId: string, messageIds: readonly string[], at = Date.now()): void {
-    const insert = this.db.prepare(
-      "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",
-    );
-    // the seat took what was sent to it: that is delivery
-    const deliver = this.db.prepare(
-      "UPDATE comms SET delivered_at = ? WHERE id = ? AND to_id = ? AND delivered_at IS NULL",
-    );
-    this.transaction(() => {
-      for (const messageId of messageIds) {
-        const id = commsMessageNumber(messageId);
-        if (id === null) continue;
-        insert.run(seatId, id);
-        deliver.run(at, id, seatId);
-      }
-    }, true);
+    this.commsStore.markCommsInboxRead(seatId, messageIds, at);
   }
 
   /** The hand-offs at or after `since`, oldest first. */
   comms(since: number, targetRunId?: string): CommsRow[] {
-    const rows = this.db
-      .prepare(
-        targetRunId === undefined
-          ? `SELECT * FROM (
-               SELECT * FROM comms WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?
-             ) ORDER BY at, id`
-          : `SELECT * FROM (
-               SELECT * FROM (
-                 SELECT * FROM comms WHERE at >= ? AND target_run_id IS NULL
-                 UNION ALL
-                 SELECT * FROM comms WHERE at >= ? AND target_run_id = ?
-               ) ORDER BY at DESC, id DESC LIMIT ?
-             ) ORDER BY at, id`,
-      )
-      .all(
-        since,
-        ...(targetRunId === undefined ? [] : [since, targetRunId]),
-        LIVE_COMMS_LIMIT,
-      ) as Row[];
-    // Activity's long-standing feed deliberately remains its compact legacy shape. New Comms
-    // readers use the scoped methods above, which include metadata and related rows.
-    return rows.map((r) => ({
-      at: r.at as number,
-      from: r.from_id as string,
-      to: r.to_id as string,
-      ticket: r.ticket as string | null,
-      text: r.text as string,
-    })) as CommsRow[];
+    return this.commsStore.comms(since, targetRunId);
   }
 
   /** Messages to `to` at or after `since`, with their label: the times FLIGHT's callers began to wait. */
   commsTo(to: string, since: number): { at: number; from: string; label: string | null }[] {
-    return (
-      this.db
-        .prepare("SELECT at, from_id, label FROM comms WHERE to_id = ? AND at >= ? ORDER BY at, id")
-        .all(to, since) as { at: number; from_id: string; label: string | null }[]
-    ).map((r) => ({ at: r.at, from: r.from_id, label: r.label }));
+    return this.commsStore.commsTo(to, since);
   }
 
   /** How many hand-offs `from` sent `to` at or after `since`. */
   commsCountTo(from: string, to: string, since: number): number {
-    const r = this.statement(
-      "SELECT COUNT(*) AS n FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?",
-    ).get(from, to, since) as { n: number };
-    return r.n;
+    return this.commsStore.commsCountTo(from, to, since);
   }
 
   /** Stable stored message IDs for one thread, in insertion order. */
   threadComms(id: string, after = 0): (CommsRow & { id: string })[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM comms WHERE id IN (
-          SELECT id FROM (SELECT id FROM comms WHERE from_id = ? AND id > ? ORDER BY id DESC LIMIT ?)
-          UNION
-          SELECT id FROM (SELECT id FROM comms WHERE to_id = ? AND id > ? ORDER BY id DESC LIMIT ?)
-        ) ORDER BY id DESC LIMIT ?`)
-      .all(
-        id,
-        after,
-        THREAD_COMMS_LIMIT,
-        id,
-        after,
-        THREAD_COMMS_LIMIT,
-        THREAD_COMMS_LIMIT,
-      ) as Row[];
-    return this.commsRows(rows.reverse());
+    return this.commsStore.threadComms(id, after);
   }
 
   /** Prompt metadata remains available even after its body has been read. */
   threadPrompt(id: string): { id: string; at: number } | undefined {
-    const row = this.db
-      .prepare(
-        "SELECT id, at FROM comms WHERE from_id = ? AND to_id = ? ORDER BY at DESC, id DESC LIMIT 1",
-      )
-      .get(COMMS_CAPCOM, id) as { id: number; at: number } | undefined;
-    return row && { id: `comms:${row.id}`, at: row.at };
+    return this.commsStore.threadPrompt(id);
   }
 
   /** Progress evidence does not need message bodies. */
   commsEvidence(since: number): Pick<CommsRow, "at" | "from" | "ticket">[] {
-    return this.db
-      .prepare('SELECT at, from_id AS "from", ticket FROM comms WHERE at >= ? ORDER BY at, id')
-      .all(since) as Pick<CommsRow, "at" | "from" | "ticket">[];
+    return this.commsStore.commsEvidence(since);
   }
 
   threadReadCursors(id: string): Map<string, { offset: number; block: number }> {
-    const rows = this.db.prepare("SELECT * FROM comms_reads WHERE thread_id = ?").all(id) as Row[];
-    return new Map(
-      rows.map((r) => [
-        r.source_id as string,
-        { offset: r.offset as number, block: r.block as number },
-      ]),
-    );
+    return this.commsStore.threadReadCursors(id);
   }
 
   /** Validates ownership without re-reading a transcript window that may have moved on. */
   threadOwnsMessage(id: string, messageId: string): boolean {
-    const position = commsPosition(messageId);
-    if (!position) return false;
-    if (position.source === "comms") {
-      return (
-        this.db
-          .prepare("SELECT 1 FROM comms WHERE id = ? AND (from_id = ? OR to_id = ?)")
-          .get(position.offset, id, id) !== undefined
-      );
-    }
-    return this.run(position.source.slice("stream:".length))?.agentId === id;
+    return this.commsStore.threadOwnsMessage(id, messageId);
   }
 
   /** Advance only through the opened snapshot, atomically; stale reads never move backwards. */
   markThreadRead(id: string, messageIds: string[]): void {
-    this.transaction(() => {
-      const update =
-        this.db.prepare(`INSERT INTO comms_reads (thread_id, source_id, offset, block) VALUES (?, ?, ?, ?)
-        ON CONFLICT(thread_id, source_id) DO UPDATE SET offset = excluded.offset, block = excluded.block
-        WHERE excluded.offset > comms_reads.offset OR (excluded.offset = comms_reads.offset AND excluded.block > comms_reads.block)`);
-      for (const messageId of messageIds) {
-        const p = commsPosition(messageId);
-        if (p) update.run(id, p.source, p.offset, p.block);
-      }
-    });
+    this.commsStore.markThreadRead(id, messageIds);
   }
 
   /** Records a hub event (a line on the Activity page). */
@@ -7397,35 +5585,12 @@ export class Store {
    * queued).
    */
   replaceQueues(queues: { seatId: string; items: { repoId: RepoId; issue: number }[] }[]): void {
-    this.transaction(() => {
-      const del = this.db.prepare("DELETE FROM queues WHERE seat_id = ? AND taken_at IS NULL");
-      for (const q of queues) del.run(q.seatId);
-      const queuedElsewhere = this.db.prepare(
-        "SELECT 1 FROM queues WHERE repo_id = ? AND issue = ? AND seat_id != ?",
-      );
-      const ins = this.db.prepare(
-        "INSERT INTO queues (seat_id, pos, repo_id, issue, taken_at) VALUES (?, ?, ?, ?, NULL)",
-      );
-      for (const { seatId, items } of queues) {
-        const kept = this.queue(seatId);
-        const held = new Set(kept.map((q) => `${q.repoId}#${q.issue}`));
-        let pos = kept.reduce((max, q) => Math.max(max, q.pos), -1) + 1;
-        for (const i of items) {
-          const ref = `${i.repoId}#${i.issue}`;
-          if (held.has(ref) || queuedElsewhere.get(i.repoId, i.issue, seatId)) continue;
-          held.add(ref);
-          ins.run(seatId, pos++, i.repoId, i.issue);
-        }
-      }
-    }, true);
+    this.seatQ.replaceQueues(queues);
   }
 
   /** The seat's queue in order, taken row first. */
   queue(seatId: string): QueueRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM queues WHERE seat_id = ? ORDER BY pos")
-      .all(seatId) as Row[];
-    return rows.map(queueRow);
+    return this.seatQ.queue(seatId);
   }
 
   /**
@@ -7434,46 +5599,21 @@ export class Store {
    * `between` is a test seam: it runs after the head is read and before it is stamped.
    */
   takeQueued(seatId: string, at: number, between?: () => void): QueueRow | null {
-    let taken: QueueRow | null = null;
-    this.transaction(() => {
-      const held = this.db
-        .prepare("SELECT 1 FROM queues WHERE seat_id = ? AND taken_at IS NOT NULL")
-        .get(seatId);
-      if (held) return;
-      const head = this.db
-        .prepare("SELECT * FROM queues WHERE seat_id = ? ORDER BY pos LIMIT 1")
-        .get(seatId) as Row | undefined;
-      if (!head) return;
-      between?.();
-      this.db
-        .prepare("UPDATE queues SET taken_at = ? WHERE seat_id = ? AND pos = ?")
-        .run(at, seatId, head.pos as number);
-      taken = { ...queueRow(head), takenAt: at };
-    }, true);
-    return taken;
+    return this.seatQ.takeQueued(seatId, at, between);
   }
 
   /** Gives a taken row back to the queue. */
   untake(seatId: string, repoId: RepoId, issue: number): void {
-    this.db
-      .prepare("UPDATE queues SET taken_at = NULL WHERE seat_id = ? AND repo_id = ? AND issue = ?")
-      .run(seatId, repoId, issue);
+    this.seatQ.untake(seatId, repoId, issue);
   }
 
   dropQueued(seatId: string, repoId: RepoId, issue: number): void {
-    this.db
-      .prepare("DELETE FROM queues WHERE seat_id = ? AND repo_id = ? AND issue = ?")
-      .run(seatId, repoId, issue);
+    this.seatQ.dropQueued(seatId, repoId, issue);
   }
 
   /** Rows taken before `before` (a take whose run never began), oldest first. */
   staleTakes(before: number): QueueRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM queues WHERE taken_at IS NOT NULL AND taken_at < ? ORDER BY taken_at, seat_id",
-      )
-      .all(before) as Row[];
-    return rows.map(queueRow);
+    return this.seatQ.staleTakes(before);
   }
 
   /**
@@ -7481,87 +5621,35 @@ export class Store {
    * text and time. A re-opened note is no longer dismissed.
    */
   raiseNote(n: NoteInput): void {
-    this.db
-      .prepare(
-        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
-           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = excluded.at, cleared_at = NULL, dismissed_at = NULL
-         WHERE attention_notes.cleared_at IS NOT NULL`,
-      )
-      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+    attention.raiseNote(this.db, n);
   }
 
   /** Updates one open operator item in place, keeping its key and history. */
   refreshNote(n: NoteInput): void {
-    this.db
-      .prepare(
-        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
-           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = excluded.at, cleared_at = NULL, dismissed_at = NULL`,
-      )
-      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+    attention.refreshNote(this.db, n);
   }
 
   /** Refresh measured details without restarting or unacknowledging an open episode. */
   refreshNoteInEpisode(n: NoteInput): void {
-    this.db
-      .prepare(
-        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
-           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.at ELSE excluded.at END,
-           dismissed_at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.dismissed_at ELSE NULL END,
-           cleared_at = NULL`,
-      )
-      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+    attention.refreshNoteInEpisode(this.db, n);
   }
 
   clearNote(key: string, at: number): void {
-    this.db
-      .prepare("UPDATE attention_notes SET cleared_at = ? WHERE key = ? AND cleared_at IS NULL")
-      .run(at, key);
+    attention.clearNote(this.db, key, at);
   }
 
   clearNotesFor(runId: string, at: number): void {
-    this.db
-      .prepare("UPDATE attention_notes SET cleared_at = ? WHERE run_id = ? AND cleared_at IS NULL")
-      .run(at, runId);
+    attention.clearNotesFor(this.db, runId, at);
   }
 
   /** Dismisses an open note of any kind from Needs you; false when there is no such note. */
   dismissNote(key: string, at: number): boolean {
-    return (
-      Number(
-        this.db
-          .prepare(
-            "UPDATE attention_notes SET dismissed_at = ? WHERE key = ? AND cleared_at IS NULL",
-          )
-          .run(at, key).changes,
-      ) > 0
-    );
+    return attention.dismissNote(this.db, key, at);
   }
 
   /** The open notes, oldest first. */
   notes(): AttentionNote[] {
-    const rows = this.db
-      .prepare("SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key")
-      .all() as Row[];
-    return rows.map((r) => ({
-      key: r.key as string,
-      kind: r.kind as NoteKind,
-      runId: r.run_id as string | null,
-      seatId: r.seat_id as string | null,
-      repoId: r.repo_id as string | null,
-      text: r.text as string,
-      at: r.at as number,
-      clearedAt: null,
-      dismissedAt: (r.dismissed_at as number | null) ?? null,
-    }));
+    return attention.notes(this.db);
   }
 
   /** Historical waits, including cleared notes; only the named seat's evidence counts. */
@@ -7571,79 +5659,24 @@ export class Store {
     now: number,
     kinds: string[],
   ): [number, number][] {
-    const rows = this.db
-      .prepare(
-        "SELECT at, cleared_at, kind FROM attention_episodes WHERE seat_id = ? AND at < ? AND (cleared_at IS NULL OR cleared_at > ?) ORDER BY at",
-      )
-      .all(seatId, now, since) as Row[];
-    return rows
-      .filter((r) => kinds.includes(r.kind as string))
-      .map((r) => [
-        Math.max(since, r.at as number),
-        Math.min(now, (r.cleared_at as number | null) ?? now),
-      ]);
+    return attention.telemetryNoteIntervals(this.db, seatId, since, now, kinds);
   }
 
   openNoteKeys(runId: string): string[] {
-    const rows = this.db
-      .prepare(
-        "SELECT key FROM attention_notes WHERE run_id = ? AND cleared_at IS NULL ORDER BY key",
-      )
-      .all(runId) as { key: string }[];
-    return rows.map((r) => r.key);
+    return attention.openNoteKeys(this.db, runId);
   }
 
   seatSession(seatId: string): SeatSessionRow | null {
-    const r = this.db.prepare("SELECT * FROM seat_sessions WHERE seat_id = ?").get(seatId) as
-      | Row
-      | undefined;
-    return r ? seatRow(r) : null;
+    return this.seatQ.seatSession(seatId);
   }
 
   /** Seat sessions for the configured HUD rows, indexed after one table read. */
   seatSessions(seatIds: readonly AgentId[]): Map<AgentId, SeatSessionRow> {
-    const out = new Map<AgentId, SeatSessionRow>();
-    if (seatIds.length === 0) return out;
-    const rows = this.statement(
-      `SELECT * FROM seat_sessions WHERE seat_id IN (${seatIds.map(() => "?").join(", ")})`,
-    ).all(...seatIds) as Row[];
-    for (const row of rows) {
-      const seat = seatRow(row);
-      out.set(seat.seatId, seat);
-    }
-    return out;
+    return this.seatQ.seatSessions(seatIds);
   }
 
   setSeatSession(row: SeatSessionRow): void {
-    this.db
-      .prepare(
-        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since, vendor, stop_by, stop_reason, stop_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(seat_id) DO UPDATE SET run_id = excluded.run_id,
-           cli_session_id = excluded.cli_session_id, state = excluded.state, vendor = excluded.vendor,
-           reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
-           stop_by = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_by ELSE NULL END,
-           stop_reason = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_reason ELSE NULL END,
-           stop_at = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_at ELSE NULL END,
-           error_since = CASE WHEN excluded.state != 'error' THEN NULL
-             WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
-             ELSE excluded.updated_at END,
-           quiet_turns = CASE WHEN seat_sessions.run_id IS excluded.run_id THEN seat_sessions.quiet_turns ELSE 0 END`,
-      )
-      .run(
-        row.seatId,
-        row.runId,
-        row.cliSessionId,
-        row.state,
-        row.reason,
-        row.worktree,
-        row.updatedAt,
-        row.state === "error" ? row.updatedAt : null,
-        row.vendor ?? "claude",
-        row.stop?.by ?? null,
-        row.stop?.reason ?? null,
-        row.stop?.at ?? null,
-      );
+    this.seatQ.setSeatSession(row);
   }
 
   /**
@@ -7665,9 +5698,7 @@ export class Store {
 
   /** Records that the seat started a turn at `at`. */
   setSeatTurnStarted(seatId: string, at: number): void {
-    this.db
-      .prepare("UPDATE seat_sessions SET last_turn_started_at = ? WHERE seat_id = ?")
-      .run(at, seatId);
+    this.seatQ.setSeatTurnStarted(seatId, at);
   }
 
   /** Commits since `since`, per agent, joined to their runs. */
@@ -7681,13 +5712,7 @@ export class Store {
 
   /** How long each cleared attention note of `kinds` raised since `since` stood open. */
   noteWaits(kinds: string[], since: number): number[] {
-    if (kinds.length === 0) return [];
-    const rows = this.db
-      .prepare(`SELECT cleared_at - at AS wait FROM attention_notes
-      WHERE kind IN (${kinds.map(() => "?").join(",")}) AND at >= ? AND cleared_at IS NOT NULL
-      ORDER BY at, key`)
-      .all(...kinds, since) as Row[];
-    return rows.map((r) => r.wait as number);
+    return attention.noteWaits(this.db, kinds, since);
   }
 
   /**
@@ -8012,10 +6037,7 @@ export class Store {
 
   /** Sessions that hold a run and are not stopped or in error. */
   activeSeatSessions(): SeatSessionRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM seat_sessions WHERE run_id IS NOT NULL ORDER BY seat_id ASC")
-      .all() as Row[];
-    return rows.map(seatRow).filter((r) => ACTIVE_SEAT_STATES.includes(r.state));
+    return this.seatQ.activeSeatSessions();
   }
 
   /** Unended runs a seat row names (any seat state), with the row's worktree; by seat id. */
@@ -8137,13 +6159,7 @@ export class Store {
 
   /** The newest `limit` messages `from` sent about one run, newest first. */
   commsFromToRun(from: string, runId: string, limit: number): CommsRow[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT * FROM comms WHERE from_id = ? AND target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
-        )
-        .all(from, runId, limit) as Row[]
-    ).map((r) => this.commsRow(r));
+    return this.commsStore.commsFromToRun(from, runId, limit);
   }
 
   /** The commits the commit tool made for a run, in the order it made them. */
@@ -8261,18 +6277,12 @@ export class Store {
 
   /** Records a seat's question; returns its id. */
   addQuestion(q: Omit<SeatQuestion, "id" | "passedAt" | "asideAt">): number {
-    const r = this.db
-      .prepare("INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
-      .run(q.agentId, q.runId, q.text, q.at);
-    return Number(r.lastInsertRowid);
+    return this.seatQ.addQuestion(q);
   }
 
   /** When the seat asked its questions, answered or not (ask_flight mirrors each to Comms). */
   questionTimes(agentId: AgentId): Set<number> {
-    const rows = this.db
-      .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")
-      .all(agentId) as { at: number }[];
-    return new Set(rows.map((r) => r.at));
+    return this.seatQ.questionTimes(agentId);
   }
 
   /**
@@ -8303,22 +6313,12 @@ export class Store {
 
   /** Questions not yet answered and not set aside, oldest first: the ones that wait in Needs you. */
   openQuestions(): SeatQuestion[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NULL ORDER BY id ASC",
-      )
-      .all() as Row[];
-    return rows.map(toQuestion);
+    return this.seatQ.openQuestions();
   }
 
   /** Questions the operator set aside with Not now and nobody has answered, oldest first. */
   asideQuestions(): SeatQuestion[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NOT NULL ORDER BY id ASC",
-      )
-      .all() as Row[];
-    return rows.map(toQuestion);
+    return this.seatQ.asideQuestions();
   }
 
   /** The seat's questions open at any time in [from, to), oldest first. */
@@ -8327,51 +6327,27 @@ export class Store {
     from: number,
     to: number,
   ): { at: number; answeredAt: number | null }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT at, answered_at FROM seat_questions
-         WHERE agent_id = ? AND at < ? AND (answered_at IS NULL OR answered_at > ?) ORDER BY id`,
-      )
-      .all(agentId, to, from) as Row[];
-    return rows.map((r) => ({ at: r.at as number, answeredAt: r.answered_at as number | null }));
+    return this.seatQ.questionsOverlapping(agentId, from, to);
   }
 
   /** One question by id, answered or not; null when there is none. */
   question(id: number): (SeatQuestion & { answeredAt: number | null }) | null {
-    const r = this.db.prepare("SELECT * FROM seat_questions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return r ? { ...toQuestion(r), answeredAt: r.answered_at as number | null } : null;
+    return this.seatQ.question(id);
   }
 
   /** Sets an open question aside (Not now); true only when it was open and not yet set aside. */
   setQuestionAside(id: number, at: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET aside_at = ? WHERE id = ? AND answered_at IS NULL AND aside_at IS NULL",
-      )
-      .run(at, id);
-    return Number(r.changes) > 0;
+    return this.seatQ.setQuestionAside(id, at);
   }
 
   /** Puts a set-aside question back in Needs you, for a Not now whose GitHub writes failed. */
   clearQuestionAside(id: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET aside_at = NULL WHERE id = ? AND answered_at IS NULL AND aside_at IS NOT NULL",
-      )
-      .run(id);
-    return Number(r.changes) > 0;
+    return this.seatQ.clearQuestionAside(id);
   }
 
   /** Marks an open question passed to the operator; true only when it was open and not yet passed. */
   passQuestion(id: number, at: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET passed_at = ? WHERE id = ? AND answered_at IS NULL AND passed_at IS NULL",
-      )
-      .run(at, id);
-    return Number(r.changes) > 0;
+    return this.seatQ.passQuestion(id, at);
   }
 
   /**
@@ -8379,19 +6355,12 @@ export class Store {
    * without a brief before #758. True only when it was passed.
    */
   unpassQuestion(id: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET passed_at = NULL WHERE id = ? AND answered_at IS NULL AND passed_at IS NOT NULL",
-      )
-      .run(id);
-    return Number(r.changes) > 0;
+    return this.seatQ.unpassQuestion(id);
   }
 
   /** Marks one open question answered at `at`. */
   answerQuestion(id: number, at: number): void {
-    this.db
-      .prepare("UPDATE seat_questions SET answered_at = ? WHERE id = ? AND answered_at IS NULL")
-      .run(at, id);
+    this.seatQ.answerQuestion(id, at);
   }
 
   /**
@@ -8399,13 +6368,7 @@ export class Store {
    * passed to the operator open.
    */
   answerQuestions(agentId: AgentId, at: number, unpassedOnly = false): void {
-    this.db
-      .prepare(
-        `UPDATE seat_questions SET answered_at = ? WHERE agent_id = ? AND answered_at IS NULL${
-          unpassedOnly ? " AND passed_at IS NULL" : ""
-        }`,
-      )
-      .run(at, agentId);
+    this.seatQ.answerQuestions(agentId, at, unpassedOnly);
   }
 
   /**
@@ -8413,13 +6376,7 @@ export class Store {
    * passed to the operator open. Another run of the same seat keeps its own questions.
    */
   answerRunQuestions(runId: string, at: number, unpassedOnly = false): void {
-    this.db
-      .prepare(
-        `UPDATE seat_questions SET answered_at = ? WHERE run_id = ? AND answered_at IS NULL${
-          unpassedOnly ? " AND passed_at IS NULL" : ""
-        }`,
-      )
-      .run(at, runId);
+    this.seatQ.answerRunQuestions(runId, at, unpassedOnly);
   }
 
   /**
@@ -8428,11 +6385,7 @@ export class Store {
    * longer waits on it.
    */
   closeQuestion(c: QuestionClosure): boolean {
-    let stored = false;
-    this.transaction(() => {
-      stored = this.insertClosure(c);
-    });
-    return stored;
+    return this.seatQ.closeQuestion(c);
   }
 
   /** Operator Clear closes the displayed source and records its closure in the same transaction. */
@@ -8476,38 +6429,12 @@ export class Store {
 
   /** `closeQuestion` without its own transaction, for a caller already in one. */
   private insertClosure(c: QuestionClosure): boolean {
-    const r = this.db
-      .prepare(
-        `INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key, ask_at) DO NOTHING`,
-      )
-      .run(c.key, c.askAt, c.kind, c.reason, c.by, c.question, c.ticket, c.operator ? 1 : 0, c.at);
-    const stored = Number(r.changes) > 0;
-    const ask = /^ask:(\d+)$/.exec(c.key);
-    if (stored && ask !== null) this.answerQuestion(Number(ask[1]), c.at);
-    return stored;
-  }
-
-  private closureOf(r: Row): QuestionClosure {
-    return {
-      key: r.key as string,
-      askAt: r.ask_at as number,
-      kind: r.kind as QuestionClosureKind,
-      reason: r.reason as string,
-      by: r.by as string,
-      question: r.question as string,
-      ticket: (r.ticket as string | null) ?? null,
-      operator: r.operator === 1,
-      at: r.at as number,
-    };
+    return this.seatQ.insertClosure(c);
   }
 
   /** The closure of one ask of a key; null when it was not closed without an answer. */
   questionClosure(key: string, askAt: number): QuestionClosure | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_closures WHERE key = ? AND ask_at = ?")
-      .get(key, askAt) as Row | undefined;
-    return r ? this.closureOf(r) : null;
+    return this.seatQ.questionClosure(key, askAt);
   }
 
   /**
@@ -8515,27 +6442,12 @@ export class Store {
    * question, which leaves when answered), by key, newest first; read once per build.
    */
   closedItemKeys(): Map<string, QuestionClosure[]> {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM question_closures WHERE key NOT LIKE 'ask:%' ORDER BY at DESC, rowid DESC",
-      )
-      .all() as Row[];
-    const byKey = new Map<string, QuestionClosure[]>();
-    for (const r of rows) {
-      const c = this.closureOf(r);
-      byKey.set(c.key, [...(byKey.get(c.key) ?? []), c]);
-    }
-    return byKey;
+    return this.seatQ.closedItemKeys();
   }
 
   /** The closures the operator had in Needs you since `since`, newest first. */
   questionClosures(since: number, limit: number): QuestionClosure[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM question_closures WHERE operator = 1 AND at >= ? ORDER BY at DESC, rowid DESC LIMIT ?",
-      )
-      .all(since, limit) as Row[];
-    return rows.map((r) => this.closureOf(r));
+    return this.seatQ.questionClosures(since, limit);
   }
 
   /** Whether FLIGHT's newest brief on the key is for the operator. */
@@ -8548,14 +6460,7 @@ export class Store {
 
   private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
     this.transaction(() => {
-      const rows = this.db
-        // a question the operator set aside outlives its run: it is answered on the Ticket page
-        .prepare(
-          `SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL AND aside_at IS NULL`,
-        )
-        .all(id) as Row[];
-      for (const r of rows) {
-        const q = toQuestion(r);
+      for (const q of this.seatQ.openQuestionsOf(where, id)) {
         const key = `ask:${q.id}`;
         this.insertClosure({
           key,
@@ -8700,8 +6605,7 @@ export class Store {
   }
 
   setFlightPlans(session: string, operation: FlightPlanOperation, at: number): void {
-    const write = this.prepareFlightPlans(session, operation, at);
-    this.transaction(write);
+    this.flightQ.setFlightPlans(session, operation, at);
   }
 
   private prepareFlightPlans(
@@ -8709,71 +6613,30 @@ export class Store {
     operation: FlightPlanOperation,
     at: number,
   ): () => void {
-    const plans = new Map(this.flightPlans(session).map((p) => [p.id, p]));
-    for (const entry of operation.upsert ?? []) {
-      if (entry.status === "completed" && !entry.detail?.trim())
-        throw new Error("Completion needs an observed outcome.");
-      plans.set(entry.id, { ...entry, createdAt: plans.get(entry.id)?.createdAt ?? at });
-    }
-    if ([...plans.values()].filter((p) => p.status === "pending").length > FLIGHT_PLAN_LIMIT)
-      throw new Error("Too many planned entries.");
-    const finished = [...plans.values()]
-      .filter((p) => p.status !== "pending")
-      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-    for (const entry of finished.slice(0, Math.max(0, plans.size - FLIGHT_PLAN_LIMIT)))
-      plans.delete(entry.id);
-    return () => {
-      this.db.prepare("DELETE FROM flight_plans WHERE session_id = ?").run(session);
-      for (const entry of plans.values())
-        this.db
-          .prepare("INSERT INTO flight_plans (session_id, id, entry) VALUES (?, ?, ?)")
-          .run(session, entry.id, JSON.stringify(entry));
-    };
+    return this.flightQ.prepareFlightPlans(session, operation, at);
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
   addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
-    this.db
-      .prepare(
-        "INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons, wake_id) VALUES (?, ?, ?, ?)",
-      )
-      .run(runId, at, JSON.stringify(reasons), wakeId ?? null);
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
   latestFlightWakeId(runId: string): string | null {
-    const row = this.db
-      .prepare("SELECT wake_id FROM flight_wakes WHERE run_id = ? ORDER BY at DESC LIMIT 1")
-      .get(runId) as { wake_id: string | null } | undefined;
-    return row?.wake_id ?? null;
+    return this.flightQ.latestFlightWakeId(runId);
   }
 
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
-    const rows = this.db
-      .prepare(
-        "SELECT run_id, at, reasons, wake_id FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
-      )
-      .all(since) as { run_id: string; at: number; reasons: string; wake_id: string | null }[];
-    return rows.map((r) => ({
-      runId: r.run_id,
-      at: r.at,
-      reasons: JSON.parse(r.reasons) as string[],
-      ...(r.wake_id === null ? {} : { wakeId: r.wake_id }),
-    }));
+    return this.flightQ.flightWakes(since);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_plans WHERE session_id = ? ORDER BY id")
-        .all(session) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightPlanInput & { createdAt: number });
+    return this.flightQ.flightPlans(session);
   }
 
   setFlightWatch(session: string, operation: FlightWatchOperation, at: number): void {
-    const write = this.prepareFlightWatch(session, operation, at);
-    this.transaction(write);
+    this.flightQ.setFlightWatch(session, operation, at);
   }
 
   private prepareFlightWatch(
@@ -8781,17 +6644,7 @@ export class Store {
     operation: FlightWatchOperation,
     at: number,
   ): () => void {
-    const watch = new Map(this.flightWatch(session).map((entry) => [entry.id, entry]));
-    for (const id of operation.remove ?? []) watch.delete(id);
-    for (const entry of operation.upsert ?? []) watch.set(entry.id, { ...entry, updatedAt: at });
-    if (watch.size > FLIGHT_WATCH_LIMIT) throw new Error("Too many watch entries.");
-    return () => {
-      this.db.prepare("DELETE FROM flight_watch WHERE session_id = ?").run(session);
-      for (const entry of watch.values())
-        this.db
-          .prepare("INSERT INTO flight_watch (session_id, id, entry) VALUES (?, ?, ?)")
-          .run(session, entry.id, JSON.stringify(entry));
-    };
+    return this.flightQ.prepareFlightWatch(session, operation, at);
   }
 
   /** Validate the whole update before writing any part of it. */
@@ -8818,11 +6671,7 @@ export class Store {
   }
 
   flightWatch(session: string): FlightWatchEntry[] {
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_watch WHERE session_id = ? ORDER BY id")
-        .all(session) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightWatchEntry);
+    return this.flightQ.flightWatch(session);
   }
 
   recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">): void {
@@ -8895,14 +6744,7 @@ export class Store {
   }
 
   flightIncoming(): FlightArrivalDisposition[] {
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?")
-        .all(FLIGHT_INCOMING_LIMIT) as Row[]
-    ).map((r) => {
-      const entry = JSON.parse(r.entry as string) as FlightArrivalDisposition;
-      return { ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null };
-    });
+    return this.flightQ.flightIncoming();
   }
 
   /**
@@ -8917,218 +6759,65 @@ export class Store {
     about: string;
     decision: string;
   }): void {
-    this.transaction(() => {
-      this.db
-        .prepare("DELETE FROM flight_decisions WHERE question_id = ? AND kind = 'answer'")
-        .run(d.questionId);
-      this.addFlightDecision({
-        at: d.at,
-        kind: "answer",
-        seatId: d.seatId,
-        targetRunId: null,
-        ref: d.ref,
-        questionId: d.questionId,
-        about: d.about,
-        decision: d.decision,
-        basis: "Operator answered the set-aside question from its ticket.",
-      });
-    });
+    this.flightQ.recordSetAsideAnswer(d);
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */
   addFlightDecision(d: Omit<FlightDecision, "id">): number {
-    const r = this.db
-      .prepare(
-        `INSERT INTO flight_decisions
-           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id,
-            wake_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        d.at,
-        d.kind,
-        d.seatId,
-        d.targetRunId,
-        d.ref,
-        d.questionId,
-        d.about,
-        d.decision,
-        d.basis,
-        d.orderId ?? null,
-        d.wakeId ?? null,
-      );
-    return Number(r.lastInsertRowid);
+    return this.flightQ.addFlightDecision(d);
   }
 
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
-    const rows = this.db
-      .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
-      .all(since, limit) as Row[];
-    return rows.map(toFlightDecision);
+    return this.flightQ.flightDecisions(since, limit);
   }
 
   /** When FLIGHT decided to wait, at or after `since`, oldest first. */
   flightWaitTimes(since: number): number[] {
-    return (
-      this.db
-        .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
-        .all(since) as { at: number }[]
-    ).map((r) => r.at);
+    return this.flightQ.flightWaitTimes(since);
   }
 
   /** The decisions of one kind about one ticket, newest first. */
   flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM flight_decisions WHERE kind = ? AND ref = ? ORDER BY at DESC, id DESC",
-      )
-      .all(kind, ref) as Row[];
-    return rows.map(toFlightDecision);
+    return this.flightQ.flightDecisionsAbout(kind, ref);
   }
 
   /** Replaces one section of a session's brief. */
   setFlightBriefSection(r: FlightBriefRow): void {
-    this.db
-      .prepare(
-        `INSERT INTO flight_brief (session_id, section, text, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(session_id, section) DO UPDATE SET
-           text = excluded.text, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
-      )
-      .run(r.sessionId, r.section, r.text, r.updatedAt, r.updatedBy);
+    this.flightQ.setFlightBriefSection(r);
   }
 
   /** Lasting notes for one repo, in topic order. */
   flightMemory(repo: string): FlightMemoryNote[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM flight_memory WHERE repo_id = ? ORDER BY topic")
-        .all(repo) as Row[]
-    ).map((r) => ({
-      repoId: r.repo_id as string,
-      topic: r.topic as string,
-      kind: r.kind as FlightMemoryNote["kind"],
-      body: r.body as string,
-      source: r.source as string,
-      author: r.author as FlightMemoryNote["author"],
-      updatedAt: r.updated_at as number,
-    }));
+    return this.flightQ.flightMemory(repo);
   }
 
   /** The state index never reads note bodies. */
   flightMemoryTitles(repo: string): FlightMemoryTitle[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT topic, kind, updated_at, author FROM flight_memory WHERE repo_id = ? ORDER BY topic",
-        )
-        .all(repo) as Row[]
-    ).map((r) => ({
-      topic: r.topic as string,
-      kind: r.kind as FlightMemoryTitle["kind"],
-      updatedAt: r.updated_at as number,
-      author: r.author as FlightMemoryTitle["author"],
-    }));
+    return this.flightQ.flightMemoryTitles(repo);
   }
 
   putFlightMemory(note: FlightMemoryNote): void {
-    const parsed = validateMemoryNote(note);
-    const key = memoryTopicKey(parsed.topic);
-    this.transaction(() => {
-      const exists = this.db
-        .prepare("SELECT 1 FROM flight_memory WHERE repo_id = ? AND topic_key = ?")
-        .get(note.repoId, key);
-      const count = this.db
-        .prepare("SELECT COUNT(*) AS n FROM flight_memory WHERE repo_id = ?")
-        .get(note.repoId) as { n: number };
-      if (!exists && count.n >= FLIGHT_MEMORY_TOPICS_MAX) throw new Error(FLIGHT_MEMORY_FULL);
-      this.db
-        .prepare(`INSERT INTO flight_memory (repo_id, topic, topic_key, kind, body, source, author, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(repo_id, topic_key) DO UPDATE SET
-        topic = excluded.topic, kind = excluded.kind, body = excluded.body, source = excluded.source,
-        author = excluded.author, updated_at = excluded.updated_at`)
-        .run(
-          note.repoId,
-          parsed.topic,
-          key,
-          parsed.kind,
-          parsed.body,
-          parsed.source,
-          parsed.author,
-          note.updatedAt,
-        );
-    });
+    this.flightQ.putFlightMemory(note);
   }
 
   deleteFlightMemory(repo: string, topic: string): boolean {
-    return (
-      this.db
-        .prepare("DELETE FROM flight_memory WHERE repo_id = ? AND topic_key = ?")
-        .run(repo, memoryTopicKey(topic)).changes > 0
-    );
+    return this.flightQ.deleteFlightMemory(repo, topic);
   }
 
   /** The full ledger for one crew session, including retained closed entries. */
   flightLedger(session: string): FlightLedgerEntry[] {
-    const pointers = new Map<string, FlightPointer[]>();
-    for (const r of this.db
-      .prepare(
-        `SELECT entry_key, kind, target, changed_at, change, read_at FROM flight_pointers
-         WHERE session_id = ? ORDER BY rowid`,
-      )
-      .all(session) as Row[]) {
-      const list = pointers.get(r.entry_key as string) ?? [];
-      list.push({
-        kind: r.kind as FlightPointerKind,
-        target: r.target as string,
-        changedAt: r.changed_at as number | null,
-        change: r.change as string | null,
-        readAt: r.read_at as number | null,
-      });
-      pointers.set(r.entry_key as string, list);
-    }
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_ledger WHERE session_id = ? ORDER BY key")
-        .all(session) as { entry: string }[]
-    ).map((r) => {
-      const entry = JSON.parse(r.entry) as FlightLedgerEntry;
-      const held = pointers.get(entry.key);
-      return held === undefined ? entry : { ...entry, pointers: held };
-    });
+    return this.flightQ.flightLedger(session);
   }
 
   /** Marks every pointer at `kind` and `target`, in any entry, as changed at `at`. */
   markFlightPointers(kind: FlightPointerKind, target: string, change: string, at: number): void {
-    this.db
-      .prepare(
-        `UPDATE flight_pointers SET changed_at = ?, change = ?, changed_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
-         WHERE kind = ? AND target = ?`,
-      )
-      .run(at, change.slice(0, FLIGHT_POINTER_CHANGE_MAX), kind, target);
+    this.flightQ.markFlightPointers(kind, target, change, at);
   }
 
   /** The pointers of open entries whose target changed after FLIGHT last read them. */
   movedFlightPointers(session: string): FlightMovedPointer[] {
-    const open = FLIGHT_LEDGER_OPEN.map(() => "?").join(", ");
-    return (
-      this.db
-        .prepare(
-          `SELECT p.entry_key, p.kind, p.target, p.changed_at, p.change FROM flight_pointers p
-           JOIN flight_ledger l ON l.session_id = p.session_id AND l.key = p.entry_key
-           WHERE p.session_id = ? AND l.status IN (${open}) AND p.changed_at IS NOT NULL
-             AND p.changed_seq > COALESCE(p.read_seq, 0)
-           ORDER BY p.changed_at, p.entry_key, p.kind, p.target`,
-        )
-        .all(session, ...FLIGHT_LEDGER_OPEN) as Row[]
-    ).map((r) => ({
-      entry: r.entry_key as string,
-      kind: r.kind as FlightPointerKind,
-      target: r.target as string,
-      change: (r.change as string | null) ?? "",
-      at: r.changed_at as number,
-    }));
+    return this.flightQ.movedFlightPointers(session);
   }
 
   /**
@@ -9136,79 +6825,17 @@ export class Store {
    * text) stays unread; changes are ordered by a counter, not by `at`, whose clock is the poll's.
    */
   markFlightPointersRead(session: string, moved: readonly FlightMovedPointer[], at: number): void {
-    const stamp = this.db.prepare(
-      `UPDATE flight_pointers SET read_at = ?, read_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
-       WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?
-         AND changed_at = ? AND change = ?`,
-    );
-    this.transaction(() => {
-      for (const m of moved) stamp.run(at, session, m.entry, m.kind, m.target, m.at, m.change);
-    });
+    this.flightQ.markFlightPointersRead(session, moved, at);
   }
 
   /** Save an entry and prune old closed entries across all sessions, in one transaction. */
   putFlightLedgerEntry(session: string, entry: FlightLedgerEntry, pruneBefore: number): void {
-    this.transaction(() => {
-      this.db
-        .prepare(`INSERT INTO flight_ledger (session_id, key, kind, status, updated_at, entry)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, key) DO UPDATE SET
-        kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
-        .run(
-          session,
-          entry.key,
-          entry.kind,
-          entry.status,
-          entry.updatedAt,
-          JSON.stringify({ ...entry, pointers: undefined }),
-        );
-      if (entry.pointers !== undefined) this.syncFlightPointers(session, entry);
-      this.db
-        .prepare(`DELETE FROM flight_ledger WHERE updated_at < ?
-        AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
-        .run(pruneBefore, ...FLIGHT_LEDGER_OPEN);
-      this.db
-        .prepare(
-          `DELETE FROM flight_pointers WHERE NOT EXISTS (
-             SELECT 1 FROM flight_ledger l
-             WHERE l.session_id = flight_pointers.session_id AND l.key = flight_pointers.entry_key)`,
-        )
-        .run();
-    });
-  }
-
-  /** Makes the entry's pointers exactly `entry.pointers`; one that stays keeps its marks. */
-  private syncFlightPointers(session: string, entry: FlightLedgerEntry): void {
-    const pointers = entry.pointers ?? [];
-    const kept = new Set(pointers.map((p) => `${p.kind}\0${p.target}`));
-    const drop = this.db.prepare(
-      "DELETE FROM flight_pointers WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?",
-    );
-    for (const old of this.db
-      .prepare("SELECT kind, target FROM flight_pointers WHERE session_id = ? AND entry_key = ?")
-      .all(session, entry.key) as { kind: string; target: string }[]) {
-      if (!kept.has(`${old.kind}\0${old.target}`))
-        drop.run(session, entry.key, old.kind, old.target);
-    }
-    const add = this.db.prepare(
-      `INSERT OR IGNORE INTO flight_pointers (session_id, entry_key, kind, target, changed_at, change, read_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const p of pointers)
-      add.run(session, entry.key, p.kind, p.target, p.changedAt, p.change, p.readAt);
+    this.flightQ.putFlightLedgerEntry(session, entry, pruneBefore);
   }
 
   /** The stored sections of a session's brief. */
   flightBrief(sessionId: string): FlightBriefRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM flight_brief WHERE session_id = ? ORDER BY section")
-      .all(sessionId) as Row[];
-    return rows.map((r) => ({
-      sessionId: r.session_id as string,
-      section: r.section as FlightBriefRow["section"],
-      text: r.text as string,
-      updatedAt: r.updated_at as number,
-      updatedBy: r.updated_by as string,
-    }));
+    return this.flightQ.flightBrief(sessionId);
   }
 
   /** A stable, bounded thread for one exact version of an item. */
@@ -9611,24 +7238,6 @@ export class Store {
     ref?: string;
     targetRunId?: string;
   }): number {
-    if (q.kinds.length === 0) return 0;
-    const where = [`kind IN (${q.kinds.map(() => "?").join(", ")})`, "at >= ?"];
-    const args: SQLInputValue[] = [...q.kinds, q.since];
-    if (q.seatId !== undefined) {
-      where.push("seat_id = ?");
-      args.push(q.seatId);
-    }
-    if (q.ref !== undefined) {
-      where.push("ref = ?");
-      args.push(q.ref);
-    }
-    if (q.targetRunId !== undefined) {
-      where.push("target_run_id = ?");
-      args.push(q.targetRunId);
-    }
-    const row = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM flight_decisions WHERE ${where.join(" AND ")}`)
-      .get(...args) as { n: number };
-    return row.n;
+    return this.flightQ.countFlightDecisions(q);
   }
 }

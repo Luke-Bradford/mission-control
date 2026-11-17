@@ -915,31 +915,6 @@ a.comms-ref {
   }
 }
 
-/* #638: the Hold form under a Needs-you item; labels and fields in two columns */
-.hold-form {
-  grid-column: 2;
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: var(--sp-1) var(--sp-2);
-  align-items: center;
-  margin: var(--sp-1) 0 var(--sp-1);
-}
-
-.hold-form label {
-  display: contents;
-}
-
-.hold-form input,
-.hold-form select {
-  min-width: 0;
-}
-
-.hold-form .row {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: var(--sp-1);
-}
-
 .comms-older {
   display: flex;
   justify-content: center;

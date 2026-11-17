@@ -193,6 +193,22 @@ describe("plan and ticket reading", () => {
 });
 
 describe("Plan and mockups in the question", () => {
+  it("says plainly that the repo is not watched, and fetches no materials for it", async () => {
+    const text = "The plan and materials are not loaded: shop-app is not watched by this hub.";
+    const fn = routes([ask("q1", { repoUnwatched: { repoId: "shop-app", text } })], {
+      [TICKET]: () => ({ status: 401, body: { error: "operator token required" } }),
+      [matPath("q1")]: () => ({ status: 401, body: { error: "operator token required" } }),
+    });
+    render(<Needs item="q1" />);
+    const mat = await screen.findByRole("region", { name: "Plan and mockups" });
+    expect(within(mat).getByText(text)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/operator token required/)).toBeNull();
+    expect(screen.queryByText(/Could not load/)).toBeNull();
+    const urls = fn.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/materials") || u.startsWith("/api/tickets/"))).toBe(false);
+  });
+
   it("shows the main ticket's full plan with no packet registered", async () => {
     routes([ask()], { [TICKET]: history(ticketBody("1. First\n### Detail\n- nested point")) });
     render(<Needs item="q1" />);

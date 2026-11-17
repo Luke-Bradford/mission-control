@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import type { MapChange } from "@mc/core";
-import { type GitExec, mapChanges, realGitExec } from "../files.ts";
+import { type GitExec, mapChanges, realGitExec } from "../repo/files.ts";
 
 // One git process at a time, leaving the other map slot for conflict checks.
 let pending: Promise<unknown> = Promise.resolve();

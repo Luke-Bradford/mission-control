@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/core";
@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPrEvidence,
   type EvidenceTarget,
+  evidenceReviewDeps,
   type PrEvidenceDeps,
 } from "../src/pr-evidence/capture.ts";
 import { decodePng, encodePng } from "../src/pr-evidence/png.ts";
@@ -82,6 +83,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
       ...t,
     });
   return {
+    workDir: deps.workDir,
     evidence: { ...evidence, ensure },
     store,
     started,
@@ -417,6 +419,236 @@ describe("PrEvidence capture", () => {
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
   });
 
+  it("retries a render that times out once straight away, before the attempt fails", async () => {
+    let tries = 0;
+    const t = setup({
+      render: async (origin, _path, scheme) => {
+        if (origin.endsWith(HEAD) && scheme === "dark" && tries++ === 0)
+          throw new Error("HUD screenshot timed out after 30000 ms");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(tries).toBe(2);
+    expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
+  });
+
+  it("keeps the renders that worked and renders only the missing page on the next attempt", async () => {
+    let now = 5000;
+    let broken = true;
+    const paths = ["apps/web/src/board/Card.tsx", "apps/web/src/comms/ItemBrief.tsx"];
+    const seen: { path: string }[] = [];
+    const t = setup({
+      now: () => now,
+      webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["comms"] }),
+      render: async (origin, path, scheme) => {
+        seen.push({ path });
+        if (broken && path.startsWith("/comms") && origin.endsWith(HEAD))
+          throw new Error("HUD screenshot timed out after 30000 ms");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths };
+    await t.evidence.ensure(target);
+    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+    const why = t.evidence.gate(target) ?? "";
+    expect(why).toContain("missing pages: comms");
+    expect(why).not.toContain("board");
+    broken = false;
+    now += 1001;
+    seen.length = 0;
+    await t.evidence.ensure(target);
+    expect(new Set(seen.map((r) => r.path))).toEqual(new Set(["/comms"]));
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.pairs.map((p) => p.page).sort()).toEqual(["board", "board", "comms", "comms"]);
+    expect(t.evidence.gate(target)).toBeNull();
+  });
+
+  it("pairs a retried page with renders of the same snapshot, taken once", async () => {
+    let now = 5000;
+    let broken = true;
+    let n = 0;
+    const t = setup({
+      now: () => now,
+      snapshot: async (to) => {
+        writeFileSync(to, `data-${++n}`);
+      },
+      startSide: async ({ sha, db }) => ({
+        origin: `http://side/${readFileSync(db, "utf8")}/${sha}`,
+        stop: async () => {},
+      }),
+      render: async (origin, _path, scheme) => {
+        const [, , , data, sha] = origin.split("/");
+        if (broken && sha === HEAD && scheme === "dark") throw new Error("timed out");
+        // the same code on both sides: only the data moves the box
+        return encodePng(
+          fixtureRaster(
+            320,
+            200,
+            [{ x: data === "data-1" ? 16 : 176, y: 40, w: 96, h: 48, rgb: [20, 20, 20] }],
+            scheme === "dark" ? [12, 12, 20] : [250, 250, 250],
+          ),
+        );
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target);
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure(target);
+    expect(n).toBe(1);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.pairs.map((p) => p.changedPixels)).toEqual([0, 0]);
+  });
+
+  it("retries a Demo render once, and skips the Demo renders it already kept", async () => {
+    let now = 5000;
+    let broken = true;
+    const asked: string[] = [];
+    let flaked = false;
+    const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        if (broken && origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+      renderDemo: async (_origin, _path, viewport) => {
+        asked.push(String(viewport.width));
+        if (viewport.width === 2560 && !flaked) {
+          flaked = true;
+          throw new Error("Demo timed out");
+        }
+        return demoShot;
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target); // live head render fails before any Demo render
+    expect(asked).toEqual([]);
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure(target);
+    expect(asked).toEqual(["1920", "2560", "2560"]); // 2560 retried once, at once
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).demos).toHaveLength(2);
+  });
+
+  it("does not re-ask for Demo renders an earlier attempt kept", async () => {
+    let now = 5000;
+    let broken = true;
+    const asked: string[] = [];
+    const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
+    const paths = ["apps/web/src/board/Card.tsx", "apps/web/src/comms/ItemBrief.tsx"];
+    const t = setup({
+      now: () => now,
+      webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["comms"] }),
+      renderDemo: async (_origin, path, viewport) => {
+        asked.push(`${path}:${viewport.width}`);
+        if (broken && path === "/comms") throw new Error("Demo timed out");
+        return demoShot;
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths };
+    await t.evidence.ensure(target);
+    // board's Demo renders worked; comms' failed twice
+    expect(asked).toEqual(["/board:1920", "/board:2560", "/comms:1920", "/comms:1920"]);
+    asked.length = 0;
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure(target);
+    expect(asked).toEqual(["/comms:1920", "/comms:2560"]);
+  });
+
+  it("renders main again on the new main when main moves between attempts", async () => {
+    let now = 5000;
+    let broken = true;
+    let main = MAIN;
+    const NEWMAIN = "8".repeat(40);
+    const seen: string[] = [];
+    const t = setup({
+      now: () => now,
+      mainSha: async () => main,
+      render: async (origin, _path, scheme) => {
+        const sha = origin.split("/").pop() ?? "";
+        seen.push(`${sha}:${scheme}`);
+        if (broken && sha === HEAD && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(sha === NEWMAIN ? MAIN : sha, scheme));
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target);
+    broken = false;
+    main = NEWMAIN;
+    now += 1001;
+    seen.length = 0;
+    await t.evidence.ensure(target);
+    expect(seen.filter((x) => x.startsWith(NEWMAIN))).toEqual([
+      `${NEWMAIN}:light`,
+      `${NEWMAIN}:dark`,
+    ]);
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).mainSha).toBe(NEWMAIN);
+  });
+
+  it("keeps the snapshot folder only while a failed head waits for its retry", async () => {
+    let now = 5000;
+    let broken = true;
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        if (broken && origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    const kept = join(t.workDir, "kept-7");
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(existsSync(kept)).toBe(true);
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(existsSync(kept)).toBe(false);
+  });
+
+  it("removes the snapshot folder when the PR gets a new head", async () => {
+    let now = 5000;
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        if (origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    const kept = join(t.workDir, "kept-7");
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(existsSync(kept)).toBe(true);
+    now += 1001;
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    // NEXT succeeded, so nothing of the old head or the new one is left
+    expect(existsSync(kept)).toBe(false);
+  });
+
+  it("throws the kept renders away when the PR gets a new head", async () => {
+    let now = 5000;
+    let broken = true;
+    let renders = 0;
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        renders++;
+        if (broken && scheme === "dark" && origin.endsWith(HEAD)) throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    broken = false;
+    now += 1001;
+    renders = 0;
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(renders).toBe(4); // both sides, both schemes: nothing reused
+    // and the old head's kept renders are gone: going back to it renders everything again
+    renders = 0;
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(renders).toBe(4);
+  });
+
   it("names the page, scheme and side of a render that times out, in the log and the gate", async () => {
     const lines: string[] = [];
     const t = setup({
@@ -628,5 +860,16 @@ describe("PrEvidence gate", () => {
         paths: [...WEB, "apps/web/src/map/Treemap.tsx"],
       }),
     ).toContain("map");
+  });
+});
+
+describe("evidenceReviewDeps", () => {
+  it("hands the review start check the capture's own page resolver", async () => {
+    const target: EvidenceTarget = { repoId: "mc", pr: 7, sha: HEAD, paths: ["apps/web/src/x.ts"] };
+    const pages = vi.fn(async () => ["board"] as const);
+    const deps = evidenceReviewDeps({ pages } as never, {} as never, "mc");
+    expect(deps.repoId).toBe("mc");
+    await expect(deps.pages(target)).resolves.toEqual(["board"]);
+    expect(pages).toHaveBeenCalledWith(target);
   });
 });

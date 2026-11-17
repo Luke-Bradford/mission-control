@@ -29,9 +29,12 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
+import { closeAnsweredItems } from "./attention/answered.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
-import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
+import { closeSettledQuestions } from "./attention/question-watch.ts";
+import { closeUnwatchedRepoItems } from "./attention/unwatched-repos.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
+import { applyDecisionDefaults } from "./brief/decision-defaults.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -104,7 +107,6 @@ import {
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
-import { applyDecisionDefaults } from "./decision-defaults.ts";
 import type { DiskUse } from "./disk/use.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
@@ -117,24 +119,24 @@ import {
   forgetViews,
   NO_LOCK,
   stateInputs,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
+import type { Supervisor } from "./runtime/supervisor.ts";
+import { syncWasteAlarms } from "./spend/waste.ts";
+import type { Store } from "./store.ts";
 import {
   FILE_SERVICE_RESTART_ADVICE,
   fileServiceFault,
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
-} from "./machine-capacity.ts";
-import { closeSettledQuestions } from "./question-watch.ts";
-import type { Supervisor } from "./runtime/supervisor.ts";
-import { syncWasteAlarms } from "./spend/waste.ts";
-import type { Store } from "./store.ts";
+} from "./telemetry/machine-capacity.ts";
 import {
   auditEndedRuns,
   TOKEN_AUDIT_FIRST_DELAY_MS,
   TOKEN_AUDIT_INTERVAL_MS,
 } from "./token-audit/audit.ts";
-import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
@@ -611,7 +613,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         lock: deps.lockState?.(),
         deliver: deps.deliverDefault,
       });
-      if (closed > 0) bus.emit("attention");
+      const answered = closeAnsweredItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
+      const unwatched = closeUnwatchedRepoItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
+      if (closed + unwatched + answered > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,

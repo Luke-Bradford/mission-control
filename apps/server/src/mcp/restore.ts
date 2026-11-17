@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { isInside, realish } from "../config.ts";
-import { GIT_TIMEOUT_MS } from "../files.ts";
+import { GIT_TIMEOUT_MS } from "../repo/files.ts";
 
 const run = promisify(execFile);
 const HELPER = fileURLToPath(new URL("./restore-helper.ts", import.meta.url));

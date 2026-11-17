@@ -47,7 +47,7 @@ export function vitestVerdict(
   return count > 0 && blocks.length === count && timeouts.length === count ? 0 : 1;
 }
 
-function readTotals(file: string): VitestReportTotals | undefined {
+export function readVitestReportTotals(file: string): VitestReportTotals | undefined {
   try {
     const j = JSON.parse(readFileSync(file, "utf8"));
     const unfinished = (j.testResults ?? []).flatMap(
@@ -87,7 +87,7 @@ export function runVitestForCi(args: string[]): number {
     process.stderr.write(result.stderr ?? "");
     const verdict = vitestVerdict(
       result.status ?? 1,
-      readTotals(outputFile),
+      readVitestReportTotals(outputFile),
       `${result.stdout ?? ""}\n${result.stderr ?? ""}`,
     );
     if (verdict === 0 && result.status !== 0)

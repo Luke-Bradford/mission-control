@@ -61,6 +61,7 @@ let store: Store,
   calls: string[],
   busy: { seatId: string; state: string }[],
   hold: CliHold,
+  supervisorBusy: () => { seatId: string; state: string }[],
   updateError: UpdateError | null,
   updateOpts: unknown;
 const headers = { "content-type": "application/json", [OPERATOR_HEADER]: TOKEN };
@@ -81,7 +82,7 @@ const build = (powers: "standard" | "superuser", gate = false) => {
     restart: () => calls.push("restart"),
   } as unknown as Updater;
   const supervisor = {
-    busy: () => busy,
+    busy: () => supervisorBusy(),
     status: () => ({ enabled: true }),
   } as unknown as Supervisor;
   app = buildApp({
@@ -102,6 +103,7 @@ beforeEach(() => {
   updateError = null;
   updateOpts = undefined;
   busy = [{ seatId: SEAT, state: "running" }];
+  supervisorBusy = () => busy;
   store = new Store(":memory:");
   store.upsertRun({
     id: RUN,
@@ -188,11 +190,17 @@ it("leaves the operator's own Update alone while seats are busy", async () => {
 it("holds new runs and runs FLIGHT's Update once the working seat's turn ends", async () => {
   build("superuser", true);
   busy = [...busy, { seatId: "guido-1", state: "running" }];
-  setTimeout(() => {
-    expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
-    busy = busy.filter((b) => b.seatId !== "guido-1");
-  }, 20);
+  // the seat's turn ends on the gate's own first poll that sees the hold set, not on a timer
+  let heldWhenFreed: boolean | undefined;
+  supervisorBusy = () => {
+    if (hold.heldBy(UPDATE_HOLD_OWNER)) {
+      heldWhenFreed = true;
+      busy = busy.filter((b) => b.seatId !== "guido-1");
+    }
+    return busy;
+  };
   const r = await update(asFlight);
+  expect(heldWhenFreed).toBe(true);
   expect(r.statusCode).toBe(200);
   expect(calls).toEqual(["update"]);
   expect(updateOpts).toEqual({ refuseUnsafe: true });

@@ -6,7 +6,7 @@ import { DEFAULT_PROFILES, type Run } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { profileHash } from "../src/profiles.ts";
+import { profileHash } from "../src/config/profiles.ts";
 import { Store } from "../src/store.ts";
 
 describe("POST /api/profiles", () => {

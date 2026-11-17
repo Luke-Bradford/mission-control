@@ -478,18 +478,18 @@ export function useAttentionMaterials(item: AttentionItem | null): {
   error: Error | null;
 } {
   const res = useResource<AttentionMaterialsResponse>(
-    item ? RESOURCES.attentionMaterials(item.key) : null,
+    item && !item.repoUnwatched ? RESOURCES.attentionMaterials(item.key) : null,
   );
   const none = res.error instanceof ApiError && res.error.status === 404;
   return {
     packets: res.data?.packets ?? [],
-    loading: item !== null && res.data === undefined && !res.error,
+    loading: item !== null && !item.repoUnwatched && res.data === undefined && !res.error,
     error: res.error && !none ? res.error : null,
   };
 }
 
 function MainPlan({ item }: { item: AttentionItem }) {
-  const ref = mainTicket(item);
+  const ref = item.repoUnwatched ? null : mainTicket(item);
   const res = useResource<TicketHistory>(
     ref ? RESOURCES.ticketHistory(ref.repoId, ref.number) : null,
   );
@@ -594,6 +594,13 @@ export function PlanAndMockups({
   const tz = useTz();
   const shots = didScreenshots(item).length > 0;
   const ref = mainTicket(item);
+  if (item.repoUnwatched)
+    return (
+      <section className="mat" aria-label="Plan and mockups">
+        <h3 className="bsec">Plan and mockups</h3>
+        <p className="note">{item.repoUnwatched.text}</p>
+      </section>
+    );
   if (!ref && packets.length === 0 && !loading && !error && !shots) return null;
   return (
     <section className="mat" aria-label="Plan and mockups">

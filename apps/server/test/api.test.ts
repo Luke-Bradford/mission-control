@@ -1,4 +1,13 @@
-import { AUDIT_MEASURED_TOOLS, FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
+import { createHash } from "node:crypto";
+import {
+  AUDIT_MEASURED_TOOLS,
+  COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
+  FLIGHT_TRIAGE_WAIT_MS,
+  joinMapGraph,
+  SPEC_BOUNCE_CAUSES,
+  unpackMap,
+} from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -91,6 +100,7 @@ import {
   LOOP_WRITES_DISABLED,
   NO_OPEN_NOTE,
 } from "../src/api.ts";
+import { LocalNotifications } from "../src/attention/local-notifications.ts";
 import { AWAY_STARTED_SETTING } from "../src/away.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
@@ -100,30 +110,29 @@ import {
   personKey,
 } from "../src/collectors/notifications.ts";
 import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
+import { noSessionText, SEATS_CHANGED } from "../src/config/config-write.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
-import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
 import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
-import * as files from "../src/files.ts";
-import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { LocalNotifications } from "../src/local-notifications.ts";
-import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
+import * as views from "../src/hud/views.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
 import { qaNativeIdentity } from "../src/qa/history-key.ts";
+import * as files from "../src/repo/files.ts";
+import { GitFailed, NO_WORKTREE_NOTE } from "../src/repo/files.ts";
 import { recordRunHandoff } from "../src/run/handoffs.ts";
+import { readStreamPage } from "../src/run/stream.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
-import { readStreamPage } from "../src/stream.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
-import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -247,7 +256,7 @@ const stubSupervisor = (): Supervisor => {
     endRun: call("end", undefined),
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),
-    wakeRun: call("wakeRun", undefined),
+    wakeRun: call("wakeRun", { freshSessionId: null, fallback: null }),
     endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
     resumeRun: call("resumeRun", undefined),
@@ -499,6 +508,7 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    bugEscapes: [],
     improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
       subject: name,
@@ -509,6 +519,10 @@ describe("audit", () => {
       calls: 0,
       chars: 0,
     })),
+    specBounces: {
+      rows: [],
+      counts: SPEC_BOUNCE_CAUSES.map((cause) => ({ cause, days7: 0, days30: 0 })),
+    },
     surgeonProposals: [],
   });
 
@@ -1218,6 +1232,64 @@ describe("Comms API", () => {
     });
   });
 
+  it("marks a mention as needing a reply exactly while its question is open on Needs you", async () => {
+    await withCommsApp(async (comms) => {
+      // Needs you lists Comms questions sent after the rollout
+      clock = Math.max(clock, COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 1);
+      const ask = store.addComms({
+        at: clock++,
+        from: "alpha",
+        to: "CAPCOM",
+        ticket: null,
+        text: "Which layout?",
+        label: "question",
+        mentions: ["CAPCOM"],
+      });
+      if (ask === null) throw new Error("question not stored");
+      const needsReply = async (id: string) =>
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === id)?.needsReply;
+      // the badge counts exactly what is open on the operator's Needs you
+      const onNeedsYou = async () =>
+        (
+          (await comms.inject({ method: "GET", url: "/api/attention" })).json() as {
+            key: string;
+            owner: string;
+          }[]
+        ).some((i) => i.key.endsWith(`:${ask.id}`) && i.owner === "operator");
+      expect(await needsReply(ask.id)).toBe(await onNeedsYou());
+      // FLIGHT passes it to the operator: on their Needs you, so on the badge
+      store.addBrief({
+        key: `comms-open:${ask.id}`,
+        for: "operator",
+        ask: "Which layout should the page use?",
+        ticket: "shop-app#703",
+        context: "The developer has two layouts ready and needs one.",
+        recommendation: "The first one: it matches the mockup.",
+        options: [
+          { label: "First", answer: "Use the first layout." },
+          { label: "Second", answer: "Use the second layout." },
+        ],
+        basis: "the developer's question",
+        at: clock,
+      });
+      clock += COMMS_FLIGHT_ESCALATION_MS + 60_000;
+      expect(await onNeedsYou()).toBe(true);
+      expect(await needsReply(ask.id)).toBe(true);
+      store.addComms({
+        at: clock++,
+        from: "CAPCOM",
+        to: "alpha",
+        ticket: null,
+        text: "The first one.",
+        replyTo: ask.id,
+      });
+      clock += 10_000; // past the attention memo
+      expect(await needsReply(ask.id)).toBe(false);
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
@@ -1306,6 +1378,8 @@ describe("Comms API", () => {
       ).toMatchObject({
         message: { id: mention.id },
         seen: false,
+        // a plain mention is read in the conversation; the bell counts only open asks
+        needsReply: false,
       });
       expect(
         (
@@ -1318,7 +1392,9 @@ describe("Comms API", () => {
         ).statusCode,
       ).toBe(200);
       expect(
-        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0].seen,
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === mention.id).seen,
       ).toBe(true);
       expect(
         (await comms.inject({ method: "GET", url: "/api/comms/pins" })).json().messages[0].id,
@@ -1561,6 +1637,7 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/tokens?days=7"],
+  ["GET", "/api/audit/fix-sessions"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -1636,6 +1713,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
+  ["GET", "/api/repos/shop-app/rules"],
+  ["POST", "/api/repos/shop-app/rules", {}],
   [
     "POST",
     "/api/repos/shop-app/setup",
@@ -2073,6 +2152,239 @@ describe("add a repo (POST /api/repos)", () => {
     expect(readFileSync(target, "utf8")).toBe(exampleText());
     expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
     expect(config.repos).toHaveLength(2);
+  });
+});
+
+describe("Setup Roles & guards", () => {
+  const rolesBody = {
+    pick_from: ["Ready"],
+    needs: ["done_when", "size"],
+    areas: { server: ["apps/server/**"] },
+    promote_backlog: true,
+    protected: [".github/**"],
+    hard_rules: ["roles/**"],
+    hard_rules_by: "operator",
+    commands: { writer: ["pnpm -s test"], review: ["pnpm -s test"] },
+    full_suite: ["pnpm -s test"],
+    required_checks: ["ci / test"],
+    checks: ["pnpm -s lint"],
+    uat: { labels: ["needs-uat"], paths: ["apps/web/**"] },
+    always_ask: ["deploy"],
+  };
+
+  type View = {
+    base: string;
+    rules: Record<string, { value: unknown; source: string; repoAdds?: string[] }>;
+  };
+  const KEYS = [
+    "pick_from",
+    "needs",
+    "areas",
+    "promote_backlog",
+    "protected",
+    "hard_rules",
+    "hard_rules_by",
+    "commands.writer",
+    "commands.review",
+    "full_suite",
+    "required_checks",
+    "checks",
+    "uat.labels",
+    "uat.paths",
+    "always_ask",
+    "autonomy",
+    "flight_powers",
+  ];
+  const SHOP = "    github: octo-org/shop-app\n";
+  /** Puts lines under shop-app in the file on disk, behind the hub's loaded config. */
+  const onDisk = (lines: string) =>
+    writeFileSync(configPath, exampleText().replace(SHOP, `${SHOP}${lines}`));
+  const view = async () => (await get("/api/repos/shop-app/rules")).json<View>();
+  /** A crew clone whose origin/HEAD CLAUDE.md holds `block`. */
+  const repoFile = (block: string) => {
+    withCrew();
+    const checkout = mapCheckout(dir);
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = checkout;
+    writeFileSync(
+      join(checkout, "CLAUDE.md"),
+      `## Mission Control\n\n\`\`\`yaml\n${block}\`\`\`\n`,
+    );
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", checkout, "-c", "user.email=a@b", "-c", "user.name=n", ...args]);
+    git("add", "CLAUDE.md");
+    git("commit", "-qm", "rules");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+  };
+
+  it("reads all 17 keys with defaults, then saves every editable rule with a backup, without GitHub", async () => {
+    const first = await view();
+    expect(Object.keys(first.rules)).toEqual(KEYS);
+    expect(first.rules.pick_from).toMatchObject({ value: ["Ready"], source: "default" });
+    expect(first.rules["commands.writer"]?.source).toBe("default");
+    expect(first.rules.autonomy).toMatchObject({ value: "draft", source: "config-file" });
+    expect(first.rules.flight_powers).toMatchObject({ source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: first.base,
+      rules: rolesBody,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ backup: "config.yaml.bak-20261017T120000Z" });
+    expect(readFileSync(configPath, "utf8")).toContain("pick_from:");
+    expect(readdirSync(dir)).toContain("config.yaml.bak-20261017T120000Z");
+    expect(refreshed).toBe(0);
+    expect(gqlCalls).toEqual([]);
+    const reread = await view();
+    for (const key of KEYS.slice(0, 15)) expect(reread.rules[key]?.source).toBe("set-here");
+    expect(reread.rules["commands.review"]?.value).toEqual(["pnpm -s test"]);
+    expect(reread.rules.areas?.value).toEqual({ server: ["apps/server/**"] });
+    // the live config took the owned fields only
+    expect(config.repos.find((r) => r.id === "shop-app")?.rules?.checks).toEqual(["pnpm -s lint"]);
+  });
+
+  it("saves one leaf of commands or uat and keeps its sibling", async () => {
+    const first = await view();
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: first.base,
+      rules: { uat: { labels: ["needs-uat"] }, commands: { writer: ["pnpm -s test"] } },
+    });
+    expect(saved.statusCode).toBe(200);
+    const read = await view();
+    expect(read.rules["uat.labels"]).toMatchObject({ value: ["needs-uat"], source: "set-here" });
+    expect(read.rules["uat.paths"]).toMatchObject({ value: [], source: "default" });
+    expect(read.rules["commands.writer"]?.value).toEqual(["pnpm -s test"]);
+    expect(read.rules["commands.review"]?.value).toEqual(first.rules["commands.review"]?.value);
+  });
+
+  it("reads the file on disk, not stale loaded rules, so the page saves what it shows", async () => {
+    expect(config.repos.find((r) => r.id === "shop-app")?.rules).toBeUndefined();
+    onDisk("    rules:\n      pick_from: [Todo]\n");
+    const read = await view();
+    expect(read.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
+    expect(createHash("sha256").update(readFileSync(configPath)).digest("hex")).toBe(read.base);
+  });
+
+  it("a rules save never makes an unapplied Authority change on disk live", async () => {
+    onDisk("    flight_powers: superuser\n");
+    const live = config.repos.find((r) => r.id === "shop-app");
+    const before = { autonomy: live?.autonomy, flightPowers: live?.flightPowers };
+    const read = await view();
+    expect(read.rules.flight_powers).toMatchObject({ value: "superuser", source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: read.base,
+      rules: { checks: ["pnpm -s lint"] },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(readFileSync(configPath, "utf8")).toContain("flight_powers: superuser");
+    expect({ autonomy: live?.autonomy, flightPowers: live?.flightPowers }).toEqual(before);
+    expect(live?.rules?.checks).toEqual(["pnpm -s lint"]);
+  });
+
+  describe("repo-file sources come from what the block declares, not from equal values", () => {
+    it("replacing keys: pick_from and areas belong to the repo file even when equal", async () => {
+      onDisk(
+        "    rules:\n      pick_from: [Ready]\n      areas: {server: [apps/server/**]}\n      always_ask: [deploy]\n",
+      );
+      repoFile("mc:\n  pick_from: [Ready]\n  areas: {server: [apps/server/**]}\n");
+      const read = await view();
+      expect(read.rules.pick_from).toMatchObject({ value: ["Ready"], source: "repo-file" });
+      expect(read.rules.areas).toMatchObject({ source: "repo-file" });
+      expect(read.rules.always_ask).toMatchObject({ source: "set-here", repoAdds: [] });
+      expect(gqlCalls).toEqual([]);
+    });
+
+    it("filling keys: needs and promote_backlog fill only when config.yaml leaves them out", async () => {
+      onDisk("    rules:\n      needs: [size]\n");
+      repoFile("mc:\n  needs: [done_when]\n  promote_backlog: false\n");
+      const read = await view();
+      expect(read.rules.needs).toMatchObject({ value: ["size"], source: "set-here" });
+      expect(read.rules.promote_backlog).toMatchObject({ value: false, source: "repo-file" });
+    });
+
+    it("additive keys keep the config source and list the repo file's additions apart", async () => {
+      onDisk(
+        "    rules:\n      hard_rules: [config.yaml]\n      checks: [pnpm -s lint]\n      uat:\n        labels: [needs-uat]\n",
+      );
+      repoFile(
+        "mc:\n  hard_rules: [CLAUDE.md]\n  checks: [pnpm -s lint, pnpm -s typecheck]\n  uat:\n    labels: [needs-uat]\n    paths: [apps/web/**]\n  always_ask: [security]\n",
+      );
+      const { rules } = await view();
+      expect(rules.hard_rules).toMatchObject({
+        value: ["config.yaml"],
+        source: "set-here",
+        repoAdds: ["CLAUDE.md"],
+      });
+      expect(rules.checks).toMatchObject({
+        value: ["pnpm -s lint"],
+        source: "set-here",
+        repoAdds: ["pnpm -s typecheck"],
+      });
+      expect(rules["uat.labels"]).toMatchObject({ source: "set-here", repoAdds: [] });
+      expect(rules["uat.paths"]).toMatchObject({
+        value: [],
+        source: "default",
+        repoAdds: ["apps/web/**"],
+      });
+      expect(rules.always_ask).toMatchObject({ source: "default", repoAdds: ["security"] });
+    });
+
+    it("hard_rules the config leaves out come from the repo file", async () => {
+      repoFile("mc:\n  hard_rules: [CLAUDE.md]\n");
+      const { rules } = await view();
+      expect(rules.hard_rules).toMatchObject({ value: ["CLAUDE.md"], source: "repo-file" });
+    });
+
+    it("an unreadable block is named and the config values still show", async () => {
+      repoFile("mc:\n  nonsense: 1\n");
+      const read = (await get("/api/repos/shop-app/rules")).json<
+        View & { repoFileError: string }
+      >();
+      expect(read.repoFileError).toContain("unknown key");
+      expect(read.rules.pick_from?.source).toBe("default");
+    });
+  });
+
+  it.each([
+    ["pick_from", { ...rolesBody, pick_from: [] }, "expected array to have >=1 items"],
+    ["needs", { ...rolesBody, needs: ["missing"] }, "needs"],
+    ["areas", { ...rolesBody, areas: { server: [] } }, "areas"],
+    ["promote_backlog", { ...rolesBody, promote_backlog: "yes" }, "expected boolean"],
+    ["protected", { ...rolesBody, protected: [""] }, "protected"],
+    ["hard_rules", { ...rolesBody, hard_rules: [""] }, "must hold only letters"],
+    ["hard_rules_by", { ...rolesBody, hard_rules_by: "flight" }, "expected one of"],
+    ["commands", { ...rolesBody, commands: { writer: [""], review: [] } }, "commands"],
+    ["full_suite", { ...rolesBody, full_suite: ["not a writer command"] }, "full_suite"],
+    ["required_checks", { ...rolesBody, required_checks: ["mc/review"] }, "not a CI check"],
+    ["checks", { ...rolesBody, checks: ["pnpm -s lint && pnpm -s test"] }, "checks"],
+    ["uat", { ...rolesBody, uat: { labels: [""], paths: [] } }, "uat"],
+    ["always_ask", { ...rolesBody, always_ask: [""] }, "expected string"],
+    ["autonomy", { ...rolesBody, autonomy: "merge" }, undefined],
+    ["flight_powers", { ...rolesBody, flight_powers: "superuser" }, undefined],
+  ])("refuses %s without writing", async (_name, rules, key) => {
+    const read = await get("/api/repos/shop-app/rules");
+    const before = readFileSync(configPath, "utf8");
+    const response = await postBody("/api/repos/shop-app/rules", {
+      base: read.json<{ base: string }>().base,
+      rules,
+    });
+    expect(response.statusCode).toBe(400);
+    if (key) expect(response.json<{ error: string }>().error).toContain(key);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  it("refuses a stale page without a backup", async () => {
+    const read = await get("/api/repos/shop-app/rules");
+    writeFileSync(configPath, `${readFileSync(configPath, "utf8")}# changed\n`);
+    const response = await postBody("/api/repos/shop-app/rules", {
+      base: read.json<{ base: string }>().base,
+      rules: rolesBody,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "config.yaml changed since this page loaded it; reload and try again",
+    });
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
   });
 });
 
@@ -2659,6 +2971,11 @@ describe("local access", () => {
       }
       if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/rules") {
+        // The route-table POST body has no version or rules; route-specific tests cover saves.
+        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 200 : 400);
         continue;
       }
       if (
@@ -6008,6 +6325,10 @@ describe("telemetry", () => {
         at: NOW - 6 * 60 * 60_000 + index * 60 * 60_000,
         merged: 0,
       })),
+      ticketsInProgress: Array.from({ length: 14 }, (_, index) => ({
+        day: `2026-10-${String(index + 4).padStart(2, "0")}`,
+        tickets: null,
+      })),
       quality: [
         {
           at: NOW - 6 * 60 * 60_000,
@@ -6259,6 +6580,40 @@ describe("reload", () => {
     expect(r.json()).toEqual({ ...changes, applied: ["seat guido-2 added"] });
     expect(reload).toHaveBeenCalledTimes(1);
     await a.close();
+  });
+
+  it("/api/telemetry?range=24h serves the machine series and stays within 60 KB with a full day sampled", async () => {
+    withCrew();
+    const GB = 1024 ** 3;
+    for (let i = 1; i <= 24 * 60; i += 1) {
+      store.addMachineSample({
+        at: NOW - (24 * 60 - i) * 60_000,
+        cpuPct: 20 + (i % 50),
+        cores: 8,
+        memUsedBytes: 5 * GB + i,
+        memTotalBytes: 16 * GB,
+        diskFreeBytes: 16 * GB,
+        diskTotalBytes: 100 * GB,
+        swapUsedBytes: (i % 7) * GB + 12_345,
+        swapTotalBytes: 8 * GB,
+        memoryPressureFreePct: 33.3333 + (i % 9),
+        agents: { count: 3, rssBytes: 6.123456 * GB + i, cpuPct: 1 },
+        testRun: { count: 5, rssBytes: 4.654321 * GB + i, cpuPct: 9 },
+      });
+    }
+    const response = await get("/api/telemetry?range=24h");
+    expect(response.statusCode).toBe(200);
+    const body = response.json<Telemetry>();
+    expect(body.machine).toHaveLength(72);
+    expect(body.machine.every((p) => p.swapPct != null && p.agentGb != null)).toBe(true);
+    // The budget is the 60 KB the other bounded routes keep; the four added series are a small share.
+    const bytes = Buffer.byteLength(response.body);
+    expect(bytes).toBeLessThan(60_000);
+    const without = JSON.stringify({
+      ...body,
+      machine: body.machine.map(({ at, cpuPct, memPct }) => ({ at, cpuPct, memPct })),
+    });
+    expect(bytes - Buffer.byteLength(without)).toBeLessThan(8_000);
   });
 
   it("uses machine-capacity thresholds applied by reload immediately", async () => {
@@ -7122,6 +7477,9 @@ describe("crew routes", () => {
         seat: null,
         decisions: [],
         controllerDecisions: [],
+        costLastHour: null,
+        sessionsLastHour: null,
+        runStartedAt: null,
         promptWakes: [],
       });
     });
@@ -7300,6 +7658,114 @@ describe("crew routes", () => {
       expect(body.wakeCost?.totalUsd).toBeCloseTo(7);
       expect(body.wakeCost?.weekShare).toBeCloseTo(1);
       expect(body.wakeWaits?.blockerMedianMs).toBe(60_000);
+    });
+
+    it("GET /api/flight serves FLIGHT's hourly status figures", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const startedAt = now - 20 * 60_000;
+      store.upsertRun(run({ id: "live-flight", agentId: "flight-1", costUsd: 7, startedAt }));
+      store.setDigest(
+        "live-flight",
+        digest({ attemptUsage: [{ id: "hour", at: now - 1000, tokens: 1 }] }),
+      );
+      store.upsertRun(
+        run({ id: "earlier-flight", agentId: "flight-1", startedAt: now - 40 * 60_000 }),
+      );
+      store.upsertRun(run({ id: "old-flight", agentId: "flight-1", startedAt: now - 61 * 60_000 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "live-flight",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: now,
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeCloseTo(7);
+      expect(body.sessionsLastHour).toBe(2);
+      expect(body.runStartedAt).toBe(startedAt);
+    });
+
+    it("GET /api/flight returns null hourly status figures with no data", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeNull();
+      expect(body.sessionsLastHour).toBeNull();
+      expect(body.runStartedAt).toBeNull();
+    });
+
+    describe("hourly status figures edge cases", () => {
+      const seat = () =>
+        config.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+      const session = (runId: string, state: "running" | "error", now: number) =>
+        store.setSeatSession({
+          seatId: "flight-1",
+          runId,
+          cliSessionId: null,
+          state,
+          reason: null,
+          worktree: null,
+          updatedAt: now,
+        });
+
+      it("serves no run start when the seat's run has ended", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({
+            id: "dead-flight",
+            agentId: "flight-1",
+            startedAt: now - 30 * 60_000,
+            endedAt: now - 10 * 60_000,
+            status: "failed",
+          }),
+        );
+        session("dead-flight", "error", now);
+        expect((await get("/api/flight")).json<FlightView>().runStartedAt).toBeNull();
+      });
+
+      it("serves 0 sessions, not null, when a steady run started before the hour", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "steady", agentId: "flight-1", costUsd: 1, startedAt: now - 90 * 60_000 }),
+        );
+        session("steady", "running", now);
+        const body = (await get("/api/flight")).json<FlightView>();
+        expect(body.sessionsLastHour).toBe(0);
+      });
+
+      it("serves no cost while the only run in the hour has none recorded", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "fresh", agentId: "flight-1", costUsd: null, startedAt: now - 60_000 }),
+        );
+        session("fresh", "running", now);
+        expect((await get("/api/flight")).json<FlightView>().costLastHour).toBeNull();
+      });
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -7718,6 +8184,24 @@ describe("update routes", () => {
     expect(r.json()).toEqual({ upToDate: true });
     expect(updaterCalls).toEqual(["update"]);
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("drops the held-Update notes once an Update has run (#1886)", async () => {
+    for (const key of ["hub-update-held", "hub-update-person"])
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "A new version of Mission Control is waiting.",
+        at: NOW - 1,
+      });
+    store.setSetting("hub-update-held-since", String(NOW - 1));
+    updaterResult = async () => ({ restarting: true });
+    await post("/api/update");
+    expect(store.notes()).toEqual([]);
+    expect(store.getSetting("hub-update-held-since")).toBeNull();
   });
 
   it("restarts a successful Update when the client disconnects before its response", async () => {
@@ -9888,6 +10372,7 @@ describe("operator token", () => {
         configPath,
         supervisor: stubSupervisor(),
         operatorToken: "tok-1",
+        controllerToken: "ctl-1",
         get noLoopWrites() {
           return noWrites;
         },
@@ -9928,7 +10413,42 @@ describe("operator token", () => {
       expect(calls).toEqual([]);
     });
 
-    it("holds and releases as the controller, and names a refusal", async () => {
+    it("refuses the controller's key on the PR hold route and on the operator's brief", async () => {
+      const ctl = { ...json, "x-mc-controller": "ctl-1" };
+      const held = await app.inject({
+        method: "POST",
+        url: "/api/prs/shop-app/12/merge-hold",
+        headers: ctl,
+        payload: { action: "hold", sha: "a".repeat(40), reason: "my check" },
+      });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      const chose = await app.inject({
+        method: "POST",
+        url: "/api/attention/example/choice",
+        headers: ctl,
+        payload: {
+          briefId: 1,
+          sourceRevision: "a".repeat(64),
+          optionId: "apply",
+          requestId: "controller",
+        },
+      });
+      expect(chose.statusCode).toBe(403);
+      expect(chose.json().error).toContain("controller");
+      expect(calls).toEqual([]);
+    });
+
+    it("refuses the controller's key: it neither holds nor releases a merge", async () => {
+      const ctl = { "x-mc-controller": "ctl-1" };
+      const held = await post(ctl, { action: "hold", reason: "my check" });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      expect((await post(ctl, { action: "release" })).statusCode).toBe(403);
+      expect(calls).toEqual([]);
+    });
+
+    it("holds and releases as the operator, and names a refusal", async () => {
       expect((await post(key, { action: "hold", reason: "design vetoed" })).statusCode).toBe(200);
       const refused = await post(key, { action: "release" });
       expect(refused.statusCode).toBe(409);

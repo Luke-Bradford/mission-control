@@ -12,6 +12,7 @@ import {
   MACHINE_COLLECTOR,
   type MachineSample,
   type PullRequestView,
+  REPO_UNWATCHED_REASON,
   type Run,
   type TestLockState,
   type UsageSample,
@@ -33,8 +34,8 @@ import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
 import { flightState, markItemsShown } from "../src/flight/state.ts";
-import * as hud from "../src/hud.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
+import * as hud from "../src/hud/hud.ts";
+import * as views from "../src/hud/views.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   BACKFILL_BUDGET_MS,
@@ -58,9 +59,9 @@ import {
 } from "../src/scheduler.ts";
 import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
 import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
-import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -196,6 +197,57 @@ const taRun = (seq: number): Run => ({
 });
 
 describe("scheduler", () => {
+  it("closes unwatched Needs-you items at start and on a later sweep", async () => {
+    vi.useFakeTimers({ now: NOW });
+    const addUnwatchedQuestion = (id: string, n: number) => {
+      store.upsertRun({
+        id,
+        agentId: "gone-seat",
+        repoId: "studio",
+        seq: 1,
+        startedAt: NOW - 60_000,
+        endedAt: null,
+        status: "running",
+        sessionId: "cli",
+        model: "x",
+        branch: "studio/1",
+        ticket: `studio#${n}`,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "/x",
+        prs: [],
+        summary: null,
+      } satisfies Run);
+      const question = store.addQuestion({
+        agentId: "gone-seat",
+        runId: id,
+        text: `Studio question ${n}`,
+        at: NOW - 60_000,
+      });
+      return `ask:${question}`;
+    };
+    const first = addUnwatchedQuestion("studio-run-1", 1);
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.questionClosure(first, NOW - 60_000)).toMatchObject({
+      kind: "repo-unwatched",
+      reason: REPO_UNWATCHED_REASON,
+    });
+    await vi.advanceTimersByTimeAsync(EMIT_COALESCE_MS);
+    expect(topics).toContain("attention");
+
+    const second = addUnwatchedQuestion("studio-run-2", 2);
+    await s.tick("ta");
+    expect(store.questionClosure(second, NOW - 60_000)).toMatchObject({
+      kind: "repo-unwatched",
+      reason: REPO_UNWATCHED_REASON,
+    });
+    expect(store.flightDecisions(0, 10).filter((d) => d.ref === "studio#2")).toHaveLength(1);
+    await s.stop();
+  });
+
   it("runs transcript maintenance with default retention", async () => {
     const transcripts = vi.fn(async () => ({ gzipped: 1, deleted: 0, skippedLive: 0, failed: [] }));
     const log = vi.fn();
@@ -818,7 +870,7 @@ describe("scheduler", () => {
         at = NOW + 30_000;
         await s.tick("ta");
         expect(store.agentEvents(0).map((e) => [e.agentId, e.at, e.text])).toEqual([
-          ["seat-guido", NOW + 15_000, "Idle → Running (your message)"],
+          ["seat-guido", NOW + 15_000, "Idle → Running"],
           ["seat-guido", NOW + 30_000, "Running → Idle (turn ended)"],
         ]);
       });
@@ -847,9 +899,7 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
           await vi.advanceTimersByTimeAsync(1000);
           expect(crewCalls()).toBe(before + 1);
-          expect(store.agentEvents(0).map((e) => e.text)).toEqual([
-            "Idle → Running (your message)",
-          ]);
+          expect(store.agentEvents(0).map((e) => e.text)).toEqual(["Idle → Running"]);
           await s.stop();
         });
 
@@ -1175,9 +1225,7 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
           bus.emit("agents");
           await vi.advanceTimersByTimeAsync(1000);
-          expect(store.agentEvents(0).map((e) => e.text)).toEqual([
-            "Idle → Running (your message)",
-          ]);
+          expect(store.agentEvents(0).map((e) => e.text)).toEqual(["Idle → Running"]);
           expect(row("scheduler:crew")).toMatchObject({ ok: true, error: null });
           await s.stop();
         });

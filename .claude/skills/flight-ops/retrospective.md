@@ -19,13 +19,12 @@ At 03:00 in the operator's timezone, the hub sends a daily `retrospective` fact,
 - Ready-to-merged median and review fail rate;
 - park reasons, re-runs and red-main incidents;
 - FLIGHT wakes and cost;
-- the "For the controller" count, and the most costly runs.
+- the most costly runs.
 
 Screen-facing share is touching / (merged - unknown), with the unknown count reported separately. It is n/a without `apps/web` or any classifiable merges. Costs use the existing metrics' lifetime totals for runs active in that window. Do not invent missing measurements.
 
 Use it to write lasting lessons:
-1. Read the day's decisions for every missing-power gap, and file a ticket for each, checking existing tickets first.
+1. Read the day's decisions for every block you could not clear in the wake you found it, and file a ticket for each cause, checking existing tickets first.
 2. For up to three other items, write lessons, file tickets or act with your tools.
 3. Log a one-paragraph summary with `mc log_decision`, citing measures and actions.
 
-All existing permissions and approval rules still apply.

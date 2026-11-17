@@ -72,6 +72,7 @@ import {
   fixesSent,
   flightShellBreakerWrite,
   flightShellWrite,
+  freezeRules,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -110,6 +111,7 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
   PR_LIST_DAYS,
@@ -180,7 +182,11 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
-import { agentDetail } from "./agent-detail.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention/attention-materials.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -189,11 +195,22 @@ import {
   nothingForOperator,
   releaseHold,
 } from "./attention/holds.ts";
+import { itemThread } from "./attention/item-thread.ts";
 import {
-  AttentionMaterialsError,
-  type AttentionMaterialsService,
-  createAttentionMaterials,
-} from "./attention-materials.ts";
+  LocalNotifications,
+  NotificationPreferencesBody,
+} from "./attention/local-notifications.ts";
+import {
+  type ActionResult,
+  answerSetAside,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+  setAsideQuestions,
+} from "./attention/needs-you-actions.ts";
+import { withRepoWatch } from "./attention/unwatched-repos.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -202,11 +219,10 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
-import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -235,6 +251,7 @@ import {
   COMMS_SNAPSHOT_LIMIT,
   commsSendState,
   pinComms,
+  raisesAttention,
   reactComms,
   sendComms,
   threadMessages,
@@ -242,17 +259,6 @@ import {
 } from "./comms/index.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
-import { compressResponse } from "./compress.ts";
-import {
-  agentIds,
-  type CcConfig,
-  configuredAgents,
-  crewSeatDef,
-  crewSeatMode,
-  DEFAULT_MAX_SEATS,
-  flightPowersOf,
-  TeamsSelection,
-} from "./config.ts";
 import {
   AccountBody,
   accountDuplicateReason,
@@ -268,27 +274,42 @@ import {
   onboardRepo,
   RepoLocation,
   RepoOnboardBody,
+  RepoRolesBody,
   RepoSetupBody,
+  readRepoRolesConfig,
   removeAccount,
   SeatsBody,
   setAccount,
+  setRepoRoles,
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
-} from "./config-write.ts";
-import type { CrewReloader } from "./crew-apply.ts";
+} from "./config/config-write.ts";
 import {
   CrewPauseBody,
   pausedSeat,
   readCrewPause,
   startUnpausedRun,
   writeCrewPause,
-} from "./crew-pause.ts";
-import { readDependencyChains } from "./dependency-chains.ts";
+} from "./config/crew-pause.ts";
+import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
+import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
+import { repoRulesView } from "./config/repo-roles-view.ts";
+import {
+  agentIds,
+  type CcConfig,
+  configuredAgents,
+  crewSeatDef,
+  crewSeatMode,
+  DEFAULT_MAX_SEATS,
+  flightPowersOf,
+  TeamsSelection,
+} from "./config.ts";
+import type { CrewReloader } from "./crew-apply.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
-import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { RepoRulesError, readRepoBlock, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   askExternalReview,
@@ -299,14 +320,7 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import {
-  changedFiles,
-  committedLines,
-  fileDiff,
-  type GitExec,
-  GitFailed,
-  NO_WORKTREE_NOTE,
-} from "./files.ts";
+import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -333,6 +347,7 @@ import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
+import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -344,12 +359,18 @@ import {
   NOTE_KEY,
   pinned,
   seatQuestionTriage,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { overviewSummary } from "./hud/overview.ts";
+import {
+  decodeCursor,
+  TICKET_PAGE_DEFAULT,
+  TICKET_PAGE_MAX,
+  ticketHistory,
+} from "./hud/ticket-history.ts";
+import { overviewTimeline } from "./hud/timeline.ts";
+import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { itemThread } from "./item-thread.ts";
-import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -364,20 +385,7 @@ import {
   readKnown,
   seatPlace,
 } from "./mcp/tools.ts";
-import { metricsView } from "./metrics.ts";
-import {
-  type ActionResult,
-  answerSetAside,
-  drop as dropQuestion,
-  type NeedsYouContext,
-  type NeedsYouDeps,
-  notNow as notNowQuestion,
-  offersFor,
-  setAsideQuestions,
-} from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { overviewSummary } from "./overview.ts";
-import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -385,7 +393,6 @@ import {
   PreviewHubError,
   type PreviewManager,
 } from "./preview/previews.ts";
-import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
@@ -395,13 +402,22 @@ import {
   type QaReportService,
   qaReportMarkdown,
 } from "./qa/reports.ts";
+import { readDependencyChains } from "./queue/dependency-chains.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
   QueueReorderError,
   resolveQueueReorder,
-} from "./queue-reorder.ts";
-import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
+} from "./queue/queue-reorder.ts";
+import { cleanText } from "./repo/clean.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./repo/files.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
 import {
@@ -409,7 +425,9 @@ import {
   AsideAnswerUnconfirmed,
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
+import { compressResponse } from "./run/compress.ts";
 import { publicHandoff } from "./run/handoffs.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
   type PrCache,
@@ -433,15 +451,10 @@ import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
-import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
-import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
-import {
-  decodeCursor,
-  TICKET_PAGE_DEFAULT,
-  TICKET_PAGE_MAX,
-  ticketHistory,
-} from "./ticket-history.ts";
-import { overviewTimeline } from "./timeline.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
+import { metricsView } from "./telemetry/metrics.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
+import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
@@ -457,7 +470,6 @@ import {
   UpdateError,
   type Updater,
 } from "./update.ts";
-import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
 
 export const TELEMETRY_COMMIT_READ_LIMIT = 32;
@@ -1421,6 +1433,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
+  /** A Needs-you key built from a Comms message: `comms-open:<id>`, `tag:<seat>:<id>`, `message:<agent>:<id>`. */
+  const COMMS_ITEM_KEY = /^(?:comms-open|tag:[^:]+|message:[^:]+):(comms:\d+)$/;
+  const CONTROLLER_HOLD_REFUSED =
+    "the controller does not hold or release merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
     const { controllerToken, operatorToken: held } = deps;
     app.addHook("onRequest", async (req) => {
@@ -2461,12 +2477,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
-      api.get("/comms/mentions", () => ({
-        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
-          message: storedCommsMessage(row),
-          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-        })),
-      }));
+      api.get("/comms/mentions", () => {
+        // A message needs the operator's reply when its question is open on their Needs you: the
+        // same rules close it in both places, so the badge and Needs you never disagree. Every
+        // Comms-sourced item key (an open question, a tag or a direct line) ends in its message id.
+        const asks = new Set<string>();
+        for (const item of sharedAttention()) {
+          if (item.owner !== OWNER_OPERATOR) continue;
+          const id = COMMS_ITEM_KEY.exec(item.key)?.[1];
+          if (id !== undefined) asks.add(id);
+        }
+        return {
+          mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+            message: storedCommsMessage(row),
+            seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+            needsReply: asks.has(row.id),
+          })),
+        };
+      });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
       api.post("/comms/mentions/seen", (req, reply) => {
         const body = z
@@ -2558,8 +2586,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
         store.markCommsScopeRead(scope.key, body.data.messageId);
+        // Opening an agent's direct thread also moves the cursor its attention items key on (the
+        // web reads through this route, not the per-thread one)
+        const all = scope.key.match(/^agent-all:(.+)$/)?.[1];
+        const direct = all ?? directAgent(scope.key);
+        if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
+          let through: string | null = body.data.messageId;
+          if (all === undefined) {
+            // The pair view shows only the CAPCOM line: its agent's other lines stay unread, and
+            // the cursor stops before the first one the view did not show that could raise an item
+            const shown = new Set(scope.rows.map((row) => row.id));
+            const limit = Number(body.data.messageId.slice("comms:".length));
+            const after = store.threadReadCursors(direct).get("comms")?.offset ?? 0;
+            through = null;
+            for (const row of store.threadComms(direct, after)) {
+              if (Number(row.id.slice("comms:".length)) > limit) break;
+              // an unshown line that raises no item (a seat's handoff) is stepped over
+              if (!shown.has(row.id) && raisesAttention(row)) break;
+              through = row.id;
+            }
+          }
+          if (through !== null) {
+            store.markThreadRead(direct, [through]);
+            bus.emit("attention");
+          }
+        }
         return { ok: true };
       });
+
+      /** The agent on the other end of CAPCOM's direct line, for a `pair:` scope key. */
+      const directAgent = (key: string): string | undefined => {
+        const pair = key.match(/^pair:([^:]+):([^:]+)$/);
+        if (!pair) return undefined;
+        if (pair[1] === COMMS_CAPCOM) return pair[2];
+        return pair[2] === COMMS_CAPCOM ? pair[1] : undefined;
+      };
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
@@ -3433,6 +3494,86 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
+      const rolesError = (reply: FastifyReply, e: unknown) => {
+        captureError(reply, e);
+        if (e instanceof ConfigWriteError) {
+          const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+            missing: 404,
+            invalid: 400,
+            current: 409,
+            conflict: 409,
+          };
+          const code = status[e.kind];
+          if (code !== undefined) return reply.code(code).send({ error: e.message });
+        }
+        return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+      };
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        try {
+          // Every value comes from the same config.yaml bytes the version is taken from, so the
+          // page can never save a version it did not show.
+          const { base, repo, raw } = await readRepoRolesConfig(configPath, req.params.repoId);
+          const checkout = config.crew?.sessions.find(
+            (session) => session.repoId === repo.id,
+          )?.checkout;
+          const repoFile =
+            checkout === undefined
+              ? null
+              : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+          return repoRulesView({
+            base,
+            repo,
+            raw,
+            repoFile: repoFile instanceof RepoRulesError ? repoFile.message : repoFile,
+          });
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoRolesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoRoles(
+            configPath,
+            req.params.repoId,
+            body.data.base,
+            body.data.rules,
+            now(),
+          );
+          const live = config.repos.find((repo) => repo.id === req.params.repoId);
+          const saved = result.config.repos.find((repo) => repo.id === req.params.repoId);
+          if (!live || !saved) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can hold unapplied Authority, crew or rotation changes. This route owns only
+          // the rule, command, check and protected-file fields; nothing else goes live.
+          live.protectedFiles = saved.protectedFiles;
+          live.commands = saved.commands;
+          live.fullSuite = saved.fullSuite;
+          live.requiredChecks = saved.requiredChecks;
+          if (saved.rules === undefined) delete live.rules;
+          else {
+            const { templates, techDebtIssue } = live.rules ?? {};
+            live.rules = freezeRules({
+              ...saved.rules,
+              ...(templates === undefined ? {} : { templates }),
+              ...(techDebtIssue === undefined ? {} : { techDebtIssue }),
+            });
+          }
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
@@ -4159,6 +4300,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             config.audit?.thresholds,
           ),
         );
+      });
+      // Reader: docs/runbook.md#audit-api (the fix-session trial's receipts; the operator and FLIGHT read it)
+      api.get("/audit/fix-sessions", async (req, reply) => {
+        if (Object.keys(req.query as Record<string, unknown>).length > 0) {
+          return reply.code(400).send({ error: "send no query" });
+        }
+        return fixSessionTrialView(store, config);
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
       api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
@@ -5193,7 +5341,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid repo" });
@@ -5232,7 +5380,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true, id: approval.id };
       });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.put("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         const body = FlightMemoryInput.omit({ topic: true }).strict().safeParse(req.body);
@@ -5254,7 +5402,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.delete("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         if (!params.success) return reply.code(400).send({ error: "Invalid memory topic" });
@@ -5855,6 +6003,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (body.data.action === "hold" && !body.data.reason)
           )
             return reply.code(400).send({ error: "invalid merge-hold request" });
+          // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+          if (controllerRequests.has(req))
+            return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
           const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
           if (!target) return reply;
           const previous = externalMergeHold(store, target.repo.id, number);
@@ -5862,7 +6013,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
             return reply
               .code(403)
-              .send({ error: "Only the controller may change this operator merge hold." });
+              .send({ error: "Only the operator may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
           checkBriefDispatch();
           setExternalMergeHold(
@@ -5956,8 +6107,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
-      // The controller holds a run's PR from merging, or releases a hold (FLIGHT's or its own).
-      // FLIGHT's hold_pr tool cannot release one set here; the operator token is required.
+      // The operator holds a run's PR from merging, or releases a hold (FLIGHT's or their own).
+      // FLIGHT's hold_pr tool cannot release one set here. The controller's key is refused.
       // Reader: docs/runbook.md#hold-a-run-from-merging
       api.post<{ Params: { id: string } }>("/runs/:id/merge-hold", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -5966,6 +6117,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!crewGate(run.agentId, reply)) return reply;
         const body = MergeHoldBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+        if (controllerRequests.has(req))
+          return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
         if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
         const engine = deps.engine;
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {
@@ -6286,6 +6440,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           // FLIGHT's run never applies a shortcut: only a person does
           const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          // main is now running (or was already): no Update is waiting any more
+          createHeldUpdateNote(store, bus)(null);
           if ("restarting" in out) {
             restarting = true;
             updater.restart();
@@ -6349,7 +6505,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const offers = needsYou === null ? undefined : offersFor(needsYou, item);
         return isOperatorItem(item)
           ? {
-              ...pinned(item, store, config),
+              ...withRepoWatch(pinned(item, store, config), config),
               ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
               ...(offers === undefined ? {} : { offers }),
             }
@@ -6376,7 +6532,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
-      registerBriefChoiceRoutes(api, app, deps, flightActor);
+      registerBriefChoiceRoutes(api, app, deps, flightActor, (req) => controllerRequests.has(req));
       // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
       api.get("/attention/answered", async () =>
         store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),
@@ -6579,7 +6735,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
-      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      // Reader: apps/web/src/data.ts (the item thread read)
       api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
         const key = req.params.key;
         if (key.length > 200) return reply.code(400).send({ error: "key too long" });

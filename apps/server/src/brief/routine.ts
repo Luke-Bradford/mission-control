@@ -2,12 +2,12 @@ import type { TestLockState } from "@mc/core";
 import { COMMS_CAPCOM, COMMS_MC } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
 import { sendComms, validateCommsText } from "../comms/index.ts";
-import { attentionItems, NO_LOCK } from "../hud.ts";
+import { attentionItems, NO_LOCK } from "../hud/hud.ts";
 import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,
   reorderQueue,
-} from "../queue-reorder.ts";
+} from "../queue/queue-reorder.ts";
 import { AsideAnswerChanged, answerAsideQuestion } from "../run/aside-answer.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { BriefChoiceDeps } from "./choices.ts";

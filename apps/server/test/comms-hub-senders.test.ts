@@ -1,12 +1,12 @@
 import { COMMS_CONTROLLER } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyDecisionDefaults } from "../src/brief/decision-defaults.ts";
 import { sendComms } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
-import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { Store } from "../src/store.ts";
 
-vi.mock("../src/hud.ts", async (original) => ({
-  ...(await original<typeof import("../src/hud.ts")>()),
+vi.mock("../src/hud/hud.ts", async (original) => ({
+  ...(await original<typeof import("../src/hud/hud.ts")>()),
   attentionItems: () => [
     { key: "d1", acked: false, agentId: null, ticket: "repo#1", text: "Proceed?", brief: null },
   ],

@@ -1,7 +1,7 @@
 import type { ConfigView, Crew } from "@mc/core";
 import type { CSSProperties } from "react";
 import { usePhone } from "../board/phone.ts";
-import { namedSeat, seatColorVar, seatRoleTitle } from "../crew.ts";
+import { callSign, namedSeat, seatColorVar, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import "./AgentTag.css";
 
@@ -38,6 +38,7 @@ export function AgentTag({
   bare,
   domId,
   showRole,
+  named,
 }: {
   id: string;
   index: number | "flight";
@@ -46,17 +47,20 @@ export function AgentTag({
   showRole?: boolean;
   /** The call sign alone, with the role's title in the tooltip: for a column too narrow for both. */
   bare?: boolean;
+  /** Show the seat's call sign (FLIGHT-1) rather than the id as the caller holds it (flight-1). */
+  named?: boolean;
   /** The element's DOM id, for an `aria-labelledby` that names a control by the call sign alone. */
   domId?: string;
 }) {
   const row = namedSeat(id, useResource<Crew>(RESOURCES.crew).data?.rows);
   const style = { "--c": agentColor(index) } as CSSProperties;
   const { suffix, title } = useRoleLabel(id, bare, showRole);
+  const name = named && row ? callSign(row) : (row?.displayCallSign ?? id);
   return (
     <span className={`ag${sm ? " sm" : ""}`} style={style} title={title}>
       <i aria-hidden="true" />
-      <span id={domId} title={row?.displayCallSign ?? id}>
-        {row?.displayCallSign ?? id}
+      <span id={domId} title={name}>
+        {name}
       </span>
       {suffix !== null && <span className="rt">{` · ${suffix}`}</span>}
     </span>

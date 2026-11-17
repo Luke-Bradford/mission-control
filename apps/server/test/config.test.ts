@@ -37,8 +37,8 @@ import {
   portFromEnv,
   seatUnavailable,
 } from "../src/config.ts";
+import { configView } from "../src/hud/views.ts";
 import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
-import { configView } from "../src/views.ts";
 import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
 
 const catalog = fakeModels();
@@ -486,6 +486,7 @@ describe("crew", () => {
     maxOpen?: string;
     lane?: string;
     laneDefault?: string;
+    fixSessionTrial?: string;
     transcripts?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
     roles?: string[];
@@ -505,6 +506,7 @@ crew:
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
+  ${opts.fixSessionTrial === undefined ? "" : `fix_session_trial: ${opts.fixSessionTrial}`}
   ${opts.transcripts === undefined ? "" : `transcripts: ${opts.transcripts}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
@@ -606,6 +608,12 @@ ${seats.join("\n")}
     });
     expect(fails(crewText({ lane: "other" })).path).toBe("crew.lane");
     expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
+  });
+
+  it("defaults the fix-session trial switch to false and rejects a non-boolean", () => {
+    expect(load(crewText({})).crew?.fixSessionTrial).toBe(false);
+    expect(load(crewText({ fixSessionTrial: "true" })).crew?.fixSessionTrial).toBe(true);
+    expect(fails(crewText({ fixSessionTrial: '"yes"' })).path).toBe("crew.fixSessionTrial");
   });
 
   it("rejects overlapping writer areas", () => {

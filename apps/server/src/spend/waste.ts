@@ -261,10 +261,11 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     });
   }
 
-  // Runs per ticket: more than three developer runs without a merge.
+  // Runs per ticket: more than three developer runs without a merge, on a ticket still open on the board.
+  const open = q.openTickets();
   for (const [ticket, list] of byTicket) {
     const own = list.filter(developer);
-    if (done(ticket) || own.length <= t.runsPerTicket) continue;
+    if (done(ticket) || !open.has(ticket) || own.length <= t.runsPerTicket) continue;
     const blocking = q.blockingByRun(own.map((r) => r.id));
     out.push({
       check: "runs-per-ticket",
@@ -436,6 +437,42 @@ export function reviewsHeld(store: Store, authorRunId: string): boolean {
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
   return rounds > resolved;
+}
+
+/**
+ * FLIGHT's settle closes this run's review-rounds hold at the live round, not at whatever level the
+ * scan last wrote (or before it wrote one), so reviews start again. False when no hold stands.
+ */
+export function settleReviewRounds(
+  store: Store,
+  run: { id: string; agentId: string; ticket: string | null; repoId?: string | null },
+  at: number,
+  basis: string,
+): boolean {
+  if (!reviewsHeld(store, run.id)) return false;
+  const rounds = store.waste.maxRound(run.id);
+  const evidence = `${run.ticket ?? run.id} is on review round ${rounds}; FLIGHT settled the park.`;
+  const open = store.waste.alarms(
+    "WHERE check_id = 'review-rounds' AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",
+    run.id,
+  )[0];
+  let id = open?.id;
+  if (open !== undefined) store.waste.updateAlarm(open.id, rounds, evidence);
+  else
+    id = store.waste.insertAlarm(
+      {
+        check: "review-rounds",
+        subject: run.id,
+        repoId: run.repoId ?? "",
+        ticket: run.ticket,
+        seatId: run.agentId,
+        runId: run.id,
+        level: rounds,
+        evidence,
+      },
+      at,
+    );
+  return id !== undefined && store.waste.resolveAlarm(id, at, basis);
 }
 
 /** The refusal text for an unchanged rerun, and the record of it, for the hook. */

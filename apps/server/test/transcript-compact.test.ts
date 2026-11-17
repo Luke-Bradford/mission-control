@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import {
   compactTranscriptLine,
   DELTA_HEARTBEAT_MS,
@@ -22,7 +23,6 @@ import {
 } from "../src/runtime/transcript-compact.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { Store } from "../src/store.ts";
-import { foldTranscript } from "../src/streamjson.ts";
 import {
   compactTranscriptFile,
   compactTranscripts,

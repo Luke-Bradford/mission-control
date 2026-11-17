@@ -4,6 +4,7 @@ import {
   type ConfigView,
   type Crew,
   HUD_STATE_LABEL,
+  LEGACY_SEAT_TURN_START_TEXT,
   SEAT_TURN_END_TEXT,
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
@@ -112,6 +113,12 @@ export function splitRef(text: string, ref: string | null): [string, string] | n
   return null;
 }
 
+/** A ticket as the chip reads, without its link: `repo #n`. */
+function plainTicket(ref: string): string {
+  const t = parseTicket(ref);
+  return t ? `${t.repoId} #${t.number}` : ref;
+}
+
 /** `owner/name` of a github.com pull request URL; null for any other URL. */
 function pullRepo(url: string | null): string | null {
   const m = url ? /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/\d+/.exec(url) : null;
@@ -144,11 +151,14 @@ function ActivityText({
   prRepoId,
   split,
   red,
+  repeat,
 }: {
   event: ActivityEvent;
   prRepoId: string | null;
   split: [string, string] | null;
   red: boolean;
+  /** The row above is the same agent on the same ticket, which already links it. */
+  repeat: boolean;
 }) {
   const pr = e.kind === "pr-opened" || e.kind === "pr-merged" ? PR_EVENT.exec(e.text) : null;
   return (
@@ -161,7 +171,11 @@ function ActivityText({
       ) : split && e.ref ? (
         <>
           {split[0]}
-          <TicketRef ticket={e.ref} url={e.kind === "escalation" ? e.url : null} />
+          {repeat ? (
+            <span className="muted">{plainTicket(e.ref)}</span>
+          ) : (
+            <TicketRef ticket={e.ref} url={e.kind === "escalation" ? e.url : null} />
+          )}
           {split[1]}
         </>
       ) : (
@@ -216,7 +230,12 @@ export function ActivityPanel() {
       if (filter === "comms") return isComms(e);
       return (
         !isComms(e) &&
-        !(e.kind === "state" && (e.text === SEAT_TURN_START_TEXT || e.text === SEAT_TURN_END_TEXT))
+        !(
+          e.kind === "state" &&
+          (e.text === SEAT_TURN_START_TEXT ||
+            e.text === LEGACY_SEAT_TURN_START_TEXT ||
+            e.text === SEAT_TURN_END_TEXT)
+        )
       );
     })
     .filter((e) => {
@@ -315,7 +334,11 @@ export function ActivityPanel() {
           } else setReading(null);
         }}
       >
-        {keyed.map(({ e, key }) => {
+        {keyed.map(({ e, key }, at) => {
+          // A run of rows from one agent on one ticket links it once, on the newest.
+          const above = at > 0 ? keyed[at - 1]?.e : undefined;
+          const repeat =
+            !!e.ref && !!above && !isComms(above) && above.ref === e.ref && above.who === e.who;
           if (isComms(e)) {
             const preview = logLine(e.text, "comms");
             // The conversation is with the crew agent at either end; FLIGHT's thread otherwise.
@@ -377,13 +400,13 @@ export function ActivityPanel() {
                     }
                   >
                     {agent ? (
-                      <AgentTag bare id={agent.id} index={agent.index} sm />
+                      <AgentTag bare named id={agent.id} index={agent.index} sm />
                     ) : (
                       <span className="muted">{e.who}</span>
                     )}
                   </a>
                 ) : agent ? (
-                  <AgentTag bare id={agent.id} index={agent.index} sm />
+                  <AgentTag bare named id={agent.id} index={agent.index} sm />
                 ) : (
                   <span className="muted">{e.who}</span>
                 )}
@@ -395,12 +418,13 @@ export function ActivityPanel() {
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
                     split={split}
                     red={red}
+                    repeat={repeat}
                   />
                 </span>
               </Expandable>
               {e.ref || e.prs.length > 0 ? (
                 <span className="arefs">
-                  {e.ref && !split && (
+                  {e.ref && !split && !repeat && (
                     <TicketRef
                       ticket={e.ref}
                       url={e.kind === "escalation" ? e.url : null}

@@ -38,6 +38,7 @@ import { protectedDecisionItem } from "../src/attention/holds.ts";
 import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
 import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
+import { setReviewHold } from "../src/engine/review-hold.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
   agentViews,
@@ -50,13 +51,13 @@ import {
   markHubStarted,
   NO_LOCK,
   pinned,
-} from "../src/hud.ts";
+} from "../src/hud/hud.ts";
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
-import { clearLeftovers } from "../src/leftovers.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
-import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
+import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue/queue-reorder.ts";
+import { clearLeftovers } from "../src/repo/leftovers.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import { Store } from "../src/store.ts";
-import { foldTranscript } from "../src/streamjson.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
 import {
   HUB_UPDATE_HELD_KEY,
   HUB_UPDATE_HELD_SINCE,
@@ -1517,6 +1518,50 @@ describe("crew seats in the rows", () => {
       NOW + 1,
     );
     expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
+  });
+
+  it("shows the hold the engine recorded for a queued review instead of the generic wait", () => {
+    const c = withCrew();
+    const sha = "c".repeat(40);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 12,
+          title: "Review target",
+          url: "https://github.com/example/sample/pull/12",
+          branch: "feature/12",
+          ticket: "shop-app#90",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: sha,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    const id = store.requestReview({
+      authorRunId: "external-pr:shop-app#12",
+      repoId: "shop-app",
+      seatId: "RETRO-1",
+      prNumber: 12,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - MIN,
+    });
+    expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toBe(
+      "Waiting for the reviewer to become available.",
+    );
+    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #7.", prNumber: 7 });
+    expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toBe("Waiting for older PR #7.");
   });
 
   it("carries the CLI version, configured effort and active template dollar cap; a loop has neither", () => {
@@ -4594,11 +4639,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       held(HUB_UPDATE_HELD_KEY);
       const cfg = superuser();
       const item = heldItem(cfg);
-      expect(item).toMatchObject({
-        owner: "flight",
-        flightTriage: "waiting",
-        triageDueAt: NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS,
-      });
+      expect(item).toMatchObject({ owner: "flight", flightTriage: "handling" });
       expect(
         needsYouItems(attentionItems(cfg, store, NOW, NO_LOCK, [])).map((i) => i.key),
       ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
@@ -4609,18 +4650,24 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       expect(item && protectedDecisionItem(store, item, cfg, NOW)).toBe(false);
     });
 
-    it("goes to the operator once FLIGHT's window has passed", () => {
+    it("stays FLIGHT's, off Needs you, after FLIGHT's window has passed", () => {
       flight();
       held(HUB_UPDATE_HELD_KEY);
-      const late = heldItem(superuser(), NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS);
-      expect(late).toMatchObject({ owner: "operator", flightTriage: "missed" });
+      const cfg = superuser();
+      const at = NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS + HOUR;
+      const late = heldItem(cfg, at);
+      expect(late).toMatchObject({ owner: "flight", flightTriage: "handling" });
+      expect(late?.triageDueAt).toBeUndefined();
+      expect(
+        needsYouItems(attentionItems(cfg, store, at, NO_LOCK, [])).map((i) => i.key),
+      ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
     });
 
-    it("counts the window from when the Update was first held, not from the latest rewrite", () => {
+    it("stays FLIGHT's however long ago the Update was first held", () => {
       flight();
       held(HUB_UPDATE_HELD_KEY, NOW - MIN);
       store.setSetting(HUB_UPDATE_HELD_SINCE, String(NOW - 25 * MIN));
-      expect(heldItem(superuser())).toMatchObject({ owner: "operator", flightTriage: "missed" });
+      expect(heldItem(superuser())).toMatchObject({ owner: "flight", flightTriage: "handling" });
     });
 
     it("is the operator's at once when FLIGHT is stopped", () => {

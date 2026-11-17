@@ -63,6 +63,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { closeSettledQuestions } from "../src/attention/question-watch.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms/index.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
@@ -101,13 +102,12 @@ import {
   type FlightWatchDeps,
   flightToolsDigest,
 } from "../src/flight/watch.ts";
-import { attentionItems } from "../src/hud.ts";
-import { closeSettledQuestions } from "../src/question-watch.ts";
+import { attentionItems } from "../src/hud/hud.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import { Store } from "../src/store.ts";
-import { foldTranscript } from "../src/streamjson.ts";
 
 const T0 = Date.parse("2026-10-22T12:00:00Z");
 const MIN = 60_000;
@@ -1304,20 +1304,20 @@ const raiseBlocked = (key = "blocked:r1:0", over: Record<string, unknown> = {}) 
 describe("FLIGHT's items to brief", () => {
   const items = () => flightState({ config, store, busy: [], now: T0 + 5 * MIN }).items;
 
-  it("lists the operator's items with no brief, not a briefed or controller one", () => {
+  it("lists the items with no brief, a failed cleanup included, but not a briefed one", () => {
     live("flight-1", "r-flight");
     raiseBlocked();
     raiseBlocked("cleanup-branch:x");
-    expect(items()).toEqual([
-      {
-        key: "note:blocked:r1:0",
-        kind: "blocked",
-        ticket: null,
-        text: "mc#7 parked",
-        ageMin: 5,
-        triageRemainingMs: 15 * MIN,
-      },
-    ]);
+    // a failed cleanup is FLIGHT's to clear: there is no controller to take it
+    expect(items().map((i) => i.key)).toContain("note:cleanup-branch:x");
+    expect(items().find((i) => i.key === "note:blocked:r1:0")).toEqual({
+      key: "note:blocked:r1:0",
+      kind: "blocked",
+      ticket: null,
+      text: "mc#7 parked",
+      ageMin: 5,
+      triageRemainingMs: 15 * MIN,
+    });
     // an incomplete brief fails the Needs you entry check: still FLIGHT's to rewrite (#1543)
     store.addBrief({
       key: "note:blocked:r1:0",
@@ -1327,7 +1327,7 @@ describe("FLIGHT's items to brief", () => {
       basis: "b",
       at: T0,
     });
-    expect(items().map((i) => i.key)).toEqual(["note:blocked:r1:0"]);
+    expect(items().map((i) => i.key)).toContain("note:blocked:r1:0");
     // a complete one settles it
     store.addBrief({
       key: "note:blocked:r1:0",
@@ -1342,7 +1342,7 @@ describe("FLIGHT's items to brief", () => {
       basis: "b",
       at: T0 + 1,
     });
-    expect(items()).toEqual([]);
+    expect(items().map((i) => i.key)).toEqual(["note:cleanup-branch:x"]);
   });
 
   it("leaves out FLIGHT's own replies and tags, and keeps another seat's reply", () => {
@@ -1356,6 +1356,40 @@ describe("FLIGHT's items to brief", () => {
     const listed = items();
     expect(listed.map((i) => i.kind)).toEqual(["message"]);
     expect(listed.some((i) => i.key.includes("flight-1"))).toBe(false);
+  });
+
+  it("wakes FLIGHT once for its own question after a brief, not once per follow-up line", async () => {
+    liveCrew();
+    const say = (at: number, text: string) =>
+      store.addComms({ at, from: "flight-1", to: COMMS_CAPCOM, ticket: null, text })?.id ?? "";
+    const first = say(T0, "briefed it, @CAPCOM OK?");
+    const key = `tag:flight-1:${first}`;
+    nowMs = T0 + MIN;
+    await watch.check();
+    store.addBrief({
+      key,
+      ask: "Ship it?",
+      ticket: "mc#7",
+      context: "FLIGHT asked whether the plan can ship and waits for your answer.",
+      recommendation: "Ship.",
+      options: [
+        { label: "Ship", answer: "Go." },
+        { label: "Hold", answer: "Wait." },
+      ],
+      basis: "b",
+      at: T0 + 2 * MIN,
+    });
+    nowMs = T0 + 3 * MIN;
+    await watch.check();
+    sendCalls.length = 0;
+    // two more lines after the brief: the item is relisted, and FLIGHT is woken for it once
+    say(T0 + 4 * MIN, "@CAPCOM one more thing, OK?");
+    nowMs = T0 + 5 * MIN;
+    await watch.check();
+    say(T0 + 6 * MIN, "@CAPCOM and another, OK?");
+    nowMs = T0 + 7 * MIN;
+    await watch.check();
+    expect(sendCalls.filter((c) => c.text.includes(key))).toHaveLength(1);
   });
 
   it("lists nothing without a FLIGHT seat", () => {

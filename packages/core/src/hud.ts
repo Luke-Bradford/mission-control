@@ -42,6 +42,8 @@ export const STALL_MS = 10 * 60_000;
 export const BACKGROUND_STALL_MS = 60 * 60_000;
 /** The Needs-you text of a stalled agent. */
 export const STALL_TEXT = "No output";
+/** Shown on a blocked ticket that has no parked reason and no open blocked-by ticket. */
+export const BLOCKED_NO_REASON_TEXT = "No reason recorded";
 export const STREAM_TEXT_MAX = 2000;
 /** A file's diff (`/api/agents/:id/files/diff`) is cut at this many characters. */
 export const DIFF_MAX_CHARS = 200_000;
@@ -201,10 +203,12 @@ export function stateChangeText(
 }
 
 /**
- * Activity text for a crew seat's turn starting: a message took it from idle to running.
- * Assumes only the operator messages seats today (FLIGHT and other seats arrive later).
+ * Activity text for a crew seat's turn starting. The hub, FLIGHT, another seat or the operator
+ * can wake a seat, so the text names no sender.
  */
-export const SEAT_TURN_START_TEXT = "Idle → Running (your message)";
+export const SEAT_TURN_START_TEXT = "Idle → Running";
+/** The text stored before 14 November 2026: still filtered with the turn starts it labels. */
+export const LEGACY_SEAT_TURN_START_TEXT = "Idle → Running (your message)";
 /** Activity text for a crew seat's turn ending. */
 export const SEAT_TURN_END_TEXT = "Running → Idle (turn ended)";
 

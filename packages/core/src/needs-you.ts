@@ -37,6 +37,14 @@ export function compactAttentionItem(i: AttentionItem): AttentionCompactItem {
 declare const NEEDS_YOU: unique symbol;
 
 /**
+ * Whether the operator has answered this item: its chosen option was applied and the item is read.
+ * A changed source is unread again, so it is no longer answered.
+ */
+export function answeredItem(i: AttentionItem): boolean {
+  return i.acked && i.brief?.choice?.state === "applied";
+}
+
+/**
  * `needsYouItems` output, and only that: a function that takes `NeedsYou` (the Board's
  * `cardNeeds`, `needsMe`) is handed the canonical set, never a raw or session-narrowed list.
  */
@@ -49,12 +57,12 @@ export type NeedsYou = readonly AttentionItem[] & { readonly [NEEDS_YOU]: true }
  * dock's and Comms' "Waiting on you", Comms' Decisions, FLIGHT's pulse, Stand-up focus and Operator
  * actions, the Overview banner, KPI and Live log filter, and the Board's "You:" chips and Needs-me
  * filter. The metric registry's Needs you (`METRICS.needsYou`) is its length, and the server's
- * Overview history (apps/server/src/overview.ts) counts the same set.
+ * Overview history (apps/server/src/hud/overview.ts) counts the same set.
  */
 export function needsYouItems(items: readonly AttentionItem[] | undefined): NeedsYou {
   const seen = new Set<string>();
   return (items ?? []).filter((i) => {
-    if (!isOperatorItem(i) || seen.has(i.key)) return false;
+    if (!isOperatorItem(i) || answeredItem(i) || seen.has(i.key)) return false;
     seen.add(i.key);
     return true;
   }) as unknown as NeedsYou;

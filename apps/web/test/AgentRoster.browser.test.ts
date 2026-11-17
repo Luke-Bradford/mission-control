@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { rosterApi, rosterRows } from "./agentRosterFixture.ts";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 
@@ -244,7 +244,17 @@ describeRendered("Agents roster in a browser", () => {
             scrollHeight: list?.scrollHeight,
           });
         }, null);
-      expect(await inFrame(), `beside the content ${await measured()}`).toBe(true);
+      // The roster list scrolls the chosen seat into view over a few frames, so poll until it settles.
+      try {
+        await vi.waitFor(
+          async () => {
+            if (!(await inFrame())) throw new Error("chosen seat is not in the roster frame yet");
+          },
+          { timeout: 5000, interval: 50 },
+        );
+      } catch (error) {
+        throw new Error(`beside the content ${await measured()}: ${(error as Error).message}`);
+      }
       await page.resize(980, 800);
       await page.evaluate(
         () =>

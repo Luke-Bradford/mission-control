@@ -5,10 +5,11 @@ import {
   type FlightConversationPage,
   type StreamEvent,
 } from "@mc/core";
-import { statNoted } from "./file-deps.ts";
+import { statNoted } from "./repo/file-deps.ts";
+import { readStreamPage } from "./run/stream.ts";
+import { timeOf } from "./run/streamjson.ts";
 import { commsPosition, type Store } from "./store.ts";
-import { readStreamPage } from "./stream.ts";
-import { transcriptFilePath } from "./transcript/file.ts";
+import { openTranscript, transcriptFilePath } from "./transcript/file.ts";
 
 type SourceRun = ReturnType<Store["flightConversationRuns"]>[number];
 interface Rank {
@@ -55,6 +56,91 @@ function readBound(store: Store, flightId: string): (Rank & { id: string }) | nu
   } catch {
     return null;
   }
+}
+
+interface TurnStart {
+  offset: number;
+  at: number | null;
+}
+
+/** Codex writes no operator line for a wake: its turns begin at `turn/started` notifications. */
+async function codexTurnStarts(transcriptPath: string): Promise<TurnStart[]> {
+  const starts: TurnStart[] = [];
+  const file = openTranscript(transcriptPath);
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let carry: Buffer = Buffer.alloc(0);
+    let carryAt = 0;
+    const take = (line: Buffer, offset: number) => {
+      if (!line.includes('"turn/started"')) return;
+      try {
+        const ev = JSON.parse(line.toString("utf8")) as { method?: unknown; timestamp?: unknown };
+        if (ev.method === "turn/started") starts.push({ offset, at: timeOf(ev.timestamp) });
+      } catch {
+        // a partial or non-JSON line starts no turn
+      }
+    };
+    for (let pos = 0; pos < file.size; ) {
+      const n = file.read(chunk, 0, chunk.length, pos);
+      if (n === 0) break;
+      let buf = Buffer.concat([carry, chunk.subarray(0, n)]);
+      let at = carryAt;
+      for (let nl = buf.indexOf(10); nl !== -1; nl = buf.indexOf(10)) {
+        take(buf.subarray(0, nl), at);
+        at += nl + 1;
+        buf = buf.subarray(nl + 1);
+      }
+      carry = Buffer.from(buf);
+      carryAt = at;
+      pos += n;
+      await yieldEventLoop();
+    }
+    take(carry, carryAt);
+  } finally {
+    file.close();
+  }
+  return starts;
+}
+
+/**
+ * Ids of the texts to leave out of the thread. A turn (from one wake line to the next) shows only its
+ * last text block, and none when FLIGHT messaged the operator in it: the reply is the answer. The
+ * progress lines stay in the transcript and on the run. Text before any wake line is never cut.
+ */
+function progressTexts(
+  events: readonly StreamEvent[],
+  replies: readonly number[],
+  starts: readonly TurnStart[],
+): Set<string> {
+  const dropped = new Set<string>();
+  let turnStart: number | null = null;
+  let started = false;
+  let texts: StreamEvent[] = [];
+  const close = (end: number | null) => {
+    if (started) {
+      const start = turnStart;
+      const replied =
+        start !== null && replies.some((at) => at >= start && (end === null || at < end));
+      for (const e of replied ? texts : texts.slice(0, -1)) dropped.add(e.id);
+    }
+    texts = [];
+  };
+  let next = 0;
+  for (const event of events) {
+    const offset = Number(event.id.split(":")[0]);
+    while (next < starts.length && starts[next].offset <= offset) {
+      close(starts[next].at);
+      turnStart = starts[next++].at;
+      started = true;
+    }
+    if (event.kind === "op") {
+      close(event.at);
+      turnStart = event.at;
+      started = true;
+    } else if (event.kind === "msg" && !internal(event.text)) texts.push(event);
+  }
+  close(null);
+  return dropped;
 }
 
 /** The old conversation join used threadMessages' latest three runs. Page the retained sources instead. */
@@ -105,37 +191,43 @@ async function runLines(store: Store, flightId: string, run: SourceRun): Promise
   let orderAt = run.startedAt;
   const seen = new Set<string>();
   const lines: Line[] = [];
+  const ordered: StreamEvent[] = [];
   for (const events of pages.reverse())
     for (const event of events) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
-      if (event.at !== null) orderAt = event.at;
-      if (event.kind !== "msg" || internal(event.text)) continue;
-      const id = `stream:${run.id}:${event.id}`;
-      const position = commsPosition(id);
-      if (!position) continue;
-      lines.push({
-        at: event.at ?? orderAt,
-        source: position.source,
-        offset: position.offset,
-        block: position.block,
-        message: {
-          id,
-          at: event.at,
-          from: flightId,
-          to: COMMS_CAPCOM,
-          text: event.text,
-          ticket: run.ticket ?? null,
-          label: null,
-          ref: null,
-          replyTo: null,
-          mentions: [],
-          reactions: [],
-          operator: false,
-          senderKind: "flight",
-        },
-      });
+      ordered.push(event);
     }
+  const starts = run.vendor === "codex" ? await codexTurnStarts(run.transcriptPath) : [];
+  const posted = progressTexts(ordered, store.flightOperatorMessageTimes(flightId), starts);
+  for (const event of ordered) {
+    if (event.at !== null) orderAt = event.at;
+    if (event.kind !== "msg" || internal(event.text) || posted.has(event.id)) continue;
+    const id = `stream:${run.id}:${event.id}`;
+    const position = commsPosition(id);
+    if (!position) continue;
+    lines.push({
+      at: event.at ?? orderAt,
+      source: position.source,
+      offset: position.offset,
+      block: position.block,
+      message: {
+        id,
+        at: event.at,
+        from: flightId,
+        to: COMMS_CAPCOM,
+        text: event.text,
+        ticket: run.ticket ?? null,
+        label: null,
+        ref: null,
+        replyTo: null,
+        mentions: [],
+        reactions: [],
+        operator: false,
+        senderKind: "flight",
+      },
+    });
+  }
   const bytes = lines.reduce((sum, line) => sum + Buffer.byteLength(line.message.text) + 256, 0);
   const after = statNoted(transcriptFilePath(run.transcriptPath));
   if (stamp.size === after.size && stamp.mtimeMs === after.mtimeMs && bytes <= CACHE_BYTES) {

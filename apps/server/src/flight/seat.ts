@@ -30,7 +30,7 @@ export function flightSeat(
 
 /**
  * Whether FLIGHT can run a held hub Update: a FLIGHT seat on a `superuser` repo. With it, the held
- * Update is FLIGHT's item (hud.ts routes it); without, it is the operator's.
+ * Update is FLIGHT's item (hud/hud.ts routes it); without, it is the operator's.
  */
 export const flightRunsUpdate = (config: CcConfig): boolean => {
   const found = flightSeat(config);

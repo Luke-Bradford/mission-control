@@ -38,10 +38,10 @@ import {
   type VersionInfo,
 } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
-import { cleanText } from "./clean.ts";
 import type { CliHold } from "./cli/update.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
-import { gitEnv } from "./files.ts";
+import { cleanText } from "./repo/clean.ts";
+import { gitEnv } from "./repo/files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
@@ -109,7 +109,7 @@ export interface HeldRange {
 }
 /**
  * The one item for a range auto-Update holds. FLIGHT runs it in a quiet moment while it is seated
- * and on a superuser repo (hud.ts gives it the triage window); otherwise it is the operator's.
+ * and on a superuser repo (hud/hud.ts gives it the triage window); otherwise it is the operator's.
  */
 export const HUB_UPDATE_HELD_KEY = "hub-update-held";
 /** An Update only a person can run (a shortcut in the change, pnpm, a checkout off main): the operator's at once. */

@@ -11,7 +11,7 @@ import {
   reviewPausedMs,
   startUnpausedRun,
   writeCrewPause,
-} from "../src/crew-pause.ts";
+} from "../src/config/crew-pause.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;

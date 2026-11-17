@@ -15,6 +15,7 @@ import type {
   BriefReadState,
 } from "./briefs.ts";
 import type { CrewPause } from "./crew-pause.ts";
+import type { FixSessionArm } from "./fix-session-trial.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
@@ -282,6 +283,12 @@ export interface RunLoop {
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
   mergeHold?: { by: "FLIGHT" | "CAPCOM"; reason: string; at: number; from?: LoopPhase } | null;
+  /** The fix-session trial arm, assigned once at the run's first fix boundary (#1643). */
+  fixArm?: FixSessionArm;
+  /** The fresh CLI sessions the run started for a fix, oldest first. */
+  fixSessions?: { sessionId: string; at: number; reason: "ci" | "review" }[];
+  /** Fresh starts that failed, so the run resumed its session instead. */
+  fixFallbacks?: { at: number; reason: string }[];
 }
 
 /** One `loop_events` row. */
@@ -466,6 +473,10 @@ export interface PrCheck {
   conclusion: string; // a check run's conclusion (its status until done); a status's state
   attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
   url: string | null;
+  /** When a check run began running (ms); absent for a status, a queued run, or a read before this was kept. */
+  startedAt?: number;
+  /** When a check run finished (ms); absent until it has. */
+  completedAt?: number;
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
@@ -581,6 +592,14 @@ export interface FlowIssue {
   /** First move into Ready / In progress / In review / Ready for QA; null when it never had one. */
   startAt: number | null;
   doneAt: number | null;
+}
+
+/** An observed board-column move in the stored flow history. */
+export interface FlowColumnMove {
+  repoId: RepoId;
+  number: number;
+  at: number;
+  column: HudColumn;
 }
 
 /** One merged PR and the CI state of its earliest commit that has a check rollup. */
@@ -1003,7 +1022,7 @@ export interface CrewLoop {
   planned?: boolean;
   /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
-  /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
+  /** What the run waits on (runWait in apps/server/src/hud/hud.ts), else null. */
   wait?: LoopWait | null;
   /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
   waitText?: string | null;
@@ -1263,15 +1282,17 @@ export interface BriefOption {
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
-/** How a question left Needs you without an answer. */
+/** How a question left Needs you: without an answer, or ("answered") by the operator's chosen option. */
 export type QuestionClosureKind =
+  | "answered"
   | "cleared"
   | "returned"
   | "withdrawn"
   | "ticket-closed"
   | "pr-merged"
   | "pr-closed"
-  | "run-ended";
+  | "run-ended"
+  | "repo-unwatched";
 /** A question closed without an answer, with the reason; shown under Answered. */
 export interface QuestionClosure {
   key: string;
@@ -1336,6 +1357,11 @@ export interface AttentionBrief {
 }
 
 export interface AttentionItem {
+  /**
+   * Set when the item's repo is not watched: its plan and materials cannot be loaded, and `text`
+   * says so plainly for the panel to show in their place.
+   */
+  repoUnwatched?: { repoId: string; text: string };
   hold?: AttentionHold;
   holdReleased?: string;
   /** When that hold was released; FLIGHT's brief older than this is stale. */
@@ -1588,7 +1614,15 @@ export interface OverviewSummary {
      */
     inFlight: { count: number; oldestAt: number | null; series?: number[] };
     /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
-    ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
+    ciPassRate24h: {
+      pct: number | null;
+      /** Heads whose checks finished and counted (passed or failed), not loop events. */
+      runs: number;
+      /** Heads left out of `pct` and `runs` because their only finished checks were cancelled. */
+      cancelled?: number;
+      redNow: number;
+      series?: (number | null)[];
+    };
     /**
      * The operator's whole inbox (one per key, never narrowed by the session filter), and its
      * episodes open at each minute end, including retained resolved episodes.
@@ -1609,7 +1643,7 @@ export interface OverviewSummary {
 }
 
 export interface PipelineStage {
-  stage: "ready" | "building" | "checks" | "review" | "merging" | "merged";
+  stage: "ready" | "building" | "checks" | "review" | "merging" | "merged" | "blocked";
   count: number;
   oldestAt: number | null;
   cards: PipelineCard[];
@@ -1626,6 +1660,10 @@ export interface PipelineCard {
   /** The board item's Priority and Size, when the ticket has them. */
   priority?: string | null;
   size?: string | null;
+  /** On a `blocked` card: why it is blocked. */
+  blockedReason?: string;
+  /** On a `merged` card: the PR merged but its ticket is still open, so it is merged, not done. */
+  ticketOpen?: boolean;
   /**
    * Set while the PR's newest review found blocking problems on its current head: the ticket
    * is in rework (In progress with its seat), or Ready after its run ended, and has been reviewed.

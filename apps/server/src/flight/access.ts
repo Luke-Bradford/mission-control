@@ -15,9 +15,9 @@ import {
   MC_TOOL_NAMES,
 } from "@mc/core";
 import { z } from "zod";
-import { isKept, SAFE_BRANCH } from "../branch-tidy.ts";
 import type { McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
+import { isKept, SAFE_BRANCH } from "../repo/branch-tidy.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { PowerHelpers } from "./powers.ts";
 import { cut } from "./tools.ts";
