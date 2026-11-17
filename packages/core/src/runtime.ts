@@ -54,7 +54,6 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.logDecision,
-  MC_TOOL_NAMES.waitOn,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
@@ -104,6 +103,29 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.operator,
   MC_TOOL_NAMES.ghWrite,
   MC_TOOL_NAMES.crewTidy,
+];
+
+/** FLIGHT calls that inspect or keep notes, rather than changing the crew's state. */
+export const FLIGHT_NON_ACTING_TOOLS: readonly McToolName[] = [
+  MC_TOOL_NAMES.codeHealth,
+  MC_TOOL_NAMES.readTicket,
+  MC_TOOL_NAMES.flightState,
+  MC_TOOL_NAMES.screenshotHud,
+  MC_TOOL_NAMES.readPr,
+  MC_TOOL_NAMES.readCiLog,
+  MC_TOOL_NAMES.ghRead,
+  MC_TOOL_NAMES.listTickets,
+  MC_TOOL_NAMES.ledger,
+  MC_TOOL_NAMES.recall,
+  MC_TOOL_NAMES.commsRead,
+  MC_TOOL_NAMES.commsInbox,
+  MC_TOOL_NAMES.logDecision,
+  MC_TOOL_NAMES.updateBrief,
+  MC_TOOL_NAMES.track,
+  MC_TOOL_NAMES.untrack,
+  MC_TOOL_NAMES.remember,
+  MC_TOOL_NAMES.forget,
+  MC_TOOL_NAMES.commsReact,
 ];
 
 /**

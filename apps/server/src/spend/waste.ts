@@ -651,7 +651,6 @@ function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[
   const days: FlightDay[] = Array.from({ length: FLIGHT_ACTIVITY_DAYS }, (_, i) => ({
     since: since + i * 24 * HOUR_MS,
     wakes: 0,
-    waits: 0,
     flightTokens: 0,
     totalTokens: 0,
     tokenShare: null,
@@ -663,10 +662,6 @@ function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[
   for (const w of store.flightWakes(since)) {
     const d = bucket(w.at);
     if (d !== undefined) d.wakes += 1;
-  }
-  for (const at of store.flightWaitTimes(since)) {
-    const d = bucket(at);
-    if (d !== undefined) d.waits += 1;
   }
   for (const r of store.waste.runsSince(since)) {
     const d = bucket(r.startedAt);

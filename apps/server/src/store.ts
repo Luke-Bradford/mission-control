@@ -72,6 +72,7 @@ import {
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightPointerKind,
+  type FlightWakeAction,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -1216,18 +1217,6 @@ export class Store {
         ...sessionsOf(r.a_sessions),
       },
     }));
-  }
-
-  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
-  fixTrialRuns(): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
-           ORDER BY started_at, seq`,
-        )
-        .all() as Row[]
-    ).map(toRun);
   }
 
   /** Context size of every stored model call of runs that started since `since`. */
@@ -3675,9 +3664,10 @@ export class Store {
       this.db.prepare("DELETE FROM flow_column_moves WHERE repo_id = ?").run(repoId);
       this.db.prepare("DELETE FROM flow_prs WHERE repo_id = ?").run(repoId);
       const insIssue = this.db.prepare(
-        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at, title) VALUES (?, ?, ?, ?, ?, ?)",
       );
-      for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
+      for (const i of issues)
+        insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt, i.title ?? null);
       const insMove = this.db.prepare(
         "INSERT INTO flow_column_moves (repo_id, number, at, column) VALUES (?, ?, ?, ?)",
       );
@@ -3717,6 +3707,7 @@ export class Store {
       size: r.size as string | null,
       startAt: r.start_at as number | null,
       doneAt: r.done_at as number | null,
+      title: r.title as string | null,
     }));
   }
 
@@ -6617,8 +6608,15 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
+  addFlightWake(
+    runId: string,
+    at: number,
+    reasons: string[],
+    wakeId?: string,
+    rode: string[] = [],
+    immediate: string[] = [],
+  ): void {
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -6629,6 +6627,14 @@ export class Store {
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     return this.flightQ.flightWakes(since);
+  }
+
+  flightWakeActions(
+    since: number,
+    until: number,
+    nonActing: readonly string[],
+  ): FlightWakeAction[] {
+    return this.flightQ.flightWakeActions(since, until, nonActing);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
@@ -6770,11 +6776,6 @@ export class Store {
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
     return this.flightQ.flightDecisions(since, limit);
-  }
-
-  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
-  flightWaitTimes(since: number): number[] {
-    return this.flightQ.flightWaitTimes(since);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

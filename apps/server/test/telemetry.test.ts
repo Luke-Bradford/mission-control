@@ -706,6 +706,8 @@ describe("capacity", () => {
       tickets: [
         {
           ticket: "shop-app#42",
+          title: null,
+          size: "S",
           readyAt: since,
           startedAt: since + HOUR,
           mergedAt: since + 3 * HOUR,
@@ -771,6 +773,8 @@ describe("capacity", () => {
     expect(tel("6h", NOW).series?.tickets).toEqual([
       {
         ticket: "shop-app#43",
+        title: null,
+        size: "S",
         readyAt: since - 4 * HOUR,
         startedAt: since - 3 * HOUR,
         mergedAt: since - 2 * HOUR,
@@ -793,10 +797,89 @@ describe("capacity", () => {
     expect(tel("6h", NOW).series?.tickets).toEqual([
       {
         ticket: "shop-app#44",
+        title: null,
+        size: "S",
         readyAt: since + HOUR,
         startedAt: null,
         mergedAt: null,
         doneAt: null,
+      },
+    ]);
+  });
+
+  it("covers 14 days of tickets whatever the range, with each title and board size", () => {
+    const card = (issueNumber: number, title: string, size: string | null) => ({
+      repoId: "shop-app",
+      issueNumber,
+      title,
+      status: "Done",
+      state: "done" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: NOW,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size,
+      closed: true,
+      prioritySource: null,
+      createdAt: NOW,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [card(50, "Ten days ago", "M")]);
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 50,
+          size: "M",
+          startAt: NOW - 11 * DAY,
+          doneAt: NOW - 10 * DAY,
+        },
+        {
+          repoId: "shop-app",
+          number: 51,
+          size: null,
+          title: "Collected, then off the board",
+          startAt: NOW - 15 * DAY,
+          doneAt: NOW - 14 * DAY,
+        },
+        {
+          repoId: "shop-app",
+          number: 52,
+          size: "S",
+          startAt: NOW - 20 * DAY,
+          doneAt: NOW - 14 * DAY - 1,
+        },
+      ],
+      [],
+    );
+
+    expect(tel("1h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#51",
+        title: "Collected, then off the board",
+        size: null,
+        readyAt: NOW - 15 * DAY,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: NOW - 14 * DAY,
+      },
+      {
+        ticket: "shop-app#50",
+        title: "Ten days ago",
+        size: "M",
+        readyAt: NOW - 11 * DAY,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: NOW - 10 * DAY,
       },
     ]);
   });
@@ -813,6 +896,8 @@ describe("capacity", () => {
     expect(tel("6h", NOW).series?.tickets).toEqual([
       {
         ticket: "shop-app#44",
+        title: null,
+        size: "S",
         readyAt: since - HOUR,
         startedAt: null,
         mergedAt: null,
@@ -1740,6 +1825,66 @@ describe("crew seats", () => {
       retroFindingsPerPr: null,
       sentBackPrs: 0,
       humanReviewWaitMs: null,
+    });
+  });
+
+  describe("quality14, daily counts over the flow window", () => {
+    const MIDNIGHT = at("2026-10-16T23:00:00Z"); // local midnight starting 2026-10-17 (BST)
+    const seed = () => {
+      store.replaceFlow(
+        "shop-app",
+        [],
+        [
+          { repoId: "shop-app", number: 1, mergedAt: MIDNIGHT - 1, firstPushCi: "passing" },
+          { repoId: "shop-app", number: 2, mergedAt: MIDNIGHT, firstPushCi: "failing" },
+          { repoId: "shop-app", number: 3, mergedAt: MIDNIGHT + HOUR, firstPushCi: "passing" },
+          { repoId: "shop-app", number: 4, mergedAt: MIDNIGHT + 2 * HOUR, firstPushCi: null },
+        ],
+      );
+      store.replacePullRequests(
+        "shop-app",
+        [pr(1, MIDNIGHT - 1), pr(2, MIDNIGHT), pr(3, MIDNIGHT + HOUR)],
+        0,
+      );
+      reported("a1", 1, 1, 0);
+      reported("a2", 2, 1, 1);
+      reported("b2", 2, 2, 0);
+      reported("a3", 3, 1, 0);
+    };
+
+    it("counts a PR on its local day, with zeros for a day with no activity", () => {
+      seed();
+      const q = tel("7d").quality14 ?? [];
+      expect(q).toHaveLength(14);
+      expect(q[13]).toEqual({
+        day: "2026-10-17",
+        ciPrs: 2,
+        ciGreenPrs: 1,
+        reviewedPrs: 2,
+        firstPassPrs: 1,
+        roundsSum: 3,
+      });
+      expect(q[12]).toEqual({
+        day: "2026-10-16",
+        ciPrs: 1,
+        ciGreenPrs: 1,
+        reviewedPrs: 1,
+        firstPassPrs: 1,
+        roundsSum: 1,
+      });
+      expect(q[0]).toEqual({
+        day: "2026-10-04",
+        ciPrs: 0,
+        ciGreenPrs: 0,
+        reviewedPrs: 0,
+        firstPassPrs: 0,
+        roundsSum: 0,
+      });
+    });
+
+    it("is the same whichever range is asked for", () => {
+      seed();
+      expect(tel("1h").quality14).toEqual(tel("7d").quality14);
     });
   });
 
