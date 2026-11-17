@@ -396,13 +396,6 @@ CREATE TABLE IF NOT EXISTS profile_overrides (
   repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
   by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
 );
--- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
-CREATE TABLE IF NOT EXISTS holds (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
-  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0,
-  told_state TEXT
-);
-CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 -- FLIGHT's living brief: one row per crew session and section.
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,

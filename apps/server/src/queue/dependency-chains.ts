@@ -38,7 +38,6 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
     prs.filter((p) => p.state === "open"),
   );
   const active = runs.filter((r) => r.endedAt === null);
-  const holds = store.activeHolds().filter((h) => h.ref.startsWith(`${repoId}#`));
   const record = readWaitRecord(store, repoId);
   const work = new Map<string, DependencyWork>();
   const edges: DependencyEdge[] = [];
@@ -184,10 +183,6 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
       const since = observedWaitSince(observed, `PR ${underlying.number}`);
       add(`PR ${pr.number}`, `PR ${underlying.number}`, "stacked", since);
     }
-  }
-  for (const hold of holds) {
-    if (prs.find((p) => p.number === hold.waitsOn)?.state === "merged") continue;
-    add(hold.ref, `PR ${hold.waitsOn}`, "held", hold.at);
   }
   for (const run of active.filter((r) => !!r.loop?.aside)) {
     const ahead = active.find(

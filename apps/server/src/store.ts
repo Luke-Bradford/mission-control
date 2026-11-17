@@ -262,7 +262,6 @@ import {
   type FlightBriefRow,
   HISTORY_BATCH_ROWS,
   HISTORY_SWEEP_MAX_BATCHES,
-  type Hold,
   type KeeperCursor,
   LIVE_LOOP_EVENTS_LIMIT,
   type LockHoldRow,
@@ -7032,49 +7031,6 @@ export class Store {
           },
         ]),
     );
-  }
-
-  /** Holds a card in Backlog behind PR `waitsOn`; an earlier open hold on the card is replaced. */
-  addHold(h: { ref: string; waitsOn: number; basis: string; at: number }): void {
-    this.releaseHold(h.ref, h.at);
-    this.db
-      .prepare("INSERT INTO holds (ref, waits_on, basis, at) VALUES (?, ?, ?, ?)")
-      .run(h.ref, h.waitsOn, h.basis, h.at);
-  }
-
-  /** Releases the card's open hold, if it has one. */
-  releaseHold(ref: string, at: number): void {
-    this.db
-      .prepare("UPDATE holds SET released_at = ? WHERE ref = ? AND released_at IS NULL")
-      .run(at, ref);
-  }
-
-  /** The holds not yet released, oldest first. */
-  activeHolds(): Hold[] {
-    const rows = this.db
-      .prepare("SELECT * FROM holds WHERE released_at IS NULL ORDER BY at, id")
-      .all() as Row[];
-    return rows.map((r) => ({
-      ref: r.ref as string,
-      waitsOn: r.waits_on as number,
-      basis: r.basis as string,
-      at: r.at as number,
-      releasedAt: r.released_at as number | null,
-      seen: r.seen === 1,
-      toldState: (r.told_state as string | null) ?? null,
-    }));
-  }
-
-  /** The board has shown the card's open hold in Backlog. */
-  markHoldSeen(ref: string): void {
-    this.db.prepare("UPDATE holds SET seen = 1 WHERE ref = ? AND released_at IS NULL").run(ref);
-  }
-
-  /** FLIGHT has been told the card's open hold waits on a PR in `state`. */
-  markHoldTold(ref: string, state: string): void {
-    this.db
-      .prepare("UPDATE holds SET told_state = ? WHERE ref = ? AND released_at IS NULL")
-      .run(state, ref);
   }
 
   /** How many briefs were written at or after `since`. */

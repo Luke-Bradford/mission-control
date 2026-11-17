@@ -772,10 +772,6 @@ export const moveWaitsOnText = (ref: string, open: readonly string[]): string =>
   `Not moved: ${ref} waits on ${open.join(", ")}.`;
 export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
 export const movedDecision = (to: string): string => `Moved to ${to}`;
-export const heldDecision = (pr: number): string => `Held in Backlog behind PR #${pr}`;
-export const holdNotOpenPrText = (repoId: string, pr: number): string =>
-  `Not moved: PR #${pr} is not an open PR in ${repoId}.`;
-export const WAITS_ON_ONLY_BACKLOG = "Not moved: waits_on is only for a move to Backlog.";
 export const movedText = (ref: string, to: string): string =>
   `Moved ${ref} to ${to}. Recorded in Decided without you.`;
 
@@ -1267,20 +1263,6 @@ export interface FlightState {
      */
     returned?: string[];
   }[];
-  /**
-   * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
-   * the PR waited on: once it is not "open", the hold is ready to release. "unknown" means the PR
-   * is not in the stored read (it may have merged or closed, or fallen past the poll's limit): check
-   * the PR yourself before you keep or release the hold. `told` is set once
-   * FLIGHT has been woken for that, so a hold it keeps does not wake it again.
-   */
-  holds: {
-    ref: string;
-    waitsOn: number;
-    ageMin: number;
-    prState: "open" | "merged" | "closed" | "unknown";
-    told: boolean;
-  }[];
   /** Reviews waiting to start or already assigned, grouped by their review seat. */
   reviewQueue?: {
     queued: number;
@@ -1458,7 +1440,6 @@ export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
   "parked",
   "free",
   "idle",
-  "release",
   "breaker",
   "holdsInForce",
   "discussions",
@@ -1614,7 +1595,6 @@ export function wakeSummary(s: FlightState): string {
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
   const inReview = s.prs.filter((p) => p.state === "open").length;
-  const toRelease = s.holds.filter((h) => h.prState !== "open" && !h.told).length;
   const duePlans = s.planned?.filter((p) => p.minutesFromNow <= 0).length ?? 0;
   const parts = [
     s.signals.length > 0 ? counted(s.signals.length, "signal", "signals") : "",
@@ -1629,7 +1609,6 @@ export function wakeSummary(s: FlightState): string {
     inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
     s.items.length > 0 ? `${counted(s.items.length, "item", "items")} to brief` : "",
     duePlans > 0 ? `${counted(duePlans, "planned item", "planned items")} due` : "",
-    toRelease > 0 ? `${counted(toRelease, "hold", "holds")} to release` : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }

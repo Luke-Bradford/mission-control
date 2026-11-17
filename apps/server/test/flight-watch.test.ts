@@ -800,21 +800,6 @@ describe("FLIGHT's flow queues", () => {
     ]);
   });
 
-  it("shows a held dependent PR in both the wait and block sides", () => {
-    store.upsertPullRequests("mc", [stored(7), stored(9)], T0);
-    store.addHold({ ref: "mc#9", waitsOn: 7, basis: "Depends on PR 7", at: T0 });
-
-    expect(flightState({ config, store, busy: [], now: T0 }).prFlow?.rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ pr: 7, blocks: ["mc#9", "PR 9"] }),
-        expect.objectContaining({
-          pr: 9,
-          waitsOn: expect.arrayContaining(["PR 7 to merge (mc#9)"]),
-        }),
-      ]),
-    );
-  });
-
   it("keeps a review carried across a main merge current", () => {
     live("guido-1", "r-guido");
     store.setRunLoop("r-guido", {
@@ -1151,134 +1136,6 @@ describe("FLIGHT's flow queues", () => {
         expect.objectContaining({ kind: "seat-stopped", reason: "INCO-1 is stopped" }),
       ]),
     );
-  });
-});
-
-describe("FLIGHT's holds", () => {
-  const heldCard = (status: string) =>
-    store.replaceBoard("mc", [
-      {
-        repoId: "mc",
-        issueNumber: 9,
-        title: "Ticket 9",
-        status,
-        state: "planned",
-        labels: [],
-        priority: null,
-        updatedAt: T0,
-        url: "u",
-        stage: null,
-        owner: null,
-        parent: null,
-        subIssues: null,
-        blockedBy: [],
-        milestone: null,
-        size: null,
-        closed: false,
-        prioritySource: null,
-        createdAt: T0,
-        itemId: "I9",
-        projectId: "P1",
-      },
-    ]);
-  beforeEach(() => heldCard("Backlog"));
-  const hold = () => store.addHold({ ref: "mc#9", waitsOn: 7, basis: "same files", at: T0 });
-
-  it("lists a hold in the digest with its age", () => {
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    nowMs = T0 + 5 * MIN;
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([
-      { ref: "mc#9", waitsOn: 7, ageMin: 5, prState: "open", told: false },
-    ]);
-  });
-
-  it("wakes once when the waited-on PR merges, with the hold listed", async () => {
-    liveCrew();
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    await watch.check();
-    // an open PR moving through the pipeline wakes nothing; the hold's release is the wake
-    expect(sendCalls).toEqual([]);
-    // updatedAt is over an hour old, so the PR is not listed and only the hold can cause the wake
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
-      T0 + MIN,
-    );
-    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0]?.text).toContain("1 hold to release");
-    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
-    expect(sent.holds).toMatchObject([{ ref: "mc#9", waitsOn: 7, prState: "merged" }]);
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-  });
-
-  it("wakes when the PR closes unmerged, and a released hold wakes nothing", async () => {
-    flightOnly();
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })],
-      T0 + MIN,
-    );
-    sendCalls = [];
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0]?.text).toContain("1 hold to release");
-    // FLIGHT keeps the hold: it is told once, not at every re-wake
-    nowMs = T0 + 3 * 60 * MIN;
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
-      { ref: "mc#9", prState: "closed", told: true },
-    ]);
-    store.releaseHold("mc#9", nowMs);
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
-  });
-
-  it("reports a hold whose PR is not in the stored read as unknown", () => {
-    hold();
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
-      { ref: "mc#9", prState: "unknown", told: false },
-    ]);
-  });
-
-  it("remembers a hold was told across a store reopen", () => {
-    store.upsertPullRequests("mc", [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })], T0);
-    hold();
-    markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
-    store.close();
-    store = new Store(join(dir, "mc.sqlite"));
-    store.setSetting(
-      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
-      JSON.stringify({ day: "2026-10-22", told: true }),
-    );
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
-      { ref: "mc#9", prState: "closed", told: true },
-    ]);
-  });
-
-  it("drops a hold whose card the board has moved past, and wakes for its merged PR", async () => {
-    liveCrew();
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    await watch.check();
-    sendCalls = [];
-    heldCard("Ready");
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
-      T0 + MIN,
-    );
-    nowMs = T0 + MIN;
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(store.activeHolds()).toEqual([]);
   });
 });
 
@@ -3207,7 +3064,6 @@ describe("wakeSummary", () => {
     tickets: [],
     prs: [],
     items: [],
-    holds: [],
     recent: [],
     breaker: { tripped: false, reason: null },
     brief: [],

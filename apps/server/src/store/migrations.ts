@@ -10,7 +10,7 @@ export const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 /** Tables an older release made and this one does not use; an existing database drops them. */
-const RETIRED_TABLES = ["run_handoffs", "ticket_waits"];
+const RETIRED_TABLES = ["run_handoffs", "ticket_waits", "holds"];
 
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
@@ -283,7 +283,6 @@ class Migrations {
     this.addColumn("attention_notes", "dismissed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
-    this.addColumn("holds", "told_state", "TEXT");
     this.addColumn("decision_defaults", "target", "TEXT");
     this.addColumn("decision_defaults", "answer", "TEXT");
     this.addColumn("decision_defaults", "delivered_at", "INTEGER");

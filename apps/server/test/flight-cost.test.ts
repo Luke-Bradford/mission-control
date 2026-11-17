@@ -230,7 +230,6 @@ describe("routine wakes wait for the batch window", () => {
       { operator: ["x"] },
       { parked: ["x"] },
       { triage: ["x"] },
-      { release: ["x"] },
       { free: ["x"] },
       { idle: ["x"] },
       { signals: ["waste_alarm:x"] },

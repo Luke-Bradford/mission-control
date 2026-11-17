@@ -686,13 +686,10 @@ const shownPrs = (store: Store): Set<string> => {
 const shownKey = (p: { repoId: string; number: number; state: string }): string =>
   `${p.repoId}#${p.number}:${p.state}`;
 
-/** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
+/** FLIGHT has received `s`: each merged or closed PR in it is not listed again. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
   let changed = false;
-  for (const h of s.holds) {
-    if (h.prState !== "open") store.markHoldTold(h.ref, h.prState);
-  }
   for (const p of s.prs) {
     if (p.state !== "open") {
       const key = shownKey({ repoId: s.repo, number: p.pr, state: p.state });
@@ -715,7 +712,6 @@ export const deliveredFacts = (s: FlightState): string =>
     retrospective: undefined,
     triage: [],
     prs: s.prs.filter((p) => p.state === "open"),
-    holds: s.holds.map((h) => ({ ...h, told: true })),
   });
 
 /** The items FLIGHT was last shown, by key, each with a hash of its text. */
@@ -842,9 +838,7 @@ function idleSeats(
   rules: { areas: Record<string, string[]> } | null,
   fit: Record<string, string[]>,
 ): FlightIdleSeats | undefined {
-  // a ticket held behind an open PR is waiting by FLIGHT's own choice, not open work for a seat
-  const held = new Set(i.store.activeHolds().map((h) => h.ref));
-  const open = i.allTickets.filter((t) => !held.has(t.ref));
+  const open = i.allTickets;
   const near = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
     if (rules === null || Object.keys(rules.areas).length === 0) return true;
     if (claimedByOther(t, i.hubLogin)) return false;
@@ -974,7 +968,6 @@ export function flightState(i: {
       prs: [],
       prFlow: { generatedAt: now, rows: [], unowned: 0, metrics: [] },
       items: [],
-      holds: [],
       reviewQueue: { queued: 0, running: 0, seats: [] },
       mergeQueue: [],
       flowHolds: [],
@@ -1257,38 +1250,6 @@ export function flightState(i: {
       parked: parkOf(store, r),
     }));
 
-  const prStates = new Map<number, FlightState["prs"][number]["state"]>(
-    store.pullRequests(session.repoId).map((p) => [p.number, p.state]),
-  );
-  // A hold ends when the board has moved its card past Backlog (or closed or dropped it). A PR
-  // gone from the stored read is reported as unknown, for FLIGHT to check.
-  const holds = store.activeHolds().flatMap((h) => {
-    const card = board.find((b) => `${b.repoId}#${b.issueNumber}` === h.ref);
-    // The stored board lags the move to Backlog until the next poll, so a card is only past its
-    // hold once the board has shown it in Backlog.
-    // a card a run has taken is past its hold, wherever the board shows it
-    if (
-      card === undefined ||
-      card.closed ||
-      active.has(h.ref) ||
-      (h.seen && hudColumnOf(card) !== "Backlog")
-    ) {
-      store.releaseHold(h.ref, now);
-      return [];
-    }
-    if (!h.seen && hudColumnOf(card) === "Backlog") store.markHoldSeen(h.ref);
-    const prState: FlightState["holds"][number]["prState"] = prStates.get(h.waitsOn) ?? "unknown";
-    return [
-      {
-        ref: h.ref,
-        waitsOn: h.waitsOn,
-        ageMin: Math.floor((now - h.at) / 60_000),
-        prState,
-        told: h.toldState === prState,
-      },
-    ];
-  });
-
   const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
   const capacity = storedMachineCapacity(store, now, capacityConfig);
   const queuedReviews = reviewQueue.queued;
@@ -1525,7 +1486,6 @@ export function flightState(i: {
     blocked: blockedWork(store, session.repoId, now, inThisLane(config)),
     prs,
     items,
-    holds,
     reviewQueue,
     mergeQueue,
     conflicts,
@@ -1777,7 +1737,6 @@ export function wakeFacts(
     // read and not answered: owed until FLIGHT replies to it
     owed: s.wake?.owed ?? [],
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
-    release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
   });
 }
@@ -1808,13 +1767,6 @@ const startableFor = (s: FlightState): { free: string[]; startable: string[] } =
 const wakeItems = (s: Pick<FlightState, "items">): FlightState["items"] =>
   s.items.filter((x) => x.kind !== "ready");
 
-/** The held cards whose PR has merged or closed, ready for FLIGHT to promote again. */
-const releasable = (s: FlightState): string[] =>
-  s.holds
-    .filter((h) => h.prState !== "open" && !h.told)
-    .map((h) => `${h.ref}:${h.waitsOn}:${h.prState}`)
-    .sort();
-
 /** The build seats left stopped, which only a start (or the operator) brings back into rotation. */
 const stoppedSeats = (s: FlightState): string[] =>
   s.seats
@@ -1843,7 +1795,6 @@ export function pending(
     s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
     s.questions.length > 0 ||
     wakeItems(s).length > 0 ||
-    releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
     startableFor(s).free.length > 0 ||
     idleFacts(s.wake?.idle).length > 0 ||
