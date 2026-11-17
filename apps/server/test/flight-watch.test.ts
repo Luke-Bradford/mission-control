@@ -5579,14 +5579,35 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls[0]?.text.split("\n")[0]).toContain("free");
   });
 
-  it("a free seat right after a wake waits for the batch window, and a question does not", async () => {
+  it("a learned batched reason does not wake FLIGHT alone; an immediate item does", async () => {
+    for (let n = 0; n < 10; n++)
+      store.addFlightWake("old-flight", nowMs - (20 + n) * MIN, ["prFlow"]);
+    flightOnly();
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+    await tick();
+    holdPr({ ci: "pending" });
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    ask("inco-1", "r-inco-2");
+    await tick();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("items");
+  });
+
+  it("a second Ready ticket after a wake waits for the batch window, and a question does not", async () => {
     flightOnly();
     store.setSeatSession(row("guido-1", null));
-    await watch.check();
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     ask("inco-1", "r-inco");
     await tick();
     expect(sendCalls).toHaveLength(1);
-    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.replaceBoard("mc", [
+      triageCard({ status: "Ready" }),
+      triageCard({ status: "Ready", issueNumber: 777 }),
+    ]);
     nowMs += FLIGHT_MIN_WAKE_GAP_MS + MIN;
     await tick();
     // routine, and the last wake was only minutes ago
@@ -5594,7 +5615,7 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     nowMs += FLIGHT_BATCH_MS;
     await tick();
     expect(sendCalls).toHaveLength(2);
-    expect(sendCalls[1]?.text.split("\n")[0]).toContain("free");
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("t");
   });
 
   it("a batch timer does not hold back a question that arrives inside the gap", async () => {
@@ -5712,12 +5733,16 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
   it("settling a question does not send the next routine fact at once", async () => {
     flightOnly();
     store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     ask("inco-1", "r-inco");
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
     nowMs += FLIGHT_MIN_WAKE_GAP_MS + MIN;
-    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.replaceBoard("mc", [
+      triageCard({ status: "Ready" }),
+      triageCard({ status: "Ready", issueNumber: 777 }),
+    ]);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     nowMs += FLIGHT_BATCH_MS;
@@ -5928,16 +5953,19 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
   it("shows the end of the batch window as the next wake while routine facts wait", async () => {
     flightOnly();
     store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
     ask("inco-1", "r-inco");
     await watch.check();
     const wokeAt = nowMs;
     nowMs += 3 * MIN;
-    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    store.replaceBoard("mc", [
+      triageCard({ status: "Ready" }),
+      triageCard({ status: "Ready", issueNumber: 777 }),
+    ]);
     await watch.check();
     expect(sendCalls).toHaveLength(1);
-    // the free seat with a ticket open also wakes FLIGHT after FLIGHT_IDLE_MS (#1451), if sooner
     expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBe(
-      Math.min(wokeAt + FLIGHT_BATCH_MS, nowMs + FLIGHT_IDLE_MS),
+      Math.min(wokeAt + FLIGHT_BATCH_MS, wokeAt + FLIGHT_IDLE_MS),
     );
   });
 
@@ -6074,7 +6102,7 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     ask();
     await tick();
     expect(store.flightWakes(0)).toEqual([
-      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1" },
+      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1", rode: [] },
     ]);
     const view = flightView(config, store, nowMs + MIN);
     expect(view.wakeHistory?.byReason).toEqual([

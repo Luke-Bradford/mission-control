@@ -81,6 +81,7 @@ class Migrations {
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
+    this.addColumn("flight_wakes", "rode", "TEXT");
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );

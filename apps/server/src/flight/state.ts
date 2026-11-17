@@ -23,6 +23,8 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IMMEDIATE_REASONS,
+  FLIGHT_IMMEDIATE_SIGNALS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -344,8 +346,9 @@ export function recordWakeReasons(
   at: number,
   causes: string[],
   wakeId?: string,
+  rode: string[] = [],
 ): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId, rode);
 }
 
 /** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
@@ -2134,20 +2137,49 @@ export function leftWakeText(
 const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
 
 /** Fact categories that are routine pipeline steps: they wait for the batch window. */
-const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set([
-  "free",
-  "t",
-  "release",
-  "reviews",
-  "prFlow",
-]);
+const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set(["t", "reviews", "prFlow"]);
+
+/** Whether one added fact must wake FLIGHT immediately even when its category was learned. */
+export function immediateFact(category: string, item: unknown): boolean {
+  if (FLIGHT_IMMEDIATE_REASONS.includes(category)) return true;
+  const fact = String(item);
+  if (category === "signals") return FLIGHT_IMMEDIATE_SIGNALS.includes(fact.split(":", 1)[0] ?? "");
+  if (category === "items") return !fact.startsWith("pr:");
+  if (category === "prs") {
+    const parts = fact.split(":");
+    return (parts[2] === "true" && parts[3] === "open") || Boolean(parts.slice(5).join(":"));
+  }
+  return false;
+}
+
+/** Changed learned categories whose additions can ride with another immediate reason. */
+export function batchedCategories(
+  previous: string,
+  current: string,
+  batched: ReadonlySet<string>,
+): string[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((category) => {
+      if (!batched.has(category)) return false;
+      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+      const added = (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
+      return added.length > 0 && added.every((v) => !immediateFact(category, v));
+    })
+    .sort();
+}
 
 /**
  * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
  * moving. An operator message, question, blocker, park, signal, plan, instruction or the breaker is
  * never routine, so those wake FLIGHT at once. False when nothing changed.
  */
-export function routineOnly(previous: string, current: string): boolean {
+export function routineOnly(
+  previous: string,
+  current: string,
+  batched: ReadonlySet<string> = new Set(),
+): boolean {
   const before = JSON.parse(previous || "{}") as Facts;
   const after = JSON.parse(current) as Facts;
   let changed = false;
@@ -2159,13 +2191,19 @@ export function routineOnly(previous: string, current: string): boolean {
     if (added.length === 0 && removed.length === 0) continue;
     // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
     // breaker's lift is, as a lift alone wakes FLIGHT
-    if (added.length === 0 && !LIFTS_WAKE.has(category) && !ROUTINE_CATEGORIES.has(category))
+    if (
+      added.length === 0 &&
+      !LIFTS_WAKE.has(category) &&
+      !ROUTINE_CATEGORIES.has(category) &&
+      !batched.has(category)
+    )
       continue;
     changed = true;
     if (category === "items") {
       // a PR's own steps are routine; any other item (a message, a blocker) is not
-      if (!added.every((v) => String(JSON.parse(v)).startsWith("pr:"))) return false;
-    } else if (!ROUTINE_CATEGORIES.has(category)) return false;
+      if (!added.every((v) => !immediateFact(category, JSON.parse(v)))) return false;
+    } else if (added.some((v) => immediateFact(category, JSON.parse(v)))) return false;
+    else if (!ROUTINE_CATEGORIES.has(category) && !batched.has(category)) return false;
   }
   return changed;
 }
