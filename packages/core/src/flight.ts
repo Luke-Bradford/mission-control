@@ -1465,7 +1465,6 @@ export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
   "instructions",
 ];
 export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [
-  "waste_alarm",
   "main_red",
   "seat_call",
   "merge_stalled",
