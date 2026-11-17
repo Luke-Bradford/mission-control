@@ -514,6 +514,7 @@ describeRendered("Needs you page", () => {
             ],
           }),
           id: 31,
+          state: { completeness: "complete", freshness: "current", reason: "Matches the source." },
           binding: {
             version: 2,
             sourceRevision: "c".repeat(64),
@@ -576,6 +577,8 @@ describeRendered("Needs you page", () => {
         expect(await buttons()).toEqual([
           { text: "Not now, clear it", disabled: false },
           { text: "Keep it", disabled: false },
+          { text: "Accept recommendation: Not now, clear it", disabled: false },
+          { text: "Discuss", disabled: false },
         ]);
         if (SHOTS) {
           mkdirSync(SHOTS, { recursive: true });
@@ -592,7 +595,9 @@ describeRendered("Needs you page", () => {
         expect(
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
-        expect((await buttons()).every((b) => b.disabled)).toBe(true);
+        expect((await buttons()).filter((b) => b.text !== "Discuss").every((b) => b.disabled)).toBe(
+          true,
+        );
         if (SHOTS) await page.screenshot(join(SHOTS, "needs-protected-after-1600x1000.png"));
       } finally {
         await page.close();

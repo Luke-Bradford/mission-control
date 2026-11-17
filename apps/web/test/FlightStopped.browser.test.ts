@@ -9,7 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { brief, HOUR, item, NOW } from "./fixtures.ts";
+import { boundBrief, HOUR, item, NOW } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
@@ -41,8 +41,7 @@ function api() {
         escalationId: null,
         text: "Which layout should the Needs you page use?",
         at: NOW - 2 * HOUR,
-        brief: brief({
-          for: "operator",
+        brief: boundBrief({
           options: [
             { id: "list", label: "List and open item", answer: "Use the list and open item." },
             { id: "column", label: "One long column", answer: "Use one long column." },
@@ -114,13 +113,7 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                 )?.disabled,
                 notice,
                 start: rect(start),
-                main: rect(q("#needsMain")),
-                mainNotices: [...document.querySelectorAll("#needsMain .flight-stopped")].map(
-                  (n) => ({
-                    row: rect(n),
-                    button: rect(n.querySelector("button")),
-                  }),
-                ),
+                mainNotices: document.querySelectorAll("#needsMain .flight-stopped").length,
                 ask: rect(q("#needsDiscussionForm")),
                 stopped: rect(q("#needsDiscussionForm .flight-stopped")),
                 input: rect(input),
@@ -128,17 +121,31 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                 height: innerHeight,
               };
             }, undefined);
-            if (!state.main) throw new Error(`${label}: main pane missing`);
-            for (const notice of state.mainNotices) {
+            // The answer column scrolls: each notice must be reachable by scrolling it into view.
+            for (let i = 0; i < state.mainNotices; i++) {
+              const notice = await page.evaluate((index) => {
+                const n = document.querySelectorAll("#needsMain .flight-stopped")[index];
+                n.scrollIntoView({ block: "nearest" });
+                const rect = (el: Element | null) => {
+                  const r = el?.getBoundingClientRect();
+                  return r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null;
+                };
+                return {
+                  row: rect(n),
+                  button: rect(n.querySelector("button")),
+                  main: rect(document.querySelector("#needsMain")),
+                };
+              }, i);
+              if (!notice.main) throw new Error(`${label}: main pane missing`);
               for (const box of [notice.row, notice.button]) {
                 if (!box) throw new Error(`${label}: stopped control missing`);
                 expect(box.y, `${label}: full stopped control above pane`).toBeGreaterThanOrEqual(
-                  state.main.y,
+                  notice.main.y - 1,
                 );
                 expect(
                   box.y + box.h,
-                  `${label}: full stopped control within pane ${JSON.stringify(state)}`,
-                ).toBeLessThanOrEqual(state.main.y + state.main.h);
+                  `${label}: full stopped control within pane`,
+                ).toBeLessThanOrEqual(notice.main.y + notice.main.h + 1);
                 expect(
                   box.y + box.h,
                   `${label}: full stopped control within viewport`,
