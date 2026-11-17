@@ -5,8 +5,8 @@ import {
   crewCliArgs,
   grantDecisionText,
   grantedPath,
-  pathsNeedingGrant,
   pathGrantProblem,
+  pathsNeedingGrant,
   protectedFileRules,
   ticketPathGrants,
 } from "../src/index.ts";

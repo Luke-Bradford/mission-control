@@ -500,7 +500,6 @@ describe("startRun eligibility", () => {
       const { runId } = await sup.startRun("guido-1", 42);
       expect(runPathGrants(store, runId)).toEqual([]);
     });
-
   });
 
   it("10: starts Size M with no plan so its seat can write it", async () => {
