@@ -6,6 +6,7 @@ import {
   GUARD_RULES,
   type GuardHitsView,
   LOCK_FREE_TEXT,
+  type RepoRulesView,
   type TestLockState,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -23,6 +24,7 @@ import { rulesFixture } from "./rolesRulesFixture.ts";
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const FREE: TestLockState = { holder: null, waiting: [] };
@@ -51,6 +53,43 @@ function page() {
   window.history.replaceState(null, "", "/setup/roles");
   return render(<Setup tab="roles" />);
 }
+
+type Answer = { status: number; body: unknown };
+/** A route that answers only when the test says so. */
+function held(): { route: () => Promise<Answer>; answer: (a: Answer) => Promise<void> } {
+  let release: (a: Answer) => void = () => {};
+  const wait = new Promise<Answer>((resolve) => {
+    release = resolve;
+  });
+  return {
+    route: () => wait,
+    answer: async (a) => {
+      await act(async () => {
+        release(a);
+        await wait;
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    },
+  };
+}
+
+/** A second repo, with an id the route must encode, and rules unlike the first repo's. */
+const OTHER = "site builder";
+const OTHER_ROUTE = `/api/repos/${encodeURIComponent(OTHER)}/rules`;
+const TWO_REPOS: ConfigView = {
+  ...CFG,
+  repos: CFG.repos.slice(0, 2).map((r, i) => (i === 1 ? { ...r, id: OTHER } : r)),
+};
+const OTHER_RULES: RepoRulesView = {
+  base: `sha-${OTHER}`,
+  rules: {
+    ...rulesFixture(OTHER).rules,
+    pick_from: { source: "set-here", value: ["Todo"] },
+    areas: { source: "default", value: {} },
+  },
+};
+const row = (panel: HTMLElement, key: string) =>
+  panel.querySelector(`[data-key="${key}"]`) as HTMLElement;
 
 /** The Repo rules panel once its rows are in (the page swaps it in when the config arrives). */
 async function rulesPanel(): Promise<HTMLElement> {
@@ -147,6 +186,106 @@ describe("Setup › Roles & guards", () => {
     expect(screen.getByText("pick_from")).toBeTruthy();
   });
 
+  it("Repo rules: the Repo picker reads the chosen repo, and its rules replace the first repo's", async () => {
+    const other = held();
+    const fetch = load({ "/api/config": TWO_REPOS, [OTHER_ROUTE]: other.route });
+    page();
+    let rules = await rulesPanel();
+    expect(rules.textContent).toContain(`${REPO} · repo file read`);
+    expect(row(rules, "pick_from").dataset.source).toBe("repo-file");
+    expect(within(row(rules, "pick_from")).getByText("In review")).toBeTruthy();
+    expect(within(row(rules, "areas")).getByText("web: apps/web/**")).toBeTruthy();
+    expect(fetch.mock.calls.some(([p]) => p === OTHER_ROUTE)).toBe(false);
+
+    fireEvent.change(within(rules).getByRole("combobox"), { target: { value: OTHER } });
+    // the second repo is read by its encoded id, and the first repo's rows leave while it loads
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(OTHER_ROUTE, expect.anything()));
+    rules = screen.getByRole("region", { name: "Repo rules" });
+    expect(rules.textContent).toContain("Reading the repo's rules");
+    expect(row(rules, "pick_from")).toBeNull();
+    expect(within(rules).queryByText("In review")).toBeNull();
+
+    await other.answer({ status: 200, body: OTHER_RULES });
+    rules = await rulesPanel();
+    expect(rules.textContent).toContain(`${OTHER} · repo file read`);
+    expect(row(rules, "pick_from").dataset.source).toBe("set-here");
+    expect(within(row(rules, "pick_from")).getByText("Todo")).toBeTruthy();
+    expect(within(rules).queryByText("In review")).toBeNull();
+    expect(row(rules, "areas").dataset.source).toBe("default");
+    expect(within(row(rules, "areas")).getByText("None set")).toBeTruthy();
+    expect(within(rules).queryByText("Repo file wins")).toBeNull();
+    expect((within(rules).getByRole("combobox") as HTMLSelectElement).value).toBe(OTHER);
+
+    // back to the first repo: its own values and sources return
+    fireEvent.change(within(rules).getByRole("combobox"), { target: { value: REPO } });
+    await waitFor(() =>
+      expect(
+        row(screen.getByRole("region", { name: "Repo rules" }), "pick_from")?.dataset.source,
+      ).toBe("repo-file"),
+    );
+    expect(screen.getByText("In review")).toBeTruthy();
+  });
+
+  it("Repo rules: a chosen repo whose rules fail shows its own error, not the first repo's rules", async () => {
+    load({
+      "/api/config": TWO_REPOS,
+      [OTHER_ROUTE]: () => ({ status: 500, body: { error: "boom" } }),
+    });
+    page();
+    const rules = await rulesPanel();
+    fireEvent.change(within(rules).getByRole("combobox"), { target: { value: OTHER } });
+    await screen.findByText(/Rules did not load/);
+    const after = screen.getByRole("region", { name: "Repo rules" });
+    expect(after.textContent).toContain(OTHER);
+    expect(row(after, "pick_from")).toBeNull();
+    expect(within(after).queryByText("In review")).toBeNull();
+  });
+
+  it("Repo rules: a value its column cuts short is a button that shows it in full", async () => {
+    const long = `apps/${"a-very-long-folder-name/".repeat(12)}file.ts`;
+    // jsdom lays nothing out: say every chip's text is wider than its box
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(900);
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(300);
+    load({
+      [`/api/repos/${REPO}/rules`]: {
+        ...rulesFixture(REPO),
+        rules: {
+          ...rulesFixture(REPO).rules,
+          protected: { source: "set-here", value: [long] },
+        },
+      },
+    });
+    page();
+    const rules = await rulesPanel();
+    const chip = await within(row(rules, "protected")).findByRole("button", { name: long });
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+    expect(chip.className).not.toContain("open");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+    expect(chip.className).toContain("open");
+    expect(chip.textContent).toBe(long);
+    // a value the repo file added says so in words, and keeps its dashed look when open
+    const added = await within(row(rules, "checks")).findByRole("button", {
+      name: "pnpm -s test:related, added by the repo file",
+    });
+    fireEvent.click(added);
+    expect(added.className).toContain("repo");
+    expect(added.className).toContain("open");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("Repo rules: a value that fits is plain text with no control of its own", async () => {
+    load();
+    page();
+    const rules = await rulesPanel();
+    expect(within(row(rules, "protected")).getByText(".github/**")).toBeTruthy();
+    expect(within(row(rules, "protected")).queryAllByRole("button", { name: /github/ })).toEqual(
+      [],
+    );
+    expect(rules.querySelectorAll("button.rg-chip")).toHaveLength(0);
+  });
+
   it("Built-in guard: each stop with its 7-day count, the note, and — when unreachable", async () => {
     load({
       "/api/guard/hits?days=7": { ...NO_HITS, counts: { ...NO_HITS.counts, "git-write": 3 } },
@@ -213,6 +352,53 @@ describe("Setup › Roles & guards", () => {
     expect(
       within(roles.querySelector("[data-role=FAO]") as HTMLElement).getByText("No seats"),
     ).toBeTruthy();
+  });
+
+  it("Roles: says the seats are being read until the config answers, never that a role has none", async () => {
+    const config = held();
+    load({ "/api/config": config.route });
+    page();
+    const roles = await screen.findByRole("region", { name: "Roles" });
+    for (const role of ["FLIGHT", "FAO", "GUIDO", "INCO", "RETRO"]) {
+      const r = roles.querySelector(`[data-role=${role}]`) as HTMLElement;
+      expect(within(r).getByText("Reading seats…")).toBeTruthy();
+      expect(r.querySelector(".rg-mid")?.textContent).toBe("— seats, unknown");
+    }
+    expect(roles.textContent).not.toContain("0 seats");
+    expect(roles.textContent).not.toContain("No seats");
+    expect(screen.getByRole("region", { name: "Repo rules" }).textContent).toContain(
+      "Reading the repo's rules",
+    );
+
+    await config.answer({ status: 200, body: CFG });
+    await waitFor(() =>
+      expect((roles.querySelector("[data-role=GUIDO]") as HTMLElement).textContent).toContain(
+        "1 seat",
+      ),
+    );
+    // only now may a role say it has no seats
+    const fao = roles.querySelector("[data-role=FAO]") as HTMLElement;
+    expect(within(fao).getByText("No seats")).toBeTruthy();
+    expect(within(fao).getByRole("link", { name: "0 seats" })).toBeTruthy();
+    expect(roles.textContent).not.toContain("Reading seats");
+  });
+
+  it("Roles and Repo rules: say the config did not load, never that a role has no seats", async () => {
+    load({ "/api/config": () => ({ status: 500, body: { error: "boom" } }) });
+    page();
+    const roles = await screen.findByRole("region", { name: "Roles" });
+    expect((await within(roles).findByRole("alert")).textContent).toMatch(/^Seats did not load\. /);
+    for (const role of ["FLIGHT", "FAO", "GUIDO", "INCO", "RETRO"]) {
+      const cells = roles.querySelectorAll(`[data-role=${role}] td`);
+      expect(cells[3]?.textContent).toBe("— seats, unknown");
+      expect(cells[4]?.textContent).toBe("— unknown");
+    }
+    expect(roles.textContent).not.toContain("0 seats");
+    expect(roles.textContent).not.toContain("No seats");
+    expect(roles.textContent).not.toContain("Reading seats");
+    const rules = screen.getByRole("region", { name: "Repo rules" });
+    expect(within(rules).getByRole("alert").textContent).toMatch(/^Rules did not load\. /);
+    expect(rules.textContent).not.toContain("Reading the repo's rules");
   });
 
   it("Roles: Planned roles opens and closes, with the arrow's state in the summary", async () => {

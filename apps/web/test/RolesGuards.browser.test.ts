@@ -28,6 +28,19 @@ const api = {
   [RESOURCES.repoRules(repo).path]: rulesFixture(repo),
 };
 
+/** A protected path far wider than its column: 300 characters with nowhere to break. */
+const LONG = `apps/${"a-very-long-folder-name/".repeat(12)}file.ts`;
+const longApi = {
+  ...api,
+  [RESOURCES.repoRules(repo).path]: {
+    ...rulesFixture(repo),
+    rules: {
+      ...rulesFixture(repo).rules,
+      protected: { source: "set-here", value: [".github/**", LONG] },
+    },
+  },
+};
+
 const SIZES = [
   [1280, 900],
   [1600, 1000],
@@ -101,6 +114,74 @@ describeRendered("Setup › Roles & guards, rendered", () => {
       }
     },
     BROWSER_TEST_TIMEOUT_MS * 4,
+  );
+
+  it(
+    "a rule value too long for its column is reached with Tab and opens in full with Enter",
+    async () => {
+      const page = await renderAt({
+        page: "test/setupBrowser.html",
+        width: 1600,
+        height: 1000,
+        search: "?tab=roles",
+        colorScheme: "dark",
+        api: longApi,
+      });
+      const chip = "#rg-rules [data-key=protected] button.rg-chip";
+      await page.box(chip);
+      const state = () =>
+        page.evaluate((css) => {
+          const button = document.querySelector(css) as HTMLElement;
+          const text = button.querySelector("span") as HTMLElement;
+          const panel = document.querySelector("#rg-rules") as HTMLElement;
+          return {
+            expanded: button.getAttribute("aria-expanded"),
+            cut: text.scrollWidth > text.clientWidth + 1,
+            height: button.getBoundingClientRect().height,
+            text: text.textContent,
+            focused: document.activeElement === button,
+            inPanel:
+              button.getBoundingClientRect().right <= panel.getBoundingClientRect().right + 0.5,
+            // the short value beside it fits, so it stays plain text
+            plain: document.querySelectorAll("#rg-rules [data-key=protected] span.rg-chip").length,
+          };
+        }, chip);
+      const closed = await state();
+      expect(closed).toMatchObject({ expanded: "false", cut: true, plain: 1, inPanel: true });
+      expect(closed.height).toBeLessThanOrEqual(24);
+      let reached = false;
+      for (let i = 0; i < 200 && !reached; i++) {
+        await page.press("Tab");
+        reached = (await state()).focused;
+      }
+      expect(reached).toBe(true);
+      await page.press("Enter");
+      const open = await state();
+      // the whole value shows, wrapped inside the panel, and focus stays on the chip
+      expect(open).toMatchObject({
+        expanded: "true",
+        cut: false,
+        text: LONG,
+        focused: true,
+        inPanel: true,
+      });
+      expect(open.height).toBeGreaterThan(40);
+      expect(await page.unclipped("#rg-rules")).not.toContain(false);
+      expect(
+        await page.evaluate(() => {
+          const c = document.querySelector(".setup-content") as Element;
+          return c.scrollWidth <= c.clientWidth + 1;
+        }, null),
+      ).toBe(true);
+      if (shots) {
+        mkdirSync(shots, { recursive: true });
+        await page.screenshot(join(shots, "roles-guards-1600x1000-dark-long-value-open.png"));
+      }
+      await page.press("Enter");
+      expect(await state()).toMatchObject({ expanded: "false", cut: true, focused: true });
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
   );
 
   it(

@@ -106,6 +106,21 @@
   min-width: 0;
 }
 
+/* a chip its column cuts short is a button: pressed, it wraps to show the whole value */
+button.rg-chip {
+  text-align: left;
+}
+
+.rg-chip.open {
+  padding-block: var(--sp-1);
+}
+
+.rg-chip.open > span {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .rg-chip.repo {
   border-style: dashed;
   color: var(--think);

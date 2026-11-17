@@ -11,7 +11,7 @@ import {
   ROLES,
   type RoleRow,
 } from "@mc/core";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { LockLines, useTestLock } from "../components/LockLines.tsx";
 import { useSeatName } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
@@ -68,6 +68,60 @@ function SourceBadge({ rule, source }: { rule: RuleKey; source: RuleSource }) {
   );
 }
 
+/** What a dashed chip means, in words. */
+const REPO_ADDED = "added by the repo file";
+
+/**
+ * One value. A chip its column cuts short is a button: pressing it shows the whole value, so a
+ * long path or command can be read in full from the keyboard.
+ */
+function Chip({ value, repo }: { value: string; repo: boolean }) {
+  const text = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  const [open, setOpen] = useState(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new value, and the swap between plain text and button, each put a new element on screen to measure.
+  useLayoutEffect(() => {
+    const el = text.current;
+    // an open chip wraps, so it measures as fitting: it keeps its button until it is closed
+    if (!el || open) return;
+    let live = true;
+    const measure = () => {
+      if (live) setCut(el.scrollWidth > el.clientWidth + 1);
+    };
+    measure();
+    void document.fonts?.ready.then(measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    observer?.observe(el);
+    return () => {
+      live = false;
+      observer?.disconnect();
+    };
+  }, [value, cut, open]);
+  const className = `rg-chip${repo ? " repo" : ""}${open ? " open" : ""}`;
+  const title = repo ? `${value} · ${REPO_ADDED}` : value;
+  const body = (
+    <>
+      <span ref={text}>{value}</span>
+      {repo && <span className="sr-only">, {REPO_ADDED}</span>}
+    </>
+  );
+  return cut || open ? (
+    <button
+      type="button"
+      className={className}
+      title={title}
+      aria-expanded={open}
+      onClick={() => setOpen(!open)}
+    >
+      {body}
+    </button>
+  ) : (
+    <span className={className} title={title}>
+      {body}
+    </span>
+  );
+}
+
 function Chips({ id, values, adds }: { id: string; values: string[]; adds: string[] }) {
   const [open, setOpen] = useState(false);
   const all = [...values.map((v) => ({ v, repo: false })), ...adds.map((v) => ({ v, repo: true }))];
@@ -76,13 +130,7 @@ function Chips({ id, values, adds }: { id: string; values: string[]; adds: strin
   return (
     <>
       {shown.map(({ v, repo }) => (
-        <span
-          key={`${repo ? "r" : "u"}:${v}`}
-          className={repo ? "rg-chip repo" : "rg-chip"}
-          title={repo ? `${v} · added by the repo file` : v}
-        >
-          <span>{v}</span>
-        </span>
+        <Chip key={`${repo ? "r" : "u"}:${v}`} value={v} repo={repo} />
       ))}
       {all.length > CHIPS_SHOWN && (
         <button
@@ -270,8 +318,8 @@ function Guard({ hits }: { hits: GuardHitsView | undefined }) {
 
 type SeatRow = { sessionId: string; id: string; area: string; retiring: boolean };
 
-function seatsOf(config: ConfigView | undefined, role: string): SeatRow[] {
-  return (config?.crew?.sessions ?? []).flatMap((s) =>
+function seatsOf(config: ConfigView, role: string): SeatRow[] {
+  return (config.crew?.sessions ?? []).flatMap((s) =>
     s.seats
       .filter((x) => x.role === role)
       .map((x) => ({
@@ -342,7 +390,8 @@ function PromptDrawer({ role, onClose }: { role: string; onClose: () => void }) 
   );
 }
 
-function RolesTable({ config }: { config: ConfigView | undefined }) {
+/** `config` undefined: the seats are not known yet (`error` says a read failed), never "none". */
+function RolesTable({ config, error }: { config: ConfigView | undefined; error: Error | null }) {
   const nameOf = useSeatName();
   const [prompt, setPrompt] = useState<{ role: string; from: HTMLElement } | null>(null);
   function closePrompt() {
@@ -352,6 +401,13 @@ function RolesTable({ config }: { config: ConfigView | undefined }) {
   return (
     <Panel id="rg-roles" title="Roles" sub="roles/*.md · five have a prompt file">
       <p className="rg-line s">{SEATS_RULE_LINE}</p>
+      {!config && error && (
+        <div className="pb">
+          <p className="note err" role="alert">
+            Seats did not load. {error.message}
+          </p>
+        </div>
+      )}
       <div className="tw">
         <table className="rg-table">
           <thead>
@@ -366,7 +422,7 @@ function RolesTable({ config }: { config: ConfigView | undefined }) {
           </thead>
           <tbody>
             {BUILT.map((r) => {
-              const seats = seatsOf(config, r.callSign);
+              const seats = config ? seatsOf(config, r.callSign) : null;
               return (
                 <tr key={r.callSign} data-role={r.callSign}>
                   <td>
@@ -377,12 +433,26 @@ function RolesTable({ config }: { config: ConfigView | undefined }) {
                   <td className="rg-purpose">{r.here}</td>
                   <td>{modeText(r.mode)}</td>
                   <td className="rg-mid">
-                    <a href={setupPath("sessions")}>
-                      {seats.length} seat{seats.length === 1 ? "" : "s"}
-                    </a>
+                    {seats ? (
+                      <a href={setupPath("sessions")}>
+                        {seats.length} seat{seats.length === 1 ? "" : "s"}
+                      </a>
+                    ) : (
+                      <>
+                        —<span className="sr-only"> seats, unknown</span>
+                      </>
+                    )}
                   </td>
                   <td>
-                    {seats.length === 0 ? (
+                    {!seats ? (
+                      error ? (
+                        <span className="rg-none">
+                          —<span className="sr-only"> unknown</span>
+                        </span>
+                      ) : (
+                        <span className="rg-none">Reading seats…</span>
+                      )
+                    ) : seats.length === 0 ? (
                       <span className="rg-none">No seats</span>
                     ) : (
                       <ul className="rg-seats">
@@ -450,7 +520,7 @@ function RolesTable({ config }: { config: ConfigView | undefined }) {
 /** Setup › Roles & guards: what each repo's crew may do, the built-in stops, and the roles. */
 export function Roles() {
   const hits = useResource<GuardHitsView>(RESOURCES.guardHits).data;
-  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const { data: config, error: configError } = useResource<ConfigView>(RESOURCES.config);
   const connection = useStore(streamStatus);
   return (
     <div className="rg-page">
@@ -468,13 +538,19 @@ export function Roles() {
         ) : (
           <Panel title="Repo rules">
             <div className="pb">
-              <p className="muted s">Reading the repo's rules…</p>
+              {configError ? (
+                <p className="note err" role="alert">
+                  Rules did not load. {configError.message}
+                </p>
+              ) : (
+                <p className="muted s">Reading the repo's rules…</p>
+              )}
             </div>
           </Panel>
         )}
         <Guard hits={hits} />
       </div>
-      <RolesTable config={config} />
+      <RolesTable config={config} error={configError} />
     </div>
   );
 }

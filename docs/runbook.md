@@ -1884,7 +1884,8 @@ block names them, fills `needs`, `promote_backlog` and `hard_rules` that config.
 only adds to `hard_rules` (when set here), `checks`, `uat.*` and `always_ask`: those keep their
 config source and list the additions in `repoAdds`. A block that cannot be read shows its reason in
 `repoFileError` and the config values still show. The response's `base` is the digest of the same
-config.yaml bytes every value came from.
+config.yaml bytes every value came from. A preview on the live config.yaml answers this read too;
+its `POST` still answers 409, so it shows the rules and never saves them.
 
 `POST` to the same route saves the approved keys only; `commands` and `uat` may name one leaf and
 keep the other. Send `base` from the read: a changed file answers `config.yaml changed since this
