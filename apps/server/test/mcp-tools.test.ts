@@ -4574,16 +4574,20 @@ describe("report_evidence", () => {
     ev = make({
       pendingChecks: (runId) => checks.pending(runId),
       checkDrops: (runId) => checks.drops(runId),
+      lostCheck: (runId, lost) => checks.lost(runId, lost),
     });
     await checks.begin({ runId: RUN, toolUseId: "codex-lost-cell" }, command);
-    await checks.begin({ runId: RUN, toolUseId: "codex-fresh-cell" }, command);
 
-    const result = await report("The replacement check is running.");
+    const result = await tool("report_evidence", ev).call(CTX, {
+      note: "The check session disappeared.",
+      lostCheck: command,
+    });
     expect(result.isError).toBe(true);
-    expect(result.text).toContain("earlier check session was lost");
+    expect(result.text).toContain("lost its Codex check session");
     expect(result.text).toContain(`Run ${command} again`);
     expect(result.text).not.toContain("Continue polling that session");
 
+    await checks.begin({ runId: RUN, toolUseId: "codex-fresh-cell" }, command);
     await checks.end({ runId: RUN, toolUseId: "codex-fresh-cell" }, true, 0);
     expect(await report("The replacement check passed with exit code 0.")).toEqual({
       text: EVIDENCE_RECORDED,

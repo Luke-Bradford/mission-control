@@ -521,12 +521,14 @@ describe("why the recorder dropped a check call", () => {
     const r = recorder();
     await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "codex-item-1" }]);
     expect(r.pending("r1")).toEqual([LINT]);
+    expect(r.lost("r1", LINT)).toBe(true);
+    expect(r.pending("r1")).toEqual([]);
+    expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
 
     const fresh = { runId: "r1", toolUseId: "codex-item-2" };
     await r.begin(fresh, LINT, [{ runId: "r1", toolUseId: "codex-item-3" }]);
 
     expect(r.pending("r1")).toEqual([LINT]);
-    expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
     await r.end({ runId: "r1", toolUseId: "codex-item-3" }, true, 0);
 
     expect(rows).toMatchObject([{ command: LINT, headSha: HEAD, ok: true, exitCode: 0 }]);
