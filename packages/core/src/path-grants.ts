@@ -3,7 +3,7 @@
  * the files in a `Paths:` line. FLIGHT approves them with a logged decision before the start; the
  * run that starts may then write exactly those files, and no other run may.
  */
-import { foldForMatch, globMatches, isProtectedPath } from "./runtime.ts";
+import { foldForMatch, globMatches, isProtectedPath, pathInArea } from "./runtime.ts";
 
 /** A `Paths:` line of a ticket body, with an optional list marker in front. */
 const PATHS_LINE = /^[ \t]*(?:[-*][ \t]+)?Paths:[ \t]*(.*)$/gm;
@@ -36,6 +36,11 @@ export function ticketPathGrants(body: string): string[] {
     }
   }
   return found;
+}
+
+/** Ticket Paths entries outside `area`, which need validation and a FLIGHT grant. */
+export function pathsNeedingGrant(area: readonly string[], paths: readonly string[]): string[] {
+  return paths.filter((path) => !pathInArea(area, path));
 }
 
 /**

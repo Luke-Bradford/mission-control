@@ -5,6 +5,7 @@ import {
   crewCliArgs,
   grantDecisionText,
   grantedPath,
+  pathsNeedingGrant,
   pathGrantProblem,
   protectedFileRules,
   ticketPathGrants,
@@ -22,6 +23,24 @@ describe("ticketPathGrants", () => {
   it("ignores the word Paths: inside a sentence, and lists each path once", () => {
     expect(ticketPathGrants("A ticket can list `Paths:` outside the areas.")).toEqual([]);
     expect(ticketPathGrants("Paths: a.json\nPaths: a.json b.json")).toEqual(["a.json", "b.json"]);
+  });
+
+  it("drops entries in the seat's area before checking grants", () => {
+    expect(
+      pathsNeedingGrant(
+        ["apps/server/**", "packages/core/**"],
+        ticketPathGrants("Paths: apps/server/**, apps/server/src/telemetry.ts, packages/core/**"),
+      ),
+    ).toEqual([]);
+    expect(pathsNeedingGrant(["apps/server/**"], ticketPathGrants("Paths: apps/web/**"))).toEqual([
+      "apps/web/**",
+    ]);
+    expect(
+      pathsNeedingGrant(
+        ["apps/server/**"],
+        ticketPathGrants("Paths: apps/server/**, package.json"),
+      ),
+    ).toEqual(["package.json"]);
   });
 });
 

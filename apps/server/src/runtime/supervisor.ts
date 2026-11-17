@@ -95,7 +95,7 @@ import {
   type Profile,
   type ProfileOverride,
   pathGrantProblem,
-  pathInArea,
+  pathsNeedingGrant,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -3647,8 +3647,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const grants: string[] = [];
       if (def.mode === "writer" && !planner) {
         const extra = info.repo.protectedFiles ?? [];
-        for (const p of ticketPathGrants(ticket.body)) {
-          if (pathInArea(info.seat.area, p)) continue;
+        for (const p of pathsNeedingGrant(info.seat.area, ticketPathGrants(ticket.body))) {
           const why = pathGrantProblem(p, extra);
           if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
           grants.push(p);
