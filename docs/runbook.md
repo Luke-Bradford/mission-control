@@ -1644,9 +1644,11 @@ sandbox, and its tools are listed with no path or command limits; its guard hook
 The list is required: the credential scrub makes the CLI ignore `bypassPermissions`. It stays
 narrower than bypass: in a `-p` run, Edit and Write to protected paths are refused. Only the listed
 built-ins are defined to the model (`--tools`), and the operator's user settings are not loaded
-(`--setting-sources project,local`), so the operator's own plugins, with their skills, agents and
-hooks, are not in FLIGHT's session; that cut a session's fixed start by about 30,000 tokens.
-Project and local Claude settings still apply, so their allow, deny and ask rules can change what
+(`--setting-sources project,local`), so nothing of the operator's own Claude set-up is in FLIGHT's
+session: their plugins (with those plugins' skills, agents and hooks), their user-level skills and
+their user `CLAUDE.md`. Every model call re-read all of it. A change to the built-in list starts a
+fresh FLIGHT session, as a change to the hub tools does. Project and local Claude settings and the
+repo's `CLAUDE.md` still apply, so their allow, deny and ask rules can change what
 FLIGHT may run. The repo's skills still reach FLIGHT through the hub's plugin folder. Codex requests and verifies a
 `dangerFullAccess` thread while retaining the hub's approval callback. Every other seat keeps its
 existing filesystem, network and tool restrictions.

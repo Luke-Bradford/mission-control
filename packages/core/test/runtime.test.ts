@@ -97,7 +97,7 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
-  it("gives FLIGHT controller tools without a sandbox, preserving guard hooks", () => {
+  it("gives FLIGHT its listed tools without a sandbox or the operator's settings, preserving guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
     for (const flag of ["--disallowedTools", "--restricted"]) expect(args).not.toContain(flag);
     // Only the listed built-ins are defined to the model, and the operator's user settings (their

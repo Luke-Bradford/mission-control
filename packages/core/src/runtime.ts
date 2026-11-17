@@ -305,6 +305,9 @@ export function modeOfSeat(seat: { role: string; mode?: ConfigSeatMode; def?: Se
  * skills (docs/spikes/2026-10-29-seat-skills.md). Its job, keeping the operator's own commands out,
  * is done by `--restricted` (no user, project or local settings) and by `--plugin-dir`, whose folder
  * the hub builds from the repo commit with skills only: no hooks, bin or MCP config.
+ *
+ * FLIGHT's profile drops `--restricted` (it needs Bash and the whole filesystem) and keeps the
+ * operator's set-up out with `--setting-sources project,local` instead (`crewCliArgs`).
  */
 export const CREW_ISOLATION_FLAGS = ["--restricted", "--strict-mcp-config"] as const;
 
@@ -1379,13 +1382,15 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
-    // Keep the guard hooks and the controller's tools and filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+    // Keep the guard hooks and the whole filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
     // (CREW_CLI_ENV, every Claude seat) makes the CLI force the permission mode back to `default`,
     // so bypassPermissions would be ignored and FLIGHT's hub tools refused: list them.
-    // Only the built-ins the role uses are defined to the model, and the operator's user settings
-    // (their installed plugins, with those plugins' skills, agents and hooks) are not loaded: a
-    // FLIGHT session then starts about 30,000 tokens smaller. The repo's own settings and the
-    // hub's `--settings`, `--plugin-dir` and `--mcp-config` still apply.
+    // Only the built-ins the role uses are defined to the model, and nothing of the operator's own
+    // Claude set-up is loaded (user settings and their installed plugins, with those plugins'
+    // skills, agents and hooks; user-level skills; the user CLAUDE.md), as for every other seat:
+    // all of it was re-read on every model call. The repo's own settings and CLAUDE.md and the
+    // hub's `--settings`, `--plugin-dir` and `--mcp-config` still apply. A name in the list the
+    // installed CLI does not have (TodoWrite, WebFetch on 2.1.322) defines nothing.
     args.splice(
       args.indexOf("--settings"),
       0,

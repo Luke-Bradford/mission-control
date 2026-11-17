@@ -38,6 +38,7 @@ import {
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   estimateTokens,
+  FLIGHT_FULL_BUILTINS,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -2885,7 +2886,7 @@ describe("repo guidance at launch", () => {
       );
   });
 
-  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+  it("starts FLIGHT unsandboxed with its listed tools and without the operator's settings", async () => {
     const { sup } = make({ extraSeat: FLIGHT });
     sup.start();
     await sup.startWatch("flight-1");
@@ -2894,6 +2895,7 @@ describe("repo guidance at launch", () => {
     for (const flag of ["--restricted", "--disallowedTools", "--permission-mode"])
       expect(argv).not.toContain(flag);
     expect(argv[argv.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
