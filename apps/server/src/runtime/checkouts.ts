@@ -1122,14 +1122,21 @@ async function installAll(
  * Empties the worktree's own `.mc-tmp` (git-ignored scratch: a test run leaves fixtures there,
  * links included) so the disk check can walk the whole tree as it always did. Nothing is followed:
  * the folder must be a real directory that resolves inside the worktree, and each entry is removed
- * with `rm`, which unlinks a symlink and never enters it. A `.mc-tmp` that is itself a link, or
- * resolves elsewhere, is left alone for the disk check to refuse. The caller holds the clone lock
- * and no seat is running in the worktree.
+ * with `rm`, which unlinks a symlink and never enters it. A `.mc-tmp` that is itself a link is
+ * unlinked, its target untouched; a directory that resolves elsewhere is left alone for the disk
+ * check to refuse. Only the resume path calls it: the caller holds the clone lock and no seat is
+ * running in the worktree.
  */
 async function clearScratch(worktree: string): Promise<void> {
   const scratch = join(worktree, MC_TMP_DIR_NAME);
   const stat = await lstat(scratch).catch(() => null);
-  if (stat === null || !stat.isDirectory()) return;
+  if (stat === null) return;
+  if (stat.isSymbolicLink()) {
+    // unlink the link itself; rm without `recursive` never follows it
+    await rm(scratch, { force: true });
+    return;
+  }
+  if (!stat.isDirectory()) return;
   const real = await realpath(scratch);
   if (real !== join(await realpath(worktree), MC_TMP_DIR_NAME)) return;
   for (const name of await readdir(scratch)) {
@@ -1143,7 +1150,6 @@ async function installReusedPnpm(
   run: InstallRunner,
 ): Promise<void> {
   if (!(await succeeds(lstat(join(s.path, PNPM_TOOL.lockfile))))) return;
-  await clearScratch(s.path);
   const modules = join(s.path, PNPM_TOOL.installDir);
   try {
     const stat = await lstat(modules);
@@ -1848,6 +1854,7 @@ export async function reinstallTrimmed(
   if (gitDir === null) throw new CheckoutError("path", `${path} is not this run's checkout`);
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
+  await clearScratch(path);
   await installReusedPnpm(
     {
       checkout: i.checkout,

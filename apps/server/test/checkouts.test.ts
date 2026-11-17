@@ -44,6 +44,7 @@ import {
   preparePlanCheckout,
   prepareReadOnlyCheckout,
   prepareScratch,
+  reinstallTrimmed,
   removeCheckout,
   sweepPnpmStores,
   syncReusedWorktree,
@@ -1482,7 +1483,7 @@ describe("prepareCheckout", () => {
       expect(existsSync(wtPath())).toBe(false);
     });
 
-    describe("symlinks a test run left in the worktree's own scratch folder", () => {
+    describe("a set-aside run resumed after its tests left symlinks in .mc-tmp", () => {
       beforeEach(() => {
         commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
         git(seed, "push", "-q", "origin", "main");
@@ -1492,46 +1493,66 @@ describe("prepareCheckout", () => {
         mkdirSync(roles, { recursive: true });
         symlinkSync(outside, join(roles, "LINK.md"));
       };
-
-      it("empties the scratch folder, never following a link, and reuses the worktree (16 Nov)", async () => {
+      const resume = (path: string) =>
+        reinstallTrimmed(
+          { checkout: clone, worktreesRoot: root, sessionId: "a" },
+          path,
+          BRANCH,
+          payloadInstall,
+        );
+      /** A worktree as the crew tidy leaves it: no root node_modules. */
+      const trimmed = async () => {
         const first = await prepareCheckout(input(), payloadInstall);
-        plant(first.path, join(MC_TMP_DIR_NAME, "t1"));
-        writeFileSync(join(first.path, MC_TMP_DIR_NAME, "note.txt"), "x\n");
-        expect(await prepareCheckout(input(), payloadInstall)).toMatchObject({
-          path: first.path,
-          created: false,
+        rmSync(join(first.path, "node_modules"), { recursive: true, force: true });
+        return first.path;
+      };
+
+      it("empties .mc-tmp without following links and reinstalls (16 Nov)", async () => {
+        const path = await trimmed();
+        plant(path, join(MC_TMP_DIR_NAME, "t1"));
+        mkdirSync(join(path, MC_TMP_DIR_NAME, "pnpm-store-root", "a", "node_modules"), {
+          recursive: true,
         });
-        expect(readdirSync(join(first.path, MC_TMP_DIR_NAME))).toEqual([]);
+        writeFileSync(join(path, MC_TMP_DIR_NAME, "note.txt"), "x\n");
+        expect(await resume(path)).toBe(true);
+        expect(readdirSync(join(path, MC_TMP_DIR_NAME))).toEqual([]);
         expect(readdirSync(outside)).toEqual(["keep.txt"]);
-        expect(existsSync(join(first.path, "node_modules"))).toBe(true);
+        expect(existsSync(join(path, "node_modules"))).toBe(true);
+      });
+
+      it("unlinks a .mc-tmp that is itself a symlink and leaves its target", async () => {
+        const path = await trimmed();
+        symlinkSync(outside, join(path, MC_TMP_DIR_NAME));
+        expect(await resume(path)).toBe(true);
+        expect(existsSync(join(path, MC_TMP_DIR_NAME))).toBe(false);
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
       });
 
       it("still refuses a link in a same-named folder anywhere else", async () => {
-        const first = await prepareCheckout(input(), payloadInstall);
-        plant(first.path, join("docs", MC_TMP_DIR_NAME, "t1"));
-        const e = await fail(prepareCheckout(input(), payloadInstall));
+        const path = await trimmed();
+        plant(path, join("docs", MC_TMP_DIR_NAME, "t1"));
+        const e = await fail(resume(path));
         expect(e.code).toBe("protected");
         expect(e.message).toContain(`has a symlink at docs/${MC_TMP_DIR_NAME}/t1/`);
         expect(readdirSync(outside)).toEqual(["keep.txt"]);
       });
 
       it("still refuses a link elsewhere while clearing the scratch folder", async () => {
-        const first = await prepareCheckout(input(), payloadInstall);
-        plant(first.path, MC_TMP_DIR_NAME);
-        symlinkSync(outside, join(first.path, "planted"));
-        const e = await fail(prepareCheckout(input(), payloadInstall));
+        const path = await trimmed();
+        plant(path, MC_TMP_DIR_NAME);
+        symlinkSync(outside, join(path, "planted"));
+        const e = await fail(resume(path));
         expect(e.code).toBe("protected");
         expect(e.message).toContain("has a symlink at planted");
         expect(readdirSync(outside)).toEqual(["keep.txt"]);
       });
 
-      it("leaves a scratch folder that is itself a symlink alone, and refuses it", async () => {
+      it("an ordinary checkout reuse leaves .mc-tmp alone", async () => {
         const first = await prepareCheckout(input(), payloadInstall);
-        symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME));
-        const e = await fail(prepareCheckout(input(), payloadInstall));
-        expect(e.code).toBe("protected");
-        expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}`);
-        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        mkdirSync(join(first.path, MC_TMP_DIR_NAME), { recursive: true });
+        writeFileSync(join(first.path, MC_TMP_DIR_NAME, "note.txt"), "x\n");
+        await prepareCheckout(input(), payloadInstall);
+        expect(readdirSync(join(first.path, MC_TMP_DIR_NAME))).toEqual(["note.txt"]);
       });
 
       describe("a base whose pnpm settings route the install through .mc-tmp", () => {
@@ -1551,11 +1572,11 @@ describe("prepareCheckout", () => {
         it.each(cases)("a link at the target is removed, not followed: %s", async (_n, files) => {
           commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
           git(seed, "push", "-q", "origin", "main");
-          const first = await prepareCheckout(input(), payloadInstall);
-          mkdirSync(join(first.path, MC_TMP_DIR_NAME), { recursive: true });
-          symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME, "deps"));
-          await prepareCheckout(input(), payloadInstall);
-          expect(readdirSync(join(first.path, MC_TMP_DIR_NAME))).toEqual([]);
+          const path = await trimmed();
+          mkdirSync(join(path, MC_TMP_DIR_NAME), { recursive: true });
+          symlinkSync(outside, join(path, MC_TMP_DIR_NAME, "deps"));
+          await resume(path);
+          expect(readdirSync(join(path, MC_TMP_DIR_NAME))).toEqual([]);
           expect(readdirSync(outside)).toEqual(["keep.txt"]);
         });
       });
