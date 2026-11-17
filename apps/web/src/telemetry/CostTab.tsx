@@ -72,8 +72,10 @@ function coverageText(
       ? `No tokens reported for ${nameList(c.missingTokens)}; not counted as 0.`
       : null;
   const missing = [
-    c.missingCost.length > 0 && `No cost reported for ${nameList(c.missingCost)}; not counted as $0.`,
-    c.missingTokens.length > 0 && `No tokens reported for ${nameList(c.missingTokens)}; not counted as 0.`,
+    c.missingCost.length > 0 &&
+      `No cost reported for ${nameList(c.missingCost)}; not counted as $0.`,
+    c.missingTokens.length > 0 &&
+      `No tokens reported for ${nameList(c.missingTokens)}; not counted as 0.`,
   ].filter(Boolean);
   return missing.length > 0 ? missing.join(" ") : null;
 }
