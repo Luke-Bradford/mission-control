@@ -1171,7 +1171,7 @@ export interface FlightTriage {
 export interface FlightState {
   /** The operator's slow pace while it is on; absent at normal pace. Starts outside it are refused. */
   pace?: PaceView;
-  /** Every open PR, unowned first. FLIGHT starts each wake by reading this flow. */
+  /** Every open PR, unowned first. A wake carries the rows that changed (see FlightWake). */
   prFlow?: FlightPrFlow;
   memory?: FlightMemoryTitle[];
   retrospective?: FlightRetrospective;
@@ -1422,8 +1422,14 @@ export interface FlightWake
   seats: FlightWakeList<FlightSeatState>;
   /** Open ledger entries, counted; `mc ledger` reads them. */
   ledgerOpen: number;
-  /** Open PRs' flow rows that changed since the last wake; the flow's timings stay on the HUD. */
-  prFlow: FlightWakeList<FlightPrFlow["rows"][number]> & { unowned: number };
+  /**
+   * Open PRs' flow rows that changed since the last wake, or passed a deadline (`overdue` names
+   * which: unowned, stage or waiting). A new last action alone does not re-send a row. The flow's
+   * timings stay on the HUD.
+   */
+  prFlow: FlightWakeList<FlightPrFlow["rows"][number] & { overdue?: string[] }> & {
+    unowned: number;
+  };
   mergeQueue: FlightWakeList<NonNullable<FlightState["mergeQueue"]>[number]>;
   tickets: FlightWakeList<FlightState["tickets"][number] | string>;
   signals: FlightWakeList<FlightSignal>;

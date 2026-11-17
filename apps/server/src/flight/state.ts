@@ -1637,6 +1637,7 @@ export function flightWake(
   );
   const linked = linkedChanges.slice(0, FLIGHT_MEMORY_RECALL_MAX);
   for (const note of linked) snapshot.linked.set(note.topic.toLowerCase(), linkedHash(note));
+  const overdueFacts = prFlowFacts(flow);
   const ticketChanges = changed("tickets", tickets.slice(0, FLIGHT_TICKETS_LISTED), (t) => t.ref);
   return {
     snapshot,
@@ -1668,7 +1669,19 @@ export function flightWake(
       ledgerOpen: ledger.length + ledgerMore,
       prFlow: {
         unowned: flow?.unowned ?? 0,
-        ...changed("prFlow", flow?.rows ?? [], (r) => String(r.pr)),
+        ...changed(
+          "prFlow",
+          (flow?.rows ?? []).map((row) => {
+            // a deadline passing changes no field of the row: the row carries what is overdue
+            const overdue = overdueFacts
+              .filter((fact) => fact.startsWith(`${row.pr}:`))
+              .map((fact) => fact.split(":")[1] ?? "");
+            return overdue.length > 0 ? { ...row, overdue } : row;
+          }),
+          (r) => String(r.pr),
+          // the last action moves with every CI run and every decision of FLIGHT's own
+          ({ lastAction: _a, lastActor: _b, lastActionAt: _c, ...row }) => row,
+        ),
       },
       mergeQueue: changed("mergeQueue", mergeQueue ?? [], (p) => String(p.pr)),
       tickets: {

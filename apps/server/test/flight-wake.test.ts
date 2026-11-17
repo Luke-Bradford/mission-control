@@ -281,6 +281,11 @@ describe("wake deltas", () => {
       unchanged: 0,
       removed: [],
     });
+    expect(first.digest.mergeQueue).toEqual({
+      entries: state.mergeQueue,
+      unchanged: 0,
+      removed: [],
+    });
     // the flow's timings and its read time are not part of a wake
     expect(first.digest.prFlow).not.toHaveProperty("metrics");
     expect(first.digest.prFlow).not.toHaveProperty("generatedAt");
@@ -296,6 +301,47 @@ describe("wake deltas", () => {
       removed: [],
     });
     expect(next.mergeQueue).toEqual({ entries: [], unchanged: 0, removed: ["12"] });
+    // a new last action alone is not a change; a PR that left is named once
+    const acted = structuredClone(moved);
+    for (const r of acted.prFlow?.rows ?? []) r.lastAction = "CI passing";
+    if (acted.prFlow) acted.prFlow.rows = acted.prFlow.rows.slice(0, 1);
+    const after = flightWake(acted, flightWake(moved, first.snapshot).snapshot);
+    expect(after.digest.prFlow).toEqual({ unowned: 0, entries: [], unchanged: 1, removed: ["13"] });
+    expect(flightWake(acted, after.snapshot).digest.prFlow.removed).toEqual([]);
+  });
+
+  it("sends a PR's flow row again when it passes a deadline, naming which", () => {
+    const state = busyBoard();
+    const row = {
+      pr: 12,
+      ticket: "mc#12",
+      title: "T",
+      owner: "nobody",
+      ownerKind: "nobody" as const,
+      seatId: null,
+      stage: "review" as const,
+      stageSince: 1,
+      ownerSince: 1,
+      openSince: 1,
+      waitsOn: [],
+      blocks: [],
+      lastAction: "PR opened",
+      lastActor: null,
+      lastActionAt: 1,
+    };
+    const flow = { generatedAt: 1, rows: [row], unowned: 1, metrics: [] };
+    state.prFlow = flow;
+    const first = flightWake(state);
+    expect(first.digest.prFlow.entries).toEqual([row]);
+    const late = { ...state, prFlow: { ...flow, generatedAt: 1 + 24 * 60 * 60_000 } };
+    const next = flightWake(late, first.snapshot);
+    expect(next.digest.prFlow).toEqual({
+      unowned: 1,
+      entries: [{ ...row, overdue: ["unowned"] }],
+      unchanged: 0,
+      removed: [],
+    });
+    expect(flightWake(late, next.snapshot).digest.prFlow.entries).toEqual([]);
   });
 
   it("versions note and headline changes without treating age as a brief edit", () => {

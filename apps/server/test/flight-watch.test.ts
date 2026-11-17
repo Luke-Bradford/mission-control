@@ -1784,6 +1784,7 @@ describe("the FLIGHT watcher", () => {
     expect(digest.brief?.every((b) => b.text === "")).toBe(true);
     expect(digest.headline).toBe("");
     expect(digest.briefVersion).toBe(1);
+    expect(digest.prFlow).toEqual({ unowned: 0, entries: [], unchanged: 0, removed: [] });
     for (const list of ["recent", "prs", "tickets", "mergeQueue"] as const) {
       expect(digest[list]).toEqual({ entries: [], unchanged: 0, removed: [] });
     }
@@ -2965,8 +2966,7 @@ describe("the FLIGHT watcher", () => {
       expect(startCalls).toHaveLength(1);
       const first = startCalls[0]?.first ?? "";
       expect(first).toContain("Mid-way through #77; promised the operator a PR by noon.");
-      // the digest is the state: a fresh session is not told to read it all again
-      expect(first).not.toContain("Read mc flight_state first");
+      // the digest is the state: a fresh session is pointed at what the digest leaves out
       expect(first).toContain("mc ledger");
       expect(first).toContain("mc recall");
     });

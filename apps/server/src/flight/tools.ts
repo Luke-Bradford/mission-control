@@ -4707,7 +4707,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.flightState,
       description:
-        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and the runaway breaker; and your brief.",
+        "The crew now, in full, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review, every PR flow row with its timings and the merge queue; your recent decisions and the runaway breaker; your brief, the ledger index and your note titles. It is large: a wake already carries what changed.",
       inputSchema: {
         type: "object",
         properties: {},
