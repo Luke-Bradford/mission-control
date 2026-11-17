@@ -244,7 +244,7 @@ it("starts the returned seat on the open PR's own ref, not the ended run's local
   expect(git(worktree, "rev-parse", "HEAD")).toBe(tip);
 });
 
-it("keeps a crashed rework round with its own ticket: a start on another ticket gets no handoff", async () => {
+it("keeps an ended run's open review findings with its own ticket: a start on another ticket gets no handoff", async () => {
   const { sup } = make({ extraSeat });
   sup.start();
   const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
@@ -287,7 +287,7 @@ it("keeps a crashed rework round with its own ticket: a start on another ticket 
   expect(userLines().some((l) => l.includes("Handoff from"))).toBe(false);
 });
 
-it("a crash mid-rework after real wakes: the seat's next ticket gets no findings, no handoff and no alarm", async () => {
+it("a crash (the process dies) mid-rework after real wakes: the seat's next ticket gets no findings, no handoff and no alarm", async () => {
   const { sup, cfg } = make({ extraSeat });
   sup.start();
   const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
@@ -312,7 +312,9 @@ it("a crash mid-rework after real wakes: the seat's next ticket gets no findings
   }
   expect(store.waste.unreportedResumes(0, 1)).toEqual([]);
   // the author crashes during the rework round, and the seat starts another ticket
-  await sup.endRunByEngine(first.runId);
+  await sup.message("guido-1", "DIE", { interrupt: false });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("error"));
+  expect(store.run(first.runId)).toMatchObject({ status: "failed", endedBy: "exit" });
   const other = await sup.startRun("guido-1", 43);
   await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
   expect(store.receivedHandoff(other.runId)).toBeNull();
