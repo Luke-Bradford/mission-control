@@ -67,6 +67,9 @@ const ID_TEXT: readonly [RegExp, string][] = [
   [/\bmcp__mc__\w+|\bmc\s+[a-z]+(?:_[a-z]+)*\b/i, "a tool name"],
 ];
 
+/** A picture written in a question's text: markdown image from a hub route. */
+const HUB_PICTURE = /!\[[^\]\n]*\]\(\/api\/[^)\s]+\)/;
+
 const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The seat ids (and so their call signs, which differ only in case) as one pattern, or null. */
@@ -78,7 +81,9 @@ const seatPattern = (seatIds: readonly string[]): RegExp | null => {
 };
 
 /** Every unreadable id in `text`, named; `seatIds` are the configured seats' ids. */
-const idKinds = (text: string, seatIds: readonly string[]): string[] => {
+const idKinds = (full: string, seatIds: readonly string[]): string[] => {
+  // the picture rule asks for a hub image, whose link ends in a hex id: it is not an id to read
+  const text = full.replace(new RegExp(HUB_PICTURE, "g"), " ");
   const seat = seatPattern(seatIds);
   return [
     ...ID_TEXT.filter(([re]) => re.test(text)).map(([, what]) => what),
@@ -166,9 +171,6 @@ export interface BriefParts {
   /** A branch preview is published for the question's ticket. */
   hasPreview: boolean;
 }
-
-/** A picture written in a question's text: markdown image from a hub route. */
-const HUB_PICTURE = /!\[[^\]\n]*\]\(\/api\/[^)\s]+\)/;
 
 /**
  * Rule 4's added parts of a question (#1510), each named so FLIGHT fixes the brief in one try.

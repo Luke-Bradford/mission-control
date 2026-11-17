@@ -5,6 +5,7 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
   joinMapGraph,
+  SPEC_BOUNCE_CAUSES,
   unpackMap,
 } from "@mc/core";
 import "./temp-home.ts";
@@ -507,6 +508,7 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    bugEscapes: [],
     improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
       subject: name,
@@ -517,6 +519,10 @@ describe("audit", () => {
       calls: 0,
       chars: 0,
     })),
+    specBounces: {
+      rows: [],
+      counts: SPEC_BOUNCE_CAUSES.map((cause) => ({ cause, days7: 0, days30: 0 })),
+    },
     surgeonProposals: [],
   });
 
@@ -6318,6 +6324,10 @@ describe("telemetry", () => {
       throughput: Array.from({ length: 6 }, (_, index) => ({
         at: NOW - 6 * 60 * 60_000 + index * 60 * 60_000,
         merged: 0,
+      })),
+      ticketsInProgress: Array.from({ length: 14 }, (_, index) => ({
+        day: `2026-10-${String(index + 4).padStart(2, "0")}`,
+        tickets: null,
       })),
       quality: [
         {

@@ -666,6 +666,9 @@ export const prMergedReason = (n: number): string => `PR ${n} merged.`;
 export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
 export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
 export const REPO_UNWATCHED_REASON = "repo no longer watched";
+/** What an item's panel says in place of its plan and materials when its repo is not watched. */
+export const repoUnwatchedPanelText = (repoId: string): string =>
+  `The plan and attached materials are not loaded because ${repoId} is not a repo this hub watches.`;
 
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;

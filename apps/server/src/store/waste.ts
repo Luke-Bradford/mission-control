@@ -226,6 +226,15 @@ export function wasteQueries(db: DatabaseSync) {
       );
     },
 
+    /** Open cards on the board, as `repo#n`: a ticket that is closed or off the board is not in it. */
+    openTickets(): Set<string> {
+      return new Set(
+        all("SELECT repo_id, issue_number FROM board_items WHERE closed = 0").map(
+          (r) => `${r.repo_id as string}#${r.issue_number as number}`,
+        ),
+      );
+    },
+
     /** Each merged ticket's size and the cost of its runs, for the median of a size. */
     mergedTicketCosts(
       mergedIn?: ReadonlyMap<string, number>,
