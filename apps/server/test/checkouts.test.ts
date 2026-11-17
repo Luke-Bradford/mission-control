@@ -1650,9 +1650,10 @@ describe("ticket checkout recovery", () => {
   it("reuses a ticket branch with an open PR", async () => {
     git(clone, "branch", BRANCH);
 
-    expect(
-      await prepareCheckout({ ...input(), openPullRequestBranches: [BRANCH] }),
-    ).toMatchObject({ branch: BRANCH, created: true });
+    expect(await prepareCheckout({ ...input(), openPullRequestBranches: [BRANCH] })).toMatchObject({
+      branch: BRANCH,
+      created: true,
+    });
   });
 
   it("keeps the ticket's branch after a title change, its worktree there or not", async () => {
