@@ -230,6 +230,61 @@ export async function chooseOption(
   return receipt(store, claimed.row, false);
 }
 
+/** A pick claimed for an answer that travels as a plain message. */
+export interface MessagePick {
+  /** The message is stored: the pick is tied to it, so the conversation draws it as the choice. */
+  sent(messageId: string): void;
+  /** Nothing was stored: the operator can pick again. */
+  release(): void;
+}
+
+/**
+ * The operator picked an option that `chooseOption` does not take (an older brief whose options
+ * carry no id, or one that is not FLIGHT's to the operator), so the answer goes as a plain message
+ * to `message.to`. The pick is claimed for that brief before the message is sent, as above, and the
+ * option is read from the stored brief by its place, never from the request's text. Null when the
+ * brief already has a pick: nothing is sent twice.
+ */
+export function claimMessagePick(
+  d: Pick<ChooseDeps, "store" | "now" | "sender"> & { flightId: string | null },
+  item: AttentionItem | undefined,
+  key: string,
+  input: { briefAt: number; option: number },
+  message: { to: string; text: string },
+): MessagePick | null {
+  const { store } = d;
+  if (store.choice(key, input.briefAt) !== null) return null;
+  if (item === undefined) throw new ChoiceRefused(404, "That question is no longer open.");
+  const brief = item.brief;
+  if (brief === undefined || brief.at !== input.briefAt)
+    throw new ChoiceRefused(
+      409,
+      "The question changed since you opened it. Reload and choose again.",
+    );
+  const option = brief.options[input.option];
+  if (option === undefined || option.answer !== message.text)
+    throw new ChoiceRefused(400, "That is not one of the options.");
+  const claimed = store.claimChoice({
+    key,
+    briefAt: input.briefAt,
+    optionId: option.id ?? `option-${input.option + 1}`,
+    label: option.label,
+    answer: option.answer,
+    question: brief.ask || item.text,
+    ticket: item.ticket ?? brief.ticket ?? null,
+    target: message.to,
+    targetKind: message.to === d.flightId ? "flight" : "seat",
+    messageId: null,
+    chosenBy: CHOOSER_NAMES[d.sender.kind],
+    chosenAt: d.now(),
+  });
+  if (!claimed.fresh) return null;
+  return {
+    sent: (messageId) => store.setChoiceMessage(key, input.briefAt, messageId),
+    release: () => store.releaseChoice(key, input.briefAt),
+  };
+}
+
 /** Takes a non-question item out of Needs you the way its own source does, then acks it. */
 function closeItem(store: Store, key: string, at: number): void {
   if (key.startsWith(NOTE_KEY)) store.dismissNote(key.slice(NOTE_KEY.length), at);

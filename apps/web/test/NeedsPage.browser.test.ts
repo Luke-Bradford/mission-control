@@ -450,39 +450,191 @@ describeRendered("Needs you page", () => {
   );
 
   it(
-    "captures the design views",
+    "send, reply, pick and the question leaving the list work on the page and in the fly-out at the evidence sizes, light and dark",
     async () => {
+      const ASKED = "Why this layout?";
+      const REPLY = "It keeps every ask one click away.";
+      const PICKED = "List and open item";
+      const choosePath = `/api/attention/${encodeURIComponent(KEY)}/choose`;
+      /** The hub for one walk: it stores what the page sends, and FLIGHT's reply is the fixture's. */
+      const hub = () => {
+        const base = api(2);
+        const [first, ...others] = base["/api/attention"];
+        if (!first?.brief) throw new Error("the fixture's first ask has a brief");
+        // FLIGHT's brief to the operator: its options go through the choose route
+        const open = { ...first, brief: { ...first.brief, for: "operator" as const } };
+        const earlier = base["/api/comms/flight"].messages;
+        let sent = false;
+        let chosen = false;
+        const said = (id: number, operator: boolean, more: object) => ({
+          id: `comms:${id}`,
+          at: NOW,
+          from: operator ? "CAPCOM" : "flight-1",
+          to: operator ? "flight-1" : "CAPCOM",
+          text: "",
+          operator,
+          ...more,
+        });
+        return {
+          ...base,
+          "/api/attention": () => (chosen ? others : [open, ...others]),
+          "/api/comms/flight": () => ({
+            messages: [
+              ...earlier,
+              ...(sent
+                ? [
+                    said(901, true, { text: ASKED, itemKey: KEY }),
+                    said(902, false, { text: REPLY }),
+                  ]
+                : []),
+              ...(chosen ? [said(903, true, { itemKey: KEY, choice: { label: PICKED } })] : []),
+            ],
+          }),
+          "/api/comms": (method: string) => {
+            if (method === "POST") sent = true;
+            return { ok: true };
+          },
+          [choosePath]: (method: string) => {
+            if (method === "POST") chosen = true;
+            return {
+              key: KEY,
+              optionId: "list",
+              label: PICKED,
+              to: "flight-1",
+              target: "flight",
+              chosenAt: NOW,
+              deliveredAt: null,
+              alreadyChosen: false,
+            };
+          },
+        };
+      };
+      /** Waits for `count` messages of the thread under `scope` to hold `words`; answers how many do. */
+      const inThread = (page: RenderedPage, scope: string, words: string, count = 1) =>
+        page.evaluate(
+          ([css, text, n]) =>
+            new Promise<number>((resolve) => {
+              const started = performance.now();
+              const look = () => {
+                const found = [
+                  ...document.querySelectorAll(`${css} .flight-thread-message`),
+                ].filter((m) => m.textContent?.includes(text)).length;
+                if (found === n || performance.now() - started > 5000) resolve(found);
+                else setTimeout(look, 50);
+              };
+              look();
+            }),
+          [scope, words, count] as const,
+        );
+      /** Waits for the Needs you tab to count `n` waiting questions; answers what it shows. */
+      const waiting = (page: RenderedPage, n: string) =>
+        page.evaluate(
+          (want) =>
+            new Promise<string>((resolve) => {
+              const started = performance.now();
+              const look = () => {
+                const shown = document.querySelector(".tabs a.needs-tab b")?.textContent ?? "";
+                if (shown === want || performance.now() - started > 5000) resolve(shown);
+                else setTimeout(look, 50);
+              };
+              look();
+            }),
+          n,
+        );
+      const posts = (page: RenderedPage, path: string) =>
+        page.requests().filter((r) => r.method === "POST" && r.path === path).length;
+      const SURFACES = [
+        // the Needs you page (it opens its first question), and the fly-out for the same item over
+        // Overview
+        { name: "page", path: "/needs-you", scope: "#needsSide", opts: "#needsOpts" },
+        { name: "flyout", path: `/?item=${KEY}`, scope: "#discuss", opts: "#dsOpts" },
+      ] as const;
       for (const scheme of ["light", "dark"] as const) {
         for (const [width, height] of [
-          [2560, 1200],
+          [1280, 900],
+          [1600, 1000],
           [1920, 940],
+          [2560, 1200],
         ] as const) {
-          const page = await renderAt({
-            page: "test/needsBrowser.html",
-            width,
-            height,
-            colorScheme: scheme,
-            api: api(),
-            assets: ASSETS,
-          });
-          try {
-            await ready(page);
-            await pictureLoaded(page);
-            // populated: the question, the picture, the options and the conversation are all there
-            await page.boxes(".needs-band-title");
-            await page.boxes("#needsSide .flight-thread-message");
-            await page.boxes(".needs-row");
-            if (SHOTS) {
+          for (const surface of SURFACES) {
+            const page = await renderAt({
+              page: "test/needsBrowser.html",
+              search: `?path=${encodeURIComponent(surface.path)}`,
+              width,
+              height,
+              colorScheme: scheme,
+              api: hub(),
+              assets: ASSETS,
+            });
+            const at = `${surface.name} ${width}x${height} ${scheme}`;
+            const shot = async (step: string, onThread = true) => {
+              if (!SHOTS) return;
               mkdirSync(SHOTS, { recursive: true });
-              await page.screenshot(join(SHOTS, `needs-${width}x${height}-${scheme}.png`));
+              // after a send or a pick, bring the thread's newest message and its box into the picture
+              if (onThread)
+                await page.evaluate((css) => {
+                  document
+                    .querySelector(`${css} .flight-thread-form`)
+                    ?.scrollIntoView({ block: "end" });
+                }, surface.scope);
+              await page.screenshot(
+                join(SHOTS, `needs-${surface.name}-${width}x${height}-${scheme}-${step}.png`),
+              );
+            };
+            try {
+              if (surface.name === "page") {
+                await ready(page);
+                await pictureLoaded(page);
+              }
+              await page.boxes(`${surface.scope} .flight-thread-message`);
+              await page.boxes(`${surface.opts} button`);
+              expect(await waiting(page, "3"), at).toBe("3");
+              const heading = await page.evaluate(
+                (css) => document.querySelector(`${css} .flight-thread-about`)?.textContent ?? "",
+                surface.scope,
+              );
+              expect(heading, at).toBe(
+                "About: Which layout should the Needs you page use: a list and the open item, or one long column?",
+              );
+              await shot("1-open", false);
+
+              // send beside the question, as the operator does: click the box, type, press Enter
+              await page.click(`${surface.scope} .flight-thread-input`);
+              for (const key of ASKED) await page.press(key === " " ? "Space" : key);
+              await page.press("Enter");
+              expect(await inThread(page, surface.scope, ASKED), at).toBe(1);
+              expect(await inThread(page, surface.scope, REPLY), at).toBe(1);
+              expect(posts(page, "/api/comms"), at).toBe(1);
+              await shot("2-reply");
+
+              // pick an option: one receipt in the thread, and the question leaves the list (the
+              // page moves on to the next question, whose thread is the same stored conversation)
+              await page.click(`${surface.opts} button`);
+              expect(await inThread(page, surface.scope, `You chose: ${PICKED}`), at).toBe(1);
+              expect(await inThread(page, surface.scope, "You chose"), at).toBe(1);
+              expect(posts(page, choosePath), at).toBe(1);
+              expect(await waiting(page, "2"), at).toBe("2");
+              if (surface.name === "page") {
+                const list = await page.evaluate(
+                  () => document.querySelector(".needs-list")?.textContent ?? "",
+                  undefined,
+                );
+                expect(list, at).not.toContain("Which layout should the Needs you page use");
+                expect(list, at).toContain("Second ask");
+              }
+              // the send and the reply are still there, once each, beside the receipt
+              expect(await inThread(page, surface.scope, ASKED), at).toBe(1);
+              expect(await inThread(page, surface.scope, REPLY), at).toBe(1);
+              expect(page.errors(), at).toEqual([]);
+              await shot("3-picked");
+            } finally {
+              await page.close();
             }
-          } finally {
-            await page.close();
           }
         }
       }
     },
-    BROWSER_TEST_TIMEOUT_MS,
+    BROWSER_TEST_TIMEOUT_MS * 2,
   );
   it(
     "clicking an option on a briefed protected item from an unwatched repo records the answer",

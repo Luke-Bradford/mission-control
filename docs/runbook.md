@@ -3045,6 +3045,14 @@ keep their permission checks.
   reads it later. A non-question item (a note, a crew error, an open Comms item) is closed at its
   source, then acked. `store.isChoiceAnswer(id)` tells a reader the message is a hub-built answer,
   not something the operator owes a reply to with the current delivery time.
+- **An option the choose route does not take.** An older brief's options carry no id, and some briefs
+  are not FLIGHT's to the operator. The page sends such an option's answer through
+  `POST /api/seats/:id/message` with `itemKey` and `choice: { briefAt, option }`, the option's place in
+  the brief it showed. The hub reads the option from the stored brief: a text that is not that option's
+  answer is refused with 400, a brief that changed with 409. It claims the brief as above and ties the
+  stored message to the pick in `question_choices`, so the FLIGHT conversation draws the pick as the
+  choice. A second pick on the same brief answers 200 and sends nothing. The message is delivered like
+  any other; only a named `question` closes.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
 - **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or

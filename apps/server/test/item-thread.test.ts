@@ -172,6 +172,145 @@ describe("a Needs-you item's conversation", () => {
   });
 });
 
+describe("an option picked on a brief the choose route does not take", () => {
+  /** An older brief: its options carry no id and it names no reader. */
+  const OPTIONS = [
+    { label: "5174", answer: "Use port 5174." },
+    { label: "5180", answer: "Use port 5180." },
+  ];
+  const BRIEF_AT = NOW - HOUR;
+  const briefOn = (key: string) =>
+    store.addBrief({
+      key,
+      context: "The dev seat asks which port to preview on.",
+      recommendation: "Use 5174.",
+      options: OPTIONS,
+      basis: "read config",
+      at: BRIEF_AT,
+    });
+  const pick = (
+    a: ReturnType<typeof app>,
+    seat: string,
+    itemKey: string,
+    option: number,
+    over: Record<string, unknown> = {},
+  ) =>
+    a.inject({
+      method: "POST",
+      url: `/api/seats/${seat}/message`,
+      headers: HEADERS,
+      payload: {
+        text: OPTIONS[option]?.answer,
+        itemKey,
+        choice: { briefAt: BRIEF_AT, option },
+        ...over,
+      },
+    });
+  const conversation = async (a: ReturnType<typeof app>) =>
+    (
+      (await a.inject({ method: "GET", url: "/api/comms/flight", headers: HEADERS })).json() as {
+        messages: { text: string; itemKey?: string; choice?: { label: string } }[];
+      }
+    ).messages;
+
+  it("stores a seat question's pick with its message, so the FLIGHT conversation draws it once", async () => {
+    const q = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which port?",
+      at: NOW - 2 * HOUR,
+    });
+    const key = `ask:${q}`;
+    briefOn(key);
+    const a = app();
+    // the page reads the item first: its options carry no id, so the choose route cannot take them
+    const listed = (
+      (await a.inject({ method: "GET", url: "/api/attention", headers: HEADERS })).json() as {
+        key: string;
+        brief?: { at: number; options: { id?: string; label: string }[] };
+      }[]
+    ).find((i) => i.key === key);
+    expect(listed?.brief?.at).toBe(BRIEF_AT);
+    expect(listed?.brief?.options.map((o) => [o.id, o.label])).toEqual([
+      [undefined, "5174"],
+      [undefined, "5180"],
+    ]);
+    expect((await conversation(a)).filter((m) => m.choice)).toEqual([]);
+
+    expect((await pick(a, "guido-1", key, 0, { question: q })).statusCode).toBe(200);
+    const picks = (await conversation(a)).filter((m) => m.choice);
+    expect(picks).toHaveLength(1);
+    expect(picks[0]).toMatchObject({ choice: { label: "5174" }, itemKey: key });
+    // the seat still gets the answer as typed, and its question closes
+    expect(store.itemThread(key).map((m) => [m.to, m.text])).toEqual([
+      ["guido-1", "Use port 5174."],
+    ]);
+    expect(store.question(q)?.answeredAt).toBe(NOW);
+    const receipt = (
+      await a.inject({
+        method: "GET",
+        url: `/api/attention/${encodeURIComponent(key)}/choice`,
+        headers: HEADERS,
+      })
+    ).json();
+    expect(receipt).toMatchObject({ key, label: "5174", to: "guido-1", target: "seat" });
+  });
+
+  it("sends a pick once: a second pick on the same brief stores no second message", async () => {
+    raise("plain", BRIEF_AT, "Something is held.");
+    briefOn("note:plain");
+    const a = app();
+    expect((await pick(a, "flight-1", "note:plain", 1)).statusCode).toBe(200);
+    expect((await pick(a, "flight-1", "note:plain", 0)).statusCode).toBe(200);
+    expect(store.itemThread("note:plain").map((m) => m.text)).toEqual(["Use port 5180."]);
+    const picks = (await conversation(a)).filter((m) => m.choice);
+    expect(picks.map((m) => m.choice?.label)).toEqual(["5180"]);
+    expect(store.latestChoice("note:plain")).toMatchObject({
+      label: "5180",
+      target: "flight-1",
+      targetKind: "flight",
+      chosenBy: "the operator",
+    });
+  });
+
+  it("refuses a pick that is not the brief's option as shown, and stores nothing", async () => {
+    raise("plain", BRIEF_AT, "Something is held.");
+    briefOn("note:plain");
+    const a = app();
+    const refused = async (res: ReturnType<typeof pick>, status: number, error: string) => {
+      const r = await res;
+      expect(r.statusCode).toBe(status);
+      expect(r.json()).toEqual({ error });
+    };
+    await refused(
+      pick(a, "flight-1", "note:plain", 0, { text: "Use port 9999." }),
+      400,
+      "That is not one of the options.",
+    );
+    await refused(
+      pick(a, "flight-1", "note:plain", 2, { text: "Use port 5174." }),
+      400,
+      "That is not one of the options.",
+    );
+    await refused(
+      pick(a, "flight-1", "note:plain", 0, { choice: { briefAt: BRIEF_AT - 1, option: 0 } }),
+      409,
+      "The question changed since you opened it. Reload and choose again.",
+    );
+    await refused(pick(a, "flight-1", "note:gone", 0), 404, "That question is no longer open.");
+    await refused(
+      pick(a, "flight-1", "note:plain", 0, { itemKey: undefined }),
+      400,
+      "A picked option names its item.",
+    );
+    expect(store.itemThread("note:plain")).toEqual([]);
+    expect(store.latestChoice("note:plain")).toBeNull();
+    // the option is still open to pick
+    expect((await pick(a, "flight-1", "note:plain", 0)).statusCode).toBe(200);
+    expect(store.latestChoice("note:plain")?.label).toBe("5174");
+  });
+});
+
 describe("a note raised again", () => {
   it("keeps its unbroken run's conversation, open or cleared, and drops an earlier run's", async () => {
     const a = app();

@@ -37,16 +37,25 @@ export function askedQuestion(key: string): number | null {
 
 const failure = (e: unknown): string => (e instanceof ApiError ? e.message : "server unreachable");
 
-/** Sends `body` to the target. Resolves to an error message to show, or null when it went through. */
+/**
+ * Sends `body` to the target. Resolves to an error message to show, or null when it went through.
+ * `picked` is the option of the item's brief that `body` answers with: the hub stores the pick
+ * with the message, so the FLIGHT thread draws it as the choice.
+ */
 export async function sendAnswer(
   target: AnswerTarget,
   flight: FlightSeat | null,
   item: AttentionItem,
   body: string,
+  picked?: BriefOption,
 ): Promise<string | null> {
   if (target.to === "github") return null;
+  const place = picked === undefined ? -1 : (item.brief?.options.indexOf(picked) ?? -1);
   // The item names the message, so it and every reply show in the one FLIGHT thread beside it.
-  const thread = { itemKey: item.key };
+  const thread = {
+    itemKey: item.key,
+    ...(item.brief && place >= 0 ? { choice: { briefAt: item.brief.at, option: place } } : {}),
+  };
   try {
     if (target.to === "seat") {
       // Name the question, so the answer reaches the run that asked it even if another run is on the seat now.

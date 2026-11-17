@@ -347,6 +347,8 @@ describe("ItemPanel, acting on an item", () => {
     return fn;
   }
   const panel = () => document.querySelector("#discuss") as HTMLElement;
+  /** What a pick of SEAT_Q's first option carries: the brief shown and the option's place in it. */
+  const PICK_5174 = { briefAt: NOW, option: 0 };
   const enabled = async (name: string) => {
     const b = (await within(panel()).findByRole("button", { name })) as HTMLButtonElement;
     await waitFor(() => expect(b.disabled).toBe(false));
@@ -366,7 +368,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
       ]),
     );
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
@@ -378,7 +380,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5180"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Use port 5180.", itemKey: SEAT_Q.key },
+        { text: "Use port 5180.", itemKey: SEAT_Q.key, choice: { briefAt: NOW, option: 1 } },
       ]),
     );
     await waitFor(() => expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true));
@@ -403,7 +405,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
       ]),
     );
     const input = within(panel()).getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
@@ -423,7 +425,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(opt);
     await waitFor(() =>
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Use port 5174.", itemKey: SEAT_Q.key },
+        { text: "Use port 5174.", itemKey: SEAT_Q.key, choice: PICK_5174 },
       ]),
     );
   });
@@ -657,7 +659,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     expect((await within(panel()).findByRole("alert")).textContent).toBe(refusal);
     expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-      { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+      { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
     ]);
   });
 
@@ -695,14 +697,19 @@ describe("ItemPanel, acting on an item", () => {
     },
   );
 
-  it("sends legacy person options through sendAnswer", async () => {
+  it("sends legacy person options through sendAnswer, with the pick, and shuts the options", async () => {
     const current = { ...SEAT_Q, kind: "person" as const, agentId: "flight-1" };
     const fn = acting([current]);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Use port 5174.", itemKey: current.key },
+        { text: "Use port 5174.", itemKey: current.key, choice: PICK_5174 },
       ]),
+    );
+    await waitFor(() =>
+      expect(
+        (within(panel()).getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled,
+      ).toBe(true),
     );
   });
 
@@ -1379,17 +1386,10 @@ describe("ItemPanel beside the one FLIGHT thread", () => {
     expect(inDock.queryByRole("heading", { name: /^About: / })).toBeNull();
   });
 
-  it("shows a picked option once, as the choice the thread draws, and sends no second message", async () => {
-    const choice = {
-      id: "comms:3",
-      at: NOW + 2,
-      from: "CAPCOM",
-      to: "flight-1",
-      text: "",
-      operator: true,
-      itemKey: "ask:7",
-      choice: { label: "5174" },
-    };
+  it("shows a picked option once, as the choice the hub stores from the click, and sends no second message", async () => {
+    // No choice exists before the click. The stub does what the hub does: a message that carries
+    // a pick is stored with it, and the thread reads it back as the choice.
+    let extra: object[] = [];
     const fn = stubFetch({
       "/api/attention": [SEAT_Q],
       "/api/crew?shape=summary": {
@@ -1397,31 +1397,72 @@ describe("ItemPanel beside the one FLIGHT thread", () => {
         firstRunToday: null,
       },
       "/api/flight": { seat: FLIGHT, decisions: [] },
-      "/api/comms/flight": stored([choice]),
-      "POST /api/seats/mc-dev-1/message": {},
+      "/api/comms/flight": () => ({ status: 200, body: stored(extra) }),
+      "POST /api/seats/mc-dev-1/message": (init: RequestInit | undefined) => {
+        const sent = JSON.parse(init?.body as string) as {
+          text: string;
+          itemKey: string;
+          choice?: { briefAt: number; option: number };
+        };
+        const picked = sent.choice && SEAT_Q.brief?.options[sent.choice.option];
+        extra = [
+          {
+            id: "comms:3",
+            at: NOW + 2,
+            from: "CAPCOM",
+            to: "mc-dev-1",
+            text: sent.text,
+            operator: true,
+            itemKey: sent.itemKey,
+            ...(picked && sent.choice?.briefAt === SEAT_Q.brief?.at
+              ? { choice: { label: picked.label } }
+              : {}),
+          },
+        ];
+        return { status: 200, body: { ok: true } };
+      },
     });
-    render(<ItemPanel />);
-    act(() => openItem(SEAT_Q.key));
-    await screen.findByText("The port is available.");
-    fireEvent.click(screen.getByRole("button", { name: "5174" }));
-    await waitFor(() =>
-      expect(
-        fn.mock.calls.filter(
-          ([p, init]) => p === "/api/seats/mc-dev-1/message" && init?.method === "POST",
-        ),
-      ).toHaveLength(1),
+    render(
+      <>
+        <Dock />
+        <ItemPanel />
+      </>,
     );
+    act(() => {
+      toggleDock(true);
+      openItem(SEAT_Q.key);
+    });
+    const flyout = within(document.querySelector("#discuss") as HTMLElement);
+    const dock = within(document.querySelector("#dock") as HTMLElement);
+    for (const view of [flyout, dock]) {
+      expect(await view.findByText("The port is available.")).toBeTruthy();
+      expect(view.queryByText(/You chose/)).toBeNull();
+    }
+    fireEvent.click(flyout.getByRole("button", { name: "5174" }));
+    for (const view of [flyout, dock]) {
+      expect(await view.findByText("You chose: 5174")).toBeTruthy();
+      expect(view.getAllByText(/You chose/)).toHaveLength(1);
+    }
+    expect(
+      fn.mock.calls
+        .filter(([p, init]) => p === "/api/seats/mc-dev-1/message" && init?.method === "POST")
+        .map(([, init]) => JSON.parse(init?.body as string)),
+    ).toEqual([
+      {
+        text: "Use port 5174.",
+        question: 7,
+        itemKey: SEAT_Q.key,
+        choice: { briefAt: NOW, option: 0 },
+      },
+    ]);
     expect(
       fn.mock.calls.filter(([p, init]) => p === "/api/comms" && init?.method === "POST"),
     ).toHaveLength(0);
-    const flyout = within(document.querySelector("#discuss") as HTMLElement);
-    await flyout.findAllByText("You chose: 5174");
     await waitFor(() =>
       expect((flyout.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
         true,
       ),
     );
-    expect(flyout.getAllByText(/You chose/)).toHaveLength(1);
   });
 
   it("keeps the brief and options while a thread send is pending, and a late failure stays with the send", async () => {
@@ -1492,7 +1533,8 @@ describe("Needs-you brief layout", () => {
         "What FLIGHT did",
         "What FLIGHT needs from you",
         "Your answer",
-        `About: ${current.text}`,
+        // the thread is headed with the title the page shows: the brief's ask, not the item's text
+        `About: ${full.ask}`,
       ]);
       expect(screen.getByText(`checked: ${full.basis}`)).toBeTruthy();
       expect(document.querySelector(".opt.rec")?.textContent).toContain("FLIGHT recommends");

@@ -12,8 +12,10 @@ import { Comms } from "../src/pages/Comms.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
 import { navigate } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
+import { ItemPanel } from "../src/shell/ItemPanel.tsx";
+import { closeItem, openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { brief, CONFIG, crewRow, HOUR, item, MIN, NOW } from "./fixtures.ts";
+import { brief, CONFIG, crewRow, escalation, HOUR, item, MIN, NOW, SEAT_Q } from "./fixtures.ts";
 
 const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 
@@ -763,6 +765,133 @@ describe("actions on the page", () => {
     routes([ask("q1")], { "/api/flight": LIVE_FLIGHT });
     render(<Needs item="q1" />);
     expect(await screen.findByRole("heading", { name: "About: Question q1" })).toBeTruthy();
+  });
+
+  it.each([
+    [
+      "a brief whose title is not its ask",
+      ask("q1", {
+        brief: brief({ title: "Approve the port plan", ask: "Should the seat preview on 5174?" }),
+      }),
+      "Approve the port plan",
+    ],
+    [
+      "an escalation, by its pinned ticket's title and not the source's words",
+      item({
+        key: "q1",
+        text: "Escalation: cache policy (raw source title)",
+        pinned: {
+          ticket: {
+            ref: "shop-app#4001",
+            title: "#4001 Pick the cache eviction policy",
+            url: "https://github.com/octo-org/shop-app/issues/4001",
+          },
+        },
+      }),
+      "Pick the cache eviction policy",
+    ],
+  ])("heads the thread with the title the page shows: %s", async (_name, current, title) => {
+    routes([current], {
+      "/api/flight": LIVE_FLIGHT,
+      // the escalation's own title ("Choose a cache eviction policy") is neither the item's text nor the title shown
+      "/api/escalations": [escalation()],
+    });
+    render(<Needs item="q1" />);
+    const about = await screen.findByRole("heading", { name: `About: ${title}` });
+    expect(screen.getByRole("heading", { level: 2, name: title })).toBeTruthy();
+    expect(screen.getAllByRole("heading", { name: /^About: / })).toEqual([about]);
+    // the fly-out for the same item is headed the same
+    act(() => openItem("q1"));
+    render(<ItemPanel />);
+    const flyout = within(document.querySelector("#discuss") as HTMLElement);
+    expect(await flyout.findByRole("heading", { name: `About: ${title}` })).toBeTruthy();
+    act(() => closeItem());
+  });
+
+  it("a picked option with no id is stored as the choice: it shows once on Needs you, in Comms and in the fly-out, and the question leaves the list", async () => {
+    // The stub does what the hub does: a message that carries a pick is stored with it, and the
+    // thread reads it back as the choice. No choice exists before the click.
+    let messages: object[] = [];
+    let items: AttentionItem[] = [SEAT_Q];
+    const fn = routes([SEAT_Q], {
+      "/api/attention": () => ({ status: 200, body: items }),
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
+      },
+      "/api/flight": LIVE_FLIGHT,
+      "/api/comms/flight": () => ({ status: 200, body: { messages } }),
+      "POST /api/seats/mc-dev-1/message": (init: RequestInit | undefined) => {
+        const sent = JSON.parse(String(init?.body)) as {
+          text: string;
+          itemKey: string;
+          choice?: { briefAt: number; option: number };
+        };
+        const picked = sent.choice && SEAT_Q.brief?.options[sent.choice.option];
+        messages = [
+          {
+            id: "comms:3",
+            at: NOW,
+            from: "CAPCOM",
+            to: "mc-dev-1",
+            text: sent.text,
+            operator: true,
+            itemKey: sent.itemKey,
+            ...(picked && sent.choice?.briefAt === SEAT_Q.brief?.at
+              ? { choice: { label: picked.label } }
+              : {}),
+          },
+        ];
+        return { status: 200, body: { ok: true } };
+      },
+    });
+    render(
+      <>
+        <Needs item={SEAT_Q.key} />
+        <Comms item={null} view={{ kind: "flight" }} />
+        <ItemPanel />
+      </>,
+    );
+    act(() => openItem(SEAT_Q.key));
+    const surfaces = () =>
+      ["#needsSide", "#page-comms", "#discuss"].map((id) =>
+        within(document.querySelector(id) as HTMLElement),
+      );
+    await waitFor(() => expect(document.querySelector("#needsOpts")).toBeTruthy());
+    const option = within(document.querySelector("#needsOpts") as HTMLElement).getByRole("button", {
+      name: "5174",
+    }) as HTMLButtonElement;
+    await waitFor(() => expect(option.disabled).toBe(false));
+    await waitFor(() => expect(document.querySelector("#discuss .flight-thread")).toBeTruthy());
+    for (const view of surfaces()) {
+      expect(await view.findByText("No messages yet.")).toBeTruthy();
+      expect(view.queryByText(/You chose/)).toBeNull();
+    }
+    fireEvent.click(option);
+    for (const view of surfaces()) {
+      expect(await view.findByText("You chose: 5174")).toBeTruthy();
+      expect(view.getAllByText(/You chose/)).toHaveLength(1);
+      // the pick is drawn in place of the answer's text, not beside it
+      expect(
+        view.queryByText("Use port 5174.", { selector: ".flight-thread-message *" }),
+      ).toBeNull();
+    }
+    expect(bodies(fn, "/api/seats/mc-dev-1/message")).toEqual([
+      {
+        text: "Use port 5174.",
+        question: 7,
+        itemKey: SEAT_Q.key,
+        choice: { briefAt: SEAT_Q.brief?.at, option: 0 },
+      },
+    ]);
+    expect(bodies(fn, "/api/comms")).toEqual([]);
+    // the seat's question closes on the hub: the next read of the list no longer has it
+    const list = within(screen.getByRole("navigation", { name: "Waiting on you" }));
+    expect(list.getByText("Which port?")).toBeTruthy();
+    items = [];
+    await act(async () => hub.refetch("/api/attention"));
+    await waitFor(() => expect(list.queryByText("Which port?")).toBeNull());
+    act(() => closeItem());
   });
 
   it("the log follows a new message only within 40 px of its end", async () => {

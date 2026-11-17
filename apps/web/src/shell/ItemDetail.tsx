@@ -50,6 +50,7 @@ import {
 } from "../needs/Materials.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
 import { PreviewOpener } from "../needs/PreviewFrame.tsx";
+import { titleOf } from "../needs/QuestionBand.tsx";
 import {
   CATCH_UP_LABEL,
   catchUpTone,
@@ -153,8 +154,8 @@ export function useItemDetail(key: string | null) {
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
-  // The item's title: the thread beside the question is headed with it.
-  const about = item?.text ?? "";
+  // The thread beside the question is headed with the title the page and the list show for it.
+  const about = item ? titleOf(item) : "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
   const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
   // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
@@ -223,8 +224,18 @@ export function useItemDetail(key: string | null) {
       return;
     }
     if (!item || !target || !replyOk || busy || chosen[item.key]) return;
+    // An option the choose routes do not take: its answer goes as a message that carries the pick.
+    const answerWith = () =>
+      void act(async () => {
+        const failed = await sendAnswer(target, seat, item, o.answer, o);
+        if (failed !== null) return failed;
+        // The thread beside the question shows the pick: it is the one message sent.
+        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+        hub.refetch(RESOURCES.choice(item.key).path);
+        return null;
+      });
     if (item.kind === "person") {
-      void act(() => sendAnswer(target, seat, item, o.answer));
+      answerWith();
       return;
     }
     if (item.kind === "approval" && o.label === "Edit") {
@@ -242,13 +253,7 @@ export function useItemDetail(key: string | null) {
       });
       return;
     }
-    void act(async () => {
-      const failed = await sendAnswer(target, seat, item, o.answer);
-      if (failed !== null) return failed;
-      // The thread beside the question shows the pick: it is the one message sent.
-      setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-      return null;
-    });
+    answerWith();
   };
   const dismiss = (after?: () => void) => {
     if (!item) return;
