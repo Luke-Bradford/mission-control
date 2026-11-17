@@ -1472,8 +1472,8 @@ board status counts as work to triage, and the wake says how many. Each seat is 
 that spell (it is woken again when the seat starts and goes idle again). The wake tells FLIGHT to start what the repo's working list allows, and that a seat with nothing it may start stays idle. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
 line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
-The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
-direction, irreversible actions and security exceptions go to the operator, parked with a brief.
+A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
+security exceptions go to the operator, parked with a brief.
 
 **Stuck PRs (#1791).** The engine's tick (`engine/stuck-prs.ts`) finds, with no FLIGHT or seat tokens, open PRs on a
 branch this hub has a run on (so not an external PR) in a `merge` repo that conflict with main (`CONFLICTING`) or have

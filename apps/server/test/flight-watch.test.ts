@@ -5205,6 +5205,27 @@ describe("the sweep's new checks hold back until their time", () => {
   const kinds = () =>
     flightState({ config, store, busy: [], now: nowMs }).signals.map((s) => s.kind);
 
+  it("a stored signal of a kind the hub no longer raises is dropped, so it cannot wake FLIGHT", () => {
+    store.setSetting(
+      `${FLIGHT_SIGNALS_SETTING}:mc`,
+      JSON.stringify({
+        initialized: true,
+        signals: {
+          "idle_no_work:inco-1:1": {
+            kind: "idle_no_work",
+            key: "inco-1:1",
+            since: nowMs,
+            evidence: "promote work for it",
+            toldAt: null,
+          },
+        },
+      }),
+    );
+    expect(kinds()).not.toContain("idle_no_work");
+    const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
+    expect(Object.keys(saved.signals ?? {})).not.toContain("idle_no_work:inco-1:1");
+  });
+
   it("an idle seat with startable work counts after 10 minutes, not before", () => {
     store.setSeatSession({ ...row("guido-1", null), updatedAt: T0 - 9 * MIN });
     store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
@@ -6671,8 +6692,8 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     const line = wakeLine(state, state, ["idle guido-1:0"]);
     expect(line).toContain("guido-1");
     expect(line).toMatch(/working list/);
-    expect(line).toMatch(/leave it idle/);
-    expect(line).toMatch(/do not promote parked work or file a ticket/);
+    expect(line).toMatch(/leave the seat idle/);
+    expect(line).toMatch(/do not promote parked work, file a ticket or log a wait/);
     expect(line).toMatch(/money, direction, irreversible/);
     expect(line).not.toMatch(/(start|open) (a|the|your) (new )?(controller |claude )?session/i);
     expect(line).not.toMatch(/controller session/i);
