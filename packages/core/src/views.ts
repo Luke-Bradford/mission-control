@@ -345,10 +345,10 @@ export interface Telemetry {
     /** The board and run facts used to plot a ticket's cycle in hours, for the last 14 days whatever the range. Null means that fact was not observed. */
     tickets: {
       ticket: string;
-      /** The board card's title, or null when the board no longer holds the card. */
-      title: string | null;
+      /** The board card's title, or null when the board no longer holds the card. Always set by the server. */
+      title?: string | null;
       /** The board Size, or null when the board has none. */
-      size: string | null;
+      size?: string | null;
       readyAt: number | null;
       startedAt: number | null;
       mergedAt: number | null;
