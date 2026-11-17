@@ -243,6 +243,7 @@ import {
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
 import { seatQueries } from "./store/seats.ts";
+import { ticketPlanQueries } from "./store/ticket-plans.ts";
 import {
   ACK_ABSENT_MS,
   type AgentEvent,
@@ -932,6 +933,11 @@ export class Store {
       (sql) => this.statement(sql),
     );
     return this.seatQueriesCache;
+  }
+
+  /** The ticket plans and their sign-off (store/ticket-plans.ts). */
+  get plans(): ReturnType<typeof ticketPlanQueries> {
+    return ticketPlanQueries(this.db);
   }
 
   /** The waste checks' queries and the alarms table (spend/waste.ts). */

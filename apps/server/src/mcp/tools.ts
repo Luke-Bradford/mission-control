@@ -135,6 +135,9 @@ import {
   otherAreaText,
   outsideAreaText,
   PLAN_HEADING,
+  PLAN_MOCKUPS_MAX,
+  PLAN_PART_MAX,
+  type PlanSignoff,
   PROFILE_NAME,
   PROFILE_PAIR_TEXT,
   PROFILE_REASON_MAX,
@@ -174,6 +177,7 @@ import {
   REVIEW_CHECK_RESULTS,
   REVIEW_FINDINGS_MAX,
   REVIEW_SUMMARY_MAX,
+  type RepoRules,
   type Run,
   readOnlyToolText,
   removedText,
@@ -207,9 +211,11 @@ import type { ProfilesError } from "../config/profiles.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
+import { RepoRulesError } from "../engine/rules.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
+import { keepMockups } from "../plans/assets.ts";
 import {
   PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,
@@ -282,6 +288,8 @@ export interface McToolsDeps {
   onFindings?: (seatId: string, runId: string) => void;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
+  /** The repo's rules as the engine reads them; `report_plan` reads `plan_signoff` from them. Absent: the config's. */
+  rules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
   /**
@@ -429,6 +437,14 @@ const PlanArgs = z
     plan: text(MC_PLAN_MAX),
     profile: z.string().regex(PROFILE_NAME).optional(),
     profile_reason: text(PROFILE_REASON_MAX).optional(),
+    // the parts the operator reads on the Planner tab, beside the plan itself
+    summary: text(PLAN_PART_MAX).optional(),
+    size_estimate: text(PLAN_PART_MAX).optional(),
+    risks: text(PLAN_PART_MAX).optional(),
+    mockups: z
+      .array(z.strictObject({ path: text(300), caption: text(200) }))
+      .max(PLAN_MOCKUPS_MAX)
+      .optional(),
   })
   .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
     message: PROFILE_PAIR_TEXT,
@@ -2837,6 +2853,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { text: `${FINDINGS_RECORDED}\nQA report: ${qaReport.permalink}` };
   }
 
+  /** The repo's plan sign-off setting, from its rules as the engine reads them. */
+  async function planSignoffOf(repoId: string): Promise<PlanSignoff> {
+    const rules = await deps.rules?.(repoId);
+    if (rules !== undefined && !(rules instanceof RepoRulesError))
+      return rules.planSignoff ?? "never";
+    return config.repos.find((r) => r.id === repoId)?.rules?.planSignoff ?? "never";
+  }
+
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = PlanArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -2896,6 +2920,17 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: planTextText(evidenceProblemText(problem)), isError: true };
     }
 
+    const kept =
+      loop === "plan"
+        ? await keepMockups({
+            worktree: live.worktree,
+            dbPath: deps.dbPath,
+            inputs: parsed.data.mockups ?? [],
+            known,
+          })
+        : ({ ok: true, mockups: [] } as const);
+    if (!kept.ok) return { text: kept.text, isError: true };
+
     const written = await queued(planQueue, `${run.repoId}#${issue}`, async (): Promise<Result> => {
       const cwd = crewDir(deps.dbPath);
       const failed = (what: string, r: { code: number | null; stderr: string }): Result => {
@@ -2919,8 +2954,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return failed("issue view", { code: viewed.code, stderr: "not an object" });
       }
       if (issueJson.state !== "OPEN") return { text: MC_PLAN_ISSUE_CLOSED, isError: true };
-      const body = String(issueJson.body ?? "");
-      if (PLAN_HEADING_LINE.test(body)) return { text: MC_PLAN_ALREADY, isError: true };
+      let body = String(issueJson.body ?? "");
+      if (PLAN_HEADING_LINE.test(body)) {
+        // a plan the operator sent back is written again, in place of the old one
+        if (loop !== "plan" || store.plans.get(run.repoId, issue)?.state !== "sent-back")
+          return { text: MC_PLAN_ALREADY, isError: true };
+        body = body.slice(0, body.search(PLAN_HEADING_LINE)).trimEnd();
+      }
       if (unclosedMarkdown(body)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
 
       const tests = planTestCount(plan);
@@ -2973,6 +3013,26 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const at = now();
     if (loop === "plan" && override !== undefined)
       store.setProfileOverride(run.repoId, issue, override, at);
+    if (loop === "plan") {
+      // a ticket FLIGHT sent keeps its hold; otherwise only `every` holds a ticket
+      const held =
+        store.plans.get(run.repoId, issue)?.required ??
+        (await planSignoffOf(run.repoId)) === "every";
+      store.plans.file(
+        run.repoId,
+        issue,
+        {
+          asks: parsed.data.summary ?? null,
+          proposal: plan.trim(),
+          sizeEstimate: parsed.data.size_estimate ?? null,
+          risks: parsed.data.risks ?? null,
+          mockups: [...kept.mockups],
+        },
+        held,
+        at,
+      );
+      bus.emit("plans");
+    }
     const planned = planWrittenText(run.ticket ?? run.id);
     store.addLoopEvent(`${run.id}:plan`, run.id, planned, at);
     const watcher = place.session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");

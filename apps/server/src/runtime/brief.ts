@@ -22,6 +22,7 @@ import {
   MC_TOOL_NAMES,
   OLDER_FINDINGS_MAX,
   profileRouteText,
+  type QaPlan,
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
   REVIEW_SINCE_FILE,
@@ -86,6 +87,8 @@ export interface BriefInput {
   fileContext?: string | null;
   /** The ticket's answered questions, newest first; the brief lists ten at most. */
   decisions?: readonly { question: string; answer: string }[];
+  /** The note the operator sent this ticket's plan back with: a planner's brief carries it. */
+  planNote?: string | null;
 }
 
 /** How many of a ticket's answered questions a run's start brief lists. */
@@ -132,6 +135,9 @@ const READONLY_CLOSE = `You read and report; you cannot commit, push or open PRs
 /** A planner's last line: no branch, and it ends by `report_plan`, which Mission Control acts on. */
 const PLANNER_CLOSE =
   "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. The plan needs a ### Tests part with one entry for each item under the ticket's ## Done when, naming the test to write first and the file it goes in. Mission Control checks every file path the plan names against this checkout and refuses the plan, naming what to fix, unless the same line says the plan creates the file (write new or create on that line); fix it and call report_plan again. Mission Control adds a plan that passes to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask FLIGHT with mc ask_flight only for a decision you cannot make from the ticket and the code.";
+/** What a planner also gives report_plan: the parts the operator reads on the Planner tab. */
+const PLANNER_PARTS =
+  "Give report_plan the parts the operator reads on the Planner tab too: summary (what the ticket asks, in a few lines), size_estimate, risks, and mockups (paths of PNG, JPEG or WebP pictures in this checkout, each with a caption) for anything the operator will see. The operator may sign the plan off or send it back with a note.";
 const WORK_UNTIL_DONE =
   "There is no turn or time limit. Work until the ticket is done or you are truly blocked; if blocked, name the blocker.";
 const PLAN_UNTIL_RECORDED =
@@ -204,7 +210,7 @@ export function ticketBrief(i: BriefInput): string {
   const profile = profileLines(i);
   const last =
     i.loop === "plan"
-      ? `${PLANNER_CLOSE} ${PLAN_UNTIL_RECORDED}`
+      ? `${PLANNER_CLOSE} ${PLANNER_PARTS} ${PLAN_UNTIL_RECORDED}`
       : `You are working in a checkout of branch ${i.branch}. ${scope} ${writer ? WRITER_CLOSE : READONLY_CLOSE} ${WORK_UNTIL_DONE}`;
   // The note goes first: a cut inside an open code fence would swallow a note placed after it.
   return [
@@ -215,6 +221,14 @@ export function ticketBrief(i: BriefInput): string {
     "",
     ...(profile.length > 0 ? [...profile, ""] : []),
     ...decisionsSection(i.decisions),
+    ...(i.loop === "plan" && i.planNote
+      ? [
+          "## The operator sent your last plan back",
+          "Write the plan again with this note in mind; Mission Control replaces the old plan.",
+          wrapExternalText(i.planNote),
+          "",
+        ]
+      : []),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
     ...(writer
@@ -247,6 +261,23 @@ export function ticketBrief(i: BriefInput): string {
         ]
       : []),
   ].join("\n");
+}
+
+/** The plan the operator signed off, as a reviewer reads it. Mockups are named; the reviewer cannot open them. */
+function signedOffPlanLines(plan: QaPlan): string[] {
+  return [
+    "## The plan the operator signed off",
+    "",
+    ...(plan.asks === null ? [] : [`What the ticket asks: ${plan.asks}`, ""]),
+    "What was proposed:",
+    wrapExternalText(plan.proposal ?? ""),
+    ...(plan.sizeEstimate === null ? [] : ["", `Size estimate: ${plan.sizeEstimate}`]),
+    ...(plan.risks === null ? [] : ["", `Complications and risks: ${plan.risks}`]),
+    ...(plan.mockups.length === 0
+      ? []
+      : ["", `Mockups shown to the operator: ${plan.mockups.map((m) => m.caption).join("; ")}`]),
+    "",
+  ];
 }
 
 export interface ReviewBriefInput {
@@ -298,6 +329,8 @@ export interface ReviewBriefInput {
   installNote?: string;
   /** The PR's changed files and the default branch's files that import them; absent when unknown. */
   reach?: ReviewReach;
+  /** The plan the operator signed off for the ticket, to check the work against. */
+  signedOffPlan?: QaPlan | null;
   /** An ended run's PR: blocking findings still open from the PR's earlier reviews. */
   olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
 }
@@ -477,6 +510,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
     "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
     "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete correction outcome within the ticket's scope and constraints. If recomposition is needed, explain the violated requirement.",
     "5. Call mc report_findings once with every finding, verdict, checked coverage, worksWell, limitations and followUps (each with disposition and ticket when deferred). List test commands with reported counts; attach at, exitCode and evidence only when you have receipts. Give visualReason only for a nonvisual change. Keep the returned immutable QA report permalink in handoffs. Missing evidence is recorded as incomplete. Then stop.",
+    ...(i.signedOffPlan
+      ? [
+          "6. The operator signed off a plan for this ticket (below). Check whether the work matches it: the proposal, and any mockup against what was built. Where it does not, report an Important finding and say so in your summary; where it does, say that.",
+        ]
+      : []),
     "If something outside this review blocks you, call FLIGHT with mc call_flight { reason, ref } rather than guessing; it wakes within 5 minutes.",
     "",
     `## Ticket ${i.repo}#${i.issue}`,
@@ -506,6 +544,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
           "",
         ]
       : []),
+    ...(i.signedOffPlan ? signedOffPlanLines(i.signedOffPlan) : []),
     "## The author's report notes, oldest first",
     "",
     notes.text === "" ? "(none)" : notes.text,

@@ -121,6 +121,7 @@ import {
   seatCallSign,
   seatDef,
   seatInstructionBlock,
+  signedOffQaPlan,
   type TicketView,
   TOOL_OUTPUT_DIR,
   TRIM_HOOK_TIMEOUT_S,
@@ -3917,6 +3918,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
+        ...(def.loop === "plan"
+          ? { planNote: store.plans.get(info.repo.id, issue)?.note ?? null }
+          : {}),
         decisions: store.answeredQuestionsOn(
           run.ticket ?? `${info.repo.id}#${issue}`,
           BRIEF_DECISIONS_MAX,
@@ -4640,6 +4644,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
           : [],
         prevReply,
+        signedOffPlan: signedOffQaPlan(store.plans.get(info.repo.id, issue)),
         ...(olderFindings.length > 0 ? { olderFindings } : {}),
         ...(reach === null ? {} : { reach }),
         diffCut: inputs.diffCut,

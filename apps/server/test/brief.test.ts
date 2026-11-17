@@ -369,6 +369,25 @@ describe("ticketBrief", () => {
     );
   });
 
+  it("a planner's brief carries the operator's note on a plan sent back, and the parts to give", () => {
+    const planner = {
+      ...input,
+      role: "FAO",
+      mode: "read-only",
+      loop: "plan",
+      call: "FAO-1",
+      branch: "",
+    } as const;
+    const out = ticketBrief({ ...planner, planNote: "Make it smaller." });
+    expect(out).toContain("## The operator sent your last plan back");
+    expect(out).toContain("Make it smaller.");
+    expect(out).toContain("summary (what the ticket asks");
+    expect(ticketBrief(planner)).not.toContain("sent your last plan back");
+    expect(ticketBrief({ ...input, planNote: "Make it smaller." })).not.toContain(
+      "Make it smaller.",
+    );
+  });
+
   it("planner brief", () => {
     const brief = ticketBrief({
       ...input,
@@ -645,6 +664,26 @@ describe("reviewBrief", () => {
     commands: ["pnpm -s vitest"],
     fullSuite: [],
   };
+
+  it("the reviewer's brief names the signed-off plan and asks whether the work matches it", () => {
+    const out = reviewBrief({
+      ...review,
+      signedOffPlan: {
+        ref: "mc#42",
+        asks: "Fix the race.",
+        proposal: "Guard stop().",
+        sizeEstimate: "S",
+        risks: "Timing.",
+        mockups: [],
+        decidedAt: 1,
+      },
+    });
+    expect(out).toContain("## The plan the operator signed off");
+    expect(out).toContain("Guard stop().");
+    expect(out).toContain("Check whether the work matches it");
+    expect(out).toContain("Where it does not, report an Important finding");
+    expect(reviewBrief(review)).not.toContain("signed off");
+  });
 
   it("lists the ticket's answered questions in a review brief too, ten at most", () => {
     const decisions = Array.from({ length: 12 }, (_, n) => ({

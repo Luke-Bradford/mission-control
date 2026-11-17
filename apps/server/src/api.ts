@@ -114,6 +114,8 @@ import {
   OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
+  PLAN_NO_SUCH,
+  PLAN_NOTE_MAX,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
   type PrUatView,
@@ -386,6 +388,15 @@ import {
   seatPlace,
 } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
+import { readPlanAsset } from "./plans/assets.ts";
+import {
+  approvePlan,
+  plansView,
+  type SignoffDeps,
+  type SignoffResult,
+  sendBackPlan,
+  ticketPlan,
+} from "./plans/signoff.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -538,6 +549,8 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
+  /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
+  ticketMove?: SignoffDeps["move"];
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Shared bounded reader; the MCP read handler can use this same instance. */
@@ -4122,8 +4135,75 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? null
               : { at: questionCursor.at, id: Number(questionCursor.key.slice("question:".length)) },
         });
-        return history ?? reply.code(404).send({ error: "unknown issue" });
+        return history === null
+          ? reply.code(404).send({ error: "unknown issue" })
+          : { ...history, plan: ticketPlan(store, config, repo.id, n) };
       });
+
+      // Reader: docs/runbook.md#plan-sign-off (the Planner tab's lists: waiting, and signed off)
+      api.get("/plans", () => plansView(store, config));
+
+      // Reader: docs/runbook.md#plan-sign-off (a plan's pictures, kept by content hash)
+      api.get<{ Params: { id: string } }>("/plan-assets/:id", async (req, reply) => {
+        // Not a mutating route, so the operator-token hook skips it: check the token here.
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = readPlanAsset(deps.store.path, req.params.id);
+        if (asset === null) return reply.code(404).send({ error: "not found" });
+        return reply
+          .header("cache-control", "private, max-age=31536000, immutable")
+          .header("x-content-type-options", "nosniff")
+          .type(asset.mediaType)
+          .send(asset.bytes);
+      });
+
+      const planDeps = (): SignoffDeps => ({
+        store,
+        config,
+        now,
+        rules: deps.repoRules ?? (async () => DEFAULT_REPO_RULES),
+        ...(deps.ticketMove === undefined ? {} : { move: deps.ticketMove }),
+      });
+      const planIssue = (raw: string): number =>
+        /^[1-9]\d*$/.test(raw) && Number(raw) <= MAX_ISSUE_NUMBER ? Number(raw) : 0;
+      const planAnswer = (reply: FastifyReply, result: SignoffResult) => {
+        if (!result.ok) return reply.code(result.status).send({ error: result.error });
+        bus.emit("plans");
+        if (result.moved) bus.emit("boards");
+        return { plan: result.plan, moved: result.moved, moveError: result.moveError };
+      };
+
+      // Reader: docs/runbook.md#plan-sign-off (Approve on the Planner tab; a held ticket moves to Ready)
+      api.post<{ Params: { repoId: string; issue: string } }>(
+        "/plans/:repoId/:issue/approve",
+        async (req, reply) => {
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const issue = planIssue(req.params.issue);
+          if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
+          return planAnswer(reply, await approvePlan(planDeps(), req.params.repoId, issue));
+        },
+      );
+
+      // Reader: docs/runbook.md#plan-sign-off (Send back on the Planner tab, with the operator's note)
+      api.post<{ Params: { repoId: string; issue: string } }>(
+        "/plans/:repoId/:issue/send-back",
+        async (req, reply) => {
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const body = z
+            .strictObject({ note: z.string().trim().min(1).max(PLAN_NOTE_MAX) })
+            .safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          const issue = planIssue(req.params.issue);
+          if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
+          return planAnswer(
+            reply,
+            sendBackPlan(planDeps(), req.params.repoId, issue, body.data.note),
+          );
+        },
+      );
 
       // Setup runs one at a time per repo, so a second tab pressing it waits and then finds the fields.
       const setupLocks = new Map<string, Promise<unknown>>();

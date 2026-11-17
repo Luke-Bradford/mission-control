@@ -35,6 +35,7 @@ import {
   commsCutMarker,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
+  DEFAULT_REPO_RULES,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -130,6 +131,7 @@ import {
   pushRun,
   seatWroteBody,
 } from "../src/mcp/tools.ts";
+import { readPlanAsset } from "../src/plans/assets.ts";
 import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
@@ -6056,6 +6058,137 @@ describe("report_plan", () => {
       ["fao-1", FAO_RUN, "secret"],
     ]);
     expect(told).toEqual([]);
+  });
+
+  describe("the plan is filed for the operator's sign-off", () => {
+    const PNG = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.alloc(32, 1),
+    ]);
+    const withRules = (planSignoff: "every" | "larger" | "never") => {
+      const cfg = config();
+      cfg.crew?.sessions[0]?.seats.push({
+        id: "fao-1",
+        role: "FAO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: [],
+      });
+      pt = createMcTools(
+        deps({
+          config: cfg,
+          gh: createGh(join(ghDir, "gh")),
+          rules: async () => ({ ...DEFAULT_REPO_RULES, planSignoff }),
+        }),
+      );
+    };
+    const call = (args: Record<string, unknown>) =>
+      tool("report_plan", pt).call(FAO_CTX, { plan: PLAN, ...args });
+
+    it("report_plan stores asks, proposal, mockups, size and risks", async () => {
+      const checkout = join(dir, "planner-pictures");
+      mkdirSync(join(checkout, "docs"), { recursive: true });
+      writeFileSync(join(checkout, "docs", "shot.png"), PNG);
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: FAO_RUN,
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: checkout,
+        updatedAt: NOW,
+      });
+      expect(
+        await call({
+          summary: "Show the plan.",
+          size_estimate: "M",
+          risks: "Touches the QA page.",
+          mockups: [{ path: "docs/shot.png", caption: "The new tab" }],
+        }),
+      ).toEqual({ text: MC_PLAN_WRITTEN });
+      const row = store.plans.get("mc", 7);
+      expect(row).toMatchObject({
+        state: "awaiting-signoff",
+        required: false,
+        asks: "Show the plan.",
+        proposal: PLAN,
+        sizeEstimate: "M",
+        risks: "Touches the QA page.",
+      });
+      const [mockup] = row?.mockups ?? [];
+      expect(mockup).toMatchObject({ caption: "The new tab", mediaType: "image/png" });
+      expect(mockup?.url).toBe(`/api/plan-assets/${mockup?.id}`);
+      expect(readPlanAsset(join(dir, "data", "mc.sqlite"), mockup?.id ?? "")?.bytes).toEqual(PNG);
+      expect(emitted).toContain("plans");
+    });
+
+    it("a mockup path outside the checkout, a symlink, a non-image and an oversize file are refused", async () => {
+      const checkout = join(dir, "planner-pictures-2");
+      mkdirSync(join(checkout, "docs"), { recursive: true });
+      writeFileSync(join(checkout, "docs", "note.png"), "not a picture");
+      writeFileSync(
+        join(checkout, "docs", "big.png"),
+        Buffer.concat([PNG, Buffer.alloc(2 * 1024 * 1024)]),
+      );
+      writeFileSync(join(dir, "outside.png"), PNG);
+      symlinkSync(join(dir, "outside.png"), join(checkout, "docs", "link.png"));
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: FAO_RUN,
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: checkout,
+        updatedAt: NOW,
+      });
+      for (const path of [
+        "../outside.png",
+        "/etc/passwd",
+        "docs/link.png",
+        "docs/note.png",
+        "docs/big.png",
+        "docs/missing.png",
+        "docs/shot.svg",
+      ]) {
+        const r = await call({ mockups: [{ path, caption: "x" }] });
+        expect(r.isError, path).toBe(true);
+        expect(r.text, path).toContain(`mockup ${path}`);
+      }
+      expect(store.plans.get("mc", 7)).toBeNull();
+      expect(ghCalls().filter((c) => c.args[1] === "edit")).toEqual([]);
+    });
+
+    it("every holds a new row", async () => {
+      withRules("every");
+      await call({});
+      expect(store.plans.get("mc", 7)?.required).toBe(true);
+    });
+
+    it("a row FLIGHT sent keeps its hold under larger", async () => {
+      withRules("larger");
+      store.plans.request("mc", 7, NOW);
+      await call({});
+      expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", required: true });
+    });
+
+    it("a plan sent back is written again in place of the old one", async () => {
+      withRules("every");
+      ghState(view(`Do X.\n\n## Plan\n\nold plan\n\nPlanned by FAO-1 (Mission Control).\n`));
+      expect(await call({})).toEqual(refused(MC_PLAN_ALREADY));
+      store.plans.file(
+        "mc",
+        7,
+        { asks: null, proposal: "old plan", sizeEstimate: null, risks: null, mockups: [] },
+        true,
+        NOW,
+      );
+      store.plans.sendBack("mc", 7, "smaller please");
+      expect(await call({})).toEqual({ text: MC_PLAN_WRITTEN });
+      expect(ghCalls().at(-1)?.body).toBe(
+        `Do X.\n\n## Plan\n\n${PLAN}\n\nPlanned by FAO-1 (Mission Control).\n`,
+      );
+      expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", note: null });
+    });
   });
 
   describe("the plan is checked", () => {
