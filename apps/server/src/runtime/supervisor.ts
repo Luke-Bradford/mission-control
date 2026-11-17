@@ -2512,6 +2512,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (info && run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
   }
 
+  const keepsWorktree = (run: Run): boolean =>
+    run.reviewId == null && !!run.ticket && !!run.branch && run.loop?.phase !== "done";
+
   /**
    * Removes a review run's scratch worktree once the run is over. Never throws: a failure is
    * logged and raised as the same blocked note the engine's end raises.
@@ -2523,6 +2526,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     worktree: string | null,
   ): Promise<void> {
     if (worktree === null) return;
+    const ended = store.run(runId);
+    // an unfinished ticket run keeps its worktree: the next run on the ticket carries on in it
+    if (ended && keepsWorktree(ended)) return;
     const seatId = info.seat.id;
     try {
       await inClone(info.session.checkout, () =>
@@ -4732,7 +4738,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     emit({ kind: "run-ended", seatId, runId, endedBy: "engine" });
     if (worktree === null) return;
     // an unfinished ticket run keeps its worktree: the next run on the ticket carries on in it
-    if (run.reviewId == null && run.ticket && run.branch && run.loop?.phase !== "done") return;
+    if (keepsWorktree(run)) return;
     try {
       await inClone(info.session.checkout, () =>
         removeCheckout(info.session.checkout, worktree, { force: true }),
