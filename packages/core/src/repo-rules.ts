@@ -88,7 +88,6 @@ export function effectiveHardRules(
 export const DEFAULT_REPO_RULES: RepoRules = freezeRules({
   pickFrom: ["Ready"],
   promoteBacklog: false,
-  planSignoff: "never",
   needs: [...REPO_NEEDS],
   areas: {},
   hardRules: DEFAULT_HARD_RULES,

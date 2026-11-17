@@ -72,7 +72,7 @@ export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules 
     ...(r.templates === undefined ? {} : { templates: r.templates }),
     pickFrom: r.pick_from ?? base.pickFrom,
     promoteBacklog: r.promote_backlog ?? base.promoteBacklog,
-    planSignoff: r.plan_signoff ?? base.planSignoff,
+    ...(r.plan_signoff === undefined ? {} : { planSignoff: r.plan_signoff }),
     needs: r.needs ?? base.needs,
     areas: r.areas === undefined ? base.areas : Object.fromEntries(Object.entries(r.areas)),
     hardRules: r.hard_rules ?? base.hardRules,
