@@ -500,6 +500,34 @@ describe("startRun eligibility", () => {
       const { runId } = await sup.startRun("guido-1", 42);
       expect(runPathGrants(store, runId)).toEqual([]);
     });
+
+    it("starts when Paths: lists only globs and files in the seat's area", async () => {
+      const { sup, cfg } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({
+          body: "Paths: apps/server/**, apps/server/src/telemetry.ts, packages/core/**\n",
+        }),
+      });
+      const seat = cfg.crew?.sessions[0]?.seats.find((candidate) => candidate.id === "guido-1");
+      if (seat) seat.area = ["apps/server/**", "packages/core/**"];
+      sup.start();
+
+      const { runId } = await sup.startRun("guido-1", 42);
+
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it("refuses an outside-area glob with the current grant error", async () => {
+      await refused(422, grantUngrantableText("apps/web/**", "it is not a plain repo-relative file path"), {
+        fetchTicket: ticketWith({ body: "Paths: apps/web/**\n" }),
+      });
+    });
+
+    it("asks approval only for an outside plain file", async () => {
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, package.json\n" }),
+      });
+    });
   });
 
   it("10: starts Size M with no plan so its seat can write it", async () => {

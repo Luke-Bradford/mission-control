@@ -78,7 +78,6 @@ import {
   hasPlanSection,
   inferTicket,
   isObj,
-  isProtectedPath,
   isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
@@ -3649,9 +3648,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (def.mode === "writer" && !planner) {
         const extra = info.repo.protectedFiles ?? [];
         for (const p of ticketPathGrants(ticket.body)) {
+          if (pathInArea(info.seat.area, p)) continue;
           const why = pathGrantProblem(p, extra);
           if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
-          if (!pathInArea(info.seat.area, p) || isProtectedPath(p, extra)) grants.push(p);
+          grants.push(p);
         }
         const approved = approvedPaths(store, ref);
         const unapproved = grants.filter((p) => !approved.includes(p));
