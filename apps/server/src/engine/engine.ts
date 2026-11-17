@@ -154,6 +154,8 @@ import {
   uatParkText,
   uatSendBackText,
   wakeFailedText,
+  wakeStuckKey,
+  wakeStuckText,
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
@@ -168,7 +170,7 @@ import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
-import type { Supervisor } from "../runtime/supervisor.ts";
+import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
@@ -591,6 +593,8 @@ export function createEngine(deps: EngineDeps): Engine {
   /** Whether each repo's rules set `hard_rules` at their last good read. */
   const hardRulesSet = new Map<RepoId, boolean>();
   /** Writer sync cap, per run; a restart clears it. */
+  /** Per run: the last 502 a wake met and how many passes in a row met it (see the wake case). */
+  const wakeRetries = new Map<string, { message: string; n: number }>();
   const lastSync = new Map<string, number>();
   /** When each run last had a transient refusal counted: one counts per tick, however often it is tried. */
   const lastTransient = new Map<string, number>();
@@ -1730,6 +1734,19 @@ export function createEngine(deps: EngineDeps): Engine {
           // the seat is busy or the hub is stopping: the next pass tries again; the run holding the
           // seat is looked at now, to give way to this rework if its turn has ended
           if (isTransientStart(e)) {
+            // a 502 that repeats on one run (its dependencies will not reinstall) is not a busy
+            // seat: the next pass still tries again, but FLIGHT is told once
+            if (e instanceof SupervisorError && e.status === 502) {
+              const message = Array.from(e.message).slice(0, STDERR_TEXT_MAX).join("");
+              const before = wakeRetries.get(run.id);
+              const n = before?.message === message ? before.n + 1 : 1;
+              wakeRetries.set(run.id, { message, n });
+              if (n >= 2)
+                store.addLoopEvent(wakeStuckKey(run.id), run.id, wakeStuckText(message), at);
+            } else {
+              // anything else between two 502s (a busy seat's 409) breaks "twice running"
+              wakeRetries.delete(run.id);
+            }
             const holder = supervisor.seat(run.agentId)?.runId ?? null;
             if (
               holder !== null &&
@@ -1739,6 +1756,7 @@ export function createEngine(deps: EngineDeps): Engine {
               void reconcileRun(holder);
             return;
           }
+          wakeRetries.delete(run.id);
           const message = e instanceof Error ? e.message : String(e);
           // (the supervisor ended the run: the next pass parks it ended)
           store.addLoopEvent(
@@ -1750,6 +1768,7 @@ export function createEngine(deps: EngineDeps): Engine {
           out.again = true;
           return;
         }
+        wakeRetries.delete(run.id);
         // a run parked on the operator's question gets one line to carry on with the answer
         // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
         // on the seat as any other)

@@ -440,7 +440,7 @@ CREATE TABLE IF NOT EXISTS flight_plans (
 );
 -- One row per FLIGHT wake: the run it woke and the fact categories that woke it.
 CREATE TABLE IF NOT EXISTS flight_wakes (
-  run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, PRIMARY KEY (run_id, at)
+  run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, rode TEXT, immediate TEXT, PRIMARY KEY (run_id, at)
 );
 CREATE TABLE IF NOT EXISTS flight_incoming (
   id TEXT PRIMARY KEY, source TEXT NOT NULL, arrival_id TEXT NOT NULL, version TEXT NOT NULL,

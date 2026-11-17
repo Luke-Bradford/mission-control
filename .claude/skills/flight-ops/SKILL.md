@@ -84,6 +84,6 @@ For a stop not listed here, find its text with `rg -F '<text>' apps/server/src p
 ## Go beyond the playbook
 
 - When a stall recurs, find its cause: the hub, the ticket or the seat. Fix the cause with a ticket that names the evidence.
-- Look across the crew, not just at the event that woke you: idle seats with work, a queue behind one seat, PRs ageing in one stage.
+- Look across the crew, not just at the event that woke you: idle seats with work they may start, a queue behind one seat, PRs ageing in one stage.
 - When many things fail at once, check the GitHub rate limit (`mc gh_read`), and read the Mac panel (`mc operator` GET `/api/machine`).
 - If you cannot clear something this wake, tell the operator in one line what is stuck, why, and what you do next.
