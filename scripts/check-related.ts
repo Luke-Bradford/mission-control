@@ -56,7 +56,8 @@ export async function checkRelated(cwd: string): Promise<number> {
   try {
     const result = spawnSync("pnpm", args, { cwd, stdio: ["inherit", fd, fd] });
     const output = result.status === 0 ? "" : readFileSync(join(dir, "output"), "utf8");
-    const verdict = vitestVerdict(result.status ?? 1, readVitestReportTotals(report), output);
+    const totals = readVitestReportTotals(report);
+    const verdict = totals ? vitestVerdict(result.status ?? 1, totals, output) : 1;
     if (verdict === 0) {
       const size = fstatSync(fd).size;
       const tail = Buffer.alloc(Math.min(size, 64 * 1024));
@@ -73,7 +74,7 @@ export async function checkRelated(cwd: string): Promise<number> {
     await pipeline(createReadStream(join(dir, "output")), process.stdout, { end: false });
     if (result.error) console.error(`Affected tests could not start: ${result.error.message}`);
     if (result.signal) console.error(`Affected tests ended on signal ${result.signal}.`);
-    return result.status ?? 1;
+    return result.status || 1;
   } finally {
     closeSync(fd);
     rmSync(dir, { recursive: true, force: true });
