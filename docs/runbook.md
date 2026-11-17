@@ -493,12 +493,12 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 | Retry loop | A ticket has 2 failed attempts (a run that ended failed, or parked as stuck, refused, conflict, no CI or gate), or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
 | Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
 | Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
-| Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm to FLIGHT with the runs listed |
+| Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm with the runs listed |
 | Coordination overhead | FLIGHT's recorded spend passes the developers' over a day (and is at least $10) | Alarm with the split; controller tokens are named, not priced |
-| Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm to FLIGHT naming the tickets |
-| Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm to FLIGHT with the runs and their blocking review findings |
-| Failed review rounds | An open PR has 2 reviews that reported blocking findings or a failed verdict | Alarm to FLIGHT; reviews go on. FLIGHT's state also lists the count on each PR (`prs[].reviewRounds`) |
-| Clearance waiting | A run has waited 2 hours on FLIGHT's clearance (a hard-rule PR, `awaitingFlight`) | Alarm to FLIGHT, once, with the hours waited. `GET /api/waste` lists it from 24 hours |
+| Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm naming the tickets |
+| Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm with the runs and their blocking review findings |
+| Failed review rounds | An open PR has 2 reviews that reported blocking findings or a failed verdict | Alarm; reviews go on. FLIGHT's state also lists the count on each PR (`prs[].reviewRounds`) |
+| Clearance waiting | A run has waited 2 hours on FLIGHT's clearance (a hard-rule PR, `awaitingFlight`) | Alarm with the hours waited. `GET /api/waste` lists it from 24 hours |
 
 - `GET /waste` also serves `flight`: 14 rolling 24-hour buckets (oldest first, the last ending now) of
   FLIGHT's wakes, its `wait` decisions, and its tokens against every run's new tokens (`tokenShare`, null
@@ -509,9 +509,11 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   retrospective's 24 hours; null before the first.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
-- FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
-  the hook has already refused that rerun, so Audit records it and FLIGHT is not woken. An alarm is
-  not a question: it never reaches Needs you.
+- Only a retry-loop alarm wakes FLIGHT, once, through the `waste_alarm` signal: it parks a ticket and
+  nothing else lifts that park. It waits for the batch window like any routine reason. No other alarm
+  wakes FLIGHT: a review-rounds hold reaches it as the parked run, a restart storm lifts when the
+  hour's count falls back, and the rest hold nothing. Every alarm is recorded and served by
+  `GET /api/waste`. An alarm is not a question: it never reaches Needs you.
 - FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
   you). The alarm stays closed until its cause grows past the level it had. For a seat's or a
   repo's alarm (restart storm, coordination overhead, ticket churn) that silence lasts one window,

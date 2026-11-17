@@ -156,7 +156,7 @@ describe("failed review rounds", () => {
     expect(state.prs.find((p) => p.pr === 7)?.reviewRounds).toBe(2);
   });
 
-  it("wakes FLIGHT once for the alarm", () => {
+  it("does not wake FLIGHT for the alarm", () => {
     store.upsertPullRequests("mc", [pr(7)], NOW);
     store.upsertRun(author());
     reported("r1", 7, 1, 2);
@@ -166,9 +166,8 @@ describe("failed review rounds", () => {
       flightSignals({ config, store, session, seats: [], now: at }).signals.filter(
         (s) => s.kind === "waste_alarm",
       );
-    expect(read(NOW)).toHaveLength(1);
-    expect(read(NOW + MIN)).toHaveLength(1);
-    expect(read(NOW + MIN)[0]?.key).toBe(read(NOW)[0]?.key);
+    expect(openWasteAlarms(store).map((a) => a.check)).toContain("failed-review-rounds");
+    expect(read(NOW)).toEqual([]);
   });
 });
 
@@ -207,26 +206,22 @@ describe("clearance waiting", () => {
     expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toEqual([]);
   });
 
-  it("wakes FLIGHT once while the wait stands", () => {
+  it("does not wake FLIGHT while the wait stands", () => {
     hold(NOW - 3 * HOUR);
     syncWasteAlarms(config, store, NOW);
     syncWasteAlarms(config, store, NOW + HOUR);
     const signals = flightSignals({ config, store, session, seats: [], now: NOW + HOUR }).signals;
-    expect(signals.filter((s) => s.kind === "waste_alarm")).toHaveLength(1);
+    expect(signals.filter((s) => s.kind === "waste_alarm")).toEqual([]);
   });
 
-  it("wakes FLIGHT once for each head: a new head restarts the two hours", () => {
-    const keys = (at: number) =>
-      flightSignals({ config, store, session, seats: [], now: at })
-        .signals.filter((s) => s.kind === "waste_alarm" && s.evidence.includes("clearance"))
-        .map((s) => s.key)
-        .sort();
+  it("raises one alarm for each head: a new head restarts the two hours", () => {
     const open = () => openWasteAlarms(store).filter((a) => a.check === "clearance-waiting");
+    const keys = (_at: number) => open().map((a) => a.id);
     hold(NOW - 3 * HOUR);
     syncWasteAlarms(config, store, NOW);
     const first = keys(NOW);
     expect(first).toHaveLength(1);
-    // the level grows from 3 to 4 hours: the same fact, not a new wake
+    // the level grows from 3 to 4 hours: the same alarm, not a new one
     syncWasteAlarms(config, store, NOW + HOUR);
     expect(keys(NOW + HOUR)).toEqual(first);
     // a new head: the wait starts over, so the old head's alarm closes and nothing is raised
@@ -237,7 +232,7 @@ describe("clearance waiting", () => {
     );
     syncWasteAlarms(config, store, NOW + 3 * HOUR);
     expect(open()).toEqual([]);
-    // two hours on the new head: one new fact, then quiet as its level grows
+    // two hours on the new head: one new alarm, then the same one as its level grows
     syncWasteAlarms(config, store, NOW + 4 * HOUR + 2 * MIN);
     const second = keys(NOW + 4 * HOUR + 2 * MIN);
     expect(second.filter((k) => !first.includes(k))).toHaveLength(1);
