@@ -87,7 +87,6 @@ import {
   duplicateTitleText,
   EDIT_UNCONFIRMED_TEXT,
   END_UNREADABLE_TEXT,
-  ENGINE_OFF_TEXT,
   eligibleToStart,
   endDirtyText,
   endedAsideDecision,
@@ -140,7 +139,6 @@ import {
   FLIGHT_STARTABLE,
   FLIGHT_TICKET_TITLE_MAX,
   FLIGHT_TICKET_TYPE_LABELS,
-  FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightLedgerEntry,
@@ -215,9 +213,7 @@ import {
   notMergedText,
   notOnBoardText,
   notOnProjectText,
-  notParkedText,
   notReadyText,
-  notRunOfSeatText,
   notSentText,
   notStartableSeatText,
   OWN_SEAT_TEXT,
@@ -235,7 +231,6 @@ import {
   PROTECTED_ITEM_REFUSED,
   type Profile,
   type ProfileOverride,
-  parkNotYoursText,
   passNeedsBriefText,
   pathGrantProblem,
   pauseWithout,
@@ -258,7 +253,6 @@ import {
   REMEMBER_DESCRIPTION,
   RETURN_NOT_SEAT_QUESTION,
   type RepoRules,
-  RUN_ID_NEEDS_UNPARK,
   type Run,
   rerunPendingText,
   rerunStartedDecision,
@@ -281,7 +275,6 @@ import {
   seatDef,
   seatHasRunText,
   sentText,
-  sentUnparkedText,
   smallNoPlanText,
   startedDecision,
   startedText,
@@ -841,15 +834,12 @@ const MessageSeatArgs = z
     text: text(MC_TEXT_MAX).optional(),
     focus: seatFocus.optional(),
     read_focus: z.literal(true).optional(),
-    unpark: z.boolean().optional(),
-    runId: z.string().min(1).max(200).optional(),
     basis: basisArg,
   })
   .refine(
     (a) =>
       [a.text !== undefined, a.focus !== undefined, a.read_focus === true].filter(Boolean)
-        .length === 1 &&
-      (a.text !== undefined || (a.unpark === undefined && a.runId === undefined)),
+        .length === 1,
     "Provide text, focus or read_focus, separately.",
   );
 const CommsPinArgs = z.strictObject({
@@ -1823,7 +1813,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function messageSeat(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, MessageSeatArgs, args);
     if (!c.ok) return c.result;
-    const { seat, text: body, unpark, runId, basis } = c.args;
+    const { seat, text: body, basis } = c.args;
     const cfg = seatCfg(seat);
     if (cfg === undefined) return fail(notInSessionText(seat));
     store.instructions.syncFocus(cfg, now());
@@ -1850,33 +1840,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const call = seatCallSign(seat);
     if (seat === ctx.seatId) return fail(OWN_SEAT_TEXT);
     if (modeOfSeat(cfg) === "scratch") return fail(scratchSeatText(call));
-    if (runId !== undefined && unpark !== true) return fail(RUN_ID_NEEDS_UNPARK);
     const at = now();
-    let lift: { runId: string; reason: string; onSeat: boolean } | null = null;
-    if (unpark === true) {
-      // the seat's own run, or the run named: one set aside in review is on no seat
-      const named = runId === undefined ? null : store.run(runId);
-      if (
-        runId !== undefined &&
-        (named === null || named.endedAt !== null || named.agentId !== seat)
-      ) {
-        return fail(notRunOfSeatText(runId, call));
-      }
-      const run = named ?? unendedRun(seat);
-      const parked = run?.loop?.phase === "parked" ? run.loop.parked : null;
-      if (run === null || parked === null || parked === undefined) {
-        return fail(notParkedText(call));
-      }
-      if (!(FLIGHT_UNPARK_KINDS as readonly string[]).includes(parked.kind) || parked.ended) {
-        return fail(parkNotYoursText(parked.kind));
-      }
-      if (deps.engine?.status().on !== true) return fail(ENGINE_OFF_TEXT);
-      lift = {
-        runId: run.id,
-        reason: parked.reason,
-        onSeat: store.seatSession(seat)?.runId === run.id,
-      };
-    }
     // sendComms rechecks the crew after scanning, before its delivery callback runs.
     try {
       await sendComms(
@@ -1890,8 +1854,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           seatSender: false,
           senderKind: "flight",
           notify: async (to, _text) => {
-            // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
-            if (to !== seat || (lift !== null && !lift.onSeat)) return;
+            // FLIGHT only wakes its addressee.
+            if (to !== seat) return;
             try {
               await deps.supervisor.message(seat, "", {
                 interrupt: false,
@@ -1909,34 +1873,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(e instanceof Error ? e.message : "Message refused.");
     }
     bus.emit("agents");
-    const lifted =
-      lift !== null &&
-      (
-        await deps.engine?.onOperatorMessage(lift.runId, "FLIGHT", {
-          kinds: FLIGHT_UNPARK_KINDS,
-        })
-      )?.lifted === true;
-    if (lift === null || !lifted) {
-      record(at, {
-        kind: "message",
-        seatId: seat,
-        about: messageAboutText(call),
-        decision: body,
-        basis,
-      });
-      bus.emit("flight");
-      return { text: sentText(call) };
-    }
     record(at, {
-      kind: "unpark",
+      kind: "message",
       seatId: seat,
-      targetRunId: lift.runId,
-      about: `${call}: ${lift.reason}`,
+      about: messageAboutText(call),
       decision: body,
       basis,
     });
     bus.emit("flight");
-    return { text: sentUnparkedText(call) };
+    return { text: sentText(call) };
   }
 
   /** The unended run of a developer seat in FLIGHT's session, by id; else the refusal to give. */
@@ -4608,7 +4553,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.messageSeat,
       description:
-        "Read focus with read_focus: true, or replace persisted focus with focus (lane:name, label:name and/or repo#issue selectors; null clears). These operations are separate from messaging. Send a seat a short, concrete message. With unpark: true, also un-park its run if the park is yours to lift: any but a budget, review or ruling park. Give runId (with unpark) for a run set aside in review; the seat is on another run then, so the text is not delivered.",
+        "Read focus with read_focus: true, or replace persisted focus with focus (lane:name, label:name and/or repo#issue selectors; null clears). These operations are separate from messaging. Send a seat a short, concrete message.",
       inputSchema: z.toJSONSchema(MessageSeatArgs),
       modes: [],
       grantable: ["read-only"],

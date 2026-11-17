@@ -65,7 +65,6 @@ import {
   FLIGHT_RUNAWAY,
   FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_STATE_TEXT_MAX,
-  FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   flightWakeId,
   GH_READ_BAD_PATH,
@@ -2817,156 +2816,18 @@ describe("comms_pin", () => {
   });
 });
 
-describe("message_seat unpark", () => {
-  const U = (over: Record<string, unknown> = {}) => ({
-    seat: "guido-1",
-    text: "Carry on",
-    unpark: true,
-    basis: "silent",
-    ...over,
-  });
-  const parked = (kind = "silent", ended = false) => {
+describe("message_seat", () => {
+  it("sends the text to the seat and records a message; unpark is not an argument", async () => {
     live("guido-1", "r-g");
-    const loop: RunLoop = {
-      ...NEW_LOOP,
-      phase: "parked",
-      parked: { kind, reason: "went quiet", ended },
-    };
-    store.setRunLoop("r-g", loop);
-  };
-  beforeEach(() => {
-    engineOn = true;
-  });
-
-  it("un-parks a silent park by FLIGHT", async () => {
-    parked("silent");
-    expect(await call("message_seat", U())).toEqual({
-      text: "Sent to GUIDO-1, and its run is un-parked.",
+    expect(await call("message_seat", { seat: "guido-1", text: "Carry on", basis: "silent" })).toEqual({
+      text: "Sent to GUIDO-1.",
     });
     expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
-    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-    expect(decisions()).toMatchObject([
-      {
-        kind: "unpark",
-        seatId: "guido-1",
-        targetRunId: "r-g",
-        about: "GUIDO-1: went quiet",
-        decision: "Carry on",
-      },
-    ]);
-  });
-
-  it("records a message when the engine did not un-park", async () => {
-    parked("silent");
-    lifts = false;
-    expect(await call("message_seat", U())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1" }]);
-  });
-
-  describe("a set-aside run, by runId", () => {
-    const aside = (id = "r-g") =>
-      store.upsertRun(
-        run(id, "guido-1", {
-          loop: {
-            ...NEW_LOOP,
-            phase: "parked",
-            parked: { kind: "ci", reason: "CI failed", ended: false },
-            aside: { worktree: "/tmp/none/wt", wake: false },
-          },
-        }),
-      );
-
-    it("un-parks it without a word to the seat, which is on another run", async () => {
-      aside();
-      expect(await call("message_seat", U({ runId: "r-g" }))).toEqual({
-        text: "Sent to GUIDO-1, and its run is un-parked.",
-      });
-      expect(messageCalls).toEqual([]);
-      expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-      expect(decisions()).toMatchObject([
-        { kind: "unpark", seatId: "guido-1", targetRunId: "r-g", about: "GUIDO-1: CI failed" },
-      ]);
-    });
-
-    it("still sends to the seat when the run is the one it holds", async () => {
-      parked("silent");
-      expect((await call("message_seat", U({ runId: "r-g" }))).isError).toBeUndefined();
-      expect(messageCalls).toHaveLength(1);
-    });
-
-    it("refuses another seat's run, an ended run, and a runId without unpark", async () => {
-      aside("r-x");
-      expect(await call("message_seat", U({ runId: "r-x", seat: "inco-1" }))).toEqual(
-        refused("Not sent: r-x is not an unended run of INCO-1."),
-      );
-      store.upsertRun(run("r-y", "guido-1", { endedAt: NOW, status: "ok" }));
-      expect((await call("message_seat", U({ runId: "r-y" }))).isError).toBe(true);
-      expect(await call("message_seat", U({ runId: "r-x", unpark: false }))).toEqual(
-        refused("Not sent: runId goes with unpark: true."),
-      );
-      expect(engineCalls).toEqual([]);
-    });
-  });
-
-  it("leaves a budget park to the operator", async () => {
-    parked("budget");
-    expect(await call("message_seat", U())).toEqual(
-      refused(
-        'Not sent: a budget park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-      ),
-    );
-    expect(messageCalls).toEqual([]);
-  });
-
-  it.each(["review", "review-ruling", "ruling", "review-failed"])(
-    "cannot lift a %s park with a message",
-    async (kind) => {
-      parked(kind);
-      expect((await call("message_seat", U())).isError).toBe(true);
-      expect(messageCalls).toEqual([]);
-      expect(engineCalls).toEqual([]);
-    },
-  );
-
-  it.each(["nothing", "gate", "conflict"])("lifts a %s park", async (kind) => {
-    parked(kind);
-    expect(await call("message_seat", U())).toEqual({
-      text: "Sent to GUIDO-1, and its run is un-parked.",
-    });
-  });
-
-  it("leaves an ended park to the operator", async () => {
-    parked("silent", true);
-    expect((await call("message_seat", U())).text).toBe(
-      'Not sent: a silent park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-    );
-  });
-
-  it("refuses a run that is not parked, or no run", async () => {
-    expect(await call("message_seat", U())).toEqual(
-      refused("Not sent: GUIDO-1's run is not parked."),
-    );
-    live("guido-1", "r-g");
-    store.setRunLoop("r-g", NEW_LOOP);
-    expect((await call("message_seat", U())).text).toBe("Not sent: GUIDO-1's run is not parked.");
-  });
-
-  it("un-parks one run 5 times, with no refusal", async () => {
-    for (let i = 0; i < 5; i++) {
-      parked("ci");
-      expect((await call("message_seat", U())).isError).toBeUndefined();
-    }
-    expect(decisions().filter((d) => d.kind === "unpark")).toHaveLength(5);
-  });
-
-  it("refuses with the engine off", async () => {
-    parked("silent");
-    engineOn = false;
-    expect(await call("message_seat", U())).toEqual(
-      refused("Not sent: the loop engine is off on this server, so nothing can be un-parked."),
-    );
-    expect(messageCalls).toEqual([]);
+    expect(engineCalls).toEqual([]);
+    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1", decision: "Carry on" }]);
+    expect(
+      (await call("message_seat", { seat: "guido-1", text: "x", unpark: true, basis: "b" })).isError,
+    ).toBe(true);
   });
 });
 
@@ -3719,7 +3580,7 @@ describe("flight_state", () => {
     store.setRunLoop("r-inco", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget", ended: false },
+      parked: { kind: "silent", reason: "budget", ended: false },
     });
     store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
     store.addQuestion({
@@ -3842,7 +3703,7 @@ describe("flight_state", () => {
           idleMin: 7,
           ticket: "mc#5",
           phase: "parked",
-          parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget" },
+          parked: { kind: "silent", reason: "budget" },
           openQuestion: true,
         },
         {

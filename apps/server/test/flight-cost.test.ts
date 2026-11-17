@@ -240,7 +240,7 @@ describe("routine wakes wait for the batch window", () => {
       { instructions: ["r2"] },
     ] as Record<string, unknown[]>[])
       expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);
-    expect(routineOnly(facts({}), facts({ signals: ["push_unseen:x"] }), learned)).toBe(true);
+    expect(routineOnly(facts({}), facts({ signals: ["old_park:x"] }), learned)).toBe(true);
     expect(immediateFact("prs", "mc#1:7:true:open::")).toBe(true);
   });
 });

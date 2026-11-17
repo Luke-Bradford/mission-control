@@ -47,7 +47,6 @@ import {
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_TICKETS_LISTED,
-  FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
   FLIGHT_WAKE_IDLE_MS,
@@ -89,7 +88,6 @@ import {
   RULING_PARK,
   type Run,
   reviewFaultStands,
-  STUCK_PARK,
   seatCallSign,
   seatDef,
   type TestLockState,
@@ -1774,14 +1772,10 @@ const stoppedSeats = (s: FlightState): string[] =>
     .map((x) => x.id)
     .sort();
 
-/** A park FLIGHT acts on: one it may lift, or a CI ruling it may settle. */
-const flightParkKind = (kind: string): boolean =>
-  kind !== STUCK_PARK && // the engine lifts it once the PR shows the push; push_unseen says when it has not
-  (kind === RULING_PARK ||
-    kind === "review-failed" ||
-    (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind));
+/** A park FLIGHT acts on: a CI ruling or a failed review it may settle. */
+const flightParkKind = (kind: string): boolean => kind === RULING_PARK || kind === "review-failed";
 
-/** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
+/** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park it may settle. */
 export function pending(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
 ): boolean {

@@ -837,10 +837,37 @@ function untilText(at: number | null, tz: string | null): string {
   }
 }
 
-const park = (loop: RunLoop, kind: string, reason: string): Step => ({
-  loop: { ...loop, phase: "parked", parked: { kind, reason, ended: false } },
-  actions: [{ kind: "event", text: parkedEventText(reason) }],
-});
+/**
+ * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
+ * free while it stands. The run rejoins its seat's queue when the park is lifted.
+ */
+const isDecisionPark = (kind: string | undefined): boolean =>
+  kind === CONTROLLER_CHECK_PARK ||
+  kind === UAT_PARK ||
+  kind === MERGE_HOLD_PARK ||
+  kind === RULING_PARK ||
+  kind === "review" ||
+  kind === "review-ruling" ||
+  kind === "review-failed";
+
+/**
+ * A run that cannot go on stops: it ends with the reason on its card and timeline, and its seat
+ * takes the next ticket. A park that waits on FLIGHT, the controller or the operator stays parked.
+ */
+const park = (loop: RunLoop, kind: string, reason: string): Step =>
+  isDecisionPark(kind)
+    ? {
+        loop: { ...loop, phase: "parked", parked: { kind, reason, ended: false } },
+        actions: [{ kind: "event", text: parkedEventText(reason) }],
+      }
+    : {
+        loop: { ...loop, phase: "parked", parked: { kind, reason, ended: true } },
+        actions: [
+          { kind: "event", text: parkedEventText(reason) },
+          { kind: "end-run" },
+          { kind: "take-next" },
+        ],
+      };
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
 
@@ -1086,32 +1113,6 @@ function stateStep(s: LoopSnapshot): Step {
           : [],
     };
   }
-  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
-  // a conflict stop lifts the same way once the PR no longer conflicts
-  if (
-    loop.phase === "parked" &&
-    (loop.parked?.kind === STUCK_PARK ||
-      (loop.parked?.kind === "conflict" && pr?.mergeable === "MERGEABLE")) &&
-    !loop.parked.ended &&
-    pr?.state === "open" &&
-    headCommit !== null &&
-    pushed?.sha === headCommit &&
-    pr.headSha === headCommit
-  ) {
-    return {
-      loop: {
-        ...loop,
-        phase: "ci",
-        parked: null,
-        pushStartedAt: now,
-        pushFor: headCommit,
-        unparkedAt: now,
-        transient: 0,
-        lastRefusal: null,
-      },
-      actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
-    };
-  }
   // a ruling on a red head is void once the seat's newer push shows green checks: back to review
   if (
     loop.phase === "parked" &&
@@ -1143,32 +1144,13 @@ function stateStep(s: LoopSnapshot): Step {
       ],
     };
   }
-  // a pending-CI stop lifts itself once every check is green on the pushed head
-  if (
-    loop.phase === "parked" &&
-    loop.parked?.kind === "ci-pending" &&
-    !loop.parked.ended &&
-    pr?.state === "open" &&
-    pr.ci === "passing" &&
-    headCommit !== null &&
-    pushed?.sha === headCommit &&
-    pr.headSha === headCommit
-  ) {
-    const passed = ciPassed(loop, headCommit);
-    return {
-      loop: {
-        ...loop,
-        phase: "review",
-        parked: null,
-        ciFails: 0,
-        ciFailedSha: null,
-        rerun: passed.rerun,
-        unparkedAt: now,
-      },
-      actions: passed.actions,
-    };
+  if (loop.phase === "parked") {
+    // a stop whose run is still live (the hub went down between saving the stop and ending the run)
+    // ends it now
+    return loop.parked?.ended && s.ended === null
+      ? { loop, actions: [{ kind: "end-run" }, { kind: "take-next" }] }
+      : unchanged(loop);
   }
-  if (loop.phase === "parked") return unchanged(loop);
   // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
   // in review or working with it still recorded: a ruling park resumes straight into review, and
   // the merge step and the ruling park both read ciFailedSha, so a stale one wedged the run.
@@ -1557,19 +1539,6 @@ function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
     return Math.max(2, s.limits?.rounds ?? REVIEW_ROUNDS);
   return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
-
-/**
- * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
- * free while it stands. The run rejoins its seat's queue when the park is lifted.
- */
-const isDecisionPark = (kind: string | undefined): boolean =>
-  kind === CONTROLLER_CHECK_PARK ||
-  kind === UAT_PARK ||
-  kind === MERGE_HOLD_PARK ||
-  kind === RULING_PARK ||
-  kind === "review" ||
-  kind === "review-ruling" ||
-  kind === "review-failed";
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {

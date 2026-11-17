@@ -300,7 +300,7 @@ describe("state step", () => {
     expect(r.loop.parked).toEqual({
       kind: "pr-closed",
       reason: "PR #12 was closed without merging",
-      ended: false,
+      ended: true,
     });
     expect(events(r.actions)).toEqual(["parked: PR #12 was closed without merging"]);
   });
@@ -405,7 +405,7 @@ describe("state step", () => {
       expect(r.loop.parked).toEqual({
         kind: "nothing",
         reason: "SULU reported, but nothing was committed, so there is nothing to push",
-        ended: false,
+        ended: true,
       });
       expect(r.loop.reportedEvidenceId).toBe(1);
       expect(r.actions.some((a) => a.kind === "push")).toBe(false);
@@ -426,7 +426,7 @@ describe("state step", () => {
 
   it("7: too many refusals park with the last refusal", () => {
     const r = reconcile(inCi({}, { transient: REFUSAL_TRIES, lastRefusal: "push refused" }));
-    expect(r.loop.parked).toEqual({ kind: "refused", reason: "push refused", ended: false });
+    expect(r.loop.parked).toEqual({ kind: "refused", reason: "push refused", ended: true });
     const r2 = reconcile(inCi({}, { transient: REFUSAL_TRIES - 1, lastRefusal: "x" }));
     expect(r2.loop.phase).toBe("ci");
   });
@@ -444,25 +444,8 @@ describe("state step", () => {
     ];
     for (const [over, why] of cases) {
       const r = reconcile(inCi(over, late));
-      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: false });
+      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: true });
     }
-  });
-
-  it("8: a run stopped on push-not-shown is in CI again once the PR head is the pushed sha", () => {
-    const stopped = reconcile(
-      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
-    ).loop;
-    expect(stopped.parked?.kind).toBe("stuck");
-    // the stored PR row later carries the pushed head
-    const r = reconcile(inCi({ pr: pr({ headSha: SHA }) }, stopped));
-    expect(r.loop).toMatchObject({
-      phase: "ci",
-      parked: null,
-      pushStartedAt: NOW,
-      pushFor: SHA,
-      unparkedAt: NOW,
-    });
-    expect(events(r.actions)).toEqual([`PR #12 shows ${SHA.slice(0, 7)}; back to CI`]);
   });
 
   it("8: a stuck run stays stopped while the PR head is not the pushed sha, or the PR is closed", () => {
@@ -505,7 +488,7 @@ describe("state step", () => {
     expect(reconcile({ ...s, claimed: { [mergeMainKey("r1", SHA)]: NOW } }).loop.parked).toEqual({
       kind: "conflict",
       reason: "PR #12 conflicts with main",
-      ended: false,
+      ended: true,
     });
   });
 
@@ -538,7 +521,7 @@ describe("state step", () => {
     expect(r.loop.parked).toEqual({
       kind: "ci",
       reason: "CI failed 3 times; last on aaaaaaa",
-      ended: false,
+      ended: true,
     });
     s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 2, ciFailedSha: SHA2, rerun });
     expect(reconcile(s).loop.phase).toBe("working");
@@ -713,7 +696,7 @@ describe("state step", () => {
     expect(r.loop.parked).toEqual({
       kind: "ci-pending",
       reason: "CI pending for 30 minutes on aaaaaaa",
-      ended: false,
+      ended: true,
     });
     const r2 = reconcile(inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS } }));
     expect(r2.loop.phase).toBe("ci");
@@ -745,7 +728,7 @@ describe("state step", () => {
       expect(r.loop.parked).toEqual({
         kind: "ci-pending",
         reason: "CI pending for 60 minutes on aaaaaaa (pending: web)",
-        ended: false,
+        ended: true,
       });
     });
 
@@ -787,20 +770,6 @@ describe("state step", () => {
       const r = reconcile(inCi({ ...runningFor(31, 31), ciP90Ms: {} }));
       expect(r.loop.parked?.kind).toBe("ci-pending");
     });
-
-    it("a ci-pending park lifts itself when every check is green", () => {
-      const parked = reconcile(inCi(runningFor(75, 62))).loop;
-      const r = reconcile(
-        inCi({ pr: pr({ ci: "passing" }) }, { phase: "parked", parked: parked.parked }),
-      );
-      expect(r.loop.phase).toBe("review");
-      expect(r.loop.parked).toBeNull();
-      expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
-      const still = reconcile(
-        inCi({ pr: pr({ ci: "pending" }) }, { phase: "parked", parked: parked.parked }),
-      );
-      expect(still.loop.phase).toBe("parked");
-    });
   });
 
   it("14: no CI reported within ten minutes of the push parks", () => {
@@ -809,7 +778,7 @@ describe("state step", () => {
     expect(r.loop.parked).toEqual({
       kind: "no-ci",
       reason: "no CI reported for aaaaaaa",
-      ended: false,
+      ended: true,
     });
     const r2 = reconcile(
       inCi({ pushed: { sha: SHA, at: NOW - NO_CI_AFTER_MS }, pr: pr({ ci: null }) }),
@@ -822,7 +791,7 @@ describe("state step", () => {
     expect(r.loop.parked).toEqual({
       kind: "budget",
       reason: "used 1001 input + output tokens of a 1000-token budget",
-      ended: false,
+      ended: true,
     });
     expect(reconcile(snap({ tokens: 1001 }, { budgetExtra: 1 })).loop.phase).toBe("working");
     expect(reconcile(snap({ tokens: 1000 })).loop.phase).toBe("working");
@@ -898,7 +867,7 @@ describe("state step", () => {
       expect(r.loop.parked).toEqual({
         kind: "silent",
         reason: "stopped after 3 carry-on resumes without reporting",
-        ended: false,
+        ended: true,
       });
     });
 
@@ -1333,7 +1302,12 @@ describe("sequences", () => {
     expect(r.loop.phase).toBe("parked");
     const next = again(s, r.loop);
     expect(outstanding(next.actions)).toEqual(outstanding(r.actions));
-    expect(outstanding(r.actions).map((a) => a.kind)).toEqual(["move-card", "note"]);
+    expect(outstanding(r.actions).map((a) => a.kind)).toEqual([
+      "end-run",
+      "take-next",
+      "move-card",
+      "note",
+    ]);
     expect(events(next.actions)).toEqual([]);
   });
 
@@ -1450,7 +1424,7 @@ describe("review round", () => {
 
   it("an ended run desires only its blocked note and clears the others", () => {
     const loop = { phase: "parked" as const, parked: ENDED, cardFor: "parked:0", touches };
-    const base = snap({}, loop);
+    const base = snap({ ended: { reason: "stopped" } }, loop);
     const s = { ...base, seat: limited(base) };
     const r = reconcile(s);
     expect(r.actions).toEqual([
@@ -3212,7 +3186,7 @@ describe("merge workspace", () => {
     expect(foreign.loop.parked).toEqual({
       kind: "gate",
       reason: "commits on the branch that Mission Control did not make",
-      ended: false,
+      ended: true,
     });
     const stray = reconcile(
       merge({}, { touches, gate: gateOf({ strays: ["CLAUDE.md", "x/a.ts"] }) }),
@@ -3221,7 +3195,7 @@ describe("merge workspace", () => {
     expect(stray.loop.parked).toEqual({
       kind: "gate",
       reason: "changes outside SULU's area: x/a.ts",
-      ended: false,
+      ended: true,
     });
   });
 
@@ -3384,7 +3358,7 @@ describe("merge workspace", () => {
     expect(r.loop.parked).toEqual({
       kind: "gate",
       reason: "changes outside SULU's area: x/a.ts, y.ts",
-      ended: false,
+      ended: true,
     });
   });
 
@@ -3394,7 +3368,7 @@ describe("merge workspace", () => {
     expect(r.loop.parked).toEqual({
       kind: "gate",
       reason: "commits on the branch that Mission Control did not make",
-      ended: false,
+      ended: true,
     });
   });
 

@@ -616,23 +616,6 @@ export const hasPlanSection = (body: string): boolean => /^## Plan[ \t]*$/m.test
 export const PLAN_SIZES: readonly string[] = ["M", "L", "XL"] satisfies readonly TicketSize[];
 /** The board columns a ticket FLIGHT starts may be in. */
 export const FLIGHT_STARTABLE: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
-/**
- * The park kinds whose lifting is FLIGHT's call: every kind but budget (a token stop), pr-closed,
- * ended, and review or CI rulings, whose lifting waives a gate. Account stops, security refusals
- * and hard-rule touches do not park as these kinds.
- */
-export const FLIGHT_UNPARK_KINDS = [
-  "silent",
-  "nothing",
-  "stuck",
-  "ci-pending",
-  "no-ci",
-  "refused",
-  "ci",
-  "gate",
-  "conflict",
-] as const;
-
 export const READ_NO_GITHUB = "Not read: GitHub could not be reached; try again in a few minutes.";
 export const READ_NO_ISSUE = "Not read: there is no such issue.";
 export const NOT_ON_BOARD = "not on the board";
@@ -824,18 +807,8 @@ export const endFailedText = (why: string): string => `Not ended: ${why}`;
 export const OWN_SEAT_TEXT = "Not sent: that is your own seat.";
 export const scratchSeatText = (call: string): string =>
   `Not sent: ${call} reviews what Mission Control hands it; it takes no messages from you.`;
-export const notParkedText = (call: string): string => `Not sent: ${call}'s run is not parked.`;
-export const notRunOfSeatText = (runId: string, call: string): string =>
-  `Not sent: ${runId} is not an unended run of ${call}.`;
-export const RUN_ID_NEEDS_UNPARK = "Not sent: runId goes with unpark: true.";
-export const parkNotYoursText = (kind: string): string =>
-  `Not sent: a ${kind} park is the operator's call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.`;
-export const ENGINE_OFF_TEXT =
-  "Not sent: the loop engine is off on this server, so nothing can be un-parked.";
 export const messageAboutText = (call: string): string => `Message to ${call}`;
 export const sentText = (call: string): string => `Sent to ${call}.`;
-export const sentUnparkedText = (call: string): string =>
-  `Sent to ${call}, and its run is un-parked.`;
 
 export const FLIGHT_TICKET_TITLE_MAX = 200;
 export const AREA_LABEL_PREFIX = "area:";
@@ -1093,8 +1066,6 @@ export const FLIGHT_IDLE_MS = 10 * 60_000;
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
-/** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
-export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
 /**
@@ -1132,7 +1103,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "github_budget",
   "hub_error",
   "old_park",
-  "push_unseen",
   "merge_stalled",
   "item_stale",
   "run_no_pr",
