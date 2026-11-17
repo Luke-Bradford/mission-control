@@ -769,6 +769,20 @@ select {
   }
 }
 
+/* Ten tabs (Planner is the tenth): at the narrowest desktop widths the session picker, the brand's
+   tracking and the tabs' tracking give up room so every tab still sits beside the status meters. */
+@media (min-width: 1280px) and (max-width: 1599px) {
+  #sess {
+    max-width: 80px;
+  }
+  .brand {
+    letter-spacing: 0.04em;
+  }
+  .tabs a {
+    letter-spacing: 0;
+  }
+}
+
 .iconbtn {
   position: relative;
   padding: var(--sp-1) var(--sp-2);
