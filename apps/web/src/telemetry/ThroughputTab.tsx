@@ -287,6 +287,7 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
                     key={r.ticket}
                     className="overflow-dot"
                     d={`M${x},${PAD.t}l-4,7h8Z`}
+                    aria-hidden="true"
                     onPointerEnter={() => setHover(i)}
                     onPointerLeave={() => setHover(null)}
                   />
