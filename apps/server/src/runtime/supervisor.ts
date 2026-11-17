@@ -944,7 +944,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
   const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
-  const FLIGHT_RUNTIME_PROFILE = "controller-v2";
+  const FLIGHT_RUNTIME_PROFILE = "controller-v3";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
     createHash("sha256")
       .update(JSON.stringify(Object.entries(env ?? {}).sort()))
