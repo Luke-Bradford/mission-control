@@ -6147,7 +6147,11 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     ask();
     await tick();
     expect(store.flightWakes(0)).toEqual([
-      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1",
+      {
+        runId: "r-flight",
+        at: nowMs,
+        reasons: ["q", "items"],
+        wakeId: "r-flight:1",
         rode: [],
         immediate: ["items", "q"],
       },

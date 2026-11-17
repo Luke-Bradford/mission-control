@@ -60,7 +60,6 @@ import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   batchedCategories,
-  immediateCategories,
   deliveredFacts,
   type FlightWakeSnapshot,
   flightLive,
@@ -69,6 +68,7 @@ import {
   flightWake,
   flightWakes,
   idleSeatLine,
+  immediateCategories,
   leftWakeText,
   markItemsShown,
   markPointersShown,
