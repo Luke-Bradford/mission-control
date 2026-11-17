@@ -56,7 +56,7 @@ export function DailyRateChart({
   let line = "";
   let pen = false;
   (rolling ?? []).forEach((v, i) => {
-    if (v === null || days[i]?.v === undefined) {
+    if (v === null || days[i]?.v == null) {
       pen = false;
       return;
     }

@@ -7,7 +7,7 @@ import {
   type Telemetry,
 } from "@mc/core";
 import { useTz } from "../clock.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, type Resource, RESOURCES, useResource } from "../data.ts";
 import { dayMonth, percent, plural } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Panel } from "../hud/Panel.tsx";
@@ -42,6 +42,15 @@ export function QualitySummaryRow({
     target: "the Audit page, review tab",
   } as const;
   const pct = (v: number | null | undefined): string => (v == null ? DASH : percent(v));
+  /** Why a figure is missing: still loading, not sent, or nothing in the window to count. */
+  const why = (v: number | null | undefined, none: string): string | undefined =>
+    v != null
+      ? undefined
+      : !t
+        ? "Loading."
+        : !q
+          ? "Not collected: the server sent no quality figures."
+          : `No ${none} in the last ${FLOW_DAYS} days.`;
   const stats: StatSpec[] = [
     {
       id: "ci",
@@ -49,6 +58,7 @@ export function QualitySummaryRow({
       value: pct(q?.ciGreenFirstPushPct),
       unit: "% of merged PRs",
       window: WINDOW,
+      reason: why(q?.ciGreenFirstPushPct, "merged PRs with a known first-push CI result"),
       definition: "Share of merged PRs whose checks were green on the first push.",
       drill: { kind: "needs-route", target: "the merged PRs behind this share" },
     },
@@ -58,6 +68,7 @@ export function QualitySummaryRow({
       value: pct(q?.firstPassReviewPct),
       unit: "% of reviewed PRs",
       window: WINDOW,
+      reason: why(q?.firstPassReviewPct, "reviewed PRs"),
       definition: "Share of reviewed PRs with no blocking finding in round 1.",
       drill: { kind: "needs-route", target: "the reviewed PRs behind this share" },
     },
@@ -67,6 +78,7 @@ export function QualitySummaryRow({
       value: one(q?.reviewRoundsPerPr),
       unit: "rounds",
       window: WINDOW,
+      reason: why(q?.reviewRoundsPerPr, "reviewed PRs"),
       definition: "Average review rounds before a merged PR with a reported review merged.",
       drill: audit,
     },
@@ -76,6 +88,7 @@ export function QualitySummaryRow({
       value: one(q?.retroFindingsPerPr),
       unit: "findings",
       window: WINDOW,
+      reason: why(q?.retroFindingsPerPr, "reviewed PRs"),
       definition: "Average blocking and minor findings a reviewer recorded per reviewed PR.",
       drill: audit,
     },
@@ -85,6 +98,7 @@ export function QualitySummaryRow({
       value: q?.humanReviewWaitMs == null ? DASH : String(Math.round(q.humanReviewWaitMs / 60_000)),
       unit: "min median",
       window: WINDOW,
+      reason: why(q?.humanReviewWaitMs, "PRs that waited for review"),
       definition: "How long a finished PR waited for your review, median.",
       drill: { kind: "needs-route", target: "the PRs that waited longest" },
     },
@@ -94,6 +108,7 @@ export function QualitySummaryRow({
       value: q?.sentBackPrs == null ? DASH : String(q.sentBackPrs),
       unit: "PRs",
       window: WINDOW,
+      reason: why(q?.sentBackPrs, "reviewed PRs"),
       definition: "Reviewed PRs a reviewer sent back at least once.",
       drill: audit,
     },
@@ -221,7 +236,30 @@ function RoundsPanel({ t }: { t: Telemetry | undefined }) {
   );
 }
 
-function GuardPanel({ hits }: { hits: GuardHitsView | undefined }) {
+/**
+ * What a route's state says beside its panel: nothing while loading or fresh; a failure with a retry
+ * when there is no data; a stale note over the last good data when a later read failed.
+ */
+function ResourceState<T>({ res, path, what }: { res: Resource<T>; path: string; what: string }) {
+  if (res.error === null) return null;
+  const retry = (
+    <button type="button" className="tel-primary" onClick={() => hub.refetch(path)}>
+      Try again
+    </button>
+  );
+  return res.data === undefined ? (
+    <p className="pb s" role="alert">
+      {what} did not load. {retry}
+    </p>
+  ) : (
+    <p className="pnote" role="status">
+      Showing the last read of {what.toLowerCase()}; the latest read failed. {retry}
+    </p>
+  );
+}
+
+function GuardPanel({ res }: { res: Resource<GuardHitsView> }) {
+  const hits = res.data;
   const rows = hits
     ? (Object.keys(GUARD_RULES) as GuardRule[])
         .map((rule) => ({ rule, count: hits.counts[rule] ?? 0 }))
@@ -231,8 +269,11 @@ function GuardPanel({ hits }: { hits: GuardHitsView | undefined }) {
   const top = rows[0]?.count ?? 1;
   return (
     <Panel id="qGuard" title="Guard blocks by rule" sub={`blocks · last ${FLOW_DAYS} days`}>
+      <ResourceState res={res} path={RESOURCES.guardHitsFlow.path} what="Guard blocks" />
       {!hits ? (
-        <p className="pb s muted">Loading…</p>
+        res.error ? null : (
+          <p className="pb s muted">Loading…</p>
+        )
       ) : rows.length === 0 ? (
         <p className="pb s muted">Nothing blocked in the last {FLOW_DAYS} days.</p>
       ) : (
@@ -262,13 +303,17 @@ function GuardPanel({ hits }: { hits: GuardHitsView | undefined }) {
   );
 }
 
-function EscapedTable({ flow }: { flow: QaFlowView | undefined }) {
+function EscapedTable({ res }: { res: Resource<QaFlowView> }) {
   const tz = useTz() ?? "UTC";
+  const flow = res.data;
   const rows = flow?.escapedDefects ?? [];
   return (
     <Panel id="qEscaped" title="Escaped defects" sub={`found after merge · last ${FLOW_DAYS} days`}>
+      <ResourceState res={res} path={RESOURCES.qaFlow.path} what="Escaped defects" />
       {!flow ? (
-        <p className="pb s muted">Loading…</p>
+        res.error ? null : (
+          <p className="pb s muted">Loading…</p>
+        )
       ) : rows.length === 0 ? (
         <p className="pb s muted">No escaped defects in the last {FLOW_DAYS} days.</p>
       ) : (
@@ -318,12 +363,12 @@ export function QualityPanels({
   view: "charts" | "table";
   dim: boolean;
 }) {
-  const hits = useResource<GuardHitsView>(RESOURCES.guardHitsFlow).data;
-  const flow = useResource<QaFlowView>(RESOURCES.qaFlow).data;
+  const hits = useResource<GuardHitsView>(RESOURCES.guardHitsFlow);
+  const flow = useResource<QaFlowView>(RESOURCES.qaFlow);
   if (view === "table")
     return (
       <div className={`grid${dim ? " dim" : ""}`} data-view="table" data-n="1">
-        <EscapedTable flow={flow} />
+        <EscapedTable res={flow} />
       </div>
     );
   return (
@@ -345,7 +390,7 @@ export function QualityPanels({
         review
       />
       <RoundsPanel t={t} />
-      <GuardPanel hits={hits} />
+      <GuardPanel res={hits} />
     </div>
   );
 }

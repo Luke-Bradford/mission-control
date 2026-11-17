@@ -61,9 +61,14 @@ function tel(): TelemetryData {
   } as unknown as TelemetryData;
 }
 
-function open(search = "") {
+function open(
+  search = "",
+  over: Record<string, unknown> = {},
+  quality?: Record<string, unknown> | null,
+) {
   window.history.replaceState(null, "", `/telemetry?tab=quality${search}`);
   const data = tel();
+  if (quality !== undefined) (data as unknown as { quality: unknown }).quality = quality;
   const routes: Record<string, unknown> = {
     "/api/config": CONFIG,
     "/api/metrics": METRICS_VIEW,
@@ -91,6 +96,7 @@ function open(search = "") {
     },
   };
   for (const r of ["1h", "6h", "24h", "7d"]) routes[`/api/telemetry?range=${r}`] = data;
+  Object.assign(routes, over);
   stubFetch(routes);
   return render(<Telemetry />);
 }
@@ -138,6 +144,13 @@ describe("Telemetry, Quality tab", () => {
     expect(document.querySelector("#qCi path.rolling")).not.toBeNull();
   });
 
+  it("breaks the rolling line at a day with no data instead of drawing through it", async () => {
+    open();
+    await waitLoaded();
+    const d = document.querySelector("#qCi path.rolling")?.getAttribute("d") ?? "";
+    expect(d.match(/M/g)).toHaveLength(2);
+  });
+
   it("shows a day's value and the rolling rate on hover and on focus, and no data on a gap", async () => {
     open();
     await waitLoaded();
@@ -173,5 +186,65 @@ describe("Telemetry, Quality tab", () => {
     expect(screen.getByRole("link", { name: "shop-app#41" }).getAttribute("href")).toBe(
       "/tickets/shop-app/41",
     );
+  });
+
+  it("gives each missing summary figure its reason, on focus and in its name", async () => {
+    open(
+      "",
+      {},
+      {
+        ciGreenFirstPushPct: null,
+        prs: 0,
+        firstPassReviewPct: null,
+        reviewedPrs: 0,
+        reviewRoundsPerPr: null,
+        retroFindingsPerPr: null,
+        humanReviewWaitMs: null,
+        sentBackPrs: null,
+      },
+    );
+    await waitLoaded();
+    const tiles = [...document.querySelectorAll(".summary .stat")];
+    expect(tiles).toHaveLength(6);
+    for (const tile of tiles) {
+      const value = tile.querySelector(".stat-value") as HTMLElement;
+      expect(value.textContent).toBe("—");
+      expect(value.getAttribute("aria-label")).toMatch(/No .* in the last 14 days\./);
+      expect(tile.querySelector(".stat-def")?.textContent).toMatch(/No .* in the last 14 days\./);
+    }
+  });
+
+  it("says not collected when the server sends no quality figures", async () => {
+    open("", {}, null);
+    await waitLoaded();
+    for (const tile of document.querySelectorAll(".summary .stat"))
+      expect(tile.querySelector(".stat-value")?.getAttribute("aria-label")).toContain(
+        "Not collected",
+      );
+  });
+
+  it("says a failed guard read did not load, offers a retry, and keeps the rest", async () => {
+    open("", { "/api/guard/hits?days=14": () => ({ status: 500, body: { error: "down" } }) });
+    await waitLoaded();
+    const panel = document.getElementById("qGuard") as HTMLElement;
+    await waitFor(() =>
+      expect(within(panel).getByRole("alert").textContent).toContain("did not load"),
+    );
+    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(panel.textContent).not.toContain("Loading…");
+    expect(document.getElementById("qCi")).not.toBeNull();
+  });
+
+  it("says a failed escaped-defects read did not load, with a retry", async () => {
+    open("&view=table", {
+      "/api/qa/flow?days=14": () => ({ status: 500, body: { error: "down" } }),
+    });
+    const panel = await waitFor(() => {
+      const p = document.getElementById("qEscaped") as HTMLElement;
+      expect(within(p).getByRole("alert").textContent).toContain("did not load");
+      return p;
+    });
+    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(panel.textContent).not.toContain("Loading…");
   });
 });
