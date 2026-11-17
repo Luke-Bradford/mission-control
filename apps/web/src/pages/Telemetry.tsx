@@ -35,7 +35,7 @@ import {
   ThroughputTable,
   TICKET_SERIES_RANGE,
 } from "../telemetry/ThroughputTab.tsx";
-import { tabDef } from "../telemetry/tabs.ts";
+import { type TelemetryFilter, tabDef } from "../telemetry/tabs.ts";
 import "../telemetry/telemetry.css";
 
 const RANGES = (Object.keys(TELEMETRY_RANGES) as TelemetryRange[]).map((r) => ({
@@ -115,10 +115,16 @@ export function Telemetry() {
   const ticketSel = useId();
   const agentSel = useId();
   const accountSel = useId();
-  const ref = RESOURCES.telemetry(range, agent, account, ticket);
+  const useFilter = (filter: TelemetryFilter, value: string) =>
+    def.filters.includes(filter) ? value : "";
+  const scopedAgent = useFilter("agent", agent);
+  const scopedAccount = useFilter("account", account);
+  const ref = RESOURCES.telemetry(range, scopedAgent, scopedAccount, useFilter("ticket", ticket));
   const res = useResource<TelemetryData>(ref);
   const bandRes = useResource<TelemetryData>(RESOURCES.telemetry(range));
-  const available = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account)).data;
+  const available = useResource<TelemetryData>(
+    RESOURCES.telemetry(range, scopedAgent, scopedAccount),
+  ).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const tz = useTz();
   const now = useNow();

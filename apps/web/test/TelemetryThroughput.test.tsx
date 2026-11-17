@@ -1,8 +1,9 @@
 import type { ConfigView, Telemetry as TelemetryData } from "@mc/core";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { streamStatus } from "../src/data.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
+import { navigate } from "../src/router.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, crewRow, HOUR, METRICS_VIEW, NOW } from "./fixtures.ts";
 
@@ -65,7 +66,11 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
   };
 }
 
-async function open(data: TelemetryData, search = "?tab=throughput") {
+async function open(
+  data: TelemetryData,
+  search = "?tab=throughput",
+  extra: Record<string, unknown> = {},
+) {
   window.history.replaceState(null, "", `/telemetry${search}`);
   const routes: Record<string, unknown> = {
     "/api/config": CFG,
@@ -81,12 +86,18 @@ async function open(data: TelemetryData, search = "?tab=throughput") {
     },
     "/api/crew?shape=summary": { rows: [crewRow({ id: "studio" })], firstRunToday: null },
   };
-  for (const r of ["1h", "6h", "24h", "7d"]) routes[`/api/telemetry?range=${r}`] = data;
-  stubFetch(routes);
+  routes["/api/telemetry?range=7d"] = data;
+  routes["/api/telemetry?range=24h"] = {
+    ...data,
+    series: { ...(data.series as object), tickets: [] } as never,
+  };
+  Object.assign(routes, extra);
+  const fetch = stubFetch(routes);
   render(<Telemetry />);
   await waitFor(() =>
     expect(document.getElementById("telemetry-tabpanel")?.getAttribute("aria-busy")).toBe("false"),
   );
+  return fetch;
 }
 
 const panel = (id: string) => document.getElementById(id) as HTMLElement;
@@ -110,6 +121,35 @@ afterEach(() => {
 });
 
 describe("Telemetry, Throughput tab", () => {
+  it("loads the 7-day per-ticket series whatever range Crew last used", async () => {
+    const fetch = await open(tel());
+    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=7d", expect.anything());
+    expect(panel("tCycleTicket").querySelectorAll("svg circle.dot")).toHaveLength(2);
+  });
+
+  it("drops a hidden Crew agent filter before loading the unscoped Throughput table", async () => {
+    const unscoped = tel();
+    const scoped = {
+      ...unscoped,
+      tokensByTicket: [{ ticket: "shop#12", tokens: 5, costUsd: 1, totalCostUsd: 1 }],
+    };
+    const fetch = await open(unscoped, "?tab=crew", {
+      "/api/telemetry?range=24h": unscoped,
+      "/api/telemetry?range=24h&agent=shop-app-ta": scoped,
+    });
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "shop-app-ta" } });
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/telemetry?range=24h&agent=shop-app-ta",
+        expect.anything(),
+      ),
+    );
+    act(() => navigate("/telemetry?tab=throughput&view=table"));
+    await waitFor(() => expect(panel("tTickets")).toBeTruthy());
+    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=7d", expect.anything());
+    expect(within(panel("tTickets")).getByRole("table").textContent).toContain("~$18.60");
+  });
+
   it("shows the summary row with each figure, unit and window", async () => {
     await open(tel());
     const read = (label: string, window: string) => {
