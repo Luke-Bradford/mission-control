@@ -608,6 +608,14 @@ ${seats.join("\n")}
     expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
   });
 
+  it("still loads a config that sets the retired fix_session_trial, and ignores it", () => {
+    for (const v of ["true", "false"]) {
+      const text = crewText({}).replace("\ncrew:\n", `\ncrew:\n  fix_session_trial: ${v}\n`);
+      expect(text).toContain(`fix_session_trial: ${v}`);
+      expect(load(text).crew).not.toHaveProperty("fixSessionTrial");
+    }
+  });
+
   it("rejects overlapping writer areas", () => {
     const e = fails(
       crewText({

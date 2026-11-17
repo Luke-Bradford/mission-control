@@ -684,6 +684,8 @@ const fileSchema = z
         max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
         lane_default: z.boolean().default(false),
+        /** Retired with the fix-session trial: still accepted so an existing config loads; ignored. */
+        fix_session_trial: z.boolean().optional(),
         roles: z.record(z.string(), roleSchema).default({}),
         sessions: z.array(
           z.strictObject({
