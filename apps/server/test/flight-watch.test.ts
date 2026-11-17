@@ -567,6 +567,19 @@ describe("FLIGHT's PR list", () => {
     expect(sendCalls).toHaveLength(1);
   });
 
+  it("does not wake again for a delivered merged PR after a hub restart", async () => {
+    flightOnly();
+    await watch.check();
+    store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: T0 })], T0);
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    makeWatch();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
   it("still lists the PR of a parked run, with its seat", () => {
     live("guido-1", "r-guido");
     store.upsertRun(run("r-guido", "guido-1", { ticket: "mc#7" }));

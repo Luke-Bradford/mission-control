@@ -1115,6 +1115,8 @@ export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
 export const FLIGHT_WAITS_SETTING = "flight.waits";
 /** The setting that keeps the items FLIGHT was last shown, so a seen item is not a new wake reason. */
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
+/** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
+export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
 /** The furthest ahead a `wait_on` may look. */
 export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */

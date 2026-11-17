@@ -41,6 +41,7 @@ import {
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
+  FLIGHT_PRS_SHOWN_SETTING,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -673,7 +674,17 @@ export function flightArrivalSource(
 /** Per store, the PRs already listed as merged or closed (`repo#number:state`): each is listed once. */
 const shownByStore = new WeakMap<Store, Set<string>>();
 const shownPrs = (store: Store): Set<string> => {
-  const set = shownByStore.get(store) ?? new Set<string>();
+  const cached = shownByStore.get(store);
+  if (cached !== undefined) return cached;
+  let saved: unknown = [];
+  try {
+    saved = JSON.parse(store.getSetting(FLIGHT_PRS_SHOWN_SETTING) ?? "[]");
+  } catch {
+    // A damaged old setting must not stop a PR from being delivered again.
+  }
+  const set = new Set(
+    Array.isArray(saved) ? saved.filter((key): key is string => typeof key === "string") : [],
+  );
   shownByStore.set(store, set);
   return set;
 };
@@ -683,12 +694,20 @@ const shownKey = (p: { repoId: string; number: number; state: string }): string 
 /** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
+  let changed = false;
   for (const h of s.holds) {
     if (h.prState !== "open") store.markHoldTold(h.ref, h.prState);
   }
   for (const p of s.prs) {
-    if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
+    if (p.state !== "open") {
+      const key = shownKey({ repoId: s.repo, number: p.pr, state: p.state });
+      if (!shown.has(key)) {
+        shown.add(key);
+        changed = true;
+      }
+    }
   }
+  if (changed) store.setSetting(FLIGHT_PRS_SHOWN_SETTING, JSON.stringify([...shown].sort()));
 }
 
 /** The facts a delivered state leaves behind: the PRs that will leave the list are not counted. */
