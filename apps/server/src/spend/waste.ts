@@ -261,10 +261,11 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     });
   }
 
-  // Runs per ticket: more than three developer runs without a merge.
+  // Runs per ticket: more than three developer runs without a merge, on a ticket still open on the board.
+  const open = q.openTickets();
   for (const [ticket, list] of byTicket) {
     const own = list.filter(developer);
-    if (done(ticket) || own.length <= t.runsPerTicket) continue;
+    if (done(ticket) || !open.has(ticket) || own.length <= t.runsPerTicket) continue;
     const blocking = q.blockingByRun(own.map((r) => r.id));
     out.push({
       check: "runs-per-ticket",

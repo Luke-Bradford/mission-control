@@ -63,6 +63,18 @@ CREATE TABLE IF NOT EXISTS escaped_defects (
   PRIMARY KEY (repo_id, issue_number, pr_number)
 );
 CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
+-- A closed bug traced to the commit and PR that introduced it, and why it was missed; one row per bug.
+CREATE TABLE IF NOT EXISTS bug_escapes (
+  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, filed_at INTEGER NOT NULL,
+  fix_pr INTEGER NOT NULL, commit_sha TEXT NOT NULL, introduced_pr INTEGER,
+  merged_at INTEGER NOT NULL, missed TEXT NOT NULL, PRIMARY KEY (repo_id, issue_number)
+);
+-- When a bug's trace was last tried and failed, so a pass moves on to the bugs tried least recently.
+CREATE TABLE IF NOT EXISTS bug_escape_tries (
+  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, tried_at INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, issue_number)
+);
+CREATE INDEX IF NOT EXISTS bug_escapes_filed ON bug_escapes(filed_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)
@@ -104,6 +116,11 @@ CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
 );
+CREATE TABLE IF NOT EXISTS flow_column_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, number INTEGER NOT NULL,
+  at INTEGER NOT NULL, column TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS flow_column_moves_order ON flow_column_moves(at, repo_id, number);
 CREATE TABLE IF NOT EXISTS flow_prs (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, first_push_ci TEXT,
   PRIMARY KEY (repo_id, number)
