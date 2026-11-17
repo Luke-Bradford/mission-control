@@ -507,13 +507,9 @@ describe("startRun eligibility", () => {
     });
 
     it("refuses an outside glob with the text it always had", async () => {
-      await refused(
-        422,
-        grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string),
-        {
-          fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
-        },
-      );
+      await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
+      });
     });
 
     it("asks FLIGHT only for the outside file of a mixed Paths: line", async () => {
