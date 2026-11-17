@@ -1282,8 +1282,9 @@ export interface BriefOption {
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
-/** How a question left Needs you without an answer. */
+/** How a question left Needs you: without an answer, or ("answered") by the operator's chosen option. */
 export type QuestionClosureKind =
+  | "answered"
   | "cleared"
   | "returned"
   | "withdrawn"
@@ -1356,6 +1357,11 @@ export interface AttentionBrief {
 }
 
 export interface AttentionItem {
+  /**
+   * Set when the item's repo is not watched: its plan and materials cannot be loaded, and `text`
+   * says so plainly for the panel to show in their place.
+   */
+  repoUnwatched?: { repoId: string; text: string };
   hold?: AttentionHold;
   holdReleased?: string;
   /** When that hold was released; FLIGHT's brief older than this is stale. */

@@ -5,6 +5,13 @@ import { join, resolve } from "node:path";
 import { expect, it } from "vitest";
 import { relatedBase } from "../../../scripts/check-related.ts";
 
+const passedReport = {
+  numFailedTests: 0,
+  numFailedTestSuites: 0,
+  numTotalTestSuites: 1,
+  testResults: [{ assertionResults: [{ status: "passed" }] }],
+};
+
 it("rejects missing or unrelated default history and returns a verified immutable base", () => {
   const dir = mkdtempSync(join(tmpdir(), "mc-related-base-"));
   const git = (...args: string[]) =>
@@ -74,7 +81,7 @@ it.each([0, 3, "signal"] as const)(
       const noise = "fixture log line\n".repeat(100_000);
       writeFileSync(
         shim,
-        `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(noise)});\nprocess.stderr.write("Test Files 1 passed (1)\\nTests 2 passed (2)\\n");\n${outcome === "signal" ? 'process.kill(process.pid, "SIGTERM");' : `process.stderr.write("fixture failure name and full error\\n"); process.exit(${outcome});`}\n`,
+        `#!/usr/bin/env node\n${outcome === 0 ? `import { writeFileSync } from "node:fs";\nconst report = process.argv.find((arg) => arg.startsWith("--outputFile.json="))?.slice("--outputFile.json=".length);\nif (report) writeFileSync(report, ${JSON.stringify(JSON.stringify(passedReport))});\n` : ""}process.stdout.write(${JSON.stringify(noise)});\nprocess.stderr.write("Test Files 1 passed (1)\\nTests 2 passed (2)\\n");\n${outcome === "signal" ? 'process.kill(process.pid, "SIGTERM");' : `process.stderr.write("fixture failure name and full error\\n"); process.exit(${outcome});`}\n`,
       );
       chmodSync(shim, 0o700);
       const result = spawnSync(process.execPath, [script], {
@@ -95,6 +102,63 @@ it.each([0, 3, "signal"] as const)(
         if (outcome === "signal") expect(result.stderr).toContain("SIGTERM");
         else expect(result.stdout).toContain("fixture failure name and full error");
       }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+const verdictCases: ReadonlyArray<
+  readonly [
+    name: string,
+    report: typeof passedReport | undefined,
+    expected: number,
+    error?: string,
+    exitCode?: number,
+  ]
+> = [
+  ["forgives the sole worker update timeout", passedReport, 0],
+  ["keeps a failed test failing", { ...passedReport, numFailedTests: 1 }, 1],
+  ["keeps another unhandled error failing", passedReport, 1, "Error: boom"],
+  ["keeps a missing report failing", undefined, 1],
+  ["keeps a zero exit without a report failing", undefined, 1, undefined, 0],
+];
+
+it.each(verdictCases)(
+  "%s",
+  (_name, report, expected, error = 'Error: [vitest-worker]: Timeout calling "onTaskUpdate"', exitCode = 1) => {
+    const dir = mkdtempSync(join(tmpdir(), "mc-related-verdict-test-"));
+    const script = resolve("scripts/check-related.ts");
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+    try {
+      git("init", "-q", "-b", "main");
+      git(
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-qm",
+        "fixture",
+      );
+      git("update-ref", "refs/remotes/origin/main", "HEAD");
+      git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+      const bin = join(dir, "bin");
+      mkdirSync(bin);
+      const shim = join(bin, "pnpm");
+      writeFileSync(
+        shim,
+        `#!/usr/bin/env node\nimport { writeFileSync } from "node:fs";\nconst outputFile = process.argv.find((arg) => arg.startsWith("--outputFile.json="))?.slice("--outputFile.json=".length);\nconst report = ${JSON.stringify(report)};\nif (outputFile && report !== undefined) writeFileSync(outputFile, JSON.stringify(report));\nprocess.stderr.write(${JSON.stringify(`Vitest caught 1 unhandled error\nUnhandled Error ⎯⎯⎯\n${error}\n`)});\nprocess.exit(${exitCode});\n`,
+      );
+      chmodSync(shim, 0o700);
+      const result = spawnSync(process.execPath, [script], {
+        cwd: dir,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+      });
+      if (expected === 0) expect(result.stdout).toContain("Affected tests passed.");
+      expect(result.status).toBe(expected);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
