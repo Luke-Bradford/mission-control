@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_MIN_VERSION } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { probeCodexVersion } from "../src/runtime/codex-version.ts";
+import { CODEX_VERSION_TIMEOUTS_MS, probeCodexVersion } from "../src/runtime/codex-version.ts";
 
 let dir: string;
 beforeEach(() => {
@@ -55,6 +55,26 @@ fs.writeFileSync(${JSON.stringify(marker)}, "x");
 if (first) setInterval(() => {}, 1000);
 else console.log("codex-cli ${CODEX_MIN_VERSION}");`;
     expect(await probeCodexVersion(executable(script), [300, 5000])).toBe(CODEX_MIN_VERSION);
+  });
+
+  it("gives the retry a longer timeout than the first try", async () => {
+    const script = `setTimeout(() => console.log("codex-cli ${CODEX_MIN_VERSION}"), 600);`;
+    expect(await probeCodexVersion(executable(script), [300, 5000])).toBe(CODEX_MIN_VERSION);
+  });
+
+  it("keeps the default timeouts to one longer retry", () => {
+    expect(CODEX_VERSION_TIMEOUTS_MS).toHaveLength(2);
+    expect(CODEX_VERSION_TIMEOUTS_MS[1]).toBeGreaterThan(CODEX_VERSION_TIMEOUTS_MS[0] ?? 0);
+  });
+
+  it("retries a failure to run and returns the version", async () => {
+    const marker = join(dir, "runs");
+    const script = `const fs = require("fs");
+const first = !fs.existsSync(${JSON.stringify(marker)});
+fs.writeFileSync(${JSON.stringify(marker)}, "x");
+if (first) process.exit(1);
+else console.log("codex-cli ${CODEX_MIN_VERSION}");`;
+    expect(await probeCodexVersion(executable(script), [2000, 2000])).toBe(CODEX_MIN_VERSION);
   });
 
   it("says the check timed out when the retry times out too", async () => {
