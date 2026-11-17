@@ -504,6 +504,13 @@ describe("dependency chips", () => {
     expect(cardColumn(b, index)).toBe("Blocked");
     expect(cardColumn(b)).toBe("Ready");
   });
+  it("a Depends on ticket whose PR is open waits on that PR and is in Blocked", () => {
+    const idx = dependencyIndex([
+      chain(node("PR 9", { edge: null, children: [node("shop-app#5", { edge: "depends" })] })),
+    ]);
+    const b = boardItem({ ...ready, issueNumber: 5, after: { issues: [2], prs: [] } });
+    expect(cardColumn(b, idx)).toBe("Blocked");
+  });
   it("a Depends on that has landed leaves a held or stacked ticket in Ready", () => {
     const idx = dependencyIndex([
       chain(node("PR 22", { edge: null, children: [node("shop-app#5", { edge: "held" })] })),

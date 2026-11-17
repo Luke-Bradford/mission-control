@@ -164,6 +164,8 @@ export interface WaitOn {
   waitedMs: number | null;
   /** A PR the hub never read: its ref is not a fact, so the chip says so. */
   unread: boolean;
+  /** The chain edge to the card's ticket is a `Depends on` (not held, stacked or queued). */
+  depends: boolean;
 }
 
 /** What `GET /api/dependencies` says, by work: what each waits on, and the chains' roots. */
@@ -194,9 +196,21 @@ export function dependencyIndex(
       for (const kid of parent.children) {
         const unread =
           parent === chain.root && /^PR \d+$/.test(parent.ref) && chain.state === "unknown";
-        add(kid.ref, { ref: parent.ref, repoId: chain.repoId, waitedMs: kid.waitedMs, unread });
+        add(kid.ref, {
+          ref: parent.ref,
+          repoId: chain.repoId,
+          waitedMs: kid.waitedMs,
+          unread,
+          depends: kid.edge === "depends",
+        });
         for (const other of kid.alsoWaitsOn)
-          add(kid.ref, { ref: other, repoId: chain.repoId, waitedMs: kid.waitedMs, unread: false });
+          add(kid.ref, {
+            ref: other,
+            repoId: chain.repoId,
+            waitedMs: kid.waitedMs,
+            unread: false,
+            depends: false,
+          });
         walk(kid);
       }
     };
@@ -275,9 +289,12 @@ export function cardColumn(item: BoardItem, index?: DependencyIndex | null): Boa
   const col = hudColumnOf(item);
   if (item.waiting && col !== "Done") return WAITING_COLUMN;
   if (!NOT_STARTED.includes(col)) return col;
-  // only a wait on one of the ticket's own `Depends on` issues moves it; a held or stacked one stays
-  const dependsOn = waitsOf(item, index).some((w) =>
-    (item.after?.issues ?? []).some((n) => w.ref === `${item.repoId}#${n}`),
+  // only a `Depends on` wait moves it (a `depends` edge, or a wait on one of its own `Depends on`
+  // issues); a held or stacked one stays
+  const dependsOn = waitsOf(item, index).some(
+    (w) =>
+      (w.depends && (item.after?.issues.length ?? 0) > 0) ||
+      (item.after?.issues ?? []).some((n) => w.ref === `${item.repoId}#${n}`),
   );
   return firstBlocker(item) !== null || dependsOn ? "Blocked" : col;
 }
