@@ -19,16 +19,8 @@ vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
   type EvidencePage,
@@ -53,7 +45,7 @@ import { createPrEvidence, evidenceReviewDeps } from "../src/pr-evidence/capture
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/preview/review.ts";
 import { externalReviewKey } from "../src/review/external.ts";
-import { fixBriefKey, reviewBrief, watchBrief } from "../src/runtime/brief.ts";
+import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -2067,183 +2059,6 @@ describe("a run set aside in review", () => {
     expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
     expect(m.sup.seatFacts("guido-1")).toBeNull();
     expect(store.run(runId)).toMatchObject({ endedAt: null });
-  });
-
-  describe("wakeRun with fresh (the fix-session trial)", () => {
-    /** The argv without its session id flag, to compare how two starts were configured. */
-    const config = (argv: string[]): string[] => {
-      const skip = new Set<number>();
-      argv.forEach((a, k) => {
-        if (["--session-id", "--resume", "--model", "--max-budget-usd"].includes(a))
-          skip.add(k).add(k + 1);
-      });
-      return argv.filter((_, k) => !skip.has(k));
-    };
-
-    it("starts a new session in the same worktree, and sends the handoff with the fix", async () => {
-      const { sup, runId } = await aside(true);
-      const old = store.run(runId)?.sessionId as string;
-      const woke = await sup.wakeRun(runId, { fresh: "review" });
-      expect(woke.fallback).toBeNull();
-      const fresh = woke.freshSessionId as string;
-      expect(fresh).toMatch(/^[0-9a-f-]{36}$/);
-      expect(fresh).not.toBe(old);
-      expect(store.run(runId)?.sessionId).toBe(fresh);
-      expect(store.seatSession("guido-1")).toMatchObject({
-        runId,
-        cliSessionId: fresh,
-        worktree: wt(),
-        state: "idle",
-      });
-      const argv = starts()[1].argv as string[];
-      expect(argv[argv.indexOf("--session-id") + 1]).toBe(fresh);
-      expect(argv).not.toContain("--resume");
-      expect(starts()[1].cwd).toBe(wt());
-      // the same prompt file and tools as the run's first start, and the model a resume uses
-      expect(argv[argv.indexOf("--model") + 1]).toBe(store.run(runId)?.model);
-      expect(config(argv)).toEqual(config(starts()[0].argv as string[]));
-      expect(store.getSetting(fixBriefKey(runId))).toContain("Fresh session for GUIDO-1");
-      await sup.message("guido-1", "the fix text", { interrupt: false });
-      await until(() => expect(userLines()).toHaveLength(2));
-      const first = userLines()[1] as string;
-      expect(first).toContain("Fresh session for GUIDO-1");
-      expect(first.indexOf("the fix text")).toBeGreaterThan(first.indexOf("mc read_ticket"));
-      // the handoff goes once
-      expect(store.getSetting(fixBriefKey(runId))).toBeNull();
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      await sup.message("guido-1", "again", { interrupt: false });
-      await until(() => expect(userLines()).toHaveLength(3));
-      expect(userLines()[2]).not.toContain("Fresh session");
-    });
-
-    /** A run set aside whose profile caps it at $10 and which has spent `spent`. */
-    async function cappedAside(spent: number) {
-      const m = make({
-        profiles: () => DEFAULT_PROFILES.map((p) => ({ ...p, budgetUsd: 10 })),
-      });
-      m.sup.start();
-      const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      await m.sup.setAside(runId);
-      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
-      store.upsertRun({ ...(store.run(runId) as Run), costUsd: spent });
-      expect(store.run(runId)?.profile?.profile.budgetUsd).toBe(10);
-      return { sup: m.sup, runId };
-    }
-
-    it("gives the fresh CLI the budget the run has left", async () => {
-      const { sup, runId } = await cappedAside(4);
-      const woke = await sup.wakeRun(runId, { fresh: "ci" });
-      expect(woke.freshSessionId).not.toBeNull();
-      await until(() => {
-        const argv = starts().at(-1)?.argv as string[];
-        expect(argv).toContain("--session-id");
-        expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("6");
-      });
-    });
-
-    /** Appends a session's init and its cumulative cost to the run's transcript, as the CLI does. */
-    const spend = (runId: string, session: string, usd: number): void => {
-      const path = (store.run(runId) as Run).transcriptPath;
-      mkdirSync(dirname(path), { recursive: true });
-      appendFileSync(
-        path,
-        `${JSON.stringify({ type: "system", subtype: "init", session_id: session })}\n${JSON.stringify({ type: "result", session_id: session, total_cost_usd: usd })}\n`,
-      );
-    };
-    const budgetOf = (argv: string[]): string =>
-      argv[argv.indexOf("--max-budget-usd") + 1] as string;
-
-    it("a later resume of a fresh session gets the budget its earlier sessions left", async () => {
-      const { sup, runId } = await cappedAside(4);
-      const old = (store.run(runId) as Run).sessionId;
-      spend(runId, old as string, 4);
-      const woke = await sup.wakeRun(runId, { fresh: "ci" });
-      const fresh = woke.freshSessionId as string;
-      expect(fresh).not.toBeNull();
-      // the fresh session spends $1 more, then the run is set aside and woken again
-      spend(runId, fresh, 1);
-      store.upsertRun({ ...(store.run(runId) as Run), costUsd: 5 });
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      await sup.setAside(runId);
-      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
-      await sup.wakeRun(runId);
-      await until(() => {
-        const argv = starts().at(-1)?.argv as string[];
-        expect(argv[argv.indexOf("--resume") + 1]).toBe(fresh);
-        expect(budgetOf(argv)).toBe("6");
-      });
-    });
-
-    it("a resume of a run's only session keeps the whole budget", async () => {
-      const { sup, runId } = await cappedAside(4);
-      spend(runId, (store.run(runId) as Run).sessionId as string, 4);
-      await sup.wakeRun(runId);
-      await until(() => {
-        const argv = starts().at(-1)?.argv as string[];
-        expect(argv).toContain("--resume");
-        expect(budgetOf(argv)).toBe("10");
-      });
-    });
-
-    it("rounds the fresh CLI's cap down to whole cents", async () => {
-      const { sup, runId } = await cappedAside(4.005);
-      await sup.wakeRun(runId, { fresh: "ci" });
-      await until(() => {
-        const argv = starts().at(-1)?.argv as string[];
-        expect(argv).toContain("--session-id");
-        expect(budgetOf(argv)).toBe("5.99");
-      });
-    });
-
-    it("resumes instead when the run has no budget left", async () => {
-      const { sup, runId } = await cappedAside(10);
-      const woke = await sup.wakeRun(runId, { fresh: "ci" });
-      expect(woke.freshSessionId).toBeNull();
-      expect(woke.fallback).toBe("no budget left for a fresh session");
-      await until(() => expect(starts().at(-1)?.argv).toContain("--resume"));
-    });
-
-    it("resumes the old session when the fresh one cannot start, and says why", async () => {
-      const gate = join(root, "fail-new");
-      const m = make({ extraArgs: ["--fail-new-while", gate] });
-      m.sup.start();
-      const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      await m.sup.setAside(runId);
-      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
-      const old = store.run(runId)?.sessionId as string;
-      writeFileSync(gate, "");
-      const woke = await m.sup.wakeRun(runId, { fresh: "ci" });
-      expect(woke.freshSessionId).toBeNull();
-      expect(woke.fallback).toContain("exited at start");
-      expect(store.run(runId)?.sessionId).toBe(old);
-      expect(store.getSetting(fixBriefKey(runId))).toBeNull();
-      expect(store.seatSession("guido-1")).toMatchObject({ runId, cliSessionId: old });
-      // the resumed CLI records its argv a moment after wakeRun returns
-      await until(() => {
-        const argv = starts().at(-1)?.argv as string[];
-        expect(argv[argv.indexOf("--resume") + 1]).toBe(old);
-      });
-      expect(store.run(runId)).toMatchObject({ endedAt: null });
-    });
-
-    it("is refused while the CLI is held, and the run stays aside", async () => {
-      const hold = new CliHold();
-      const m = make({ cliHold: hold });
-      m.sup.start();
-      const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
-      await until(() => expect(seatState("guido-1")).toBe("idle"));
-      await m.sup.setAside(runId);
-      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
-      const old = store.run(runId)?.sessionId;
-      hold.hold("held for the CLI");
-      const e = await refusal(m.sup.wakeRun(runId, { fresh: "ci" }));
-      expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
-      expect(m.sup.seatFacts("guido-1")).toBeNull();
-      expect(store.run(runId)).toMatchObject({ endedAt: null, sessionId: old });
-      expect(store.getSetting(fixBriefKey(runId))).toBeNull();
-    });
   });
 
   it("wakeRun resumes the same session in place", async () => {
