@@ -7,6 +7,7 @@ import { linkRefs } from "../comms/refLinks.ts";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
+import { githubRepoOfUrl } from "../links.ts";
 import { FlightStoppedNote } from "./FlightStoppedNote.tsx";
 import type { FlightView } from "./flightTypes.ts";
 import "./FlightThread.css";
@@ -62,6 +63,15 @@ export function FlightThread({
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
+  // Only a pull request in a configured repo shows as its text alone; any other link keeps its host.
+  const isRepoPullUrl = (url: string): boolean => {
+    const repoOf = githubRepoOfUrl(url);
+    return (
+      repoOf !== null &&
+      /\/pull\/\d+$/.test(url) &&
+      (config?.repos.some((r) => r.github.toLowerCase() === repoOf.toLowerCase()) ?? false)
+    );
+  };
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const [text, setText] = useState("");
@@ -184,7 +194,7 @@ export function FlightThread({
               {message.choice ? (
                 `You chose: ${message.choice.label}`
               ) : (
-                <OpenLinks>
+                <OpenLinks hostHidden={isRepoPullUrl}>
                   <Markdown text={linkRefs(message.text, message.ticket, repo, config)} />
                 </OpenLinks>
               )}

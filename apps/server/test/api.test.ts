@@ -5,6 +5,7 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
   joinMapGraph,
+  SPEC_BOUNCE_CAUSES,
   unpackMap,
 } from "@mc/core";
 import "./temp-home.ts";
@@ -507,6 +508,7 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    bugEscapes: [],
     improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
       subject: name,
@@ -517,6 +519,10 @@ describe("audit", () => {
       calls: 0,
       chars: 0,
     })),
+    specBounces: {
+      rows: [],
+      counts: SPEC_BOUNCE_CAUSES.map((cause) => ({ cause, days7: 0, days30: 0 })),
+    },
     surgeonProposals: [],
   });
 
@@ -6319,6 +6325,10 @@ describe("telemetry", () => {
         at: NOW - 6 * 60 * 60_000 + index * 60 * 60_000,
         merged: 0,
       })),
+      ticketsInProgress: Array.from({ length: 14 }, (_, index) => ({
+        day: `2026-10-${String(index + 4).padStart(2, "0")}`,
+        tickets: null,
+      })),
       quality: [
         {
           at: NOW - 6 * 60 * 60_000,
@@ -6570,6 +6580,40 @@ describe("reload", () => {
     expect(r.json()).toEqual({ ...changes, applied: ["seat guido-2 added"] });
     expect(reload).toHaveBeenCalledTimes(1);
     await a.close();
+  });
+
+  it("/api/telemetry?range=24h serves the machine series and stays within 60 KB with a full day sampled", async () => {
+    withCrew();
+    const GB = 1024 ** 3;
+    for (let i = 1; i <= 24 * 60; i += 1) {
+      store.addMachineSample({
+        at: NOW - (24 * 60 - i) * 60_000,
+        cpuPct: 20 + (i % 50),
+        cores: 8,
+        memUsedBytes: 5 * GB + i,
+        memTotalBytes: 16 * GB,
+        diskFreeBytes: 16 * GB,
+        diskTotalBytes: 100 * GB,
+        swapUsedBytes: (i % 7) * GB + 12_345,
+        swapTotalBytes: 8 * GB,
+        memoryPressureFreePct: 33.3333 + (i % 9),
+        agents: { count: 3, rssBytes: 6.123456 * GB + i, cpuPct: 1 },
+        testRun: { count: 5, rssBytes: 4.654321 * GB + i, cpuPct: 9 },
+      });
+    }
+    const response = await get("/api/telemetry?range=24h");
+    expect(response.statusCode).toBe(200);
+    const body = response.json<Telemetry>();
+    expect(body.machine).toHaveLength(72);
+    expect(body.machine.every((p) => p.swapPct != null && p.agentGb != null)).toBe(true);
+    // The budget is the 60 KB the other bounded routes keep; the four added series are a small share.
+    const bytes = Buffer.byteLength(response.body);
+    expect(bytes).toBeLessThan(60_000);
+    const without = JSON.stringify({
+      ...body,
+      machine: body.machine.map(({ at, cpuPct, memPct }) => ({ at, cpuPct, memPct })),
+    });
+    expect(bytes - Buffer.byteLength(without)).toBeLessThan(8_000);
   });
 
   it("uses machine-capacity thresholds applied by reload immediately", async () => {

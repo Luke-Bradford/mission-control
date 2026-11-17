@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  CODE_HEALTH_OVERVIEW_FILES_MAX,
+  CODE_HEALTH_OVERVIEW_PAST_MAX,
+  CODE_HEALTH_OVERVIEW_ROWS_MAX,
   CODE_HEALTH_OVERVIEW_TTL_MS,
   type CodeHealthOverview,
   type CodeHealthView,
@@ -309,6 +312,36 @@ describe("Audit first-screen summary", () => {
     const funnel = (await overview()).past.funnel;
     expect(funnel).toContainEqual({ kind: "dismissed", count: 250 });
     expect(funnel).toContainEqual({ kind: "proposed", count: 1 });
+  });
+
+  it("caps ranked rows, file findings and past items at their limits and keeps the funnel exact", async () => {
+    db.exec("BEGIN");
+    for (let n = 0; n < CODE_HEALTH_OVERVIEW_FILES_MAX + 5; n++) {
+      const id = review(n + 1, 1);
+      merged(n + 1, NOW - DAY, id);
+      touch(n + 1, `src/f${n}.ts`);
+      finding(id, `src/f${n}.ts`, `s${n}`);
+    }
+    for (let n = 0; n < CODE_HEALTH_OVERVIEW_PAST_MAX + 5; n++) proposal(`acc${n}`, "accepted");
+    // The hub derives one repeated-rounds proposal per PR at round 3 or more; rounds 3..14 give twelve, ranked by round.
+    const extra = 2;
+    for (let n = 0; n < CODE_HEALTH_OVERVIEW_ROWS_MAX + extra; n++)
+      merged(100 + n, NOW - DAY, review(100 + n, 3 + n));
+    db.exec("COMMIT");
+    const view = await overview();
+    expect(view.rows).toHaveLength(CODE_HEALTH_OVERVIEW_ROWS_MAX);
+    expect(view.rows.map((row) => row.target.baseline)).toEqual(
+      Array.from(
+        { length: CODE_HEALTH_OVERVIEW_ROWS_MAX },
+        (_, i) => 3 + extra + CODE_HEALTH_OVERVIEW_ROWS_MAX - 1 - i,
+      ),
+    );
+    expect(view.landing.files).toHaveLength(CODE_HEALTH_OVERVIEW_FILES_MAX);
+    expect(view.past.items).toHaveLength(CODE_HEALTH_OVERVIEW_PAST_MAX);
+    expect(view.past.funnel).toContainEqual({
+      kind: "accepted",
+      count: CODE_HEALTH_OVERVIEW_PAST_MAX + 5,
+    });
   });
 
   it("shows after-date results only from stored remeasure records", async () => {

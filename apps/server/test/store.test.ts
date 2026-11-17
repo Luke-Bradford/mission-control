@@ -2317,6 +2317,7 @@ describe("Store", () => {
       diskTotalBytes: null,
       agents: null,
     });
+    const NOT_COLLECTED = { swapPct: null, pressurePct: null, agentGb: null, testRunGb: null };
     const buckets = () => store.machineBuckets(SINCE, SINCE + 5 * BUCKET, BUCKET, 5);
 
     it("averages per bucket, keeps the last sample's time, and nulls what nothing measured", () => {
@@ -2324,8 +2325,8 @@ describe("Store", () => {
       store.addMachineSample(sample(SINCE + 5_000, 30, 40));
       store.addMachineSample(sample(SINCE + BUCKET, null, null));
       expect(buckets()).toEqual([
-        { at: SINCE + 5_000, cpuPct: 20, memPct: 30 },
-        { at: SINCE + BUCKET, cpuPct: null, memPct: null },
+        { at: SINCE + 5_000, cpuPct: 20, memPct: 30, ...NOT_COLLECTED },
+        { at: SINCE + BUCKET, cpuPct: null, memPct: null, ...NOT_COLLECTED },
       ]);
     });
 
@@ -2341,10 +2342,65 @@ describe("Store", () => {
       ]);
     });
 
+    it("serves swap, memory pressure and agent and test-run memory; an old sample reads null, not zero", () => {
+      const GB = 1024 ** 3;
+      store.addMachineSample({
+        ...sample(SINCE, 10, 20),
+        swapUsedBytes: 1 * GB,
+        swapTotalBytes: 4 * GB,
+        memoryPressureFreePct: 70,
+        agents: { count: 2, rssBytes: 3 * GB, cpuPct: 1 },
+        testRun: { count: 4, rssBytes: 2 * GB, cpuPct: 5 },
+      });
+      store.addMachineSample({
+        ...sample(SINCE + 1_000, 10, 20),
+        swapUsedBytes: 3 * GB,
+        swapTotalBytes: 4 * GB,
+        memoryPressureFreePct: 50,
+        agents: { count: 2, rssBytes: 5 * GB, cpuPct: 1 },
+        testRun: null,
+      });
+      // An old sample: none of the new fields, and no swap file at all in the next bucket.
+      store.addMachineSample(sample(SINCE + BUCKET, 10, 20));
+      store.addMachineSample({
+        ...sample(SINCE + 2 * BUCKET, 10, 20),
+        swapUsedBytes: 0,
+        swapTotalBytes: 0,
+      });
+      expect(buckets().map(({ at: _at, cpuPct: _c, memPct: _m, ...rest }) => rest)).toEqual([
+        { swapPct: 50, pressurePct: 40, agentGb: 4, testRunGb: 2 },
+        { swapPct: null, pressurePct: null, agentGb: null, testRunGb: null },
+        { swapPct: null, pressurePct: null, agentGb: null, testRunGb: null },
+      ]);
+    });
+
+    it("backfills the new columns from a stored sample's JSON", () => {
+      const old = join(dir, "old2.sqlite");
+      const db = new DatabaseSync(old);
+      db.exec(
+        "CREATE TABLE machine_samples (at INTEGER PRIMARY KEY, sample TEXT NOT NULL, cpu_pct REAL, mem_pct REAL)",
+      );
+      db.prepare("INSERT INTO machine_samples VALUES (?, ?, ?, ?)").run(
+        SINCE,
+        JSON.stringify({
+          ...sample(SINCE, 10, 20),
+          swapUsedBytes: 1,
+          swapTotalBytes: 4,
+          memoryPressureFreePct: 90,
+          agents: { count: 1, rssBytes: 1024 ** 3, cpuPct: 0 },
+        }),
+        10,
+        20,
+      );
+      db.close();
+      const [b] = new Store(old).machineBuckets(SINCE, SINCE + BUCKET, BUCKET, 5);
+      expect(b).toMatchObject({ swapPct: 25, pressurePct: 10, agentGb: 1, testRunGb: null });
+    });
+
     it("ignores a sample with no memory total in the memory mean", () => {
       store.addMachineSample(sample(SINCE, 10, 50, 100));
       store.addMachineSample(sample(SINCE + 1, 10, 5, 0));
-      expect(buckets()).toEqual([{ at: SINCE + 1, cpuPct: 10, memPct: 50 }]);
+      expect(buckets()).toEqual([{ at: SINCE + 1, cpuPct: 10, memPct: 50, ...NOT_COLLECTED }]);
     });
 
     it("reads the pre-extracted columns, not the sample JSON", () => {
@@ -2354,8 +2410,8 @@ describe("Store", () => {
       raw.exec("UPDATE machine_samples SET sample = 'not json'"); // json_extract would throw
       raw.close();
       expect(buckets()).toEqual([
-        { at: SINCE, cpuPct: 10, memPct: 20 },
-        { at: SINCE + BUCKET, cpuPct: 30, memPct: 60 },
+        { at: SINCE, cpuPct: 10, memPct: 20, ...NOT_COLLECTED },
+        { at: SINCE + BUCKET, cpuPct: 30, memPct: 60, ...NOT_COLLECTED },
       ]);
     });
 
@@ -2369,7 +2425,7 @@ describe("Store", () => {
       db.close();
       const migrated = new Store(old);
       expect(migrated.machineBuckets(SINCE, SINCE + BUCKET, BUCKET, 5)).toEqual([
-        { at: SINCE + 1, cpuPct: 10, memPct: 20 },
+        { at: SINCE + 1, cpuPct: 10, memPct: 20, ...NOT_COLLECTED },
       ]);
       expect(migrated.machineSamples(0)).toHaveLength(2);
       new Store(old); // re-opening an already-migrated database is a no-op
