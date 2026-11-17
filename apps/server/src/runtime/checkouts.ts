@@ -317,6 +317,10 @@ export interface PendingCheckouts {
 export interface CheckoutInput {
   /** An ended author's branch; an existing managed worktree can be adopted in place. */
   handoff?: { branch: string; worktree: string | null };
+  /** Branches whose cached PR has merged; these start a new stage unless they also have an open PR. */
+  mergedPullRequestBranches?: readonly string[];
+  /** Branches whose cached PR is still open and can therefore be resumed. */
+  openPullRequestBranches?: readonly string[];
   /** Mission Control's clone of the repo (a session's `checkout`). */
   checkout: string;
   /** `crew.worktrees`. */
@@ -1259,7 +1263,9 @@ async function fetchOriginBase(
 async function ticketBranch(
   inClone: (args: string[]) => Promise<string>,
   issue: number,
-): Promise<string | null> {
+  mergedPullRequestBranches: readonly string[] = [],
+  openPullRequestBranches: readonly string[] = [],
+): Promise<{ branch: string | null; branches: ReadonlySet<string> }> {
   let refs: string;
   try {
     refs = await inClone([
@@ -1283,13 +1289,24 @@ async function ticketBranch(
       .map((ref) => ref.replace(/^refs\/(?:heads|remotes\/origin)\//, ""))
       .filter((branch) => pattern.test(branch)),
   );
-  if (branches.size > 1) {
+  const merged = new Set(mergedPullRequestBranches);
+  const open = new Set(openPullRequestBranches);
+  const reusable = [...branches].filter((branch) => !merged.has(branch) || open.has(branch));
+  if (reusable.length > 1) {
     throw new CheckoutError(
       "branch",
-      `#${issue} has more than one branch (${branches.size}); delete the extra ones`,
+      `#${issue} has more than one branch (${reusable.length}); delete the extra ones`,
     );
   }
-  return branches.values().next().value ?? null;
+  return { branch: reusable[0] ?? null, branches };
+}
+
+function freshTicketBranch(issue: number, title: string, branches: ReadonlySet<string>): string {
+  const base = branchFor(issue, title);
+  for (let stage = 2; ; stage += 1) {
+    const branch = `${base}-stage-${stage}`;
+    if (!branches.has(branch)) return branch;
+  }
 }
 
 /** A fresh detached copy of the ticket's branch, or origin's default tip when it has none. */
@@ -1299,7 +1316,7 @@ export async function prepareReadOnlyCheckout(
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
   const path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
-  const branch = await ticketBranch(inClone, i.issue);
+  const { branch } = await ticketBranch(inClone, i.issue);
   const refSha = (ref: string) =>
     inClone(["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`]).then(
       (s) => s.trim(),
@@ -1648,8 +1665,18 @@ export async function prepareCheckout(
   runInstall: InstallRunner = execFileP,
 ): Promise<Checkout> {
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
+  const ticket = await ticketBranch(
+    inClone,
+    i.issue,
+    i.mergedPullRequestBranches,
+    i.openPullRequestBranches,
+  );
   const branch =
-    i.handoff?.branch ?? (await ticketBranch(inClone, i.issue)) ?? branchFor(i.issue, i.title);
+    i.handoff?.branch ??
+    ticket.branch ??
+    (ticket.branches.size === 0
+      ? branchFor(i.issue, i.title)
+      : freshTicketBranch(i.issue, i.title, ticket.branches));
   // a worktree made before sessions had folders is reused where it is
   let path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
