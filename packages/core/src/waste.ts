@@ -214,13 +214,12 @@ export interface WasteSpend {
 }
 
 /**
- * One 24-hour bucket of FLIGHT's own activity: how often it woke, how often it decided to wait, and
+ * One 24-hour bucket of FLIGHT's own activity: how often it woke, and
  * its share of the new tokens every run used. The share is null when no run recorded tokens.
  */
 export interface FlightDay {
   since: number;
   wakes: number;
-  waits: number;
   flightTokens: number;
   totalTokens: number;
   tokenShare: number | null;

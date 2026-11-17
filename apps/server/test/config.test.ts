@@ -486,7 +486,6 @@ describe("crew", () => {
     maxOpen?: string;
     lane?: string;
     laneDefault?: string;
-    fixSessionTrial?: string;
     transcripts?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
     roles?: string[];
@@ -506,7 +505,6 @@ crew:
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
-  ${opts.fixSessionTrial === undefined ? "" : `fix_session_trial: ${opts.fixSessionTrial}`}
   ${opts.transcripts === undefined ? "" : `transcripts: ${opts.transcripts}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
@@ -610,10 +608,12 @@ ${seats.join("\n")}
     expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
   });
 
-  it("defaults the fix-session trial switch to false and rejects a non-boolean", () => {
-    expect(load(crewText({})).crew?.fixSessionTrial).toBe(false);
-    expect(load(crewText({ fixSessionTrial: "true" })).crew?.fixSessionTrial).toBe(true);
-    expect(fails(crewText({ fixSessionTrial: '"yes"' })).path).toBe("crew.fixSessionTrial");
+  it("still loads a config that sets the retired fix_session_trial, and ignores it", () => {
+    for (const v of ["true", "false"]) {
+      const text = crewText({}).replace("\ncrew:\n", `\ncrew:\n  fix_session_trial: ${v}\n`);
+      expect(text).toContain(`fix_session_trial: ${v}`);
+      expect(load(text).crew).not.toHaveProperty("fixSessionTrial");
+    }
   });
 
   it("rejects overlapping writer areas", () => {

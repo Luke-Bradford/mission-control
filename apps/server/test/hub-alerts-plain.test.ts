@@ -1,6 +1,5 @@
 import { flightDownText, flightNotTriagingText, flightStartFailedText } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { leftWakeText } from "../src/flight/state.ts";
 import { sinceText } from "../src/hud/hud.ts";
 import { hubCodeHeldText } from "../src/update.ts";
 
@@ -10,57 +9,7 @@ const RAW = [/\d{10,}/, /[\w-]+:[\w./#-]+:\d/, /#\d+/, /\b[0-9a-f]{7,40}\b/, /\w
 const expectPlain = (text: string): void => {
   for (const re of RAW) expect(text).not.toMatch(re);
 };
-
-const reason = (category: string, item: unknown) => ({
-  id: `${category}:${JSON.stringify(item)}`,
-  label: "ignored",
-  targets: [],
-});
 const AT = Date.UTC(2026, 10, 7, 14, 30);
-
-describe("the wake-left alert", () => {
-  it("counts by kind in plain words and names the time", () => {
-    const text = leftWakeText(
-      [
-        reason("prFlow", `1407:stage:clearance:${AT}`),
-        reason("prFlow", `1408:unowned:${AT}`),
-        reason("prs", "repo#12:9:true:open:review:"),
-        reason("free", "GUIDO-1"),
-        reason("items", "comms-open:42"),
-        reason("signals", "seat_call:GUIDO-1"),
-      ],
-      AT,
-      "Europe/London",
-    );
-    expect(text).toBe(
-      "FLIGHT was woken at 14:30 about 6 things and left them undecided; it will not be woken again for them: 3 pull requests waiting for a next step, 1 free seat, 1 question waiting for an answer, 1 signal from the crew.",
-    );
-    expectPlain(text);
-  });
-
-  it("names every other kind of reason in words", () => {
-    const text = leftWakeText(
-      [
-        reason("reviews", "idle"),
-        reason("breaker", "tripped"),
-        reason("planned", ["p1", AT, "check", "repo#12", "look again"]),
-        reason("signals", "seat_call:GUIDO-1"),
-        reason("items", "stall:GUIDO-1:x:y:1"),
-      ],
-      AT,
-      "Europe/London",
-    );
-    expect(text).not.toMatch(/other thing/);
-    expectPlain(text);
-  });
-
-  it("uses the singular for one", () => {
-    const text = leftWakeText([reason("t", "repo#3")], AT, "Europe/London");
-    expect(text).toBe(
-      "FLIGHT was woken at 14:30 about 1 thing and left it undecided; it will not be woken again for them: 1 ticket ready to start.",
-    );
-  });
-});
 
 describe("the held-Update alert", () => {
   it("reads in plain words for both holds", () => {

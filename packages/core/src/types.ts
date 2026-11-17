@@ -15,7 +15,6 @@ import type {
   BriefReadState,
 } from "./briefs.ts";
 import type { CrewPause } from "./crew-pause.ts";
-import type { FixSessionArm } from "./fix-session-trial.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
@@ -283,12 +282,8 @@ export interface RunLoop {
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
   mergeHold?: { by: "FLIGHT" | "CAPCOM"; reason: string; at: number; from?: LoopPhase } | null;
-  /** The fix-session trial arm, assigned once at the run's first fix boundary (#1643). */
-  fixArm?: FixSessionArm;
-  /** The fresh CLI sessions the run started for a fix, oldest first. */
+  /** The fresh CLI sessions the run started for a fix (a retired trial), oldest first; the token audit reads old ones. */
   fixSessions?: { sessionId: string; at: number; reason: "ci" | "review" }[];
-  /** Fresh starts that failed, so the run resumed its session instead. */
-  fixFallbacks?: { at: number; reason: string }[];
 }
 
 /** One `loop_events` row. */

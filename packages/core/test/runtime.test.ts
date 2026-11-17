@@ -336,7 +336,6 @@ describe("the allowlist in phase 2b", () => {
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
       callFlight: "mcp__mc__call_flight",
-      waitOn: "mcp__mc__wait_on",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
@@ -704,7 +703,6 @@ describe("crew constants", () => {
         tools: [
           "code_health",
           "log_decision",
-          "wait_on",
           "read_ticket",
           "answer_question",
           "start_seat",
@@ -840,7 +838,6 @@ describe("mc tool grants", () => {
     expect(FLIGHT_TOOLS).toEqual([
       "code_health",
       "log_decision",
-      "wait_on",
       "read_ticket",
       "answer_question",
       "start_seat",

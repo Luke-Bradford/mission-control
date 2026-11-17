@@ -160,14 +160,12 @@ import {
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { setReviewHold } from "../src/engine/review-hold.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
+import { observeFlightMain } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
   flightTriageItems,
   operatorItems,
-  unhandledReasons,
-  wakeReasons,
 } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
@@ -585,81 +583,6 @@ beforeEach(() => {
   live("flight-1", "r-flight");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-describe("wait_on", () => {
-  const waitArgs = (over: Record<string, unknown> = {}) => ({
-    target: "mc#7",
-    on: "its PR merging",
-    until: new Date(NOW + 30 * 60_000).toISOString(),
-    basis: "the PR is in CI",
-    ...over,
-  });
-
-  it("is a FLIGHT tool, granted to the read-only watch role", () => {
-    expect(named("wait_on")).toMatchObject({ modes: [], grantable: ["read-only"] });
-  });
-
-  it("records a wait decision on the target, and keeps the time for the wake that ends it", async () => {
-    const r = await call("wait_on", waitArgs());
-    expect(r.isError).toBeUndefined();
-    expect(store.flightDecisions(0, 10)).toEqual([
-      expect.objectContaining({
-        kind: "wait",
-        ref: "mc#7",
-        about: "mc#7: waiting on its PR merging",
-        decision: `waiting until ${new Date(NOW + 30 * 60_000).toISOString()}`,
-        basis: "the PR is in CI",
-      }),
-    ]);
-    expect(flightWaits(store)["mc#7"]).toEqual({
-      on: "its PR merging",
-      until: NOW + 30 * 60_000,
-      at: NOW,
-    });
-  });
-
-  it("waits on the original target when given a wait_over signal's id", async () => {
-    const r = await call("wait_on", waitArgs({ target: `wait_over:wait_over:mc#7:${NOW}:${NOW}` }));
-    expect(r.isError).toBeUndefined();
-    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
-    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
-      ref: "mc#7",
-      about: "mc#7: waiting on its PR merging",
-    });
-  });
-
-  it.each([
-    ["items", `pr:mc#7:${NOW}`, `pr:mc#7:${NOW}`],
-    ["signals", `hub_error:loop:engine:${NOW}`, `loop:engine:${NOW}`],
-    ["signals", `merge_stalled:mc#9:1559:${NOW}`, `mc#9:1559:${NOW}`],
-  ])(
-    "keeps a reason's own key whole, so a wait on it handles the %s fact %s",
-    async (category, fact, target) => {
-      expect((await call("wait_on", waitArgs({ target }))).isError).toBeUndefined();
-      expect(Object.keys(flightWaits(store))).toEqual([target]);
-      const reasons = wakeReasons("", JSON.stringify({ [category]: [fact] }));
-      expect(unhandledReasons(store, reasons, NOW - 1, new Set(reasons.map((x) => x.id)))).toEqual(
-        [],
-      );
-    },
-  );
-
-  it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
-    expect(
-      (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,
-    ).toBe(true);
-    expect(
-      (await call("wait_on", waitArgs({ until: new Date(NOW + 8 * 86_400_000).toISOString() })))
-        .isError,
-    ).toBe(true);
-    live("guido-1", "r-guido");
-    expect(await call("wait_on", waitArgs(), ctx("guido-1", "r-guido"))).toEqual({
-      text: MC_FLIGHT_ONLY,
-      isError: true,
-    });
-    expect(store.flightDecisions(0, 10)).toEqual([]);
-  });
-});
 
 describe("log_decision", () => {
   it("is shown only to a role that is granted it", () => {
@@ -1441,7 +1364,6 @@ describe("tool list", () => {
       "instruct_seat",
       "revoke_instruction",
       "log_decision",
-      "wait_on",
       "read_ticket",
       "answer_question",
       "return_question",
@@ -3706,52 +3628,6 @@ describe("flight_state", () => {
       string
     >;
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
-  });
-
-  describe("500 expired waits (#1632)", () => {
-    const waits = async (args: Record<string, unknown>) => {
-      for (let i = 0; i < 500; i++)
-        recordFlightWait(store, `mc#${1000 + i}`, {
-          on: "a long wait",
-          until: NOW - 3 * 24 * 60 * 60_000,
-          at: NOW - 4 * 24 * 60 * 60_000,
-        });
-      const read = JSON.parse((await call("flight_state", args)).text) as {
-        signals: { kind: string; evidence: string }[];
-      };
-      return read.signals.filter((s) => s.kind === "wait_over");
-    };
-
-    it("fold into one summary line with the count", async () => {
-      const over = await waits({});
-      expect(over).toHaveLength(1);
-      expect(over[0]?.evidence).toContain("500 expired waits");
-      expect(JSON.stringify(over).length).toBeLessThan(1000);
-    });
-
-    it("keep a wait that ended an hour ago listed on every read", async () => {
-      recordFlightWait(store, "mc#77", {
-        on: "PR 77 to merge",
-        until: NOW - 3_600_000,
-        at: NOW - 7_200_000,
-      });
-      const keys = async () =>
-        (
-          JSON.parse((await call("flight_state", {})).text) as {
-            signals: { kind: string; key: string }[];
-          }
-        ).signals
-          .filter((s) => s.kind === "wait_over")
-          .map((s) => s.key);
-      await keys();
-      const second = await keys();
-      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
-      expect(second).not.toContain("expired");
-    });
-
-    it("are all listed with full: true", async () => {
-      expect(await waits({ full: true })).toHaveLength(500);
-    });
   });
 
   it("exposes the hub's away bug decision key only for the current head", async () => {
