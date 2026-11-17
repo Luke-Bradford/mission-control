@@ -227,7 +227,17 @@ function wideQuery(): MediaQueryList | null {
   return query;
 }
 
-const isWide = (): boolean => wideQuery()?.matches ?? true;
+/** A page with no column for the dock (Comms, FLIGHT, Needs you): the dock is a drawer there at any width. */
+let coverPage = false;
+
+export function setDockCover(on: boolean): void {
+  if (coverPage === on) return;
+  coverPage = on;
+  if (drawerOpen) setDrawer(false);
+  refresh();
+}
+
+const isWide = (): boolean => !coverPage && (wideQuery()?.matches ?? true);
 
 function columnCollapsed(): boolean {
   if (roomyQuery === undefined) {
@@ -312,6 +322,11 @@ const flightUnread = store(0);
 export const setFlightUnread = (n: number): void => flightUnread.set(n);
 export const useFlightUnread = (): number => useStore(flightUnread);
 
+/** A FLIGHT thread is on screen in a page (Comms): its replies are being read there. */
+const flightPageThread = store(false);
+export const setFlightPageThread = (on: boolean): void => flightPageThread.set(on);
+export const useFlightPageThread = (): boolean => useStore(flightPageThread);
+
 /** Show the dock (the Needs-you "FLIGHT replied" row). */
 export function openDockChat(): void {
   setDockCollapsed(false);
@@ -321,6 +336,7 @@ export function openDockChat(): void {
 /** Forget every overlay (the tests' reset: these are module singletons). */
 export function resetOverlays(): void {
   flightUnread.set(0);
+  flightPageThread.set(false);
   stack.length = 0;
   help.set(false);
   palette.set(false);

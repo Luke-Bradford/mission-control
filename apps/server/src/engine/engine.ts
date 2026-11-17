@@ -26,7 +26,6 @@ import {
   asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
-  assignFixArm,
   awayBugDecisionAbout,
   awayDiffSafe,
   awayTicketType,
@@ -67,14 +66,10 @@ import {
   FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   fillLoopText,
-  fixArmEventText,
   fixCommsText,
   fixKey,
   fixSentText,
   fixText,
-  fixTrialStratum,
-  freshFallbackEventText,
-  freshWokenEventText,
   gateView,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
@@ -154,6 +149,8 @@ import {
   uatParkText,
   uatSendBackText,
   wakeFailedText,
+  wakeStuckKey,
+  wakeStuckText,
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
@@ -162,17 +159,16 @@ import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
-import { fixTrialMerged, fixTrialSize } from "../fix-session-trial.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
-import type { Supervisor } from "../runtime/supervisor.ts";
-import { restartHold, reviewsHeld } from "../spend/waste.ts";
+import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
-import { fixWakeReason, reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
+import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
@@ -373,6 +369,8 @@ export interface Engine {
       beforeLift?: () => Promise<boolean>;
       /** A short FLIGHT fix list, appended after RETRO's findings for the author; for `second_review`, FLIGHT's reason. */
       note?: string;
+      /** FLIGHT's basis for the settle; it closes the run's review-rounds hold when one stands. */
+      basis?: string;
     },
   ): Promise<OperatorResult>;
   /**
@@ -589,6 +587,8 @@ export function createEngine(deps: EngineDeps): Engine {
   /** Whether each repo's rules set `hard_rules` at their last good read. */
   const hardRulesSet = new Map<RepoId, boolean>();
   /** Writer sync cap, per run; a restart clears it. */
+  /** Per run: the last 502 a wake met and how many passes in a row met it (see the wake case). */
+  const wakeRetries = new Map<string, { message: string; n: number }>();
   const lastSync = new Map<string, number>();
   /** When each run last had a transient refusal counted: one counts per tick, however often it is tried. */
   const lastTransient = new Map<string, number>();
@@ -1401,7 +1401,10 @@ export function createEngine(deps: EngineDeps): Engine {
       );
       out.again = true;
     };
-    /** A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. */
+    /**
+     * A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. It is
+     * for this run alone: the seat's next run, on another ticket, never reads it in its inbox.
+     */
     const handOff = (from: string, text: string): void => {
       store.addComms({
         at,
@@ -1409,6 +1412,7 @@ export function createEngine(deps: EngineDeps): Engine {
         senderKind: from === COMMS_MC ? "hub" : "seat",
         to: run.agentId,
         ticket: run.ticket ?? null,
+        targetRunId: run.id,
         text,
       });
       bus.emit("agents");
@@ -1716,14 +1720,25 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         const oldest = wakeDueAsideRun(store, run.agentId);
         if (oldest !== undefined && oldest.id !== run.id) return;
-        const fresh = freshFixReason(run, cur, at);
-        let woke: { freshSessionId: string | null; fallback: string | null } | undefined;
         try {
-          woke = await supervisor.wakeRun(run.id, fresh === undefined ? undefined : { fresh });
+          await supervisor.wakeRun(run.id);
         } catch (e) {
           // the seat is busy or the hub is stopping: the next pass tries again; the run holding the
           // seat is looked at now, to give way to this rework if its turn has ended
           if (isTransientStart(e)) {
+            // a 502 that repeats on one run (its dependencies will not reinstall) is not a busy
+            // seat: the next pass still tries again, but FLIGHT is told once
+            if (e instanceof SupervisorError && e.status === 502) {
+              const message = Array.from(e.message).slice(0, STDERR_TEXT_MAX).join("");
+              const before = wakeRetries.get(run.id);
+              const n = before?.message === message ? before.n + 1 : 1;
+              wakeRetries.set(run.id, { message, n });
+              if (n >= 2)
+                store.addLoopEvent(wakeStuckKey(run.id), run.id, wakeStuckText(message), at);
+            } else {
+              // anything else between two 502s (a busy seat's 409) breaks "twice running"
+              wakeRetries.delete(run.id);
+            }
             const holder = supervisor.seat(run.agentId)?.runId ?? null;
             if (
               holder !== null &&
@@ -1733,6 +1748,7 @@ export function createEngine(deps: EngineDeps): Engine {
               void reconcileRun(holder);
             return;
           }
+          wakeRetries.delete(run.id);
           const message = e instanceof Error ? e.message : String(e);
           // (the supervisor ended the run: the next pass parks it ended)
           store.addLoopEvent(
@@ -1744,6 +1760,7 @@ export function createEngine(deps: EngineDeps): Engine {
           out.again = true;
           return;
         }
+        wakeRetries.delete(run.id);
         // a run parked on the operator's question gets one line to carry on with the answer
         // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
         // on the seat as any other)
@@ -1755,27 +1772,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         cur.aside = null;
         const call = seatCallSign(run.agentId);
-        if (fresh !== undefined && woke?.freshSessionId) {
-          cur.fixSessions = [
-            ...(cur.fixSessions ?? []),
-            { sessionId: woke.freshSessionId, at, reason: fresh },
-          ];
-        }
-        if (fresh !== undefined && woke?.fallback) {
-          cur.fixFallbacks = [...(cur.fixFallbacks ?? []), { at, reason: woke.fallback }];
-          store.addLoopEvent(
-            `${run.id}:fix-fallback:${at}`,
-            run.id,
-            freshFallbackEventText(call, woke.fallback),
-            at,
-          );
-        }
-        store.addLoopEvent(
-          `${run.id}:woken:${at}`,
-          run.id,
-          woke?.freshSessionId ? freshWokenEventText(call) : wokenEventText(call),
-          at,
-        );
+        store.addLoopEvent(`${run.id}:woken:${at}`, run.id, wokenEventText(call), at);
         // the fix line goes now
         out.again = true;
         return;
@@ -2324,60 +2321,6 @@ export function createEngine(deps: EngineDeps): Engine {
       item !== undefined &&
       hudColumnOf(item) !== "Blocked"
     );
-  }
-
-  /**
-   * The fix-session trial (#1643): the reason to start the run's wake in a fresh session, or
-   * undefined to resume it. With the switch on, an eligible run with a fix due is put in an arm
-   * once (kept for its later fixes); only the fresh arm gets a new session.
-   */
-  function freshFixReason(run: Run, cur: RunLoop, at: number): "ci" | "review" | undefined {
-    if (config.crew?.fixSessionTrial !== true) return undefined;
-    const reason = fixWakeReason(store, run);
-    if (reason === null) return undefined;
-    if (cur.fixArm === undefined) {
-      const seat = seatConfig(run.agentId);
-      const issue = issueOf(run);
-      if (
-        seat === undefined ||
-        seatDef(seat).loop !== "build" ||
-        seatDef(seat).mode !== "writer" ||
-        run.vendor === "codex" ||
-        run.reviewId != null ||
-        issue === null ||
-        run.ticket === null
-      )
-        return undefined;
-      const stratum = fixTrialStratum(fixTrialSize(store, run));
-      if (stratum === null) return undefined;
-      const others = store.fixTrialRuns().filter((r) => r.id !== run.id);
-      if (others.some((r) => r.ticket === run.ticket)) return undefined;
-      const entries = others.flatMap((r) => {
-        const s = fixTrialStratum(fixTrialSize(store, r));
-        return r.loop?.fixArm === undefined || s === null || r.ticket === null
-          ? []
-          : [
-              {
-                ticket: r.ticket,
-                stratum: s,
-                arm: r.loop.fixArm,
-                merged: fixTrialMerged(store, r),
-              },
-            ];
-      });
-      const arm = assignFixArm(entries, stratum, issue);
-      if (arm === null) return undefined;
-      cur.fixArm = arm;
-      // stored before the wake: a transient refusal keeps the arm
-      store.setRunLoop(run.id, cur);
-      store.addLoopEvent(
-        `${run.id}:fix-arm`,
-        run.id,
-        fixArmEventText(run.ticket, arm, stratum),
-        at,
-      );
-    }
-    return cur.fixArm === "fresh" ? reason : undefined;
   }
 
   /** Whether the run's PR is merged (found on GitHub, or by the merge step). */
@@ -3341,6 +3284,22 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
         checkBriefDispatch();
+        // a settle that sends the change back to review is FLIGHT's decision on the round cap: it
+        // closes the run's review-rounds hold, or the review would be held and dropped at once
+        const reopens =
+          opts?.action === "rereview" ||
+          opts?.action === "accept" ||
+          opts?.action === "second_review";
+        if (by === "FLIGHT" && reopens) {
+          const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
+          if (settleReviewRounds(store, run, at, basis))
+            store.addLoopEvent(
+              `${run.id}:review-rounds-resolved:${next.epoch}`,
+              run.id,
+              `review-rounds hold resolved by FLIGHT's ${opts?.action}`,
+              at,
+            );
+        }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);

@@ -32,7 +32,6 @@ import {
   escalationKind,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
-  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
@@ -868,7 +867,7 @@ const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k
 
 /** The watch's FLIGHT-down notes as items: folded into the one "FLIGHT is not triaging" item. */
 const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
-  [...FLIGHT_DOWN_NOTES, FLIGHT_LEFT_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
+  FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
 );
 
 /**
@@ -1539,7 +1538,8 @@ function buildAttentionItems(
     if (list === undefined) return false;
     const at = questionAskAt(i, currentBrief(i));
     // a closure covers the item as it stood: one raised again after it is a new item
-    return list.some((c) => c.askAt === at && c.at >= i.at);
+    // an answer is not a close: the answered item stays as it is, and leaves the operator's set
+    return list.some((c) => c.kind !== "answered" && c.askAt === at && c.at >= i.at);
   };
   const route = (i: OwnedItem): AttentionItem => {
     if (closedAsk(i) && !ownReply(i, flightId)) {

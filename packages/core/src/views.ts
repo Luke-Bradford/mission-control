@@ -342,9 +342,13 @@ export interface Telemetry {
       projectedExhaustionAt?: number | null;
       resets: { at: number; resetAt: number; cause: string }[];
     }[];
-    /** The board and run facts used to plot a ticket's cycle in hours. Null means that fact was not observed. */
+    /** The board and run facts used to plot a ticket's cycle in hours, for the last 14 days whatever the range. Null means that fact was not observed. */
     tickets: {
       ticket: string;
+      /** The board card's title, or null when the board no longer holds the card. Always set by the server. */
+      title?: string | null;
+      /** The board Size, or null when the board has none. */
+      size?: string | null;
       readyAt: number | null;
       startedAt: number | null;
       mergedAt: number | null;
@@ -352,6 +356,8 @@ export interface Telemetry {
     }[];
     /** Range-bounded throughput buckets. `at` is the start of the bucket. */
     throughput?: { at: number; merged: number }[];
+    /** Last 14 local days of observed board WIP; today ends at the read time. */
+    ticketsInProgress?: { day: string; tickets: number | null }[];
     /** Daily quality buckets. Missing observations remain null rather than becoming zero. */
     quality?: {
       at: number;
@@ -425,6 +431,25 @@ export interface Telemetry {
     /** Mean commits per finished, looped, non-review crew run started over FLOW_DAYS; null when none. */
     commitsPerRun?: number | null;
   };
+  /**
+   * FLOW_DAYS local days, oldest first, whatever range was asked for; zeros kept for a quiet day.
+   * Counts, so the reader can total several days before dividing: green over ci, first pass over
+   * reviewed, roundsSum over reviewed.
+   */
+  quality14?: {
+    /** Local YYYY-MM-DD. */
+    day: string;
+    /** Merged PRs that day whose first-push CI is known. */
+    ciPrs: number;
+    /** Of those, first push passing. */
+    ciGreenPrs: number;
+    /** Merged PRs that day with a reported review. */
+    reviewedPrs: number;
+    /** Of those, round 1 had no blocking findings. */
+    firstPassPrs: number;
+    /** Sum of each reviewed PR's last review round. */
+    roundsSum: number;
+  }[];
   /** TELEMETRY_POINTS points over the range, tokens per minute. */
   tokensPerMinute: AgentSeries[];
   /** The last LIVE_MINUTES minutes, oldest first, from the digests' minute buckets. */
@@ -452,7 +477,19 @@ export interface Telemetry {
   }[];
   subagents: (SubagentInfo & { agentId: AgentId })[];
   quota: { accountId: AccountId; window: "5h" | "7d"; points: { at: number; pct: number }[] }[];
-  machine: { at: number; cpuPct: number | null; memPct: number | null }[];
+  machine: {
+    at: number;
+    cpuPct: number | null;
+    memPct: number | null;
+    /** Swap file in use, % of its size. null = not collected (or no swap file), never 0 for a gap. */
+    swapPct?: number | null;
+    /** Memory pressure: 100 minus macOS's system-wide free percentage. null = not collected. */
+    pressurePct?: number | null;
+    /** Memory held by the claude and codex processes, GB. null = not collected. */
+    agentGb?: number | null;
+    /** Memory held by full-suite test runs, GB; null when no run was sampled in the bucket. */
+    testRunGb?: number | null;
+  }[];
   tokensByTicket: {
     ticket: string;
     tokens: number;

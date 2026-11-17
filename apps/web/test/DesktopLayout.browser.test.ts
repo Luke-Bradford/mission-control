@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   BROWSER_TEST_TIMEOUT_MS,
   browserSession,
@@ -164,9 +164,9 @@ describeRendered("Approved compact desktop shell", () => {
           }, undefined),
         ).toBe("solid");
         await page.evaluate(() => {
-          const input = document.querySelector<HTMLInputElement>("#dockInput");
+          const input = document.querySelector<HTMLTextAreaElement>("#dockInput");
           if (!input) throw Error("Missing composer");
-          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
           set?.call(input, "Keep the selected decision draft");
           input.dispatchEvent(new Event("input", { bubbles: true }));
         }, undefined);
@@ -183,7 +183,7 @@ describeRendered("Approved compact desktop shell", () => {
         await page.click(".dockrail button");
         expect(
           await page.evaluate(
-            () => (document.querySelector("#dockInput") as HTMLInputElement).value,
+            () => (document.querySelector("#dockInput") as HTMLTextAreaElement).value,
             undefined,
           ),
         ).toBe("Keep the selected decision draft");
@@ -233,19 +233,29 @@ describeRendered("Approved compact desktop shell", () => {
             if (scenario === "empty") expect(summary).toContain("has not recorded a headline");
             if (scenario === "many") {
               expect(summary).not.toContain("waiting");
-              const log = await page.evaluate(() => {
-                const element = document.querySelector<HTMLElement>(".dmsgs");
-                return {
-                  count: element?.children.length,
-                  distance: element
-                    ? element.scrollHeight - element.clientHeight - element.scrollTop
-                    : null,
-                };
-              }, undefined);
-              expect(log.count).toBe(20);
-              expect(log.distance).toBeLessThanOrEqual(1);
+              const readLog = () =>
+                page.evaluate(() => {
+                  const element = document.querySelector<HTMLElement>(".flight-thread-log");
+                  return {
+                    count: element?.children.length,
+                    distance: element
+                      ? element.scrollHeight - element.clientHeight - element.scrollTop
+                      : null,
+                  };
+                }, undefined);
+              // The thread scrolls to its newest message after the first layout, which a loaded run delays.
+              // Poll until it settles; the bound still fails a thread that never reaches its end.
+              await vi.waitFor(
+                async () => {
+                  const log = await readLog();
+                  expect(log.count).toBe(20);
+                  expect(log.distance).not.toBeNull();
+                  expect(log.distance as number).toBeLessThanOrEqual(1);
+                },
+                { timeout: 5000, interval: 50 },
+              );
               await page.evaluate(() => {
-                const messages = document.querySelector<HTMLElement>(".dmsgs");
+                const messages = document.querySelector<HTMLElement>(".flight-thread-log");
                 if (!messages) throw new Error("Missing conversation");
                 messages.scrollTop = 100;
                 messages.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -254,7 +264,7 @@ describeRendered("Approved compact desktop shell", () => {
               await page.click(".dockrail button");
               expect(
                 await page.evaluate(
-                  () => document.querySelector<HTMLElement>(".dmsgs")?.scrollTop,
+                  () => document.querySelector<HTMLElement>(".flight-thread-log")?.scrollTop,
                   undefined,
                 ),
               ).toBe(100);

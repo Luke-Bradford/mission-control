@@ -4,9 +4,9 @@ import { RESOURCES, useResource, useResources } from "../data.ts";
 import { cost, kTokens, percent, plural } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { HBar } from "../hud/charts/HBar.tsx";
-import { Panel } from "../hud/Panel.tsx";
 import { parseTicket, TicketRef } from "../hud/RepoRef.tsx";
 import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
+import { TPanel as Panel } from "./TPanel.tsx";
 
 /** Cost (catalogue 2.6.6): tokens by ticket, totals and loop steps. */
 export function CostGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {

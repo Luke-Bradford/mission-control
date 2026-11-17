@@ -240,6 +240,43 @@ export function telemetry(
   }
   const throughput = days.map((day) => ({ day, merged: perDay.get(day) ?? 0 }));
 
+  // Each stored column move gives a ticket's state from that point onward. We do not infer a
+  // state before the first recorded move, so days without history stay visibly unknown.
+  const moves = store.flowColumnMoves().filter((move) => move.at <= now);
+  const dayStarts = [dayStart];
+  while (dayStarts.length < CYCLE_TIME_DAYS) {
+    dayStarts.unshift(startOfLocalDay((dayStarts[0] as number) - 1, tz));
+  }
+  const ticketColumns = new Map<string, string>();
+  let moveIndex = 0;
+  let inProgress = 0;
+  const ticketsInProgress: NonNullable<TelemetrySeries["ticketsInProgress"]> = days.map(
+    (day, index) => {
+      const live = index === days.length - 1;
+      const end = live ? now : (dayStarts[index + 1] as number);
+      while (
+        moveIndex < moves.length &&
+        ((moves[moveIndex]?.at ?? Infinity) < end || (live && moves[moveIndex]?.at === end))
+      ) {
+        const move = moves[moveIndex] as (typeof moves)[number];
+        const ticket = `${move.repoId}#${move.number}`;
+        const wasInProgress = ticketColumns.get(ticket) === "In progress";
+        const isInProgress = move.column === "In progress";
+        if (wasInProgress !== isInProgress) inProgress += isInProgress ? 1 : -1;
+        ticketColumns.set(ticket, move.column);
+        moveIndex += 1;
+      }
+      const firstMove = moves[0]?.at;
+      return {
+        day,
+        tickets:
+          firstMove === undefined || firstMove > end || (!live && firstMove === end)
+            ? null
+            : inProgress,
+      };
+    },
+  );
+
   const flowSince = now - CYCLE_TIME_DAYS * DAY_MS;
   const bySize = new Map<string, number[]>();
   let excluded = 0;
@@ -325,6 +362,34 @@ export function telemetry(
         ? null
         : commitRuns.reduce((sum, r) => sum + store.runCommits(r.id).length, 0) / commitRuns.length,
   };
+
+  // Daily counts over the same window as the ticket series, whatever range was asked for.
+  const dayIndex = new Map(days.map((day, index) => [day, index]));
+  const quality14: NonNullable<Telemetry["quality14"]> = days.map((day) => ({
+    day,
+    ciPrs: 0,
+    ciGreenPrs: 0,
+    reviewedPrs: 0,
+    firstPassPrs: 0,
+    roundsSum: 0,
+  }));
+  for (const p of ciKnown) {
+    if (p.mergedAt > now) continue;
+    const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
+    if (!entry) continue;
+    entry.ciPrs += 1;
+    if (p.firstPushCi === "passing") entry.ciGreenPrs += 1;
+  }
+  for (const p of prs) {
+    if (p.mergedAt === null || p.mergedAt > now) continue;
+    const key = `${p.repoId}#${p.number}`;
+    const rvs = reviewsByPr.get(key);
+    const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
+    if (!rvs || !entry || !mergedKeys.has(key)) continue;
+    entry.reviewedPrs += 1;
+    if (firstPass.includes(rvs)) entry.firstPassPrs += 1;
+    entry.roundsSum += Math.max(...rvs.map((r) => r.round));
+  }
 
   const throughputBucketMs = rangeMs <= DAY_MS ? HOUR_MS : DAY_MS;
   const throughputPoints = Array.from(
@@ -669,8 +734,10 @@ export function telemetry(
     }),
   );
 
+  // Always the last CYCLE_TIME_DAYS days, whatever the range: the Throughput tab's cycle-time chart
+  // and Tickets table draw 14 days of tickets.
   const tickets: TelemetrySeries["tickets"] = store
-    .flowIssues(since)
+    .flowIssues(flowSince)
     .filter((issue) => issue.doneAt === null || issue.doneAt <= now)
     .map((issue) => {
       const ticket = `${issue.repoId}#${issue.number}`;
@@ -682,6 +749,8 @@ export function telemetry(
           .sort((a, b) => a - b)[0] ?? null;
       return {
         ticket,
+        title: issue.title ?? store.boardItem(issue.repoId, issue.number)?.title ?? null,
+        size: issue.size,
         readyAt: issue.startAt,
         startedAt: store.ticketStartedAt(ticket),
         mergedAt,
@@ -714,6 +783,7 @@ export function telemetry(
     quota: chartQuota,
     tickets,
     throughput: throughputPoints,
+    ticketsInProgress,
     quality: qualityPoints,
     annotations,
   };
@@ -866,6 +936,7 @@ export function telemetry(
     throughput,
     cycleTime,
     quality,
+    quality14,
     tokensPerMinute,
     liveMinutes,
     utilisation,

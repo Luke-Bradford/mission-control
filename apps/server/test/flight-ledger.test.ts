@@ -597,6 +597,15 @@ describe("retrospective measures", () => {
     store.upsertRun(run("dev", "guido-1", { costUsd: 3 }));
     store.upsertRun(run("cheap", "guido-1", { costUsd: 1 }));
     store.upsertRun(run("foreign", "guido-1", { repoId: "other", costUsd: 100 }));
+    store.addFlightWake("flight", NOW - 10 * MIN, ["prs"]);
+    store.addFlightWake("flight", NOW - 5 * MIN, ["q"]);
+    store.recordToolCall({
+      at: NOW - 9 * MIN,
+      runId: "flight",
+      tool: "merge_pr",
+      written: 0,
+      returned: 0,
+    });
     store.addLoopEvent("dev:park", "dev", "parked: failed checks", NOW);
     observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: NOW - MIN });
     observeFlightMain(store, "mc", { sha: "green", ci: "passing", at: NOW });
@@ -658,6 +667,7 @@ describe("retrospective measures", () => {
         ],
         instruction: expect.stringContaining("log pages checked and tickets filed or folded"),
       },
+      wakeActions: { wakes: 2, noAction: 1, share: 0.5 },
     });
     await prepareRetrospective(config, store, NOW + MIN);
     expect(pendingRetrospective(store, "mc")).toEqual(report);

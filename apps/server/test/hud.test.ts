@@ -1888,6 +1888,8 @@ describe("crew seats in the rows", () => {
       });
       it("seat: a set-aside run flagged to wake", () => {
         start({ phase: "review", aside: { ...aside, wake: true } });
+        // a set-aside run has left its seat
+        store.setSeatSession(seat({ runId: null, state: "idle" }));
         expect(waitOf(withCrew())).toBe("seat");
       });
       it("seat: the text names the ticket the seat is on, while it is on one", () => {
