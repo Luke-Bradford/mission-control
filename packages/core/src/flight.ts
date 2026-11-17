@@ -1112,14 +1112,10 @@ export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 export const FLIGHT_ITEM_RELAPSE_MS = 2 * FLIGHT_HOUR_MS;
 /** FLIGHT's request to the controller, unanswered this long, is a wake reason. */
 export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
-/** The setting that keeps what FLIGHT waits on, by target. */
-export const FLIGHT_WAITS_SETTING = "flight.waits";
 /** The setting that keeps the items FLIGHT was last shown, so a seen item is not a new wake reason. */
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
 /** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
 export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
-/** The furthest ahead a `wait_on` may look. */
-export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
 export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
@@ -1145,7 +1141,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "item_stale",
   "run_no_pr",
   "controller_unanswered",
-  "wait_over",
   "seat_call",
   "question_changed",
   "waste_alarm",
@@ -1153,7 +1148,11 @@ export const FLIGHT_SIGNAL_KINDS = [
   "wake_stuck",
 ] as const;
 /** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
-export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = ["idle_no_work", "budget_unused"];
+export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [
+  "idle_no_work",
+  "budget_unused",
+  "wait_over",
+];
 export interface FlightSignal {
   checks?: string[];
   told?: boolean;
@@ -1339,14 +1338,12 @@ export interface FlightState {
 
 /** What decides which seats, tickets and items wake FLIGHT; absent: every Ready ticket and item counts. */
 export interface FlightWakeInputs {
-  /** Build seat id to the Ready tickets it could start now: its area, no claim by another, no live wait. */
+  /** Build seat id to the Ready tickets it could start now: its area, no claim by another. */
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
-  /** FLIGHT has a live `wait_on` for the idle-reviewers fault. */
-  reviewsWaited?: boolean;
   /**
-   * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
+   * Free build seats with open tickets near their area, and how long
    * that has stood. Absent when no seat is in that state.
    */
   idle?: FlightIdleSeats;
@@ -1437,8 +1434,6 @@ export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
-/** The one Needs-you note raised when a wake's reasons are left without a decision (FLIGHT is not woken again for them). */
-export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 /**
  * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
  * raised (a reply, an item) would wake it again straight away: on 2026-10-23 that was a wake every
@@ -1664,7 +1659,7 @@ export function wakeLine(
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
   const idleReviewFault = reviewFaultStands(s.reviewQueue)
-    ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
+    ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
     : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
   const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";

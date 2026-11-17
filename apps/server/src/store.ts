@@ -6790,11 +6790,6 @@ export class Store {
     return this.flightQ.flightDecisions(since, limit);
   }
 
-  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
-  flightWaitTimes(since: number): number[] {
-    return this.flightQ.flightWaitTimes(since);
-  }
-
   /** The decisions of one kind about one ticket, newest first. */
   flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
     return this.flightQ.flightDecisionsAbout(kind, ref);
