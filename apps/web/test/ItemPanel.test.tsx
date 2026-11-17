@@ -374,6 +374,16 @@ describe("ItemPanel, acting on an item", () => {
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
+  it("an option on a brief the hub wrote, with no action of its own, goes as a plain message with no pick", async () => {
+    const fn = acting([{ ...SEAT_Q, brief: brief({ by: "hub" }) }]);
+    fireEvent.click(await enabled("5174"));
+    await waitFor(() =>
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
+        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+      ]),
+    );
+  });
+
   it("an option on FLIGHT's own question posts to FLIGHT with the item key and keeps the dock closed", async () => {
     act(() => toggleDock(false));
     const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }]);

@@ -1,13 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMS_CAPCOM, type ItemThread, OPERATOR_HEADER } from "@mc/core";
+import { COMMS_CAPCOM, type ItemThread, OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { itemThread } from "../src/attention/item-thread.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { sendComms } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";
 import type { CommsRow } from "../src/store/types.ts";
 import { Store } from "../src/store.ts";
@@ -308,6 +309,131 @@ describe("an option picked on a brief the choose route does not take", () => {
     // the option is still open to pick
     expect((await pick(a, "flight-1", "note:plain", 0)).statusCode).toBe(200);
     expect(store.latestChoice("note:plain")?.label).toBe("5174");
+  });
+});
+
+describe("who may pick with a message, and for which seat", () => {
+  const OPTIONS = [
+    { label: "5174", answer: "Use port 5174." },
+    { label: "5180", answer: "Use port 5180." },
+  ];
+  const BRIEF_AT = NOW - HOUR;
+  const briefOn = (key: string) =>
+    store.addBrief({
+      key,
+      context: "The dev seat asks which port to preview on.",
+      recommendation: "Use 5174.",
+      options: OPTIONS,
+      basis: "read config",
+      at: BRIEF_AT,
+    });
+  const asks = (agentId: string) => {
+    const q = store.addQuestion({
+      agentId,
+      runId: `r-${agentId}`,
+      text: "Which port?",
+      at: BRIEF_AT,
+    });
+    briefOn(`ask:${q}`);
+    return q;
+  };
+  const post = (
+    a: ReturnType<typeof app>,
+    seat: string,
+    payload: Record<string, unknown>,
+    headers: Record<string, string> = HEADERS,
+  ) => a.inject({ method: "POST", url: `/api/seats/${seat}/message`, headers, payload });
+  const picking = (itemKey: string, more: Record<string, unknown> = {}) => ({
+    text: "Use port 5174.",
+    itemKey,
+    choice: { briefAt: BRIEF_AT, option: 0 },
+    ...more,
+  });
+
+  it("refuses FLIGHT's message that carries a pick, and still takes the same message without one", async () => {
+    raise("plain", BRIEF_AT, "Something is held.");
+    briefOn("note:plain");
+    store.upsertRun({
+      id: "flight-run",
+      agentId: "flight-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: NOW - HOUR,
+      endedAt: null,
+      status: "running",
+      sessionId: null,
+      model: null,
+      branch: null,
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "/x",
+      prs: [],
+      summary: null,
+    } as Run);
+    const asFlight = {
+      ...HEADERS,
+      [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: "flight-1", runId: "flight-run" }),
+    };
+    const a = app();
+    const refused = await post(a, "guido-1", picking("note:plain"), asFlight);
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toEqual({
+      error: "FLIGHT cannot pick an option with a message. Send the text without `choice`.",
+    });
+    expect(store.latestChoice("note:plain")).toBeNull();
+    expect(store.itemThread("note:plain")).toEqual([]);
+    // the route stays open to FLIGHT for a message
+    const plain = await post(
+      a,
+      "guido-1",
+      { text: "Use port 5174.", itemKey: "note:plain" },
+      asFlight,
+    );
+    expect(plain.statusCode).toBe(200);
+    expect(store.itemThread("note:plain").map((m) => [m.from, m.text])).toEqual([
+      ["flight-1", "Use port 5174."],
+    ]);
+    expect(store.latestChoice("note:plain")).toBeNull();
+  });
+
+  it("refuses a pick sent to a seat that did not ask, and one that does not name the seat's question", async () => {
+    const q = asks("guido-1");
+    const key = `ask:${q}`;
+    const a = app();
+    const refused = async (res: ReturnType<typeof post>, status: number, error: string) => {
+      const r = await res;
+      expect([r.statusCode, r.json()]).toEqual([status, { error }]);
+    };
+    // FLIGHT did not ask, and the seat that asked is in the crew
+    await refused(post(a, "flight-1", picking(key)), 409, "That question belongs to another seat.");
+    await refused(
+      post(a, "guido-1", picking(key)),
+      400,
+      "A pick on a seat's question names that question.",
+    );
+    // a note is FLIGHT's to answer: a seat cannot be given its pick
+    raise("plain", BRIEF_AT, "Something is held.");
+    briefOn("note:plain");
+    await refused(
+      post(a, "guido-1", picking("note:plain")),
+      409,
+      "That question belongs to another seat.",
+    );
+    expect(store.question(q)?.answeredAt).toBeNull();
+    expect(store.latestChoice(key)).toBeNull();
+    expect(store.latestChoice("note:plain")).toBeNull();
+    expect(store.itemThread(key)).toEqual([]);
+    expect(store.itemThread("note:plain")).toEqual([]);
+  });
+
+  it("closes FLIGHT's own question with the pick, though the page names no question for FLIGHT", async () => {
+    const q = asks("flight-1");
+    const key = `ask:${q}`;
+    const a = app();
+    expect((await post(a, "flight-1", picking(key))).statusCode).toBe(200);
+    expect(store.question(q)?.answeredAt).toBe(NOW);
+    expect(store.latestChoice(key)).toMatchObject({ label: "5174", targetKind: "flight" });
   });
 });
 

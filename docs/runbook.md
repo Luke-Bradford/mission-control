@@ -3048,11 +3048,16 @@ keep their permission checks.
 - **An option the choose route does not take.** An older brief's options carry no id, and some briefs
   are not FLIGHT's to the operator. The page sends such an option's answer through
   `POST /api/seats/:id/message` with `itemKey` and `choice: { briefAt, option }`, the option's place in
-  the brief it showed. The hub reads the option from the stored brief: a text that is not that option's
-  answer is refused with 400, a brief that changed with 409. It claims the brief as above and ties the
-  stored message to the pick in `question_choices`, so the FLIGHT conversation draws the pick as the
-  choice. A second pick on the same brief answers 200 and sends nothing. The message is delivered like
-  any other; only a named `question` closes.
+  the brief it showed. Only the operator or the controller may send one: FLIGHT's message with a
+  `choice` is refused with 403. The pick passes the choose route's refusals (an escalation, a brief
+  the hub wrote, a changed brief, a closed question), and an option the choose route takes is refused
+  here with 409. The hub reads the option from the stored brief: a text that is not that option's
+  answer is refused with 400. The message must go to the seat that asked (a question's seat, else the
+  item's seat) while it is in the crew, else to FLIGHT; any other seat is refused with 409. A pick sent
+  to the seat that asked a question must name that `question`. The hub claims the brief as above and
+  ties the stored message to the pick in `question_choices`, so the FLIGHT conversation draws the
+  pick as the choice; a question closes with its pick. A second pick on the same brief answers 200
+  and sends nothing. An item that is not a question stays open, as with any message.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
 - **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or

@@ -224,6 +224,7 @@ import {
   choiceReceipt,
   chooseOption,
   claimMessagePick,
+  MESSAGE_PICK_SENDERS,
   type MessagePick,
 } from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
@@ -4900,15 +4901,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // A picked option is claimed before its text is sent, and tied to the stored message.
           let pick: MessagePick | null | undefined;
           if (b.choice !== undefined) {
+            // the operator token lets FLIGHT send a message here; it does not let FLIGHT pick
+            if (!MESSAGE_PICK_SENDERS.includes(sender.kind))
+              throw new SupervisorError(
+                403,
+                "FLIGHT cannot pick an option with a message. Send the text without `choice`.",
+              );
             if (b.itemKey === undefined)
               throw new SupervisorError(400, "A picked option names its item.");
             try {
               pick = claimMessagePick(
-                { store, now, sender, flightId: flightSeat(config)?.seat.id ?? null },
+                {
+                  store,
+                  now,
+                  sender,
+                  crew: commsCrew,
+                  flightId: flightSeat(config)?.seat.id ?? null,
+                },
                 currentDiscussionItem(b.itemKey),
                 b.itemKey,
                 b.choice,
-                { to: id, text: b.text },
+                { to: id, text: b.text, question: b.question },
               );
             } catch (e) {
               if (e instanceof ChoiceRefused) throw new SupervisorError(e.status, e.message);

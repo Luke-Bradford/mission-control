@@ -1,4 +1,5 @@
 import {
+  type AttentionBrief,
   type AttentionItem,
   type ChoiceReceipt,
   type ChoiceTargetKind,
@@ -66,6 +67,44 @@ export function choiceReceipt(store: Store, key: string): ChoiceReceipt | null {
 }
 
 /**
+ * The refusals every pick passes, whichever route carries it: the item is still open, it is not
+ * answered on GitHub, it has a brief the route takes (`takes`), the hub did not write that brief,
+ * and it is the brief the page showed. Answers that brief.
+ */
+function pickableBrief(
+  item: AttentionItem | undefined,
+  briefAt: number,
+  takes: (brief: AttentionBrief) => boolean,
+): { item: AttentionItem; brief: AttentionBrief } {
+  if (item === undefined) throw new ChoiceRefused(404, "That question is no longer open.");
+  if (item.escalationId !== null)
+    throw new ChoiceRefused(409, "That question is answered on GitHub, not here.");
+  const brief = item.brief;
+  if (brief === undefined || !takes(brief))
+    throw new ChoiceRefused(409, "That question has no options for you to pick from.");
+  // a brief the hub wrote acts through its own route (a queue change has Approve and Deny buttons)
+  if (brief.by === "hub") throw new ChoiceRefused(409, "Use the item's own buttons for this one.");
+  if (brief.at !== briefAt)
+    throw new ChoiceRefused(
+      409,
+      "The question changed since you opened it. Reload and choose again.",
+    );
+  return { item, brief };
+}
+
+/** The choose route takes FLIGHT's briefs to the operator, and of those the options that carry an id. */
+const forChooseRoute = (brief: AttentionBrief): boolean => brief.for === "operator";
+
+/** The seat question behind an `ask:` key, refused once it is closed; null for any other key. */
+function openQuestion(store: Store, key: string) {
+  const ask = ASK.exec(key);
+  const question = ask === null ? null : store.question(Number(ask[1]));
+  if (ask !== null && (question === null || question.answeredAt !== null))
+    throw new ChoiceRefused(409, "That question is already closed.");
+  return question;
+}
+
+/**
  * The operator picked one option of an item's brief. Only the bound ids pick an option: the brief
  * the page showed (`briefAt`) and one of its option ids. The answer goes to the run that asked, or
  * to FLIGHT; the question closes; the choice is stored for the ticket's history. Nothing goes to
@@ -80,28 +119,13 @@ export async function chooseOption(
   const { store } = d;
   const again = store.choice(key, input.briefAt);
   if (again !== null) return receipt(store, again, true);
-  if (item === undefined) throw new ChoiceRefused(404, "That question is no longer open.");
-  if (item.escalationId !== null)
-    throw new ChoiceRefused(409, "That question is answered on GitHub, not here.");
-  const brief = item.brief;
-  if (brief === undefined || brief.for !== "operator")
-    throw new ChoiceRefused(409, "That question has no options for you to pick from.");
-  // a brief the hub wrote acts through its own route (a queue change has Approve and Deny buttons)
-  if (brief.by === "hub") throw new ChoiceRefused(409, "Use the item's own buttons for this one.");
-  if (brief.at !== input.briefAt)
-    throw new ChoiceRefused(
-      409,
-      "The question changed since you opened it. Reload and choose again.",
-    );
+  const { item: open, brief } = pickableBrief(item, input.briefAt, forChooseRoute);
   const option = brief.options.find((o) => o.id !== undefined && o.id === input.optionId);
   if (option === undefined) throw new ChoiceRefused(400, "That is not one of the options.");
 
   const now = d.now();
   const flightId = flightSeat(d.config)?.seat.id ?? null;
-  const ask = ASK.exec(key);
-  const question = ask === null ? null : store.question(Number(ask[1]));
-  if (ask !== null && (question === null || question.answeredAt !== null))
-    throw new ChoiceRefused(409, "That question is already closed.");
+  const question = openQuestion(store, key);
 
   // who asked: the seat behind an ask: question, or behind a seat's open Comms item; a seat's
   // other items name the seat but not the run, so their answer goes through FLIGHT
@@ -113,18 +137,18 @@ export async function chooseOption(
     if (author !== undefined && author !== flightId && d.crew().includes(author))
       asker = { agentId: author, runId: store.commsStamp(messageId).runId };
   } else if (
-    (item.kind === "tag" || item.kind === "message") &&
-    item.agentId !== null &&
-    item.agentId !== flightId &&
-    d.crew().includes(item.agentId)
+    (open.kind === "tag" || open.kind === "message") &&
+    open.agentId !== null &&
+    open.agentId !== flightId &&
+    d.crew().includes(open.agentId)
   ) {
     // built as `${kind}:${seat}:${message id}`: the seat wrote it, and its run is in the id
-    const messageId = key.slice(`${item.kind}:${item.agentId}:`.length);
+    const messageId = key.slice(`${open.kind}:${open.agentId}:`.length);
     const source = commsPosition(messageId)?.source ?? "";
     const runId = source.startsWith("stream:")
       ? source.slice("stream:".length)
       : store.commsStamp(messageId).runId;
-    asker = { agentId: item.agentId, runId };
+    asker = { agentId: open.agentId, runId };
   }
   // any other item (a crew error, a stall, a lock, a note) is FLIGHT's to decide, not a seat's question
 
@@ -142,8 +166,8 @@ export async function chooseOption(
     to = flightId;
     targetKind = asker === null ? "flight" : "flight-for-next-run";
   }
-  const ticket = item.ticket ?? brief.ticket ?? null;
-  const asked = brief.ask || item.text;
+  const ticket = open.ticket ?? brief.ticket ?? null;
+  const asked = brief.ask || open.text;
   const chooser = CHOOSER_NAMES[d.sender.kind];
   const lead = `Re: ${key} · ${chooser} chose "${option.label}"`;
   const text =
@@ -230,9 +254,15 @@ export async function chooseOption(
   return receipt(store, claimed.row, false);
 }
 
+/** Who may pick an option with a message: the senders the choose route is open to, and not FLIGHT. */
+export const MESSAGE_PICK_SENDERS: readonly CommsSenderKind[] = ["operator", "controller"];
+
 /** A pick claimed for an answer that travels as a plain message. */
 export interface MessagePick {
-  /** The message is stored: the pick is tied to it, so the conversation draws it as the choice. */
+  /**
+   * The message is stored: the pick is tied to it, so the conversation draws it as the choice,
+   * and a seat's question closes with it, as it does on the choose route.
+   */
   sent(messageId: string): void;
   /** Nothing was stored: the operator can pick again. */
   release(): void;
@@ -240,47 +270,65 @@ export interface MessagePick {
 
 /**
  * The operator picked an option that `chooseOption` does not take (an older brief whose options
- * carry no id, or one that is not FLIGHT's to the operator), so the answer goes as a plain message
- * to `message.to`. The pick is claimed for that brief before the message is sent, as above, and the
- * option is read from the stored brief by its place, never from the request's text. Null when the
- * brief already has a pick: nothing is sent twice.
+ * carry no id, or a brief that is not FLIGHT's to the operator), so the answer goes as a plain
+ * message to `message.to`. It passes the refusals every pick passes, and these of its own:
+ * - the option is read from the stored brief by its place, and the text must be its answer;
+ * - an option the choose route takes is picked there, not here;
+ * - the message goes to the seat that asked (a seat's question, else the item's seat) while that
+ *   seat is in the crew, and to FLIGHT otherwise, never to another seat;
+ * - a pick sent to the seat that asked a question names that question, so the route delivers it
+ *   to the run that asked and closes it; a named question is the pick's own.
+ * The brief is claimed before the message is sent, as above. Null when the brief already has a
+ * pick: nothing is sent twice.
  */
 export function claimMessagePick(
-  d: Pick<ChooseDeps, "store" | "now" | "sender"> & { flightId: string | null },
+  d: Pick<ChooseDeps, "store" | "now" | "sender" | "crew"> & { flightId: string | null },
   item: AttentionItem | undefined,
   key: string,
   input: { briefAt: number; option: number },
-  message: { to: string; text: string },
+  message: { to: string; text: string; question?: number },
 ): MessagePick | null {
   const { store } = d;
   if (store.choice(key, input.briefAt) !== null) return null;
-  if (item === undefined) throw new ChoiceRefused(404, "That question is no longer open.");
-  const brief = item.brief;
-  if (brief === undefined || brief.at !== input.briefAt)
-    throw new ChoiceRefused(
-      409,
-      "The question changed since you opened it. Reload and choose again.",
-    );
+  const { item: open, brief } = pickableBrief(item, input.briefAt, () => true);
   const option = brief.options[input.option];
   if (option === undefined || option.answer !== message.text)
     throw new ChoiceRefused(400, "That is not one of the options.");
+  if (forChooseRoute(brief) && option.id !== undefined)
+    throw new ChoiceRefused(409, "That option is picked with the choose route, not a message.");
+  const question = openQuestion(store, key);
+
+  // who the answer is for: the seat that asked while it is in the crew, FLIGHT otherwise
+  const asked = question?.agentId ?? open.agentId;
+  const owner = asked !== null && d.crew().includes(asked) ? asked : d.flightId;
+  if (owner === null) throw new ChoiceRefused(409, "There is no FLIGHT seat to take this answer.");
+  if (message.to !== owner) throw new ChoiceRefused(409, "That question belongs to another seat.");
+  if (message.question !== undefined && message.question !== question?.id)
+    throw new ChoiceRefused(400, "The option picked is not for the question the message names.");
+  // FLIGHT has no run set aside to route to: its own question closes with the pick, below
+  if (question !== null && owner !== d.flightId && message.question === undefined)
+    throw new ChoiceRefused(400, "A pick on a seat's question names that question.");
+
   const claimed = store.claimChoice({
     key,
     briefAt: input.briefAt,
     optionId: option.id ?? `option-${input.option + 1}`,
     label: option.label,
     answer: option.answer,
-    question: brief.ask || item.text,
-    ticket: item.ticket ?? brief.ticket ?? null,
-    target: message.to,
-    targetKind: message.to === d.flightId ? "flight" : "seat",
+    question: brief.ask || open.text,
+    ticket: open.ticket ?? brief.ticket ?? null,
+    target: owner,
+    targetKind: owner === d.flightId ? "flight" : "seat",
     messageId: null,
     chosenBy: CHOOSER_NAMES[d.sender.kind],
     chosenAt: d.now(),
   });
   if (!claimed.fresh) return null;
   return {
-    sent: (messageId) => store.setChoiceMessage(key, input.briefAt, messageId),
+    sent: (messageId) => {
+      store.setChoiceMessage(key, input.briefAt, messageId);
+      if (question !== null) store.answerQuestion(question.id, d.now());
+    },
     release: () => store.releaseChoice(key, input.briefAt),
   };
 }

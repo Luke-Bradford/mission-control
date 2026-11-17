@@ -50,7 +50,12 @@ export async function sendAnswer(
   picked?: BriefOption,
 ): Promise<string | null> {
   if (target.to === "github") return null;
-  const place = picked === undefined ? -1 : (item.brief?.options.indexOf(picked) ?? -1);
+  // A brief the hub wrote acts through its own buttons: the hub takes no pick for it, so its
+  // option goes as the plain message it always was.
+  const place =
+    picked === undefined || item.brief?.by === "hub"
+      ? -1
+      : (item.brief?.options.indexOf(picked) ?? -1);
   // The item names the message, so it and every reply show in the one FLIGHT thread beside it.
   const thread = {
     itemKey: item.key,
