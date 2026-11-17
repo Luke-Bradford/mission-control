@@ -664,7 +664,15 @@ describeRendered("Needs you page", () => {
               try {
                 await ready(page);
                 // Below 2200 px the dock starts folded; its rail button opens it.
-                if (dock === "expanded") await page.click(".dockrail button");
+                // The dock's fold choice lives in sessionStorage and can carry over from an earlier
+                // case, so read the actual state and toggle only when it differs from the wanted one.
+                const folded = await page.evaluate(
+                  () => document.querySelector("#dock")?.classList.contains("collapsed") ?? true,
+                  undefined,
+                );
+                if (dock === "expanded" && folded) await page.click(".dockrail button");
+                if (dock === "folded" && !folded)
+                  await page.click("#dockHead button[aria-controls=dockBody]");
                 await page.boxes(".needs-answer .decision-facts");
                 const overflow = await page.evaluate(
                   () => document.documentElement.scrollWidth - innerWidth,
