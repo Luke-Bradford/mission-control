@@ -368,6 +368,28 @@ describe("collectFlow issues", () => {
     ]);
   });
 
+  it("fills a stored done row's missing title from GitHub once its card is gone", async () => {
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 7, size: "S", startAt: NOW - 5 * DAY, doneAt: NOW - DAY }],
+      [],
+    );
+    const { gql } = stub({ 7: { title: "Fetched title", ...timeline() } });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toEqual([
+      {
+        repoId: "shop-app",
+        number: 7,
+        size: "S",
+        title: "Fetched title",
+        startAt: NOW - 5 * DAY,
+        doneAt: NOW - DAY,
+      },
+    ]);
+  });
+
   it("uses the last move into Done and ignores events on another project", async () => {
     store.replaceBoard("shop-app", [board(1)]);
     const { gql } = stub({
