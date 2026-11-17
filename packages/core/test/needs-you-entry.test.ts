@@ -150,10 +150,16 @@ describe("needsYouEntryFaults", () => {
 
   it("lets a hub screenshot image into the context but still refuses a bare commit code", () => {
     const image = "![the page](/api/screenshots/0123456789abcdef0123456789abcdef.png)";
-    expect(context(`The page changed last week, see ${image} for how. Nothing happens until you decide.`)).toEqual([]);
-    expect(context(`The page changed in deadbee1, see ${image} for how. Nothing happens until you decide.`)).toEqual([
-      "the context has a commit code: say it in words",
-    ]);
+    expect(
+      context(
+        `The page changed last week, see ${image} for how. Nothing happens until you decide.`,
+      ),
+    ).toEqual([]);
+    expect(
+      context(
+        `The page changed in deadbee1, see ${image} for how. Nothing happens until you decide.`,
+      ),
+    ).toEqual(["the context has a commit code: say it in words"]);
   });
 
   it("refuses the same ids in the context, naming the part", () => {
