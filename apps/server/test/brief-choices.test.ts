@@ -11,6 +11,7 @@ import {
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { closeAnsweredItems } from "../src/attention/answered.ts";
 import { chooseBrief, retainedBriefChoice } from "../src/brief/choices.ts";
 import { applyDecisionDefaults } from "../src/brief/decision-defaults.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
@@ -367,6 +368,14 @@ it("attributes an applied FYI default to FLIGHT and an operator choice to the op
     expect.objectContaining({ key, kind: "answered", by: "FLIGHT-1" }),
   ]);
   expect(store.questionClosures(0, 10)[0]?.reason).toMatch(/^FLIGHT-1 chose: /);
+  // a choice made before closures existed keeps its FLIGHT attribution when the sweep records it
+  (store as unknown as { db: { prepare(s: string): { run(): unknown } } }).db
+    .prepare("DELETE FROM question_closures")
+    .run();
+  expect(closeAnsweredItems({ config, store, now })).toBe(1);
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ by: "FLIGHT-1", reason: expect.stringMatching(/^FLIGHT-1 chose: /) }),
+  ]);
   const other = flightSource();
   await chooseBrief(choices(), other.key, request(other.key), { operator: true });
   expect(store.questionClosures(0, 10)).toContainEqual(

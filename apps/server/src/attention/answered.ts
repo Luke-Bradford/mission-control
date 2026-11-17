@@ -56,9 +56,11 @@ export function closeAnsweredItems(d: {
     const choice = item.brief?.choice;
     if (choice?.state !== "applied") continue;
     const label = item.brief?.options.find((o) => o.id === choice.optionId)?.label;
+    const by: AnsweredBy =
+      "seatId" in choice.actor ? { seatId: choice.actor.seatId } : { operator: true };
     if (
       label !== undefined &&
-      recordAnswered(store, item, [item.key], label, choice.completedAt ?? now)
+      recordAnswered(store, item, [item.key], label, choice.completedAt ?? now, by)
     )
       closed++;
   }
