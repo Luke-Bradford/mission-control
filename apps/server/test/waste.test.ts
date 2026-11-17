@@ -196,7 +196,9 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
 
   describe("the restarted-after-park alarm", () => {
     const restarted = () =>
-      openWasteAlarms(store).filter((a) => a.check === "ticket-churn" && a.subject.endsWith(":restarted"));
+      openWasteAlarms(store).filter(
+        (a) => a.check === "ticket-churn" && a.subject.endsWith(":restarted"),
+      );
     const decide = (at: number, kind: "re-plan" | "note", about: string) =>
       store.addFlightDecision({
         at,
