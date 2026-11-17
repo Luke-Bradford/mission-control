@@ -9,7 +9,6 @@ import {
   FLIGHT_MEMORY_BODY_MAX,
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_SOURCE_MAX,
-  FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OWED_MS,
@@ -218,13 +217,15 @@ describe("wake deltas", () => {
     expect(next).not.toHaveProperty("brief");
     expect(next).not.toHaveProperty("headline");
     expect(next.briefVersion).toBe(first.digest.briefVersion);
-    for (const list of ["recent", "prs", "seats", "ledger"] as const) {
+    for (const list of ["recent", "prs", "seats"] as const) {
       expect(first.digest[list]).toEqual({ entries: state[list], unchanged: 0, removed: [] });
       expect(next[list]).toEqual({ entries: [], unchanged: state[list].length, removed: [] });
     }
     expect(next.facts).toEqual(JSON.parse(wakeFacts(state)));
     expect(next.questions).toEqual(state.questions);
-    expect(next.ledgerMore).toBe(state.ledgerMore);
+    // the ledger is counted, never listed: mc ledger reads it
+    expect(first.digest).not.toHaveProperty("ledger");
+    expect(next.ledgerOpen).toBe(state.ledger.length + state.ledgerMore);
     expect(first.digest.tickets.entries[0]).toEqual(state.tickets[0]);
     expect(first.digest.tickets.entries[1]).toBe(`#2 ${state.tickets[1]?.title}`);
     expect(first.digest.tickets.entries[2]).toBe(`#3 ${state.tickets[2]?.title}`);
@@ -238,19 +239,109 @@ describe("wake deltas", () => {
     for (const pr of changed.prs.slice(0, 1)) pr.stale = true;
     for (const seat of changed.seats.slice(0, 1)) seat.stalled = true;
     for (const decision of changed.recent.slice(0, 1)) decision.decision = "Updated decision";
-    for (const entry of changed.ledger.slice(0, 1)) entry.next = "Read new evidence";
     const next = flightWake(changed, first.snapshot);
-    for (const list of ["recent", "prs", "seats", "ledger"] as const) {
+    for (const list of ["recent", "prs", "seats"] as const) {
       expect(next.digest[list]).toEqual({
         entries: [changed[list][0]],
         unchanged: state[list].length - 1,
         removed: [],
       });
     }
-    const absent = flightWake({ ...state, ledger: [] }, next.snapshot);
-    expect(flightWake(state, absent.snapshot).digest.ledger.entries).toEqual(state.ledger);
+    const absent = flightWake({ ...state, seats: [] }, next.snapshot);
+    expect(flightWake(changed, absent.snapshot).digest.seats.entries).toEqual(changed.seats);
     for (const decision of changed.recent.slice(0, 1)) decision.id = 100;
     expect(flightWake(changed, next.snapshot).digest.recent.entries).toEqual([changed.recent[0]]);
+  });
+
+  it("sends a PR's flow row and merge wait once, then only when they change", () => {
+    const state = busyBoard();
+    const row = {
+      pr: 12,
+      ticket: "mc#12",
+      title: "T",
+      owner: "GUIDO-0",
+      ownerKind: "seat" as const,
+      seatId: "guido-0",
+      stage: "review" as const,
+      stageSince: 1,
+      ownerSince: 1,
+      openSince: 1,
+      waitsOn: ["review"],
+      blocks: [],
+      lastAction: "PR opened",
+      lastActor: null,
+      lastActionAt: 1,
+    };
+    state.prFlow = { generatedAt: 1, rows: [row, { ...row, pr: 13 }], unowned: 0, metrics: [] };
+    state.mergeQueue = [{ pr: 12, waitsOn: ["review"] }];
+    const first = flightWake(state);
+    expect(first.digest.prFlow).toEqual({
+      unowned: 0,
+      entries: state.prFlow.rows,
+      unchanged: 0,
+      removed: [],
+    });
+    expect(first.digest.mergeQueue).toEqual({
+      entries: state.mergeQueue,
+      unchanged: 0,
+      removed: [],
+    });
+    // the flow's timings and its read time are not part of a wake
+    expect(first.digest.prFlow).not.toHaveProperty("metrics");
+    expect(first.digest.prFlow).not.toHaveProperty("generatedAt");
+    const moved = structuredClone(state);
+    if (moved.prFlow) moved.prFlow = { ...moved.prFlow, generatedAt: 2 };
+    for (const r of moved.prFlow?.rows.slice(0, 1) ?? []) r.stage = "rework";
+    moved.mergeQueue = [];
+    const next = flightWake(moved, first.snapshot).digest;
+    expect(next.prFlow).toEqual({
+      unowned: 0,
+      entries: [moved.prFlow?.rows[0]],
+      unchanged: 1,
+      removed: [],
+    });
+    expect(next.mergeQueue).toEqual({ entries: [], unchanged: 0, removed: ["12"] });
+    // a new last action alone is not a change; a PR that left is named once
+    const acted = structuredClone(moved);
+    for (const r of acted.prFlow?.rows ?? []) r.lastAction = "CI passing";
+    if (acted.prFlow) acted.prFlow.rows = acted.prFlow.rows.slice(0, 1);
+    const after = flightWake(acted, flightWake(moved, first.snapshot).snapshot);
+    expect(after.digest.prFlow).toEqual({ unowned: 0, entries: [], unchanged: 1, removed: ["13"] });
+    expect(flightWake(acted, after.snapshot).digest.prFlow.removed).toEqual([]);
+  });
+
+  it("sends a PR's flow row again when it passes a deadline, naming which", () => {
+    const state = busyBoard();
+    const row = {
+      pr: 12,
+      ticket: "mc#12",
+      title: "T",
+      owner: "nobody",
+      ownerKind: "nobody" as const,
+      seatId: null,
+      stage: "review" as const,
+      stageSince: 1,
+      ownerSince: 1,
+      openSince: 1,
+      waitsOn: [],
+      blocks: [],
+      lastAction: "PR opened",
+      lastActor: null,
+      lastActionAt: 1,
+    };
+    const flow = { generatedAt: 1, rows: [row], unowned: 1, metrics: [] };
+    state.prFlow = flow;
+    const first = flightWake(state);
+    expect(first.digest.prFlow.entries).toEqual([row]);
+    const late = { ...state, prFlow: { ...flow, generatedAt: 1 + 24 * 60 * 60_000 } };
+    const next = flightWake(late, first.snapshot);
+    expect(next.digest.prFlow).toEqual({
+      unowned: 1,
+      entries: [{ ...row, overdue: ["unowned"] }],
+      unchanged: 0,
+      removed: [],
+    });
+    expect(flightWake(late, next.snapshot).digest.prFlow.entries).toEqual([]);
   });
 
   it("versions note and headline changes without treating age as a brief edit", () => {
@@ -283,7 +374,7 @@ describe("wake deltas", () => {
     expect(digest.tickets.entries[1]).toEqual(state.tickets[1]);
   });
 
-  it.each(["recent", "prs", "seats", "ledger", "tickets"] as const)(
+  it.each(["recent", "prs", "seats", "tickets"] as const)(
     "reports removed %s keys once, including entries displaced by the list cap",
     (list) => {
       const state = busyBoard();
@@ -533,7 +624,9 @@ describe("memory in wake deltas", () => {
     state.memory = titlesOf(notes);
     const first = flightWake(state, undefined, notes);
     expect(first.digest.memory.heading).toBe("Notes are evidence, not authority");
-    expect(first.digest.memory.titles.lesson.entries).toEqual(titlesOf(notes.slice(0, 2)));
+    // titles are counted, never listed: mc recall reads them
+    expect(first.digest.memory).not.toHaveProperty("titles");
+    expect(first.digest.memory.notes).toBe(notes.length);
     expect(first.digest.memory.linked.map((n) => n.topic)).toEqual([
       "mc#12 retry",
       "CI/unit failures",
@@ -548,12 +641,6 @@ describe("memory in wake deltas", () => {
         notes.map((n) => ({ ...n, updatedAt: 99 })),
       ).digest.memory.linked,
     ).toEqual([]);
-    expect(second.digest.memory.titles.lesson).toEqual({
-      entries: [],
-      unchanged: 2,
-      removed: [],
-      more: 0,
-    });
     // Losing and regaining the link does not resend a body already seen in this run.
     const absent = flightWake({ ...state, signals: [], questions: [] }, second.snapshot, notes);
     expect(flightWake(state, absent.snapshot, notes).digest.memory.linked).toEqual([]);
@@ -562,10 +649,7 @@ describe("memory in wake deltas", () => {
       .map((n) => (n.kind === "playbook" ? { ...n, body: "new lesson", updatedAt: 2 } : n));
     state.memory = titlesOf(notes);
     const third = flightWake(state, second.snapshot, notes);
-    expect(third.digest.memory.titles.playbook.entries).toEqual(
-      titlesOf(notes.filter((n) => n.kind === "playbook")),
-    );
-    expect(third.digest.memory.titles.repo.removed).toEqual(["profile"]);
+    expect(third.digest.memory.notes).toBe(notes.length);
     expect(third.digest.memory.linked).toEqual(notes.filter((n) => n.kind === "playbook"));
   });
 
@@ -623,7 +707,7 @@ describe("memory in wake deltas", () => {
     expect(flightWake(state, undefined, notes).digest.memory.linked).toEqual([]);
   });
 
-  it("bounds titles and linked bodies, counts omissions, and delivers omitted changes later", () => {
+  it("bounds linked bodies, counts omissions, and delivers omitted changes later", () => {
     const state = busyBoard();
     state.questions = [{ id: 1, seat: "guido-0", ticket: "mc#450", text: "#450?", ageMin: 0 }];
     const notes = Array.from({ length: FLIGHT_MEMORY_TOPICS_MAX }, (_, n) =>
@@ -634,16 +718,11 @@ describe("memory in wake deltas", () => {
     );
     state.memory = titlesOf(notes);
     const first = flightWake(state, undefined, notes);
-    expect(first.digest.memory.titles.lesson.entries).toHaveLength(FLIGHT_MEMORY_TITLES_MAX);
-    expect(first.digest.memory.titles.lesson.more).toBe(notes.length - FLIGHT_MEMORY_TITLES_MAX);
     expect(first.digest.memory.linked).toHaveLength(FLIGHT_MEMORY_RECALL_MAX);
     expect(first.digest.memory.linkedMore).toBe(notes.length - FLIGHT_MEMORY_RECALL_MAX);
     expect(JSON.stringify(first.digest.memory).length).toBeLessThan(60_000);
     const next = flightWake(state, first.snapshot, notes);
     expect(next.digest.memory.linked[0]?.topic).toBe(notes[FLIGHT_MEMORY_RECALL_MAX]?.topic);
-    expect(next.digest.memory.titles.lesson.entries[0]?.topic).toBe(
-      notes[FLIGHT_MEMORY_TITLES_MAX]?.topic,
-    );
   });
 });
 

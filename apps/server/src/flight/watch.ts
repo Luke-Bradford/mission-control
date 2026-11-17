@@ -520,12 +520,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = false;
       rotationRequested = false; // the fresh session already sees the current config
       try {
-        const { digest, snapshot } = flightWake(
-          state,
-          undefined,
-          store.flightMemory(state.repo),
-          false,
-        );
+        const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const note = store
           .flightMemory(state.repo)
@@ -689,7 +684,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         state,
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
-        false,
       );
       const changed = changedWakeFacts(lastFacts, wake);
       // A learned category rides with an immediate wake, but teaches the learned set only when it
@@ -821,12 +815,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (!seatId || store.seatSession(seatId)?.runId !== runId) return;
       delivered = {
         runId,
-        snapshot: flightWake(
-          state,
-          delivered?.runId === runId ? delivered.snapshot : undefined,
-          [],
-          true,
-        ).snapshot,
+        snapshot: flightWake(state, delivered?.runId === runId ? delivered.snapshot : undefined)
+          .snapshot,
       };
     },
     rotate() {
