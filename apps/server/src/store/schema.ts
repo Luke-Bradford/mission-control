@@ -235,12 +235,6 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
-CREATE TABLE IF NOT EXISTS run_handoffs (
-  run_id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, ticket TEXT NOT NULL, at INTEGER NOT NULL,
-  record TEXT NOT NULL, accepted_by TEXT, accepted_run_id TEXT, claim_token TEXT
-);
-CREATE INDEX IF NOT EXISTS run_handoffs_ticket ON run_handoffs(repo_id, ticket, at DESC);
-CREATE INDEX IF NOT EXISTS run_handoffs_received ON run_handoffs(accepted_run_id);
 -- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
 CREATE TABLE IF NOT EXISTS comms (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,

@@ -176,7 +176,6 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -1370,7 +1369,6 @@ describe("tool list", () => {
       "withdraw_question",
       "attach_materials",
       "start_seat",
-      "reassign_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
@@ -1983,136 +1981,6 @@ describe("start_seat", () => {
     expect(startCalls).toHaveLength(1);
   });
 
-  it("reassigns an ended author's ticket through the existing start checks and logs the handoff", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    store.upsertRun(
-      run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
-    );
-    expect(
-      (
-        await call("reassign_ticket", {
-          issue: 7,
-          seat: "guido-1",
-          reason: "The old seat hit quota",
-        })
-      ).isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
-      kind: "start",
-      ref: "mc#7",
-      basis: "The old seat hit quota",
-    });
-    expect(store.flightDecisions(0, 10)[0]?.decision).toContain(
-      "Reassigned from GUIDO-CX to GUIDO-1",
-    );
-  });
-
-  it("refuses to reassign a ticket with a live author and never ends it", async () => {
-    store.upsertRun(run("live", "guido-cx", { ticket: "mc#7", branch: "feature/7-live" }));
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Move it" })).isError,
-    ).toBe(true);
-    expect(startCalls).toEqual([]);
-    expect(store.run("live")?.endedAt).toBeNull();
-  });
-  it("reassigns a removed author only when it has a durable crew handoff", async () => {
-    const old = run("removed", "removed-seat", {
-      ticket: "mc#7",
-      branch: "feature/7-old",
-      endedAt: NOW - 1000,
-    });
-    store.upsertRun(old);
-    const args = { issue: 7, seat: "guido-1", reason: "Continue after the seat was removed" };
-    expect((await call("reassign_ticket", args)).isError).toBe(true);
-    recordRunHandoff(store, old, null);
-    expect((await call("reassign_ticket", args)).isError).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-  });
-  it.each(["In progress", "In review"])(
-    "continues the preserved author's open PR from %s",
-    async (status) => {
-      cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-      board(sc(7, { status }));
-      store.upsertRun(
-        run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
-      );
-      const savedPr = {
-        repoId: "mc",
-        number: 9,
-        title: "PR",
-        url: "u",
-        branch: "feature/7-old",
-        ticket: "mc#7",
-        state: "open" as const,
-        isDraft: true,
-        review: null,
-        ci: "pending" as const,
-        createdAt: NOW,
-        updatedAt: NOW,
-        mergedAt: null,
-        headSha: null,
-        mergeable: null,
-      };
-      store.upsertPullRequests("mc", [savedPr], NOW);
-      expect(
-        (
-          await call("reassign_ticket", {
-            issue: 7,
-            seat: "guido-1",
-            reason: "Continue CI and review",
-          })
-        ).isError,
-      ).toBeUndefined();
-      expect(startCalls).toHaveLength(1);
-      startCalls.length = 0;
-      store.upsertPullRequests("mc", [{ ...savedPr, branch: "feature/7-unrelated" }], NOW);
-      expect(
-        await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Continue" }),
-      ).toEqual(refused(openPrText("mc#7", 9)));
-      expect(startCalls).toEqual([]);
-    },
-  );
-  it("returns an ended run's open PR to a seat when the PR's head is not the run's branch", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    board(sc(7, { status: "In review" }));
-    store.upsertRun(
-      run("old", "guido-cx", {
-        ticket: "mc#7",
-        branch: "feature/7-local",
-        endedAt: NOW - 1000,
-        loop: { ...NEW_LOOP, prNumber: 9 },
-      }),
-    );
-    store.upsertPullRequests(
-      "mc",
-      [
-        {
-          repoId: "mc",
-          number: 9,
-          title: "PR",
-          url: "u",
-          branch: "feature/7-pr-head",
-          ticket: "mc#7",
-          state: "open" as const,
-          isDraft: false,
-          review: null,
-          ci: "pending" as const,
-          createdAt: NOW,
-          updatedAt: NOW,
-          mergedAt: null,
-          headSha: null,
-          mergeable: null,
-        },
-      ],
-      NOW,
-    );
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the findings" }))
-        .isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-  });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
     [

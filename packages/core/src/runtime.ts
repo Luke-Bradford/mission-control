@@ -57,7 +57,6 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
-  MC_TOOL_NAMES.reassignTicket,
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.instructSeat,
   MC_TOOL_NAMES.revokeInstruction,

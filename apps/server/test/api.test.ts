@@ -125,7 +125,6 @@ import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews
 import { qaNativeIdentity } from "../src/qa/history-key.ts";
 import * as files from "../src/repo/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/repo/files.ts";
-import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { readStreamPage } from "../src/run/stream.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
@@ -3359,27 +3358,9 @@ describe("local access", () => {
 });
 
 describe("agents", () => {
-  it("serves durable outgoing and received handoffs, and rejects unknown runs", async () => {
-    const old = run({
-      id: "handoff-old",
-      ticket: "shop-app#7",
-      branch: "feature/7-work",
-      endedAt: NOW,
-    });
-    store.upsertRun(old);
-    const h = recordRunHandoff(store, old, null);
-    expect(h).not.toBeNull();
-    expect((await get(`/api/runs/${old.id}/handoff`)).json()).toMatchObject({
-      runId: old.id,
-      ticket: "shop-app#7",
-    });
-    store.upsertRun(run({ id: "handoff-next", ticket: "shop-app#7" }));
-    expect(store.claimHandoff(old.id, "claim")).toBe(true);
-    expect(store.acceptHandoff(old.id, "claim", "guido-1", "handoff-next")).toBe(true);
-    expect((await get("/api/runs/handoff-next/handoff")).json()).toMatchObject({
-      runId: old.id,
-      acceptedBy: "guido-1",
-    });
+  it("answers null on the handoff route (runs are no longer handed off) and 404 for unknown runs", async () => {
+    store.upsertRun(run({ id: "handoff-old", ticket: "shop-app#7", endedAt: NOW }));
+    expect((await get("/api/runs/handoff-old/handoff")).json()).toBeNull();
     expect((await get("/api/runs/unknown/handoff")).statusCode).toBe(404);
   });
   it("runs honours ?limit and validates it as an integer 1..500", async () => {

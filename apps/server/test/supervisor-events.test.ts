@@ -557,7 +557,6 @@ describe("supervisor events (Plan 7a)", () => {
         runId: null,
       });
       expect(readFileSync(join(wt, "wip.txt"), "utf8")).toBe("wip\n");
-      expect(store.openHandoff("mc", "mc#42")).toMatchObject({ runId, worktree: wt });
       // the branch keeps the run's commits
       expect(git(clone, "branch", "--list", BRANCH)).toContain(BRANCH);
       // the seat can start again
@@ -639,7 +638,6 @@ describe("supervisor events (Plan 7a)", () => {
       expect(seatState("guido-1")).toBe("idle");
       expect(store.seatSession("guido-1")?.runId).toBeNull();
       expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
-      expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
       await sup.stopAll();
       release();
     });

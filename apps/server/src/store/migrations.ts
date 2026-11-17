@@ -9,6 +9,9 @@ const USAGE_DEDUPE_VERSION = 1;
 export const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
+/** Tables an older release made and this one does not use; an existing database drops them. */
+const RETIRED_TABLES = ["run_handoffs"];
+
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
 
@@ -397,6 +400,7 @@ class Migrations {
         .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
         .run(COMMS_NOTICE, "hub");
     this.migrateCommsLabels();
+    for (const table of RETIRED_TABLES) this.db.exec(`DROP TABLE IF EXISTS ${table}`);
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);

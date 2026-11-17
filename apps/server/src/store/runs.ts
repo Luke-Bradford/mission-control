@@ -250,7 +250,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
 
     /**
      * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
-     * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
+     * someone releases it. Only the latest run counts.
      */
     branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
       const latest = q.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);
