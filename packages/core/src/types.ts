@@ -589,6 +589,8 @@ export interface FlowIssue {
   repoId: RepoId;
   number: number;
   size: string | null;
+  /** The card's title when the row was collected; null for rows collected before titles were kept. */
+  title?: string | null;
   /** First move into Ready / In progress / In review / Ready for QA; null when it never had one. */
   startAt: number | null;
   doneAt: number | null;

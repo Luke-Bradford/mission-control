@@ -734,8 +734,10 @@ export function telemetry(
     }),
   );
 
+  // Always the last CYCLE_TIME_DAYS days, whatever the range: the Throughput tab's cycle-time chart
+  // and Tickets table draw 14 days of tickets.
   const tickets: TelemetrySeries["tickets"] = store
-    .flowIssues(since)
+    .flowIssues(flowSince)
     .filter((issue) => issue.doneAt === null || issue.doneAt <= now)
     .map((issue) => {
       const ticket = `${issue.repoId}#${issue.number}`;
@@ -747,6 +749,8 @@ export function telemetry(
           .sort((a, b) => a - b)[0] ?? null;
       return {
         ticket,
+        title: issue.title ?? store.boardItem(issue.repoId, issue.number)?.title ?? null,
+        size: issue.size,
         readyAt: issue.startAt,
         startedAt: store.ticketStartedAt(ticket),
         mergedAt,

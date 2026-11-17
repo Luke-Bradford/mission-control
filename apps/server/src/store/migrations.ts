@@ -124,6 +124,7 @@ class Migrations {
         this.setSetting("flow-ready-start-v1", "1");
       }, true);
     }
+    this.addColumn("flow_issues", "title", "TEXT");
     this.addColumn("notifications", "source_content", "TEXT");
     this.addColumn("briefs", "structured", "TEXT");
     this.addColumn("drafts", "source", "TEXT");

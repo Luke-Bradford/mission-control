@@ -34,7 +34,7 @@ const timelineFields = (paged: boolean) => `timelineItems(first: ${FLOW_TIMELINE
   nodes { ... on ProjectV2ItemStatusChangedEvent { createdAt status project { number } } }
   pageInfo { hasNextPage endCursor }
 }`;
-const ISSUE_FIELDS = timelineFields(false);
+const ISSUE_FIELDS = `title ${timelineFields(false)}`;
 const PR_FIELDS = `commits(first: 20) { nodes { commit { ${CHECK_CONTEXTS} } } }`;
 
 type Repo = CcConfig["repos"][number];
@@ -248,13 +248,22 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       .pullRequests(repo.id)
       .filter((p) => p.mergedAt !== null && p.mergedAt >= since);
 
-    const timelines = await readAll(
-      gql,
-      repo,
-      "issue",
-      ISSUE_FIELDS,
-      flowIssues.map((i) => i.issueNumber),
-    );
+    // Done rows kept after their card left the board, from before titles were stored: read the
+    // issue too, so every retained row gains its title.
+    const onBoard = new Set(flowIssues.map((i) => i.issueNumber));
+    const untitled = store
+      .flowIssues(since)
+      .filter(
+        (kept) =>
+          kept.repoId === repo.id &&
+          kept.doneAt !== null &&
+          kept.title == null &&
+          !onBoard.has(kept.number),
+      );
+    const timelines = await readAll(gql, repo, "issue", ISSUE_FIELDS, [
+      ...flowIssues.map((i) => i.issueNumber),
+      ...untitled.map((kept) => kept.number),
+    ]);
     const truncated = await pageTimelines(gql, repo, timelines);
     const checks = await readAll(
       gql,
@@ -314,9 +323,20 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         repoId: repo.id,
         number: i.issueNumber,
         size: i.size,
+        title: i.title,
         ...flow,
         doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
+    }
+    // A done ticket whose card has left the board keeps its stored row (and title) for the whole
+    // window, so the Throughput table still names it.
+    const collected = new Set(issues.map((issue) => issue.number));
+    for (const kept of store.flowIssues(since)) {
+      if (kept.repoId !== repo.id || kept.doneAt === null || collected.has(kept.number)) continue;
+      const fetched = path(timelines.get(kept.number), "title");
+      issues.push(
+        kept.title == null && typeof fetched === "string" ? { ...kept, title: fetched } : kept,
+      );
     }
     const prs: FlowPr[] = [];
     for (const p of merged) {

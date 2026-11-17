@@ -114,7 +114,7 @@ CREATE INDEX IF NOT EXISTS controller_messages_at ON controller_messages(at);
 CREATE TABLE IF NOT EXISTS controller_files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
-  done_at INTEGER, PRIMARY KEY (repo_id, number)
+  done_at INTEGER, title TEXT, PRIMARY KEY (repo_id, number)
 );
 CREATE TABLE IF NOT EXISTS flow_column_moves (
   id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, number INTEGER NOT NULL,
