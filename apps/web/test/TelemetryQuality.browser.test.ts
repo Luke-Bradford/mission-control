@@ -55,6 +55,7 @@ function api() {
   return routes;
 }
 
+/** The Quality panels draw after the data loads, so wait for each before measuring. */
 async function ready(page: RenderedPage) {
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)), undefined);
   if (page.errors().length) throw new Error(page.errors().join("; "));
