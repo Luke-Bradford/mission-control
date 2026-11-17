@@ -216,14 +216,14 @@ describe("clearance waiting", () => {
 
   it("raises one alarm for each head: a new head restarts the two hours", () => {
     const open = () => openWasteAlarms(store).filter((a) => a.check === "clearance-waiting");
-    const keys = (_at: number) => open().map((a) => a.id);
+    const keys = () => open().map((a) => a.id);
     hold(NOW - 3 * HOUR);
     syncWasteAlarms(config, store, NOW);
-    const first = keys(NOW);
+    const first = keys();
     expect(first).toHaveLength(1);
     // the level grows from 3 to 4 hours: the same alarm, not a new one
     syncWasteAlarms(config, store, NOW + HOUR);
-    expect(keys(NOW + HOUR)).toEqual(first);
+    expect(keys()).toEqual(first);
     // a new head: the wait starts over, so the old head's alarm closes and nothing is raised
     store.setRunLoop(
       "r1",
@@ -234,10 +234,10 @@ describe("clearance waiting", () => {
     expect(open()).toEqual([]);
     // two hours on the new head: one new alarm, then the same one as its level grows
     syncWasteAlarms(config, store, NOW + 4 * HOUR + 2 * MIN);
-    const second = keys(NOW + 4 * HOUR + 2 * MIN);
+    const second = keys();
     expect(second.filter((k) => !first.includes(k))).toHaveLength(1);
     syncWasteAlarms(config, store, NOW + 6 * HOUR);
-    expect(keys(NOW + 6 * HOUR)).toEqual(second);
+    expect(keys()).toEqual(second);
   });
 
   it("a resolved alarm on one head does not silence the next head", () => {

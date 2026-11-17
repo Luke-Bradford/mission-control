@@ -756,8 +756,9 @@ export function flightSignals(i: {
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
-  // Only an alarm that parks a ticket wakes FLIGHT, once: nothing else lifts that park, so left
-  // unsaid the ticket would stand unseen. Every other alarm is recorded and served by GET /waste.
+  // Only an alarm that parks a ticket wakes FLIGHT, once: the dealer skips the ticket until the
+  // alarm is resolved or its cause ends, so left unsaid the ticket would stand unseen. The other
+  // alarms are stored; GET /api/waste serves the open ones.
   for (const alarm of openWasteAlarms(store)) {
     if (alarm.repoId !== repo) continue;
     if (WASTE_ACTIONS[alarm.check] !== "park") continue;

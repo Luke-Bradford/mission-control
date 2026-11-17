@@ -45,9 +45,9 @@ export const WASTE_THRESHOLDS = Object.freeze({
   retryResumes: 3,
   /** A change past this many review rounds stops its reviews. */
   reviewRounds: 2,
-  /** An open PR with this many failed review rounds is raised to FLIGHT; its reviews go on. */
+  /** An open PR with this many failed review rounds raises an alarm; its reviews go on. */
   failedReviewRounds: 2,
-  /** A hard-rule PR waiting this long on FLIGHT's clearance is raised to FLIGHT. */
+  /** A hard-rule PR waiting this long on FLIGHT's clearance raises an alarm. */
   clearanceAlarmMs: 2 * HOUR_MS,
   /** The same wait shows on the Audit waste route from this long. */
   clearanceAuditMs: DAY_MS,
