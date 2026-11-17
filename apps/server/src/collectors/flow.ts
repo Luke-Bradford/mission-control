@@ -319,7 +319,8 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
     }
-    // A done ticket whose card has left the board keeps its stored row for the whole window.
+    // A done ticket whose card has left the board keeps its stored row (and title) for the whole
+    // window, so the Throughput table still names it.
     const collected = new Set(issues.map((issue) => issue.number));
     for (const kept of store.flowIssues(since)) {
       if (kept.repoId !== repo.id || kept.doneAt === null || collected.has(kept.number)) continue;
