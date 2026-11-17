@@ -1379,7 +1379,7 @@ export const owedAsk = (ids: readonly string[]): string =>
   `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
 /** The sentence FLIGHT is told when seats idle with tickets open: follow the working list; an idle seat is allowed. */
 export const IDLE_SEAT_ASK =
-  "A free seat has stood idle while tickets are open. Start the next ticket the repo's pinned working list allows for that seat (in a repo with no working list, the board's next complete ticket), or triage the tickets with no board status. If nothing may start, leave the seat idle and do nothing more: do not promote parked work, file a ticket or log a wait to keep it busy. A wait on a person is never the reason a seat idles: only money, direction, irreversible actions and security exceptions go to the operator, each parked with a brief.";
+  "A free seat has stood idle while tickets are open. Start the next ticket the repo's pinned working list allows for that seat (in a repo with no working list, the board's next complete ticket), or triage the tickets with no board status. If nothing may start, leave the seat idle and do nothing more: do not promote work the working list sets aside, file a ticket or log a wait to keep it busy. A wait on a person is never the reason a seat idles: only money, direction, irreversible actions and security exceptions go to the operator, each parked with a brief.";
 
 export interface FlightWakeList<T> {
   entries: T[];

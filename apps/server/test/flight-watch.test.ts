@@ -6005,7 +6005,9 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(line).toContain("guido-1");
     expect(line).toMatch(/working list/);
     expect(line).toMatch(/leave the seat idle/);
-    expect(line).toMatch(/do not promote parked work, file a ticket or log a wait/);
+    expect(line).toMatch(
+      /do not promote work the working list sets aside, file a ticket or log a wait/,
+    );
     expect(line).toMatch(/money, direction, irreversible/);
     expect(line).not.toMatch(/(start|open) (a|the|your) (new )?(controller |claude )?session/i);
     expect(line).not.toMatch(/controller session/i);
