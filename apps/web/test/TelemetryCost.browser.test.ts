@@ -131,7 +131,10 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
           const button = document.querySelector<HTMLButtonElement>('[data-stat="ccover"] button');
           const tip = document.querySelector<HTMLElement>('[data-stat="ccover"] [role="tooltip"]');
           button?.focus();
-          return { text: tip?.textContent ?? "", visible: tip && getComputedStyle(tip).display !== "none" };
+          return {
+            text: tip?.textContent ?? "",
+            visible: tip && getComputedStyle(tip).display !== "none",
+          };
         }, undefined);
         expect(coverage.visible).toBe(true);
         expect(coverage.text).toContain("not counted as $0.");
