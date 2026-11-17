@@ -252,11 +252,11 @@ function SpendByStep({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
                 extra={`${kTokens(r.tokens)} · ${plural(r.runs, "run")}`}
               />
             ))}
-            <p className="s">
-              <span className="muted">Total </span>
-              <span className="num">{cost(total)}</span>
-            </p>
           </div>
+          <p className="step-summary s">
+            <span className="muted">Total </span>
+            <span className="num">{cost(total)}</span>
+          </p>
           <p className="pnote">
             Spend per hour by step is not tracked yet, so the bars show the whole range. A step with
             no reported cost shows a dash; it is not counted as $0.

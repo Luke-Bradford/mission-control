@@ -9,7 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { costTelemetryApi } from "./telemetryCostFixture.ts";
+import { costTelemetry, costTelemetryApi } from "./telemetryCostFixture.ts";
 
 const { renderAt } = browserSession();
 const evidence = process.env.MC_QA_EVIDENCE_DIR;
@@ -25,6 +25,12 @@ async function ready(page: RenderedPage) {
 }
 
 const api = () => ({ ...desktopFixture().api, ...costTelemetryApi() });
+
+const apiWithMissingCosts = () => {
+  const data = costTelemetry();
+  data.totals = data.totals.map((row, i) => (i < 3 ? { ...row, costUsd: null } : row));
+  return { ...api(), "/api/telemetry?range=24h": data };
+};
 
 const PANELS = ["#tStepBars", "#tTicketBars", "#tTok", "#tQuotaUsed"];
 
@@ -47,6 +53,8 @@ async function geometry(page: RenderedPage) {
       summary: document.querySelectorAll(".summary .stat").length,
       layers: document.querySelectorAll("#tTok path.area").length,
       meters: document.querySelectorAll("#tQuotaUsed li.quota-row").length,
+      stepTotal: box("#tStepBars .step-summary"),
+      stepNote: box("#tStepBars .pnote"),
     };
   }, PANELS);
 }
@@ -79,6 +87,11 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
             // three seats, then Other: four layers stacked
             expect(g.layers).toBe(4);
             expect(g.meters).toBe(2);
+            expect(g.stepTotal).not.toBeNull();
+            expect(g.stepNote).not.toBeNull();
+            expect((g.stepTotal as { b: number }).b).toBeLessThanOrEqual(
+              (g.stepNote as { y: number }).y,
+            );
             for (const { sel, box } of g.panels) {
               expect(box, sel).not.toBeNull();
               const b = box as { b: number; r: number; h: number; w: number };
@@ -100,6 +113,39 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
       );
     }
   }
+
+  it(
+    "shows the complete missing-cost explanation on keyboard focus",
+    async () => {
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1600,
+        height: 1000,
+        colorScheme: "dark",
+        api: apiWithMissingCosts(),
+        search: "?path=/telemetry%3Ftab%3Dcost",
+      });
+      try {
+        await ready(page);
+        const coverage = await page.evaluate(() => {
+          const button = document.querySelector<HTMLButtonElement>('[data-stat="ccover"] button');
+          const tip = document.querySelector<HTMLElement>('[data-stat="ccover"] [role="tooltip"]');
+          button?.focus();
+          return { text: tip?.textContent ?? "", visible: tip && getComputedStyle(tip).display !== "none" };
+        }, undefined);
+        expect(coverage.visible).toBe(true);
+        expect(coverage.text).toContain("not counted as $0.");
+        expect(coverage.text).toContain("dev-2 on sonnet");
+        if (evidence) {
+          mkdirSync(evidence, { recursive: true });
+          await page.screenshot(join(evidence, "telemetry-cost-coverage-focus-1600x1000-dark.png"));
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 
   it(
     "keeps the table view inside the work area, scrolling within it",

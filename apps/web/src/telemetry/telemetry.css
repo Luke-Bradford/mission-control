@@ -826,6 +826,13 @@
   height: 100%;
 }
 
+/* The spend total and scope note stay visible while busy rows scroll above them. */
+.step-summary {
+  flex: none;
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
+}
+
 .step-sw {
   display: inline-block;
   width: 10px;

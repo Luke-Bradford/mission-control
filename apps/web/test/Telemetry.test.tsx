@@ -1618,6 +1618,24 @@ describe("Cost and tokens tab", () => {
     within(panel("tTotals")).getByText(/No cost reported for codex-ta; not counted as \$0\./);
   });
 
+  it("shows the complete missing-cost explanation on keyboard focus", async () => {
+    const totals = tel().totals;
+    await loaded(
+      tel({
+        totals: [
+          ...totals,
+          { ...totals[0], model: "model-a", costUsd: null },
+          { ...totals[0], model: "model-b", costUsd: null },
+        ],
+      }),
+    );
+    const coverage = tile("Cost coverage");
+    fireEvent.focus(within(coverage).getByRole("button"));
+    const tip = within(coverage).getByRole("tooltip").textContent ?? "";
+    expect(tip).toContain("not counted as $0.");
+    expect(tip).toContain("model-a");
+  });
+
   it("scales spend bars by reported cost, not token volume", async () => {
     await loaded(
       tel({
@@ -1647,6 +1665,12 @@ describe("Cost and tokens tab", () => {
       for (const id of ids)
         expect(panel(id).querySelector(".sub")?.textContent).toContain("Whole crew, not filtered");
     });
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    await waitFor(() =>
+      expect(panel("tStepTable").querySelector(".sub")?.textContent).toContain(
+        "Whole crew, not filtered",
+      ),
+    );
   });
 
   it("stacks tokens per minute as the top three seats and Other, summing to the total", async () => {
