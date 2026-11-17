@@ -92,10 +92,14 @@ function Measure({ row }: { row: CodeHealthRecommendation }) {
     <div className="as-meas">
       <span className="as-l">{row.target.metric}</span>
       <span className="as-v">
-        <span>{now === null ? "unknown" : num(now)}</span>
+        <span>{now === null ? "— unknown" : num(now)}</span>
         <span aria-hidden="true">→</span>
         <span>{target === null ? "target not set" : num(target)}</span>
-        <span className="as-unit">{row.measure?.unit}</span>
+      </span>
+      <span className="as-unit">
+        {row.measure
+          ? `${row.measure.unit} · over ${row.measure.window}`
+          : "unit not recorded · no measure yet"}
       </span>
     </div>
   );
@@ -582,7 +586,12 @@ export function AuditSummary({
                 <tbody>
                   {overview.figures.map((f) => (
                     <tr key={f.id} className="as-hrow">
-                      <td title={`${f.source}. ${f.coverage}`}>{f.label}</td>
+                      <td title={`${f.source}. ${f.coverage}`}>
+                        {f.label}
+                        <span className="as-sub as-fmeta">
+                          {f.unit} · {f.window.label}
+                        </span>
+                      </td>
                       <td className="as-r as-m">
                         {figureValue({ ...f, value: f.comparison?.value ?? null })}
                       </td>

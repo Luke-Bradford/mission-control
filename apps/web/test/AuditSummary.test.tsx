@@ -518,3 +518,69 @@ it("holds a drafted decision when the page is disconnected mid-way", async () =>
   ).toBe(true);
   expect((screen.getByRole("textbox", { name: "Owner" }) as HTMLInputElement).value).toBe("me");
 });
+
+it("shows each row's measurement window and unit, and says so when there is no measure", async () => {
+  setup(
+    overviewFixture({
+      rows: 2,
+      rowOver: (n) =>
+        n === 1
+          ? {
+              measure: {
+                current: null,
+                unit: "findings a week",
+                window: "7d",
+                sourceAt: null,
+                coverage: "none",
+              },
+            }
+          : { measure: undefined },
+    }),
+  );
+  render(<CodeHealth />);
+  await ready();
+  const rows = document.querySelectorAll("tr.as-rec");
+  expect(rows[0].textContent).toContain("— unknown");
+  expect(rows[0].textContent).toContain("findings a week · over 7d");
+  expect(rows[1].textContent).toContain("unit not recorded · no measure yet");
+});
+
+it("shows each figure's own window, unit and state in the table, not in a hover title", async () => {
+  const over = overviewFixture();
+  over.figures = [
+    {
+      ...over.figures[0],
+      id: "a",
+      label: "Alpha",
+      unit: "merged PRs",
+      window: { ...over.figures[0].window, label: "7d" },
+    },
+    {
+      ...over.figures[1],
+      id: "b",
+      label: "Beta",
+      unit: "% of merged PRs",
+      window: { ...over.figures[1].window, label: "90d" },
+    },
+    {
+      ...over.figures[3],
+      id: "c",
+      label: "Gamma",
+      unit: "USD, median of priced PRs",
+      state: "partial",
+      value: null,
+      comparison: null,
+      window: { ...over.figures[3].window, label: "30d" },
+    },
+  ];
+  setup(over);
+  render(<CodeHealth />);
+  await ready();
+  const table = screen.getByRole("region", { name: "Health measures" });
+  const text = (name: string) => within(table).getByText(name).closest("tr")?.textContent ?? "";
+  expect(text("Alpha")).toContain("merged PRs · 7d");
+  expect(text("Beta")).toContain("% of merged PRs · 90d");
+  expect(text("Gamma")).toContain("USD, median of priced PRs · 30d");
+  expect(text("Gamma")).toContain("partial");
+  expect(text("Gamma")).toContain("—");
+});

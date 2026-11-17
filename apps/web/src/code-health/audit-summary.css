@@ -363,7 +363,7 @@
 }
 .as-mg {
   display: grid;
-  grid-template-columns: 1.25fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--sp-4);
 }
 .as-mg h3 {
@@ -396,9 +396,13 @@
   color: var(--fg);
   font-weight: 600;
 }
+.as-mg > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 @container (max-width: 1000px) {
   .as-mg {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -539,4 +543,10 @@
 }
 .as-scroll .as-rec > td {
   padding-block: var(--sp-1);
+}
+.as-fmeta {
+  display: block;
+}
+.as-meas .as-unit {
+  display: block;
 }

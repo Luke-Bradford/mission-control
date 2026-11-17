@@ -91,6 +91,7 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.totalRows).toBe(8);
             expect(m.visibleRows).toBeGreaterThanOrEqual(5);
             expect(m.firstOpen).toBe(true);
+            expect(m.detailInside).toBe(true);
             expect(m.pageScrolls).toBe(false);
             expect(m.sideways).toBe(false);
             expect(m.panelsInside).toBe(true);
@@ -125,6 +126,7 @@ describeRendered("Audit first screen in a real browser", () => {
           expect(m.sideways).toBe(false);
           expect(m.panelsInside).toBe(true);
           if (options.rows === 50) expect(m.listScrolls).toBe(true);
+          if (options.rows !== 0) expect(m.detailInside).toBe(true);
           if (options.rows !== 0) {
             const reachable = await page.reachable(".as-do .as-scroll tr.as-rec");
             expect(reachable).toHaveLength(options.rows);
