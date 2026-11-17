@@ -11,6 +11,7 @@ import {
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { closeAnsweredItems } from "../src/attention/answered.ts";
 import { chooseBrief, retainedBriefChoice } from "../src/brief/choices.ts";
 import { applyDecisionDefaults } from "../src/brief/decision-defaults.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
@@ -171,6 +172,9 @@ it("settles FLIGHT's labelled Comms question when its canonical choice is applie
     state: "applied",
   });
   expect(store.commsSettlement(message.id)).toMatchObject({ settledBy: "CAPCOM" });
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ key, kind: "answered" }),
+  ]);
   expect(attentionItems(config, store, now).find((item) => item.key === key)).toBeUndefined();
   expect(store.flightDecisions(0, 1)[0]).toMatchObject({
     about: `Brief choice ${key}`,
@@ -358,6 +362,28 @@ it("does not let an old successful claim hide a changed same-key source", async 
     acked: false,
     brief: { state: { freshness: "stale" } },
   });
+});
+it("attributes an applied FYI default to FLIGHT and an operator choice to the operator", async () => {
+  const key = source();
+  now += DECISION_DEFAULT_WAIT_MS;
+  expect(await applyDecisionDefaults({ config, store, now, choices: choices() })).toBe(1);
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ key, kind: "answered", by: "FLIGHT-1" }),
+  ]);
+  expect(store.questionClosures(0, 10)[0]?.reason).toMatch(/^FLIGHT-1 chose: /);
+  // a choice made before closures existed keeps its FLIGHT attribution when the sweep records it
+  (store as unknown as { db: { prepare(s: string): { run(): unknown } } }).db
+    .prepare("DELETE FROM question_closures")
+    .run();
+  expect(closeAnsweredItems({ config, store, now })).toBe(1);
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ by: "FLIGHT-1", reason: expect.stringMatching(/^FLIGHT-1 chose: /) }),
+  ]);
+  const other = flightSource();
+  await chooseBrief(choices(), other.key, request(other.key), { operator: true });
+  expect(store.questionClosures(0, 10)).toContainEqual(
+    expect.objectContaining({ key: other.key, by: "operator" }),
+  );
 });
 it("serializes competing manual and timer choices to one durable epoch", async () => {
   const key = source(),

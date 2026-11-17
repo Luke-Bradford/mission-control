@@ -4,10 +4,10 @@ import { dayLabel, dur, narrowDay, percent, plural } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { MetricName } from "../hud/MetricName.tsx";
-import { Panel } from "../hud/Panel.tsx";
 import { metricTitle, sessionTag, useMetrics } from "../metrics.ts";
 import { chartAnnotations } from "./annotations.ts";
 import { DASH, NOT_TRACKED, NOT_TRACKED_TITLE, type Scope } from "./common.ts";
+import { TPanel as Panel } from "./TPanel.tsx";
 
 function Stat({
   value,

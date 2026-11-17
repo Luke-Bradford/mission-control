@@ -29,6 +29,7 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
+import { closeAnsweredItems } from "./attention/answered.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
 import { closeSettledQuestions } from "./attention/question-watch.ts";
 import { closeUnwatchedRepoItems } from "./attention/unwatched-repos.ts";
@@ -612,13 +613,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         lock: deps.lockState?.(),
         deliver: deps.deliverDefault,
       });
+      const answered = closeAnsweredItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
       const unwatched = closeUnwatchedRepoItems({
         config,
         store,
         now: now(),
         lock: deps.lockState?.(),
       });
-      if (closed + unwatched > 0) bus.emit("attention");
+      if (closed + unwatched + answered > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,
@@ -1435,7 +1442,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
         }
         // Waste alarms are read once a minute: a restart storm shows within minutes. They never
-        // raise a Needs-you item; FLIGHT is woken once per alarm.
+        // raise a Needs-you item; only one that parks a ticket wakes FLIGHT.
         try {
           syncWasteAlarms(deps.config, store, at);
         } catch (e) {

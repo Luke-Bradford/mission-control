@@ -124,6 +124,30 @@ export interface AuditImprovement {
   chars?: number;
 }
 
+/** Why a bug got past the PR that introduced it, worked out from the hub's own records. */
+export const BUG_MISSED_REASONS = ["requirement", "test", "review", "none"] as const;
+export type BugMissedReason = (typeof BUG_MISSED_REASONS)[number];
+
+/** A closed bug traced to the commit and PR that introduced it. */
+export interface AuditBugEscape {
+  repoId: string;
+  /** The bug ticket's number. */
+  issue: number;
+  /** When the bug was filed. */
+  filedAt: number;
+  /** The merged PR that fixed it. */
+  fixPr: number;
+  /** The commit that introduced the bug. */
+  commit: string;
+  /** The PR that commit came in on; null when git names none. */
+  introducedPr: number | null;
+  /** When that PR was merged. */
+  mergedAt: number;
+  missed: BugMissedReason;
+  /** Time from that merge to the bug being filed, in ms. */
+  discoveryMs: number;
+}
+
 /** The `/api/audit` response for one range. */
 export interface AuditView {
   range: { since: number; until: number };
@@ -191,6 +215,11 @@ export interface AuditView {
    * server always sets it; optional so web fixtures built before it type-check.
    */
   improvements?: AuditImprovement[];
+  /**
+   * Bugs filed in range that are closed with a merged fix, each traced to the commit and PR that
+   * introduced it, newest first. The server always sets it; optional so web fixtures built before it type-check.
+   */
+  bugEscapes?: AuditBugEscape[];
   /**
    * PRs whose review failed on spec (not only quality), by cause, and the rounds per cause over
    * 7 and 30 days up to the range end. The server always sets it; optional so web fixtures built before it type-check.
@@ -274,6 +303,7 @@ export function capAudit(audit: AuditView): AuditView {
           },
         }),
     ...(audit.items === undefined ? {} : { items: cut("items", audit.items) }),
+    ...(audit.bugEscapes === undefined ? {} : { bugEscapes: cut("bugEscapes", audit.bugEscapes) }),
     ...(audit.improvements === undefined
       ? {}
       : { improvements: cut("improvements", audit.improvements) }),

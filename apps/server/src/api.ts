@@ -210,6 +210,7 @@ import {
   offersFor,
   setAsideQuestions,
 } from "./attention/needs-you-actions.ts";
+import { withRepoWatch } from "./attention/unwatched-repos.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -319,7 +320,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -4300,13 +4300,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
         );
       });
-      // Reader: docs/runbook.md#audit-api (the fix-session trial's receipts; the operator and FLIGHT read it)
-      api.get("/audit/fix-sessions", async (req, reply) => {
-        if (Object.keys(req.query as Record<string, unknown>).length > 0) {
-          return reply.code(400).send({ error: "send no query" });
-        }
-        return fixSessionTrialView(store, config);
-      });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
       api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
         "/audit/tokens",
@@ -6504,7 +6497,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const offers = needsYou === null ? undefined : offersFor(needsYou, item);
         return isOperatorItem(item)
           ? {
-              ...pinned(item, store, config),
+              ...withRepoWatch(pinned(item, store, config), config),
               ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
               ...(offers === undefined ? {} : { offers }),
             }

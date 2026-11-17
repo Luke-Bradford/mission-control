@@ -72,6 +72,7 @@ import {
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightPointerKind,
+  type FlightWakeAction,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -217,6 +218,15 @@ import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
 import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
+import {
+  type BugFixCandidate,
+  bugEscapes,
+  bugFixCandidates,
+  type IntroducingPrFacts,
+  introducingPrFacts,
+  noteBugTraceTried,
+  recordBugEscape,
+} from "./store/bug-escapes.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -1209,18 +1219,6 @@ export class Store {
     }));
   }
 
-  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
-  fixTrialRuns(): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
-           ORDER BY started_at, seq`,
-        )
-        .all() as Row[]
-    ).map(toRun);
-  }
-
   /** Context size of every stored model call of runs that started since `since`. */
   runCallContexts(since: number): { runId: string; context: number }[] {
     return this.db
@@ -2073,6 +2071,8 @@ export class Store {
         AUDIT_RETENTION_DAYS,
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -3010,6 +3010,7 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
+      bugEscapes: bugEscapes(this.db, since, until),
       improvements: [
         ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
@@ -3023,6 +3024,24 @@ export class Store {
       specBounces: specBounces(this.db, since, until),
       surgeonProposals: [],
     };
+  }
+
+  /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
+  bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
+    return bugFixCandidates(this.db, repoId, limit);
+  }
+
+  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
+    noteBugTraceTried(this.db, repoId, issue, at);
+  }
+
+  introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
+    return introducingPrFacts(this.db, repoId, pr);
+  }
+
+  /** Records a traced bug once per ticket; a repeat leaves the row as it was. */
+  recordBugEscape(e: Parameters<typeof recordBugEscape>[1]): void {
+    recordBugEscape(this.db, e);
   }
 
   /**
@@ -3645,9 +3664,10 @@ export class Store {
       this.db.prepare("DELETE FROM flow_column_moves WHERE repo_id = ?").run(repoId);
       this.db.prepare("DELETE FROM flow_prs WHERE repo_id = ?").run(repoId);
       const insIssue = this.db.prepare(
-        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at, title) VALUES (?, ?, ?, ?, ?, ?)",
       );
-      for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
+      for (const i of issues)
+        insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt, i.title ?? null);
       const insMove = this.db.prepare(
         "INSERT INTO flow_column_moves (repo_id, number, at, column) VALUES (?, ?, ?, ?)",
       );
@@ -3687,6 +3707,7 @@ export class Store {
       size: r.size as string | null,
       startAt: r.start_at as number | null,
       doneAt: r.done_at as number | null,
+      title: r.title as string | null,
     }));
   }
 
@@ -6587,8 +6608,15 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
+  addFlightWake(
+    runId: string,
+    at: number,
+    reasons: string[],
+    wakeId?: string,
+    rode: string[] = [],
+    immediate: string[] = [],
+  ): void {
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -6599,6 +6627,14 @@ export class Store {
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     return this.flightQ.flightWakes(since);
+  }
+
+  flightWakeActions(
+    since: number,
+    until: number,
+    nonActing: readonly string[],
+  ): FlightWakeAction[] {
+    return this.flightQ.flightWakeActions(since, until, nonActing);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
@@ -6740,11 +6776,6 @@ export class Store {
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
     return this.flightQ.flightDecisions(since, limit);
-  }
-
-  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
-  flightWaitTimes(since: number): number[] {
-    return this.flightQ.flightWaitTimes(since);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

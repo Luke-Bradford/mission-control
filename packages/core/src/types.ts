@@ -15,7 +15,6 @@ import type {
   BriefReadState,
 } from "./briefs.ts";
 import type { CrewPause } from "./crew-pause.ts";
-import type { FixSessionArm } from "./fix-session-trial.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
@@ -283,12 +282,8 @@ export interface RunLoop {
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
   mergeHold?: { by: "FLIGHT" | "CAPCOM"; reason: string; at: number; from?: LoopPhase } | null;
-  /** The fix-session trial arm, assigned once at the run's first fix boundary (#1643). */
-  fixArm?: FixSessionArm;
-  /** The fresh CLI sessions the run started for a fix, oldest first. */
+  /** The fresh CLI sessions the run started for a fix (a retired trial), oldest first; the token audit reads old ones. */
   fixSessions?: { sessionId: string; at: number; reason: "ci" | "review" }[];
-  /** Fresh starts that failed, so the run resumed its session instead. */
-  fixFallbacks?: { at: number; reason: string }[];
 }
 
 /** One `loop_events` row. */
@@ -589,6 +584,8 @@ export interface FlowIssue {
   repoId: RepoId;
   number: number;
   size: string | null;
+  /** The card's title when the row was collected; null for rows collected before titles were kept. */
+  title?: string | null;
   /** First move into Ready / In progress / In review / Ready for QA; null when it never had one. */
   startAt: number | null;
   doneAt: number | null;
@@ -1282,8 +1279,9 @@ export interface BriefOption {
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
-/** How a question left Needs you without an answer. */
+/** How a question left Needs you: without an answer, or ("answered") by the operator's chosen option. */
 export type QuestionClosureKind =
+  | "answered"
   | "cleared"
   | "returned"
   | "withdrawn"
@@ -1356,6 +1354,11 @@ export interface AttentionBrief {
 }
 
 export interface AttentionItem {
+  /**
+   * Set when the item's repo is not watched: its plan and materials cannot be loaded, and `text`
+   * says so plainly for the panel to show in their place.
+   */
+  repoUnwatched?: { repoId: string; text: string };
   hold?: AttentionHold;
   holdReleased?: string;
   /** When that hold was released; FLIGHT's brief older than this is stale. */
