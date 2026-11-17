@@ -1629,11 +1629,10 @@ describe("Cost and tokens tab", () => {
       }),
     );
     const rows = panel("tStepBars").querySelectorAll(".hrow");
-    expect((rows[0]?.querySelector(".track i") as HTMLElement).style.width).toBe(
-      "16.666666666666664%",
+    expect(rows).toHaveLength(3);
+    expect([...rows].map((row) => (row.querySelector(".track i") as HTMLElement).style.width)).toEqual(
+      ["16.666666666666664%", "100%", "0%"],
     );
-    expect((rows[1]?.querySelector(".track i") as HTMLElement).style.width).toBe("100%");
-    expect((rows[2]?.querySelector(".track i") as HTMLElement).style.width).toBe("0%");
   });
 
   it.each([
