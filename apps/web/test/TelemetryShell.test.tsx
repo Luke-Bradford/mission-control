@@ -1,11 +1,11 @@
-import type { ConfigView, Telemetry as TelemetryData } from "@mc/core";
+import { type ConfigView, METRICS, type Telemetry as TelemetryData } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { streamStatus } from "../src/data.ts";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { TELEMETRY_TABS } from "../src/router.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow, HOUR, METRICS_VIEW, MIN, NOW } from "./fixtures.ts";
+import { CONFIG, crewRow, HOUR, item, METRICS_VIEW, MIN, NOW } from "./fixtures.ts";
 import { readStyle } from "./styles.ts";
 
 const LOOP = CONFIG.loops[0] as ConfigView["loops"][number];
@@ -117,11 +117,16 @@ const MACHINE = {
   transcripts: null,
 };
 
-function stub(data: TelemetryData = tel(), machine: unknown = MACHINE) {
+function stub(
+  data: TelemetryData = tel(),
+  machine: unknown = MACHINE,
+  attention: unknown[] = [item()],
+) {
   const routes: Record<string, unknown> = {
     "/api/config": CFG,
     "/api/machine": machine,
     "/api/metrics": METRICS_VIEW,
+    "/api/attention": attention,
   };
   for (const r of ["1h", "6h", "24h", "7d"]) routes[`/api/telemetry?range=${r}`] = data;
   routes["/api/telemetry?range=24h&agent=studio"] = data;
@@ -172,8 +177,8 @@ describe("the health band", () => {
     expect(tiles).toEqual([
       { label: "Crew health", value: "Watch", unit: "verdict", window: "now" },
       { label: "Your response", value: "4m 20s", unit: "median", window: "today" },
-      { label: "~Cost", value: "~$24.31", unit: "USD", window: "today" },
-      { label: "Merged", value: "6", unit: "PRs", window: "today" },
+      { label: "~Cost", value: "~$24.31", unit: "USD", window: METRICS.cost.window },
+      { label: "Merged", value: "6", unit: "PRs", window: METRICS.merged.window },
       { label: "CI first push", value: "88%", unit: "% of merged PRs", window: "14d" },
       { label: "First-pass review", value: "70%", unit: "% of reviewed PRs", window: "14d" },
       { label: "Tightest quota", value: "78%", unit: "% used", window: "now" },
@@ -191,9 +196,7 @@ describe("the health band", () => {
       "today · vs ~$10.00 7-day average",
     );
     // (13 × 3 + 7) / 14
-    expect(stat("Merged").querySelector(".stat-sub")?.textContent).toBe(
-      "today · vs 3.3 14-day mean",
-    );
+    expect(stat("Merged").querySelector(".stat-sub")?.textContent).toBe("24h · vs 3.3 14-day mean");
     expect(stat("Tightest quota").querySelector(".stat-sub")?.textContent).toBe(
       "now · claude-main · 7d · resets in 2d 4h",
     );
@@ -265,6 +268,48 @@ describe("the health band", () => {
     expect(within(stat("Crew health")).getByRole("link").textContent).toBe("Needs attention");
     expect(stat("Crew health").className).toContain("v-attention");
     expect(within(stat("Your response")).getByRole("button").textContent).toBe("—");
+  });
+});
+
+describe("questions waiting on you", () => {
+  async function openWith(attention: unknown[]) {
+    window.history.replaceState(null, "", "/telemetry");
+    stub(tel(), MACHINE, attention);
+    render(<Telemetry />);
+    await waitFor(() =>
+      expect(document.getElementById("telemetry-tabpanel")?.getAttribute("aria-busy")).toBe(
+        "false",
+      ),
+    );
+    // the verdict waits for the Needs you data
+    await waitFor(() =>
+      expect(stat("Crew health").querySelector(".stat-value")?.textContent).not.toBe("—"),
+    );
+  }
+  const waitingOnYou = () =>
+    screen
+      .getByText("Waiting on you", { selector: ".stat-label" })
+      .closest(".stat")
+      ?.querySelector(".stat-value")?.textContent;
+
+  it("does not count a seat queued for the test lock: no questions reads 0 and Healthy", async () => {
+    // studio is at hudState "waiting" in the stub, which is a lock queue, not a question
+    await openWith([]);
+    expect(waitingOnYou()).toBe("0");
+    expect(stat("Crew health").querySelector(".stat-value")?.textContent).toBe("Healthy");
+  });
+
+  it("counts open questions, not the hub's alerts, and turns the verdict to Watch", async () => {
+    await openWith([
+      item({ key: "a" }),
+      item({ key: "b" }),
+      item({ key: "c", alert: true, kind: "decision" }),
+    ]);
+    expect(waitingOnYou()).toBe("2");
+    expect(stat("Crew health").querySelector(".stat-value")?.textContent).toBe("Watch");
+    expect(stat("Crew health").querySelector(".stat-sub")?.textContent).toContain(
+      "2 questions waiting",
+    );
   });
 });
 
@@ -427,6 +472,7 @@ describe("the Crew tab", () => {
         summary.getByText(label, { selector: ".stat-label" }).closest(".stat") as HTMLElement
       ).querySelector(".stat-value")?.textContent;
     expect(read("Seats running")).toBe("1 of 2");
+    // one open question on the Needs you list; the seat queued for the test lock is not one
     expect(read("Waiting on you")).toBe("1");
     expect(read("Median response")).toBe("4.3");
     expect(read("Slowest 10%")).toBe("19.0");

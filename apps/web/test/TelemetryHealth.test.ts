@@ -62,7 +62,7 @@ describe("the crew verdict", () => {
   it.each([
     [1, "9 of 11 running · 1 question waiting"],
     [3, "9 of 11 running · 3 questions waiting"],
-  ])("is Watch while %s seat questions wait", (waiting, reason) => {
+  ])("is Watch while %s questions wait", (waiting, reason) => {
     expect(verdict({ crew: crew({ waiting }) })).toEqual({ word: "Watch", reason });
   });
 
@@ -82,7 +82,8 @@ it("counts seats by state", () => {
     { hudState: "error" },
     { hudState: "idle" },
   ] as CrewRow[];
-  expect(crewCounts(rows)).toEqual({ running: 2, configured: 6, waiting: 1, stalled: 2 });
+  // waiting is the open question count passed in, not seats at hudState "waiting"
+  expect(crewCounts(rows, 4)).toEqual({ running: 2, configured: 6, waiting: 4, stalled: 2 });
 });
 
 it("picks the quota window with the highest used share", () => {

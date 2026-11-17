@@ -19,7 +19,7 @@ export interface CrewCounts {
   running: number;
   /** Seats configured. */
   configured: number;
-  /** Seats waiting on an answer. */
+  /** Open questions waiting on the operator (Needs you), not seats queued for the test lock. */
   waiting: number;
   /** Seats stalled or in error. */
   stalled: number;
@@ -46,11 +46,11 @@ export function quotaWindows(t: Telemetry | undefined): QuotaWindow[] {
 export const tightestQuota = (windows: QuotaWindow[]): QuotaWindow | null =>
   windows.reduce<QuotaWindow | null>((a, w) => (a === null || w.pct > a.pct ? w : a), null);
 
-export function crewCounts(rows: CrewRow[]): CrewCounts {
+export function crewCounts(rows: CrewRow[], questions: number): CrewCounts {
   return {
     running: rows.filter((r) => r.hudState === "running").length,
     configured: rows.length,
-    waiting: rows.filter((r) => r.hudState === "waiting").length,
+    waiting: questions,
     stalled: rows.filter((r) => r.hudState === "stalled" || r.hudState === "error").length,
   };
 }

@@ -8,6 +8,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { agentPath, NEEDS_YOU_PATH, PAGE_PATHS, type TelemetryView } from "../router.ts";
 import { Subagents, ToolLatency } from "./AgentsGroup.tsx";
 import { DASH, indexOf, type Scope } from "./common.ts";
+import { useOpenQuestions } from "./questions.ts";
 import { Cell, Stat, type StatSpec } from "./Stat.tsx";
 
 type SpanState = NonNullable<Telemetry["series"]>["stateSpans"][number]["state"];
@@ -239,6 +240,7 @@ function CrewSummary({
   scope: Scope;
   onNeedsRoute: (s: StatSpec) => void;
 }) {
+  const questions = useOpenQuestions();
   const rows = crew?.rows.filter((r) => scope.agents.some((a) => a.id === r.id));
   const capcom = t?.capcom;
   const stats: StatSpec[] = [
@@ -256,10 +258,11 @@ function CrewSummary({
     {
       id: "waiting",
       label: "Waiting on you",
-      value: rows ? String(rows.filter((r) => r.hudState === "waiting").length) : DASH,
+      value: questions === undefined ? DASH : String(questions),
       unit: "questions",
       window: "now",
-      definition: "Seats waiting for an answer.",
+      definition:
+        "Questions on the Needs you list waiting for your answer. A seat queued for the test lock is not one; the lanes show it as Waiting.",
       drill: { kind: "link", href: NEEDS_YOU_PATH, target: "the Needs you list" },
     },
     {

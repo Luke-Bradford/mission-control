@@ -1,4 +1,4 @@
-import type { Crew, MachineView, Telemetry } from "@mc/core";
+import { type Crew, type MachineView, METRICS, type Telemetry } from "@mc/core";
 import { useNow } from "../clock.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { cost, dur, elapsed, percent } from "../fmt.ts";
@@ -6,6 +6,7 @@ import { sessionTag, useMetrics } from "../metrics.ts";
 import { NEEDS_YOU_PATH, PAGE_PATHS, telemetryPath } from "../router.ts";
 import { DASH } from "./common.ts";
 import { crewCounts, crewVerdict, quotaWindows, tightestQuota } from "./health.ts";
+import { useOpenQuestions } from "./questions.ts";
 import { Stat, type StatSpec } from "./Stat.tsx";
 
 /** Days the cost comparison averages over, and the days the Merged comparison averages over. */
@@ -20,6 +21,8 @@ interface Inputs {
   crew: Crew | undefined;
   machine: MachineView | undefined;
   now: number;
+  /** Open questions on the Needs you list; undefined until it loads. */
+  questions: number | undefined;
   /** The registry's cost and merged readings (`useMetrics`), so every page shows one value. */
   registry: { cost: string | undefined; merged: string | undefined; session: string | null };
 }
@@ -35,8 +38,16 @@ function memFreePct(m: MachineView | undefined): number | null {
 }
 
 /** The band's eight stats; `—` for a figure still loading or not recorded. */
-export function healthStats({ t, t7, crew, machine, now, registry }: Inputs): StatSpec[] {
-  const counts = crew ? crewCounts(crew.rows) : null;
+export function healthStats({
+  t,
+  t7,
+  crew,
+  machine,
+  now,
+  questions,
+  registry,
+}: Inputs): StatSpec[] {
+  const counts = crew && questions !== undefined ? crewCounts(crew.rows, questions) : null;
   const quotas = quotaWindows(t);
   const verdict =
     counts && t && machine
@@ -64,7 +75,7 @@ export function healthStats({ t, t7, crew, machine, now, registry }: Inputs): St
       unit: "verdict",
       window: "now",
       definition:
-        "Needs attention for a quota at its stop level, a machine capacity warning, or a stalled or errored seat. Watch for a quota at its alert level or a seat question waiting. Otherwise Healthy.",
+        "Needs attention for a quota at its stop level, a machine capacity warning, or a stalled or errored seat. Watch for a quota at its alert level or a question waiting on you. Otherwise Healthy.",
       drill: { kind: "link", href: NEEDS_YOU_PATH, target: "the Needs you list" },
       detail: verdict?.reason,
       verdict: verdict?.word,
@@ -97,8 +108,8 @@ export function healthStats({ t, t7, crew, machine, now, registry }: Inputs): St
       value: registry.merged ?? DASH,
       metric: "merged",
       unit: "PRs",
-      window: scoped ? `today · ${registry.session}` : "today",
-      definition: `Pull requests merged today, compared with the daily mean of the last ${MERGED_DAYS} days.${followed}`,
+      window: scoped ? `${METRICS.merged.window} · ${registry.session}` : METRICS.merged.window,
+      definition: `Pull requests merged in the last 24 hours, compared with the daily mean of the last ${MERGED_DAYS} days.${followed}`,
       drill: { kind: "link", href: PAGE_PATHS.board, target: "Board, stage merged" },
       detail:
         mergedMean === null ? undefined : `vs ${mergedMean.toFixed(1)} ${MERGED_DAYS}-day mean`,
@@ -162,13 +173,14 @@ export function HealthBand({
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const machine = useResource<MachineView>(RESOURCES.machine).data;
   const now = useNow();
+  const questions = useOpenQuestions();
   const metrics = useMetrics();
   const registry = {
     cost: metrics.readings.cost?.value,
     merged: metrics.readings.merged?.value,
     session: sessionTag(metrics.session),
   };
-  const stats = healthStats({ t, t7, crew, machine, now, registry });
+  const stats = healthStats({ t, t7, crew, machine, now, questions, registry });
   return (
     <section className="band" aria-label="Health band">
       {stats.map((s) => (
