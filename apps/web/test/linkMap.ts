@@ -253,7 +253,7 @@ export const LINK_MAP: Record<
       rule(/^Tightest quota: /, /^\/telemetry\?tab=cost$/, "Quota used is on the Cost tab."),
       rule(/^Machine: /, /^\/telemetry\?tab=machine$/, "CPU and memory are on the Machine tab."),
       rule(
-        /^(Running|Waiting|Parked|Idle) seats: /,
+        /^(Running|Waiting|Parked|Idle|Stalled|Blocked|Error|Stopped) seats: /,
         /^\/agent$/,
         "A state count leads to the Agents page, where the seats are.",
       ),

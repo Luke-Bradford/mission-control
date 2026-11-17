@@ -504,6 +504,49 @@ describe("figures that cannot be opened and figures in the readouts", () => {
   });
 });
 
+describe("seats in a state the lanes do not draw", () => {
+  it.each([
+    ["stalled", "Stalled"],
+    ["blocked", "Blocked"],
+    ["error", "Error"],
+    ["stopped", "Stopped"],
+  ] as const)("shows a %s seat by name and in the totals", async (state, label) => {
+    window.history.replaceState(null, "", "/telemetry");
+    const fetch = stub();
+    const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetch.mockImplementation(async (...a: unknown[]) =>
+      a[0] === "/api/crew?shape=summary"
+        ? new Response(
+            JSON.stringify({
+              rows: [
+                crewRow({ id: "shop-app-ta", hudState: "running" }),
+                crewRow({ id: "studio", hudState: state }),
+              ],
+              firstRunToday: null,
+            }),
+          )
+        : answer(...a),
+    );
+    render(<Telemetry />);
+    await waitFor(() =>
+      expect(document.querySelector("#tCrewState .lane .lane-state")).toBeTruthy(),
+    );
+    const lanes = [...document.querySelectorAll("#tCrewState .lane")];
+    // visible on the seat's own lane, not only in its accessible text
+    expect(lanes[1]?.querySelector(".lane-state")?.textContent).toBe(state);
+    expect(lanes[0]?.querySelector(".lane-state")).toBeNull();
+    const rows = [...document.querySelectorAll("#tCrewState .readout li")].map(
+      (li) => `${li.textContent?.replace(/Seats .*$/, "").trim()}`,
+    );
+    const counts = [...document.querySelectorAll("#tCrewState .readout li")].map((li) =>
+      Number.parseInt(li.querySelector("a")?.textContent ?? "0", 10),
+    );
+    // every seat in view is counted once
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(2);
+    expect(rows.some((r) => r.includes(label))).toBe(true);
+  });
+});
+
 describe("states", () => {
   it("is busy with a loading panel while the hub has not answered", async () => {
     window.history.replaceState(null, "", "/telemetry");

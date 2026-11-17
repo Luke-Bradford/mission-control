@@ -4,6 +4,7 @@ import { useSeatName } from "../crew.ts";
 import { dur, hhmm, kTokens, percent } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Panel } from "../hud/Panel.tsx";
+import { Pill } from "../hud/Pill.tsx";
 import { agentPath, NEEDS_YOU_PATH, PAGE_PATHS, type TelemetryView } from "../router.ts";
 import { Subagents, ToolLatency } from "./AgentsGroup.tsx";
 import { DASH, indexOf, type Scope } from "./common.ts";
@@ -31,14 +32,13 @@ function axisLabels(from: number, to: number, tz: string | null): { at: number; 
   }));
 }
 
-/** The lane state a live seat state reads as; absent for states the four lanes do not draw. */
-const LIVE_LANE: Partial<Record<HudState, SpanState>> = {
-  running: "running",
-  waiting: "waiting",
-  parked: "parked",
-  idle: "idle",
-  stopped: "idle",
-};
+/** The live states a readout counts besides the four a lane draws; each is shown only while a seat is in it. */
+const EXCEPTIONAL: { key: HudState; label: string; tone: "crit" | "warn" | "neutral" }[] = [
+  { key: "stalled", label: "Stalled", tone: "crit" },
+  { key: "error", label: "Error", tone: "crit" },
+  { key: "blocked", label: "Blocked", tone: "warn" },
+  { key: "stopped", label: "Stopped", tone: "neutral" },
+];
 
 function Lanes({
   t,
@@ -63,8 +63,8 @@ function Lanes({
     const live = crew?.rows.find((r) => r.id === a.id)?.hudState ?? null;
     return { agent: a, spans: mine, live };
   });
-  const nowCount = (state: SpanState) =>
-    lanes.filter((l) => l.live !== null && LIVE_LANE[l.live] === state).length;
+  const nowCount = (state: HudState) => lanes.filter((l) => l.live === state).length;
+  const exceptional = EXCEPTIONAL.filter((e) => nowCount(e.key) > 0);
   const width = to - from;
   if (t && !t.series)
     return (
@@ -97,6 +97,14 @@ function Lanes({
                   );
                 })}
               </div>
+              {live && EXCEPTIONAL.some((e) => e.key === live) && (
+                <Pill
+                  tone={EXCEPTIONAL.find((e) => e.key === live)?.tone ?? "neutral"}
+                  className="lane-state"
+                >
+                  {live}
+                </Pill>
+              )}
             </li>
           ))}
         </ul>
@@ -122,6 +130,19 @@ function Lanes({
                 text={`${nowCount(s.key)} now`}
                 label={`${s.label} seats`}
                 definition={`Seats in the ${s.label.toLowerCase()} state now, of the seats in view. Opens the Agents page.`}
+                href={PAGE_PATHS.agent}
+              />
+            </span>
+          </li>
+        ))}
+        {exceptional.map((e) => (
+          <li key={e.key}>
+            <Pill tone={e.tone}>{e.label}</Pill>
+            <span className="vl">
+              <Cell
+                text={`${nowCount(e.key)} now`}
+                label={`${e.label} seats`}
+                definition={`Seats ${e.key} now, of the seats in view. Opens the Agents page.`}
                 href={PAGE_PATHS.agent}
               />
             </span>
