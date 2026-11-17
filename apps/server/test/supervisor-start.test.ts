@@ -518,9 +518,13 @@ describe("startRun eligibility", () => {
     });
 
     it("refuses an outside-area glob with the current grant error", async () => {
-      await refused(422, grantUngrantableText("apps/web/**", "it is not a plain repo-relative file path"), {
-        fetchTicket: ticketWith({ body: "Paths: apps/web/**\n" }),
-      });
+      await refused(
+        422,
+        grantUngrantableText("apps/web/**", "it is not a plain repo-relative file path"),
+        {
+          fetchTicket: ticketWith({ body: "Paths: apps/web/**\n" }),
+        },
+      );
     });
 
     it("asks approval only for an outside plain file", async () => {
