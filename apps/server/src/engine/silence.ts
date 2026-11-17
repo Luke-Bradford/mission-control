@@ -12,9 +12,8 @@ export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): n
   // FLIGHT, watch and observed-loop runs carry no ticket or no seat session.
   const working: { runId: string; accountId: string; budgetParked: boolean }[] = [];
   for (const session of store.activeSeatSessions()) {
-    const run = session.runId === null ? undefined : store.run(session.runId);
-    if (run === undefined || run.endedAt !== null || run.ticket === null || run.loop?.aside)
-      continue;
+    const run = session.runId === null ? null : store.run(session.runId);
+    if (run === null || run.endedAt !== null || run.ticket === null || run.loop?.aside) continue;
     const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
     if (seat === undefined) continue;
     const parked = run.loop?.parked;
