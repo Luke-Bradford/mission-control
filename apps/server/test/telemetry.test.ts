@@ -1804,7 +1804,7 @@ describe("crew seats", () => {
   });
 
   describe("a seat's waiting share", () => {
-    const NOON =at("2026-10-17T15:00:00Z");
+    const NOON = at("2026-10-17T15:00:00Z");
     // local midnight 2026-10-16T23:00Z: 16h elapsed at NOON
     const seatShare = () => tel("6h", NOON).utilisation.find((u) => u.agentId === "GUIDO-1");
     const ran = () => {

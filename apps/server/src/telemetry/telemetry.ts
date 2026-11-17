@@ -391,7 +391,7 @@ export function telemetry(
     entry.roundsSum += Math.max(...rvs.map((r) => r.round));
   }
 
-  const throughputBucketMs =rangeMs <= DAY_MS ? HOUR_MS : DAY_MS;
+  const throughputBucketMs = rangeMs <= DAY_MS ? HOUR_MS : DAY_MS;
   const throughputPoints = Array.from(
     { length: Math.ceil(rangeMs / throughputBucketMs) },
     (_, index) => ({ at: since + index * throughputBucketMs, merged: 0 }),
