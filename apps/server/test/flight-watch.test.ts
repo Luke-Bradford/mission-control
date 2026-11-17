@@ -3143,9 +3143,9 @@ describe("wakeSummary", () => {
     it("is true for a question, a free build seat with a ticket, or a ruling park FLIGHT settles", () => {
       expect(pending(state({ questions: [q] }))).toBe(true);
       expect(pending(state({ seats: [s({ free: true })], tickets: [ticket] }))).toBe(true);
-      expect(
-        pending(state({ seats: [s({ parked: { kind: "ruling", reason: "x" } })] })),
-      ).toBe(true);
+      expect(pending(state({ seats: [s({ parked: { kind: "ruling", reason: "x" } })] }))).toBe(
+        true,
+      );
     });
 
     it("a stuck park is the engine's: it is not pending and leaves the wake facts unchanged", () => {

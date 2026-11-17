@@ -24,7 +24,6 @@ import {
   answerLineKey,
   asideEventText,
   asideForAnswerEventText,
-  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   awayDiffSafe,
@@ -167,7 +166,7 @@ import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
-import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
+import { wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
@@ -1044,7 +1043,6 @@ export function createEngine(deps: EngineDeps): Engine {
       asideOk: reviewer !== null,
       // a question FLIGHT passed to the operator: the run waits off its seat for the answer
       operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
-      reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
         : {}),
@@ -1665,14 +1663,12 @@ export function createEngine(deps: EngineDeps): Engine {
         const worktree = supervisor.seat(run.agentId)?.worktree ?? null;
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
-        // (a run set aside mid-build is due back as soon as the rework is out of the way)
         // (not while the run waits for the operator's answer: that wakes it)
         const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
         const waitsOnPerson = asked !== undefined;
         cur.aside = {
           worktree,
-          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
-          ...(a.displaced ? { displaced: true as const } : {}),
+          wake: cur.phase === "working" && !waitsOnPerson,
           ...(asked ? { ask: asked.id } : {}),
         };
         store.setRunLoop(run.id, cur);
@@ -1688,11 +1684,9 @@ export function createEngine(deps: EngineDeps): Engine {
           run.id,
           waitsOnPerson
             ? asideForAnswerEventText(call)
-            : cur.phase === "working" || a.displaced
-              ? asideForReworkEventText(call)
-              : cur.phase === "ci"
-                ? asideInCiEventText(call)
-                : asideEventText(call),
+            : cur.phase === "ci"
+              ? asideInCiEventText(call)
+              : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);

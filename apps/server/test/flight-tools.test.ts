@@ -113,7 +113,6 @@ import {
   RETURN_NOT_SEAT_QUESTION,
   type RepoRules,
   type Run,
-  type RunLoop,
   researchText,
   retiredBriefText,
   returnedQuestionText,
@@ -2819,14 +2818,19 @@ describe("comms_pin", () => {
 describe("message_seat", () => {
   it("sends the text to the seat and records a message; unpark is not an argument", async () => {
     live("guido-1", "r-g");
-    expect(await call("message_seat", { seat: "guido-1", text: "Carry on", basis: "silent" })).toEqual({
+    expect(
+      await call("message_seat", { seat: "guido-1", text: "Carry on", basis: "silent" }),
+    ).toEqual({
       text: "Sent to GUIDO-1.",
     });
     expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
     expect(engineCalls).toEqual([]);
-    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1", decision: "Carry on" }]);
+    expect(decisions()).toMatchObject([
+      { kind: "message", seatId: "guido-1", decision: "Carry on" },
+    ]);
     expect(
-      (await call("message_seat", { seat: "guido-1", text: "x", unpark: true, basis: "b" })).isError,
+      (await call("message_seat", { seat: "guido-1", text: "x", unpark: true, basis: "b" }))
+        .isError,
     ).toBe(true);
   });
 });

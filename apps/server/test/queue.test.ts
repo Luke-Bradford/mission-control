@@ -32,7 +32,7 @@ import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
 import { ProfilesError } from "../src/config/profiles.ts";
 import type { CcConfig } from "../src/config.ts";
-import { reworkDueBesides, wakeDueAsideRun } from "../src/engine/aside.ts";
+import { wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
   accountHoldsNewWork,
@@ -1149,23 +1149,11 @@ describe("takeNext", () => {
     store.upsertRun(run({ id: "r-on-seat", agentId: SERVER, ticket: `${REPO}#9`, loop: aside }));
     seatRow("running", "r-on-seat");
     expect(wakeDueAsideRun(store, SERVER)).toBeUndefined();
-    store.upsertRun(run({ id: "r-next", agentId: SERVER, ticket: `${REPO}#10`, loop: NEW_LOOP }));
-    expect(reworkDueBesides(store, store.run("r-next") as Run)).toBe(false);
   });
 
-  it("rework first: two reworks come back oldest first, and a run displaced mid-build after both", () => {
+  it("rework first: two reworks come back oldest first", () => {
     const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
     const at = (n: number) => NOW - n * 60_000;
-    // the displaced one is the oldest, but has no push: it waits behind both reworks
-    store.upsertRun(
-      run({
-        id: "r-displaced",
-        agentId: SERVER,
-        ticket: `${REPO}#7`,
-        startedAt: at(30),
-        loop: { ...aside, phase: "working" },
-      }),
-    );
     for (const [id, n, started] of [
       ["r-younger", 8, at(10)],
       ["r-older", 9, at(20)],
@@ -1178,38 +1166,6 @@ describe("takeNext", () => {
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-older");
     store.setRunLoop("r-older", { ...aside, aside: { worktree: "/w/x", wake: false } });
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-younger");
-    store.setRunLoop("r-younger", { ...aside, aside: { worktree: "/w/x", wake: false } });
-    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-displaced");
-  });
-
-  it("rework first: a pushed run displaced with a refused commit waits behind the rework, and keeps its worktree", () => {
-    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
-    const at = (n: number) => NOW - n * 60_000;
-    // the refused run is the oldest, but waits behind the rework it made way for
-    store.upsertRun(
-      run({
-        id: "r-refused",
-        agentId: SERVER,
-        ticket: `${REPO}#7`,
-        startedAt: at(30),
-        loop: {
-          ...aside,
-          phase: "ci",
-          aside: { worktree: "/w/refused", wake: true, displaced: true },
-        },
-      }),
-    );
-    store.setRunPush({ runId: "r-refused", sha: "a".repeat(40), at: NOW });
-    store.upsertRun(
-      run({ id: "r-rework", agentId: SERVER, ticket: `${REPO}#9`, startedAt: at(10), loop: aside }),
-    );
-    store.setRunPush({ runId: "r-rework", sha: "b".repeat(40), at: NOW });
-    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-rework");
-    // the refused run does not hold up the rework (two reworks never displace each other)
-    expect(reworkDueBesides(store, store.run("r-rework") as Run)).toBe(false);
-    store.setRunLoop("r-rework", { ...aside, aside: { worktree: "/w/x", wake: false } });
-    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-refused");
-    expect(store.run("r-refused")?.loop?.aside?.worktree).toBe("/w/refused");
   });
 
   it("rework first: blocking findings on the sha the pushed head carries hold the seat", async () => {

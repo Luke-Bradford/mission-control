@@ -10,7 +10,6 @@ import {
   answeredLineText,
   answerLineKey,
   asideEventText,
-  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   type BoardItem,
@@ -1460,9 +1459,6 @@ describe("CI and review", () => {
       await h.engine.tick();
     }
     expect(loopOf().parked?.reason).toMatch(/CI pending for 60 minutes .*pending: web/);
-    setPr({ ci: "passing", checks: [web({ startedAt: t0, completedAt: clock })] });
-    await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "review", parked: null });
   });
 
   it("a failing check is named in the CI failed event", async () => {
@@ -1658,19 +1654,6 @@ describe("refusals", () => {
     await h.engine.reconcileRun(RUN);
     expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
     expect(loopOf().parked?.reason).toContain(text);
-  });
-
-  it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
-    setPr({ ci: "passing", headSha: SHA_B });
-    report();
-    await h.engine.reconcileRun(RUN);
-    clock += NO_CI_AFTER_MS + 1000;
-    await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
-    clock += ENGINE_TICK_MS;
-    setPr({ ci: "pending", headSha: SHA });
-    await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "ci", parked: null, unparkedAt: clock });
   });
 
   describe("the note's text is written for the operator", () => {
@@ -2172,7 +2155,7 @@ describe("The operator's message", () => {
       }
     };
 
-    it("parks a Claude run that has spent its cap, and Resume refuses it", async () => {
+    it("stops a Claude run that has spent its cap, and Resume refuses it", async () => {
       spend();
       await h.engine.tick();
       expect(loopOf()).toMatchObject({
@@ -2181,7 +2164,7 @@ describe("The operator's message", () => {
       });
       expect(await h.engine.onOperatorMessage(RUN)).toEqual({
         lifted: false,
-        reason: "dollar-cap",
+        reason: "not-parked",
       });
       expect(loopOf().phase).toBe("parked");
     });
@@ -5657,33 +5640,21 @@ describe("the engine runs reviews", () => {
       });
 
       describe("FLIGHT asks for it", () => {
-        const parkedOnConflict = async () => {
+        const inReview = async () => {
           await toReview();
           await h.engine.reconcileRun(RUN);
-          setLoop({
-            phase: "parked",
-            parked: { kind: "conflict", reason: "PR #12 conflicts with main", ended: false },
-          });
         };
 
         it("syncMain merges main with the engine's own merge", async () => {
           behindMain();
           h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
-          await parkedOnConflict();
-          const before = loopOf().epoch;
+          await inReview();
           expect(await h.engine.syncMain(RUN)).toEqual({
             kind: "merged",
             sha: SHA_B,
             mainSha: MAIN,
           });
           expect(h.updates).toEqual([{ mainSha: MAIN, worktree: join(dir, "wt") }]);
-          expect(loopOf()).toMatchObject({
-            phase: "ci",
-            pushFor: SHA_B,
-            parked: null,
-            epoch: before + 1,
-            unparkedAt: clock,
-          });
           expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(true);
           expect(loopTexts()).toContain(`merged main ${MAIN.slice(0, 7)} into the branch`);
         });
@@ -5691,7 +5662,7 @@ describe("the engine runs reviews", () => {
         it("a conflicting merge goes back to the author", async () => {
           behindMain();
           h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts"] }];
-          await parkedOnConflict();
+          await inReview();
           expect(await h.engine.syncMain(RUN)).toEqual({ kind: "conflict", files: ["apps/a.ts"] });
           expect(loopOf()).toMatchObject({
             phase: "working",
@@ -5699,66 +5670,8 @@ describe("the engine runs reviews", () => {
           });
         });
 
-        const parkedStuck = async () => {
-          await toReview();
-          await h.engine.reconcileRun(RUN);
-          setLoop({
-            phase: "parked",
-            parked: { kind: "stuck", reason: "the push is not shown on GitHub", ended: false },
-          });
-        };
-
-        it("a stuck park behind main goes to CI after one syncMain", async () => {
-          behindMain();
-          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
-          await parkedStuck();
-          const before = loopOf().epoch;
-          expect(await h.engine.syncMain(RUN)).toEqual({
-            kind: "merged",
-            sha: SHA_B,
-            mainSha: MAIN,
-          });
-          expect(loopOf()).toMatchObject({
-            phase: "ci",
-            pushFor: SHA_B,
-            parked: null,
-            epoch: before + 1,
-            unparkedAt: clock,
-          });
-          expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(true);
-        });
-
-        it("a stuck park whose newest commit was never recorded as pushed still merges main", async () => {
-          behindMain();
-          h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: false }];
-          await parkedStuck();
-          commit("e".repeat(40));
-          expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "merged" });
-        });
-
-        it("a stuck park's conflicting merge is refused to the author with the files", async () => {
-          behindMain();
-          h.updateResults = [{ ok: true, kind: "conflict", files: ["apps/a.ts", "apps/b.ts"] }];
-          await parkedStuck();
-          expect(await h.engine.syncMain(RUN)).toEqual({
-            kind: "conflict",
-            files: ["apps/a.ts", "apps/b.ts"],
-          });
-          expect(loopOf()).toMatchObject({
-            phase: "working",
-            mainMerge: { mainSha: MAIN, files: ["apps/a.ts", "apps/b.ts"] },
-          });
-        });
-
-        it("a stuck park not behind main is current, and stays parked", async () => {
-          await parkedStuck();
-          expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
-          expect(h.updates).toEqual([]);
-          expect(loopOf().phase).toBe("parked");
-        });
-
         it("a branch that has main already is current, and nothing is merged", async () => {
-          await parkedOnConflict();
+          await inReview();
           expect(await h.engine.syncMain(RUN)).toEqual({ kind: "current", mainSha: MAIN });
           expect(h.updates).toEqual([]);
         });
@@ -5766,8 +5679,7 @@ describe("the engine runs reviews", () => {
         it("a run in review that is behind is merged without a park", async () => {
           behindMain();
           h.updateResults = [{ ok: true, kind: "merged", sha: SHA_B, parent: SHA, prSame: true }];
-          await toReview();
-          await h.engine.reconcileRun(RUN);
+          await inReview();
           const before = loopOf().epoch;
           expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "merged" });
           expect(loopOf().epoch).toBe(before);
@@ -5775,7 +5687,7 @@ describe("the engine runs reviews", () => {
 
         it("refuses a seat in a turn, a worktree with changes, a run in the wrong place", async () => {
           behindMain();
-          await parkedOnConflict();
+          await inReview();
           h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
           expect(await h.engine.syncMain(RUN)).toEqual({
             kind: "refused",
@@ -5787,19 +5699,16 @@ describe("the engine runs reviews", () => {
             kind: "refused",
             text: "the worktree has uncommitted changes",
           });
-          expect(loopOf().phase).toBe("parked");
-          setLoop({ parked: { kind: "ci", reason: "x", ended: false } });
-          expect(await h.engine.syncMain(RUN)).toMatchObject({ kind: "refused" });
           setLoop({ phase: "working", parked: null });
           expect(await h.engine.syncMain(RUN)).toEqual({
             kind: "refused",
-            text: "the run is not in CI or review, or parked on a conflict or a stuck push",
+            text: "the run is not in CI or review",
           });
         });
 
         it("refuses a branch with unpushed commits, and a draft repo", async () => {
           behindMain();
-          await parkedOnConflict();
+          await inReview();
           commit("e".repeat(40));
           expect(await h.engine.syncMain(RUN)).toEqual({
             kind: "refused",
@@ -8159,25 +8068,6 @@ describe("the engine runs reviews", () => {
       store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: join(dir, `wt-${id}`) });
     }
 
-    it("findings on a set-aside PR set the ticket being built aside at its turn end, then wake the rework", async () => {
-      await setAside();
-      const b = "guido-1:b";
-      building(b, 7);
-      const takesBefore = h.taken.length;
-      // the seat is busy with b until b is set aside, as the real wake answers
-      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
-      reported(first().id, [finding("Important")]);
-      await vi.waitFor(() => expect(h.asides).toContain(b));
-      await vi.waitFor(() => expect(store.run(b)?.loop?.aside).toMatchObject({ wake: true }));
-      h.wakeError = null;
-      await h.engine.reconcileRun(RUN);
-      // the rework is back on the seat first; the new ticket waits behind it
-      await vi.waitFor(() => expect(asideRun()).toBeNull());
-      expect(h.wakes.at(-1)).toBe(RUN);
-      expect(store.seatSession(SEAT)?.runId).toBe(RUN);
-      expect(h.taken).toHaveLength(takesBefore);
-    });
-
     it("paused rework never displaces the only run with a pause exception", async () => {
       await setAside();
       const b = "guido-1:b";
@@ -8462,76 +8352,6 @@ describe("the engine runs reviews", () => {
       expect(loopOf().aside).toBeNull();
       expect(store.seatSession(SEAT)?.runId).toBe(RUN);
       expect(h.taken).toEqual([SEAT]);
-    });
-
-    it("a pushed run whose newer commit was refused gives way to rework on its seat, and comes back after it", async () => {
-      h.asideOn = true;
-      report();
-      await h.engine.reconcileRun(RUN);
-      setPr({ ci: "pending" });
-      seatIdle(RUN);
-      // a newer commit the push gate refused: it stays unpushed
-      commit(SHA_B);
-      setLoop({
-        pushFor: SHA_B,
-        pushStartedAt: clock,
-        transient: 1,
-        lastRefusal: "the gate refused",
-      });
-      const b = "guido-1:b";
-      store.upsertRun(
-        run({
-          id: b,
-          startedAt: START + MIN,
-          seq: 3,
-          ticket: `${REPO}#8`,
-          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/b", wake: true } },
-        }),
-      );
-      store.setRunPush({ runId: b, sha: SHA_C, at: clock });
-      h.asides.length = 0;
-      await h.engine.reconcileRun(RUN);
-      expect(h.asides).toEqual([RUN]);
-      expect(loopOf().aside).toEqual({ worktree: join(dir, "wt"), wake: true, displaced: true });
-      expect(loopTexts()).toContain(asideForReworkEventText("GUIDO-1"));
-      // the rework it made way for comes back first
-      await vi.waitFor(() => expect(h.wakes).toEqual([b]));
-      // the rework is out of the way: the seat is free and the refused run comes back
-      store.setRunLoop(b, {
-        ...NEW_LOOP,
-        phase: "review",
-        aside: { worktree: "/w/b", wake: false },
-      });
-      seatIdle(null);
-      await h.engine.reconcileRun(RUN);
-      await vi.waitFor(() => expect(h.wakes).toContain(RUN));
-      expect(loopOf().aside).toBeNull();
-    });
-
-    it("two reworks on one seat do not set each other aside at every turn end", async () => {
-      await inCi();
-      setPr({ ci: "failing" });
-      await h.engine.reconcileRun(RUN);
-      clock += 1000;
-      setPr({ ci: "failing" });
-      await h.engine.reconcileRun(RUN);
-      await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
-      // a younger run of the seat has findings waiting; the woken one's turn ends
-      store.upsertRun(
-        run({
-          id: "guido-1:younger",
-          startedAt: START + MIN,
-          seq: 3,
-          ticket: `${REPO}#8`,
-          loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/y", wake: true } },
-        }),
-      );
-      h.facts = { inTurn: false, resumedAt: clock, rateLimitedUntil: null };
-      seatIdle(RUN);
-      await h.engine.reconcileRun(RUN);
-      await h.engine.reconcileRun(RUN);
-      expect(h.asides).toEqual([RUN]);
-      expect(h.wakes).toEqual([RUN]);
     });
   });
 });

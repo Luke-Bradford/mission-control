@@ -537,8 +537,6 @@ export const answeredLineText =
   "The operator answered your question. The answer is in your Comms inbox: read it and carry on with the ticket.";
 export const answerLineKey = (runId: string, questionId: number): string =>
   `answer:${runId}:${questionId}`;
-export const asideForReworkEventText = (call: string): string =>
-  `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -666,8 +664,6 @@ export interface LoopSnapshot {
    * the run is parked off the seat, which takes the next ticket, and the run comes back once answered.
    */
   operatorAsk?: boolean;
-  /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
-  reworkDue?: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
@@ -748,7 +744,7 @@ export type LoopAction =
   | { kind: "request-review"; sha: string; attempt: number }
   | { kind: "supersede-review"; reviewId: number }
   | { kind: "pr-body"; reviewId: number }
-  | { kind: "set-aside"; displaced?: true }
+  | { kind: "set-aside" }
   | { kind: "wake" }
   | { kind: "update-branch"; mainSha: string }
   | { kind: "mark-ready" }
@@ -1587,43 +1583,6 @@ function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
 }
 
 /**
- * Whether a run that has pushed holds a newer commit the push gate refused (in ci with a refusal
- * recorded, or parked as refused or stuck). A fresh commit in ci whose push is not yet tried is not. The commit stays in its worktree, unpushed; the seat's other run may hold
- * the rework that fixes the refusal.
- */
-function refusedPush(s: LoopSnapshot, loop: RunLoop): boolean {
-  return (
-    s.pushed !== null &&
-    s.headCommit !== null &&
-    s.headCommit !== s.pushed.sha &&
-    ((loop.phase === "ci" && loop.lastRefusal !== null) ||
-      (loop.phase === "parked" &&
-        (loop.parked?.kind === "refused" || loop.parked?.kind === STUCK_PARK)))
-  );
-}
-
-/**
- * Whether the run leaves its seat at this turn end because rework is due on another of the seat's
- * runs: one being built, or one that pushed and holds a refused newer commit. Its worktree is kept
- * as it is; it comes back once the rework is out of the way.
- */
-function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
-  const { seat } = s;
-  return (
-    s.reworkDue === true &&
-    // a run in review or working on a pushed sha is rework itself (or in flight); two reworks must
-    // not displace each other
-    ((s.pushed === null && loop.phase === "working") || refusedPush(s, loop)) &&
-    !loop.aside &&
-    s.ended === null &&
-    seat.holdsRun &&
-    seat.state === "idle" &&
-    !seat.inTurn &&
-    !seat.openQuestion
-  );
-}
-
-/**
  * The main sha to merge into the run's branch now, or null. In a merge workspace, a run waiting at
  * its pushed sha is updated when its PR conflicts with main; its seat is between turns, or the
  * run is aside.
@@ -1885,11 +1844,9 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : !pendingLineDue(s, loop) && displaceDue(s, loop)
-            ? { kind: "set-aside", displaced: true }
-            : !pendingLineDue(s, loop) && (asideDue(s, loop) || parkOnPersonDue(s, loop))
-              ? { kind: "set-aside" }
-              : dueLine(s, loop);
+          : !pendingLineDue(s, loop) && (asideDue(s, loop) || parkOnPersonDue(s, loop))
+            ? { kind: "set-aside" }
+            : dueLine(s, loop);
     if (line !== null) actions.push(line);
   }
   return actions;
