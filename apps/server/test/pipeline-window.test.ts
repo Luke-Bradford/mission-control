@@ -1,6 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -148,5 +150,64 @@ describe("ciFailureClass", () => {
     expect(ciFailureClass("validate")).toBe("lint-typecheck-build");
     expect(ciFailureClass("server-process (2)")).toBe("tests");
     expect(ciFailureClass("docs")).toBe("other");
+  });
+});
+
+const SCRIPT = resolve(
+  fileURLToPath(new URL(".", import.meta.url)),
+  "../scripts/pipeline-window.ts",
+);
+const USAGE =
+  "Usage: pipeline-window.ts --db <copy of the hub DB> --repo <repo id> --from <ISO time> [--hours 24]";
+function cli(...args: string[]) {
+  return spawnSync(process.execPath, ["--experimental-strip-types", SCRIPT, ...args], {
+    encoding: "utf8",
+  });
+}
+
+describe("command line", () => {
+  it("reads a database copy over the default 24-hour window", () => {
+    crewRun(10);
+    ci(10, "validate", "FAILURE");
+    const r = cli("--db", path, "--repo", REPO, "--from", "2026-11-16T00:00:00Z");
+    expect(r.status).toBe(0);
+    const lines = r.stdout.trimEnd().split("\n");
+    expect(lines[0]).toBe(
+      "Pipeline window 2026-11-16T00:00:00.000Z to 2026-11-17T00:00:00.000Z, repo mission-control",
+    );
+    expect(lines[2]).toBe("Failed, lint/typecheck/build (validate): 1");
+  });
+
+  it("honours --hours", () => {
+    const r = cli("--db", path, "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "1");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("to 2026-11-16T01:00:00.000Z");
+  });
+
+  it.each([
+    ["no arguments", []],
+    ["a missing --db", ["--repo", REPO, "--from", "2026-11-16T00:00:00Z"]],
+    ["a missing --repo", ["--db", "x", "--from", "2026-11-16T00:00:00Z"]],
+    ["a missing --from", ["--db", "x", "--repo", REPO]],
+    ["an unparseable --from", ["--db", "x", "--repo", REPO, "--from", "not a date"]],
+    ["zero hours", ["--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "0"]],
+    ["non-numeric hours", ["--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "abc"]],
+  ])("prints the usage line and exits 2 for %s", (_name, args) => {
+    const r = cli(...args);
+    expect(r.status).toBe(2);
+    expect(r.stderr.trim()).toBe(USAGE);
+    expect(r.stdout).toBe("");
+  });
+
+  it("says it did not read a missing or non-database file and exits 1", () => {
+    const missing = join(dir, "nope.db");
+    const a = cli("--db", missing, "--repo", REPO, "--from", "2026-11-16T00:00:00Z");
+    expect(a.status).toBe(1);
+    expect(a.stdout.trim()).toBe(`Not read: ${missing} is not a hub database.`);
+    const junk = join(dir, "junk.db");
+    writeFileSync(junk, "this is not sqlite");
+    const b = cli("--db", junk, "--repo", REPO, "--from", "2026-11-16T00:00:00Z");
+    expect(b.status).toBe(1);
+    expect(b.stdout.trim()).toBe(`Not read: ${junk} is not a hub database.`);
   });
 });
