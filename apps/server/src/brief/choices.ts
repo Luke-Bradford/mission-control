@@ -337,11 +337,12 @@ export async function chooseBrief(
       if (sourceMessageId !== null && item.agentId !== null && aliases.length === 2)
         deps.store.settleCommsItem(sourceMessageId, "CAPCOM", "Chosen in Needs you", deps.now());
       deps.store.ack(aliases, deps.now());
-      // answered: it leaves Needs you whatever its repo, and is listed under Answered
+      // answered: it leaves Needs you whatever its repo, and is listed under Answered, once
+      // (under the displayed key, though every alias is acked and settled above)
       recordAnswered(
         deps.store,
         item,
-        aliases,
+        [key],
         current.options.find((option) => option.id === request.optionId)?.label ?? text,
         deps.now(),
         "seatId" in actor ? { seatId: actor.seatId } : { operator: true },

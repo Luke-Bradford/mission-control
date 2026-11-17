@@ -172,6 +172,9 @@ it("settles FLIGHT's labelled Comms question when its canonical choice is applie
     state: "applied",
   });
   expect(store.commsSettlement(message.id)).toMatchObject({ settledBy: "CAPCOM" });
+  expect(store.questionClosures(0, 10)).toEqual([
+    expect.objectContaining({ key, kind: "answered" }),
+  ]);
   expect(attentionItems(config, store, now).find((item) => item.key === key)).toBeUndefined();
   expect(store.flightDecisions(0, 1)[0]).toMatchObject({
     about: `Brief choice ${key}`,
