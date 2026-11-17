@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_MIN_VERSION } from "@mc/core";
@@ -32,21 +32,40 @@ describe("Codex version probe", () => {
     expect(await version).toBe(CODEX_MIN_VERSION);
   });
 
-  it.each(["codex-cli 0.153.9", "unreadable", ""])("refuses %j", async (output) => {
+  it("refuses a version below the minimum, naming it, without a retry", async () => {
+    const marker = join(dir, "runs");
+    const script = `require("fs").appendFileSync(${JSON.stringify(marker)}, "x"); console.log("codex-cli 0.153.9");`;
+    await expect(probeCodexVersion(executable(script))).rejects.toThrow(
+      `Codex 0.153.9 is older than ${CODEX_MIN_VERSION}`,
+    );
+    expect(readFileSync(marker, "utf8")).toBe("x");
+  });
+
+  it.each(["unreadable", ""])("refuses unreadable output %j", async (output) => {
     await expect(
       probeCodexVersion(executable(`console.log(${JSON.stringify(output)});`)),
-    ).rejects.toThrow(`Codex requires ${CODEX_MIN_VERSION} or newer`);
+    ).rejects.toThrow("Codex version output was not readable");
   });
 
-  it("bounds an unresponsive version command", async () => {
-    await expect(probeCodexVersion(executable("setInterval(() => {}, 1000);"))).rejects.toThrow(
-      `Codex requires ${CODEX_MIN_VERSION} or newer`,
-    );
+  it("retries a timeout with a longer one and returns the version", async () => {
+    const marker = join(dir, "runs");
+    const script = `const fs = require("fs");
+const first = !fs.existsSync(${JSON.stringify(marker)});
+fs.writeFileSync(${JSON.stringify(marker)}, "x");
+if (first) setInterval(() => {}, 1000);
+else console.log("codex-cli ${CODEX_MIN_VERSION}");`;
+    expect(await probeCodexVersion(executable(script), [300, 5000])).toBe(CODEX_MIN_VERSION);
   });
 
-  it("refuses a missing executable", async () => {
+  it("says the check timed out when the retry times out too", async () => {
+    await expect(
+      probeCodexVersion(executable("setInterval(() => {}, 1000);"), [200, 300]),
+    ).rejects.toThrow("Codex version check timed out");
+  });
+
+  it("says Codex could not be run, with the reason", async () => {
     await expect(probeCodexVersion(join(dir, "missing"))).rejects.toThrow(
-      `Codex requires ${CODEX_MIN_VERSION} or newer`,
+      /Codex could not be run: .*ENOENT/,
     );
   });
 });
