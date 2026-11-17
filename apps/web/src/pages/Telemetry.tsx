@@ -6,7 +6,7 @@ import {
   type TelemetryRange,
 } from "@mc/core";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { useTz } from "../clock.ts";
+import { useNow, useTz } from "../clock.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { elapsed, hhmm } from "../fmt.ts";
 import { ChartCursorProvider } from "../hud/charts/Hover.tsx";
@@ -29,6 +29,12 @@ import { HealthBand } from "../telemetry/HealthBand.tsx";
 import { RunsDialog } from "../telemetry/RunsDialog.tsx";
 import type { StatSpec } from "../telemetry/Stat.tsx";
 import { TAB_PANEL_ID, TabBar, tabId } from "../telemetry/TabBar.tsx";
+import {
+  ThroughputCharts,
+  ThroughputSummaryRow,
+  ThroughputTable,
+  TICKET_SERIES_RANGE,
+} from "../telemetry/ThroughputTab.tsx";
 import { tabDef } from "../telemetry/tabs.ts";
 import "../telemetry/telemetry.css";
 
@@ -99,7 +105,9 @@ export function Telemetry() {
   const tab = telemetryTabParam(search);
   const view = telemetryViewParam(search);
   const def = tabDef(tab);
-  const [range, setRange] = useState<TelemetryRange>(DEFAULT_RANGE);
+  const [pickedRange, setRange] = useState<TelemetryRange>(DEFAULT_RANGE);
+  // Throughput's per-ticket series is the longest the server sends; the Range buttons are hidden there.
+  const range = tab === "throughput" ? TICKET_SERIES_RANGE : pickedRange;
   const [agent, setAgent] = useState("");
   const [account, setAccount] = useState("");
   const [ticket, setTicket] = useState("");
@@ -113,6 +121,7 @@ export function Telemetry() {
   const available = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account)).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const tz = useTz();
+  const now = useNow();
   const connection = useStore(streamStatus);
   const tickets = useMemo(
     () =>
@@ -196,7 +205,9 @@ export function Telemetry() {
       <section id="page-telemetry" data-tab={tab} className={refetching ? "refetching" : undefined}>
         <div className="toolbar">
           <h1 className="toolbar-heading">Telemetry</h1>
-          {!def.fixed && <Seg label="Range" options={RANGES} value={range} onChange={setRange} />}
+          {!def.fixed && (
+            <Seg label="Range" options={RANGES} value={pickedRange} onChange={setRange} />
+          )}
           {def.filters.includes("agent") && (
             <>
               <label className="s fg2" htmlFor={agentSel}>
@@ -260,7 +271,10 @@ export function Telemetry() {
             </span>
           )}
         </div>
-        {def.built && <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />}
+        {tab === "crew" && (
+          <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />
+        )}
+        {tab === "throughput" && <ThroughputSummaryRow t={t} onNeedsRoute={setRuns} />}
         <section
           id={TAB_PANEL_ID}
           className="tabpanel"
@@ -276,12 +290,18 @@ export function Telemetry() {
               <div className="grid" data-state={state}>
                 <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
               </div>
+            ) : tab === "throughput" ? (
+              view === "table" ? (
+                <ThroughputTable t={t} wait={scope.wait} dim={dim} />
+              ) : (
+                <ThroughputCharts t={t} wait={scope.wait} now={now} dim={dim} />
+              )
             ) : (
               <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
             )
           ) : (
             <ComingTab
-              tab={tab as Exclude<TelemetryTab, "crew">}
+              tab={tab as Exclude<TelemetryTab, "crew" | "throughput">}
               label={def.label}
               t={t}
               scope={scope}

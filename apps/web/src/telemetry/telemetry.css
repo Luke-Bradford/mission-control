@@ -8,7 +8,8 @@
 }
 
 /* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
-#page-telemetry[data-tab="crew"] {
+#page-telemetry[data-tab="crew"],
+#page-telemetry[data-tab="throughput"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(var(--crew-min, 520px), 1fr);
   overflow: visible;
@@ -283,6 +284,16 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: minmax(256px, 1fr);
   }
+}
+
+/* Throughput: four charts in a 2x2, or the one table across the width. */
+.tabpanel .grid[data-view="charts"][data-n="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(256px, 1fr));
+}
+
+.tabpanel .grid[data-view="table"][data-n="1"] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .tabpanel .grid > .panel {
@@ -791,4 +802,98 @@
 .crew-cell:hover .crew-cell-def,
 .crew-cell:focus-within .crew-cell-def {
   display: block;
+}
+
+/* throughput: legend keys, the dots chart, range bars and the step line */
+.tp-legend i {
+  --k: var(--accent);
+}
+
+.tp-legend i.k-bar {
+  background: var(--k);
+}
+
+.tp-legend i.k-dash {
+  width: 16px;
+  height: 0;
+  border-radius: 0;
+  border-top: 2px dashed var(--k);
+}
+
+.tp-legend i.k-line {
+  width: 16px;
+  height: 2px;
+  background: var(--k);
+}
+
+.tp-legend i.k-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--k);
+}
+
+.chart .dot {
+  fill: var(--accent);
+  fill-opacity: 0.85;
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.chart .cycle-line {
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.size-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.size-rows li {
+  display: grid;
+  grid-template-columns: minmax(88px, 30%) minmax(0, 1fr) minmax(72px, auto);
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.size-rows .lb {
+  color: var(--fg-2);
+}
+
+.size-rows .tr {
+  position: relative;
+  height: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.size-rows .rng {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.size-rows .tr b {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: -1px;
+  background: var(--fg);
+}
+
+.size-rows .vl {
+  text-align: right;
+}
+
+.tickets-panel .pnote {
+  flex: none;
 }

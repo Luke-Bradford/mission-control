@@ -37,6 +37,7 @@ export function VBars({
   height = 150,
   times,
   annotations = [],
+  guide,
 }: {
   bars: VBar[];
   label: string;
@@ -48,6 +49,8 @@ export function VBars({
   times?: number[];
   /** Events at known times, rendered only when the bars are timestamped. */
   annotations?: { at: number; label: string; color?: string }[];
+  /** A dashed horizontal line at this value (a mean). Its label belongs in the caller's legend. */
+  guide?: number;
 }) {
   const [ref, w] = useChartWidth(560);
   const [hover, setHover] = useState<number | null>(null);
@@ -168,6 +171,9 @@ export function VBars({
             </g>
           );
         })}
+        {guide !== undefined && (
+          <line className="guide" x1={x0} x2={x1} y1={Y(guide)} y2={Y(guide)} />
+        )}
         {times &&
           annotations
             .filter((annotation, index, all) => {
