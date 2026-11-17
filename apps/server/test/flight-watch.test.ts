@@ -6665,12 +6665,14 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(idleFact(T0 + GAP)).toEqual([`inco-1:${T0}`]);
   });
 
-  it("the wake line tells FLIGHT to promote or decide, never to wait on the operator or start a session", () => {
+  it("the wake line tells FLIGHT to follow the working list, allows an idle seat, and never says to wait on the operator or start a session", () => {
     tick(T0);
     const state = read(T0 + GAP);
     const line = wakeLine(state, state, ["idle guido-1:0"]);
     expect(line).toContain("guido-1");
-    expect(line).toMatch(/promote/i);
+    expect(line).toMatch(/working list/);
+    expect(line).toMatch(/leave it idle/);
+    expect(line).toMatch(/do not promote parked work or file a ticket/);
     expect(line).toMatch(/money, direction, irreversible/);
     expect(line).not.toMatch(/(start|open) (a|the|your) (new )?(controller |claude )?session/i);
     expect(line).not.toMatch(/controller session/i);

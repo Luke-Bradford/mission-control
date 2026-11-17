@@ -1093,7 +1093,7 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
-/** While a free build seat has open tickets near it and nothing starts, the hub wakes FLIGHT this often. */
+/** While a free build seat has open tickets near it and nothing starts, the hub logs one line per period this long. */
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
@@ -1131,13 +1131,11 @@ export const FLIGHT_LOOPS_SETTING = "flight.loops";
  */
 export const FLIGHT_GUARD_SETTING = "flight.guard";
 export const FLIGHT_MAIN_SETTING = "flight.main";
-/** `idle_no_work` and `budget_unused` are no longer raised; they stay listed so stored signals still read. */
 export const FLIGHT_SIGNAL_KINDS = [
   "flaky_test",
   "repeat_park",
   "main_red",
   "idle_seat",
-  "idle_no_work",
   "chain_stalled",
   "github_budget",
   "hub_error",
@@ -1152,9 +1150,10 @@ export const FLIGHT_SIGNAL_KINDS = [
   "question_changed",
   "waste_alarm",
   "stuck_pr",
-  "budget_unused",
   "wake_stuck",
 ] as const;
+/** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
+export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = ["idle_no_work", "budget_unused"];
 export interface FlightSignal {
   checks?: string[];
   told?: boolean;
@@ -1379,12 +1378,12 @@ export const idlePeriod = (ms: number): number | null =>
 export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["seats"] =>
   idle?.seats.filter((x) => idlePeriod(x.ms) !== null) ?? [];
 
-/** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
 /** What the wake says on every wake while the operator's messages are owed an answer. */
 export const owedAsk = (ids: readonly string[]): string =>
   `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
+/** The sentence FLIGHT is told when seats idle with tickets open: follow the working list; an idle seat is allowed. */
 export const IDLE_SEAT_ASK =
-  "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
+  "A free seat has stood idle while tickets are open. Start the next ticket the repo's pinned working list allows for it, or triage the tickets with no board status. If the working list has nothing this seat may start, leave it idle and log that with wait_on on the seat: do not promote parked work or file a ticket to keep it busy. A wait on a person is never the reason a seat idles: only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
 
 export interface FlightWakeList<T> {
   entries: T[];

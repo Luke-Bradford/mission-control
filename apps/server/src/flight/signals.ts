@@ -17,6 +17,7 @@ import {
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_OLD_PARK_MS,
   FLIGHT_PUSH_UNSEEN_MS,
+  FLIGHT_RETIRED_SIGNAL_KINDS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAITS_SETTING,
@@ -115,6 +116,10 @@ function read(store: Store, repo: string, now: number): RecordState {
   } as RecordState;
   const cutoff = now - FLIGHT_SIGNAL_KEEP_MS;
   for (const [key, entry] of Object.entries(state.signals)) {
+    if (FLIGHT_RETIRED_SIGNAL_KINDS.includes(entry.kind)) {
+      delete state.signals[key];
+      continue;
+    }
     const main =
       entry.kind === "main_red"
         ? stored<MainCi | null>(store, `${FLIGHT_MAIN_SETTING}:${repo}`, null)
