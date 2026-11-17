@@ -23,6 +23,8 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IMMEDIATE_REASONS,
+  FLIGHT_IMMEDIATE_SIGNALS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -39,6 +41,7 @@ import {
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
+  FLIGHT_PRS_SHOWN_SETTING,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -344,8 +347,10 @@ export function recordWakeReasons(
   at: number,
   causes: string[],
   wakeId?: string,
+  rode: string[] = [],
+  immediate: string[] = [],
 ): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId, rode, immediate);
 }
 
 /** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
@@ -670,7 +675,17 @@ export function flightArrivalSource(
 /** Per store, the PRs already listed as merged or closed (`repo#number:state`): each is listed once. */
 const shownByStore = new WeakMap<Store, Set<string>>();
 const shownPrs = (store: Store): Set<string> => {
-  const set = shownByStore.get(store) ?? new Set<string>();
+  const cached = shownByStore.get(store);
+  if (cached !== undefined) return cached;
+  let saved: unknown = [];
+  try {
+    saved = JSON.parse(store.getSetting(FLIGHT_PRS_SHOWN_SETTING) ?? "[]");
+  } catch {
+    // A damaged old setting must not stop a PR from being delivered again.
+  }
+  const set = new Set(
+    Array.isArray(saved) ? saved.filter((key): key is string => typeof key === "string") : [],
+  );
   shownByStore.set(store, set);
   return set;
 };
@@ -680,12 +695,20 @@ const shownKey = (p: { repoId: string; number: number; state: string }): string 
 /** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
+  let changed = false;
   for (const h of s.holds) {
     if (h.prState !== "open") store.markHoldTold(h.ref, h.prState);
   }
   for (const p of s.prs) {
-    if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
+    if (p.state !== "open") {
+      const key = shownKey({ repoId: s.repo, number: p.pr, state: p.state });
+      if (!shown.has(key)) {
+        shown.add(key);
+        changed = true;
+      }
+    }
   }
+  if (changed) store.setSetting(FLIGHT_PRS_SHOWN_SETTING, JSON.stringify([...shown].sort()));
 }
 
 /** The facts a delivered state leaves behind: the PRs that will leave the list are not counted. */
@@ -1177,7 +1200,7 @@ export function flightState(i: {
   const prs = store
     .pullRequests(session.repoId)
     .filter(
-      // a merge no longer wakes FLIGHT, so an unshown one waits a day for the next wake to carry it
+      // an unshown merge stays available until its immediate wake is delivered
       (p) =>
         p.state === "open" ||
         (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_METRICS_DAY_MS),
@@ -1793,7 +1816,7 @@ export function wakeFacts(
         .sort() ?? [],
     // CI, review and merge steps are digest-only; merge_stalled says when a ready PR has stood still
     prs: s.prs
-      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null)
+      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null || p.state === "merged")
       .map(
         (p) =>
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
@@ -2134,20 +2157,67 @@ export function leftWakeText(
 const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
 
 /** Fact categories that are routine pipeline steps: they wait for the batch window. */
-const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set([
-  "free",
-  "t",
-  "release",
-  "reviews",
-  "prFlow",
-]);
+const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set(["t", "reviews", "prFlow"]);
+
+/** Whether one added fact must wake FLIGHT immediately even when its category was learned. */
+export function immediateFact(category: string, item: unknown): boolean {
+  if (FLIGHT_IMMEDIATE_REASONS.includes(category)) return true;
+  const fact = String(item);
+  if (category === "signals") return FLIGHT_IMMEDIATE_SIGNALS.includes(fact.split(":", 1)[0] ?? "");
+  if (category === "items") return !fact.startsWith("pr:");
+  if (category === "prs") {
+    const parts = fact.split(":");
+    return (
+      (parts[2] === "true" && parts[3] === "open") ||
+      parts[3] === "merged" ||
+      Boolean(parts.slice(5).join(":"))
+    );
+  }
+  return false;
+}
+
+/** Changed learned categories whose additions can ride with another immediate reason. */
+export function batchedCategories(
+  previous: string,
+  current: string,
+  batched: ReadonlySet<string>,
+): string[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((category) => {
+      if (!batched.has(category)) return false;
+      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+      const added = (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
+      return added.length > 0 && added.every((v) => !immediateFact(category, v));
+    })
+    .sort();
+}
+
+/** Changed categories with an added immediate fact: a wake they cause could not have been batched. */
+export function immediateCategories(previous: string, current: string): string[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((category) => {
+      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+      return (after[category] ?? []).some(
+        (v) => !old.has(JSON.stringify(v)) && immediateFact(category, v),
+      );
+    })
+    .sort();
+}
 
 /**
  * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
  * moving. An operator message, question, blocker, park, signal, plan, instruction or the breaker is
  * never routine, so those wake FLIGHT at once. False when nothing changed.
  */
-export function routineOnly(previous: string, current: string): boolean {
+export function routineOnly(
+  previous: string,
+  current: string,
+  batched: ReadonlySet<string> = new Set(),
+): boolean {
   const before = JSON.parse(previous || "{}") as Facts;
   const after = JSON.parse(current) as Facts;
   let changed = false;
@@ -2159,13 +2229,19 @@ export function routineOnly(previous: string, current: string): boolean {
     if (added.length === 0 && removed.length === 0) continue;
     // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
     // breaker's lift is, as a lift alone wakes FLIGHT
-    if (added.length === 0 && !LIFTS_WAKE.has(category) && !ROUTINE_CATEGORIES.has(category))
+    if (
+      added.length === 0 &&
+      !LIFTS_WAKE.has(category) &&
+      !ROUTINE_CATEGORIES.has(category) &&
+      !batched.has(category)
+    )
       continue;
     changed = true;
     if (category === "items") {
       // a PR's own steps are routine; any other item (a message, a blocker) is not
-      if (!added.every((v) => String(JSON.parse(v)).startsWith("pr:"))) return false;
-    } else if (!ROUTINE_CATEGORIES.has(category)) return false;
+      if (!added.every((v) => !immediateFact(category, JSON.parse(v)))) return false;
+    } else if (added.some((v) => immediateFact(category, JSON.parse(v)))) return false;
+    else if (!ROUTINE_CATEGORIES.has(category) && !batched.has(category)) return false;
   }
   return changed;
 }

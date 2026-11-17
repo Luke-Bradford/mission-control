@@ -192,6 +192,27 @@ export interface FlightWakeRecord {
   reasons: string[];
   /** `flightWakeId(runId, n)`; absent on a wake stored before ids were kept. */
   wakeId?: string;
+  /** Batched categories that rode with an immediate wake. */
+  rode?: string[];
+  /** Cause categories that carried an immediate fact, which batching could not have held back. */
+  immediate?: string[];
+}
+
+export interface FlightWakeAction {
+  runId: string;
+  at: number;
+  reasons: string[];
+  rode: string[];
+  immediate: string[];
+  acted: boolean;
+}
+
+export interface FlightWakeActions {
+  wakes: number;
+  noAction: number;
+  share: number | null;
+  byReason: { reason: string; wakes: number; noAction: number }[];
+  batched: string[];
 }
 
 /** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
@@ -524,6 +545,8 @@ export interface FlightRetrospective {
   productPass: { pages: string[]; instruction: string };
   /** Tickets opened and closed, runs per ticket, review rounds and idle seat-hours. */
   counts?: WasteCounts;
+  /** How often FLIGHT woke without changing state, and which reasons are batched. */
+  wakeActions?: FlightWakeActions;
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -1095,6 +1118,8 @@ export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
 export const FLIGHT_WAITS_SETTING = "flight.waits";
 /** The setting that keeps the items FLIGHT was last shown, so a seen item is not a new wake reason. */
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
+/** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
+export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
 /** The furthest ahead a `wait_on` may look. */
 export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
@@ -1430,7 +1455,30 @@ export const FLIGHT_OPERATOR_WAKE_GAP_MS = 30_000;
  * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
  * together. Anything else wakes at once.
  */
-export const FLIGHT_BATCH_MS = 15 * 60_000;
+export const FLIGHT_BATCH_MS = 30 * 60_000;
+export const FLIGHT_BATCH_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+export const FLIGHT_BATCH_NO_ACTION_SHARE = 0.8;
+export const FLIGHT_BATCH_MIN_WAKES = 10;
+export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
+  "q",
+  "operator",
+  "owed",
+  "triage",
+  "parked",
+  "free",
+  "idle",
+  "release",
+  "breaker",
+  "holdsInForce",
+  "discussions",
+  "instructions",
+];
+export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [
+  "waste_alarm",
+  "main_red",
+  "seat_call",
+  "merge_stalled",
+];
 /** @deprecated Unread operator requests no longer expire from FLIGHT's wake inputs. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** An operator message FLIGHT read and has not answered stays owed this long. */

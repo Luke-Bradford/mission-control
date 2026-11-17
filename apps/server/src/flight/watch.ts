@@ -59,6 +59,7 @@ import { wakePieces } from "../telemetry/prompt-cost.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
+  batchedCategories,
   deliveredFacts,
   type FlightWakeSnapshot,
   flightLive,
@@ -67,6 +68,7 @@ import {
   flightWake,
   flightWakes,
   idleSeatLine,
+  immediateCategories,
   leftWakeText,
   markItemsShown,
   markPointersShown,
@@ -86,6 +88,7 @@ import {
   wakeFacts,
   wakeReasons,
 } from "./state.ts";
+import { batchedWakeReasons } from "./wake-actions.ts";
 
 export interface FlightWatchDeps {
   config: CcConfig;
@@ -166,6 +169,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let handover: { runId: string; at: number } | null = null;
   let lastFacts = "";
   let lastWakeAt = 0;
+  let learnedBatches: { at: number; set: ReadonlySet<string> } | null = null;
   /**
    * The last wake's reasons, checked when FLIGHT's turn ends: each needs a decision on its target
    * (or to be settled). One it left goes to the operator in a note; FLIGHT is not woken again for it.
@@ -387,6 +391,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const found = flightSeat(config);
     if (found === null) return;
     const t = now();
+    if (learnedBatches === null || t - learnedBatches.at >= FLIGHT_HOUR_MS) {
+      try {
+        learnedBatches = { at: t, set: new Set(batchedWakeReasons(store, t)) };
+      } catch (e) {
+        log(`flight wake batches: ${e instanceof Error ? e.message : e}`);
+        learnedBatches = { at: t, set: new Set() };
+      }
+    }
     try {
       const state = flightState({
         config,
@@ -423,6 +435,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     const id = found.seat.id;
     const t = now();
+    if (learnedBatches === null || t - learnedBatches.at >= FLIGHT_HOUR_MS) {
+      try {
+        learnedBatches = { at: t, set: new Set(batchedWakeReasons(store, t)) };
+      } catch (e) {
+        log(`flight wake batches: ${e instanceof Error ? e.message : e}`);
+        learnedBatches = { at: t, set: new Set() };
+      }
+    }
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
     let added = false;
@@ -715,7 +735,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (onlySettled(lastFacts, wake)) lastFacts = wake;
     // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
     const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
-    const batched = wake !== lastFacts && listed && t < batchEnds && routineOnly(lastFacts, wake);
+    const routine =
+      wake !== lastFacts && listed && routineOnly(lastFacts, wake, learnedBatches.set);
+    const batched = routine && t < batchEnds;
     if (batched) {
       later(batchEnds - t);
       recordNextFlightWake(
@@ -744,13 +766,25 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         t,
       );
       const changed = changedWakeFacts(lastFacts, wake);
-      const causes = changed;
-      const reasons = wakeReasons(lastFacts, wake, state.items);
+      // A learned category rides with an immediate wake, but teaches the learned set only when it
+      // causes a wake itself at the end of the batch window.
+      const immediate = immediateCategories(lastFacts, wake);
+      const rode = routine ? [] : batchedCategories(lastFacts, wake, learnedBatches.set);
+      const rider = (category: string) => rode.includes(category.replace(/ \(\d+\)$/, ""));
+      const causes = changed.filter((category) => !rider(category));
+      const reasons = wakeReasons(lastFacts, wake, state.items).filter(
+        (reason) => !rider(reason.id.split(":", 1)[0] ?? ""),
+      );
       if (
-        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes), {
-          wake: n + 1,
-          pieces: wakePieces(digest),
-        })) === "sent"
+        (await supervisor.send(
+          runId,
+          wakeKey(runId, n + 1),
+          wakeLine(state, digest, [...causes, ...rode]),
+          {
+            wake: n + 1,
+            pieces: wakePieces(digest),
+          },
+        )) === "sent"
       ) {
         audit = nextAudit(t, reasons);
         delivered = { runId, snapshot };
@@ -759,11 +793,21 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markItemsShown(store, state);
         markRetrospectiveShown(store, state);
         markPointersShown(store, config, state, t);
+        const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
-        const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
         recordFlightWake(store, found.session.repoId, t, woke);
-        recordWakeReasons(store, runId, t, woke, flightWakeId(runId, n + 1));
+        recordWakeReasons(
+          store,
+          runId,
+          t,
+          woke,
+          flightWakeId(runId, n + 1),
+          rode,
+          immediate.filter((category) =>
+            woke.some((cause) => cause.replace(/ \(\d+\)$/, "") === category),
+          ),
+        );
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {
