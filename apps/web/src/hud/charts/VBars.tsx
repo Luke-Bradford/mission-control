@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Grid, keyStep, PAD, Tip, useChartCursor, useChartWidth, XAxis } from "./Hover.tsx";
+import { Grid, keyStep, PAD, Tip, useChartCursor, useChartSize, XAxis } from "./Hover.tsx";
 import "./VBars.css";
 
 export interface VBar {
@@ -38,6 +38,7 @@ export function VBars({
   times,
   annotations = [],
   guide,
+  fill = false,
 }: {
   bars: VBar[];
   label: string;
@@ -51,8 +52,11 @@ export function VBars({
   annotations?: { at: number; label: string; color?: string }[];
   /** A dashed horizontal line at this value (a mean). Its label belongs in the caller's legend. */
   guide?: number;
+  /** Fill the chart's flexed panel body instead of using its normal fixed plot height. */
+  fill?: boolean;
 }) {
-  const [ref, w] = useChartWidth(560);
+  const [ref, w, measuredHeight] = useChartSize(560, height);
+  const chartHeight = fill ? Math.max(120, measuredHeight) : height;
   const [hover, setHover] = useState<number | null>(null);
   const cursor = useChartCursor();
   const n = bars.length;
@@ -61,7 +65,7 @@ export function VBars({
   const x0 = PAD.l;
   const x1 = w - PAD.r;
   const yTop = PAD.t;
-  const yBottom = height - PAD.b;
+  const yBottom = chartHeight - PAD.b;
   const total = (b: VBar): number => b.segments.reduce((a, s) => a + s.value, 0);
   const peak = Math.max(1, ...bars.map(total));
   const max = peak * 1.15;
@@ -106,8 +110,9 @@ export function VBars({
   return (
     <div className="chart" ref={ref}>
       <svg
-        viewBox={`0 0 ${w} ${height}`}
+        viewBox={`0 0 ${w} ${chartHeight}`}
         width="100%"
+        height={chartHeight}
         preserveAspectRatio="xMinYMin meet"
         role="img"
         aria-label={aria}
@@ -152,7 +157,7 @@ export function VBars({
                 <text
                   className="ct xl"
                   x={last ? x1 : left(i) + bw / 2}
-                  y={height - 3}
+                  y={chartHeight - 3}
                   textAnchor={last ? "end" : "middle"}
                 >
                   {b.label}

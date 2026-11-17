@@ -9,7 +9,7 @@ import {
 import { useState } from "react";
 import { useTz } from "../clock.ts";
 import { cost, dayLabel, dayMonth, narrowDay, plural } from "../fmt.ts";
-import { Grid, keyStep, PAD, Tip, useChartWidth, XAxis } from "../hud/charts/Hover.tsx";
+import { Grid, keyStep, PAD, Tip, useChartSize, XAxis } from "../hud/charts/Hover.tsx";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { useMetrics } from "../metrics.ts";
@@ -23,6 +23,7 @@ const DAY_MS = 24 * HOUR_MS;
 export const TICKET_SERIES_RANGE = "7d" as const;
 const TICKET_DAYS = TELEMETRY_RANGES[TICKET_SERIES_RANGE] / (24 * 60);
 const CHART_H = 140;
+const CHART_MIN_H = 120;
 const MS_PER_HOUR_FIGURE = HOUR_MS;
 
 /** A round top for an hours axis. */
@@ -178,6 +179,7 @@ function MergedPerDay({ t, wait }: { t: Telemetry | undefined; wait: string }) {
             every={2}
             accentLast
             height={CHART_H}
+            fill
             guide={mean}
             bars={rows.map((d) => ({
               key: d.day,
@@ -210,7 +212,8 @@ function MergedPerDay({ t, wait }: { t: Telemetry | undefined; wait: string }) {
 }
 
 function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; now: number }) {
-  const [ref, w] = useChartWidth(560);
+  const [ref, w, measuredHeight] = useChartSize(560, CHART_H);
+  const chartHeight = Math.max(CHART_MIN_H, measuredHeight);
   const [hover, setHover] = useState<number | null>(null);
   const rows = finished(t);
   const from = now - TICKET_DAYS * DAY_MS;
@@ -218,10 +221,15 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
   const sorted = shown.map((r) => r.doneAt - r.readyAt).sort((a, b) => a - b);
   const p50 = rank(sorted, 0.5);
   const p85 = rank(sorted, 0.85);
-  const top = niceMax(Math.max(1, ...sorted.map((ms) => ms / HOUR_MS)) * 1.05);
+  const p50Hours = p50 === null ? 0 : p50 / HOUR_MS;
+  const p85Hours = p85 === null ? 0 : p85 / HOUR_MS;
+  // Percentiles describe the useful comparison range; a single stalled ticket must not flatten it.
+  const top = niceMax(Math.max(24, p85Hours * 1.5, p50Hours * 3));
+  const overflow = shown.filter((r) => (r.doneAt - r.readyAt) / HOUR_MS > top);
+  const longest = Math.max(...sorted) / HOUR_MS;
   const x0 = PAD.l;
   const x1 = w - PAD.r;
-  const yBottom = CHART_H - PAD.b;
+  const yBottom = chartHeight - PAD.b;
   const Y = (h: number): number => PAD.t + (1 - h / top) * (yBottom - PAD.t);
   const X = (at: number): number => x0 + ((at - from) / (now - from)) * (x1 - x0);
   const fmt = (v: number): string => `${v} h`;
@@ -246,8 +254,9 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
         <div className="pb">
           <div className="chart" ref={ref}>
             <svg
-              viewBox={`0 0 ${w} ${CHART_H}`}
+              viewBox={`0 0 ${w} ${chartHeight}`}
               width="100%"
+              height={chartHeight}
               preserveAspectRatio="xMinYMin meet"
               role="img"
               aria-label={`Cycle time per ticket: ${shown.map((r) => `${r.ticket} ${hours(r.doneAt - r.readyAt)} h`).join(", ")}`}
@@ -270,21 +279,33 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
                     />
                   ),
               )}
-              {shown.map((r, i) => (
-                <circle
-                  key={r.ticket}
-                  className="dot"
-                  cx={X(r.doneAt)}
-                  cy={Y((r.doneAt - r.readyAt) / HOUR_MS)}
-                  r={hover === i ? 5 : 3.5}
-                  onPointerEnter={() => setHover(i)}
-                  onPointerLeave={() => setHover(null)}
-                />
-              ))}
-              <text className="ct xl" x={x0} y={CHART_H - 3}>
+              {shown.map((r, i) => {
+                const duration = (r.doneAt - r.readyAt) / HOUR_MS;
+                const x = X(r.doneAt);
+                return duration > top ? (
+                  <path
+                    key={r.ticket}
+                    className="overflow-dot"
+                    d={`M${x},${PAD.t}l-4,7h8Z`}
+                    onPointerEnter={() => setHover(i)}
+                    onPointerLeave={() => setHover(null)}
+                  />
+                ) : (
+                  <circle
+                    key={r.ticket}
+                    className="dot"
+                    cx={x}
+                    cy={Y(duration)}
+                    r={hover === i ? 5 : 3.5}
+                    onPointerEnter={() => setHover(i)}
+                    onPointerLeave={() => setHover(null)}
+                  />
+                );
+              })}
+              <text className="ct xl" x={x0} y={chartHeight - 3}>
                 {tz ? dayMonth(from, tz) : "start"}
               </text>
-              <text className="ct xl" x={x1} y={CHART_H - 3} textAnchor="end">
+              <text className="ct xl" x={x1} y={chartHeight - 3} textAnchor="end">
                 now
               </text>
             </svg>
@@ -325,6 +346,16 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
                 kind: "dash",
                 color: "var(--warn)",
               },
+              ...(overflow.length
+                ? [
+                    {
+                      key: "overflow",
+                      name: `${overflow.length} above ${top} h · longest ${longest.toFixed(0)} h`,
+                      kind: "dot" as const,
+                      color: "var(--accent)",
+                    },
+                  ]
+                : []),
             ]}
           />
         </div>
@@ -410,7 +441,8 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
 }
 
 function TicketsInProgress({ t, wait }: { t: Telemetry | undefined; wait: string }) {
-  const [ref, w] = useChartWidth(560);
+  const [ref, w, measuredHeight] = useChartSize(560, CHART_H);
+  const chartHeight = Math.max(CHART_MIN_H, measuredHeight);
   const [hover, setHover] = useState<number | null>(null);
   const series = t?.series?.ticketsInProgress;
   // Days before the first observation are left out, not drawn as zero.
@@ -421,7 +453,7 @@ function TicketsInProgress({ t, wait }: { t: Telemetry | undefined; wait: string
   const top = Math.max(4, Math.ceil(peak / 4) * 4);
   const x0 = PAD.l;
   const x1 = w - PAD.r;
-  const yBottom = CHART_H - PAD.b;
+  const yBottom = chartHeight - PAD.b;
   const Y = (v: number): number => PAD.t + (1 - v / top) * (yBottom - PAD.t);
   const slot = (x1 - x0) / Math.max(1, days.length);
   const mid = (i: number): number => x0 + i * slot + slot / 2;
@@ -447,8 +479,9 @@ function TicketsInProgress({ t, wait }: { t: Telemetry | undefined; wait: string
         <div className="pb">
           <div className="chart" ref={ref}>
             <svg
-              viewBox={`0 0 ${w} ${CHART_H}`}
+              viewBox={`0 0 ${w} ${chartHeight}`}
               width="100%"
+              height={chartHeight}
               preserveAspectRatio="xMinYMin meet"
               role="img"
               aria-label={`Tickets in progress: ${days
@@ -465,7 +498,7 @@ function TicketsInProgress({ t, wait }: { t: Telemetry | undefined; wait: string
                     <text
                       className="ct xl"
                       x={i === days.length - 1 ? x1 : mid(i)}
-                      y={CHART_H - 3}
+                      y={chartHeight - 3}
                       textAnchor={i === days.length - 1 ? "end" : "middle"}
                     >
                       {narrowDay(day.day)}
@@ -555,10 +588,12 @@ export function ThroughputTable({
   t,
   wait,
   dim,
+  now,
 }: {
   t: Telemetry | undefined;
   wait: string;
   dim: boolean;
+  now: number;
 }) {
   const tz = useTz();
   const costs = new Map(
@@ -568,7 +603,9 @@ export function ThroughputTable({
     ]),
   );
   const rows = (t?.series?.tickets ?? [])
-    .filter((k) => k.mergedAt !== null)
+    .filter(
+      (k) => k.mergedAt !== null && k.mergedAt >= now - TICKET_DAYS * DAY_MS && k.mergedAt <= now,
+    )
     .sort((a, b) => (b.mergedAt ?? 0) - (a.mergedAt ?? 0));
   return (
     <div className={`grid${dim ? " dim" : ""}`} data-view="table" data-n="1">

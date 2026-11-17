@@ -292,7 +292,7 @@ export function Telemetry() {
               </div>
             ) : tab === "throughput" ? (
               view === "table" ? (
-                <ThroughputTable t={t} wait={scope.wait} dim={dim} />
+                <ThroughputTable t={t} wait={scope.wait} dim={dim} now={now} />
               ) : (
                 <ThroughputCharts t={t} wait={scope.wait} now={now} dim={dim} />
               )

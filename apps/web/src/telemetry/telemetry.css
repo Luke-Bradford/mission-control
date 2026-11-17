@@ -292,6 +292,19 @@
   grid-template-rows: repeat(2, minmax(256px, 1fr));
 }
 
+/* Throughput plots fill the panel body; the legend stays below the measured plot. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+
+.tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb > .chart {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+
 .tabpanel .grid[data-view="table"][data-n="1"] {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -836,6 +849,12 @@
 .chart .dot {
   fill: var(--accent);
   fill-opacity: 0.85;
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.chart .overflow-dot {
+  fill: var(--accent);
   stroke: var(--surface);
   stroke-width: 1;
 }

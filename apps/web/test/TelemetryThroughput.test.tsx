@@ -157,6 +157,33 @@ describe("Telemetry, Throughput tab", () => {
     expect(cycle.querySelector(".legend")?.textContent).toMatch(/p85/);
   });
 
+  it("keeps the cycle-time distribution readable when one ticket is an outlier", async () => {
+    const regular = Array.from({ length: 20 }, (_, i) => ({
+      ticket: `shop#${100 + i}`,
+      readyAt: NOW - (i + 1) * HOUR,
+      startedAt: null,
+      mergedAt: NOW - HOUR,
+      doneAt: NOW,
+    }));
+    const outlier = {
+      ticket: "shop#outlier",
+      readyAt: NOW - 600 * HOUR,
+      startedAt: null,
+      mergedAt: NOW - HOUR,
+      doneAt: NOW,
+    };
+    const base = tel();
+    await open({
+      ...base,
+      series: { ...(base.series as object), tickets: [...regular, outlier] } as never,
+    });
+    const cycle = panel("tCycleTicket");
+    const grid = [...cycle.querySelectorAll("svg .gl + text")].map((n) => n.textContent);
+    expect(grid).toContain("36 h");
+    expect(cycle.querySelectorAll("svg .dot, svg .overflow-dot")).toHaveLength(21);
+    expect(cycle.querySelector(".legend")?.textContent).toContain("1 above 36 h");
+  });
+
   it("does not invent per-ticket history when the server sends no series", async () => {
     await open({ ...tel(), series: undefined });
     expect(panel("tCycleTicket").textContent).toContain("not available for the last 7 days yet.");
@@ -195,7 +222,26 @@ describe("Telemetry, Throughput tab", () => {
   });
 
   it("shows the Tickets table with Ticket, Merged, Cycle and cost, and a note on Title and Size", async () => {
-    await open(tel(), "?tab=throughput&view=table");
+    const base = tel();
+    await open(
+      {
+        ...base,
+        series: {
+          ...(base.series as object),
+          tickets: [
+            ...((base.series?.tickets ?? []) as NonNullable<TelemetryData["series"]>["tickets"]),
+            {
+              ticket: "shop#9",
+              readyAt: null,
+              startedAt: null,
+              mergedAt: NOW - 30 * DAY,
+              doneAt: null,
+            },
+          ],
+        } as never,
+      },
+      "?tab=throughput&view=table",
+    );
     const table = within(panel("tTickets")).getByRole("table");
     expect([...table.querySelectorAll("th")].map((h) => h.textContent)).toEqual([
       "Ticket",
@@ -205,6 +251,7 @@ describe("Telemetry, Throughput tab", () => {
     ]);
     const rows = table.querySelectorAll("tbody tr");
     expect(rows).toHaveLength(2);
+    expect(table.textContent).not.toContain("shop#9");
     expect(rows[1]?.textContent).toContain("shop#12");
     expect(rows[1]?.textContent).toContain("25 h");
     expect(rows[1]?.textContent).toContain("~$18.60");

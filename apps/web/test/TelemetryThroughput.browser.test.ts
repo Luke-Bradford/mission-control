@@ -76,6 +76,7 @@ async function geometry(page: RenderedPage) {
       const el = document.getElementById(id);
       const r = el?.getBoundingClientRect();
       const body = el?.querySelector(".pb") as HTMLElement | null;
+      const bodyStyle = body ? getComputedStyle(body) : null;
       return {
         id,
         found: !!el,
@@ -84,6 +85,13 @@ async function geometry(page: RenderedPage) {
         h: r?.height ?? 0,
         // the chart and its legend show whole, with no hidden overflow
         bodyScroll: body ? body.scrollHeight - body.clientHeight : 0,
+        bodyContentHeight: body
+          ? body.clientHeight -
+            Number.parseFloat(bodyStyle?.paddingTop ?? "0") -
+            Number.parseFloat(bodyStyle?.paddingBottom ?? "0")
+          : 0,
+        chartHeight: (el?.querySelector(".chart") as HTMLElement | null)?.clientHeight ?? 0,
+        legendHeight: (el?.querySelector(".legend") as HTMLElement | null)?.clientHeight ?? 0,
       };
     });
     return {
@@ -124,6 +132,10 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
               expect(p.bottom, p.id).toBeLessThanOrEqual(g.mainBottom + 1);
               expect(p.h, p.id).toBeGreaterThanOrEqual(240);
               expect(p.bodyScroll, `${p.id} clips`).toBeLessThanOrEqual(1);
+              if (["tMerged", "tCycleTicket", "tWip"].includes(p.id))
+                expect(p.chartHeight, `${p.id} chart height`).toBeGreaterThanOrEqual(
+                  p.bodyContentHeight - p.legendHeight - 24,
+                );
             }
             expect(g.legendMean).toContain("14-day mean");
             if (evidence) {
