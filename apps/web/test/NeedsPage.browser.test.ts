@@ -663,16 +663,26 @@ describeRendered("Needs you page", () => {
               const label = `${variant.name} ${width}x${height} ${colorScheme} dock ${dock}`;
               try {
                 await ready(page);
-                // Below 2200 px the dock starts folded; its rail button opens it.
-                // The dock's fold choice lives in sessionStorage and can carry over from an earlier
-                // case, so read the actual state and toggle only when it differs from the wanted one.
-                const folded = await page.evaluate(
-                  () => document.querySelector("#dock")?.classList.contains("collapsed") ?? true,
-                  undefined,
-                );
-                if (dock === "expanded" && folded) await page.click(".dockrail button");
-                if (dock === "folded" && !folded)
-                  await page.click("#dockHead button[aria-controls=dockBody]");
+                // Needs you has no dock column: the dock is a drawer there at any width. "Expanded"
+                // opens that drawer; it floats over the page, so the page must not shift or overflow
+                // under it, and it is closed again before the focus and hit-test checks.
+                if (dock === "expanded") {
+                  await page.click('.iconbtn[title^="Show or hide FLIGHT"]');
+                  const drawerOpen = await page.evaluate(
+                    () => document.querySelector<HTMLElement>("#dock")?.hidden === false,
+                    undefined,
+                  );
+                  expect(drawerOpen, `${label}: the dock drawer opens`).toBe(true);
+                  const underDrawer = await page.evaluate(
+                    () => document.documentElement.scrollWidth - innerWidth,
+                    undefined,
+                  );
+                  expect(
+                    underDrawer,
+                    `${label}: no horizontal overflow, drawer open`,
+                  ).toBeLessThanOrEqual(0);
+                  await page.keyboard.press("Escape");
+                }
                 await page.boxes(".needs-answer .decision-facts");
                 const overflow = await page.evaluate(
                   () => document.documentElement.scrollWidth - innerWidth,
