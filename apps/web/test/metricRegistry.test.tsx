@@ -109,7 +109,8 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
   {
     name: "Telemetry",
     page: () => <Telemetry />,
-    shows: ["cost", "agentsWorking", "merged", "cycleTime"],
+    // The health band carries the two registry figures it shows; the Overview covers the others.
+    shows: ["cost", "merged"],
   },
   {
     name: "Comms",
