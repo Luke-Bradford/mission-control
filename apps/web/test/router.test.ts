@@ -176,6 +176,7 @@ describe("path helpers", () => {
       agent: "/agent",
       comms: "/comms",
       qa: "/qa",
+      planner: "/planner",
       telemetry: "/telemetry",
       audit: "/audit",
       setup: "/setup",
