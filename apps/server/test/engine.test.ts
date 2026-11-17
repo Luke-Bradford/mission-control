@@ -109,6 +109,8 @@ import {
   uatParkText,
   uatSendBackText,
   wakeFailedText,
+  wakeStuckKey,
+  wakeStuckText,
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
@@ -116,7 +118,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import { writeCrewPause } from "../src/config/crew-pause.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { asideWakeDue } from "../src/engine/aside.ts";
+import { asideWakeDue, wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   createEngine,
   designFailedIn,
@@ -160,7 +162,7 @@ import {
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
-import { reviewsHeld, syncWasteAlarms } from "../src/spend/waste.ts";
+import { reviewsHeld, syncWasteAlarms, ticketParked } from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
@@ -3328,6 +3330,61 @@ describe("the engine runs reviews", () => {
     expect(h.sent.filter((x) => x.key.startsWith(`wake:${RUN}:`))).toEqual([]);
     expect(h.sent[0]?.key).toMatch(/^fix:/);
     expect(h.sent[0]?.text).toContain("a Important thing");
+  });
+
+  it("files the findings' Comms row for its own run, so the seat's next run on another ticket never reads it", async () => {
+    await toReview();
+    await h.engine.tick();
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    const id = first().id;
+    store.recordFindings(id, need(store.review(id)?.runId), {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "broken",
+      findings: [finding("Important")],
+      at: clock,
+    });
+    emit({ kind: "idle", seatId: SEAT, runId: RUN, resumed: false });
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent[0]?.key).toMatch(/^fix:/);
+    const fromRetro = (rows: { from: string; to: string }[]) =>
+      rows.filter((m) => m.from === RETRO && m.to === SEAT);
+    expect(fromRetro(store.commsInboxRun(SEAT, RUN)).length).toBeGreaterThan(0);
+    // the author crashes during the rework round, and the seat starts another ticket
+    clock += MIN;
+    store.setRunEnded(RUN, clock, "failed", "exit");
+    seatIdle(null);
+    emit({ kind: "run-ended", seatId: SEAT, runId: RUN, endedBy: "exit" });
+    await h.engine.reconcileRun(RUN);
+    const crashed = need(store.run(RUN));
+    const sentBefore = h.sent.length;
+    store.upsertRun({
+      ...crashed,
+      id: "another-run",
+      seq: crashed.seq + 1,
+      ticket: "shop-app#99",
+      ticketTitle: "Board chips",
+      branch: "feature/99-board-chips",
+      endedAt: null,
+      status: "running",
+      loop: NEW_LOOP,
+      startedAt: clock,
+    });
+    seatIdle("another-run");
+    // the new run is not handed the first run's findings, and is not woken for them
+    expect(fromRetro(store.commsInboxRun(SEAT, "another-run"))).toEqual([]);
+    expect(fromRetro(store.commsInboxRun(SEAT, RUN)).length).toBeGreaterThan(0);
+    for (let i = 0; i < 3; i++) {
+      clock += MIN;
+      await h.engine.tick();
+      await h.engine.reconcileRun("another-run");
+    }
+    expect(h.sent.slice(sentBefore).filter((x) => x.key.includes("another-run"))).toEqual([]);
+    expect(wakeDueAsideRun(store, SEAT)).toBeUndefined();
+    // no retry-loop alarm for the other ticket
+    expect(store.waste.unreportedResumes(0, 1)).toEqual([]);
+    syncWasteAlarms(config, store, clock);
+    expect(ticketParked(store, "shop-app#99")).toBeNull();
   });
 
   /** A blocking review reported on the pushed head, then the author's passes. */
@@ -8126,6 +8183,52 @@ describe("the engine runs reviews", () => {
       store.setRunEnded(RUN, clock, "failed", "exit");
       await h.engine.reconcileRun(RUN);
       expect(loopOf().parked).toMatchObject({ kind: "ended", ended: true });
+    });
+
+    it("a wake that fails the same way twice running is recorded once, for FLIGHT; the retries go on", async () => {
+      await setAside();
+      const failure = "could not resume: dependencies could not be reinstalled";
+      h.wakeError = new SupervisorError(502, failure);
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      expect(store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN))).toEqual([]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      const stuck = store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN));
+      expect(stuck.map((e) => e.text)).toEqual([wakeStuckText(failure)]);
+      // still aside: the next pass tries again
+      expect(asideRun()?.wake).toBe(true);
+    });
+
+    it("a 409 between two 502s breaks the streak", async () => {
+      await setAside();
+      const stuck = () => store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN));
+      h.wakeError = new SupervisorError(
+        502,
+        "could not resume: dependencies could not be reinstalled",
+      );
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      await h.engine.reconcileRun(RUN);
+      h.wakeError = new SupervisorError(
+        502,
+        "could not resume: dependencies could not be reinstalled",
+      );
+      await h.engine.reconcileRun(RUN);
+      expect(stuck()).toEqual([]);
+      await h.engine.reconcileRun(RUN);
+      expect(stuck()).toHaveLength(1);
+    });
+
+    it("a busy seat's 409 is never reported as a stuck wake", async () => {
+      await setAside();
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN))).toEqual([]);
     });
 
     it("a park wakes it", async () => {

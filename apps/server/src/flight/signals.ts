@@ -39,6 +39,7 @@ import {
   STUCK_PARK,
   seatDef,
   WAITING_OPERATOR_LABEL,
+  WAKE_STUCK_KEY_SUFFIX,
   WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
@@ -413,6 +414,13 @@ export function flightSignals(i: {
       });
       parks.set(key, entries);
     }
+  }
+  // a wake that failed the same way twice running on one run: the hub keeps trying, FLIGHT is told once
+  for (const event of store.loopEvents(cutoff, repo)) {
+    if (!event.key.endsWith(WAKE_STUCK_KEY_SUFFIX)) continue;
+    const run = store.run(event.runId);
+    if (run?.endedAt != null) continue;
+    raise("wake_stuck", event.runId, event.at, `${event.runId}: ${event.text}`);
   }
   for (const [key, entries] of parks) {
     if (entries.length >= 2) {

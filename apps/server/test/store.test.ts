@@ -567,7 +567,7 @@ describe("Store", () => {
     const path = join(dir, "flow.sqlite");
     const old = new Store(path);
     old.deleteSetting("flow-ready-start-v1");
-    const issue = { repoId: "r", number: 1, size: null, startAt: 10, doneAt: 20 };
+    const issue = { repoId: "r", number: 1, size: null, title: "A title", startAt: 10, doneAt: 20 };
     const pr = { repoId: "r", number: 2, mergedAt: 20, firstPushCi: null };
     old.replaceFlow("r", [issue], [pr]);
     old.close();
@@ -2577,6 +2577,7 @@ describe("Store", () => {
       size: "S",
       startAt: 10,
       doneAt: 100,
+      title: null,
     });
     expect(store.flowPrs(200)).toEqual([
       { repoId: "r1", number: 8, mergedAt: 300, firstPushCi: null },

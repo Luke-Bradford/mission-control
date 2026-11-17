@@ -1,6 +1,6 @@
 import { carriedFrom, fixKey, type Run, reviewFor, seatIsPaused } from "@mc/core";
 import { readCrewPause } from "../config/crew-pause.ts";
-import type { Store } from "../store.ts";
+import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 
 /**
  * Whether a run set aside in CI or review is due back on its seat: the loop flagged it
@@ -12,6 +12,10 @@ import type { Store } from "../store.ts";
 export function asideWakeDue(store: Store, run: Run): boolean {
   const aside = run.loop?.aside;
   if (!aside || run.endedAt !== null || run.loop?.phase === "done") return false;
+  // a run on its seat is not waiting for one: a restart between its wake and the loop clearing
+  // `aside` leaves the flag set, and it must not set the seat's next run aside, over and over
+  const row = store.seatSession(run.agentId);
+  if (row?.runId === run.id && ACTIVE_SEAT_STATES.includes(row.state)) return false;
   if (aside.wake) return true;
   // parked on the operator's question: not due back until it is answered (the loop then wakes it)
   if (aside.ask !== undefined) return false;

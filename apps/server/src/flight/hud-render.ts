@@ -8,6 +8,7 @@ import {
   HUD_PAGE_PATHS,
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
   QA_DISCLOSURE_LABEL,
   QA_TAB_LABELS,
   QA_VIEW_LABEL,
@@ -85,8 +86,8 @@ export function hudRenderRequest(hubOrigin: string): HudRenderGuard {
 }
 
 interface BrowserRoute {
-  request(): { method(): string; url(): string };
-  continue(): Promise<void>;
+  request(): { method(): string; url(): string; headers(): Record<string, string> };
+  continue(options?: { headers: Record<string, string> }): Promise<void>;
   abort(): Promise<void>;
 }
 
@@ -176,6 +177,11 @@ export interface HudRenderOptions {
   viewport?: HudViewport;
   /** Turn the web app's Demo mode on before the page loads, and wait for its marker. */
   demo?: boolean;
+  /**
+   * The operator token of a throwaway hub the capture owns. The browser adds it to that hub's
+   * `/api/` reads, so token-guarded pages show their data; the page's own script never holds it.
+   */
+  operatorToken?: string;
 }
 
 const loadPlaywright = async (): Promise<HudPlaywright> =>
@@ -354,7 +360,15 @@ export async function renderHudWithPlaywright(
         await route.abort();
         return;
       }
-      await (guard(method, requestUrl) ? route.continue() : route.abort());
+      if (!guard(method, requestUrl)) {
+        await route.abort();
+        return;
+      }
+      if (options.operatorToken !== undefined && path.startsWith("/api/"))
+        await route.continue({
+          headers: { ...request.headers(), [OPERATOR_HEADER]: options.operatorToken },
+        });
+      else await route.continue();
     });
     ensureActive();
     await context.routeWebSocket("**/*", async (route) => {
@@ -470,6 +484,7 @@ export interface HudHelperJob {
   colorScheme?: HudColorScheme;
   viewport?: HudViewport;
   demo?: boolean;
+  operatorToken?: string;
 }
 
 export interface HudHelperOptions {
@@ -481,6 +496,7 @@ export interface HudHelperOptions {
   colorScheme?: HudColorScheme;
   viewport?: HudViewport;
   demo?: boolean;
+  operatorToken?: string;
   /** Extra time past the render deadline for the helper's own cleanup before it is killed. */
   graceMs?: number;
   /** How long the helper gets to close Chrome after SIGTERM before the group is killed. */
@@ -590,6 +606,7 @@ export function renderHudInHelper(
       ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
       ...(options.viewport === undefined ? {} : { viewport: options.viewport }),
       ...(options.demo === undefined ? {} : { demo: options.demo }),
+      ...(options.operatorToken === undefined ? {} : { operatorToken: options.operatorToken }),
     };
     child.send(job);
   });
