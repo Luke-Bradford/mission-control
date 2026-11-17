@@ -2,7 +2,7 @@ import type { AttentionItem, AutonomyQuestion } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
-import { hub, RESOURCES } from "../src/data.ts";
+import { hub, RESOURCES, streamStatus } from "../src/data.ts";
 import { FLIGHT_NO_SEAT, FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import type { PersonThreadView } from "../src/notifications.ts";
 import { navigate } from "../src/router.ts";
@@ -467,6 +467,29 @@ describe("ItemPanel, acting on an item", () => {
     await waitFor(() => expect(document.activeElement).toBe(input));
     expect(posts(fn, CHOICE_PATH)).toEqual([]);
     expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+  });
+
+  it("disconnected shuts Accept and every option, then reopens them on reconnect", async () => {
+    const fn = acting([BOUND_SEAT], { [`POST ${CHOICE_PATH}`]: applied() });
+    await enabled("Accept recommendation: 5174");
+    act(() => streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: NOW }));
+    try {
+      await within(panel()).findByText("Disconnected. Reconnect to choose.");
+      const accept = within(panel()).getByRole("button", {
+        name: "Accept recommendation: 5174",
+      }) as HTMLButtonElement;
+      expect(accept.disabled).toBe(true);
+      const option = within(panel()).getByRole("button", { name: "5180" }) as HTMLButtonElement;
+      expect(option.disabled).toBe(true);
+      fireEvent.click(option);
+      fireEvent.click(accept);
+      expect(posts(fn, CHOICE_PATH)).toEqual([]);
+      act(() => streamStatus.set({ connected: true, reconnecting: false, lastMessageAt: NOW }));
+      await enabled("Accept recommendation: 5174");
+      expect(within(panel()).queryByText("Disconnected. Reconnect to choose.")).toBeNull();
+    } finally {
+      act(() => streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null }));
+    }
   });
 
   it("pending, unknown and failure keep the intent", async () => {

@@ -76,7 +76,7 @@ export function DecisionFacts({
   const why = decision.whyOperator;
   const effect =
     brief.binding?.actions.find((a) => a.optionId === brief.recommendedOptionId)?.effect ??
-    "act on its recommendation";
+    "the recommended action";
   return (
     <section className="decision-facts" aria-label="Decision facts">
       <FreshnessBadge state={brief.state} />
@@ -114,7 +114,7 @@ export function DecisionFacts({
           {why
             ? "Waits for your answer. Nothing happens automatically."
             : defaultDueAt !== undefined
-              ? `FLIGHT will ${effect}${tz ? ` at ${hhmm(defaultDueAt, tz)}` : ""} unless you choose.`
+              ? `If nobody answers ${tz ? `by ${hhmm(defaultDueAt, tz)}` : "soon"}, FLIGHT applies its recommendation: ${effect}`
               : "Nothing is scheduled to happen automatically."}
           {decision.waiting && <> {decision.waiting}</>}
         </p>

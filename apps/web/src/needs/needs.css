@@ -632,17 +632,3 @@ fieldset.needs-controls {
   max-width: none;
   margin: 0;
 }
-
-.answer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-1);
-  max-width: 800px;
-}
-
-.answer-actions .note {
-  flex: 1 0 100%;
-  margin: 0;
-  overflow-wrap: anywhere;
-}

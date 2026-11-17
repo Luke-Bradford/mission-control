@@ -1,3 +1,4 @@
+import type { BriefBinding } from "@mc/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_LINES, BriefOptions, DecisionFacts, ItemBrief } from "../src/comms/ItemBrief.tsx";
@@ -424,14 +425,20 @@ describe("DecisionFacts", () => {
   });
 
   it("countdown only for FYI", () => {
+    const effect = "Within-authority guidance delivered to the displayed run";
+    const base = boundBrief();
     const fyi = boundBrief({
       decision: { consulted: [], costOfDelay: "Slower." },
+      binding: {
+        ...(base.binding as BriefBinding),
+        actions: (base.binding as BriefBinding).actions.map((a) => ({ ...a, effect })),
+      },
     });
     const { unmount } = render(
       <DecisionFacts brief={fyi} defaultDueAt={Date.UTC(2026, 9, 17, 14, 40)} tz="UTC" />,
     );
     expect(
-      screen.getByText(/FLIGHT will Records 5174\. at 14:40 unless you choose\./),
+      screen.getByText(`If nobody answers by 14:40, FLIGHT applies its recommendation: ${effect}`),
     ).toBeTruthy();
     expect(screen.getByText("Within FLIGHT's standing authority")).toBeTruthy();
     unmount();
@@ -439,6 +446,6 @@ describe("DecisionFacts", () => {
     expect(
       screen.getByText(/Waits for your answer\. Nothing happens automatically\./),
     ).toBeTruthy();
-    expect(screen.queryByText(/FLIGHT will/)).toBeNull();
+    expect(screen.queryByText(/applies its recommendation/)).toBeNull();
   });
 });
