@@ -11,13 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
-import {
-  immediateFact,
-  onlySettled,
-  routineOnly,
-  unhandledReasons,
-  wakeReasons,
-} from "../src/flight/state.ts";
+import { immediateFact, onlySettled, routineOnly } from "../src/flight/state.ts";
 import { Store } from "../src/store.ts";
 
 const MIN = 60_000;
@@ -249,44 +243,5 @@ describe("routine wakes wait for the batch window", () => {
       expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);
     expect(routineOnly(facts({}), facts({ signals: ["push_unseen:x"] }), learned)).toBe(true);
     expect(immediateFact("prs", "mc#1:7:true:open::")).toBe(true);
-  });
-});
-
-describe("wakes that ended in nothing are handled by a wait on their exact key", () => {
-  const wait = (target: string, at: number) =>
-    store.addFlightDecision({
-      at,
-      kind: "wait",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: `${target}: waiting on a thing`,
-      decision: "waiting until later",
-      basis: "b",
-    });
-  it("a wait on a repeat_park key with spaces handles the signal", () => {
-    const key = "mc#9:review failed on the same file";
-    const facts = JSON.stringify({ signals: [`repeat_park:${key}`] });
-    const reasons = wakeReasons("", facts);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      1,
-    );
-    wait(key, NOW + MIN);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      0,
-    );
-  });
-  it("a wait on an item's full key handles its item_stale signal", () => {
-    const item = "message:guido-1:stream:guido-1:20261105T020751Z:271748:0";
-    const refs = [{ key: item, ticket: null }];
-    const facts = JSON.stringify({
-      signals: ["item_stale:message:guido-1:stream:guido-1:20261105T020751Z:271748"],
-    });
-    const reasons = wakeReasons("", facts, refs);
-    wait(item, NOW + MIN);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      0,
-    );
   });
 });

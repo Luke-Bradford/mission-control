@@ -79,7 +79,7 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
 - **Going live:** run the waiting hub Update yourself with `mc operator` when the hub is idle. Then check that the hub answers.
 - **Recurring stalls:** when the same thing stalls twice, find the cause and fix it (a ticket and a seat), not just the instance.
 
-If you cannot clear something this wake, log it with `mc log_decision`. Then tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
+What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
 
 ## How to pass things on
 

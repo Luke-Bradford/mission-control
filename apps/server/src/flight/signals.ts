@@ -20,7 +20,6 @@ import {
   FLIGHT_RETIRED_SIGNAL_KINDS,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_WAITS_SETTING,
   type FlightSignal,
   type FlightState,
   type FlightTriage,
@@ -41,7 +40,7 @@ import {
   WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
-import { dueStuckPrs, prFitsSeat, type StuckPr, waitTargetNumber } from "../engine/stuck-prs.ts";
+import { dueStuckPrs, prFitsSeat, type StuckPr } from "../engine/stuck-prs.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../queue/dependencies.ts";
 import { ownsCard } from "../queue/ownership.ts";
@@ -82,12 +81,6 @@ export interface SeatCall {
   seat: string;
   reason: string;
   ref: string | null;
-  at: number;
-}
-/** What FLIGHT's `wait_on` kept: what it waits on, and when it looks again. */
-export interface FlightWait {
-  on: string;
-  until: number;
   at: number;
 }
 export interface LoopHeartbeat {
@@ -709,13 +702,9 @@ export function flightSignals(i: {
       `PR #${pr.pr} (${pr.ref || "no ticket"}) reported green and reviewed at ${new Date(pr.at).toISOString()}, still not merged`,
     );
   }
-  const heldBy = flightWaits(store);
   for (const item of i.triageItems ?? []) {
     // a PR ready to merge has its own check, merge_stalled
     if (now - item.at < FLIGHT_ITEM_STALE_MS || item.kind === "ready") continue;
-    // an item FLIGHT waits on (by its full key or the signal's key) is not stale until the wait ends
-    if ([item.key, item.key.replace(/:\d+$/, "")].some((k) => (heldBy[k]?.until ?? 0) > now))
-      continue;
     raise(
       "item_stale",
       // an item's key ends in the time it was last raised, which a PR's update moves
@@ -739,68 +728,6 @@ export function flightSignals(i: {
       d.at,
       `FLIGHT asked the controller at ${new Date(d.at).toISOString()} and has no answer: ${d.about.slice(0, 200)}`,
     );
-  }
-  const waits = flightWaits(store);
-  const ended = Object.values(waits).filter((w) => w.until <= now);
-  const decisions =
-    ended.length === 0
-      ? []
-      : store
-          .flightDecisions(Math.min(...ended.map((w) => w.until)), 500)
-          .filter((d) => d.kind !== "wait");
-  for (const [target, wait] of Object.entries(waits)) {
-    // a wait on a wait_over key is a nest from before waits kept their original target
-    if (waitTargetOf(target) !== target) {
-      delete waits[target];
-      continue;
-    }
-    // what it waited on has settled on its own: nothing to look at again
-    if (waitResolved(store, repo, target)) {
-      delete waits[target];
-      continue;
-    }
-    if (wait.until > now) continue;
-    // FLIGHT has been told it ended, and nothing is left to look at again
-    if (
-      state.signals[`wait_over:${target}:${wait.until}`]?.toldAt != null &&
-      (now - wait.until > FLIGHT_WAIT_OVER_KEEP_MS || waitSubjectDone(store, repo, target))
-    ) {
-      delete waits[target];
-      continue;
-    }
-    // FLIGHT dealt with it since it ended: a decision on the target, or naming the signal's key
-    const signalKey = `${target}:${wait.until}`;
-    if (
-      decisions.some(
-        (d) =>
-          d.at >= wait.until &&
-          (d.ref === target ||
-            d.seatId === target ||
-            d.about.includes(`wait_over:${signalKey}`) ||
-            d.decision.includes(`wait_over:${signalKey}`)),
-      )
-    ) {
-      delete waits[target];
-      continue;
-    }
-    raise(
-      "wait_over",
-      `${target}:${wait.until}`,
-      wait.until,
-      `${target}: you waited on ${wait.on} until ${new Date(wait.until).toISOString()}; look again`,
-    );
-  }
-  if (Object.keys(waits).length !== Object.keys(flightWaits(store)).length) {
-    store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
-  }
-  for (const [id, signal] of Object.entries(state.signals)) {
-    if (
-      signal.kind === "wait_over" &&
-      !active.has(id) &&
-      (signal.toldAt === null || signal.key.includes("wait_over:"))
-    ) {
-      delete state.signals[id];
-    }
   }
   if (i.questions !== undefined) {
     const seen = new Set<string>();
@@ -914,75 +841,6 @@ export function flightSignalHistory(
 const flightSeatId = (config: CcConfig): string | null =>
   config.crew?.sessions.flatMap((x) => x.seats).find((x) => seatDef(x).loop === "watch")?.id ??
   null;
-
-/**
- * Whether what a wait is on has settled: a ticket or PR ref whose card is closed or whose PR has
- * merged or closed, or a `note:blocked:<seat>:` target whose seat's run is no longer parked.
- */
-function waitResolved(store: Store, repo: string, target: string): boolean {
-  const ref = /^([\w.-]+)#(\d+)$/.exec(target);
-  if (ref !== null) {
-    if (ref[1] !== repo) return false;
-    const n = Number(ref[2]);
-    return (
-      store.board(repo).some((b) => b.issueNumber === n && b.closed) ||
-      store
-        .pullRequests(repo)
-        .some(
-          (p) =>
-            (p.number === n && p.state !== "open") || (p.ticket === target && p.state === "merged"),
-        )
-    );
-  }
-  const blocked = /^note:blocked:([^:]+):/.exec(target);
-  if (blocked !== null) {
-    const runId = store.seatSession(blocked[1] ?? "")?.runId ?? null;
-    const run = runId === null ? null : store.run(runId);
-    return run === null || run.endedAt !== null || run.loop?.phase !== "parked";
-  }
-  return false;
-}
-
-/** A told wait that ended this long ago leaves the signal list, whatever it waited on. */
-export const FLIGHT_WAIT_OVER_KEEP_MS = 48 * FLIGHT_HOUR_MS;
-
-/**
- * Whether a told wait's subject needs nothing more, however FLIGHT wrote the target (`PR 1294`,
- * `#1294`, `1401`, `mc#7`): its PR is merged or closed, its ticket is closed, or its run has ended.
- */
-function waitSubjectDone(store: Store, repo: string, target: string): boolean {
-  if (waitResolved(store, repo, target)) return true;
-  const run = store.run(target);
-  if (run !== null && run !== undefined) return run.endedAt !== null;
-  const n = waitTargetNumber(repo, target);
-  if (n === null) return false;
-  return waitResolved(store, repo, `${repo}#${n}`);
-}
-
-/** The waits FLIGHT recorded with `wait_on`, by target. */
-export function flightWaits(store: Store): Record<string, FlightWait> {
-  return stored<Record<string, FlightWait>>(store, FLIGHT_WAITS_SETTING, {});
-}
-
-/**
- * The target a wait is really on. FLIGHT may pass a `wait_over` signal's id back as the target; that
- * waits on the original target again, so ending the wait never wraps the key in another `wait_over:`.
- */
-export const waitTargetOf = (target: string): string => {
-  let t = target.trim();
-  // each wait_over: wrapped the key in the time its wait ended; the target's own trailing time stays
-  while (t.startsWith("wait_over:")) t = t.slice("wait_over:".length).replace(/:\d{10,}$/, "");
-  return t;
-};
-
-/** Keeps a wait; a later one on the same target replaces it. Entries a week past their time go. */
-export function recordFlightWait(store: Store, target: string, wait: FlightWait): void {
-  const waits = flightWaits(store);
-  waits[waitTargetOf(target)] = wait;
-  for (const [key, w] of Object.entries(waits))
-    if (w.until < wait.at - FLIGHT_SIGNAL_KEEP_MS) delete waits[key];
-  store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
-}
 
 /**
  * A seat's call to FLIGHT: kept as an untold `seat_call` signal, so the next wake lists it with the

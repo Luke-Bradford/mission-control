@@ -15,7 +15,6 @@ import {
   COMMS_MC,
   eligibleToStart,
   FLIGHT_STUCK_PR_MS,
-  FLIGHT_WAITS_SETTING,
   type FlightPrFlow,
   NEW_LOOP,
   type RepoId,
@@ -87,40 +86,6 @@ export const stuckPrRepo = (config: CcConfig, repoId: RepoId): boolean =>
   );
 
 /**
- * The issue or PR number a `wait_on` target names, in any spelling FLIGHT uses (`mc#7`, `7`, `#7`,
- * `PR 7`, `pull 7`, `ticket 7`, `issue 7`); null for another repo's ref or a target with no number.
- * Signals read their wait targets with it too, so there is one list of spellings.
- */
-export function waitTargetNumber(repo: string, target: string): number | null {
-  const t = target.trim();
-  const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(t)?.[1];
-  if (n !== undefined) return Number(n);
-  const ref = /^([\w.-]+)#(\d+)$/.exec(t);
-  return ref !== null && ref[1] === repo ? Number(ref[2]) : null;
-}
-
-/** Whether a FLIGHT wait still running is on this PR or its ticket, by any name it goes by. */
-function flightWaitsOn(
-  store: Store,
-  repo: string,
-  prNumber: number,
-  issue: number,
-  now: number,
-): boolean {
-  let waits: Record<string, { until?: number }> = {};
-  try {
-    waits = JSON.parse(store.getSetting(FLIGHT_WAITS_SETTING) || "{}");
-  } catch {
-    return false;
-  }
-  return Object.entries(waits).some(([target, w]) => {
-    if ((w.until ?? 0) <= now) return false;
-    const n = waitTargetNumber(repo, target);
-    return n === prNumber || n === issue;
-  });
-}
-
-/**
  * The open crew PRs that are stuck now, whatever the wait: conflicting with main, or with red CI,
  * with no run working on them and nobody holding them. `since` says how long.
  */
@@ -175,7 +140,6 @@ export function stuckPrs(i: {
       continue;
     if (ticketHolds.has(pr.ticket)) continue;
     if (attentionHolds.some(([key]) => key.startsWith(`pr:${repoId}#${pr.number}:`))) continue;
-    if (flightWaitsOn(store, repoId, pr.number, issue, now)) continue;
     const card = board.find((c) => c.issueNumber === issue);
     if (card === undefined || card.closed || card.labels.includes(WAITING_OPERATOR_LABEL)) continue;
     if (ticketParked(store, pr.ticket) !== null) continue;

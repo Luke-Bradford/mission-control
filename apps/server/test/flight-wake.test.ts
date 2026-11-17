@@ -23,13 +23,7 @@ import {
   wakeLine,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import {
-  deliveredFacts,
-  flightWake,
-  nextWakeAt,
-  wakeFacts,
-  wakeReasons,
-} from "../src/flight/state.ts";
+import { deliveredFacts, flightWake, nextWakeAt, wakeFacts } from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
@@ -165,31 +159,6 @@ describe("wake deltas", () => {
       unchanged: 1,
       removed: [],
     });
-  });
-
-  it("omits waits older than a day without losing them from the full state", () => {
-    const now = Date.parse("2026-11-09T08:00:00Z");
-    const day = 24 * 60 * 60_000;
-    const state = busyBoard();
-    state.signals = [
-      { kind: "wait_over", key: "mc#1:old", since: now - day - 1, evidence: "old wait" },
-      { kind: "wait_over", key: "mc#2:boundary", since: now - day, evidence: "due wait" },
-      { kind: "main_red", key: "old-main", since: now - day - 1, evidence: "still red" },
-    ];
-    const first = flightWake(state, undefined, [], false, now);
-    expect(first.digest.signals.entries.map((s) => s.key)).toEqual(["mc#2:boundary", "old-main"]);
-    expect(first.digest.signals.unchanged).toBe(1);
-    expect(state.signals.map((s) => s.key)).toEqual(["mc#1:old", "mc#2:boundary", "old-main"]);
-    const later = flightWake(state, first.snapshot, [], false, now + 1);
-    expect(later.digest.signals).toEqual({
-      entries: [],
-      unchanged: 3,
-      removed: ["wait_over:mc#2:boundary"],
-    });
-    expect(
-      flightWake({ ...state, signals: [] }, later.snapshot, [], false, now + 1).digest.signals
-        .removed,
-    ).toEqual(["main_red:old-main"]);
   });
 
   it("lists a handled reason again when its producer marks it untold", () => {
@@ -693,20 +662,6 @@ describe("no re-wake on a timer", () => {
   it("schedules nothing with nothing waiting", () => {
     const quiet = { ...busyBoard(), questions: [], tickets: [], prs: [], seats: [] };
     expect(nextWakeAt(quiet, T, T)).toBeNull();
-  });
-});
-
-describe("wake reasons", () => {
-  it("lists what is new against the last facts, with the targets a decision would name", () => {
-    const before = wakeFacts({ ...busyBoard(), questions: [] });
-    const after = wakeFacts({
-      ...busyBoard(),
-      questions: [{ id: 7, seat: "guido-1", ticket: "mc#1", text: "Which lane?", ageMin: 1 }],
-    });
-    expect(wakeReasons(before, after)).toEqual([
-      { id: "q:7", label: "q 7", targets: ["7", "ask:7"] },
-    ]);
-    expect(wakeReasons(after, after)).toEqual([]);
   });
 });
 

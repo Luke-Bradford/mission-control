@@ -8,7 +8,6 @@ import {
   COMMS_MC,
   FLIGHT_IDLE_MS,
   FLIGHT_STUCK_PR_MS,
-  FLIGHT_WAITS_SETTING,
   freezeRules,
   NEW_LOOP,
   type PullRequestView,
@@ -31,7 +30,6 @@ import {
   stuckPrs,
   takeStuckPrs,
   trackStuckPrs,
-  waitTargetNumber,
 } from "../src/engine/stuck-prs.ts";
 import { flightState } from "../src/flight/state.ts";
 import { prFlow } from "../src/pr/flow.ts";
@@ -433,26 +431,6 @@ describe("tickets and PRs that are never taken", () => {
       },
     ],
     [
-      "a ticket FLIGHT waits on",
-      () => {
-        stuckSetup(7);
-        store.setSetting(
-          FLIGHT_WAITS_SETTING,
-          JSON.stringify({ [`${REPO}#7`]: { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" } }),
-        );
-      },
-    ],
-    [
-      "a PR FLIGHT waits on",
-      () => {
-        stuckSetup(7);
-        store.setSetting(
-          FLIGHT_WAITS_SETTING,
-          JSON.stringify({ "PR 7": { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" } }),
-        );
-      },
-    ],
-    [
       "a PR under a merge hold",
       () => {
         stuckSetup(7);
@@ -488,57 +466,6 @@ describe("tickets and PRs that are never taken", () => {
     expect(list()).toEqual([]);
     const state = flightState({ config, store, busy: [], now, areas: RULES.areas });
     expect(state.signals.map((s) => s.kind)).not.toContain("stuck_pr");
-  });
-});
-
-describe("a FLIGHT wait in any spelling of its target", () => {
-  it("reads a target to its number", () => {
-    expect(waitTargetNumber("mc", "PR#20")).toBe(20);
-    expect(waitTargetNumber("mc", "mc#7")).toBe(7);
-    expect(waitTargetNumber("mc", "other#7")).toBeNull();
-    expect(waitTargetNumber("mc", "note:blocked:x")).toBeNull();
-  });
-
-  it.each([
-    "7",
-    "#7",
-    "ticket 7",
-    "issue 7",
-    "20",
-    "pr 20",
-    "pull 20",
-    "PR #20",
-    "PR#20",
-    "pull#20",
-    "ticket#7",
-    "issue#7",
-    "mc#20",
-    "mc#7",
-  ])("holds PR 20 on ticket 7 when the wait is on %s", async (target) => {
-    stuckSetup(7, { number: 20, branch: "feature/7-x", ticket: `${REPO}#7` });
-    store.setSetting(
-      FLIGHT_WAITS_SETTING,
-      JSON.stringify({ [target]: { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" } }),
-    );
-    trackStuckPrs(store, config, now);
-    now += FLIGHT_STUCK_PR_MS;
-    await takeStuckPrs(deps(realConflict()));
-    expect(started).toEqual([]);
-    expect(list()).toEqual([]);
-  });
-
-  it("does not hold on another repo's ref or an unrelated number", async () => {
-    stuckSetup(7, { number: 20, branch: "feature/7-x", ticket: `${REPO}#7` });
-    store.setSetting(
-      FLIGHT_WAITS_SETTING,
-      JSON.stringify({
-        "other#7": { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" },
-        "21": { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" },
-      }),
-    );
-    trackStuckPrs(store, config, now);
-    now += FLIGHT_STUCK_PR_MS;
-    expect(list()).toHaveLength(1);
   });
 });
 
@@ -594,17 +521,7 @@ describe("the two-attempt rule (a call that stays FLIGHT's)", () => {
       at: T0,
     });
   };
-  const expired = [
-    [
-      "after its wait has expired",
-      () =>
-        store.setSetting(
-          FLIGHT_WAITS_SETTING,
-          JSON.stringify({ [`${REPO}#7`]: { until: T0 - 1, at: T0 - 60 * MIN, reason: "r" } }),
-        ),
-    ],
-    ["with no wait at all", () => {}],
-  ] as const;
+  const expired = [["with no wait at all", () => {}]] as const;
 
   it.each(expired)("a PR that failed two reviews is not offered %s", async (_n, wait) => {
     stuckSetup(7);
