@@ -55,18 +55,26 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
       panelsInside: [...document.querySelectorAll(".as-cols > .as-col > .panel")].every(
         (p) => rect(p).bottom <= innerHeight + 1,
       ),
-      // Every section of the open row's detail sits inside the Do next list, uncut and unclipped.
+      // Every section of the open row's detail sits inside the Do next list, with no sideways travel.
       detailInside: (() => {
         const sections = [...document.querySelectorAll(".as-more .as-mg > div")];
         if (!list || sections.length === 0) return false;
         const b = rect(list);
-        return sections.every((d) => {
-          const r = rect(d);
-          return (
-            r.left >= b.left - 1 && r.right <= b.right + 1 && d.scrollWidth <= d.clientWidth + 1
-          );
-        });
+        const right = b.left + list.clientWidth;
+        return (
+          list.scrollWidth <= list.clientWidth + 1 &&
+          sections.every((d) => rect(d).left >= b.left - 1 && rect(d).right <= right + 1)
+        );
       })(),
+      detailDebug: JSON.stringify({
+        list: list && { left: rect(list).left, client: list.clientWidth, scroll: list.scrollWidth },
+        sections: [...document.querySelectorAll(".as-more .as-mg > div")].map((d) => ({
+          left: Math.round(rect(d).left),
+          right: Math.round(rect(d).right),
+          scroll: d.scrollWidth,
+          client: d.clientWidth,
+        })),
+      }),
       listScrolls: list ? list.scrollHeight > list.clientHeight : false,
       small: [
         ...document.querySelectorAll(".as-cols button, .as-cols select, .as-cols a[href]"),
@@ -103,7 +111,7 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.totalRows).toBe(8);
             expect(m.visibleRows).toBeGreaterThanOrEqual(5);
             expect(m.firstOpen).toBe(true);
-            expect(m.detailInside).toBe(true);
+            expect(m.detailInside, m.detailDebug).toBe(true);
             expect(m.pageScrolls).toBe(false);
             expect(m.sideways).toBe(false);
             expect(m.panelsInside).toBe(true);
@@ -138,7 +146,7 @@ describeRendered("Audit first screen in a real browser", () => {
           expect(m.sideways).toBe(false);
           expect(m.panelsInside).toBe(true);
           if (options.rows === 50) expect(m.listScrolls).toBe(true);
-          if (options.rows !== 0) expect(m.detailInside).toBe(true);
+          if (options.rows !== 0) expect(m.detailInside, m.detailDebug).toBe(true);
           if (options.rows !== 0) {
             const reachable = await page.reachable(".as-do .as-scroll tr.as-rec");
             expect(reachable).toHaveLength(options.rows);

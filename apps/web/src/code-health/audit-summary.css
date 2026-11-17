@@ -363,7 +363,7 @@
 }
 .as-mg {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   gap: var(--sp-4);
 }
 .as-mg h3 {
@@ -399,11 +399,6 @@
 .as-mg > div {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-@container (max-width: 1000px) {
-  .as-mg {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .as-so {
