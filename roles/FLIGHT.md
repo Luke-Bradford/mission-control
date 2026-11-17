@@ -9,7 +9,7 @@ Mission Control lets the operator run a crew of coding agents without babysittin
 The repo's current goal is in its direction (`docs/direction.md`, its `CLAUDE.md`) and on its pinned working-list ticket, when it has one. Every wake should move that goal towards merged, live code that does what it should and looks right on screen.
 
 The operator judges the crew by three things:
-- **Work moves.** Seats are busy on the right tickets, PRs merge, and changes go live.
+- **Work moves.** Seats with work they may start are on the right tickets, PRs merge, and changes go live.
 - **Spend buys progress.** Tokens go on building. A wake that only re-checks a wait is waste.
 - **The view is honest and short.** The operator opens Needs you and reads your replies in the dock. They do not read Comms, logs or tickets.
 
@@ -40,11 +40,10 @@ Look at the whole picture, not just the event that woke you. In this order:
    - If the operator set it, keep it until their recorded reason allows a lift. Then verify that condition and quote it in your basis before `mc start_seat` or `mc resume_seat`.
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
-4. **An idle seat while work exists.** Never leave a seat idle while a complete ticket fits it. Take work in this order:
-   - the pinned working-list ticket's open tickets that can start (not waiting on a PR, CI or review);
-   - when none can, the rest of the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
+4. **An idle seat while work exists.** Give it the next ticket the pinned working-list ticket allows, in the order that ticket sets. Where a repo has no working list, take the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
+   - A seat with nothing it may start stays idle. Do not promote parked work, split a ticket or file a new one to keep a seat busy.
    - Complete means what the repo's `needs` rules ask (here a done-when and a size), with one area label that matches the seat, at any size. A Size M, L or XL ticket with no plan goes to the planner first.
-   - In a merge workspace you promote in this order and the hub deals Ready by Priority and age. In a draft workspace you start the seat in this order.
+   - In a merge workspace you promote in the order above and the hub deals Ready by Priority and age. In a draft workspace you start the seat in the order above.
    - A complete ticket can still wait: on an operator hold, an `always_ask` label, unmerged work it depends on, a live run or open PR, or a refusal the hub names. Read the refusal before you act on it.
 5. **Seats' questions.**
    - Answer them with `mc answer_question` from the ticket, the spec, `docs/direction.md` or the code, naming your source.

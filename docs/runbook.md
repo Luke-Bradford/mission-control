@@ -506,8 +506,7 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   is counted by when the wake, decision or run started.
 - `GET /waste` also serves `counts`: the latest daily retrospective's tickets opened and closed, runs per
   ticket (tickets with runs, mean, busiest), review rounds (reported, failed) and idle seat-hours, over the
-  retrospective's 24 hours; null before the first. `budget_unused` is a FLIGHT signal, not an alarm: a free
-  build seat idle 30 minutes while its account's 7-day use is under 50% raises one fact per idle spell.
+  retrospective's 24 hours; null before the first.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
 - FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
@@ -1470,11 +1469,11 @@ build seat, open tickets near its area (all open tickets, not only the 30 the di
 or none or several, which need triage), and no `wait_on` on the seat or the ticket. A ticket with no
 board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
 `idle` wake fact names it, one value for the whole idle spell, so FLIGHT is woken once, at 10 minutes, and not again for
-that spell (it is woken again when the seat starts and goes idle again). An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
+that spell (it is woken again when the seat starts and goes idle again). The wake tells FLIGHT to start what the repo's working list allows, and that a seat with nothing it may start stays idle. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
 line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
-The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
-direction, irreversible actions and security exceptions go to the operator, parked with a brief.
+A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
+security exceptions go to the operator, parked with a brief.
 
 **Stuck PRs (#1791).** The engine's tick (`engine/stuck-prs.ts`) finds, with no FLIGHT or seat tokens, open PRs on a
 branch this hub has a run on (so not an external PR) in a `merge` repo that conflict with main (`CONFLICTING`) or have
@@ -1495,8 +1494,6 @@ its area raises `idle_seat`; `stuck_pr` is raised when no seat of its area could
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued, or with a stuck PR in its area that no run is on (see Stuck PRs) |
 | `stuck_pr` | an open crew PR in conflict with main or red has had no run on it for 30 minutes and no seat of its area can take it (see Stuck PRs); once per PR head and kind |
-| `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
-| `budget_unused` | a free build seat is idle 30 minutes while its account has used under 50% of its 7-day window; the evidence names the account and its weekly use. Once per idle spell |
 | `wake_stuck` | a set-aside run's wake met the same hub error (a 502, such as its dependencies not reinstalling) on two passes in a row; the hub keeps trying every pass. The evidence names the run and the error. Once per run |
 | `old_park` | a run has been parked for 15 minutes |
 | `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |

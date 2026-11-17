@@ -917,9 +917,7 @@ export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: n
 /** The log line for the seats idle past a 30-minute period: each one's time, and why nothing started. */
 export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seats"]): string {
   const why =
-    idle.ready.length > 0
-      ? `Ready ${idle.ready.join(", ")} not started`
-      : "no Ready ticket fits; FLIGHT has promoted none and logged no wait";
+    idle.ready.length > 0 ? `Ready ${idle.ready.join(", ")} not started` : "no Ready ticket fits";
   const triage =
     idle.untriaged.length > 0 ? ` (${idle.untriaged.length} with no board status)` : "";
   const named = seats.map((x) => `${x.id} ${Math.floor(x.ms / 60_000)} min`).join(", ");
