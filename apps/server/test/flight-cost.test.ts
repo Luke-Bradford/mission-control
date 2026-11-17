@@ -232,7 +232,6 @@ describe("routine wakes wait for the batch window", () => {
       { triage: ["x"] },
       { free: ["x"] },
       { idle: ["x"] },
-      { signals: ["waste_alarm:x"] },
       { signals: ["main_red:sha"] },
       { items: ["comms-open:4"] },
       { prs: ["mc#1:7:true:open::"] },
@@ -241,6 +240,7 @@ describe("routine wakes wait for the batch window", () => {
     ] as Record<string, unknown[]>[])
       expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);
     expect(routineOnly(facts({}), facts({ signals: ["old_park:x"] }), learned)).toBe(true);
+    expect(routineOnly(facts({}), facts({ signals: ["waste_alarm:x"] }), learned)).toBe(true);
     expect(immediateFact("prs", "mc#1:7:true:open::")).toBe(true);
   });
 });

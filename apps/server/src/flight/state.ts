@@ -1857,8 +1857,9 @@ export function immediateCategories(previous: string, current: string): string[]
 
 /**
  * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
- * moving. An operator message, question, blocker, park, signal, plan, instruction or the breaker is
- * never routine, so those wake FLIGHT at once. False when nothing changed.
+ * moving. An operator message, question, blocker, park, plan, instruction or the breaker is never
+ * routine, so those wake FLIGHT at once; so does a signal, unless its kind is not immediate and
+ * signals are a learned category. False when nothing changed.
  */
 export function routineOnly(
   previous: string,

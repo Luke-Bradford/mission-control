@@ -35,6 +35,7 @@ import {
   seatDef,
   WAITING_OPERATOR_LABEL,
   WAKE_STUCK_KEY_SUFFIX,
+  WASTE_ACTIONS,
   WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
@@ -742,11 +743,12 @@ export function flightSignals(i: {
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
-  // a waste alarm wakes FLIGHT once: the signal keeps its told mark for as long as the alarm stands
+  // Only an alarm that parks a ticket wakes FLIGHT, once: the dealer skips the ticket until the
+  // alarm is resolved or its cause ends, so left unsaid the ticket would stand unseen. The other
+  // alarms are stored; GET /api/waste serves the open ones.
   for (const alarm of openWasteAlarms(store)) {
     if (alarm.repoId !== repo) continue;
-    // a refused rerun is already fixed by the hook: Audit records it, FLIGHT is not woken
-    if (alarm.check === "unchanged-rerun") continue;
+    if (WASTE_ACTIONS[alarm.check] !== "park") continue;
     raise(
       "waste_alarm",
       String(alarm.id),
