@@ -269,6 +269,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             CHECK_BASH_TIMEOUT_MS,
           ),
         };
+        // A new Codex call with the same command replaces an earlier one that never delivered a
+        // completion. Its exec cell no longer exists, so keeping the old receipt pending would
+        // block both this fresh call and the eventual push until the turn ends.
+        const replaced = new Set<StartedCall>();
+        for (const [id, startedCall] of started) {
+          if (startedCall.runId !== key.runId || startedCall.command !== command) continue;
+          started.delete(id);
+          replaced.add(startedCall);
+        }
+        for (const prior of replaced)
+          noteDrop(key.runId, "session-lost", prior.matched, prior.head, prior.command);
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {

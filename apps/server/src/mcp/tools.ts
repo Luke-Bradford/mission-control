@@ -2680,8 +2680,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       }
       const pending = deps.pendingChecks?.(currentRun.id) ?? [];
       if (pending.length > 0) {
+        const lost = (deps.checkDrops?.(currentRun.id) ?? []).filter(
+          (drop) => drop.reason === "session-lost",
+        );
         return {
-          text: `Evidence not recorded: these checks have no completed receipt yet: ${pending.join(", ")}. A yielded session is still running. Continue polling that session until it reports a final numeric exit code before reporting evidence or ending your turn. If polling is refused, report the blocker; do not claim a pass.`,
+          text:
+            lost.length > 0
+              ? `Evidence not recorded: the earlier check session was lost before it reported an exit code. Run ${pending.join(", ")} again; do not keep polling the lost session. Once the new call starts, wait for its final numeric exit code before reporting evidence or ending your turn.`
+              : `Evidence not recorded: these checks have no completed receipt yet: ${pending.join(", ")}. A yielded session is still running. Continue polling that session until it reports a final numeric exit code before reporting evidence or ending your turn. If polling is refused, report the blocker; do not claim a pass.`,
           isError: true,
         };
       }

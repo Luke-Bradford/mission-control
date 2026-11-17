@@ -3049,6 +3049,25 @@ describe("push and draft_pr", () => {
         expect(remoteTip()).toBe(sha);
       });
 
+      it("pushes after a fresh Codex check replaces a disappeared session", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        const checks = createCheckRecorder({
+          store,
+          checks: async () => [LINT, TYPES],
+          state: async () => ({ head: head(), clean: true }),
+        });
+        await checks.begin({ runId: RUN, toolUseId: "lost-cell" }, LINT);
+        await checks.begin({ runId: RUN, toolUseId: "fresh-cell" }, LINT);
+        await checks.end({ runId: RUN, toolUseId: "fresh-cell" }, true, 0);
+        await checks.begin({ runId: RUN, toolUseId: "types" }, TYPES);
+        await checks.end({ runId: RUN, toolUseId: "types" }, true, 0);
+
+        expect(await push(gated({ checkDrops: (runId) => checks.drops(runId) }))).toEqual({
+          text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+        });
+        expect(remoteTip()).toBe(sha);
+      });
+
       it("holds the repo's affected-tests check until it passes on the pushed head", async () => {
         const related = "pnpm -s test:related";
         const checks = gated({ checks: async () => [LINT, TYPES, related] });
@@ -3085,6 +3104,7 @@ describe("push and draft_pr", () => {
         ["dirty-end", "left uncommitted or untracked files"],
         ["head-moved", "moved the head during the call"],
         ["turn-ended", "the turn ended before the call reported its end"],
+        ["session-lost", "check session disappeared"],
         ["background", "went to the background"],
         ["timeout", "Bash timeout"],
         ["unreadable", "could not read the seat's clone"],
@@ -4541,6 +4561,33 @@ describe("report_evidence", () => {
     await checks.end(key, true, 0);
     expect(await report("Checks completed with exit code 0.")).toEqual({ text: EVIDENCE_RECORDED });
     expect(told).toEqual([[CTX.seatId, CTX.runId]]);
+  });
+
+  it("tells a Codex seat to rerun a check after its session disappears", async () => {
+    await committed();
+    const command = "pnpm -s test:related";
+    const checks = createCheckRecorder({
+      store,
+      checks: async () => [command],
+      state: async () => ({ head: head(), clean: true }),
+    });
+    ev = make({
+      pendingChecks: (runId) => checks.pending(runId),
+      checkDrops: (runId) => checks.drops(runId),
+    });
+    await checks.begin({ runId: RUN, toolUseId: "codex-lost-cell" }, command);
+    await checks.begin({ runId: RUN, toolUseId: "codex-fresh-cell" }, command);
+
+    const result = await report("The replacement check is running.");
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("earlier check session was lost");
+    expect(result.text).toContain(`Run ${command} again`);
+    expect(result.text).not.toContain("Continue polling that session");
+
+    await checks.end({ runId: RUN, toolUseId: "codex-fresh-cell" }, true, 0);
+    expect(await report("The replacement check passed with exit code 0.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
   });
 
   it("takes a fresh recovery report after a push-wait stop and its check completes", async () => {
