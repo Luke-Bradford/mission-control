@@ -7,7 +7,7 @@ import {
   type Telemetry,
 } from "@mc/core";
 import { useTz } from "../clock.ts";
-import { hub, type Resource, RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, type Resource, useResource } from "../data.ts";
 import { dayMonth, percent, plural } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Panel } from "../hud/Panel.tsx";
