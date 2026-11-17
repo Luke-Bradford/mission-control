@@ -51,7 +51,11 @@ function nameList(names: string[]): string {
 }
 
 /** What the usage rows left out, in words: the text the summary and the totals share. */
-function coverageText(t: Telemetry | undefined, scope: Scope): string | null {
+function coverageText(
+  t: Telemetry | undefined,
+  scope: Scope,
+  kind?: "cost" | "tokens",
+): string | null {
   if (!t) return null;
   const rows = t.totals.filter(
     (r) =>
@@ -59,13 +63,19 @@ function coverageText(t: Telemetry | undefined, scope: Scope): string | null {
       (scope.account === "" || r.accountId === scope.account),
   );
   const c = costCoverage(rows);
-  const parts = [
-    c.missingCost.length > 0 &&
-      `No cost reported for ${nameList(c.missingCost)}; not counted as $0.`,
-    c.missingTokens.length > 0 &&
-      `No tokens reported for ${nameList(c.missingTokens)}; not counted as 0.`,
+  if (kind === "cost")
+    return c.missingCost.length > 0
+      ? `No cost reported for ${nameList(c.missingCost)}; not counted as $0.`
+      : null;
+  if (kind === "tokens")
+    return c.missingTokens.length > 0
+      ? `No tokens reported for ${nameList(c.missingTokens)}; not counted as 0.`
+      : null;
+  const missing = [
+    c.missingCost.length > 0 && `No cost reported for ${nameList(c.missingCost)}; not counted as $0.`,
+    c.missingTokens.length > 0 && `No tokens reported for ${nameList(c.missingTokens)}; not counted as 0.`,
   ].filter(Boolean);
-  return parts.length > 0 ? parts.join(" ") : null;
+  return missing.length > 0 ? missing.join(" ") : null;
 }
 
 /** The Cost and tokens summary row: today's spend and tokens, cost per merged ticket, and coverage. */
@@ -86,7 +96,8 @@ function CostSummary({
   const cover = costCoverage(rows);
   const hit = t ? cacheHitPct(t.today) : null;
   const perTicket = t ? costPerMergedTicket(t.tokensByTicket) : null;
-  const detail = coverageText(t, scope) ?? undefined;
+  const costDetail = coverageText(t, scope, "cost") ?? undefined;
+  const tokensDetail = coverageText(t, scope, "tokens") ?? undefined;
   const stats: StatSpec[] = [
     {
       id: "cost",
@@ -133,7 +144,7 @@ function CostSummary({
       window: scope.range,
       definition:
         "Seat and model rows that reported a cost, of all rows in the range. Mission Control does not count runs here yet.",
-      detail,
+      detail: costDetail,
       drill: { kind: "needs-route", target: "the rows that reported no cost" },
     },
     {
@@ -144,6 +155,7 @@ function CostSummary({
       window: scope.range,
       definition:
         "Seat and model rows that reported tokens, of all rows in the range. Mission Control does not count runs here yet.",
+      detail: tokensDetail,
       drill: { kind: "needs-route", target: "the rows that reported no tokens" },
     },
   ];

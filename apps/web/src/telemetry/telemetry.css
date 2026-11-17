@@ -238,15 +238,13 @@
 }
 
 .summary .stat-sub {
-  position: absolute;
-  right: var(--sp-3);
-  bottom: var(--sp-2);
-  display: block;
-  white-space: nowrap;
+  position: static;
+  display: -webkit-box;
+  white-space: normal;
 }
 
 .summary .stat-main {
-  padding-right: var(--sp-7);
+  padding-right: 0;
 }
 
 /* the tab panel: a grid of panels that share what is left of the screen */

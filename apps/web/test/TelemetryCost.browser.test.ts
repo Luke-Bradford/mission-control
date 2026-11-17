@@ -66,7 +66,8 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
             height,
             colorScheme: scheme,
             api: api(),
-            search: "?path=/telemetry&tab=cost",
+            // The desktop fixture keeps only `path`; encode the tab query inside it.
+            search: "?path=/telemetry%3Ftab%3Dcost",
           });
           try {
             await ready(page);
@@ -109,7 +110,8 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
         height: 1000,
         colorScheme: "dark",
         api: api(),
-        search: "?path=/telemetry&tab=cost&view=table",
+        // The desktop fixture keeps only `path`; encode the tab and view queries inside it.
+        search: "?path=/telemetry%3Ftab%3Dcost%26view%3Dtable",
       });
       try {
         await ready(page);
