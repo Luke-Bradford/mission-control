@@ -196,6 +196,18 @@ describe("ItemPanel, Ask FLIGHT", () => {
 });
 
 describe("ItemPanel, an escalation with a question", () => {
+  it("heads the thread with the Needs-you item title, not the source issue's", async () => {
+    const asked = item({ text: "Clear it from Needs you?" });
+    open(
+      [asked],
+      [escalation({ title: "[studio] cutover — point repo front-door", question: QUESTION })],
+    );
+    expect(
+      await screen.findByRole("heading", { name: "About: Clear it from Needs you?" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /cutover/ })).toBeNull();
+  });
+
   it("heads it with the kind, the agent and when it opened", async () => {
     const { container } = open([item()]);
     await screen.findByText("Which eviction policy should the quote cache use?");

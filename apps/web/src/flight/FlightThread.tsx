@@ -1,4 +1,10 @@
-import { COMMS_MC, COMMS_NOTICE, type ConfigView, type FlightConversationMessage } from "@mc/core";
+import {
+  COMMS_MC,
+  COMMS_MESSAGE_MAX,
+  COMMS_NOTICE,
+  type ConfigView,
+  type FlightConversationMessage,
+} from "@mc/core";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
@@ -244,6 +250,7 @@ export function FlightThread({
           aria-label="Message FLIGHT"
           placeholder="Ask FLIGHT to assign, reprioritise or report…"
           rows={2}
+          maxLength={COMMS_MESSAGE_MAX}
           value={text}
           disabled={!seat}
           onChange={(e) => setText(e.target.value)}

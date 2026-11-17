@@ -154,7 +154,7 @@ export function useItemDetail(key: string | null) {
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
   // The item's title: the thread beside the question is headed with it.
-  const about = esc?.title ?? item?.text ?? "";
+  const about = item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
   const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
   // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
