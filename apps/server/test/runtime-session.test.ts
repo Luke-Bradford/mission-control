@@ -392,13 +392,13 @@ describe("startSession against the fake CLI", () => {
   });
 
   it("a keeper that ends before the CLI's last words arrive still gives those words", async () => {
-    const input = keeperInput();
-    const { s, events, until } = start(input);
+    const { s, events, until } = start();
+    const keeperDir = join(dir, `k${keeperDirs}`);
     s.send("hi");
     await until(isResult);
     // the keeper's exit file holds what the CLI said last; the keeper goes before the socket carries it
     writeFileSync(
-      join(input.dir, KEEPER_EXIT_FILE),
+      join(keeperDir, KEEPER_EXIT_FILE),
       JSON.stringify({
         code: 1,
         signal: null,
@@ -408,7 +408,7 @@ describe("startSession against the fake CLI", () => {
         endReason: null,
       }),
     );
-    process.kill(readPidFile(input.dir, KEEPER_PID_FILE) as number, "SIGKILL");
+    process.kill(readPidFile(keeperDir, KEEPER_PID_FILE) as number, "SIGKILL");
     expect(await until(isExit)).toEqual({ kind: "exit", code: 1, signal: null });
     const said = events.filter((e) => e.kind === "stderr").map((e) => (e as { text: string }).text);
     expect(said.at(-1)).toBe("invalid seat settings");
