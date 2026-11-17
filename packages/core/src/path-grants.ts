@@ -38,9 +38,13 @@ export function ticketPathGrants(body: string): string[] {
   return found;
 }
 
-/** Ticket Paths entries outside `area`, which need validation and a FLIGHT grant; in-area files and globs do not. */
-export function pathsNeedingGrant(area: readonly string[], paths: readonly string[]): string[] {
-  return paths.filter((path) => !pathInArea(area, path));
+/** Ticket Paths entries outside `area` or protected by the repo, which need validation and a FLIGHT grant. */
+export function pathsNeedingGrant(
+  area: readonly string[],
+  paths: readonly string[],
+  extra: readonly string[] = [],
+): string[] {
+  return paths.filter((path) => !pathInArea(area, path) || isProtectedPath(path, extra));
 }
 
 /**

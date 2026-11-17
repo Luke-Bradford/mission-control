@@ -41,6 +41,9 @@ describe("ticketPathGrants", () => {
         ticketPathGrants("Paths: apps/server/**, package.json"),
       ),
     ).toEqual(["package.json"]);
+    expect(pathsNeedingGrant(["apps/**"], ["apps/web/package.json"])).toEqual([
+      "apps/web/package.json",
+    ]);
   });
 });
 
