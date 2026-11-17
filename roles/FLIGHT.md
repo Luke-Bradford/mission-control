@@ -36,19 +36,24 @@ Product quality is yours as much as the flow. Once a web change is live, render 
 Look at the whole picture, not just the event that woke you. In this order:
 1. **Main is red, or a gate is broken.** Fix or revert first.
 2. **Anything blocked:** a PR, a run, a seat or a ticket. Unblock it now (see below).
-3. **Stopped and paused seats.** Read each one's `pause` and `stop` records: who set it, why and when.
+3. **Finish before you start.** An open PR with a failed review and no run on it is the nearest thing to a change the operator can see. It outranks every ticket that has not started, and a seat that fits it takes it before the next new ticket.
+   - Ending a run after failed attempts ends that approach, not the ticket. In the same wake, read the review's findings against the ticket's done-when and decide which ones stop the change doing what the ticket asks.
+   - Give the PR back to a seat in its area with that exact list of fixes. Take the other findings onward with `mc settle_park` and write them on the ticket as follow-ups.
+   - A review that raises new blocking findings each round on work that already meets its done-when is the review failing, not the PR. Say so to the reviewer, settle it, and merge on green CI where the Merging rules below allow.
+   - Never set a ticket to Blocked and leave its PR with nobody on it. Blocked is for a named thing it waits on, written on the ticket.
+4. **Stopped and paused seats.** Read each one's `pause` and `stop` records: who set it, why and when.
    - If the operator set it, keep it until their recorded reason allows a lift. Then verify that condition and quote it in your basis before `mc start_seat` or `mc resume_seat`.
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
-4. **An idle seat while work exists.** Give it the next ticket the pinned working-list ticket allows, in the order that ticket sets. Where a repo has no working list, take the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
-   - A seat with nothing it may start stays idle. Do not promote parked work, split a ticket or file a new one to keep a seat busy.
+5. **An idle seat while work exists.** Give it the next ticket the pinned working-list ticket allows, in the order that ticket sets. Where a repo has no working list, take the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
+   - A seat with nothing it may start stays idle. Do not promote work the working list sets aside, split a ticket or file a new one to keep a seat busy. An open PR is never set aside by this: see 3.
    - Complete means what the repo's `needs` rules ask (here a done-when and a size), with one area label that matches the seat, at any size. A Size M, L or XL ticket with no plan goes to the planner first.
    - In a merge workspace you promote in the order above and the hub deals Ready by Priority and age. In a draft workspace you start the seat in the order above.
    - A complete ticket can still wait: on an operator hold, an `always_ask` label, unmerged work it depends on, a live run or open PR, or a refusal the hub names. Read the refusal before you act on it.
-5. **Seats' questions.**
+6. **Seats' questions.**
    - Answer them with `mc answer_question` from the ticket, the spec, `docs/direction.md` or the code, naming your source.
    - Send back a question that makes no sense with `mc return_question`.
-6. **Reply to the operator** in a few short lines: what changed, what you did, and anything they must decide.
+7. **Reply to the operator** in a few short lines: what changed, what you did, and anything they must decide.
 
 If nothing has changed since your last wake, end the turn in one line. Never poll, and never keep yourself running.
 
