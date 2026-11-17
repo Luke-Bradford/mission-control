@@ -164,10 +164,18 @@ export function flightQueries(
       reasons: string[],
       wakeId?: string,
       rode: string[] = [],
+      immediate: string[] = [],
     ): void {
       db.prepare(
-        "INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons, wake_id, rode) VALUES (?, ?, ?, ?, ?)",
-      ).run(runId, at, JSON.stringify(reasons), wakeId ?? null, JSON.stringify(rode));
+        "INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons, wake_id, rode, immediate) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(
+        runId,
+        at,
+        JSON.stringify(reasons),
+        wakeId ?? null,
+        JSON.stringify(rode),
+        JSON.stringify(immediate),
+      );
     },
 
     /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -182,7 +190,7 @@ export function flightQueries(
     flightWakes(since: number): FlightWakeRecord[] {
       const rows = db
         .prepare(
-          "SELECT run_id, at, reasons, wake_id, rode FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
+          "SELECT run_id, at, reasons, wake_id, rode, immediate FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
         )
         .all(since) as {
         run_id: string;
@@ -190,6 +198,7 @@ export function flightQueries(
         reasons: string;
         wake_id: string | null;
         rode: string | null;
+        immediate: string | null;
       }[];
       return rows.map((r) => ({
         runId: r.run_id,
@@ -197,6 +206,7 @@ export function flightQueries(
         reasons: JSON.parse(r.reasons) as string[],
         ...(r.wake_id === null ? {} : { wakeId: r.wake_id }),
         rode: r.rode === null ? [] : (JSON.parse(r.rode) as string[]),
+        immediate: r.immediate === null ? [] : (JSON.parse(r.immediate) as string[]),
       }));
     },
 
@@ -207,7 +217,7 @@ export function flightQueries(
     ): FlightWakeAction[] {
       const rows = db
         .prepare(`
-        SELECT w.run_id, w.at, w.reasons, w.rode,
+        SELECT w.run_id, w.at, w.reasons, w.rode, w.immediate,
           EXISTS(SELECT 1 FROM mcp_tool_calls c
             WHERE c.run_id = w.run_id AND c.at >= w.at AND c.at < COALESCE(
               (SELECT MIN(next.at) FROM flight_wakes next WHERE next.run_id = w.run_id AND next.at > w.at), ?)
@@ -219,6 +229,7 @@ export function flightQueries(
         at: number;
         reasons: string;
         rode: string | null;
+        immediate: string | null;
         acted: number;
       }[];
       return rows.map((r) => ({
@@ -226,6 +237,7 @@ export function flightQueries(
         at: r.at,
         reasons: JSON.parse(r.reasons) as string[],
         rode: r.rode === null ? [] : (JSON.parse(r.rode) as string[]),
+        immediate: r.immediate === null ? [] : (JSON.parse(r.immediate) as string[]),
         acted: r.acted === 1,
       }));
     },

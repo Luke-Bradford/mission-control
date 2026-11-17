@@ -41,6 +41,7 @@ export function noActionReasons(wakes: readonly FlightWakeAction[]): string[] {
   const counts = new Map<string, { wakes: number; noAction: number }>();
   for (const wake of wakes)
     for (const reason of wake.reasons) {
+      if (wake.immediate.includes(reason)) continue;
       const current = counts.get(reason) ?? { wakes: 0, noAction: 0 };
       current.wakes++;
       if (!wake.acted) current.noAction++;

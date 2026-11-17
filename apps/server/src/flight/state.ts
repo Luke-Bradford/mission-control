@@ -348,8 +348,9 @@ export function recordWakeReasons(
   causes: string[],
   wakeId?: string,
   rode: string[] = [],
+  immediate: string[] = [],
 ): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId, rode);
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId, rode, immediate);
 }
 
 /** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
@@ -2189,6 +2190,20 @@ export function batchedCategories(
       const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
       const added = (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
       return added.length > 0 && added.every((v) => !immediateFact(category, v));
+    })
+    .sort();
+}
+
+/** Changed categories with an added immediate fact: a wake they cause could not have been batched. */
+export function immediateCategories(previous: string, current: string): string[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((category) => {
+      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+      return (after[category] ?? []).some(
+        (v) => !old.has(JSON.stringify(v)) && immediateFact(category, v),
+      );
     })
     .sort();
 }

@@ -194,6 +194,8 @@ export interface FlightWakeRecord {
   wakeId?: string;
   /** Batched categories that rode with an immediate wake. */
   rode?: string[];
+  /** Cause categories that carried an immediate fact, which batching could not have held back. */
+  immediate?: string[];
 }
 
 export interface FlightWakeAction {
@@ -201,6 +203,7 @@ export interface FlightWakeAction {
   at: number;
   reasons: string[];
   rode: string[];
+  immediate: string[];
   acted: boolean;
 }
 
@@ -1466,6 +1469,8 @@ export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
   "release",
   "breaker",
   "holdsInForce",
+  "discussions",
+  "instructions",
 ];
 export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [
   "waste_alarm",

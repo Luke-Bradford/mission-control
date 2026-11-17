@@ -60,6 +60,7 @@ import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   batchedCategories,
+  immediateCategories,
   deliveredFacts,
   type FlightWakeSnapshot,
   flightLive,
@@ -767,6 +768,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       const changed = changedWakeFacts(lastFacts, wake);
       // A learned category rides with an immediate wake, but teaches the learned set only when it
       // causes a wake itself at the end of the batch window.
+      const immediate = immediateCategories(lastFacts, wake);
       const rode = routine ? [] : batchedCategories(lastFacts, wake, learnedBatches.set);
       const rider = (category: string) => rode.includes(category.replace(/ \(\d+\)$/, ""));
       const causes = changed.filter((category) => !rider(category));
@@ -795,7 +797,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         recordFlightWake(store, found.session.repoId, t, woke);
-        recordWakeReasons(store, runId, t, woke, flightWakeId(runId, n + 1), rode);
+        recordWakeReasons(
+          store,
+          runId,
+          t,
+          woke,
+          flightWakeId(runId, n + 1),
+          rode,
+          immediate.filter((category) =>
+            woke.some((cause) => cause.replace(/ \(\d+\)$/, "") === category),
+          ),
+        );
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {

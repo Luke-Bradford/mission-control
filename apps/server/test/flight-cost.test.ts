@@ -230,7 +230,7 @@ describe("routine wakes wait for the batch window", () => {
   });
 
   it("does not batch immediate facts even in a learned category", () => {
-    const learned = new Set(["signals", "items", "prs"]);
+    const learned = new Set(["signals", "items", "prs", "discussions", "instructions"]);
     for (const factsAdded of [
       { q: ["x"] },
       { operator: ["x"] },
@@ -243,6 +243,8 @@ describe("routine wakes wait for the batch window", () => {
       { signals: ["main_red:sha"] },
       { items: ["comms-open:4"] },
       { prs: ["mc#1:7:true:open::"] },
+      { discussions: [["d1", ["m1"]]] },
+      { instructions: ["r2"] },
     ] as Record<string, unknown[]>[])
       expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);
     expect(routineOnly(facts({}), facts({ signals: ["push_unseen:x"] }), learned)).toBe(true);

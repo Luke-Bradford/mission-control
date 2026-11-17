@@ -5418,6 +5418,16 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(store.flightWakes(0).at(-1)?.reasons).toEqual(["prs"]);
   });
 
+  it("records a merge wake as caused by an immediate fact", async () => {
+    flightOnly();
+    holdPr({ ci: "passing" });
+    await watch.check();
+    holdPr({ ci: "passing", state: "merged", mergedAt: nowMs });
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    expect(store.flightWakes(0).at(-1)?.immediate).toEqual(["prs"]);
+  });
+
   it("a wait on a parked seat stays silent, then a changed park kind wakes", async () => {
     liveCrew();
     const park = (kind: string) => {
@@ -6137,7 +6147,10 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     ask();
     await tick();
     expect(store.flightWakes(0)).toEqual([
-      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1", rode: [] },
+      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1",
+        rode: [],
+        immediate: ["items", "q"],
+      },
     ]);
     const view = flightView(config, store, nowMs + MIN);
     expect(view.wakeHistory?.byReason).toEqual([

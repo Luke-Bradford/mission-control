@@ -6624,8 +6624,9 @@ export class Store {
     reasons: string[],
     wakeId?: string,
     rode: string[] = [],
+    immediate: string[] = [],
   ): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode);
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */

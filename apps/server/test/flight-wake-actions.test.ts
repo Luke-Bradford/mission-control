@@ -64,6 +64,7 @@ describe("FLIGHT wake actions", () => {
         at: n,
         reasons: ["prs"],
         rode: [],
+        immediate: [],
         acted: n === 0,
       })),
       ...Array.from({ length: 10 }, (_, n) => ({
@@ -71,6 +72,7 @@ describe("FLIGHT wake actions", () => {
         at: n,
         reasons: ["stopped"],
         rode: [],
+        immediate: [],
         acted: n < 2,
       })),
       ...Array.from({ length: 9 }, (_, n) => ({
@@ -78,6 +80,7 @@ describe("FLIGHT wake actions", () => {
         at: n,
         reasons: ["t"],
         rode: [],
+        immediate: [],
         acted: false,
       })),
       ...Array.from({ length: 10 }, (_, n) => ({
@@ -85,6 +88,7 @@ describe("FLIGHT wake actions", () => {
         at: n,
         reasons: ["q"],
         rode: [],
+        immediate: [],
         acted: false,
       })),
       ...Array.from({ length: 10 }, (_, n) => ({
@@ -92,9 +96,30 @@ describe("FLIGHT wake actions", () => {
         at: n,
         reasons: [],
         rode: ["items"],
+        immediate: [],
         acted: false,
       })),
     ];
     expect(noActionReasons(wakes)).toEqual(["prs"]);
+  });
+
+  it("does not learn from wakes an immediate fact caused", () => {
+    const wake = (acted: boolean, immediate: string[], reasons = ["prs"]) => ({
+      runId: "f",
+      at: 0,
+      reasons,
+      rode: [],
+      immediate,
+      acted,
+    });
+    expect(
+      noActionReasons([
+        ...Array.from({ length: 10 }, () => wake(false, [])),
+        ...Array.from({ length: 5 }, () => wake(true, ["prs"])),
+      ]),
+    ).toEqual(["prs"]);
+    expect(
+      noActionReasons(Array.from({ length: 10 }, () => wake(false, [], ["discussions"]))),
+    ).toEqual([]);
   });
 });
