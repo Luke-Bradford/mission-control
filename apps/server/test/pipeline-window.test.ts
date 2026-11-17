@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   ciFailureClass,
@@ -191,7 +191,10 @@ describe("command line", () => {
     ["a missing --from", ["--db", "x", "--repo", REPO]],
     ["an unparseable --from", ["--db", "x", "--repo", REPO, "--from", "not a date"]],
     ["zero hours", ["--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "0"]],
-    ["non-numeric hours", ["--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "abc"]],
+    [
+      "non-numeric hours",
+      ["--db", "x", "--repo", REPO, "--from", "2026-11-16T00:00:00Z", "--hours", "abc"],
+    ],
   ])("prints the usage line and exits 2 for %s", (_name, args) => {
     const r = cli(...args);
     expect(r.status).toBe(2);
