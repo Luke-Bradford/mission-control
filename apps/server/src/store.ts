@@ -3675,9 +3675,10 @@ export class Store {
       this.db.prepare("DELETE FROM flow_column_moves WHERE repo_id = ?").run(repoId);
       this.db.prepare("DELETE FROM flow_prs WHERE repo_id = ?").run(repoId);
       const insIssue = this.db.prepare(
-        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at, title) VALUES (?, ?, ?, ?, ?, ?)",
       );
-      for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
+      for (const i of issues)
+        insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt, i.title ?? null);
       const insMove = this.db.prepare(
         "INSERT INTO flow_column_moves (repo_id, number, at, column) VALUES (?, ?, ?, ?)",
       );
@@ -3717,6 +3718,7 @@ export class Store {
       size: r.size as string | null,
       startAt: r.start_at as number | null,
       doneAt: r.done_at as number | null,
+      title: r.title as string | null,
     }));
   }
 

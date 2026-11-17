@@ -149,6 +149,7 @@ describe("collectFlow issues", () => {
         repoId: "shop-app",
         number: 1,
         size: null,
+        title: "t1",
         startAt: Date.parse(at(3)),
         doneAt: null,
       },
@@ -171,6 +172,7 @@ describe("collectFlow issues", () => {
       repoId: "shop-app",
       number: 1,
       size: null,
+      title: "t1",
       startAt: Date.parse(at(3)),
       doneAt: null,
     });
@@ -278,6 +280,7 @@ describe("collectFlow issues", () => {
       repoId: "shop-app",
       number: 1,
       size: null,
+      title: "t1",
       startAt: Date.parse(at(3)),
       doneAt: null,
     });
@@ -300,6 +303,7 @@ describe("collectFlow issues", () => {
         repoId: "shop-app",
         number: 1,
         size: "M",
+        title: "t1",
         startAt: Date.parse(at(5)),
         doneAt: Date.parse(at(1)),
       },
@@ -331,10 +335,37 @@ describe("collectFlow issues", () => {
     const { gql } = stub({ 1: timeline(ev("Backlog", 5), ev("Done", 1)) });
     await run(gql);
     expect(store.flowIssues(since)).toEqual([
-      { repoId: "shop-app", number: 1, size: null, startAt: null, doneAt: Date.parse(at(1)) },
+      {
+        repoId: "shop-app",
+        number: 1,
+        size: null,
+        title: "t1",
+        startAt: null,
+        doneAt: Date.parse(at(1)),
+      },
     ]);
     expect(status()).toMatchObject({ ok: true });
     expect(status()?.error).toContain("1 done issue(s) without a start");
+  });
+
+  it("keeps a done ticket's row, with its title, after its card leaves the board", async () => {
+    store.replaceBoard("shop-app", [board(1)]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 5), ev("Done", 1)) });
+    await run(gql);
+
+    store.replaceBoard("shop-app", []);
+    await run(gql);
+
+    expect(store.flowIssues(since)).toEqual([
+      {
+        repoId: "shop-app",
+        number: 1,
+        size: null,
+        title: "t1",
+        startAt: Date.parse(at(5)),
+        doneAt: Date.parse(at(1)),
+      },
+    ]);
   });
 
   it("uses the last move into Done and ignores events on another project", async () => {
@@ -376,7 +407,14 @@ describe("collectFlow issues", () => {
         NOW,
       );
       expect(store.flowIssues(since)).toEqual([
-        { repoId: "shop-app", number: 1, size: null, startAt: null, doneAt: Date.parse(at(1)) },
+        {
+          repoId: "shop-app",
+          number: 1,
+          size: null,
+          title: "t1",
+          startAt: null,
+          doneAt: Date.parse(at(1)),
+        },
       ]);
       expect(status()?.error).toContain("1 done issue(s) without a start");
     },

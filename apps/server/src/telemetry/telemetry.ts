@@ -721,7 +721,7 @@ export function telemetry(
           .sort((a, b) => a - b)[0] ?? null;
       return {
         ticket,
-        title: store.boardItem(issue.repoId, issue.number)?.title ?? null,
+        title: issue.title ?? store.boardItem(issue.repoId, issue.number)?.title ?? null,
         size: issue.size,
         readyAt: issue.startAt,
         startedAt: store.ticketStartedAt(ticket),

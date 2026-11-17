@@ -314,9 +314,16 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         repoId: repo.id,
         number: i.issueNumber,
         size: i.size,
+        title: i.title,
         ...flow,
         doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
+    }
+    // A done ticket whose card has left the board keeps its stored row for the whole window.
+    const collected = new Set(issues.map((issue) => issue.number));
+    for (const kept of store.flowIssues(since)) {
+      if (kept.repoId !== repo.id || kept.doneAt === null || collected.has(kept.number)) continue;
+      issues.push(kept);
     }
     const prs: FlowPr[] = [];
     for (const p of merged) {
