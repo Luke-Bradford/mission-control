@@ -2,6 +2,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { telemetryPath } from "../src/router.ts";
 import {
   BROWSER_TEST_TIMEOUT_MS,
   browserSession,
@@ -58,6 +59,7 @@ async function ready(page: RenderedPage) {
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)), undefined);
   if (page.errors().length) throw new Error(page.errors().join("; "));
   await page.boxes("#page-telemetry");
+  for (const id of ["#qCi", "#qFirstPass", "#qRounds", "#qGuard"]) await page.boxes(id);
   await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -79,7 +81,7 @@ describeRendered("Telemetry, Quality tab, in a browser", () => {
             height,
             colorScheme: scheme,
             api: api(),
-            search: "?path=/telemetry&tab=quality",
+            search: `?path=${encodeURIComponent(telemetryPath("quality"))}`,
           });
           try {
             await ready(page);
