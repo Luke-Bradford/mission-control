@@ -210,6 +210,7 @@ import {
   offersFor,
   setAsideQuestions,
 } from "./attention/needs-you-actions.ts";
+import { withRepoWatch } from "./attention/unwatched-repos.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -6504,7 +6505,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const offers = needsYou === null ? undefined : offersFor(needsYou, item);
         return isOperatorItem(item)
           ? {
-              ...pinned(item, store, config),
+              ...withRepoWatch(pinned(item, store, config), config),
               ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
               ...(offers === undefined ? {} : { offers }),
             }
