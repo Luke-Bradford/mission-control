@@ -734,11 +734,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (onlySettled(lastFacts, wake)) lastFacts = wake;
     // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
     const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
-    const batched =
-      wake !== lastFacts &&
-      listed &&
-      t < batchEnds &&
-      routineOnly(lastFacts, wake, learnedBatches.set);
+    const routine =
+      wake !== lastFacts && listed && routineOnly(lastFacts, wake, learnedBatches.set);
+    const batched = routine && t < batchEnds;
     if (batched) {
       later(batchEnds - t);
       recordNextFlightWake(
@@ -767,9 +765,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         t,
       );
       const changed = changedWakeFacts(lastFacts, wake);
-      const causes = changed;
-      const reasons = wakeReasons(lastFacts, wake, state.items);
-      const rode = batchedCategories(lastFacts, wake, learnedBatches.set);
+      // A learned category rides with an immediate wake, but teaches the learned set only when it
+      // causes a wake itself at the end of the batch window.
+      const rode = routine ? [] : batchedCategories(lastFacts, wake, learnedBatches.set);
+      const rider = (category: string) => rode.includes(category.replace(/ \(\d+\)$/, ""));
+      const causes = changed.filter((category) => !rider(category));
+      const reasons = wakeReasons(lastFacts, wake, state.items).filter(
+        (reason) => !rider(reason.id.split(":", 1)[0] ?? ""),
+      );
       if (
         (await supervisor.send(
           runId,

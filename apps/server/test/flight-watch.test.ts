@@ -1269,7 +1269,7 @@ describe("FLIGHT's holds", () => {
     ]);
   });
 
-  it("drops a hold whose card the board has moved past, and does not wake for it", async () => {
+  it("drops a hold whose card the board has moved past, and wakes for its merged PR", async () => {
     liveCrew();
     store.upsertPullRequests("mc", [stored(7)], T0);
     hold();
@@ -1284,7 +1284,7 @@ describe("FLIGHT's holds", () => {
     nowMs = T0 + MIN;
     expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
     await watch.check();
-    expect(sendCalls).toEqual([]);
+    expect(sendCalls).toHaveLength(1);
     expect(store.activeHolds()).toEqual([]);
   });
 });
@@ -3310,8 +3310,8 @@ describe("wakeSummary", () => {
       const stopped = state({ seats: [s({ state: "stopped", free: true })] });
       expect(pending(stopped)).toBe(true);
       expect(wakeSummary(stopped)).toBe("1 free seat · 1 stopped");
-      // a PR merging is a routine step: in the digest, not a wake fact
-      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).toBe(
+      // an unseen merged PR is an immediate wake fact
+      expect(wakeFacts(state({ prs: [{ ...pr, state: "merged" }] }))).not.toBe(
         wakeFacts(state({ prs: [pr] })),
       );
       expect(wakeFacts(state({ prs: [{ ...pr, awaitingFlight: "sha" }] }))).not.toBe(
@@ -5445,7 +5445,7 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(store.flightWakes(0).at(-1)?.reasons).toEqual(expect.arrayContaining(["free"]));
   });
 
-  it("a PR going pending, green, review queued, merged wakes FLIGHT never", async () => {
+  it("a PR going pending, green, review queued, then merged wakes FLIGHT", async () => {
     flightOnly();
     holdPr({ ci: "pending" });
     await watch.check();
@@ -5469,11 +5469,13 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     await tick();
     holdPr({ ci: "passing", state: "merged", mergedAt: nowMs });
     await tick();
-    expect(sendCalls).toEqual([]);
+    expect(sendCalls).toHaveLength(1);
+    expect(sendCalls[0]?.text.split("\n")[0]).toContain("prs");
     expect(startCalls).toEqual([]);
     expect(wakeFacts(flightState({ config, store, busy: [], now: nowMs }))).toBe(before);
-    // still in the digest FLIGHT reads
-    expect(listed().map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
+    // the sent digest contains the merge before it is marked shown
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
+    expect(sent.prs.entries.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
   });
 
   it("a ready PR with a queued merge wakes nothing until the stall rule fires, then once", async () => {
@@ -5579,22 +5581,46 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls[0]?.text.split("\n")[0]).toContain("free");
   });
 
-  it("a learned batched reason does not wake FLIGHT alone; an immediate item does", async () => {
-    for (let n = 0; n < 10; n++)
-      store.addFlightWake("old-flight", nowMs - (20 + n) * MIN, ["prFlow"]);
+  it("a learned batched reason does not wake FLIGHT alone; a question does, and it rides along", async () => {
+    for (let n = 0; n < 10; n++) store.addFlightWake("old-flight", nowMs - (20 + n) * MIN, ["prs"]);
     flightOnly();
+    live("inco-1", "r-inco");
     ask("inco-1", "r-inco");
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
     await tick();
     holdPr({ ci: "pending" });
+    store.setRunLoop("r-pr", { ...NEW_LOOP, prNumber: 7, awaitingFlight: "sha7" });
     await tick();
     expect(sendCalls).toHaveLength(1);
-    ask("inco-1", "r-inco-2");
+    ask("inco-1", "r-inco");
     await tick();
     expect(sendCalls).toHaveLength(2);
-    expect(sendCalls[1]?.text.split("\n")[0]).toContain("items");
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("q");
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("prs");
+    expect(store.flightWakes(0).at(-1)?.reasons).toEqual(expect.arrayContaining(["q", "items"]));
+    expect(store.flightWakes(0).at(-1)?.reasons).not.toContain("prs");
+    expect(store.flightWakes(0).at(-1)?.rode).toEqual(["prs"]);
+  });
+
+  it("a learned batched reason triggers the batch-window fallback instead of riding", async () => {
+    for (let n = 0; n < 10; n++) store.addFlightWake("old-flight", nowMs - (20 + n) * MIN, ["prs"]);
+    flightOnly();
+    live("inco-1", "r-inco");
+    ask("inco-1", "r-inco");
+    await watch.check();
+    store.answerQuestion(store.openQuestions()[0]?.id ?? 0, nowMs);
+    await tick();
+    holdPr({ ci: "pending" });
+    store.setRunLoop("r-pr", { ...NEW_LOOP, prNumber: 7, awaitingFlight: "sha7" });
+    await tick();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_BATCH_MS;
+    await tick();
+    expect(sendCalls).toHaveLength(2);
+    expect(store.flightWakes(0).at(-1)?.reasons).toEqual(["prs"]);
+    expect(store.flightWakes(0).at(-1)?.rode).toEqual([]);
   });
 
   it("a second Ready ticket after a wake waits for the batch window, and a question does not", async () => {
@@ -6011,16 +6037,12 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls).toHaveLength(2);
   });
 
-  it("a merged PR that woke nothing rides in the next wake, even an hour later", async () => {
+  it("a merged PR wakes FLIGHT at once and is listed in that wake", async () => {
     flightOnly();
     await watch.check();
     store.upsertPullRequests("mc", [stored(7, { state: "merged", mergedAt: nowMs })], nowMs);
     await watch.check();
-    expect(sendCalls).toEqual([]);
-    nowMs += 61 * MIN;
-    vi.setSystemTime(nowMs);
-    ask();
-    await watch.check();
+    expect(sendCalls).toHaveLength(1);
     const last = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
     expect(last.prs.entries.map((p) => [p.pr, p.state])).toEqual([[7, "merged"]]);
   });

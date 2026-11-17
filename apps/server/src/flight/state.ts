@@ -1180,7 +1180,7 @@ export function flightState(i: {
   const prs = store
     .pullRequests(session.repoId)
     .filter(
-      // a merge no longer wakes FLIGHT, so an unshown one waits a day for the next wake to carry it
+      // an unshown merge stays available until its immediate wake is delivered
       (p) =>
         p.state === "open" ||
         (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_METRICS_DAY_MS),
@@ -1796,7 +1796,7 @@ export function wakeFacts(
         .sort() ?? [],
     // CI, review and merge steps are digest-only; merge_stalled says when a ready PR has stood still
     prs: s.prs
-      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null)
+      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null || p.state === "merged")
       .map(
         (p) =>
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
@@ -2147,7 +2147,11 @@ export function immediateFact(category: string, item: unknown): boolean {
   if (category === "items") return !fact.startsWith("pr:");
   if (category === "prs") {
     const parts = fact.split(":");
-    return (parts[2] === "true" && parts[3] === "open") || Boolean(parts.slice(5).join(":"));
+    return (
+      (parts[2] === "true" && parts[3] === "open") ||
+      parts[3] === "merged" ||
+      Boolean(parts.slice(5).join(":"))
+    );
   }
   return false;
 }
