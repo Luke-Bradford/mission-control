@@ -160,6 +160,7 @@ export function Telemetry() {
     range,
     all,
     agents,
+    agent,
     account,
     ticket,
     wait: res.error && !t ? "Telemetry did not load." : "Loading…",

@@ -193,15 +193,25 @@ function Wait({ scope }: { scope: Scope }) {
   return <p className="pb s muted">{scope.wait}</p>;
 }
 
+/** Step totals stay crew-wide until telemetry returns scoped step rows. */
+function crewWideSteps(scope: Scope): boolean {
+  return Boolean(scope.agent || scope.account || scope.ticket);
+}
+
 /** Spend by loop step: one bar per step, plus what the hub does not keep (an hourly series). */
 function SpendByStep({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const steps = t?.tokensByStep;
+  const wholeCrew = crewWideSteps(scope);
   const spent = (steps ?? []).reduce((a, s) => a + (s.costUsd ?? 0), 0);
   const withCost = (steps ?? []).filter((s) => s.costUsd !== null);
   const total = withCost.length > 0 ? spent : null;
-  const most = Math.max(1, ...(steps ?? []).map((s) => s.tokens));
+  const most = Math.max(0.0001, ...(steps ?? []).map((s) => s.costUsd ?? 0));
   return (
-    <Panel id="tStepBars" title="Spend by step" sub={`~USD, API-equivalent · last ${scope.range}`}>
+    <Panel
+      id="tStepBars"
+      title="Spend by step"
+      sub={`~USD, API-equivalent · last ${scope.range}${wholeCrew ? " · Whole crew, not filtered" : ""}`}
+    >
       {!t ? (
         <Wait scope={scope} />
       ) : steps === undefined ? (
@@ -237,7 +247,7 @@ function SpendByStep({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
                   </>
                 }
                 title={`${r.step}: ${cost(r.costUsd)}, ${kTokens(r.tokens)} tokens, ${plural(r.runs, "run")}`}
-                pct={(r.tokens / most) * 100}
+                pct={((r.costUsd ?? 0) / most) * 100}
                 value={cost(r.costUsd)}
                 extra={`${kTokens(r.tokens)} · ${plural(r.runs, "run")}`}
               />
@@ -354,7 +364,7 @@ function TokensPerMinute({ t, scope }: { t: Telemetry | undefined; scope: Scope 
     <Panel
       id="tTok"
       title="Tokens per minute"
-      sub={`${live ? `live · last ${LIVE_MINUTES} minutes` : `history · last ${scope.range}`} · top 3 seats and other`}
+      sub={`${live ? `live · last ${LIVE_MINUTES} minutes` : `history · last ${scope.range}`} · top 3 seats and other${scope.ticket ? " · Whole crew, not filtered" : ""}`}
       actions={
         <Seg label="Tokens per minute" options={TOK_MODES} value={mode} onChange={setMode} />
       }
@@ -640,7 +650,11 @@ function CostTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
 function StepTable({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const steps = t?.tokensByStep;
   return (
-    <Panel id="tStepTable" title="Tokens by loop step" sub="repeats cost more">
+    <Panel
+      id="tStepTable"
+      title="Tokens by loop step"
+      sub={`repeats cost more${crewWideSteps(scope) ? " · Whole crew, not filtered" : ""}`}
+    >
       {!t ? (
         <Wait scope={scope} />
       ) : steps === undefined ? (

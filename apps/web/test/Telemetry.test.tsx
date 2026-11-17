@@ -1618,6 +1618,38 @@ describe("Cost and tokens tab", () => {
     within(panel("tTotals")).getByText(/No cost reported for codex-ta; not counted as \$0\./);
   });
 
+  it("scales spend bars by reported cost, not token volume", async () => {
+    await loaded(
+      tel({
+        tokensByStep: [
+          { step: "plan", tokens: 1_000, costUsd: 10, runs: 1 },
+          { step: "build", tokens: 100, costUsd: 60, runs: 1 },
+          { step: "review", tokens: 10_000, costUsd: null, runs: 1 },
+        ],
+      }),
+    );
+    const rows = panel("tStepBars").querySelectorAll(".hrow");
+    expect((rows[0]?.querySelector(".track i") as HTMLElement).style.width).toBe(
+      "16.666666666666664%",
+    );
+    expect((rows[1]?.querySelector(".track i") as HTMLElement).style.width).toBe("100%");
+    expect((rows[2]?.querySelector(".track i") as HTMLElement).style.width).toBe("0%");
+  });
+
+  it.each([
+    ["Agent", "studio", ["tStepBars"]],
+    ["Account", "codex-main", ["tStepBars"]],
+    ["Ticket", "shop-app#3349", ["tStepBars", "tTok"]],
+  ])("marks crew-wide charts when the %s filter is active", async (label, choice, ids) => {
+    await loaded();
+    expect(screen.queryByText("Whole crew, not filtered")).toBeNull();
+    fireEvent.change(screen.getByLabelText(label), { target: { value: choice } });
+    await waitFor(() => {
+      for (const id of ids)
+        expect(panel(id).querySelector(".sub")?.textContent).toContain("Whole crew, not filtered");
+    });
+  });
+
   it("stacks tokens per minute as the top three seats and Other, summing to the total", async () => {
     const more = ["a", "b", "c", "d"].map((id, i) => ({
       agentId: id,
