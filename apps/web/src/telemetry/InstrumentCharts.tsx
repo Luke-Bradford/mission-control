@@ -10,9 +10,9 @@ import {
   useChartWidth,
 } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
-import { Panel } from "../hud/Panel.tsx";
 import { chartAnnotations } from "./annotations.ts";
 import type { Scope } from "./common.ts";
+import { TPanel as Panel } from "./TPanel.tsx";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;

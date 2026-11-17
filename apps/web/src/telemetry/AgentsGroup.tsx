@@ -6,34 +6,20 @@ import {
   TELEMETRY_RANGES,
   type Telemetry,
 } from "@mc/core";
-import { type ReactNode, useState } from "react";
-import { dur, kTokens, minutesAgo, percent } from "../fmt.ts";
+import { useState } from "react";
+import { dur, kTokens, minutesAgo } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { StackedArea } from "../hud/charts/StackedArea.tsx";
-import { VBars } from "../hud/charts/VBars.tsx";
-import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { DASH, indexOf, type Scope } from "./common.ts";
+import { TPanel as Panel } from "./TPanel.tsx";
 
 type TokMode = "live" | "hist";
 const TOK_MODES = [
   { value: "live", label: "Live" },
   { value: "hist", label: "History" },
-] as const;
-
-const UTIL = [
-  { key: "working", label: "working", color: "var(--ok)" },
-  { key: "waiting", label: "waiting (lock, reviews)", color: "var(--accent)" },
-  { key: "blocked", label: "blocked, parked or stalled", color: "var(--warn-mark)" },
-  { key: "idle", label: "idle", color: "var(--line-2)" },
-] as const;
-
-const TURN_KINDS = [
-  { key: "input", label: "input" },
-  { key: "output", label: "output" },
-  { key: "cacheRead", label: "cache read" },
 ] as const;
 
 /** The agents in view, in config order, with their series. */
@@ -98,99 +84,7 @@ function TokensPerMinute({ t, scope }: { t: Telemetry | undefined; scope: Scope 
   );
 }
 
-function Utilisation({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
-  const rows = t ? inView(scope, t.utilisation) : [];
-  let body: ReactNode;
-  if (!t) body = <p className="pb s muted">{scope.wait}</p>;
-  else if (t.utilisation.length === 0) body = <p className="pb s muted">No agents configured.</p>;
-  else if (rows.length === 0) body = <p className="pb s muted">No agents match this filter.</p>;
-  else
-    body = (
-      <div className="pb">
-        {rows.map((r) => (
-          <div className="hrow util" key={r.agentId}>
-            <span>
-              <AgentTag id={r.agentId} index={indexOf(scope, r.agentId)} sm />
-            </span>
-            <span className="ubar">
-              {UTIL.filter((u) => (r[u.key] ?? 0) > 0).map((u) => (
-                <i
-                  key={u.key}
-                  title={`${u.label} ${percent(r[u.key] ?? 0)}`}
-                  style={{ width: `${r[u.key]}%`, background: u.color }}
-                />
-              ))}
-              {(r.unknown ?? 0) > 0 && (
-                <i
-                  title={`unknown ${percent(r.unknown ?? 0)}`}
-                  style={{ width: `${r.unknown}%`, background: "var(--muted)" }}
-                />
-              )}
-            </span>
-            <span className="num xs">{percent(r.working)}</span>
-          </div>
-        ))}
-        <div className="tnote">
-          <Legend items={UTIL.map((u) => ({ key: u.key, name: u.label, color: u.color }))} />
-        </div>
-      </div>
-    );
-  return (
-    <Panel id="tUtil" title="Where agent time goes" sub="share of today, per agent">
-      {body}
-    </Panel>
-  );
-}
-
-function TokensPerTurn({
-  t,
-  scope,
-  agent,
-}: {
-  t: Telemetry | undefined;
-  scope: Scope;
-  agent: AgentId | null;
-}) {
-  const turns = t?.turnUsage.find((u) => u.agentId === agent)?.turns ?? [];
-  let body: ReactNode;
-  if (!t) body = <p className="pb s muted">{scope.wait}</p>;
-  else if (agent === null)
-    body = (
-      <p className="pb s muted">
-        {scope.all.length === 0 ? "No agents configured." : "No agents match this filter."}
-      </p>
-    );
-  else if (turns.length === 0)
-    body = <p className="pb s muted">No turns recorded for {agent} yet.</p>;
-  else {
-    const kinds = TURN_KINDS.map((k, i) => ({ ...k, color: agentColor(i) }));
-    body = (
-      <div className="pb">
-        <VBars
-          label={`Tokens per turn, ${agent}`}
-          height={160}
-          every={Math.max(1, Math.ceil(turns.length / 8))}
-          format={kTokens}
-          bars={turns.map((u, i) => ({
-            key: String(i),
-            label: `turn ${i + 1}`,
-            tip: `turn ${i + 1}`,
-            segments: kinds.map((k) => ({ name: k.label, value: u[k.key], color: k.color })),
-          }))}
-        />
-        <Legend items={kinds.map((k) => ({ key: k.key, name: k.label, color: k.color }))} />
-      </div>
-    );
-  }
-  // Decision: the server sends the latest run's turns, finished or not, so "latest run".
-  return (
-    <Panel id="tTurn" title="Tokens per turn" sub={agent === null ? DASH : `${agent} · latest run`}>
-      {body}
-    </Panel>
-  );
-}
-
-function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+export function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const ms = (v: number | null): string => (v === null ? DASH : dur(v));
   return (
     <Panel id="tLat" title="Tool latency" sub="p50 and p95 per tool">
@@ -234,7 +128,7 @@ function ToolLatency({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
-function Subagents({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+export function Subagents({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const rows = t ? inView(scope, t.subagents) : [];
   return (
     <Panel id="tSubs" title="Subagents" sub="spawned by the crew today">
@@ -291,24 +185,11 @@ function Subagents({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   );
 }
 
-/** Agents (catalogue 2.6.4): tokens per minute, where time goes, per turn, tool latency, subagents. */
-export function AgentsGroup({
-  t,
-  scope,
-  turnAgent,
-}: {
-  t: Telemetry | undefined;
-  scope: Scope;
-  /** Whose turns: the Agent filter, else the selected agent in view, else the first in view. */
-  turnAgent: AgentId | null;
-}) {
+/** The agent series the Cost and tokens tab will take over: tokens per minute, by agent. */
+export function AgentsGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   return (
     <div className="tgrid">
       <TokensPerMinute t={t} scope={scope} />
-      <Utilisation t={t} scope={scope} />
-      <TokensPerTurn t={t} scope={scope} agent={turnAgent} />
-      <ToolLatency t={t} scope={scope} />
-      <Subagents t={t} scope={scope} />
     </div>
   );
 }
