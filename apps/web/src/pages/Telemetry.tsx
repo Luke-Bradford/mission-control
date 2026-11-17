@@ -26,6 +26,7 @@ import { ComingTab } from "../telemetry/ComingTab.tsx";
 import { CrewPanels, CrewSummaryRow } from "../telemetry/CrewTab.tsx";
 import type { AgentInfo, Scope } from "../telemetry/common.ts";
 import { HealthBand } from "../telemetry/HealthBand.tsx";
+import { QUALITY_RANGE, QualityPanels, QualitySummaryRow } from "../telemetry/QualityTab.tsx";
 import { RunsDialog } from "../telemetry/RunsDialog.tsx";
 import type { StatSpec } from "../telemetry/Stat.tsx";
 import { TAB_PANEL_ID, TabBar, tabId } from "../telemetry/TabBar.tsx";
@@ -107,7 +108,9 @@ export function Telemetry() {
   const ticketSel = useId();
   const agentSel = useId();
   const accountSel = useId();
-  const ref = RESOURCES.telemetry(range, agent, account, ticket);
+  // Quality plots its daily series from the longest range the server serves, whatever the toolbar says.
+  const dataRange = tab === "quality" ? QUALITY_RANGE : range;
+  const ref = RESOURCES.telemetry(dataRange, agent, account, ticket);
   const res = useResource<TelemetryData>(ref);
   const bandRes = useResource<TelemetryData>(RESOURCES.telemetry(range));
   const available = useResource<TelemetryData>(RESOURCES.telemetry(range, agent, account)).data;
@@ -260,7 +263,10 @@ export function Telemetry() {
             </span>
           )}
         </div>
-        {def.built && <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />}
+        {tab === "crew" && (
+          <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />
+        )}
+        {tab === "quality" && <QualitySummaryRow t={t} onNeedsRoute={setRuns} />}
         <section
           id={TAB_PANEL_ID}
           className="tabpanel"
@@ -276,12 +282,14 @@ export function Telemetry() {
               <div className="grid" data-state={state}>
                 <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
               </div>
+            ) : tab === "quality" ? (
+              <QualityPanels t={t} view={view} dim={dim} />
             ) : (
               <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
             )
           ) : (
             <ComingTab
-              tab={tab as Exclude<TelemetryTab, "crew">}
+              tab={tab as Exclude<TelemetryTab, "crew" | "quality">}
               label={def.label}
               t={t}
               scope={scope}

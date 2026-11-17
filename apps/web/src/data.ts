@@ -13,6 +13,7 @@ import {
   crewDetailPath,
   crewSummaryPath,
   dockStreamPath,
+  FLOW_DAYS,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
   type MapPayload,
@@ -294,6 +295,10 @@ export const RESOURCES = {
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
+  /** Guard blocks over the Quality tab's fixed window. */
+  guardHitsFlow: { path: `/api/guard/hits?days=${FLOW_DAYS}`, topic: "guard" },
+  /** The QA board's flow figures (escaped defects) over the Quality tab's fixed window. */
+  qaFlow: { path: `/api/qa/flow?days=${FLOW_DAYS}`, topic: ["boards", "guard"] },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
   allAccountModels: { path: "/api/accounts/models", topic: "config" },
   accountModels: (id: string): ResourceRef => ({

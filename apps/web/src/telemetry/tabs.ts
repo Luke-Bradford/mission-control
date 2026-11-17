@@ -24,7 +24,7 @@ export const TAB_DEFS: readonly TabDef[] = [
     built: false,
   },
   { id: "throughput", label: "Throughput", fixed: "Last 14 days", filters: [], built: false },
-  { id: "quality", label: "Quality", fixed: "Last 14 days", filters: [], built: false },
+  { id: "quality", label: "Quality", fixed: "Last 14 days", filters: [], built: true },
   { id: "machine", label: "Machine", fixed: null, filters: [], built: false },
 ];
 

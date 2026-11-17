@@ -8,7 +8,8 @@
 }
 
 /* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
-#page-telemetry[data-tab="crew"] {
+#page-telemetry[data-tab="crew"],
+#page-telemetry[data-tab="quality"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(var(--crew-min, 520px), 1fr);
   overflow: visible;
@@ -283,6 +284,22 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: minmax(256px, 1fr);
   }
+}
+
+/* Quality: four panels in two rows, two columns. */
+.tabpanel .grid[data-view="charts"][data-n="4"]:not([data-state]) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(200px, 1fr));
+}
+
+.tabpanel .grid[data-view="table"][data-n="1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tabpanel .qchart > .chart {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
 }
 
 .tabpanel .grid > .panel {

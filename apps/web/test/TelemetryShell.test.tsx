@@ -388,7 +388,6 @@ describe("the tabs", () => {
     for (const [tab, name] of [
       ["cost", "Cost and tokens is coming"],
       ["throughput", "Throughput is coming"],
-      ["quality", "Quality is coming"],
       ["machine", "Machine is coming"],
     ] as const) {
       await open(`?tab=${tab}`);
@@ -401,10 +400,11 @@ describe("the tabs", () => {
     const expected: Record<string, string[]> = {
       cost: ["tTok", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"],
       throughput: ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"],
-      quality: ["tQual", "tQualityTrend"],
+      // built: its panels are the Quality tab's own, and the earlier two are gone
+      quality: [],
       machine: ["tMach", "tLock"],
     };
-    const all = Object.values(expected).flat();
+    const all = [...Object.values(expected).flat(), "tQual", "tQualityTrend"];
     for (const [tab, ids] of Object.entries(expected)) {
       await open(`?tab=${tab}`);
       for (const id of all)

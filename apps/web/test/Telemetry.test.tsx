@@ -439,12 +439,20 @@ const kpi = (container: HTMLElement, label: string) => {
   };
 };
 
+/** The Quality tab's summary row: label, value and unit of each figure. */
 const quality = () =>
-  [...panel("tQual").querySelectorAll(".stat2")].map((s) => [
-    s.querySelector("span")?.textContent,
-    s.querySelector("b")?.textContent,
-    s.querySelector("b")?.getAttribute("title"),
-  ]);
+  [
+    ...within(screen.getByRole("region", { name: "Quality summary" })).getAllByText(/./, {
+      selector: ".stat-label",
+    }),
+  ].map((l) => {
+    const stat = l.closest(".stat") as HTMLElement;
+    return [
+      l.textContent,
+      stat.querySelector(".stat-value")?.textContent,
+      stat.querySelector(".stat-unit")?.textContent,
+    ];
+  });
 
 describe("KPI tiles", () => {
   it.each([false, true])("animates changed live values only (reduced motion: %s)", (reduced) => {
@@ -510,13 +518,9 @@ describe("KPI tiles", () => {
     }
   });
 
-  it("the quality panel says which of its figures are not tracked yet", async () => {
+  it("the quality summary reads — for the figures the hub does not send", async () => {
     await loaded(undefined, undefined, undefined, "quality");
-    const notTracked = [...panel("tQual").querySelectorAll(".stat2 b")].filter(
-      (b) => b.textContent === NOT_TRACKED,
-    );
-    expect(notTracked).toHaveLength(5);
-    for (const b of notTracked) expect(b.classList.contains("nt")).toBe(true);
+    expect(quality().filter(([, v]) => v === "—")).toHaveLength(5);
   });
 
   it("computed tiles show today's numbers; the others show — with the phase that brings them", async () => {
@@ -657,18 +661,13 @@ describe("Flow of work", () => {
 
   it("quality: CI green on first push rounded; the rest — with their reasons", async () => {
     await loaded(undefined, undefined, undefined, "quality");
-    const stats = [...panel("tQual").querySelectorAll(".stat2")].map((s) => [
-      s.querySelector("span")?.textContent,
-      s.querySelector("b")?.textContent,
-      s.querySelector("b")?.getAttribute("title"),
-    ]);
-    expect(stats).toEqual([
-      ["verify passed first try", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["review rounds per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["RETRO findings per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["median wait for a human review", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["PRs sent back by reviewers", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["CI green on first push", "94%", "16 merged PRs with a known first-push CI result"],
+    expect(quality()).toEqual([
+      ["CI first push", "94%", "% of merged PRs"],
+      ["First-pass review", "—", "% of reviewed PRs"],
+      ["Review rounds per PR", "—", "rounds"],
+      ["RETRO findings per PR", "—", "findings"],
+      ["Human review wait", "—", "min median"],
+      ["PRs sent back", "—", "PRs"],
     ]);
   });
 
@@ -676,8 +675,8 @@ describe("Flow of work", () => {
     const a = await loaded(tel({ quality: Q }), undefined, undefined, "quality");
     expect(quality()).toEqual(
       expect.arrayContaining([
-        ["review rounds per PR", "1.5", "2 merged PRs with a review"],
-        ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
+        ["Review rounds per PR", "1.5", "rounds"],
+        ["RETRO findings per PR", "0.8", "findings"],
       ]),
     );
     a.unmount();
@@ -694,11 +693,10 @@ describe("Flow of work", () => {
       undefined,
       "quality",
     );
-    const none = "No merged PRs with a review in the last 14 days.";
     expect(quality()).toEqual(
       expect.arrayContaining([
-        ["review rounds per PR", "—", none],
-        ["RETRO findings per PR", "—", none],
+        ["Review rounds per PR", "—", "rounds"],
+        ["RETRO findings per PR", "—", "findings"],
       ]),
     );
   });
@@ -1210,11 +1208,8 @@ describe("empty and failing telemetry", () => {
     );
     cleanup();
     await show("quality");
-    const ci = [...panel("tQual").querySelectorAll(".stat2")].at(-1);
-    expect(ci?.querySelector("b")?.textContent).toBe("—");
-    expect(ci?.querySelector("b")?.getAttribute("title")).toBe(
-      "No merged PRs with a known first-push CI result in the last 14 days.",
-    );
+    expect(quality()[0]).toEqual(["CI first push", "—", "% of merged PRs"]);
+    expect(document.getElementById("qCi")?.textContent).toContain("No merged PRs with a result");
     cleanup();
     await show("machine");
     within(panel("tMach")).getByText("No machine samples in the last 24h.");
@@ -1233,7 +1228,6 @@ describe("empty and failing telemetry", () => {
   it.each([
     ["crew", ["tCrewState"]],
     ["throughput", ["tFlow", "tCycleControl", "tForecast"]],
-    ["quality", ["tQualityTrend"]],
     ["cost", ["tCostMerged"]],
   ] as const)("does not invent v2 history from aggregate telemetry on %s", async (tab, ids) => {
     await loaded(undefined, undefined, undefined, tab);
@@ -1283,16 +1277,12 @@ describe("engine telemetry", () => {
     await loaded(ENGINE(), undefined, undefined, "quality");
     expect(quality()).toEqual(
       expect.arrayContaining([
-        ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
-        ["PRs sent back by reviewers", "2", "50% passed the first review round"],
-        [
-          "median wait for a human review",
-          "2m 00s",
-          "How long a finished PR waited for your review, median, last 14 days.",
-        ],
+        ["RETRO findings per PR", "0.8", "findings"],
+        ["PRs sent back", "2", "PRs"],
+        ["Human review wait", "2", "min median"],
       ]),
     );
-    expect(statValue("First-pass review")).toBe("50%");
+    expect(quality()).toContainEqual(["First-pass review", "50%", "% of reviewed PRs"]);
   });
 
   it("shows commits on Throughput and loop-step spend on Cost", async () => {
