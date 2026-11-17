@@ -829,11 +829,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       void check();
     },
     start() {
-      // the retired "left undecided" alert: one still open from before is cleared, never raised again
-      if (store.notes().some((n) => n.key === "flight:left")) {
-        store.clearNote("flight:left", now());
+      // left by the retired wake audit and waits: an open note is cleared and the stored waits go
+      const left = "flight:left";
+      if (store.notes().some((n) => n.key === left)) {
+        store.clearNote(left, now());
         bus.emit("attention");
       }
+      store.deleteSetting("flight.waits");
       if (interval !== null) return;
       stopped = false;
       // a schedule kept from before a restart is not this watch's; idle passes recompute it

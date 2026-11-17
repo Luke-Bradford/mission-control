@@ -752,7 +752,7 @@ export function markItemsShown(store: Store, s: FlightState): void {
 }
 
 /** The wake fact for a queued review an idle review seat has not started. */
-export const REVIEW_FAULT_FACT = "idle-reviewers";
+const REVIEW_FAULT_FACT = "idle-reviewers";
 /** What `wakeFacts` reads beyond the digest: where a Ready ticket could start, and which items are new. */
 function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): FlightWakeInputs {
   return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
@@ -1745,7 +1745,7 @@ export function wakeFacts(
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: startable.sort(),
-    // seats idle with tickets open: one fact per idle spell, until one starts or FLIGHT logs a wait
+    // seats idle with tickets open: one fact per idle spell, until one starts
     idle: idleFacts(s.wake?.idle),
     // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [

@@ -521,13 +521,10 @@ describe("the two-attempt rule (a call that stays FLIGHT's)", () => {
       at: T0,
     });
   };
-  const expired = [["with no wait at all", () => {}]] as const;
-
-  it.each(expired)("a PR that failed two reviews is not offered %s", async (_n, wait) => {
+  it("a PR that failed two reviews is not offered", async () => {
     stuckSetup(7);
     failReview(1, "sha-a");
     failReview(2, "sha-b");
-    wait();
     stuckFor30();
     await takeStuckPrs(deps(realConflict()));
     expect(started).toEqual([]);

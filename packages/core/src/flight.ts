@@ -1338,12 +1338,12 @@ export interface FlightState {
 
 /** What decides which seats, tickets and items wake FLIGHT; absent: every Ready ticket and item counts. */
 export interface FlightWakeInputs {
-  /** Build seat id to the Ready tickets it could start now: its area, no claim by another, no live wait. */
+  /** Build seat id to the Ready tickets it could start now: its area, no claim by another. */
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
   /**
-   * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
+   * Free build seats with open tickets near their area, and how long
    * that has stood. Absent when no seat is in that state.
    */
   idle?: FlightIdleSeats;

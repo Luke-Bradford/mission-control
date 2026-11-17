@@ -4896,7 +4896,7 @@ describe("a seat's call to FLIGHT", () => {
     listener?.({ kind: "idle", seatId: "flight-1", runId: "r-flight", resumed: false });
     nowMs += FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
-    // not woken again: the call goes to the operator's list once
+    // not woken again
     expect(sendCalls).toHaveLength(1);
   });
 });
@@ -4928,6 +4928,38 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).not.toContain("idle_no_work");
     const saved = JSON.parse(store.getSetting(`${FLIGHT_SIGNALS_SETTING}:mc`) ?? "{}");
     expect(Object.keys(saved.signals ?? {})).not.toContain("idle_no_work:inco-1:1");
+  });
+
+  it("a stored wait_over signal, the left-undecided note and the stored waits go when the watch starts", () => {
+    store.setSetting(
+      `${FLIGHT_SIGNALS_SETTING}:mc`,
+      JSON.stringify({
+        initialized: true,
+        signals: {
+          "wait_over:mc#9:1": {
+            kind: "wait_over",
+            key: "mc#9:1",
+            since: nowMs,
+            evidence: "look again",
+            toldAt: null,
+          },
+        },
+      }),
+    );
+    store.setSetting("flight.waits", JSON.stringify({ "mc#9": { on: "x", until: 1, at: 0 } }));
+    store.raiseNote({
+      key: "flight:left",
+      kind: "blocked",
+      runId: null,
+      seatId: "flight-1",
+      repoId: "mc",
+      text: "left",
+      at: nowMs,
+    });
+    expect(kinds()).not.toContain("wait_over");
+    watch.start();
+    expect(store.notes().some((n) => n.key === "flight:left")).toBe(false);
+    expect(store.getSetting("flight.waits") ?? "").toBe("");
   });
 
   it("an idle seat with startable work counts after 10 minutes, not before", () => {
