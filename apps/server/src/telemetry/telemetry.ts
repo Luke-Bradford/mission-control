@@ -363,6 +363,34 @@ export function telemetry(
         : commitRuns.reduce((sum, r) => sum + store.runCommits(r.id).length, 0) / commitRuns.length,
   };
 
+  // Daily counts over the same window as the ticket series, whatever range was asked for.
+  const dayIndex = new Map(days.map((day, index) => [day, index]));
+  const quality14: NonNullable<Telemetry["quality14"]> = days.map((day) => ({
+    day,
+    ciPrs: 0,
+    ciGreenPrs: 0,
+    reviewedPrs: 0,
+    firstPassPrs: 0,
+    roundsSum: 0,
+  }));
+  for (const p of ciKnown) {
+    if (p.mergedAt > now) continue;
+    const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
+    if (!entry) continue;
+    entry.ciPrs += 1;
+    if (p.firstPushCi === "passing") entry.ciGreenPrs += 1;
+  }
+  for (const p of prs) {
+    if (p.mergedAt === null || p.mergedAt > now) continue;
+    const key = `${p.repoId}#${p.number}`;
+    const rvs = reviewsByPr.get(key);
+    const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
+    if (!rvs || !entry || !mergedKeys.has(key)) continue;
+    entry.reviewedPrs += 1;
+    if (firstPass.includes(rvs)) entry.firstPassPrs += 1;
+    entry.roundsSum += Math.max(...rvs.map((r) => r.round));
+  }
+
   const throughputBucketMs = rangeMs <= DAY_MS ? HOUR_MS : DAY_MS;
   const throughputPoints = Array.from(
     { length: Math.ceil(rangeMs / throughputBucketMs) },
@@ -904,6 +932,7 @@ export function telemetry(
     throughput,
     cycleTime,
     quality,
+    quality14,
     tokensPerMinute,
     liveMinutes,
     utilisation,
