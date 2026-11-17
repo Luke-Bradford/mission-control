@@ -1382,6 +1382,18 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     // Keep the guard hooks and the controller's tools and filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
     // (CREW_CLI_ENV, every Claude seat) makes the CLI force the permission mode back to `default`,
     // so bypassPermissions would be ignored and FLIGHT's hub tools refused: list them.
+    // Only the built-ins the role uses are defined to the model, and the operator's user settings
+    // (their installed plugins, with those plugins' skills, agents and hooks) are not loaded: a
+    // FLIGHT session then starts about 30,000 tokens smaller. The repo's own settings and the
+    // hub's `--settings`, `--plugin-dir` and `--mcp-config` still apply.
+    args.splice(
+      args.indexOf("--settings"),
+      0,
+      "--tools",
+      FLIGHT_FULL_BUILTINS.join(","),
+      "--setting-sources",
+      "project,local",
+    );
     args.splice(
       args.indexOf("--append-system-prompt-file"),
       0,
