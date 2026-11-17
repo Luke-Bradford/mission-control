@@ -1095,8 +1095,6 @@ export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
 /** While a free build seat has open tickets near it and nothing starts, the hub wakes FLIGHT this often. */
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
-/** A build seat idle this long with nothing startable queued for it wakes FLIGHT to promote work. */
-export const FLIGHT_IDLE_NO_WORK_MS = 5 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
@@ -1133,6 +1131,7 @@ export const FLIGHT_LOOPS_SETTING = "flight.loops";
  */
 export const FLIGHT_GUARD_SETTING = "flight.guard";
 export const FLIGHT_MAIN_SETTING = "flight.main";
+/** `idle_no_work` and `budget_unused` are no longer raised; they stay listed so stored signals still read. */
 export const FLIGHT_SIGNAL_KINDS = [
   "flaky_test",
   "repeat_park",
@@ -1156,8 +1155,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "budget_unused",
   "wake_stuck",
 ] as const;
-/** A seat idle while its account is under this share of its week raises `budget_unused`. */
-export const FLIGHT_BUDGET_UNUSED_PCT = 50;
 export interface FlightSignal {
   checks?: string[];
   told?: boolean;

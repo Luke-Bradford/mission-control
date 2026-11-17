@@ -3,15 +3,12 @@ import {
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
   COMMS_CONTROLLER,
-  FLIGHT_BUDGET_UNUSED_PCT,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_COST_DAYS,
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
-  FLIGHT_IDLE_NO_WORK_MS,
-  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEM_RELAPSE_MS,
   FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -507,15 +504,6 @@ export function flightSignals(i: {
     );
   }
 
-  // only a `merge` repo has its Ready cards dealt into queues; elsewhere FLIGHT starts them itself
-  const dealt = config.repos.find((r) => r.id === repo)?.autonomy === "merge";
-  const readyInLane = board.some(
-    (b) =>
-      !b.closed &&
-      hudColumnOf(b) === "Ready" &&
-      inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
-      !b.blockedBy.some((d) => !d.closed),
-  );
   // a stuck PR the hub would hand a free seat counts as queued work for that seat
   const areaRules = i.areas === undefined ? null : { areas: i.areas };
   const stuck = dueStuckPrs(i.stuckPrs ?? [], now);
@@ -555,56 +543,6 @@ export function flightSignals(i: {
             : `open PR #${stuckWork?.number} (${stuckWork?.ticket}) has no run and is ${stuckWork?.kind === "conflict" ? "in conflict with main" : "red"}`
         }`,
       );
-    }
-    // a free build seat idle for half an hour while its account has most of its week left
-    const account = session.seats.find((x) => x.id === seat.id)?.accountId;
-    const weekly = account === undefined ? null : store.latestUsage(account, "7d");
-    if (
-      seat.loop === "build" &&
-      seat.free &&
-      row?.state === "idle" &&
-      !seat.atStop &&
-      since !== undefined &&
-      now - since >= FLIGHT_IDLE_SEAT_WAKE_MS &&
-      weekly !== null &&
-      weekly.resetAt > now &&
-      weekly.pct < FLIGHT_BUDGET_UNUSED_PCT
-    ) {
-      raise(
-        "budget_unused",
-        `${seat.id}:${since}`,
-        since,
-        `${seat.id} idle since ${new Date(since).toISOString()} while ${account} has used ${Math.round(weekly.pct)}% of its week (resets ${new Date(weekly.resetAt).toISOString()}); the budget is going unused`,
-      );
-    }
-    if (
-      seat.loop === "build" &&
-      seat.free &&
-      row?.state === "idle" &&
-      !seat.atStop &&
-      since !== undefined &&
-      now - since >= FLIGHT_IDLE_NO_WORK_MS &&
-      !work &&
-      !stuckWork &&
-      (dealt || !readyInLane)
-    ) {
-      const id = `idle_no_work:${seat.id}:${since}`;
-      // at most one wake per seat an hour: an earlier episode's signal, untold or told within
-      // the hour, holds this one back
-      const held = Object.entries(state.signals).some(
-        ([other, x]) =>
-          x.kind === "idle_no_work" &&
-          other !== id &&
-          x.key.startsWith(`${seat.id}:`) &&
-          (x.toldAt === null || now - x.toldAt < FLIGHT_HOUR_MS),
-      );
-      if (!held)
-        raise(
-          "idle_no_work",
-          `${seat.id}:${since}`,
-          since,
-          `${seat.id} (area ${seat.area.join(", ") || "any"}) idle since ${new Date(since).toISOString()}; no ticket in Ready is startable for its area and lane, so promote work for it`,
-        );
     }
   }
   // a stuck PR no seat of its area can take is FLIGHT's to place; one a seat can take is the hub's
