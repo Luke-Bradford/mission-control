@@ -683,6 +683,20 @@ describe("reviewBrief", () => {
     expect(out).toContain("Check whether the work matches it");
     expect(out).toContain("Where it does not, report an Important finding");
     expect(reviewBrief(review)).not.toContain("signed off");
+    const withFiles = reviewBrief({
+      ...review,
+      signedOffPlan: {
+        ref: "mc#42",
+        asks: null,
+        proposal: "Guard stop().",
+        sizeEstimate: null,
+        risks: null,
+        mockups: [{ id: "a".repeat(64), caption: "The tab", mediaType: "image/png", url: "u" }],
+        decidedAt: 1,
+      },
+      planMockupFiles: [{ path: ".mc-review/plan-mockups/1-aaaaaaaa.png", caption: "The tab" }],
+    });
+    expect(withFiles).toContain("- .mc-review/plan-mockups/1-aaaaaaaa.png: The tab");
   });
 
   it("lists the ticket's answered questions in a review brief too, ten at most", () => {

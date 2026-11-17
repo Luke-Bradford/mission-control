@@ -1,7 +1,7 @@
 /** The pictures a plan carries: read from the planner's checkout, kept by content hash, served by id. */
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { PLAN_MOCKUP_BYTES_MAX, type PlanMockup } from "@mc/core";
 import { storedMediaType } from "../attention/attention-materials.ts";
@@ -94,4 +94,31 @@ export function readPlanAsset(
   }
   const mediaType = storedMediaType(bytes);
   return mediaType === null ? null : { bytes, mediaType };
+}
+
+/** Where in a review's scratch copy the signed-off mockups go. */
+export const REVIEW_MOCKUP_DIR = ".mc-review/plan-mockups";
+const EXT: Record<PlanMockup["mediaType"], string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+};
+
+/** Copies each mockup into the review's scratch copy, so the reviewer can open it; returns the paths. */
+export async function stageReviewMockups(
+  dbPath: string,
+  scratchPath: string,
+  mockups: readonly PlanMockup[],
+): Promise<{ path: string; caption: string }[]> {
+  const staged: { path: string; caption: string }[] = [];
+  if (mockups.length === 0) return staged;
+  await mkdir(join(scratchPath, REVIEW_MOCKUP_DIR), { recursive: true });
+  for (const [n, m] of mockups.entries()) {
+    const asset = readPlanAsset(dbPath, m.id);
+    if (asset === null) continue;
+    const path = `${REVIEW_MOCKUP_DIR}/${n + 1}-${m.id.slice(0, 8)}.${EXT[asset.mediaType]}`;
+    await writeFile(join(scratchPath, path), asset.bytes, { flag: "w", mode: 0o600 });
+    staged.push({ path, caption: m.caption });
+  }
+  return staged;
 }

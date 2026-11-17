@@ -6065,6 +6065,7 @@ describe("report_plan", () => {
       Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
       Buffer.alloc(32, 1),
     ]);
+    const WHOLE = { summary: "s", size_estimate: "M", risks: "r" };
     const withRules = (planSignoff: "every" | "larger" | "never") => {
       const cfg = config();
       cfg.crew?.sessions[0]?.seats.push({
@@ -6083,7 +6084,7 @@ describe("report_plan", () => {
       );
     };
     const call = (args: Record<string, unknown>) =>
-      tool("report_plan", pt).call(FAO_CTX, { plan: PLAN, ...args });
+      tool("report_plan", pt).call(FAO_CTX, { plan: PLAN, ...WHOLE, ...args });
 
     it("report_plan stores asks, proposal, mockups, size and risks", async () => {
       const checkout = join(dir, "planner-pictures");
@@ -6156,6 +6157,25 @@ describe("report_plan", () => {
       }
       expect(store.plans.get("mc", 7)).toBeNull();
       expect(ghCalls().filter((c) => c.args[1] === "edit")).toEqual([]);
+    });
+
+    it.each(["summary", "size_estimate", "risks"])(
+      "a plan the operator will sign off is refused without %s",
+      async (part) => {
+        withRules("larger");
+        const r = await call({ [part]: undefined });
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain(part);
+        expect(store.plans.get("mc", 7)).toBeNull();
+        expect(ghCalls().filter((c) => c.args[1] === "edit")).toEqual([]);
+      },
+    );
+
+    it("a repo that holds nothing, with no ticket sent, still takes a plan with only the plan", async () => {
+      withRules("never");
+      expect(await tool("report_plan", pt).call(FAO_CTX, { plan: PLAN })).toEqual({
+        text: MC_PLAN_WRITTEN,
+      });
     });
 
     it("every holds a new row", async () => {

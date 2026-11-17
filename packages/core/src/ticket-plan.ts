@@ -115,3 +115,7 @@ export function signedOffQaPlan(plan: TicketPlan | null): QaPlan | null {
     decidedAt: plan.decidedAt,
   };
 }
+
+/** report_plan's refusal: the operator signs a plan off, so it needs every part. */
+export const planPartsText = (missing: readonly string[]): string =>
+  `Not written: the operator reads this plan on the Planner tab, so it needs ${missing.join(", ")} too. Add them (mockups only when the work changes something the operator will see) and call report_plan again.`;

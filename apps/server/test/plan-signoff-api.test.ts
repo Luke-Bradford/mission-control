@@ -8,7 +8,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { loadConfig } from "../src/config.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
-import { keepMockups } from "../src/plans/assets.ts";
+import { keepMockups, stageReviewMockups } from "../src/plans/assets.ts";
 import { Store } from "../src/store.ts";
 
 const EXAMPLE = resolve(import.meta.dirname, "../../../config.example.yaml");
@@ -143,6 +143,24 @@ describe("the Planner tab's data", () => {
   });
 });
 
+describe("the reviewer's copy of the mockups", () => {
+  it("stageReviewMockups puts each signed-off picture in the scratch copy by path", async () => {
+    writeFileSync(join(dir, "pic.png"), PNG);
+    const kept = await keepMockups({
+      worktree: dir,
+      dbPath: store.path,
+      inputs: [{ path: "pic.png", caption: "The tab" }],
+      known: [],
+    });
+    if (!kept.ok) throw new Error(kept.text);
+    const scratch = join(dir, "scratch");
+    const staged = await stageReviewMockups(store.path, scratch, kept.mockups);
+    expect(staged).toHaveLength(1);
+    expect(staged[0]?.caption).toBe("The tab");
+    expect(readFileSync(join(scratch, staged[0]?.path ?? ""))).toEqual(PNG);
+  });
+});
+
 describe("sign-off", () => {
   it("approve moves the card to Ready and records the sign-off", async () => {
     store.plans.file("shop-app", 7, parts(), true, NOW - 5);
@@ -171,7 +189,7 @@ describe("sign-off", () => {
     await a.close();
   });
 
-  it("a card that cannot be moved stays signed off, with the reason", async () => {
+  it("a card that cannot be moved leaves the plan waiting, with a retryable error", async () => {
     store.plans.file("shop-app", 7, parts(), true, NOW);
     moveResult = { ok: false, reason: "card not on the project" };
     const a = app();
@@ -180,8 +198,44 @@ describe("sign-off", () => {
       url: "/api/plans/shop-app/7/approve",
       payload: {},
     });
-    expect(res.json()).toMatchObject({ moved: false, moveError: "card not on the project" });
-    expect(store.plans.get("shop-app", 7)?.state).toBe("signed-off");
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toContain("card not on the project");
+    expect(store.plans.get("shop-app", 7)?.state).toBe("awaiting-signoff");
+    moveResult = { ok: true, changed: true };
+    expect(
+      (await a.inject({ method: "POST", url: "/api/plans/shop-app/7/approve", payload: {} }))
+        .statusCode,
+    ).toBe(200);
+    await a.close();
+  });
+
+  it("two approvals at once move the card once and sign off once", async () => {
+    store.plans.file("shop-app", 7, parts(), true, NOW);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const config = loadConfig(join(dir, "config.yaml"));
+    const a = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      repoRules: async () => ({ ...DEFAULT_REPO_RULES, planSignoff: "every" }),
+      ticketMove: async (m) => {
+        moves.push(m);
+        await gate;
+        return { ok: true, changed: true };
+      },
+    });
+    const post = () =>
+      a.inject({ method: "POST", url: "/api/plans/shop-app/7/approve", payload: {} });
+    const both = Promise.all([post(), post()]);
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    const codes = (await both).map((r) => r.statusCode).sort();
+    expect(codes).toEqual([200, 409]);
+    expect(moves).toHaveLength(1);
     await a.close();
   });
 

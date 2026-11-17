@@ -29,7 +29,7 @@ export interface SignoffDeps {
 
 export type SignoffResult =
   | { ok: true; plan: TicketPlan; moved: boolean; moveError: string | null }
-  | { ok: false; status: 404 | 409; error: string };
+  | { ok: false; status: 404 | 409 | 502; error: string };
 
 /** The plan with its title from the board copy, when the ticket is still on the board. */
 export function withTitle(store: Store, plan: TicketPlan): TicketPlan {
@@ -83,11 +83,34 @@ const tellFlight = (deps: SignoffDeps, plan: TicketPlan, text: string): void => 
   });
 };
 
+/** One approval at a time per ticket, so a double submit cannot move the card or tell FLIGHT twice. */
+const approving = new Map<string, Promise<unknown>>();
+
 /**
- * Signs a plan off. A plan the repo holds its ticket for also moves the card to Ready (from Backlog
- * or Refinement); a plan that holds nothing is recorded and the card stays where it is.
+ * Signs a plan off. A plan the repo holds its ticket for first moves the card to Ready (from
+ * Backlog or Refinement); only when that succeeds is the plan marked signed off, so a failed move
+ * leaves it waiting and the operator can try again. A plan that holds nothing is recorded and the
+ * card stays where it is.
  */
-export async function approvePlan(
+export function approvePlan(
+  deps: SignoffDeps,
+  repoId: string,
+  issue: number,
+): Promise<SignoffResult> {
+  const key = `${repoId}#${issue}`;
+  const run = (approving.get(key) ?? Promise.resolve()).then(
+    () => approveOne(deps, repoId, issue),
+    () => approveOne(deps, repoId, issue),
+  );
+  const tail = run.catch(() => undefined);
+  approving.set(key, tail);
+  void tail.then(() => {
+    if (approving.get(key) === tail) approving.delete(key);
+  });
+  return run;
+}
+
+async function approveOne(
   deps: SignoffDeps,
   repoId: string,
   issue: number,
@@ -97,9 +120,7 @@ export async function approvePlan(
     return { ok: false, status: 404, error: PLAN_NO_SUCH };
   if (plan.state !== "awaiting-signoff") return { ok: false, status: 409, error: PLAN_NOT_WAITING };
   const held = planHolds(await settingOf(deps, repoId), plan);
-  deps.store.plans.approve(repoId, issue, deps.now());
   let moved = false;
-  let moveError: string | null = null;
   if (held && deps.move !== undefined) {
     const card = deps.store.board(repoId).find((i) => i.issueNumber === issue);
     const column = card === undefined ? null : hudColumnOf(card);
@@ -110,13 +131,19 @@ export async function approvePlan(
         issue,
         column: "Ready",
       });
-      moved = result.ok && result.changed;
-      if (!result.ok) moveError = result.reason;
+      if (!result.ok)
+        return {
+          ok: false,
+          status: 502,
+          error: `The card could not be moved to Ready (${result.reason}), so the plan is not signed off yet. Try again.`,
+        };
+      moved = result.changed;
     }
   }
+  deps.store.plans.approve(repoId, issue, deps.now());
   const signed = deps.store.plans.get(repoId, issue) as TicketPlan;
   tellFlight(deps, signed, PLAN_APPROVED_COMMS(signed.ref));
-  return { ok: true, plan: withTitle(deps.store, signed), moved, moveError };
+  return { ok: true, plan: withTitle(deps.store, signed), moved, moveError: null };
 }
 
 /** Sends a plan back to the planner with the operator's note. */

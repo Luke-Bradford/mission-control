@@ -168,6 +168,7 @@ import { mapTree } from "../map/snapshot.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { stageReviewMockups } from "../plans/assets.ts";
 import type { ReviewEvidenceDeps } from "../pr-evidence/capture.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { ReviewPreviews } from "../preview/review.ts";
@@ -4622,6 +4623,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         (edges) => reviewReach(edges, changedPaths),
         () => null,
       );
+      const signedPlan = signedOffQaPlan(store.plans.get(info.repo.id, issue));
+      const planMockupFiles =
+        signedPlan === null
+          ? []
+          : await stageReviewMockups(store.path, scratch.path, signedPlan.mockups).catch(() => []);
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
@@ -4644,7 +4650,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
           : [],
         prevReply,
-        signedOffPlan: signedOffQaPlan(store.plans.get(info.repo.id, issue)),
+        signedOffPlan: signedPlan,
+        planMockupFiles,
         ...(olderFindings.length > 0 ? { olderFindings } : {}),
         ...(reach === null ? {} : { reach }),
         diffCut: inputs.diffCut,

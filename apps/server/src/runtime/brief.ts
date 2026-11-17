@@ -264,7 +264,10 @@ export function ticketBrief(i: BriefInput): string {
 }
 
 /** The plan the operator signed off, as a reviewer reads it. Mockups are named; the reviewer cannot open them. */
-function signedOffPlanLines(plan: QaPlan): string[] {
+function signedOffPlanLines(
+  plan: QaPlan,
+  mockupFiles: readonly { path: string; caption: string }[],
+): string[] {
   return [
     "## The plan the operator signed off",
     "",
@@ -273,9 +276,18 @@ function signedOffPlanLines(plan: QaPlan): string[] {
     wrapExternalText(plan.proposal ?? ""),
     ...(plan.sizeEstimate === null ? [] : ["", `Size estimate: ${plan.sizeEstimate}`]),
     ...(plan.risks === null ? [] : ["", `Complications and risks: ${plan.risks}`]),
-    ...(plan.mockups.length === 0
-      ? []
-      : ["", `Mockups shown to the operator: ${plan.mockups.map((m) => m.caption).join("; ")}`]),
+    ...(mockupFiles.length === 0
+      ? plan.mockups.length === 0
+        ? []
+        : [
+            "",
+            `Mockups shown to the operator (not available as files): ${plan.mockups.map((m) => m.caption).join("; ")}`,
+          ]
+      : [
+          "",
+          "Mockups shown to the operator (open each with the Read tool and compare it with the screenshots of what was built):",
+          ...mockupFiles.map((m) => `- ${m.path}: ${m.caption}`),
+        ]),
     "",
   ];
 }
@@ -331,6 +343,8 @@ export interface ReviewBriefInput {
   reach?: ReviewReach;
   /** The plan the operator signed off for the ticket, to check the work against. */
   signedOffPlan?: QaPlan | null;
+  /** The signed-off mockups copied into the scratch copy, by path. */
+  planMockupFiles?: readonly { path: string; caption: string }[];
   /** An ended run's PR: blocking findings still open from the PR's earlier reviews. */
   olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
 }
@@ -544,7 +558,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
           "",
         ]
       : []),
-    ...(i.signedOffPlan ? signedOffPlanLines(i.signedOffPlan) : []),
+    ...(i.signedOffPlan ? signedOffPlanLines(i.signedOffPlan, i.planMockupFiles ?? []) : []),
     "## The author's report notes, oldest first",
     "",
     notes.text === "" ? "(none)" : notes.text,

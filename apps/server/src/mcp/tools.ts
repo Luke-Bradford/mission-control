@@ -149,6 +149,7 @@ import {
   planFewTestsText,
   planMissingPathsText,
   planNoProfilesText,
+  planPartsText,
   planPaths,
   planTestCount,
   planTextText,
@@ -2920,6 +2921,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: planTextText(evidenceProblemText(problem)), isError: true };
     }
 
+    // a plan the operator will sign off (a ticket FLIGHT sent, or a repo that holds tickets) is whole
+    if (loop === "plan") {
+      const held =
+        ["awaiting-plan", "sent-back"].includes(store.plans.get(run.repoId, issue)?.state ?? "") ||
+        (await planSignoffOf(run.repoId)) !== "never";
+      const lacking = (
+        [
+          ["summary", parsed.data.summary],
+          ["size_estimate", parsed.data.size_estimate],
+          ["risks", parsed.data.risks],
+        ] as const
+      )
+        .filter(([, v]) => v === undefined)
+        .map(([k]) => k);
+      if (held && lacking.length > 0) return { text: planPartsText(lacking), isError: true };
+    }
     const kept =
       loop === "plan"
         ? await keepMockups({

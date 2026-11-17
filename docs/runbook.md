@@ -2032,7 +2032,9 @@ proposed, also written under `## Plan` on the ticket), `summary` (what the ticke
 `size_estimate`, `risks` and `mockups` (up to 8 `{ path, caption }`; each path is a PNG, JPEG or
 WebP file of at most 2 MB inside the planner's checkout, not a link). The hub keeps each picture by
 content hash under `plan-assets/` beside the database. Under `every` the row holds the ticket;
-under `larger` or `never` a plan is still filed, and holds only a ticket FLIGHT sent. A plan the
+under `larger` or `never` a plan is still filed, and holds only a ticket FLIGHT sent. When the repo
+is `every` or `larger`, or FLIGHT sent the ticket, `report_plan` is refused unless it also has
+`summary`, `size_estimate` and `risks` (mockups only when the operator will see something). A plan the
 operator sent back is written again: `report_plan` replaces the old `## Plan` section, and a
 planner may be started on that ticket whatever its size.
 
@@ -2046,8 +2048,9 @@ for the planner, with the operator's `note`) and `signed-off`.
 - `GET /api/plan-assets/:id` returns a kept picture (the operator token is needed, as for other
   pictures). Ids are content hashes, so a picture never changes.
 - `POST /api/plans/:repoId/:issue/approve` (send `{}`) signs the plan off. For a ticket the repo
-  holds, a card in Backlog or Refinement moves to Ready; if the move fails the plan stays signed off
-  and the answer's `moveError` says why (FLIGHT can then promote it). A plan that holds nothing is
+  holds, a card in Backlog or Refinement moves to Ready first, and only then is the plan marked signed
+  off. A failed move answers `502` and the plan stays waiting, so it can be approved again. Two
+  approvals at once move the card once; the second answers `409`. A plan that holds nothing is
   recorded and the card stays. `409` when the plan is not waiting for sign-off.
 - `POST /api/plans/:repoId/:issue/send-back` with `{ note }` returns the ticket to the planner with
   the note, which the planner's next brief carries.
@@ -2056,8 +2059,9 @@ for the planner, with the operator's `note`) and `signed-off`.
 
 **QA.** A native QA report for a ticket with a signed-off plan carries `plan` (a frozen copy: asks,
 proposal, size estimate, risks, mockups with their picture URLs, and when it was signed), shown in
-the report's Markdown under "Signed-off plan". The reviewer's brief includes the plan and asks them
-to say where the work does not match it.
+the report's Markdown under "Signed-off plan". The reviewer's brief includes the plan, with each signed-off mockup copied into the review's scratch
+copy under `.mc-review/plan-mockups/` and named in the brief, and asks them to say where the work does
+not match it.
 
 ## QA board data
 
