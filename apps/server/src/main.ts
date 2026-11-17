@@ -56,7 +56,6 @@ import {
   messageUnpausedSeat,
   pauseAwareSupervisor,
   pausedSeat,
-  readCrewPause,
   startUnpausedRun,
 } from "./config/crew-pause.ts";
 import { loadProfiles, PROFILES_FILE } from "./config/profiles.ts";
@@ -82,6 +81,7 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { recordingShotSaves, runSilenceCheck } from "./engine/silence.ts";
 import { takeStuckPrs } from "./engine/stuck-prs.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
@@ -761,11 +761,7 @@ export async function main(): Promise<void> {
             ready: (runId) => reviewPreviews.ready(runId),
             identity: (runId) => reviewPreviews.identity(runId),
             browse: (job, guard) => previewBrowserInHelper(job, guard),
-            saveShot: (png) => {
-              const id = reviewShots.save(png);
-              store.recordSilenceEvent("screenshot-captured", Date.now());
-              return id;
-            },
+            saveShot: recordingShotSaves(store, (png) => reviewShots.save(png), Date.now),
           },
         }),
   };
@@ -1328,10 +1324,7 @@ export async function main(): Promise<void> {
   const audit = () => {
     try {
       runCodeHealthAudit({ store, config, now: Date.now });
-      store.checkSilenceAlarms(Date.now(), {
-        crewPaused: readCrewPause(store) !== null,
-        budgetStopped: store.silenceAlarmsBudgetStopped(),
-      });
+      runSilenceCheck({ store, config, now: Date.now });
     } catch (e) {
       log(`code-health audit failed: ${e instanceof Error ? e.message : String(e)}`);
     }

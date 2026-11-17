@@ -7,6 +7,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const NOW = Date.UTC(2026, 10, 8, 12);
 const SINCE = NOW - 7 * 24 * HOUR;
+const QUIET_NONE = { crewPaused: false, budgetStopped: false, noSeatRan: false };
 const screenshotEvent = () => {
   const event = SILENCE_WATCHED_EVENTS.find((item) => item.kind === "screenshot-captured");
   if (event === undefined) throw new Error("Screenshot capture must be watched");
@@ -94,9 +95,8 @@ describe("question-asked-back", () => {
 describe("silence alarms", () => {
   it("raises one alarm after an expected event gap and clears it when the event resumes", () => {
     const watched = screenshotEvent();
-    store.upsertRun(run({ startedAt: NOW - 2 * HOUR }));
     store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
-    store.checkSilenceAlarms(NOW, { crewPaused: false, budgetStopped: false });
+    store.checkSilenceAlarms(NOW, QUIET_NONE);
 
     expect(store.audit(SINCE, NOW).items).toMatchObject([
       {
@@ -108,19 +108,18 @@ describe("silence alarms", () => {
     ]);
 
     store.recordSilenceEvent(watched.kind, NOW + 1);
-    store.checkSilenceAlarms(NOW + 1, { crewPaused: false, budgetStopped: false });
+    store.checkSilenceAlarms(NOW + 1, QUIET_NONE);
     expect(store.audit(SINCE, NOW + 1).items).toMatchObject([
       { kind: "silence-alarm", subject: "screenshot-captured", state: "done" },
     ]);
   });
 
   it.each([
-    { crewPaused: true, budgetStopped: false, ran: true },
-    { crewPaused: false, budgetStopped: true, ran: true },
-    { crewPaused: false, budgetStopped: false, ran: false },
+    { crewPaused: true, budgetStopped: false, noSeatRan: false },
+    { crewPaused: false, budgetStopped: true, noSeatRan: false },
+    { crewPaused: false, budgetStopped: false, noSeatRan: true },
   ])("does not raise an alarm in quiet periods: %o", (quiet) => {
     const watched = screenshotEvent();
-    if (quiet.ran) store.upsertRun(run({ startedAt: NOW - 2 * HOUR }));
     store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
     store.checkSilenceAlarms(NOW, quiet);
     expect(store.audit(SINCE, NOW).items?.filter((item) => item.kind === "silence-alarm")).toEqual(
@@ -128,46 +127,11 @@ describe("silence alarms", () => {
     );
   });
 
-  it("does not treat an ended historical run as active crew work", () => {
-    const watched = screenshotEvent();
-    store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok" }));
-    store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
-    store.checkSilenceAlarms(NOW, { crewPaused: false, budgetStopped: false });
-    expect(store.audit(SINCE, NOW).items?.filter((item) => item.kind === "silence-alarm")).toEqual(
-      [],
-    );
-  });
-
-  it("does not let an ended budget park suppress alarms", () => {
-    store.upsertRun(
-      run({
-        endedAt: NOW - HOUR,
-        status: "ok",
-        loop: { parked: { kind: "budget", reason: "limit", ended: false } } as NonNullable<
-          Run["loop"]
-        >,
-      }),
-    );
-    expect(store.silenceAlarmsBudgetStopped()).toBe(false);
-  });
-
-  it("recognizes a current budget park as a quiet period", () => {
-    store.upsertRun(
-      run({
-        loop: { parked: { kind: "budget", reason: "limit", ended: false } } as NonNullable<
-          Run["loop"]
-        >,
-      }),
-    );
-    expect(store.silenceAlarmsBudgetStopped()).toBe(true);
-  });
-
   it("includes the event, last seen time, and expected gap in Audit's Do next data", () => {
     const watched = screenshotEvent();
     const lastSeenAt = NOW - watched.gapMs - 1;
-    store.upsertRun(run({ startedAt: NOW - 2 * HOUR }));
     store.recordSilenceEvent(watched.kind, lastSeenAt);
-    store.checkSilenceAlarms(NOW, { crewPaused: false, budgetStopped: false });
+    store.checkSilenceAlarms(NOW, QUIET_NONE);
 
     expect(store.audit(SINCE, NOW).items).toMatchObject([
       {

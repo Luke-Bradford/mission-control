@@ -644,6 +644,16 @@ describe("wait_on", () => {
     },
   );
 
+  it("counts a succeeding tool call as a FLIGHT tool success, and a failing one not", async () => {
+    expect(store.silenceEventLastSeen("flight-tool-succeeded")).toBeNull();
+    expect(
+      (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,
+    ).toBe(true);
+    expect(store.silenceEventLastSeen("flight-tool-succeeded")).toBeNull();
+    expect((await call("wait_on", waitArgs())).isError).toBeUndefined();
+    expect(store.silenceEventLastSeen("flight-tool-succeeded")).toBe(NOW);
+  });
+
   it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
     expect(
       (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,

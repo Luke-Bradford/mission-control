@@ -955,6 +955,24 @@ describe("takeNext", () => {
     expect(started).toHaveLength(1);
   });
 
+  it("records a seat run start only when a Ready ticket's run actually starts", async () => {
+    await queued(card(1));
+    store.upsertRun(run({ id: "other", agentId: "retro", ticket: null }));
+    expect(store.silenceEventLastSeen("seat-run-started")).toBeNull();
+    enabled = false;
+    await take();
+    expect(started).toEqual([]);
+    expect(store.silenceEventLastSeen("seat-run-started")).toBeNull();
+    startFails = () => new Error("boom");
+    enabled = true;
+    await take();
+    expect(store.silenceEventLastSeen("seat-run-started")).toBeNull();
+    startFails = () => null;
+    await take();
+    expect(started).toHaveLength(1);
+    expect(store.silenceEventLastSeen("seat-run-started")).toBe(NOW);
+  });
+
   it("starts nothing when the fresh read finds the card In progress, and untakes the row", async () => {
     await queued(card(1));
     fresh = () => ({ status: "In progress", state: "in progress", closed: false, assignees: [] });

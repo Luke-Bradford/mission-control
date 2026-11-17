@@ -607,18 +607,22 @@ export class Store {
   }
   recordCodeHealthMergedReviews(repoId: string, at: number) {
     let changed = 0;
+    const reviewed = () =>
+      Number(
+        (
+          this.db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM code_health_merged_reviews WHERE repo_id = ? AND review_id IS NOT NULL",
+            )
+            .get(repoId) as { n: number }
+        ).n,
+      );
+    const before = reviewed();
     this.transaction(() => {
       changed = recordMergedReviews(this.db, repoId, at);
     }, true);
-    if (
-      changed > 0 &&
-      this.db
-        .prepare(
-          "SELECT 1 FROM code_health_merged_reviews WHERE repo_id = ? AND recorded_at = ? AND review_id IS NOT NULL LIMIT 1",
-        )
-        .get(repoId, at) !== undefined
-    )
-      this.recordSilenceEvent("merged-pr-review-recorded", at);
+    // a review linked to a PR recorded earlier without one counts too
+    if (reviewed() > before) this.recordSilenceEvent("merged-pr-review-recorded", at);
     return changed;
   }
   codeHealthMergedReviews(repoId: string) {
@@ -3094,12 +3098,20 @@ export class Store {
     recordAuditEvent(this.db, kind, at);
   }
 
-  /** Opens alarms for routine events that stopped during active crew work, and clears resumed ones. */
-  checkSilenceAlarms(at: number, quiet: { crewPaused: boolean; budgetStopped: boolean }): void {
-    if (quiet.crewPaused || quiet.budgetStopped) return;
-    const ran =
-      this.db.prepare("SELECT 1 FROM runs WHERE ended_at IS NULL LIMIT 1").get() !== undefined;
-    if (!ran) return;
+  /** When a watched event last succeeded, or null if it never has. */
+  silenceEventLastSeen(kind: SilenceWatchedEventKind): number | null {
+    return auditEventLastSeen(this.db, kind);
+  }
+
+  /**
+   * Opens alarms for routine events that stopped, and clears resumed ones. A quiet period (the crew
+   * paused, stopped on its budget, or no seat working a ticket) leaves every alarm as it was.
+   */
+  checkSilenceAlarms(
+    at: number,
+    quiet: { crewPaused: boolean; budgetStopped: boolean; noSeatRan: boolean },
+  ): void {
+    if (quiet.crewPaused || quiet.budgetStopped || quiet.noSeatRan) return;
     for (const event of SILENCE_WATCHED_EVENTS) {
       const lastSeenAt = auditEventLastSeen(this.db, event.kind);
       if (lastSeenAt === null) continue;
@@ -3109,17 +3121,6 @@ export class Store {
         : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
       recordSilenceAlarm(this.db, event.kind, silent ? "open" : "done", detail, at);
     }
-  }
-
-  /** A token-budget park stops routine work, so its quiet period is not a silence alarm. */
-  silenceAlarmsBudgetStopped(): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM runs WHERE ended_at IS NULL AND json_extract(loop, '$.parked.kind') = 'budget' LIMIT 1",
-        )
-        .get() !== undefined
-    );
   }
 
   /** Items recorded in range, newest first. */
