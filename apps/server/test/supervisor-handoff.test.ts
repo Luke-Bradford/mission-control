@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { NEW_LOOP } from "@mc/core";
 import { expect, it } from "vitest";
 import { externalReviewKey } from "../src/review/external.ts";
+import { syncWasteAlarms, ticketParked } from "../src/spend/waste.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { clone, git, make, prep, store, until, userLines } from "./supervisor-harness.ts";
 
@@ -286,11 +287,22 @@ it("keeps a crashed rework round with its own ticket: a start on another ticket 
   expect(userLines().some((l) => l.includes("Handoff from"))).toBe(false);
 });
 
-it("does not count a rework wake as a carry-on resume for the retry-loop alarm", async () => {
-  const { sup } = make({ extraSeat });
+it("a crash mid-rework after real wakes: the seat's next ticket gets no findings, no handoff and no alarm", async () => {
+  const { sup, cfg } = make({ extraSeat });
   sup.start();
   const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
   await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  // the engine's findings row for the first run, as it files it after sending the fix line
+  store.addComms({
+    at: Date.now(),
+    from: "retro",
+    senderKind: "seat",
+    to: "guido-1",
+    ticket: "mc#42",
+    targetRunId: first.runId,
+    text: "ticket 42's own finding",
+  });
+  // three real rework wakes of the run
   for (let i = 0; i < 3; i++) {
     const aside = await sup.setAside(first.runId);
     if (!aside) throw new Error("missing aside");
@@ -299,4 +311,20 @@ it("does not count a rework wake as a carry-on resume for the retry-loop alarm",
     await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
   }
   expect(store.waste.unreportedResumes(0, 1)).toEqual([]);
+  // the author crashes during the rework round, and the seat starts another ticket
+  await sup.endRunByEngine(first.runId);
+  const other = await sup.startRun("guido-1", 43);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  expect(store.receivedHandoff(other.runId)).toBeNull();
+  expect(userLines().some((l) => l.includes("ticket 42's own finding"))).toBe(false);
+  expect(userLines().some((l) => l.includes("Handoff from"))).toBe(false);
+  // the crashed run's PR keeps waiting for a seat on its own ticket
+  expect(store.openHandoff("mc", "mc#42")).toMatchObject({
+    runId: first.runId,
+    acceptedRunId: null,
+  });
+  // neither ticket is parked by a retry-loop alarm
+  syncWasteAlarms(cfg, store, Date.now());
+  expect(ticketParked(store, "mc#42")).toBeNull();
+  expect(ticketParked(store, "mc#43")).toBeNull();
 });
