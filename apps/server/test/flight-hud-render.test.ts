@@ -4,6 +4,7 @@ import {
   HUD_PAGE_PATHS,
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
   QA_DISCLOSURE_LABEL,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
@@ -34,7 +35,7 @@ describe("hudRenderRequest page allowlist", () => {
 });
 
 class FakeRoute {
-  readonly continued = vi.fn(async () => {});
+  readonly continued = vi.fn(async (_options?: { headers: Record<string, string> }) => {});
   readonly aborted = vi.fn(async () => {});
   private readonly method: string;
   private readonly target: string;
@@ -45,10 +46,14 @@ class FakeRoute {
   }
 
   request() {
-    return { method: () => this.method, url: () => this.target };
+    return {
+      method: () => this.method,
+      url: () => this.target,
+      headers: () => ({ accept: "application/json" }),
+    };
   }
-  continue() {
-    return this.continued();
+  continue(options?: { headers: Record<string, string> }) {
+    return this.continued(options);
   }
   abort() {
     return this.aborted();
@@ -410,6 +415,24 @@ describe("renderHudWithPlaywright", () => {
       code: 1008,
       reason: "HUD screenshot blocks WebSockets",
     });
+  });
+
+  it("sends a side hub's own token on its API reads only, never to the page", async () => {
+    const fake = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(fake.playwright),
+      operatorToken: "side-secret",
+    });
+    const api = await fake.request("GET", "http://127.0.0.1:7420/api/code-health");
+    expect(api.continued).toHaveBeenCalledWith({
+      headers: { accept: "application/json", [OPERATOR_HEADER]: "side-secret" },
+    });
+    const asset = await fake.request("GET", "http://127.0.0.1:7420/assets/app.js");
+    expect(asset.continued).toHaveBeenCalledWith(undefined);
+    const bootstrap = await fake.request("GET", `http://127.0.0.1:7420${OPERATOR_BOOTSTRAP_PATH}`);
+    expect(bootstrap.aborted).toHaveBeenCalledOnce();
+    const post = await fake.request("POST", "http://127.0.0.1:7420/api/board");
+    expect(post.aborted).toHaveBeenCalledOnce();
   });
 
   it("aborts bootstrap, SSE and every non-GET before consulting the generic guard", async () => {

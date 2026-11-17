@@ -2,8 +2,8 @@
  * Captures a web PR's screenshot pairs: every affected HUD page at 1600x1000, light and dark, on
  * main and on the PR head, both rendered from copies of one snapshot of the live database.
  */
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
   EVIDENCE_DEMO_VIEWPORTS,
   EVIDENCE_KINDS,
@@ -24,6 +24,7 @@ import {
   prEvidenceUncatalogued,
   type WebPageGraph,
 } from "@mc/core";
+import { OPERATOR_TOKEN_FILE } from "../operator.ts";
 import { decodePng, diffImages } from "./png.ts";
 import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
 
@@ -53,12 +54,16 @@ export interface PrEvidenceDeps {
   snapshot(to: string): Promise<void>;
   /** Serves `sha`'s HUD from `db`; on cancellation rejects only after cleaning owned resources. */
   startSide(input: { sha: string; db: string; signal: AbortSignal }): Promise<EvidenceSide>;
-  /** One screenshot of a page on a side, in a colour scheme. */
+  /**
+   * One screenshot of a page on a side, in a colour scheme. `operatorToken` is that side's own
+   * throwaway hub's token, for pages that need it; it must never reach an image, a log or the PR.
+   */
   render(
     origin: string,
     path: string,
     scheme: EvidenceScheme,
     signal: AbortSignal,
+    operatorToken?: string,
   ): Promise<Buffer>;
   /**
    * One screenshot of a page on the head in Demo, at its busiest, at `viewport`. Without it a
@@ -189,6 +194,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   /** Renders what `shots` lacks, once more at once if a render fails, and keeps each success. */
   async function render(
     side: EvidenceSide,
+    operatorToken: string | undefined,
     name: string,
     pages: EvidencePage[],
     signal: AbortSignal,
@@ -204,7 +210,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
             shots.set(
               key,
               await abortable(
-                deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
+                deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal, operatorToken),
                 signal,
               ),
             );
@@ -277,13 +283,20 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
           EVIDENCE_DEMO_VIEWPORTS.some((v) => !shots.has(evidenceDemoImageName(p, v.width))),
         ));
     if (!need) return;
-    const db = join(dir, `${name}.sqlite`);
+    // Each side's hub writes its own token beside its database, so the sides get a folder each.
+    const sideDir = join(dir, name);
+    await mkdir(sideDir, { recursive: true, mode: 0o700 });
+    const db = join(sideDir, `${name}.sqlite`);
     await copyFile(snapshot, db);
     signal.throwIfAborted();
     const side = await deps.startSide({ sha, db, signal });
     try {
       signal.throwIfAborted();
-      await render(side, name, pages, signal, shots);
+      // The hub's token file is the throwaway hub's own key, never the live hub's.
+      const operatorToken = (
+        await readFile(join(dirname(db), OPERATOR_TOKEN_FILE), "utf8").catch(() => "")
+      ).trim();
+      await render(side, operatorToken || undefined, name, pages, signal, shots);
       if (withDemos) await renderDemos(side, pages, signal, shots);
     } finally {
       await side.stop().catch(() => {});
