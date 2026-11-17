@@ -818,7 +818,7 @@
   background: var(--surface-2);
   border-radius: var(--r-s);
   overflow: hidden;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 .spend-stack i {
