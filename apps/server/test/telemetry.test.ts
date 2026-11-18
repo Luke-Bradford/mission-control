@@ -2011,7 +2011,7 @@ describe("crew seats", () => {
         ran();
         const t = tel("24h", NOON);
         const dayStart = at("2026-10-16T23:00:00Z");
-        const running = t.series.stateSpans
+        const running = (t.series?.stateSpans ?? [])
           .filter((x) => x.agentId === "GUIDO-1" && x.state === "running")
           .reduce((sum, x) => sum + Math.max(0, x.endedAt - Math.max(x.startedAt, dayStart)), 0);
         const share = (running / (NOON - dayStart)) * 100;
