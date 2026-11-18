@@ -265,6 +265,29 @@ describe("isDescendant (real git)", () => {
   });
 });
 
+describe("isDescendant fetch memory (real git)", () => {
+  it("does not fetch a head again for the same run once the fetch failed", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const other = join(dir, "other2");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", "-B", "later", mainSha);
+    write(other, "docs/c.md", "doc\nlater\n");
+    git(other, "commit", "-q", "-am", "later");
+    const head = git(other, "rev-parse", "HEAD");
+    const p = publisher();
+    // not on origin yet: the fetch fails
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    git(other, "push", "-q", "origin", "later");
+    // on origin now, but this run's failed fetch of it is remembered
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    // another run asks afresh
+    expect(await p.isDescendant({ ...run(), id: "other-run" }, mainSha, head)).toBe(true);
+  });
+});
+
 describe("updateBranch (real git)", () => {
   it("does not make a pointless merge when main contains the working branch tip", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));

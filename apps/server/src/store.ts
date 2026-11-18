@@ -5709,7 +5709,7 @@ export class Store {
     const row = this.db
       .prepare("SELECT run_id, last_turn_ended_at FROM seat_sessions WHERE seat_id = ?")
       .get(seatId) as { run_id: string | null; last_turn_ended_at: number | null } | undefined;
-    const newest = row?.run_id ? this.newestRunCommit(row.run_id) : null;
+    const newest = row?.run_id ? this.newestAuthoredCommit(row.run_id) : null;
     const committed = newest !== null && newest.at > (row?.last_turn_ended_at ?? 0);
     this.db
       .prepare(
@@ -6196,6 +6196,14 @@ export class Store {
     return rows.map((r) => r.sha);
   }
 
+  /** How many commits the run itself made (followed ones left out). */
+  authoredCommitCount(runId: string): number {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM run_commits WHERE run_id = ? AND followed = 0")
+      .get(runId) as { n: number };
+    return r.n;
+  }
+
   /** The run's commits that someone else made and the run only follows (see `addRunCommit`). */
   followedCommits(runId: string): Set<string> {
     const rows = this.db
@@ -6229,6 +6237,16 @@ export class Store {
     return r ? { sha: r.sha, at: r.at } : null;
   }
 
+  /** The run's newest commit that it made itself (followed ones left out), else null. */
+  newestAuthoredCommit(runId: string): { sha: string; at: number } | null {
+    const r = this.db
+      .prepare(
+        "SELECT sha, at FROM run_commits WHERE run_id = ? AND followed = 0 ORDER BY id DESC LIMIT 1",
+      )
+      .get(runId) as { sha: string; at: number } | undefined;
+    return r ? { sha: r.sha, at: r.at } : null;
+  }
+
   /**
    * Every commit any run made on `branch`: a later run on the same ticket reuses the branch, and
    * the earlier run's unpushed commits still count as the hub's.
@@ -6253,6 +6271,48 @@ export class Store {
       )
       .get(repoId, branch) as { sha: string } | undefined;
     return first === undefined || last === undefined ? null : { first: first.sha, last: last.sha };
+  }
+
+  /**
+   * The run takes someone else's commit on top of its push as its own push, in one transaction:
+   * the commit (followed, so the merge gate still sees it as outside), the push, a loop event and
+   * a FLIGHT decision (that commit skipped the hard-rule park). Once per run and sha.
+   */
+  adoptFollowedHead(a: {
+    runId: string;
+    repoId: RepoId;
+    branch: string;
+    sha: string;
+    at: number;
+    ticket: string | null;
+    seatId: AgentId;
+    eventKey: string;
+    eventText: string;
+  }): void {
+    this.transaction(() => {
+      this.addRunCommit({
+        runId: a.runId,
+        repoId: a.repoId,
+        branch: a.branch,
+        sha: a.sha,
+        at: a.at,
+        followed: true,
+      });
+      this.setRunPush({ runId: a.runId, sha: a.sha, at: a.at });
+      if (!this.addLoopEvent(a.eventKey, a.runId, a.eventText, a.at)) return;
+      this.addFlightDecision({
+        at: a.at,
+        kind: "settle",
+        seatId: a.seatId,
+        targetRunId: a.runId,
+        ref: a.ticket,
+        questionId: null,
+        about: "followed commit",
+        decision: a.eventText,
+        basis:
+          "a commit on top of the seat's push was taken as the run's push without the park for outside commits",
+      });
+    });
   }
 
   /** Records that a run's branch is on origin at `sha` (replacing an earlier push of the run). */

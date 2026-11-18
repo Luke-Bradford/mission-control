@@ -817,6 +817,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return out;
   }
 
+  /** `run:sha` of heads `isDescendant` could not fetch. */
+  const unfetchable = new Set<string>();
   return {
     async push(run) {
       const r = await pushRun(deps, run.id);
@@ -1202,8 +1204,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
       const result = await inGit(run, async (g) => {
         // a commit someone else pushed is not in the clone yet
-        if (!(await have(g, head))) {
-          await g(["fetch", "--no-tags", "origin", head]).catch(() => "");
+        // (one that could not be fetched is not asked for again for this run)
+        const key = `${run.id}:${head}`;
+        if (!(await have(g, head)) && !unfetchable.has(key)) {
+          const got = await g(["fetch", "--no-tags", "origin", head]).then(
+            () => true,
+            () => false,
+          );
+          if (!got) unfetchable.add(key);
         }
         return {
           ok: true as const,

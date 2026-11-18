@@ -3329,6 +3329,11 @@ describe("liveSeatRuns and branchCommitSpan", () => {
       expect(store.runCommitsSince(0).map((c) => c.sha)).toEqual(["own"]);
     });
 
+    it("is left out of commits per run (HUD work and telemetry), and of the seat's quiet-turn count", () => {
+      expect(store.authoredCommitCount("r1")).toBe(1);
+      expect(store.newestAuthoredCommit("r1")).toEqual({ sha: "own", at: 10 });
+    });
+
     it("still counts as the run's newest commit, its commits, and the branch's last", () => {
       expect(store.newestRunCommit("r1")).toEqual({ sha: "theirs", at: 20 });
       expect(store.runCommits("r1")).toEqual(["own", "theirs"]);

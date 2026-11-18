@@ -1745,6 +1745,80 @@ describe("refusals", () => {
     expect(store.runCommits(RUN).filter((c) => c === SHA_B)).toHaveLength(1);
   });
 
+  it("a seat commit made while the descent is checked is not lost: nothing is adopted that pass", async () => {
+    const SHA_C = "c".repeat(40);
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.duringDescendant = () => {
+      h.duringDescendant = undefined;
+      store.addRunCommit({ runId: RUN, repoId: REPO, branch: BRANCH, sha: SHA_C, at: clock });
+    };
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(store.followedCommits(RUN).size).toBe(0);
+    expect(h.fastForwards).toEqual([]);
+    expect(loopOf().parked).toBeNull();
+  });
+
+  it("holds the adoption and the line while the seat is in a turn, then makes them once it is idle", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+    expect(h.sent.some((m) => m.key === `branch-moved:${RUN}:${SHA_B}`)).toBe(false);
+    expect(loopOf().parked).toBeNull();
+    h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(h.fastForwards).toHaveLength(1);
+    expect(h.sent.filter((m) => m.key === `branch-moved:${RUN}:${SHA_B}`)).toHaveLength(1);
+  });
+
+  it("logs each adoption as a FLIGHT decision", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    const logged = store.flightDecisions(0, 50).filter((d) => d.about === "followed commit");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.targetRunId).toBe(RUN);
+  });
+
+  it("goes from CI into review on the adopted head", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "passing", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "review", parked: null });
+  });
+
+  it("parks as stuck when the PR head does not descend from the push", async () => {
+    h.descends = false;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+  });
+
   it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
     setPr({ ci: "passing", headSha: SHA_B });
     report();

@@ -1576,32 +1576,38 @@ export function createEngine(deps: EngineDeps): Engine {
       }
       case "adopt-head": {
         const prior = store.runPush(run.id);
-        store.addRunCommit({
+        // read again: the seat may have committed or pushed since the loop planned this
+        if (prior === null || store.newestRunCommit(run.id)?.sha !== prior.sha) return;
+        const worktree = worktreeOf(run, cur);
+        // the hub cannot move a worktree while its seat is in a turn: the move and the line wait
+        // until the seat is idle (the loop plans this again next pass)
+        const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
+        if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) return;
+        const base = `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push ${prior.sha.slice(0, 7)}.`;
+        const ask = `${base} Fast-forward your worktree to it (git merge --ff-only ${a.sha.slice(0, 7)}) before you commit again`;
+        // the line is on the loop first: a crash after the writes below still tells the seat
+        const key = `branch-moved:${run.id}:${a.sha}`;
+        cur.branchMoved = { key, text: `${ask}.` };
+        saveLoop(run.id, cur, store.run(run.id)?.loop, at);
+        store.adoptFollowedHead({
           runId: run.id,
           repoId: run.repoId,
           branch: run.branch ?? findPr(run, cur)?.branch ?? "",
           sha: a.sha,
           at,
-          // not the seat's or the hub's commit: the merge gate still sees it as outside
-          followed: true,
+          ticket: run.ticket,
+          seatId: run.agentId,
+          eventKey: `${run.id}:${cur.epoch}:followed:${a.sha}`,
+          eventText: `PR head ${a.sha.slice(0, 7)} is on top of the push ${prior.sha.slice(0, 7)}; CI follows it`,
         });
-        store.setRunPush({ runId: run.id, sha: a.sha, at });
-        store.addLoopEvent(
-          `${run.id}:${cur.epoch}:followed:${a.sha}`,
-          run.id,
-          `PR head ${a.sha.slice(0, 7)} is on top of the push ${prior?.sha.slice(0, 7) ?? ""}; CI follows it`,
-          at,
-        );
         // a seat cannot fetch for itself: the hub moves its worktree
-        const worktree = worktreeOf(run, cur);
         const moved = worktree === null ? null : await publisher.fastForward(run, worktree, a.sha);
-        const base = `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push${prior === null ? "" : ` ${prior.sha.slice(0, 7)}`}.`;
         cur.branchMoved = {
-          key: `branch-moved:${run.id}:${a.sha}`,
+          key,
           text:
             moved?.ok === true
               ? `${base} Your worktree is on it now; nothing to do.`
-              : `${base} Fast-forward your worktree to it (git merge --ff-only ${a.sha.slice(0, 7)}) before you commit again${moved === null ? "" : `; the hub could not (${moved.text})`}.`,
+              : `${ask}${moved === null ? "" : `; the hub could not (${moved.text})`}.`,
         };
         await deliverBranchMoved(run, cur);
         out.again = true;
@@ -2281,10 +2287,17 @@ export function createEngine(deps: EngineDeps): Engine {
       pr.headSha !== null &&
       pr.headSha !== pushed.sha &&
       snap.headCommit === pushed.sha &&
-      // a head the run made itself is a poll that lags behind, not a push on top
-      !store.runCommits(run.id).includes(pr.headSha) &&
+      // a head the branch's runs made themselves is a poll that lags behind, not a push on top
+      !store.branchCommits(run.repoId, run.branch ?? "").has(pr.headSha) &&
       (await publisher.isDescendant(run, pushed.sha, pr.headSha))
     ) {
+      // the fetch can take a while: a commit or push the seat made meanwhile is not this push,
+      // and the snapshot is stale; the next pass reads it again
+      if (
+        store.newestRunCommit(run.id)?.sha !== pushed.sha ||
+        store.runPush(run.id)?.sha !== pushed.sha
+      )
+        return;
       snap.prDescends = true;
     }
     if (snap === null) {
