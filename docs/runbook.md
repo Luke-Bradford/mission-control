@@ -4,7 +4,7 @@
 
 Stage 2 of the light-harness work compares the last merged main commit, `6d4cea7`, with
 `cdf4ac9`. Non-test TypeScript and TSX lines under `apps` and `packages` changed from
-192,811 to 191,760. Run this from the repository root once for each ref:
+203,197 to 202,137. Run this from the repository root once for each ref:
 
 ```sh
 git ls-tree -r --name-only <ref> -- apps packages \
@@ -14,7 +14,7 @@ git ls-tree -r --name-only <ref> -- apps packages \
   | wc -l
 ```
 
-Distinct `CREATE TABLE` names under `apps/server/src` changed from 112 to 109. Run this
+Anchored `CREATE TABLE` names under `apps/server/src` changed from 91 to 88. Run this
 from the repository root once for each ref:
 
 ```sh

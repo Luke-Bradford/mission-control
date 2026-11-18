@@ -2513,8 +2513,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (info && run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
   }
 
-  const keepsWorktree = (run: Run): boolean =>
-    run.reviewId == null && !!run.ticket && !!run.branch && run.loop?.phase !== "done";
+  const keepsWorktree = (run: Run): boolean => {
+    if (run.reviewId != null || !run.ticket || !run.branch || run.loop?.phase === "done")
+      return false;
+    const card = store
+      .board(run.repoId)
+      .find((candidate) => `${run.repoId}#${candidate.issueNumber}` === run.ticket);
+    if (card?.closed) return false;
+    return !store
+      .pullRequestsOnTicket(run.repoId, run.ticket)
+      .some((pr) => pr.branch === run.branch && pr.state === "merged");
+  };
 
   /**
    * Removes a review run's scratch worktree once the run is over. Never throws: a failure is
@@ -3679,11 +3688,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               if (priorRun.summary === null && evidence === undefined && findings.length === 0)
                 return null;
               return [
-                ...(priorRun.summary === null ? [] : [`Earlier summary: ${priorRun.summary}`]),
-                ...(evidence === undefined ? [] : [`Earlier evidence: ${evidence}`]),
+                ...(priorRun.summary === null
+                  ? []
+                  : [`Earlier summary: ${cleanText(priorRun.summary, 1500)}`]),
+                ...(evidence === undefined
+                  ? []
+                  : [`Earlier evidence: ${cleanText(evidence, 1500)}`]),
                 ...findings.map(
                   (finding) =>
-                    `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${finding.summary}. Required next action: ${finding.fix}`,
+                    `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${cleanText(finding.summary, 1500)}. Required next action: ${cleanText(finding.fix, 1500)}`,
                 ),
               ].join("\n\n");
             })();

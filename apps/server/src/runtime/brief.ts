@@ -225,7 +225,7 @@ export function ticketBrief(i: BriefInput): string {
     ...decisionsSection(i.decisions),
     ...(i.continuation === null || i.continuation === undefined
       ? []
-      : ["## Continue the earlier run", "", i.continuation, ""]),
+      : ["## Continue the earlier run", "", wrapExternalText(i.continuation), ""]),
     ...(i.loop === "plan" && i.planNote
       ? [
           "## The operator sent your last plan back",
