@@ -1252,7 +1252,7 @@ paths, basis }` logs a `grant` decision ("Approved mc#7 to write package.json") 
 Every start path checks it, FLIGHT's, the engine's and the operator's.
 
 Entries the seat's own area already covers are dropped first and need no grant: a plain file in the
-area, or a glob that lies wholly inside it, compared segment by segment (the area `apps/*` covers
+area, or a glob that lies wholly inside it, compared segment by segment (for example the area `apps/*` covers
 `apps/server/**`). A glob is kept, and refused like any outside glob, when
 the start cannot prove it stays inside the area (for example `apps/**/server/**` against the area
 `apps/*/server/**`).
