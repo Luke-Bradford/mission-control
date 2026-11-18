@@ -1336,11 +1336,7 @@ function stateStep(s: LoopSnapshot): Step {
           ? Math.max(loop.pushStartedAt, loop.headSeenAt ?? 0)
           : loop.pushStartedAt;
       if (waitingSince !== null && now - waitingSince > NO_CI_AFTER_MS) {
-        return park(
-          loop,
-          STUCK_PARK,
-          `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
-        );
+        return unchanged(loop);
       }
       return unchanged(loop);
     }
@@ -1413,17 +1409,7 @@ function stateStep(s: LoopSnapshot): Step {
     );
     const overdue = pr.ci === "pending" ? ciOverdue(s, pr.checks, since, now) : null;
     if (overdue !== null) {
-      const parts = [
-        overdue.pending.length ? `pending: ${overdue.pending.join(", ")}` : "",
-        overdue.missing.length ? `missing: ${overdue.missing.join(", ")}` : "",
-      ].filter((p) => p !== "");
-      return park(
-        loop,
-        "ci-pending",
-        `CI pending for ${minutes(overdue.limitMs)} minutes on ${short}${
-          parts.length > 0 ? ` (${parts.join("; ")})` : ""
-        }`,
-      );
+      return unchanged(loop);
     }
     if (pr.ci === null && pr.polledAt - since > NO_CI_AFTER_MS) {
       return park(loop, "no-ci", `no CI reported for ${short}`);
@@ -1849,7 +1835,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
           : IN_REVIEW
         : loop.phase === "parked"
           ? loop.parked?.ended &&
-            loop.parked.kind !== "budget" &&
+            loop.parked.kind === "ended" &&
             s.pr?.state === "open" &&
             reviewed
             ? READY

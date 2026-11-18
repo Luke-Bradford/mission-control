@@ -438,21 +438,23 @@ describe("state step", () => {
     expect(r2.loop.phase).toBe("ci");
   });
 
-  it("8: a push or PR that never shows up parks after ten minutes", () => {
+  it("8: a push or PR that never shows up keeps waiting in CI", () => {
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
-    const msg = "the push or PR for aaaaaaa has not shown up on GitHub after 10 minutes";
-    const cases: [Partial<LoopSnapshot>, string][] = [
-      [{ pushed: null }, "no push is recorded for the run"],
-      [{ pr: null }, "no PR of the run has been read from GitHub"],
-      [{ pr: pr({ headSha: SHA2 }) }, `PR #${pr().number} has head bbbbbbb, not aaaaaaa`],
-      [{ pushed: { sha: SHA2, at: NOW } }, "the push is bbbbbbb, not the newest commit aaaaaaa"],
-      [{ headCommit: null }, "no commit is recorded for the run, but aaaaaaa is pushed"],
-      [{ pr: pr({ headSha: null }) }, `PR #${pr().number} has no head, not aaaaaaa`],
+    const cases: Partial<LoopSnapshot>[] = [
+      { pushed: null },
+      { pr: null },
+      { pr: pr({ headSha: SHA2 }) },
+      { pushed: { sha: SHA2, at: NOW } },
+      { headCommit: null },
+      { pr: pr({ headSha: null }) },
     ];
-    for (const [over, why] of cases) {
+    for (const over of cases) {
       const r = reconcile(inCi(over, late));
-      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: true });
+      expect(r.loop).toMatchObject({ phase: "ci", parked: null });
+      expect(r.actions.map((action) => action.kind)).not.toContain("end-run");
     }
+    const visible = reconcile(inCi({ pr: pr({ headSha: SHA, ci: "passing" }) }, late));
+    expect(visible.loop.phase).toBe("review");
   });
 
   it("8: a PR head that descends from the push is adopted as the push, not parked as stuck", () => {
@@ -463,7 +465,7 @@ describe("state step", () => {
     expect(r.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
   });
 
-  it("8: a descending head is adopted while the seat is busy inside the window, and parks once the window is spent", () => {
+  it("8: a descending head is adopted while the seat is busy, including after the window", () => {
     const busy = { seat: { ...snap().seat, inTurn: true } };
     const inside = reconcile(
       inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...busy }, { pushStartedAt: NOW - 1000 }),
@@ -471,7 +473,8 @@ describe("state step", () => {
     expect(inside.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
     const spent = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...busy }, late));
-    expect(spent.loop.parked?.kind).toBe("stuck");
+    expect(spent.loop.phase).toBe("ci");
+    expect(spent.loop.parked).toBeNull();
     // an idle seat is adopted for however long it has waited
     const idle = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true }, late));
     expect(idle.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
@@ -522,37 +525,36 @@ describe("state step", () => {
     const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }) }, old));
     expect(r.loop.parked ?? null).toBeNull();
     expect(r.loop).toMatchObject({ headSeenSha: SHA2, headSeenAt: NOW });
-    // seen for a whole window, still not adoptable: it parks
+    // seen for a whole window, still not adoptable: it remains in CI
     const spent = reconcile(
       inCi(
         { pr: pr({ headSha: SHA2 }) },
         { ...old, headSeenSha: SHA2, headSeenAt: NOW - NO_CI_AFTER_MS - 1 },
       ),
     );
-    expect(spent.loop.parked?.kind).toBe("stuck");
+    expect(spent.loop).toMatchObject({ phase: "ci", parked: null });
   });
 
-  it("8: a PR head that does not descend from the push still parks as stuck", () => {
+  it("8: a PR head that does not descend from the push remains in CI", () => {
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
     for (const prDescends of [false, undefined]) {
       const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends }, late));
-      expect(r.loop.parked?.kind).toBe("stuck");
+      expect(r.loop).toMatchObject({ phase: "ci", parked: null });
       expect(r.actions.some((a) => a.kind === "adopt-head")).toBe(false);
     }
   });
 
-  it("8: a stuck run stays stopped while the PR head is not the pushed sha, or the PR is closed", () => {
-    const stopped = reconcile(
+  it("8: a late push remains in CI until GitHub shows it", () => {
+    const waiting = reconcile(
       inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
     ).loop;
     for (const over of [
       { pr: pr({ headSha: SHA2 }) },
       { pr: pr({ headSha: null }) },
       { pr: null },
-      { pr: pr({ state: "closed" as const }) },
       { headCommit: SHA2 },
     ] as Partial<LoopSnapshot>[]) {
-      expect(reconcile(inCi(over, stopped)).loop.phase).toBe("parked");
+      expect(reconcile(inCi(over, waiting)).loop.phase).toBe("ci");
     }
   });
 
@@ -744,7 +746,7 @@ describe("state step", () => {
       expect(r.loop.phase).toBe("ci");
       expect(r.loop.parked).toBeNull();
       const other = reconcile(inCi({ ...old, pr: pending }, { rerun: reran(SHA2) }));
-      expect(other.loop.parked?.kind).toBe("ci-pending");
+      expect(other.loop).toMatchObject({ phase: "ci", parked: null });
     });
 
     it("a pass with no failure before is no flake", () => {
@@ -773,24 +775,21 @@ describe("state step", () => {
     expect(events(r.actions)).toEqual(["CI failed on aaaaaaa"]);
   });
 
-  it("13: the pending park names pending and missing checks", () => {
+  it("13: pending checks stay in CI", () => {
     const checks = { failing: [], pending: ["check"], missing: ["e2e"] };
     const r = reconcile(
       inCi({ pr: pr({ checks }), pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } }),
     );
-    expect(r.loop.parked?.reason).toBe(
-      "CI pending for 30 minutes on aaaaaaa (pending: check; missing: e2e)",
-    );
+    expect(r.loop).toMatchObject({ phase: "ci", parked: null });
   });
 
-  it("13: CI pending for thirty minutes parks", () => {
+  it("13: CI pending for thirty minutes stays in CI and a pass moves to review", () => {
     const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
     const r = reconcile(inCi(old));
-    expect(r.loop.parked).toEqual({
-      kind: "ci-pending",
-      reason: "CI pending for 30 minutes on aaaaaaa",
-      ended: true,
-    });
+    expect(r.loop).toMatchObject({ phase: "ci", parked: null });
+    expect(r.actions.map((action) => action.kind)).not.toContain("end-run");
+    const passing = reconcile(inCi({ ...old, pr: pr({ ci: "passing" }) }, r.loop));
+    expect(passing.loop.phase).toBe("review");
     const r2 = reconcile(inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS } }));
     expect(r2.loop.phase).toBe("ci");
   });
@@ -816,13 +815,9 @@ describe("state step", () => {
       expect(r.loop.parked).toBeNull();
     });
 
-    it("a job past twice its p90 parks, naming the job", () => {
+    it("a job past twice its p90 stays in CI", () => {
       const r = reconcile(inCi(runningFor(75, 62)));
-      expect(r.loop.parked).toEqual({
-        kind: "ci-pending",
-        reason: "CI pending for 60 minutes on aaaaaaa (pending: web)",
-        ended: true,
-      });
+      expect(r.loop).toMatchObject({ phase: "ci", parked: null });
     });
 
     it("a queued job with no start is judged from the push", () => {
@@ -833,7 +828,7 @@ describe("state step", () => {
           pr: pr({ checks: { failing: [], pending: ["web"], missing: [] } }),
         }),
       );
-      expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
+      expect(r.loop).toMatchObject({ phase: "ci", parked: null });
     });
 
     describe("a job still in GitHub's queue behind a busy runner pool", () => {
@@ -856,9 +851,9 @@ describe("state step", () => {
         expect(r.loop.parked).toBeNull();
       });
 
-      it("still parks a job that is running past twice its p90", () => {
+      it("keeps a job that is running past twice its p90 in CI", () => {
         const r = reconcile(busy({ web: NOW - 11 * min }));
-        expect(r.loop.parked?.reason).toBe("CI pending for 10 minutes on aaaaaaa (pending: web)");
+        expect(r.loop).toMatchObject({ phase: "ci", parked: null });
       });
     });
 
@@ -874,9 +869,7 @@ describe("state step", () => {
         const r = reconcile(gate(12, { pending: [], missing: ["check"] }));
         expect(r.loop.parked).toBeNull();
         const late = reconcile(gate(61, { pending: [], missing: ["check"] }));
-        expect(late.loop.parked?.reason).toBe(
-          "CI pending for 60 minutes on aaaaaaa (missing: check)",
-        );
+        expect(late.loop).toMatchObject({ phase: "ci", parked: null });
       });
 
       it("a queued check with no start is judged the same way", () => {
@@ -887,7 +880,7 @@ describe("state step", () => {
 
     it("a job with no history keeps the fixed limit", () => {
       const r = reconcile(inCi({ ...runningFor(31, 31), ciP90Ms: {} }));
-      expect(r.loop.parked?.kind).toBe("ci-pending");
+      expect(r.loop).toMatchObject({ phase: "ci", parked: null });
     });
   });
 
@@ -1621,7 +1614,7 @@ describe("review round", () => {
   it("13: pending is measured from now, not from the poll", () => {
     const at = NOW - CI_PENDING_MAX_MS - 1;
     const stale = reconcile(inCi({ pushed: { sha: SHA, at }, pr: pr({ polledAt: at }) }));
-    expect(stale.loop.parked?.kind).toBe("ci-pending");
+    expect(stale.loop).toMatchObject({ phase: "ci", parked: null });
     const ahead = reconcile(
       inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS }, pr: pr({ polledAt: NOW + 5 }) }),
     );
@@ -1744,16 +1737,14 @@ describe("review round", () => {
     expect(text({ prNumber: 9 })).toBe(`${REF}: PR #9 is ready for review (CI passed on aaaaaaa)`);
   });
 
-  it("8: a report with no commit that never pushes parks with a readable text", () => {
+  it("8: a report with no commit that never pushes stays in CI", () => {
     const r = reconcile(
       inCi(
         { headCommit: null, pushed: null, pr: null },
         { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 },
       ),
     );
-    expect(r.loop.parked?.reason).toBe(
-      "the push or PR has not shown up on GitHub after 10 minutes: no push is recorded for the run",
-    );
+    expect(r.loop).toMatchObject({ phase: "ci", parked: null });
   });
 
   it("15: the budget text names the ceiling", () => {
@@ -1894,17 +1885,17 @@ describe("amendments from the reviews of Task 5", () => {
     const r = reconcile(s);
     expect(r.loop).toMatchObject({ phase: "ci", pushFor: SHA2, pushStartedAt: NOW });
     expect(r.actions).toEqual([{ kind: "push" }]);
-    // the clock now runs from the new commit: ten minutes on, with the push still missing, it parks
+    // the clock now runs from the new commit: it keeps waiting if the push is still missing
     const later = reconcile({ ...s, now: NOW + 10 * MIN + 1, loop: r.loop });
-    expect(later.loop.parked?.kind).toBe("stuck");
+    expect(later.loop).toMatchObject({ phase: "ci", parked: null });
     // and a commit resets the refusals counted against the old one
     const refused = reconcile({ ...s, loop: { ...s.loop, transient: 2, lastRefusal: "old" } });
     expect(refused.loop).toMatchObject({ transient: 0, lastRefusal: null });
   });
 
-  it("E3: without a new commit the old clock still parks", () => {
+  it("E3: without a new commit the old clock keeps waiting", () => {
     const s = inCi({ pushed: null, pr: null }, { pushFor: SHA, pushStartedAt: NOW - 11 * MIN });
-    expect(reconcile(s).loop.parked?.kind).toBe("stuck");
+    expect(reconcile(s).loop).toMatchObject({ phase: "ci", parked: null });
   });
 
   it("E4: the review note after a ruling says it was ruled, not that CI passed", () => {
@@ -2010,7 +2001,7 @@ describe("amendments from the reviews of Task 5", () => {
     );
     expect(reconcile(pending).loop.phase).toBe("ci");
     const never = { ...pending, loop: { ...pending.loop, unparkedAt: null } };
-    expect(reconcile(never).loop.parked?.kind).toBe("ci-pending");
+    expect(reconcile(never).loop).toMatchObject({ phase: "ci", parked: null });
     const none = inCi(
       { pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: NOW }) },
       { unparkedAt: NOW - 1000 },
@@ -2021,7 +2012,7 @@ describe("amendments from the reviews of Task 5", () => {
       ...pending,
       loop: { ...pending.loop, unparkedAt: NOW - CI_PENDING_MAX_MS - 1 },
     };
-    expect(reconcile(stale).loop.parked?.kind).toBe("ci-pending");
+    expect(reconcile(stale).loop).toMatchObject({ phase: "ci", parked: null });
   });
 
   it("the returned loop shares no parked or touches object with the input", () => {
@@ -2259,6 +2250,21 @@ describe("review decisions", () => {
       { cardFor: "rework:0" },
     );
     expect(kinds(reconcile(capped).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Blocked" },
+    ]);
+  });
+
+  it("a CI stop during rework stays Blocked, not Ready", () => {
+    const stopped = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" } },
+      {
+        phase: "parked",
+        parked: { kind: "ci", reason: "CI failed 3 times", ended: true },
+        cardFor: null,
+      },
+    );
+    expect(kinds(reconcile(stopped).actions, "move-card")).toEqual([
       { kind: "move-card", column: "Blocked" },
     ]);
   });
