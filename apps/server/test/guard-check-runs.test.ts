@@ -24,10 +24,7 @@ describe("checksRun", () => {
   });
 
   it("matches configured checks when related tests are another && segment", () => {
-    expect(checksRun(`${LINT} && ${TYPES} && pnpm -s test:related`, CHECKS)).toEqual([
-      LINT,
-      TYPES,
-    ]);
+    expect(checksRun(`${LINT} && ${TYPES} && pnpm -s test:related`, CHECKS)).toEqual([LINT, TYPES]);
   });
 
   it.each([
