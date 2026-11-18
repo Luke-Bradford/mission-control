@@ -982,54 +982,64 @@ export function demoPageAnswers(
 }
 
 const planPicture = (c: string, caption: string) => ({
-  url: `/api/attention-material-assets/${c.repeat(64)}`,
+  id: c.repeat(64),
+  url: `/api/plan-assets/${c.repeat(64)}`,
   caption,
+  mediaType: "image/png" as const,
 });
 
 /** Plans to sign off: one waiting, one sent back, one approved (the Retry ticket's). */
 function plansView() {
-  const base = { repoId: DEMO_REPO, risks: "", pictures: [] as ReturnType<typeof planPicture>[] };
   const at = Date.now() - 3 * 3_600_000;
+  const base = {
+    repoId: DEMO_REPO,
+    marked: true,
+    requestedAt: at,
+    plannedAt: at,
+    note: null,
+    mockups: [] as ReturnType<typeof planPicture>[],
+  };
   return {
-    pending: [
+    waiting: [
       {
         ...base,
-        id: "plan-201",
-        ticket: `${DEMO_REPO}#201`,
+        issue: 201,
+        ref: `${DEMO_REPO}#201`,
         title: "Audit the coupon rules",
-        status: "pending",
+        state: "awaiting-signoff",
         asks: "List every coupon rule, say which overlap, and flag any that can stack to a free order.",
-        proposed:
+        proposal:
           "Read the coupon rules, add a table of overlaps to the audit page, and a test that no stack goes below zero.",
-        pictures: [planPicture("a", "Audit table with overlaps marked")],
-        size: "M",
+        mockups: [planPicture("a", "Audit table with overlaps marked")],
+        sizeEstimate: "M",
         risks: "Old coupons have no owner, so some overlaps may be on purpose.",
+        decidedAt: null,
       },
     ],
     history: [
       {
         ...base,
-        id: "plan-104",
-        ticket: `${DEMO_REPO}#104`,
+        issue: 104,
+        ref: `${DEMO_REPO}#104`,
         title: "Fix the address form on narrow screens",
-        status: "sent-back",
+        state: "sent-back",
         asks: "The address form overflows below 360px.",
-        proposed: "Rebuild the form as one column.",
-        size: "S",
+        proposal: "Rebuild the form as one column.",
+        sizeEstimate: "S",
         risks: "None known.",
         note: "Keep the postcode lookup on narrow screens.",
         decidedAt: at,
       },
       {
         ...base,
-        id: "plan-102",
-        ticket: `${DEMO_REPO}#102`,
+        issue: 102,
+        ref: `${DEMO_REPO}#102`,
         title: "Retry failed payment webhooks",
-        status: "approved",
+        state: "signed-off",
         asks: "Failed payment webhooks are dropped; retry them.",
-        proposed: "Queue each failed webhook and retry with backoff, five tries over an hour.",
-        pictures: [planPicture("b", "Retry queue in the admin screen")],
-        size: "M",
+        proposal: "Queue each failed webhook and retry with backoff, five tries over an hour.",
+        mockups: [planPicture("b", "Retry queue in the admin screen")],
+        sizeEstimate: "M",
         risks: "A retry could double-charge if the first call did land.",
         decidedAt: at - 86_400_000,
       },
