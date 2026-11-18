@@ -93,12 +93,11 @@ describeRendered("Planner page", () => {
           `${state} at ${size.width}x${size.height}, ${colorScheme}: fits, and the plan is not squeezed`,
           async () => {
             mkdirSync(SHOTS, { recursive: true });
-            const history = state === "sent back";
             const page = await renderAt({
               page: "test/desktopBrowser.html",
               ...size,
               colorScheme,
-              search: `?path=${encodeURIComponent(history ? "/planner?view=history" : "/planner")}`,
+              search: `?path=${encodeURIComponent("/planner")}`,
               api: {
                 ...desktopFixture().api,
                 "/api/plans": plans,
@@ -217,7 +216,7 @@ describeRendered("Planner page", () => {
           height: 720,
           colorScheme,
           search: `?path=${encodeURIComponent("/planner")}`,
-          api: { ...desktopFixture().api, "/api/plans": { pending: [waiting], history: [] } },
+          api: { ...desktopFixture().api, "/api/plans": { waiting: [waiting], history: [] } },
           assets: ASSETS,
         });
         try {
