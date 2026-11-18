@@ -6285,7 +6285,6 @@ export class Store {
     sha: string;
     at: number;
     ticket: string | null;
-    seatId: AgentId;
     eventKey: string;
     eventText: string;
   }): void {
@@ -6303,14 +6302,15 @@ export class Store {
       this.addFlightDecision({
         at: a.at,
         kind: "settle",
-        seatId: a.seatId,
+        // the hub's own call: no seat made it
+        seatId: null,
         targetRunId: a.runId,
         ref: a.ticket,
         questionId: null,
         about: "followed commit",
         decision: a.eventText,
         basis:
-          "a commit on top of the seat's push was taken as the run's push without the park for outside commits",
+          "The commit was taken as the run's push, so it does not park the run as stuck; the merge gate still counts it as outside the run's own commits.",
       });
     });
   }

@@ -129,6 +129,7 @@ import type {
   GateResult,
   OpenPrResult,
   Publisher,
+  FastForwardResult,
   PublishResult,
   RerunResult,
   RerunStateResult,
@@ -186,7 +187,7 @@ let h: Harness;
 
 function makeConfig(): CcConfig {
   return {
-    operator: { id: "op", timezone: "Europe/London" },
+    operator: { id: "op", timezone: "Europe/London", githubLogins: ["op-login"] },
     accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
     repos: [
       {
@@ -417,7 +418,9 @@ interface Harness {
   changes: string[] | { ok: false; text: string; transient: boolean };
   /** The fastForward calls, and what it answers. */
   fastForwards: { runId: string; worktree: string; sha: string }[];
-  fastForwardResult: PublishResult;
+  fastForwardResult: FastForwardResult;
+  /** The logins that wrote the commits between the push and the PR head (commitsFrom reads them). */
+  commitLogins: string[];
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
 }
@@ -491,6 +494,7 @@ function harness(): Harness {
     asideOn: false,
     fastForwards: [],
     fastForwardResult: { ok: true },
+    commitLogins: ["op-login"],
     endBlocked: false,
     asides: [],
     wakes: [],
@@ -524,6 +528,8 @@ function harness(): Harness {
           x.duringDescendant?.(ancestor, head);
           return x.descends ?? ancestor === head;
         },
+        commitsFrom: async (_run, _ancestor, _head, logins) =>
+          x.commitLogins.every((login) => logins.includes(login)),
         async push(r) {
           x.pushes.push(r.id);
           if (x.pushHang) return new Promise<PublishResult>(() => {});
@@ -1701,48 +1707,118 @@ describe("refusals", () => {
     expect(loopOf().parked).toBeNull();
     expect(loopOf().phase).toBe("ci");
     expect(h.fastForwards).toEqual([{ runId: RUN, worktree: join(dir, "wt"), sha: SHA_B }]);
-    const line = h.sent.find((m) => m.key === `branch-moved:${RUN}:${SHA_B}`);
-    expect(line?.text).toContain("Your worktree is on it now");
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(loopTexts()).toContain(
+      `the worktree is on ${SHA_B.slice(0, 7)} now`,
+    );
+    // the seat is not sent a line: it could not act on one, and it would resume a quiet seat
+    expect(h.sent.filter((m) => m.key.startsWith("branch-moved:"))).toEqual([]);
     // someone else's commit: the merge gate must not count it as the hub's
     expect(store.runCommits(RUN)).toContain(SHA_B);
     expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(false);
   });
 
-  it("tells the seat to fast-forward itself when the hub could not move its worktree", async () => {
+  it("keeps the worktree move held when the hub cannot do it, never asks the seat to merge, and tries again", async () => {
     h.descends = true;
     h.fastForwardResult = { ok: false, text: "diverged", transient: false };
     setPr({ ci: "pending", headSha: SHA_B });
     report();
     await h.engine.reconcileRun(RUN);
-    clock += NO_CI_AFTER_MS + 1000;
-    await h.engine.reconcileRun(RUN);
-    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
-    const line = h.sent.find((m) => m.key === `branch-moved:${RUN}:${SHA_B}`);
-    expect(line?.text).toContain("Fast-forward your worktree");
-    expect(line?.text).toContain("the hub could not (diverged)");
-  });
-
-  it("a branch-moved line the busy seat could not take is held, and delivered next pass without adopting again", async () => {
-    h.descends = true;
-    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
-    setPr({ ci: "pending", headSha: SHA_B });
-    report();
-    h.busy = true;
-    await h.engine.reconcileRun(RUN);
-    clock += NO_CI_AFTER_MS + 1000;
-    await h.engine.reconcileRun(RUN);
-    const key = `branch-moved:${RUN}:${SHA_B}`;
-    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
-    expect(h.sent.some((m) => m.key === key)).toBe(false);
-    expect(loopOf().branchMoved?.key).toBe(key);
-    h.busy = false;
     clock += ENGINE_TICK_MS;
     await h.engine.reconcileRun(RUN);
-    expect(h.sent.filter((m) => m.key === key)).toHaveLength(1);
-    expect(h.sent.find((m) => m.key === key)?.text).toContain("Fast-forward your worktree");
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().branchMoved).toMatchObject({ sha: SHA_B, why: "diverged" });
+    expect(h.sent.filter((m) => m.text.includes("--ff-only"))).toEqual([]);
+    expect(h.sent.filter((m) => m.key.startsWith("branch-moved:"))).toEqual([]);
+    // a later idle pass tries again, and does not adopt a second time
+    const tries = h.fastForwards.length;
+    h.fastForwardResult = { ok: true };
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(h.fastForwards).toHaveLength(tries + 1);
     expect(loopOf().branchMoved).toBeUndefined();
-    expect(h.fastForwards).toHaveLength(1);
+    expect(loopOf().parked).toBeNull();
     expect(store.runCommits(RUN).filter((c) => c === SHA_B)).toHaveLength(1);
+  });
+
+  it("parks with a readable reason when the hub still cannot move the worktree after the window", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    setPr({ ci: "pending", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(loopOf().parked?.reason).toContain("could not move");
+    expect(loopOf().parked?.reason).toContain("diverged");
+    expect(loopOf().branchMoved).toBeUndefined();
+  });
+
+  it("drops a held worktree move once the run's push changes", async () => {
+    const SHA_C = "c".repeat(40);
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    store.setRunPush({ runId: RUN, sha: SHA_C, at: clock });
+    const tries = h.fastForwards.length;
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(h.fastForwards).toHaveLength(tries);
+  });
+
+  it("holds the move while the seat is starting a turn, then makes it once it is free", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.busyList = [{ seatId: SEAT, state: "running" }];
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+    h.busyList = [];
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(h.fastForwards).toHaveLength(1);
+  });
+
+  it("a seat with no live session is idle: the head is adopted, and the run is never stuck in CI", async () => {
+    h.descends = true;
+    h.facts = null;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    for (let i = 0; i < 3; i++) {
+      clock += NO_CI_AFTER_MS;
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().parked?.kind).not.toBe("stuck");
+    }
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().phase).toBe("ci");
+  });
+
+  it("takes only commits the operator's accounts wrote; others park as stuck", async () => {
+    h.descends = true;
+    h.commitLogins = ["op-login", "someone-else"];
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
   });
 
   it("a seat commit made while the descent is checked is not lost: nothing is adopted that pass", async () => {
@@ -1761,24 +1837,22 @@ describe("refusals", () => {
     expect(loopOf().parked).toBeNull();
   });
 
-  it("holds the adoption and the line while the seat is in a turn, then makes them once it is idle", async () => {
+  it("holds the adoption while the seat is in a turn, then makes it once it is idle", async () => {
     h.descends = true;
     setPr({ ci: "pending", headSha: SHA_B });
     report();
     h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
     await h.engine.reconcileRun(RUN);
-    clock += NO_CI_AFTER_MS + 1000;
+    clock += ENGINE_TICK_MS;
     await h.engine.reconcileRun(RUN);
     expect(store.runPush(RUN)?.sha).toBe(SHA);
     expect(h.fastForwards).toEqual([]);
-    expect(h.sent.some((m) => m.key === `branch-moved:${RUN}:${SHA_B}`)).toBe(false);
     expect(loopOf().parked).toBeNull();
     h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
     clock += ENGINE_TICK_MS;
     await h.engine.reconcileRun(RUN);
     expect(store.runPush(RUN)?.sha).toBe(SHA_B);
     expect(h.fastForwards).toHaveLength(1);
-    expect(h.sent.filter((m) => m.key === `branch-moved:${RUN}:${SHA_B}`)).toHaveLength(1);
   });
 
   it("logs each adoption as a FLIGHT decision", async () => {
@@ -1791,6 +1865,9 @@ describe("refusals", () => {
     const logged = store.flightDecisions(0, 50).filter((d) => d.about === "followed commit");
     expect(logged).toHaveLength(1);
     expect(logged[0]?.targetRunId).toBe(RUN);
+    // the hub's own call, not a seat's or FLIGHT's
+    expect(logged[0]?.seatId).toBeNull();
+    expect(logged[0]?.basis).toContain("merge gate still counts it as outside");
   });
 
   it("goes from CI into review on the adopted head", async () => {

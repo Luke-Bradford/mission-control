@@ -173,7 +173,7 @@ describe("worktreeChanges (real git)", () => {
 
 describe("fastForward (real git)", () => {
   /** Someone else pushes a commit on top of the branch tip from another clone; its sha. */
-  function outsidePush(): string {
+  function outsidePush(edit?: (other: string) => void): string {
     git(worktree, "push", "-q", "origin", BRANCH);
     const other = join(dir, "other");
     git(dir, "clone", "-q", join(dir, "origin.git"), other);
@@ -181,7 +181,9 @@ describe("fastForward (real git)", () => {
     git(other, "config", "user.email", "o@example.com");
     git(other, "checkout", "-q", BRANCH);
     write(other, "docs/c.md", "doc\nedited\n");
-    git(other, "commit", "-q", "-am", "doc edit");
+    edit?.(other);
+    git(other, "add", "-A");
+    git(other, "commit", "-q", "-m", "doc edit");
     git(other, "push", "-q", "origin", BRANCH);
     return git(other, "rev-parse", "HEAD");
   }
@@ -193,6 +195,19 @@ describe("fastForward (real git)", () => {
     expect(await publisher().fastForward(run(), worktree, sha)).toEqual({ ok: true });
     expect(git(worktree, "rev-parse", "HEAD")).toBe(sha);
     expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+  });
+
+  it("reports an install that the moved-in commits need but the hub refuses", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush((other) => {
+      write(other, "package.json", '{"name":"sync-test","private":true}\n');
+      write(other, "pnpm-lock.yaml", "garbage: [\n");
+    });
+    const r = await publisher().fastForward(run(), worktree, sha);
+    expect(r).toMatchObject({ ok: true });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(sha);
+    expect(r.ok && r.installNote).toContain("dependencies changed; install refused:");
   });
 
   it("leaves a branch that has diverged from the new commit as it is", async () => {

@@ -456,6 +456,36 @@ describe("state step", () => {
     expect(r.actions).toEqual([{ kind: "adopt-head", sha: SHA2 }]);
   });
 
+  it("8: a descending head is adopted while the seat is busy inside the window, and parks once the window is spent", () => {
+    const busy = { seat: { ...snap().seat, inTurn: true } };
+    const inside = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...busy }, { pushStartedAt: NOW - 1000 }),
+    );
+    expect(inside.actions).toEqual([{ kind: "adopt-head", sha: SHA2 }]);
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    const spent = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...busy }, late));
+    expect(spent.loop.parked?.kind).toBe("stuck");
+    // an idle seat is adopted for however long it has waited
+    const idle = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true }, late));
+    expect(idle.actions).toEqual([{ kind: "adopt-head", sha: SHA2 }]);
+  });
+
+  it("8: a worktree move the hub could not make parks once the window is spent, and names the reason", () => {
+    const held = { sha: SHA2, epoch: 0, since: NOW - NO_CI_AFTER_MS - 1, why: "diverged" };
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), pushed: { sha: SHA2, at: NOW } }, { branchMoved: held }));
+    expect(r.loop.parked?.kind).toBe("stuck");
+    expect(r.loop.parked?.reason).toContain("could not move");
+    expect(r.loop.parked?.reason).toContain("diverged");
+    expect(r.loop.branchMoved).toBeUndefined();
+    const fresh = reconcile(
+      inCi(
+        { pr: pr({ headSha: SHA2 }), pushed: { sha: SHA2, at: NOW } },
+        { branchMoved: { ...held, since: NOW - 1000 } },
+      ),
+    );
+    expect(fresh.loop.parked ?? null).toBeNull();
+  });
+
   it("8: a PR head that does not descend from the push still parks as stuck", () => {
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
     for (const prDescends of [false, undefined]) {

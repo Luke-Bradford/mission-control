@@ -3191,3 +3191,52 @@ describe("fileMinorFindings", () => {
     expect(ghCalls).toEqual([]);
   });
 });
+
+describe("commitsFrom", () => {
+  const A = "a".repeat(40);
+  const B = "b".repeat(40);
+  const commit = (author: string | null, committer: string | null) => ({
+    author: author === null ? null : { login: author },
+    committer: committer === null ? null : { login: committer },
+  });
+  const compareReturning =
+    (body: object, seen: string[] = []): GhRunner =>
+    async (args) => {
+      seen.push(args.join(" "));
+      return { code: 0, stdout: JSON.stringify(body), stderr: "" };
+    };
+  const from = (gh: GhRunner, logins = ["op"]) =>
+    createPublisher(deps({ gh })).commitsFrom(run(), A, B, logins);
+
+  it("is true when every commit was authored or committed by one of the logins", async () => {
+    const seen: string[] = [];
+    const gh = compareReturning(
+      {
+        total_commits: 2,
+        commits: [commit("op", "op"), commit("op", "web-flow")],
+      },
+      seen,
+    );
+    expect(await from(gh)).toBe(true);
+    expect(seen[0]).toContain(`compare/${A}...${B}`);
+  });
+
+  it("is false when a commit was written by neither", async () => {
+    const gh = compareReturning({
+      total_commits: 2,
+      commits: [commit("op", "op"), commit("stranger", "web-flow")],
+    });
+    expect(await from(gh)).toBe(false);
+    expect(await from(compareReturning({ total_commits: 1, commits: [commit(null, null)] }))).toBe(
+      false,
+    );
+  });
+
+  it("is false with no logins, an empty range, a failed read or a cut-short list", async () => {
+    const ok = { total_commits: 1, commits: [commit("op", "op")] };
+    expect(await from(compareReturning(ok), [])).toBe(false);
+    expect(await from(compareReturning({ total_commits: 0, commits: [] }))).toBe(false);
+    expect(await from(compareReturning({ total_commits: 300, commits: ok.commits }))).toBe(false);
+    expect(await from(async () => ({ code: 1, stdout: "", stderr: "boom" }))).toBe(false);
+  });
+});

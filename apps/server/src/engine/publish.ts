@@ -110,6 +110,10 @@ export const UPDATE_UP_TO_DATE = "the branch already contains main";
 export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
+/** A fast-forward's answer; `installNote` is a refusal or failure of the install that followed it. */
+export type FastForwardResult =
+  | { ok: true; installNote?: string }
+  | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
   | {
       ok: true;
@@ -191,6 +195,11 @@ export interface Publisher {
   ): Promise<{ ok: true; sha: string } | { ok: false; text: string; transient: boolean }>;
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
+  /**
+   * Whether every commit in `ancestor..head` was authored or committed by one of `logins`, from
+   * GitHub's compare; false when the read fails, the range is empty, or the list is cut short.
+   */
+  commitsFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
   /** Opens the run's draft PR, or finds the one it already opened. */
@@ -266,7 +275,7 @@ export interface Publisher {
    * (fetching it when needed). A worktree that is not behind `sha` on the same line, or that
    * the move would overwrite, is left as it is and refused.
    */
-  fastForward(run: Run, worktree: string, sha: string): Promise<PublishResult>;
+  fastForward(run: Run, worktree: string, sha: string): Promise<FastForwardResult>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
   markDraft(run: Run): Promise<PublishResult>;
@@ -1228,6 +1237,25 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return result.ok && result.descends;
     },
 
+    async commitsFrom(run, ancestor, head, logins) {
+      const repo = repoOf(run);
+      if (repo === undefined || !SHA.test(ancestor) || !SHA.test(head)) return false;
+      const compare = await ghJson(["api", `repos/${repo}/compare/${ancestor}...${head}`], "compare");
+      if (isRefusal(compare) || !Array.isArray(compare.commits) || compare.commits.length === 0)
+        return false;
+      // GitHub lists at most 250 commits: a longer range is not read whole
+      if (typeof compare.total_commits === "number" && compare.total_commits > compare.commits.length)
+        return false;
+      const loginOf = (who: unknown): unknown => (who as { login?: unknown } | null)?.login;
+      // a merge made on GitHub is committed by its web flow: the author's login is the one that counts
+      return (compare.commits as { author?: unknown; committer?: unknown }[]).every(
+        (c) =>
+          (typeof loginOf(c.author) === "string" && logins.includes(loginOf(c.author) as string)) ||
+          (typeof loginOf(c.committer) === "string" &&
+            logins.includes(loginOf(c.committer) as string)),
+      );
+    },
+
     async reviewPr(run, number) {
       const repo = repoOf(run);
       if (repo === undefined) return null;
@@ -1569,6 +1597,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async fastForward(run, worktree, sha) {
       if (!SHA.test(sha)) return final("not a commit sha");
+      if (run.branch === null) return final(MERGE_NOT_RUN_BRANCH);
       const place = seatPlace(deps.config, run.agentId);
       if (place === null) return final(MERGE_NO_SEAT);
       const git = deps.git ?? crewGit;
@@ -1592,8 +1621,25 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {
             return final("the branch has diverged from the PR's head; it was not changed");
           }
+          const before = (await g(["rev-parse", "--verify", "HEAD"])).trim();
           await g(["merge", "--ff-only", "--quiet", sha]);
-          return { ok: true };
+          // the moved-in commits may change the lockfile: the worktree's install follows them
+          const gc: G = (a) =>
+            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          let installNote: string | undefined;
+          try {
+            const { defaultBranch, mainSha } = await originNow(gc, null);
+            await fetchMain(gc, defaultBranch, mainSha);
+            installNote = await installAfterSync(
+              checkout,
+              { path: worktree, gitDir, branch: run.branch, baseSha: mainSha },
+              before,
+              deps.config.crew?.worktrees ?? "",
+            );
+          } catch (e) {
+            installNote = `dependencies may have changed; install not run: ${errText(e)}`;
+          }
+          return { ok: true, ...(installNote ? { installNote } : {}) };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);

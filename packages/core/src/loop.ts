@@ -1313,6 +1313,17 @@ function stateStep(s: LoopSnapshot): Step {
     if (!gv.gate.hubOnly) return park(loop, "gate", GATE_FOREIGN_COMMITS_PARK);
   }
 
+  // The hub keeps trying to move the seat's worktree onto an adopted head; a seat that cannot take
+  // it in the window is the operator's to look at, not left to commit onto the old head.
+  const held = loop.branchMoved;
+  if (held !== undefined && now - held.since > NO_CI_AFTER_MS) {
+    return park(
+      { ...loop, branchMoved: undefined },
+      STUCK_PARK,
+      `the hub could not move ${s.seat.call}'s worktree onto ${sha7(held.sha)}, the commit added on top of its push, after ${minutes(NO_CI_AFTER_MS)} minutes${held.why === undefined ? "" : ` (${held.why})`}; bring the worktree up to it before the seat commits again`,
+    );
+  }
+
   if (loop.phase === "ci") {
     // A commit made while in ci is a new push: its clock and its refusals start over.
     if (typeof loop.pushFor === "string" && loop.pushFor !== headCommit) {
@@ -1329,7 +1340,8 @@ function stateStep(s: LoopSnapshot): Step {
     }
     if (pushed === null || pr === null || pushed.sha !== headCommit || pr.headSha !== pushed.sha) {
       // someone else's commit on top of the seat's push (a main merge, a doc edit): the PR head is
-      // the run's push now, and the seat is told its branch moved on
+      // the run's push now, and the hub moves the seat's worktree onto it. The engine adopts it only
+      // while the seat is idle, so a seat that stays busy past the window is parked as stuck below.
       if (
         pushed !== null &&
         pr !== null &&
@@ -1337,7 +1349,11 @@ function stateStep(s: LoopSnapshot): Step {
         pushed.sha === headCommit &&
         pr.headSha !== null &&
         pr.headSha !== pushed.sha &&
-        s.prDescends === true
+        s.prDescends === true &&
+        (!s.seat.inTurn ||
+          !s.seat.holdsRun ||
+          loop.pushStartedAt === null ||
+          now - loop.pushStartedAt <= NO_CI_AFTER_MS)
       ) {
         return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha }] };
       }

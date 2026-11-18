@@ -680,12 +680,45 @@ export function createEngine(deps: EngineDeps): Engine {
     return sent;
   }
 
-  /** Sends the held branch-moved line; it is kept, and tried again next pass, until the seat has it. */
-  async function deliverBranchMoved(run: Run, loop: RunLoop): Promise<void> {
+  /**
+   * The hub may move a run's worktree: its seat is not in a turn and not starting one (a run off
+   * its seat has no turn to race). A seat with no live session counts as idle.
+   */
+  function worktreeMovable(run: Run): boolean {
+    if (supervisor.seat(run.agentId)?.runId !== run.id) return true;
+    return (
+      !(supervisor.seatFacts(run.agentId)?.inTurn ?? false) &&
+      !supervisor.busy().some((b) => b.seatId === run.agentId)
+    );
+  }
+
+  /**
+   * Moves the run's worktree onto the head it adopted. A refusal is kept (the pass after tries
+   * again, and the loop parks the run once the window is spent); the seat is never asked to do it,
+   * as its guard denies the merge.
+   */
+  async function followAdoptedHead(run: Run, loop: RunLoop, at: number): Promise<void> {
     const held = loop.branchMoved;
     if (held === undefined) return;
-    const sent = await send(run.id, held.key, held.text);
-    if (sent === "sent" || sent === "dup") delete loop.branchMoved;
+    const worktree = worktreeOf(run, loop);
+    // a run with no worktree of its own has none to move
+    if (worktree === null) {
+      delete loop.branchMoved;
+      return;
+    }
+    if (!worktreeMovable(run)) return;
+    const moved = await publisher.fastForward(run, worktree, held.sha);
+    if (!moved.ok) {
+      loop.branchMoved = { ...held, why: moved.text };
+      return;
+    }
+    delete loop.branchMoved;
+    store.addLoopEvent(
+      `${run.id}:${held.epoch}:moved:${held.sha}`,
+      run.id,
+      `the worktree is on ${held.sha.slice(0, 7)} now${moved.installNote === undefined ? "" : `; ${moved.installNote}`}`,
+      at,
+    );
   }
 
   /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
@@ -1578,16 +1611,11 @@ export function createEngine(deps: EngineDeps): Engine {
         const prior = store.runPush(run.id);
         // read again: the seat may have committed or pushed since the loop planned this
         if (prior === null || store.newestRunCommit(run.id)?.sha !== prior.sha) return;
-        const worktree = worktreeOf(run, cur);
-        // the hub cannot move a worktree while its seat is in a turn: the move and the line wait
-        // until the seat is idle (the loop plans this again next pass)
-        const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
-        if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) return;
-        const base = `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push ${prior.sha.slice(0, 7)}.`;
-        const ask = `${base} Fast-forward your worktree to it (git merge --ff-only ${a.sha.slice(0, 7)}) before you commit again`;
-        // the line is on the loop first: a crash after the writes below still tells the seat
-        const key = `branch-moved:${run.id}:${a.sha}`;
-        cur.branchMoved = { key, text: `${ask}.` };
+        // the hub cannot move a worktree while its seat is in a turn: the adoption waits until the
+        // seat is idle (the loop plans this again next pass)
+        if (!worktreeMovable(run)) return;
+        // the move is on the loop first: a crash after the writes below still moves the worktree
+        cur.branchMoved = { sha: a.sha, epoch: cur.epoch, since: at };
         saveLoop(run.id, cur, store.run(run.id)?.loop, at);
         store.adoptFollowedHead({
           runId: run.id,
@@ -1596,20 +1624,11 @@ export function createEngine(deps: EngineDeps): Engine {
           sha: a.sha,
           at,
           ticket: run.ticket,
-          seatId: run.agentId,
           eventKey: `${run.id}:${cur.epoch}:followed:${a.sha}`,
           eventText: `PR head ${a.sha.slice(0, 7)} is on top of the push ${prior.sha.slice(0, 7)}; CI follows it`,
         });
         // a seat cannot fetch for itself: the hub moves its worktree
-        const moved = worktree === null ? null : await publisher.fastForward(run, worktree, a.sha);
-        cur.branchMoved = {
-          key,
-          text:
-            moved?.ok === true
-              ? `${base} Your worktree is on it now; nothing to do.`
-              : `${ask}${moved === null ? "" : `; the hub could not (${moved.text})`}.`,
-        };
-        await deliverBranchMoved(run, cur);
+        await followAdoptedHead(run, cur, at);
         out.again = true;
         return;
       }
@@ -2183,6 +2202,12 @@ export function createEngine(deps: EngineDeps): Engine {
       return;
     }
     const pushed = store.runPush(run.id);
+    // a worktree move for an older epoch or push is moot: the seat has moved on
+    if (
+      input.branchMoved !== undefined &&
+      (input.branchMoved.epoch !== input.epoch || pushed?.sha !== input.branchMoved.sha)
+    )
+      delete input.branchMoved;
     const flightPowers = flightPowersOf(config, run.repoId);
     if (
       input.flightClearedSha &&
@@ -2289,7 +2314,14 @@ export function createEngine(deps: EngineDeps): Engine {
       snap.headCommit === pushed.sha &&
       // a head the branch's runs made themselves is a poll that lags behind, not a push on top
       !store.branchCommits(run.repoId, run.branch ?? "").has(pr.headSha) &&
-      (await publisher.isDescendant(run, pushed.sha, pr.headSha))
+      (await publisher.isDescendant(run, pushed.sha, pr.headSha)) &&
+      // only the operator's own commits are taken into a seat's worktree; anyone else's park as stuck
+      (await publisher.commitsFrom(
+        run,
+        pushed.sha,
+        pr.headSha,
+        config.operator.githubLogins ?? [],
+      ))
     ) {
       // the fetch can take a while: a commit or push the seat made meanwhile is not this push,
       // and the snapshot is stale; the next pass reads it again
@@ -2339,9 +2371,9 @@ export function createEngine(deps: EngineDeps): Engine {
     const out: Outcome = { again: false, parked: false };
     if (run.endedAt === null && cur.branchMoved !== undefined) {
       try {
-        await deliverBranchMoved(run, cur);
+        await followAdoptedHead(run, cur, at);
       } catch (e) {
-        log(`${runId}: branch-moved failed: ${e instanceof Error ? e.message : String(e)}`);
+        log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     for (const a of step.actions) {
