@@ -45,7 +45,7 @@ const apiWithLongTicketTitle = () => {
       {
         repoId: "mission-control",
         issueNumber: 1900,
-        title: "A complete ranked ticket title stays readable when the chart label is clipped",
+        title: "A".repeat(300),
         status: "In Progress",
         state: "open",
         labels: [],
@@ -207,7 +207,7 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
           }, interaction);
           expect(title.visible).toBe(true);
           expect(title.inside).toBe(true);
-          expect(title.text).toContain("A complete ranked ticket title stays readable");
+          expect(title.text).toContain("A".repeat(300));
         } finally {
           await page.close();
         }

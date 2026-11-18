@@ -6,7 +6,7 @@ import {
   TELEMETRY_RANGES,
   type Telemetry,
 } from "@mc/core";
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ticketRef } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
@@ -199,6 +199,7 @@ export function CostSummaryRow(props: {
 function TicketLabel({ ticket, title }: { ticket: string; title?: string }) {
   const [open, setOpen] = useState(false);
   const [point, setPoint] = useState({ left: 8, top: 8 });
+  const tooltip = useRef<HTMLSpanElement>(null);
   const tip = useId();
   const full = `${ticket}${title ? ` · ${title}` : ""}`;
   const show = (target: HTMLElement) => {
@@ -209,6 +210,16 @@ function TicketLabel({ ticket, title }: { ticket: string; title?: string }) {
     });
     setOpen(true);
   };
+  useLayoutEffect(() => {
+    const el = tooltip.current;
+    if (!open || !el) return;
+    const box = el.getBoundingClientRect();
+    const next = {
+      left: Math.max(8, Math.min(box.left, window.innerWidth - box.width - 8)),
+      top: Math.max(8, Math.min(box.top, window.innerHeight - box.height - 8)),
+    };
+    if (next.left !== point.left || next.top !== point.top) setPoint(next);
+  }, [open, point]);
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: focus and hover disclose the full title, not an action
     <span
@@ -227,6 +238,7 @@ function TicketLabel({ ticket, title }: { ticket: string; title?: string }) {
       {open &&
         createPortal(
           <span
+            ref={tooltip}
             id={tip}
             className="ticket-title-tooltip"
             data-ticket-title-tooltip="true"

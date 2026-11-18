@@ -993,6 +993,7 @@
   z-index: 20;
   width: max-content;
   max-width: min(480px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
   padding: var(--sp-1) var(--sp-2);
   background: var(--surface-2);
   border: 1px solid var(--line-2);
@@ -1000,6 +1001,7 @@
   box-shadow: var(--shadow);
   white-space: normal;
   overflow-wrap: anywhere;
+  overflow: auto;
 }
 
 .quota-meters {
