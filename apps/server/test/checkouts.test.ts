@@ -293,6 +293,16 @@ async function syncCheckout() {
 }
 
 describe("prepareCheckout", () => {
+  it("carries a stopped ticket on in another seat's worktree, keeping its uncommitted files", async () => {
+    const first = await prepareCheckout(input());
+    writeFileSync(join(first.path, "wip.txt"), "unfinished\n");
+    const next = await prepareCheckout({ ...input(), seatId: "inco" });
+    expect(next.path).toBe(first.path);
+    expect(next.branch).toBe(first.branch);
+    expect(next.created).toBe(false);
+    expect(readFileSync(join(next.path, "wip.txt"), "utf8")).toBe("unfinished\n");
+  });
+
   it.each([false, true])("refuses helper config on reuse=%s", async (reuse) => {
     if (reuse) await prepareCheckout(input());
     git(clone, "config", "diff.x.textconv", "sentinel-helper");

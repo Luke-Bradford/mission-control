@@ -29,7 +29,13 @@ import {
   scratchName,
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
-import { type CrewSessionConfig, managedSessionPath, realish, SEAT_ID } from "../config.ts";
+import {
+  type CrewSessionConfig,
+  isInside,
+  managedSessionPath,
+  realish,
+  SEAT_ID,
+} from "../config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import {
   assertSeatGitConfig,
@@ -1555,6 +1561,26 @@ export async function installAfterSync(
   }
 }
 
+/** The worktree under the crew root that has `branch` checked out, else null. */
+async function managedWorktreeOf(
+  inClone: (args: string[], timeoutMs?: number) => Promise<string>,
+  branch: string,
+  worktreesRoot: string,
+): Promise<string | null> {
+  const root = await realpath(worktreesRoot).catch(() => null);
+  if (root === null) return null;
+  const listed = await inClone(["worktree", "list", "--porcelain"]).catch(() => "");
+  for (const block of listed.split("\n\n")) {
+    const lines = block.split("\n");
+    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
+    const found = lines.find((l) => l.startsWith("worktree "))?.slice(9);
+    if (found === undefined) continue;
+    const actual = await realpath(found).catch(() => null);
+    if (actual !== null && actual !== root && isInside(actual, root)) return found;
+  }
+  return null;
+}
+
 /**
  * Gives a run its branch and worktree: reuses this ticket's worktree if it exists, else adds one
  * on the existing branch (local, or origin's tracked) or on a new branch from origin's default
@@ -1567,8 +1593,11 @@ export async function prepareCheckout(
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
   const branch = (await ticketBranch(inClone, i.issue)) ?? branchFor(i.issue, i.title);
   // a worktree made before sessions had folders is reused where it is
-  const path =
+  const own =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
+  // the ticket's branch may sit in a managed worktree another seat left behind when its run
+  // stopped: this run carries on there, with its uncommitted files
+  const path = (await managedWorktreeOf(inClone, branch, i.worktreesRoot)) ?? own;
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 

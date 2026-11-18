@@ -3683,6 +3683,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      // the worktree may be one another seat left when its run stopped: that seat no longer holds it
+      if (!planner && !readOnly) {
+        const seatIds = (crew?.sessions ?? []).flatMap((x) => x.seats.map((m) => m.id));
+        for (const other of store.seatSessions(seatIds).values()) {
+          if (
+            other.seatId !== seatId &&
+            other.worktree === checkout.path &&
+            (other.runId === null || store.run(other.runId)?.endedAt !== null)
+          )
+            store.setSeatSession({ ...other, worktree: null, updatedAt: startedAt });
+        }
+      }
       setRunPathGrants(store, runId, grants);
       // the lines report_evidence will hold the seat to, as the ticket words them now
       if (def.loop === "build" && !readOnly)

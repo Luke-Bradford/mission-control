@@ -1700,7 +1700,7 @@ This is decided, not an oversight: a hold that outlived the run could be cleared
 seat. A clean review reads only the pushed head, so uncommitted work the ended run left in its
 worktree is not seen by the review or by `merge_pr`.
 
-An ended run's PR with review findings is picked up by starting the ticket again: the new run reuses the ticket's branch (a PR whose head ref differs from the run's branch is not adopted by a different seat).
+An ended run's PR with review findings is picked up by starting the ticket again: the new run, on any seat, reuses the ticket's branch and the managed worktree a stopped run left (uncommitted files included), and continues the PR an earlier run on that branch opened.
 
 When such a PR is behind main or conflicts, FLIGHT can bring main in itself: `mc sync_main` needs an
 unended run, but FLIGHT's shell may merge, resolve and commit on a detached HEAD (`git fetch`, `git

@@ -263,7 +263,27 @@ describe("openPr", () => {
     expect(tools.openDraftPr).not.toHaveBeenCalled();
   });
 
-  it("does not adopt an earlier PR recorded by another seat", async () => {
+  it("does not adopt an earlier PR recorded by a run on another branch", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        agentId: "other-seat",
+        branch: "feature/other",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
+  });
+
+  it("adopts the earlier PR of an ended run on the same branch, whatever its seat", async () => {
     store.upsertRun(
       run({
         id: "r0",
@@ -276,9 +296,8 @@ describe("openPr", () => {
     );
     ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
     expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
-      ok: false,
-      text: EARLIER_PR_OPEN,
-      transient: false,
+      ok: true,
+      prNumber: 29,
     });
   });
 
