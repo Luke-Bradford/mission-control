@@ -1007,46 +1007,61 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
         const runs: unknown = JSON.parse(listed.stdout);
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
-        const failed = runs.flatMap(
-          (r: unknown): { id: number; name: string; attempt: number | null }[] => {
-            const x = r as {
-              databaseId?: unknown;
-              name?: unknown;
-              conclusion?: unknown;
-              status?: unknown;
-              attempt?: unknown;
-            } | null;
-            if (
-              x === null ||
-              typeof x.databaseId !== "number" ||
-              !Number.isSafeInteger(x.databaseId)
-            ) {
-              return [];
+        const failed: { id: number; name: string; attempt: number | null; rerun: boolean }[] = [];
+        for (const r of runs) {
+          const x = r as {
+            databaseId?: unknown;
+            name?: unknown;
+            conclusion?: unknown;
+            status?: unknown;
+            attempt?: unknown;
+          } | null;
+          if (
+            x === null ||
+            typeof x.databaseId !== "number" ||
+            !Number.isSafeInteger(x.databaseId)
+          ) {
+            continue;
+          }
+          const name = typeof x.name === "string" ? x.name : "CI";
+          const attempt =
+            typeof x.attempt === "number" && Number.isSafeInteger(x.attempt) && x.attempt > 0
+              ? x.attempt
+              : null;
+          if (x.conclusion === "failure") {
+            failed.push({ id: x.databaseId, name, attempt, rerun: false });
+          } else if (x.status !== "completed" && attempt !== null && attempt > 1) {
+            // a run being re-run has no conclusion yet: the attempt before it may be the one that
+            // failed, but a re-run can also start from a green attempt
+            const before = await deps.gh(
+              [
+                "run",
+                "view",
+                `--repo=${repo}`,
+                String(x.databaseId),
+                `--attempt=${attempt - 1}`,
+                "--json=conclusion",
+              ],
+              { cwd: cwd() },
+            );
+            if (before.code !== 0) return CI_LOG_UNREADABLE;
+            const state: unknown = JSON.parse(before.stdout);
+            if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
+              failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
             }
-            const name = typeof x.name === "string" ? x.name : "CI";
-            if (x.conclusion === "failure") return [{ id: x.databaseId, name, attempt: null }];
-            // a run being re-run has no conclusion yet: the attempt before it is the one that failed
-            if (
-              x.status !== "completed" &&
-              typeof x.attempt === "number" &&
-              Number.isSafeInteger(x.attempt) &&
-              x.attempt > 1
-            ) {
-              return [{ id: x.databaseId, name, attempt: x.attempt - 1 }];
-            }
-            return [];
-          },
-        );
+          }
+        }
         if (failed.length === 0) return NO_FAILED_RUN;
         // bytes, not characters: what is left of CI_EXCERPT_MAX, separators and headers included
         let budget = CI_EXCERPT_MAX;
         const sections: string[] = [];
         for (const f of failed) {
           const name = cleanLog(f.name).slice(0, RUN_NAME_MAX);
-          const head =
+          const named =
             f.attempt === null
-              ? `${name}:\n`
-              : `${name} (attempt ${f.attempt}, which failed; a re-run is going):\n`;
+              ? name
+              : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
+          const head = `${named}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
           const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);

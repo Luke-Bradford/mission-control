@@ -678,11 +678,48 @@ describe("ciExcerpt", () => {
           { databaseId: 12, name: "lint", conclusion: "success", status: "completed", attempt: 1 },
         ]),
       }),
+      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "failure" }) }),
       () => ({ code: 0, stdout: "boom\n" }),
     ];
     const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
     expect(out).toBe("test (attempt 1, which failed; a re-run is going):\nboom");
-    expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
+    expect(ghCalls[1]).toEqual([
+      "run",
+      "view",
+      "--repo=o/mc",
+      "11",
+      "--attempt=1",
+      "--json=conclusion",
+    ]);
+    expect(ghCalls[2]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
+  });
+
+  it("says no failed run when a re-run started from a successful attempt", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 2 },
+        ]),
+      }),
+      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "success" }) }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
+    expect(ghCalls.some((c) => c.includes("--log-failed"))).toBe(false);
+  });
+
+  it("names the attempt of a completed failed run and reads that attempt", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "failure", status: "completed", attempt: 2 },
+        ]),
+      }),
+      () => ({ code: 0, stdout: "boom\n" }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe("test (attempt 2):\nboom");
+    expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=2", "--log-failed"]);
   });
 
   it("says no failed run for a first attempt that is still running", async () => {
