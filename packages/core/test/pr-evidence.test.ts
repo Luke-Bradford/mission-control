@@ -29,6 +29,7 @@ const ALL = [
   "setup_roles",
   "setup_sources",
   "setup_access",
+  "planner",
 ];
 
 describe("prEvidenceAffectedPages", () => {
