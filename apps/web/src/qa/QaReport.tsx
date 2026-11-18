@@ -197,7 +197,7 @@ function usePlanTicket(r: QaReport, ticket: string | null | undefined) {
     known === null ? RESOURCES.pr(r.repoId, r.prNumber) : null,
   );
   const number =
-    known ?? (pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null) ?? branchTicket(r.branch)
+    known ?? (pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null) ?? branchTicket(r.branch);
   return {
     number,
     loading: number === null && pr.loading,

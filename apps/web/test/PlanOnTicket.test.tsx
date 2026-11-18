@@ -225,7 +225,9 @@ describe("the signed-off plan beside what was built", () => {
     serve({ [PR]: () => ({ status: 503, body: { error: "PR lookup offline" } }) });
     render(<QaReportRead report={qaReportFixture()} archived />);
     const panel = await screen.findByRole("region", { name: "Signed-off plan" });
-    expect(within(panel).getByRole("alert").textContent).toMatch(/Could not find this report's ticket/);
+    expect(within(panel).getByRole("alert").textContent).toMatch(
+      /Could not find this report's ticket/,
+    );
     expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
   });
 
