@@ -39,6 +39,7 @@ import {
   seatRow,
 } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
+import { rulesFixture } from "./rolesRulesFixture.ts";
 
 function defined<T>(value: T | null | undefined): T {
   if (value == null) throw new Error("Test expected a value to exist");
@@ -657,6 +658,7 @@ export function demoSeed() {
       ),
     },
     "/api/flight/summary": flightSummary(),
+    [`/api/repos/${DEMO_REPO}/rules`]: rulesFixture(DEMO_REPO),
     "/api/settings/away": {
       on: false,
       until: "",

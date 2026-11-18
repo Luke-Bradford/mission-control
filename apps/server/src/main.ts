@@ -37,6 +37,7 @@ import {
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
+import { createBugEscapeCollector } from "./bug-escapes/sweep.ts";
 import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
 import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
@@ -484,9 +485,13 @@ export async function main(): Promise<void> {
               return { stop: async () => await stopPreview(child) };
             },
           }),
-          render: (origin, path, colorScheme, signal) => {
+          render: (origin, path, colorScheme, signal, operatorToken) => {
             const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, { colorScheme, signal });
+            return renderHudInHelper(guard.page(path), guard, {
+              colorScheme,
+              signal,
+              ...(operatorToken === undefined ? {} : { operatorToken }),
+            });
           },
           renderDemo: (origin, path, viewport, signal) => {
             const guard = hudRenderRequest(origin);
@@ -708,6 +713,7 @@ export async function main(): Promise<void> {
     checks: runChecks,
     checkDrops: (runId) => checkRecorder.drops(runId),
     pendingChecks: (runId) => checkRecorder.pending(runId),
+    lostCheck: (runId, command) => checkRecorder.lost(runId, command),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
@@ -1128,6 +1134,8 @@ export async function main(): Promise<void> {
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath: writableConfigPath,
+    // Reads may use the loaded file on any server: a preview shows its rules and cannot save them.
+    configReadPath: configPath,
     crewReloader: writableConfigPath === undefined ? undefined : crewReloader,
     // A preview writes only a config file it was explicitly pointed at, never the live one.
     seatWrites: !preview || process.env.MC_CONFIG !== undefined,
@@ -1174,8 +1182,10 @@ export async function main(): Promise<void> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   const gitFiles = preview ? null : createGitFileCollector({ config, store, bus });
+  const bugEscapes = preview ? null : createBugEscapeCollector({ config, store });
   app.addHook("onClose", async () => {
     await gitFiles?.stop();
+    await bugEscapes?.stop();
   });
   const previewExpiry = previews ? setInterval(() => void previews.expire(), 60_000) : null;
   app.addHook("onClose", async () => {
@@ -1215,6 +1225,7 @@ export async function main(): Promise<void> {
   if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
   gitFiles?.start();
+  bugEscapes?.start();
   supervisor.start();
   // After the supervisor has taken the crew lock (it does so before returning), so the engine's
   // first look at the seats works; its resumed runs start in the background, so no idle event of

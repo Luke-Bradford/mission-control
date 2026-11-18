@@ -5,6 +5,7 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
   joinMapGraph,
+  SPEC_BOUNCE_CAUSES,
   unpackMap,
 } from "@mc/core";
 import "./temp-home.ts";
@@ -95,6 +96,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildApp,
   CHECK_FAILED,
+  CONFIG_FILE_UNAVAILABLE,
   CONFIG_WRITES_UNAVAILABLE,
   LOOP_WRITES_DISABLED,
   NO_OPEN_NOTE,
@@ -255,7 +257,7 @@ const stubSupervisor = (): Supervisor => {
     endRun: call("end", undefined),
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),
-    wakeRun: call("wakeRun", { freshSessionId: null, fallback: null }),
+    wakeRun: call("wakeRun", undefined),
     endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
     resumeRun: call("resumeRun", undefined),
@@ -507,6 +509,7 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    bugEscapes: [],
     improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
       subject: name,
@@ -517,6 +520,10 @@ describe("audit", () => {
       calls: 0,
       chars: 0,
     })),
+    specBounces: {
+      rows: [],
+      counts: SPEC_BOUNCE_CAUSES.map((cause) => ({ cause, days7: 0, days30: 0 })),
+    },
     surgeonProposals: [],
   });
 
@@ -1631,7 +1638,6 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/tokens?days=7"],
-  ["GET", "/api/audit/fix-sessions"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -2257,6 +2263,46 @@ describe("Setup Roles & guards", () => {
     const read = await view();
     expect(read.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
     expect(createHash("sha256").update(readFileSync(configPath)).digest("hex")).toBe(read.base);
+  });
+
+  it("a preview that may not write config still reads the rules, and saves nothing", async () => {
+    onDisk("    rules:\n      pick_from: [Todo]\n");
+    const before = readFileSync(configPath, "utf8");
+    // a preview on the live file: the path it loaded, and no writable `configPath`
+    const preview = buildApp({ config, store, bus, configReadPath: configPath });
+    try {
+      const read = await preview.inject({ method: "GET", url: "/api/repos/shop-app/rules" });
+      expect(read.statusCode).toBe(200);
+      const body = read.json<View>();
+      expect(Object.keys(body.rules)).toEqual(KEYS);
+      expect(body.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
+      expect(
+        (await preview.inject({ method: "GET", url: "/api/repos/nope/rules" })).statusCode,
+      ).toBe(404);
+      const saved = await preview.inject({
+        method: "POST",
+        url: "/api/repos/shop-app/rules",
+        headers: json,
+        payload: JSON.stringify({ base: body.base, rules: rolesBody }),
+      });
+      expect(saved.statusCode).toBe(409);
+      expect(saved.json()).toEqual({ error: CONFIG_WRITES_UNAVAILABLE });
+    } finally {
+      await preview.close();
+    }
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
+  });
+
+  it("a server with no config file says the rules cannot be read", async () => {
+    const bare = buildApp({ config, store, bus });
+    try {
+      const read = await bare.inject({ method: "GET", url: "/api/repos/shop-app/rules" });
+      expect(read.statusCode).toBe(409);
+      expect(read.json()).toEqual({ error: CONFIG_FILE_UNAVAILABLE });
+    } finally {
+      await bare.close();
+    }
   });
 
   it("a rules save never makes an unapplied Authority change on disk live", async () => {
@@ -6319,6 +6365,10 @@ describe("telemetry", () => {
         at: NOW - 6 * 60 * 60_000 + index * 60 * 60_000,
         merged: 0,
       })),
+      ticketsInProgress: Array.from({ length: 14 }, (_, index) => ({
+        day: `2026-10-${String(index + 4).padStart(2, "0")}`,
+        tickets: null,
+      })),
       quality: [
         {
           at: NOW - 6 * 60 * 60_000,
@@ -6570,6 +6620,40 @@ describe("reload", () => {
     expect(r.json()).toEqual({ ...changes, applied: ["seat guido-2 added"] });
     expect(reload).toHaveBeenCalledTimes(1);
     await a.close();
+  });
+
+  it("/api/telemetry?range=24h serves the machine series and stays within 60 KB with a full day sampled", async () => {
+    withCrew();
+    const GB = 1024 ** 3;
+    for (let i = 1; i <= 24 * 60; i += 1) {
+      store.addMachineSample({
+        at: NOW - (24 * 60 - i) * 60_000,
+        cpuPct: 20 + (i % 50),
+        cores: 8,
+        memUsedBytes: 5 * GB + i,
+        memTotalBytes: 16 * GB,
+        diskFreeBytes: 16 * GB,
+        diskTotalBytes: 100 * GB,
+        swapUsedBytes: (i % 7) * GB + 12_345,
+        swapTotalBytes: 8 * GB,
+        memoryPressureFreePct: 33.3333 + (i % 9),
+        agents: { count: 3, rssBytes: 6.123456 * GB + i, cpuPct: 1 },
+        testRun: { count: 5, rssBytes: 4.654321 * GB + i, cpuPct: 9 },
+      });
+    }
+    const response = await get("/api/telemetry?range=24h");
+    expect(response.statusCode).toBe(200);
+    const body = response.json<Telemetry>();
+    expect(body.machine).toHaveLength(72);
+    expect(body.machine.every((p) => p.swapPct != null && p.agentGb != null)).toBe(true);
+    // The budget is the 60 KB the other bounded routes keep; the four added series are a small share.
+    const bytes = Buffer.byteLength(response.body);
+    expect(bytes).toBeLessThan(60_000);
+    const without = JSON.stringify({
+      ...body,
+      machine: body.machine.map(({ at, cpuPct, memPct }) => ({ at, cpuPct, memPct })),
+    });
+    expect(bytes - Buffer.byteLength(without)).toBeLessThan(8_000);
   });
 
   it("uses machine-capacity thresholds applied by reload immediately", async () => {

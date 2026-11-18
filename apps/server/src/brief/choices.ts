@@ -6,6 +6,7 @@ import type {
   BriefChoiceReceipt,
   BriefChoiceRequest,
 } from "@mc/core";
+import { recordAnswered } from "../attention/answered.ts";
 import { holds } from "../attention/holds.ts";
 import type { ChangeBus } from "../bus.ts";
 import {
@@ -336,6 +337,16 @@ export async function chooseBrief(
       if (sourceMessageId !== null && item.agentId !== null && aliases.length === 2)
         deps.store.settleCommsItem(sourceMessageId, "CAPCOM", "Chosen in Needs you", deps.now());
       deps.store.ack(aliases, deps.now());
+      // answered: it leaves Needs you whatever its repo, and is listed under Answered, once
+      // (under the displayed key, though every alias is acked and settled above)
+      recordAnswered(
+        deps.store,
+        item,
+        [key],
+        current.options.find((option) => option.id === request.optionId)?.label ?? text,
+        deps.now(),
+        "seatId" in actor ? { seatId: actor.seatId } : { operator: true },
+      );
       return save("applied", text);
     } catch (error) {
       const text =

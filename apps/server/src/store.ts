@@ -72,9 +72,11 @@ import {
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightPointerKind,
+  type FlightWakeAction,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
+  type FlowColumnMove,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -216,6 +218,15 @@ import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
 import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
+import {
+  type BugFixCandidate,
+  bugEscapes,
+  bugFixCandidates,
+  type IntroducingPrFacts,
+  introducingPrFacts,
+  noteBugTraceTried,
+  recordBugEscape,
+} from "./store/bug-escapes.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -280,6 +291,7 @@ import {
   messageImprovements,
   toolImprovements,
 } from "./telemetry/audit-improvements.ts";
+import { specBounces } from "./telemetry/spec-bounces.ts";
 
 export * from "./store/types.ts";
 
@@ -323,6 +335,21 @@ const notificationRow = (r: Row): NotificationRow => ({
 /** Memory in use as a percentage of the total; null when unmeasured or the total is unknown. */
 const memPct = (s: MachineSample): number | null =>
   s.memUsedBytes !== null && s.memTotalBytes > 0 ? (s.memUsedBytes / s.memTotalBytes) * 100 : null;
+
+const GIB = 1024 ** 3;
+
+/** Two decimals keep the served series short; null stays null. */
+const round2 = (n: number | null): number | null => (n === null ? null : Math.round(n * 100) / 100);
+
+/** Swap in use as a percentage of the swap file; null when unmeasured or there is no swap file. */
+const swapPct = (s: MachineSample): number | null =>
+  s.swapUsedBytes != null && s.swapTotalBytes != null && s.swapTotalBytes > 0
+    ? (s.swapUsedBytes / s.swapTotalBytes) * 100
+    : null;
+
+/** 100 minus the free percentage `memory_pressure` reports; null when unmeasured. */
+const pressurePct = (s: MachineSample): number | null =>
+  s.memoryPressureFreePct == null ? null : 100 - s.memoryPressureFreePct;
 
 /**
  * A stored digest; one persisted before `background` existed has none in flight, one before
@@ -1192,18 +1219,6 @@ export class Store {
     }));
   }
 
-  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
-  fixTrialRuns(): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
-           ORDER BY started_at, seq`,
-        )
-        .all() as Row[]
-    ).map(toRun);
-  }
-
   /** Context size of every stored model call of runs that started since `since`. */
   runCallContexts(since: number): { runId: string; context: number }[] {
     return this.db
@@ -2056,6 +2071,8 @@ export class Store {
         AUDIT_RETENTION_DAYS,
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -2993,6 +3010,7 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
+      bugEscapes: bugEscapes(this.db, since, until),
       improvements: [
         ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
@@ -3003,8 +3021,27 @@ export class Store {
           this.commsChatter(since, until),
         ),
       ],
+      specBounces: specBounces(this.db, since, until),
       surgeonProposals: [],
     };
+  }
+
+  /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
+  bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
+    return bugFixCandidates(this.db, repoId, limit);
+  }
+
+  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
+    noteBugTraceTried(this.db, repoId, issue, at);
+  }
+
+  introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
+    return introducingPrFacts(this.db, repoId, pr);
+  }
+
+  /** Records a traced bug once per ticket; a repeat leaves the row as it was. */
+  recordBugEscape(e: Parameters<typeof recordBugEscape>[1]): void {
+    recordBugEscape(this.db, e);
   }
 
   /**
@@ -3616,19 +3653,43 @@ export class Store {
   }
 
   /** Replaces the repo's finished and open flow rows. */
-  replaceFlow(repoId: RepoId, issues: FlowIssue[], prs: FlowPr[]): void {
+  replaceFlow(
+    repoId: RepoId,
+    issues: FlowIssue[],
+    prs: FlowPr[],
+    moves: FlowColumnMove[] = [],
+  ): void {
     this.transaction(() => {
       this.db.prepare("DELETE FROM flow_issues WHERE repo_id = ?").run(repoId);
+      this.db.prepare("DELETE FROM flow_column_moves WHERE repo_id = ?").run(repoId);
       this.db.prepare("DELETE FROM flow_prs WHERE repo_id = ?").run(repoId);
       const insIssue = this.db.prepare(
-        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at, title) VALUES (?, ?, ?, ?, ?, ?)",
       );
-      for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
+      for (const i of issues)
+        insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt, i.title ?? null);
+      const insMove = this.db.prepare(
+        "INSERT INTO flow_column_moves (repo_id, number, at, column) VALUES (?, ?, ?, ?)",
+      );
+      for (const m of moves) insMove.run(repoId, m.number, m.at, m.column);
       const insPr = this.db.prepare(
         "INSERT INTO flow_prs (repo_id, number, merged_at, first_push_ci) VALUES (?, ?, ?, ?)",
       );
       for (const p of prs) insPr.run(repoId, p.number, p.mergedAt, p.firstPushCi);
     });
+  }
+
+  /** Every observed flow-column move, oldest first, for local telemetry reads. */
+  flowColumnMoves(): FlowColumnMove[] {
+    const rows = this.db
+      .prepare("SELECT * FROM flow_column_moves ORDER BY at ASC, repo_id, number, id")
+      .all() as Row[];
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      number: r.number as number,
+      at: r.at as number,
+      column: r.column as FlowColumnMove["column"],
+    }));
   }
 
   /** Issues done at or after `sinceMs`, plus every open flow issue, oldest first. */
@@ -3646,6 +3707,7 @@ export class Store {
       size: r.size as string | null,
       startAt: r.start_at as number | null,
       doneAt: r.done_at as number | null,
+      title: r.title as string | null,
     }));
   }
 
@@ -3674,9 +3736,20 @@ export class Store {
     this.transaction(() => {
       this.db
         .prepare(
-          "INSERT OR REPLACE INTO machine_samples (at, sample, cpu_pct, mem_pct) VALUES (?, ?, ?, ?)",
+          `INSERT OR REPLACE INTO machine_samples
+             (at, sample, cpu_pct, mem_pct, swap_pct, pressure_pct, agent_gb, test_gb)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(s.at, JSON.stringify(s), s.cpuPct, memPct(s));
+        .run(
+          s.at,
+          JSON.stringify(s),
+          s.cpuPct,
+          memPct(s),
+          swapPct(s),
+          pressurePct(s),
+          s.agents ? s.agents.rssBytes / GIB : null,
+          s.testRun ? s.testRun.rssBytes / GIB : null,
+        );
       this.db.prepare("DELETE FROM machine_samples WHERE at < ?").run(s.at - MACHINE_RETENTION_MS);
     });
   }
@@ -3704,7 +3777,9 @@ export class Store {
   ): Telemetry["machine"] {
     const rows = this.db
       .prepare(
-        `SELECT MAX(at) AS at, AVG(cpu_pct) AS cpu, AVG(mem_pct) AS mem FROM machine_samples
+        `SELECT MAX(at) AS at, AVG(cpu_pct) AS cpu, AVG(mem_pct) AS mem, AVG(swap_pct) AS swap,
+                AVG(pressure_pct) AS pressure, AVG(agent_gb) AS agent, AVG(test_gb) AS test
+         FROM machine_samples
          WHERE at >= ? AND at <= ?
          GROUP BY MIN(?, CAST((at - ?) / ? AS INTEGER)) ORDER BY 1 ASC`,
       )
@@ -3712,8 +3787,20 @@ export class Store {
       at: number;
       cpu: number | null;
       mem: number | null;
+      swap: number | null;
+      pressure: number | null;
+      agent: number | null;
+      test: number | null;
     }[];
-    return rows.map((r) => ({ at: r.at, cpuPct: r.cpu, memPct: r.mem }));
+    return rows.map((r) => ({
+      at: r.at,
+      cpuPct: r.cpu,
+      memPct: r.mem,
+      swapPct: round2(r.swap),
+      pressurePct: round2(r.pressure),
+      agentGb: round2(r.agent),
+      testRunGb: round2(r.test),
+    }));
   }
 
   /** Acknowledges attention item keys at `at` (a re-ack moves the time; absence is kept). */
@@ -6521,8 +6608,15 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
+  addFlightWake(
+    runId: string,
+    at: number,
+    reasons: string[],
+    wakeId?: string,
+    rode: string[] = [],
+    immediate: string[] = [],
+  ): void {
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -6533,6 +6627,14 @@ export class Store {
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     return this.flightQ.flightWakes(since);
+  }
+
+  flightWakeActions(
+    since: number,
+    until: number,
+    nonActing: readonly string[],
+  ): FlightWakeAction[] {
+    return this.flightQ.flightWakeActions(since, until, nonActing);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
@@ -6674,11 +6776,6 @@ export class Store {
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
     return this.flightQ.flightDecisions(since, limit);
-  }
-
-  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
-  flightWaitTimes(since: number): number[] {
-    return this.flightQ.flightWaitTimes(since);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

@@ -7,6 +7,593 @@
   overflow: auto;
 }
 
+/* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
+#page-telemetry[data-tab="crew"],
+#page-telemetry[data-tab="throughput"] {
+  display: grid;
+  grid-template-rows: auto auto auto auto minmax(var(--crew-min, 520px), 1fr);
+  overflow: visible;
+}
+
+#page-telemetry .toolbar {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+#page-telemetry .toolbar .grow {
+  flex: 1;
+}
+
+/* the health band: eight stats in one row */
+.band {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+/* where eight tiles cannot show their full labels and units, the band takes two rows of four */
+@media (max-width: 1199px) {
+  .band {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.stat {
+  position: relative;
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.stat-label {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+
+.stat-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.stat-value {
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  border-bottom: 1px dotted var(--accent);
+  border-radius: 0;
+  padding: 0;
+  min-height: 24px;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* a number whose list needs a route that is not built is dashed and amber */
+.stat-value[data-drill="needs-route"] {
+  border-bottom-style: dashed;
+  border-bottom-color: var(--warn);
+}
+
+.stat-value:hover {
+  color: var(--accent);
+}
+
+/* a unit is fixed text, so it wraps rather than truncates */
+.stat-unit {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* the window and its comparison: two lines at most, the full text in the tile's title */
+.stat-sub {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.stat-def {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  margin-top: var(--sp-1);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 48px));
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg);
+}
+
+.stat:hover .stat-def,
+.stat:focus-within .stat-def {
+  display: block;
+}
+
+.band .stat:nth-last-child(-n + 3) .stat-def,
+.summary .stat:nth-last-child(-n + 2) .stat-def {
+  left: auto;
+  right: 0;
+}
+
+/* the verdict wraps its reason; its mark says the state beside its colour */
+.stat[data-stat="health"] .stat-value {
+  font-size: var(--fs-panel);
+  line-height: var(--lh-panel);
+  white-space: normal;
+  text-align: left;
+}
+
+.stat.v-healthy .stat-value::before {
+  content: "● ";
+  color: var(--ok);
+}
+
+.stat.v-watch .stat-value::before {
+  content: "◆ ";
+  color: var(--warn);
+}
+
+.stat.v-attention .stat-value::before {
+  content: "▲ ";
+  color: var(--crit);
+}
+
+.stat-sub .stat-cmp {
+  color: var(--fg-2);
+}
+
+/* tabs */
+.tabsrow {
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.tablist {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.tablist [role="tab"] {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--r) var(--r) 0 0;
+  min-height: 32px;
+  background: none;
+  color: var(--fg-2);
+  padding: 0 var(--sp-4);
+}
+
+.tablist [role="tab"][aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chip {
+  margin-left: auto;
+  align-self: center;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.chip.crit {
+  border-color: var(--crit);
+  color: var(--crit);
+}
+
+/* the tab's summary row: a scope cell, then one stat per figure */
+.summary {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.6fr) repeat(6, minmax(0, 1fr));
+  gap: var(--sp-2);
+  align-items: stretch;
+}
+
+.summary .scope {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+
+.summary .stat {
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.summary .stat-sub {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: var(--sp-2);
+  display: block;
+  white-space: nowrap;
+}
+
+.summary .stat-main {
+  padding-right: var(--sp-7);
+}
+
+/* the tab panel: a grid of panels that share what is left of the screen */
+.tabpanel {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+}
+
+.tabpanel .grid {
+  display: grid;
+  gap: var(--sp-2);
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(256px, 1fr));
+}
+
+.tabpanel .grid.dim {
+  opacity: 0.72;
+}
+
+.tabpanel .grid[data-view="table"] {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: minmax(240px, 1fr);
+}
+
+.tabpanel .grid[data-state] {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(240px, 1fr);
+}
+
+/* Wide work areas put the two crew panels side by side. */
+@media (min-width: 2200px) {
+  .tabpanel .grid[data-view="charts"]:not([data-state]) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(256px, 1fr);
+  }
+}
+
+/* Throughput: four charts in a 2x2, or the one table across the width. */
+.tabpanel .grid[data-view="charts"][data-n="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(256px, 1fr));
+}
+
+/* Throughput plots fill the panel body; the legend stays below the measured plot. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+
+.tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb > .chart {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+
+.tabpanel .grid[data-view="table"][data-n="1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tabpanel .grid > .panel {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.tabpanel .grid > .panel > .pbody {
+  flex: 1 1 0;
+  display: flex;
+  gap: var(--sp-4);
+  min-height: 0;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.tabpanel .pnote {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+
+.tabpanel .grid > .panel > .pb {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.state-panel {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--sp-3);
+  text-align: center;
+  color: var(--fg-2);
+  padding: var(--sp-6);
+}
+
+.state-panel p {
+  margin: 0;
+  font-size: var(--fs-panel);
+}
+
+.skeleton {
+  width: min(480px, 60vw);
+  height: 96px;
+  border-radius: var(--r);
+  background: linear-gradient(90deg, var(--surface-2), var(--line), var(--surface-2));
+  opacity: 0.7;
+}
+
+.tel-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+/* crew state lanes */
+.lanes-chart {
+  --lane-label: calc(var(--sp-7) * 2);
+  --lane-state: calc(var(--sp-7) + var(--sp-5));
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.crew-lanes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  grid-auto-rows: minmax(18px, 1fr);
+}
+
+.lane {
+  display: grid;
+  grid-template-columns: var(--lane-label) minmax(0, 1fr) var(--lane-state);
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 18px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.lane > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.lane-track {
+  position: relative;
+  height: 14px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  overflow: hidden;
+}
+
+.lane-track .span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.crew-lane-axis {
+  position: relative;
+  flex: none;
+  height: 20px;
+  margin-left: calc(var(--lane-label) + var(--sp-2));
+  margin-right: calc(var(--lane-state) + var(--sp-2));
+}
+
+.crew-lane-axis span {
+  position: absolute;
+  top: var(--sp-1);
+  transform: translateX(-50%);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.crew-lane-axis span.first {
+  transform: none;
+}
+
+.crew-lane-axis span.last {
+  transform: translateX(-100%);
+}
+
+/* state shapes: solid, hatched, dotted, underline */
+.span.running,
+.crew-sw.st.running,
+.share.running {
+  background: var(--ok);
+}
+
+.span.waiting,
+.crew-sw.st.waiting,
+.share.waiting {
+  background: repeating-linear-gradient(135deg, var(--warn) 0 3px, transparent 3px 5px);
+  border: 1px solid var(--warn);
+}
+
+.span.parked,
+.crew-sw.st.parked,
+.share.parked {
+  background:
+    radial-gradient(circle, var(--fg-2) 1px, transparent 1.5px) 0 0 / 5px 5px,
+    var(--surface-2);
+}
+
+.span.idle,
+.crew-sw.st.idle,
+.share.idle {
+  background: none;
+  border-bottom: 2px solid var(--muted);
+  border-radius: 0;
+}
+
+.share.unknown {
+  background: none;
+  border: 1px dashed var(--line-2);
+}
+
+.readout {
+  flex: 0 0 148px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  min-height: 0;
+}
+
+.readout li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 24px;
+}
+
+.readout .crew-sw.st {
+  flex: none;
+  width: 16px;
+  height: 10px;
+  border-radius: var(--r-s);
+}
+
+.readout .nm {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+
+.readout .vl {
+  color: var(--fg);
+}
+
+/* where agent time goes */
+#tUtil .rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  grid-auto-rows: minmax(18px, 1fr);
+}
+
+#tUtil .row {
+  display: grid;
+  grid-template-columns: minmax(88px, 28%) minmax(0, 1fr) minmax(56px, auto);
+  gap: var(--sp-2);
+  align-items: center;
+  min-height: 18px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+#tUtil .bar {
+  position: relative;
+  height: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  display: flex;
+  overflow: visible;
+}
+
+#tUtil .bar .share {
+  display: block;
+  height: 100%;
+}
+
+#tUtil .bar:focus-visible::after,
+#tUtil .bar:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 6;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+
+#tUtil .vl {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.coming {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.coming-note .pb p {
+  margin: 0;
+}
+
+.runs-dialog .pb {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.runs-dialog .pb p {
+  margin: 0;
+}
+
 /* Telemetry's readouts sit in one instrument band, divided by hairlines rather than boxed apart. */
 .kpis {
   display: grid;
@@ -180,4 +767,152 @@
   .tgrid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* an unavailable figure has no action: no underline, no pointer */
+.stat-value[aria-disabled="true"] {
+  border-bottom-color: transparent;
+  cursor: default;
+}
+
+.stat-value[aria-disabled="true"]:hover {
+  color: var(--fg);
+}
+
+/* a figure in a chart's readout */
+.crew-cell {
+  position: relative;
+}
+
+.crew-cell-value {
+  color: var(--fg);
+  border-bottom: 1px dotted var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.crew-cell-def {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: var(--sp-1);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 48px));
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg);
+  text-align: left;
+  white-space: normal;
+}
+
+.crew-cell:hover .crew-cell-def,
+.crew-cell:focus-within .crew-cell-def {
+  display: block;
+}
+
+/* throughput: legend keys, the dots chart, range bars and the step line */
+.tp-legend i {
+  --k: var(--accent);
+}
+
+.tp-legend i.k-bar {
+  background: var(--k);
+}
+
+.tp-legend i.k-dash {
+  width: 16px;
+  height: 0;
+  border-radius: 0;
+  border-top: 2px dashed var(--k);
+}
+
+.tp-legend i.k-line {
+  width: 16px;
+  height: 2px;
+  background: var(--k);
+}
+
+.tp-legend i.k-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--k);
+}
+
+.chart .dot {
+  fill: var(--accent);
+  fill-opacity: 0.85;
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.chart .overflow-dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.chart .cycle-line {
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.size-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.size-rows li {
+  display: grid;
+  grid-template-columns: minmax(88px, 30%) minmax(0, 1fr) minmax(72px, auto);
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.size-rows .lb {
+  color: var(--fg-2);
+}
+
+.size-rows .tr {
+  position: relative;
+  height: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.size-rows .rng {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.size-rows .tr b {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: calc(var(--sp-1) / -4);
+  background: var(--fg);
+}
+
+.size-rows .vl {
+  text-align: right;
+}
+
+.tickets-panel .pnote {
+  flex: none;
 }

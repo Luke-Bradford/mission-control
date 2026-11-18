@@ -1,11 +1,6 @@
 .agent-v2-identity {
   padding: var(--sp-2) var(--sp-4);
 }
-.agent-v2 .picker {
-  max-height: calc(3 * var(--table-row) + 2 * var(--sp-1));
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
 .agent-v2-idrow {
   display: flex;
   align-items: center;
