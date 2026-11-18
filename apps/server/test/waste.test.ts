@@ -133,24 +133,46 @@ describe("restart storm (7 November replay)", () => {
     expect(restartHold(store, "guido-1")).toBeNull();
   });
 
-  it("does not count reviews that ended ok with a reported review, but counts failed ones", () => {
+  it("does not count reviews that were reported, but counts failed ones", () => {
     const starts = WASTE_THRESHOLDS.restartStormStarts + 1;
-    for (let i = 0; i < starts; i++)
-      store.upsertRun(
-        run("retro-1", { startedAt: NOW - i * MIN, status: "ok", reviewId: 100 + i }),
-      );
+    // Every review run ends "ok" (the engine writes it so); the review's own state tells them apart.
+    const review = (seatId: string, i: number, end: "reported" | "failed"): void => {
+      const at = NOW - i * MIN;
+      const id = store.requestReview({
+        authorRunId: `author-${seatId}-${i}`,
+        repoId: "mc",
+        seatId,
+        prNumber: 100 + i,
+        sha: "h",
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at,
+      });
+      if (id === null) throw new Error("review not created");
+      const r = run(seatId, { startedAt: at, status: "ok", reviewId: id });
+      store.upsertRun(r);
+      store.setReviewState(id, ["queued"], "running", { at, runId: r.id });
+      if (end === "reported")
+        store.recordFindings(id, r.id, {
+          verdict: { spec: "pass", quality: "pass" },
+          summary: "ok",
+          findings: [],
+          at,
+        });
+      else store.setReviewState(id, ["running"], "failed", { at, failure: "silent" });
+    };
+    for (let i = 0; i < starts; i++) review("retro-1", i, "reported");
     syncWasteAlarms(config, store, NOW);
     expect(openWasteAlarms(store)).toEqual([]);
     expect(restartHold(store, "retro-1")).toBeNull();
+
+    for (let i = 0; i < starts; i++) review("retro-2", i, "failed");
     for (let i = 0; i < starts; i++)
       store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN, status: "failed" }));
-    for (let i = 0; i < starts; i++)
-      store.upsertRun(
-        run("retro-2", { startedAt: NOW - i * MIN, status: "failed", reviewId: 200 + i }),
-      );
     syncWasteAlarms(config, store, NOW);
-    expect(restartHold(store, "guido-1")).not.toBeNull();
     expect(restartHold(store, "retro-2")).not.toBeNull();
+    expect(restartHold(store, "guido-1")).not.toBeNull();
     expect(restartHold(store, "retro-1")).toBeNull();
   });
 
