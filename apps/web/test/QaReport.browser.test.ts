@@ -247,7 +247,23 @@ describeRendered("Accountable QA report", () => {
     async () => {
       const report = qaReportFixture();
       const wide = (name: string) => `https://evidence.example/${name}.svg`;
-      const mockup = `/api/attention-material-assets/${"a".repeat(64)}`;
+      const mockup = `/api/plan-assets/${"a".repeat(64)}`;
+      report.plan = {
+        ref: "mission-control#2037",
+        asks: "Show plans for sign-off.",
+        proposal: "Add the Planner tab and compare its mockups with QA evidence.",
+        mockups: [
+          {
+            id: "a".repeat(64),
+            url: mockup,
+            caption: "Planner mockup at 1600×1000",
+            mediaType: "image/png",
+          },
+        ],
+        sizeEstimate: "M",
+        risks: "The retained image needs a bounded preview.",
+        decidedAt: 1,
+      };
       report.visual.pairs = [
         ...report.visual.pairs,
         { ...report.visual.pairs[0], label: "Planner · 1920×940 · dark" },
@@ -265,24 +281,6 @@ describeRendered("Accountable QA report", () => {
       queued.ticket = "mission-control#2037";
       api[`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${report.headSha}`] = {
         reports: [report],
-      };
-      api["/api/plans?repoId=mission-control"] = {
-        pending: [],
-        history: [
-          {
-            id: "p1",
-            repoId: "mission-control",
-            ticket: "mission-control#2037",
-            title: "Planner tab",
-            asks: "Show plans for sign-off.",
-            proposed: "Add the Planner tab and compare its mockups with QA evidence.",
-            pictures: [{ url: mockup, caption: "Planner mockup at 1600×1000" }],
-            size: "M",
-            risks: "The retained image needs a bounded preview.",
-            status: "approved",
-            decidedAt: 1,
-          },
-        ],
       };
       const asset = (fill: string) => ({
         contentType: "image/svg+xml",

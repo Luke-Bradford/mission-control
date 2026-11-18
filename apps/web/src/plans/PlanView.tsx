@@ -8,10 +8,12 @@ import "./plans.css";
 type DisplayPlan = TicketPlan | QaPlan;
 
 export function PlanPictures({ plan }: { plan: DisplayPlan }) {
-  if (plan.mockups.length === 0) return <p className="muted">No mockups or pictures.</p>;
+  // Retained historical records can predate mockups. Treat a missing list as no stored pictures.
+  const mockups = plan.mockups ?? [];
+  if (mockups.length === 0) return <p className="muted">No mockups or pictures.</p>;
   return (
     <section className="needs-pictures" aria-label="Mockups and pictures">
-      {plan.mockups.map((p) => {
+      {mockups.map((p) => {
         const route = pictureRoute(p.url);
         return route ? (
           <Picture key={p.url} label={p.caption} route={route} />
