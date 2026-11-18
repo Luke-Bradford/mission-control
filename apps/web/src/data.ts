@@ -129,10 +129,6 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
-  discussion: (key: string, id = ""): ResourceRef => ({
-    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
-    topic: "attention",
-  }),
   /** One item's conversation: the messages sent from it and their replies, from Comms. */
   itemThread: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/thread`,
