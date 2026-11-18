@@ -1564,6 +1564,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const gitDir = await adminDirOf(common, worktree);
           if (gitDir === null) return final(UPDATE_NO_WORKTREE);
           const g: G = (a) => git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+          // only the run's own branch moves; another branch, or a detached HEAD, is left alone
+          const head = await g(["symbolic-ref", "--quiet", "HEAD"]).then(
+            (s) => s.trim(),
+            () => null,
+          );
+          if (run.branch === null || head !== `refs/heads/${run.branch}`) {
+            return final(MERGE_NOT_RUN_BRANCH);
+          }
           if (!(await have(g, sha))) await g(["fetch", "--no-tags", "origin", sha]);
           if (!(await have(g, sha))) return final("the new commit could not be fetched");
           if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {

@@ -415,6 +415,9 @@ interface Harness {
   rerunStates: RerunStateResult[];
   /** What worktreeChanges answers (a path list, or a refusal). */
   changes: string[] | { ok: false; text: string; transient: boolean };
+  /** The fastForward calls, and what it answers. */
+  fastForwards: { runId: string; worktree: string; sha: string }[];
+  fastForwardResult: PublishResult;
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
 }
@@ -486,6 +489,8 @@ function harness(): Harness {
     statusResults: [],
     statusThrows: null,
     asideOn: false,
+    fastForwards: [],
+    fastForwardResult: { ok: true },
     endBlocked: false,
     asides: [],
     wakes: [],
@@ -568,8 +573,9 @@ function harness(): Harness {
         async worktreeChanges() {
           return x.changes;
         },
-        async fastForward() {
-          return { ok: true };
+        async fastForward(r, worktree, sha) {
+          x.fastForwards.push({ runId: r.id, worktree, sha });
+          return x.fastForwardResult;
         },
         async hardRuleTouches(run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
@@ -1684,7 +1690,7 @@ describe("refusals", () => {
     expect(loopOf().parked?.reason).toContain(text);
   });
 
-  it("a PR head on top of the seat's push becomes the run's push, and the seat is told", async () => {
+  it("a PR head on top of the seat's push becomes the run's push, and the seat's worktree follows", async () => {
     h.descends = true;
     setPr({ ci: "pending", headSha: SHA_B });
     report();
@@ -1694,7 +1700,26 @@ describe("refusals", () => {
     expect(store.runPush(RUN)?.sha).toBe(SHA_B);
     expect(loopOf().parked).toBeNull();
     expect(loopOf().phase).toBe("ci");
-    expect(sentKeys()).toContain(`branch-moved:${RUN}:${SHA_B}`);
+    expect(h.fastForwards).toEqual([{ runId: RUN, worktree: join(dir, "wt"), sha: SHA_B }]);
+    const line = h.sent.find((m) => m.key === `branch-moved:${RUN}:${SHA_B}`);
+    expect(line?.text).toContain("Your worktree is on it now");
+    // someone else's commit: the merge gate must not count it as the hub's
+    expect(store.runCommits(RUN)).toContain(SHA_B);
+    expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(false);
+  });
+
+  it("tells the seat to fast-forward itself when the hub could not move its worktree", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    const line = h.sent.find((m) => m.key === `branch-moved:${RUN}:${SHA_B}`);
+    expect(line?.text).toContain("Fast-forward your worktree");
+    expect(line?.text).toContain("the hub could not (diverged)");
   });
 
   it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {

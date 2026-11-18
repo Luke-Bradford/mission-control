@@ -74,6 +74,7 @@ class Migrations {
     )
       this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
     // Token audit call times (#1646): audits stored before this have none until re-read.
+    this.addColumn("run_commits", "followed", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("run_token_calls", "at", "INTEGER");
     this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("run_token_audit", "sessions", "TEXT NOT NULL DEFAULT '[]'");

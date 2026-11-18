@@ -6118,13 +6118,15 @@ export class Store {
     branch: string;
     sha: string;
     at: number;
+    /** Someone else's commit the run follows: not one Mission Control or the seat made. */
+    followed?: boolean;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO run_commits (run_id, repo_id, branch, sha, at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO run_commits (run_id, repo_id, branch, sha, at, followed) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(run_id, sha) DO NOTHING`,
       )
-      .run(c.runId, c.repoId, c.branch, c.sha, c.at);
+      .run(c.runId, c.repoId, c.branch, c.sha, c.at, c.followed === true ? 1 : 0);
   }
 
   commitLines(sha: string): { additions: number | null; deletions: number | null } | null {
@@ -6219,7 +6221,7 @@ export class Store {
    */
   branchCommits(repoId: RepoId, branch: string): Set<string> {
     const rows = this.db
-      .prepare("SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ?")
+      .prepare("SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ? AND followed = 0")
       .all(repoId, branch) as { sha: string }[];
     return new Set(rows.map((r) => r.sha));
   }

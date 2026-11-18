@@ -18,6 +18,7 @@ import {
   gitIdentity,
   MC_MERGE_AUTHOR,
   MERGE_BRANCH_MOVED,
+  MERGE_NOT_RUN_BRANCH,
   prDiffKey,
   UPDATE_MERGE_IN_PROGRESS,
   UPDATE_NO_WORKTREE,
@@ -167,6 +168,59 @@ describe("worktreeChanges (real git)", () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     const r = await publisher().worktreeChanges(run(), join(dir, "elsewhere"));
     expect(r).toMatchObject({ ok: false });
+  });
+});
+
+describe("fastForward (real git)", () => {
+  /** Someone else pushes a commit on top of the branch tip from another clone; its sha. */
+  function outsidePush(): string {
+    git(worktree, "push", "-q", "origin", BRANCH);
+    const other = join(dir, "other");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", BRANCH);
+    write(other, "docs/c.md", "doc\nedited\n");
+    git(other, "commit", "-q", "-am", "doc edit");
+    git(other, "push", "-q", "origin", BRANCH);
+    return git(other, "rev-parse", "HEAD");
+  }
+
+  it("fetches the new commit and moves the run's own branch onto it", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush();
+    expect(await publisher().fastForward(run(), worktree, sha)).toEqual({ ok: true });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(sha);
+    expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+  });
+
+  it("leaves a branch that has diverged from the new commit as it is", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush();
+    write(worktree, "apps/a.ts", "local\n");
+    git(worktree, "commit", "-q", "-am", "local only");
+    const before = git(worktree, "rev-parse", "HEAD");
+    expect(await publisher().fastForward(run(), worktree, sha)).toMatchObject({ ok: false });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+  });
+
+  it("leaves another branch, or a detached HEAD, as it is", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush();
+    git(worktree, "switch", "-q", "-c", "other-branch");
+    const before = git(worktree, "rev-parse", "HEAD");
+    expect(await publisher().fastForward(run(), worktree, sha)).toEqual({
+      ok: false,
+      text: MERGE_NOT_RUN_BRANCH,
+      transient: false,
+    });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+    git(worktree, "switch", "-q", "--detach", "HEAD");
+    expect(await publisher().fastForward(run(), worktree, sha)).toMatchObject({ ok: false });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
   });
 });
 

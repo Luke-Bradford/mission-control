@@ -1574,6 +1574,8 @@ export function createEngine(deps: EngineDeps): Engine {
           branch: run.branch ?? findPr(run, cur)?.branch ?? "",
           sha: a.sha,
           at,
+          // not the seat's or the hub's commit: the merge gate still sees it as outside
+          followed: true,
         });
         store.setRunPush({ runId: run.id, sha: a.sha, at });
         store.addLoopEvent(
