@@ -589,9 +589,11 @@ it("shows a count scale and each day's merged count, reachable by keyboard, cros
   setup();
   render(<CodeHealth />);
   await ready();
-  const list = screen.getByRole("list", { name: /Merged PRs per day, count by day, over 14 days/ });
-  expect(list.getAttribute("tabindex")).toBe("0");
-  const items = within(list).getAllByRole("listitem");
+  const region = screen.getByRole("region", {
+    name: /Merged PRs per day, count by day, over 14 days/,
+  });
+  expect(region.getAttribute("tabindex")).toBe("0");
+  const items = within(region).getAllByRole("listitem");
   expect(items).toHaveLength(14);
   expect(items[0].textContent).toBe("10-22 10");
   expect(items[10].textContent).toContain("11-01");

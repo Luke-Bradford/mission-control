@@ -305,69 +305,70 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
   const y = (v: number) => H - (v / max) * H;
   return (
     <>
-    <div className="as-chart">
-      <div className="as-yscale" aria-hidden="true">
-        <span>{max}</span>
-        <span>0</span>
-      </div>
-    <div className="as-plot">
-      <svg
-        role="img"
-        aria-label={`Merged PRs per day over ${days.length} days, by highest review round. Most days: ${max} merged at most.`}
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-      >
-        {days.map((d, i) => {
-          const x = i * bw + 2,
-            w = Math.max(1, bw - 4);
-          let acc = 0;
-          const seg = (v: number, cls: string) => {
-            if (!v) return null;
-            const top = y(acc + v),
-              bar = (
-                <rect
-                  key={cls}
-                  className={cls}
-                  x={x}
-                  y={top}
-                  width={w}
-                  height={y(acc) - top}
-                  vectorEffect="non-scaling-stroke"
-                />
+      <div className="as-chart">
+        <div className="as-yscale" aria-hidden="true">
+          <span>{max}</span>
+          <span>0</span>
+        </div>
+        <div className="as-plot">
+          <svg
+            role="img"
+            aria-label={`Merged PRs per day over ${days.length} days, by highest review round. Most days: ${max} merged at most.`}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+          >
+            {days.map((d, i) => {
+              const x = i * bw + 2,
+                w = Math.max(1, bw - 4);
+              let acc = 0;
+              const seg = (v: number, cls: string) => {
+                if (!v) return null;
+                const top = y(acc + v),
+                  bar = (
+                    <rect
+                      key={cls}
+                      className={cls}
+                      x={x}
+                      y={top}
+                      width={w}
+                      height={y(acc) - top}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  );
+                acc += v;
+                return bar;
+              };
+              return (
+                <g key={d.day}>
+                  <title>
+                    {d.day}: {totals[i]} merged, {d.noHubReview} with no hub review
+                  </title>
+                  {seg(d.round1, "as-b1")}
+                  {seg(d.round2, "as-b2")}
+                  {seg(d.round3Plus, "as-b3")}
+                  {seg(d.noHubReview, "as-b0")}
+                </g>
               );
-            acc += v;
-            return bar;
-          };
-          return (
-            <g key={d.day}>
-              <title>
-                {d.day}: {totals[i]} merged, {d.noHubReview} with no hub review
-              </title>
-              {seg(d.round1, "as-b1")}
-              {seg(d.round2, "as-b2")}
-              {seg(d.round3Plus, "as-b3")}
-              {seg(d.noHubReview, "as-b0")}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="as-axis">
-        <span>{days[0]?.day}</span>
-        <span>{days.at(-1)?.day}</span>
+            })}
+          </svg>
+          <div className="as-axis">
+            <span>{days[0]?.day}</span>
+            <span>{days.at(-1)?.day}</span>
+          </div>
+        </div>
       </div>
-    </div>
-    </div>
-    <ul
-      className="as-daylist"
-      tabIndex={0}
-      aria-label={`Merged PRs per day, count by day, over ${days.length} days`}
-    >
-      {days.map((d, i) => (
-        <li key={d.day}>
-          {d.day.slice(5)} <b>{totals[i]}</b>
-        </li>
-      ))}
-    </ul>
+      <ScrollRegion
+        className="as-daylist"
+        label={`Merged PRs per day, count by day, over ${days.length} days`}
+      >
+        <ul>
+          {days.map((d, i) => (
+            <li key={d.day}>
+              {d.day.slice(5)} <b className="as-dn">{totals[i]}</b>
+            </li>
+          ))}
+        </ul>
+      </ScrollRegion>
     </>
   );
 }
