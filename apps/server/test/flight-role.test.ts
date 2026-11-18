@@ -44,6 +44,8 @@ describe("roles/FLIGHT.md", () => {
     expect(role).toContain("Use it only for how a seat always works");
     expect(role).toContain("for one run, use `mc message_seat`");
     expect(role).toContain("live instructions with their ids");
-    expect(role).toContain("When the reason for one of yours is gone, revoke it with `mc revoke_instruction`");
+    expect(role).toContain(
+      "When the reason for one of yours is gone, revoke it with `mc revoke_instruction`",
+    );
   });
 });
