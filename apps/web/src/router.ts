@@ -105,7 +105,7 @@ export const tabOf = (r: Route): Page =>
  * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
  * page is one: it says what the dock would, so the dock stays out of its way.
  */
-export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["agent", "flight", "needs"]);
+export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["flight", "needs"]);
 
 /** The Telemetry page's tabs, in display order; the first is the default. */
 export const TELEMETRY_TABS = ["crew", "cost", "throughput", "quality", "machine"] as const;

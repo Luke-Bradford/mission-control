@@ -1498,10 +1498,17 @@ describe("Setup › Repos & seats cards", () => {
   });
 
   it("shows each repo's plan sign-off setting and saves a change to it", async () => {
+    const writes: string[] = [];
     load({
       "/api/repos/shop-app/rules": repoRules("every"),
-      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
-      "POST /api/repos/shop-app/rules": () => ({ status: 200, body: {} }),
+      "POST /api/repos/shop-app/setup": () => {
+        writes.push("setup");
+        return { status: 200, body: { backup: "c.bak" } };
+      },
+      "POST /api/repos/shop-app/rules": () => {
+        writes.push("rules");
+        return { status: 200, body: {} };
+      },
     });
     at("repos");
     const card = expandCard(await screen.findByLabelText("shop-app"));
@@ -1521,7 +1528,31 @@ describe("Setup › Repos & seats cards", () => {
       expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
         rules: { plan_signoff: "never" },
       });
+      expect(writes).toEqual(["rules", "setup"]);
     });
+  });
+
+  it("does not write plan rules when the setting is unchanged", async () => {
+    load({
+      "/api/repos/shop-app/rules": repoRules("every"),
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    await within(card).findByLabelText("Plan sign-off");
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() =>
+      expect(
+        fetchFn.mock.calls.some(
+          ([path, init]) => path === "/api/repos/shop-app/setup" && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      fetchFn.mock.calls.some(
+        ([path, init]) => path === "/api/repos/shop-app/rules" && init?.method === "POST",
+      ),
+    ).toBe(false);
   });
 
   it("does not save plan sign-off until the repo rules load", async () => {

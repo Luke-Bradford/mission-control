@@ -145,15 +145,19 @@ function RepoCard({
   const save = async () => {
     setSaving(true);
     try {
-      const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
-        defaultAccountId: account || null,
-        guidance,
-      });
-      if (rules.data?.rules.plan_signoff) {
+      const savedPlanSignoff = rules.data?.rules.plan_signoff;
+      // This write uses the version read with the rules. Do it before /setup can rewrite config.yaml.
+      if (savedPlanSignoff && rules.data && planSignOff !== savedPlanSignoff.value) {
         await apiPost(ACTIONS.repoRules(repo.id), {
           base: rules.data.base,
           rules: { plan_signoff: planSignOff },
         });
+      }
+      const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
+        defaultAccountId: account || null,
+        guidance,
+      });
+      if (savedPlanSignoff) {
         hub.refetch(RESOURCES.repoRules(repo.id).path);
       }
       toast(`Saved ${repo.id}. Backup: ${result.backup}.`);
