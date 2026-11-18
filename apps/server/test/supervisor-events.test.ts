@@ -800,6 +800,11 @@ describe("supervisor events (Plan 7a)", () => {
         resolutions: [{ findingRef: { reviewId: review, pos: 3 }, outcome: "fixed" }],
         at: 5,
       });
+      expect(store.latestReportedReview("mc", 9)?.id).toBe(review);
+      expect(store.findingsOf(review).find((entry) => entry.file === "critical.ts")).toMatchObject({
+        state: "open",
+        resolution: undefined,
+      });
 
       await first.sup.endRunByEngine(priorStart.runId);
       const { runId } = await first.sup.startRun("guido-2", 42, { loop: LOOP });

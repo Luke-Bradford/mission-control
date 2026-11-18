@@ -3690,13 +3690,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               const evidence = store.evidenceNotes(priorRun.id).at(-1)?.note;
               const review =
                 priorRun.loop?.prNumber === null || priorRun.loop?.prNumber === undefined
-                  ? undefined
-                  : store
-                      .reviewsOfPr(info.repo.id, priorRun.loop.prNumber)
-                      .findLast((candidate) => candidate.state === "reported");
+                  ? null
+                  : store.latestReportedReview(info.repo.id, priorRun.loop.prNumber);
               const severityRank: Record<string, number> = { Critical: 0, Important: 1 };
               const findings =
-                review === undefined
+                review === null
                   ? []
                   : store
                       .findingsOf(review.id)
