@@ -330,6 +330,33 @@ describe("Audit first-screen summary", () => {
     expect(figure).toHaveProperty("coverage");
   });
 
+  it("advances the findings-per-touch updated time when a later touch-only merge changes the denominator", async () => {
+    const r1 = review(1, 1);
+    merged(1, NOW - 3 * DAY, r1);
+    touch(1, "src/a.ts");
+    finding(r1, "src/a.ts", "x");
+    const first = (await overview()).figures.find((f) => f.id === "findings-per-touch");
+    merged(2, NOW - DAY / 2, null);
+    touch(2, "src/b.ts");
+    const next = (await overview()).figures.find((f) => f.id === "findings-per-touch");
+    expect(next?.denominator).toBe(2);
+    expect(next?.updatedAt).toBe(NOW - DAY / 2);
+    expect(next?.updatedAt).toBeGreaterThan(first?.updatedAt ?? 0);
+  });
+
+  it("rebuilds a stored overview of an older version that lacks the findings-per-touch figure", () => {
+    merged(1, NOW - DAY, review(1, 1));
+    const reader = new CodeHealthReader(store, config, () => at);
+    reader.overview("sample", "30d");
+    const row = db.prepare("SELECT body FROM code_health_overview").get() as { body: string };
+    const old = JSON.parse(row.body);
+    old.figures = old.figures.filter((f: { id: string }) => f.id !== "findings-per-touch");
+    db.prepare("UPDATE code_health_overview SET version = 2, body = ?").run(JSON.stringify(old));
+    const again = new CodeHealthReader(store, config, () => at).overview("sample", "30d");
+    expect(again.rebuilt).toBe(true);
+    expect(again.view.figures.map((f) => f.id)).toContain("findings-per-touch");
+  });
+
   it("leaves an open PR's findings out of findings per touch", async () => {
     merged(1, NOW - DAY, review(1, 1));
     touch(1, "src/a.ts");
