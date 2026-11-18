@@ -540,9 +540,13 @@
   border-radius: 0;
 }
 
+/* unknown: a dashed outline over a cross-hatch, so it never reads as dotted Parked */
+.crew-sw.st.unknown,
 .share.unknown {
-  background: none;
-  border: 1px dashed var(--line-2);
+  background:
+    repeating-linear-gradient(45deg, var(--fg-2) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(135deg, var(--fg-2) 0 1px, transparent 1px 4px);
+  border: 1px dashed var(--fg-2);
 }
 
 .readout {
