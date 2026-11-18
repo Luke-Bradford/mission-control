@@ -152,6 +152,7 @@ import type { Move } from "../src/github/board.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { activity } from "../src/hud/views.ts";
 import { externalReviewKey } from "../src/review/external.ts";
+import { inheritedHandoffLoop } from "../src/run/handoffs.ts";
 import {
   type SeatBusy,
   type SeatFacts,
@@ -159,7 +160,6 @@ import {
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
-import { inheritedHandoffLoop } from "../src/run/handoffs.ts";
 import { reviewsHeld, syncWasteAlarms, ticketParked } from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
