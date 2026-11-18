@@ -1251,6 +1251,11 @@ A start of that ticket is refused (422) until FLIGHT has approved the files: `mc
 paths, basis }` logs a `grant` decision ("Approved mc#7 to write package.json") and then starts the seat.
 Every start path checks it, FLIGHT's, the engine's and the operator's.
 
+Entries the seat's own area already covers are dropped first and need no grant: a plain file in the
+area, or a glob that lies wholly inside it. A glob is kept, and refused like any outside glob, when
+the start cannot prove it stays inside the area (for example `apps/**/server/**` against the area
+`apps/*/server/**`).
+
 - The run may write exactly the listed files that sit outside its area or are protected, for that
   run only. Another run on the same seat holds nothing it was not given. The grant is fixed when
   the run starts; editing the ticket later changes nothing.
