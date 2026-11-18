@@ -484,6 +484,26 @@ function ScrollRegion({
   );
 }
 
+/** The one-sentence verdict: a bold lead, then the rest in plain text. Its tone is spoken, not a badge. */
+export function Verdict({ verdict }: { verdict: CodeHealthOverview["verdict"] }) {
+  const cut = verdict.text.search(/\.\s/),
+    lead = cut === -1 ? verdict.text : verdict.text.slice(0, cut + 1),
+    rest = cut === -1 ? "" : verdict.text.slice(cut + 1).trim();
+  return (
+    <p className="as-verdict" data-tone={verdict.tone}>
+      <span className="sr-only">
+        {verdict.tone === "ok"
+          ? "Steady. "
+          : verdict.tone === "warn"
+            ? "Needs attention. "
+            : "Unknown. "}
+      </span>
+      <b>{lead}</b>
+      {rest && ` ${rest}`}
+    </p>
+  );
+}
+
 /** The Audit first screen: one stored summary, shown. It reads nothing and decides nothing itself. */
 export function AuditSummary({
   overview,
@@ -521,315 +541,304 @@ export function AuditSummary({
   const openId = open === undefined ? shown[0]?.id : open;
   const alarms = overview.wasteAlarms?.rows ?? [];
   const COLS = 5;
-  const tone = overview.verdict.tone;
   const outside = overview.outside;
   return (
-    <>
-      <p className="as-verdict" data-tone={tone}>
-        <span className="as-tone">
-          {tone === "ok" ? "Steady" : tone === "warn" ? "Needs attention" : "Unknown"}
-        </span>
-        <b>{overview.verdict.text}</b>
-      </p>
-      <div className="as-cols">
-        <div className="as-col">
-          <Panel
-            className="as-do"
-            title="Do next"
-            sub={
-              <>
-                <b className="as-count">{rows.length}</b> ranked
-                {alarms.length > 0 && <> · {alarms.length} waste alarms</>}
-              </>
-            }
-            actions={
-              <>
-                <Seg
-                  label="Who decides"
-                  value={filter}
-                  onChange={(next) => {
-                    setFilter(next);
-                    setOpen(undefined);
-                  }}
-                  options={(Object.keys(WHO_LABEL) as Who[]).map((k) => ({
-                    value: k,
-                    label: `${WHO_LABEL[k]} ${counts[k]}`,
-                  }))}
-                />
-                <button type="button" className="as-link" onClick={onHistory}>
-                  Recommendation history
-                </button>
-              </>
-            }
-          >
-            <ScrollRegion className="as-scroll as-grow" label="Recommendations">
-              {shown.length === 0 && alarms.length === 0 ? (
-                <p className="as-empty">
-                  {rows.length === 0
-                    ? "No open proposal meets the measured triage rules. Missing collection is named in coverage; this is not a healthy-repo verdict."
-                    : `No ${WHO_LABEL[filter]} decisions in this list. ${rows.length} proposals are under All.`}
-                </p>
-              ) : (
-                <table>
-                  <colgroup>
-                    <col className="as-c-n" />
-                    <col />
-                    <col className="as-c-meas" />
-                    <col className="as-c-dec" />
-                    <col className="as-c-act" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>What to change, and why</th>
-                      <th>Measure · now → target</th>
-                      <th>Decides · state</th>
-                      <th className="as-r">Decide</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shown.flatMap((row, i) => {
-                      const isOpen = row.id === openId;
-                      return [
-                        <RecRow
-                          key={row.id}
-                          row={row}
-                          n={i + 1}
-                          open={isOpen}
-                          blocked={blocked}
-                          onToggle={() => setOpen(isOpen ? null : row.id)}
-                          onDecide={onDecide}
-                          onHistory={onHistory}
-                        />,
-                        isOpen && (
-                          <Detail
-                            key={`${row.id}-more`}
-                            row={row}
-                            cols={COLS}
-                            onInspect={onInspect}
-                          />
-                        ),
-                      ];
-                    })}
-                    {filter === "all" &&
-                      alarms.map((a, i) => <WasteRow key={a.id} row={a} n={rows.length + i + 1} />)}
-                  </tbody>
-                </table>
-              )}
-            </ScrollRegion>
-            {!overview.wasteAlarms && (
-              <p className="as-foot">Waste alarms: not yet supplied by this server.</p>
-            )}
-          </Panel>
-          <Panel
-            className="as-outside"
-            title="New outside"
-            sub={
-              <>
-                <b>{outside.items.length}</b> items ·{" "}
-                {outside.state === "available" ? "collected" : "not collected yet"}
-              </>
-            }
-          >
-            {outside.state === "not-collected" && outside.items.length === 0 ? (
-              <p className="as-empty">Not collected yet. {outside.note}</p>
+    <div className="as-cols">
+      <div className="as-col">
+        <Panel
+          className="as-do"
+          title="Do next"
+          sub={
+            <>
+              <b className="as-count">{rows.length}</b> ranked
+              {alarms.length > 0 && <> · {alarms.length} waste alarms</>}
+            </>
+          }
+          actions={
+            <>
+              <Seg
+                label="Who decides"
+                value={filter}
+                onChange={(next) => {
+                  setFilter(next);
+                  setOpen(undefined);
+                }}
+                options={(Object.keys(WHO_LABEL) as Who[]).map((k) => ({
+                  value: k,
+                  label: `${WHO_LABEL[k]} ${counts[k]}`,
+                }))}
+              />
+              <button type="button" className="as-link" onClick={onHistory}>
+                Recommendation history
+              </button>
+            </>
+          }
+        >
+          <ScrollRegion className="as-scroll as-grow" label="Recommendations">
+            {shown.length === 0 && alarms.length === 0 ? (
+              <p className="as-empty">
+                {rows.length === 0
+                  ? "No open proposal meets the measured triage rules. Missing collection is named in coverage; this is not a healthy-repo verdict."
+                  : `No ${WHO_LABEL[filter]} decisions in this list. ${rows.length} proposals are under All.`}
+              </p>
             ) : (
-              <ScrollRegion className="as-scroll as-out" label="External items">
+              <table>
+                <colgroup>
+                  <col className="as-c-n" />
+                  <col />
+                  <col className="as-c-meas" />
+                  <col className="as-c-dec" />
+                  <col className="as-c-act" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>What to change, and why</th>
+                    <th>Measure · now → target</th>
+                    <th>Decides · state</th>
+                    <th className="as-r">Decide</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shown.flatMap((row, i) => {
+                    const isOpen = row.id === openId;
+                    return [
+                      <RecRow
+                        key={row.id}
+                        row={row}
+                        n={i + 1}
+                        open={isOpen}
+                        blocked={blocked}
+                        onToggle={() => setOpen(isOpen ? null : row.id)}
+                        onDecide={onDecide}
+                        onHistory={onHistory}
+                      />,
+                      isOpen && (
+                        <Detail
+                          key={`${row.id}-more`}
+                          row={row}
+                          cols={COLS}
+                          onInspect={onInspect}
+                        />
+                      ),
+                    ];
+                  })}
+                  {filter === "all" &&
+                    alarms.map((a, i) => <WasteRow key={a.id} row={a} n={rows.length + i + 1} />)}
+                </tbody>
+              </table>
+            )}
+          </ScrollRegion>
+          {!overview.wasteAlarms && (
+            <p className="as-foot">Waste alarms: not yet supplied by this server.</p>
+          )}
+        </Panel>
+        <Panel
+          className="as-outside"
+          title="New outside"
+          sub={
+            <>
+              <b>{outside.items.length}</b> items ·{" "}
+              {outside.state === "available" ? "collected" : "not collected yet"}
+            </>
+          }
+        >
+          {outside.state === "not-collected" && outside.items.length === 0 ? (
+            <p className="as-empty">Not collected yet. {outside.note}</p>
+          ) : (
+            <ScrollRegion className="as-scroll as-out" label="External items">
+              <table>
+                <colgroup>
+                  <col className="as-c-so" />
+                  <col />
+                  <col className="as-c-date" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>What changed</th>
+                    <th className="as-r">Recorded</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {outside.items.map((o) => (
+                    <tr key={`${o.source}-${o.recordedAt}`}>
+                      <td className="as-so">{o.source}</td>
+                      <td>{o.summary}</td>
+                      <td className="as-r">{day(o.recordedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          )}
+        </Panel>
+      </div>
+      <div className="as-col">
+        <Panel
+          className="as-build"
+          title="How we build"
+          sub="Merged PRs a day, by highest review round"
+          actions={
+            <button
+              type="button"
+              className="as-defbtn"
+              aria-expanded={showDays}
+              onClick={() => setShowDays((v) => !v)}
+            >
+              Count for each day
+            </button>
+          }
+        >
+          <MergedChart days={overview.build.mergedPerDay} showDays={showDays} />
+          <ScrollRegion className="as-scroll as-hscroll" label="Health measures">
+            <table>
+              <colgroup>
+                <col />
+                <col className="as-c-hwin" />
+                <col className="as-c-hwin" />
+                <col className="as-c-hchg" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Measure</th>
+                  <th className="as-r">
+                    {sharedWindow ? (sharedWindow.before ?? "Before") : "Before"}
+                  </th>
+                  <th className="as-r">{sharedWindow ? sharedWindow.now : "Now"}</th>
+                  <th>Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overview.figures.map((f) => (
+                  <FigureRow key={f.id} f={f} showWindow={!sharedWindow} />
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
+        </Panel>
+        <Panel
+          className="as-files"
+          title="Where findings land"
+          sub={
+            <>
+              <b>{overview.landing.files.reduce((n, f) => n + f.findings, 0)}</b> findings in{" "}
+              {overview.landing.files.length} files
+            </>
+          }
+        >
+          {overview.landing.files.length === 0 ? (
+            <p className="as-empty">
+              No review findings are recorded against a file in this window.
+            </p>
+          ) : (
+            <ScrollRegion className="as-scroll as-grow" label="Files by findings">
+              <table>
+                <colgroup>
+                  <col />
+                  <col className="as-c-fig" />
+                  <col className="as-c-fig" />
+                  <col className="as-c-fig" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th className="as-r" aria-sort="descending">
+                      Findings <span aria-hidden="true">▼</span>
+                    </th>
+                    <th className="as-r">Touches</th>
+                    <th className="as-r">Per touch</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...overview.landing.files]
+                    .sort((a, b) => b.findings - a.findings)
+                    .map((f) => (
+                      <tr key={f.path} className="as-frow">
+                        <td className="as-path">
+                          <FilePath path={f.path} />
+                        </td>
+                        <td className="as-r">{f.findings}</td>
+                        <td className="as-r">{f.touches}</td>
+                        <td className="as-r">
+                          {f.ratio.value === null ? "—" : num(Math.round(f.ratio.value * 10) / 10)}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          )}
+        </Panel>
+        <Panel
+          className="as-past"
+          title="What past recommendations achieved"
+          sub={`${overview.past.measured.improved} paid off · ${overview.past.measured.unchanged} unchanged · ${overview.past.measured.worse} worse · ${overview.past.measured.unmeasured} not measured`}
+          actions={
+            overview.past.items.length > 0 && (
+              <button
+                type="button"
+                className="as-defbtn"
+                aria-expanded={showPast}
+                onClick={() => setShowPast((v) => !v)}
+              >
+                {showPast ? "Hide results" : `Show ${overview.past.items.length} results`}
+              </button>
+            )
+          }
+        >
+          <div className="as-fun">
+            {overview.past.funnel.map((f) => (
+              <div key={f.kind} className="as-cell">
+                <b className="as-fig">{f.count}</b>
+                <span className="as-cap">{label(f.kind)}</span>
+              </div>
+            ))}
+          </div>
+          {overview.past.items.length === 0 ? (
+            <p className="as-empty">
+              No proposal has been decided yet, so there is no result to show.
+            </p>
+          ) : (
+            showPast && (
+              <ScrollRegion className="as-scroll as-pastrows" label="Past results">
                 <table>
                   <colgroup>
-                    <col className="as-c-so" />
-                    <col />
                     <col className="as-c-date" />
+                    <col />
+                    <col className="as-c-chg" />
+                    <col className="as-c-out" />
                   </colgroup>
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th>What changed</th>
-                      <th className="as-r">Recorded</th>
-                    </tr>
-                  </thead>
                   <tbody>
-                    {outside.items.map((o) => (
-                      <tr key={`${o.source}-${o.recordedAt}`}>
-                        <td className="as-so">{o.source}</td>
-                        <td>{o.summary}</td>
-                        <td className="as-r">{day(o.recordedAt)}</td>
+                    {overview.past.items.map((p) => (
+                      <tr key={p.id} className="as-prow">
+                        <td className="as-m">{day(p.decidedAt)}</td>
+                        <td>
+                          {p.title}
+                          <span className="as-sub"> · {p.metric}</span>
+                        </td>
+                        <td className="as-r">
+                          {p.after
+                            ? p.after.change
+                            : p.baseline === null
+                              ? "no baseline"
+                              : `from ${num(p.baseline)}`}
+                        </td>
+                        <td>
+                          <span className="as-vd">
+                            <i className={OUTCOME_SHAPE[p.outcome]} aria-hidden="true" />
+                            {OUTCOME_LABEL[p.outcome]}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </ScrollRegion>
-            )}
-          </Panel>
-        </div>
-        <div className="as-col">
-          <Panel
-            className="as-build"
-            title="How we build"
-            sub="Merged PRs a day, by highest review round"
-            actions={
-              <button
-                type="button"
-                className="as-defbtn"
-                aria-expanded={showDays}
-                onClick={() => setShowDays((v) => !v)}
-              >
-                Count for each day
-              </button>
-            }
-          >
-            <MergedChart days={overview.build.mergedPerDay} showDays={showDays} />
-            <ScrollRegion className="as-scroll as-hscroll" label="Health measures">
-              <table>
-                <colgroup>
-                  <col />
-                  <col className="as-c-hwin" />
-                  <col className="as-c-hwin" />
-                  <col className="as-c-hchg" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Measure</th>
-                    <th className="as-r">
-                      {sharedWindow ? (sharedWindow.before ?? "Before") : "Before"}
-                    </th>
-                    <th className="as-r">{sharedWindow ? sharedWindow.now : "Now"}</th>
-                    <th>Change</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {overview.figures.map((f) => (
-                    <FigureRow key={f.id} f={f} showWindow={!sharedWindow} />
-                  ))}
-                </tbody>
-              </table>
-            </ScrollRegion>
-          </Panel>
-          <Panel
-            className="as-files"
-            title="Where findings land"
-            sub={
-              <>
-                <b>{overview.landing.files.reduce((n, f) => n + f.findings, 0)}</b> findings in{" "}
-                {overview.landing.files.length} files
-              </>
-            }
-          >
-            {overview.landing.files.length === 0 ? (
-              <p className="as-empty">
-                No review findings are recorded against a file in this window.
-              </p>
-            ) : (
-              <ScrollRegion className="as-scroll as-grow" label="Files by findings">
-                <table>
-                  <colgroup>
-                    <col />
-                    <col className="as-c-fig" />
-                    <col className="as-c-fig" />
-                    <col className="as-c-fig" />
-                  </colgroup>
-                  <thead>
-                    <tr>
-                      <th>File</th>
-                      <th className="as-r" aria-sort="descending">
-                        Findings <span aria-hidden="true">▼</span>
-                      </th>
-                      <th className="as-r">Touches</th>
-                      <th className="as-r">Per touch</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...overview.landing.files]
-                      .sort((a, b) => b.findings - a.findings)
-                      .map((f) => (
-                        <tr key={f.path} className="as-frow">
-                          <td className="as-path">
-                            <FilePath path={f.path} />
-                          </td>
-                          <td className="as-r">{f.findings}</td>
-                          <td className="as-r">{f.touches}</td>
-                          <td className="as-r">
-                            {f.ratio.value === null
-                              ? "—"
-                              : num(Math.round(f.ratio.value * 10) / 10)}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </ScrollRegion>
-            )}
-          </Panel>
-          <Panel
-            className="as-past"
-            title="What past recommendations achieved"
-            sub={`${overview.past.measured.improved} paid off · ${overview.past.measured.unchanged} unchanged · ${overview.past.measured.worse} worse · ${overview.past.measured.unmeasured} not measured`}
-            actions={
-              overview.past.items.length > 0 && (
-                <button
-                  type="button"
-                  className="as-defbtn"
-                  aria-expanded={showPast}
-                  onClick={() => setShowPast((v) => !v)}
-                >
-                  {showPast ? "Hide results" : `Show ${overview.past.items.length} results`}
-                </button>
-              )
-            }
-          >
-            <div className="as-fun">
-              {overview.past.funnel.map((f) => (
-                <div key={f.kind} className="as-cell">
-                  <b className="as-fig">{f.count}</b>
-                  <span className="as-cap">{label(f.kind)}</span>
-                </div>
-              ))}
-            </div>
-            {overview.past.items.length === 0 ? (
-              <p className="as-empty">
-                No proposal has been decided yet, so there is no result to show.
-              </p>
-            ) : (
-              showPast && (
-                <ScrollRegion className="as-scroll as-pastrows" label="Past results">
-                  <table>
-                    <colgroup>
-                      <col className="as-c-date" />
-                      <col />
-                      <col className="as-c-chg" />
-                      <col className="as-c-out" />
-                    </colgroup>
-                    <tbody>
-                      {overview.past.items.map((p) => (
-                        <tr key={p.id} className="as-prow">
-                          <td className="as-m">{day(p.decidedAt)}</td>
-                          <td>
-                            {p.title}
-                            <span className="as-sub"> · {p.metric}</span>
-                          </td>
-                          <td className="as-r">
-                            {p.after
-                              ? p.after.change
-                              : p.baseline === null
-                                ? "no baseline"
-                                : `from ${num(p.baseline)}`}
-                          </td>
-                          <td>
-                            <span className="as-vd">
-                              <i className={OUTCOME_SHAPE[p.outcome]} aria-hidden="true" />
-                              {OUTCOME_LABEL[p.outcome]}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </ScrollRegion>
-              )
-            )}
-          </Panel>
-        </div>
+            )
+          )}
+        </Panel>
       </div>
-    </>
+    </div>
   );
 }

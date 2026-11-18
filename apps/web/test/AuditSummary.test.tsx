@@ -629,12 +629,16 @@ it("sorts landing files by findings with a visible cue, and shows a figure's def
   expect(document.querySelector(".as-fdef")?.textContent).toMatch(/\w/);
 });
 
-it("words the verdict chip for what is measured, never as Healthy", async () => {
+it("leads the verdict in bold, with no badge, and speaks its tone", async () => {
   setup(overviewFixture({ tone: "ok" }));
   render(<CodeHealth />);
   await ready();
-  const chip = document.querySelector(".as-tone");
-  expect(chip?.textContent).toBe("Steady");
+  const verdict = document.querySelector(".as-verdict") as HTMLElement;
+  expect(verdict.querySelector("b")?.textContent).toBe(
+    "Reviews almost stopped being recorded on 1 Nov, so the trend ends there.",
+  );
+  expect(document.querySelector(".as-tone")).toBeNull();
+  expect(verdict.querySelector(".sr-only")?.textContent).toBe("Steady. ");
   expect(document.body.textContent).not.toMatch(/Healthy/);
 });
 

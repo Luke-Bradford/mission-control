@@ -10,7 +10,7 @@ import {
 } from "@mc/core";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
-import { AuditSummary } from "./AuditSummary.tsx";
+import { AuditSummary, Verdict } from "./AuditSummary.tsx";
 import { CodeRisk } from "./CodeRisk.tsx";
 import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dialogs.tsx";
 import { date, label } from "./format.ts";
@@ -233,11 +233,14 @@ export function CodeHealth() {
       }
     >
       <div className="ch-heading">
-        <div>
-          <h1 ref={heading} tabIndex={-1}>
+        <div className="ch-title">
+          <h1 ref={heading} tabIndex={-1} className={summary && overview ? "sr-only" : undefined}>
             Audit
           </h1>
-          <p>Where should we invest in code health next?</p>
+          <p className={summary && overview ? "sr-only" : undefined}>
+            Where should we invest in code health next?
+          </p>
+          {summary && overview && <Verdict verdict={overview.verdict} />}
         </div>
         <div className="ch-filters" hidden={OWN_SCOPE.has(tab)}>
           <label>
@@ -270,90 +273,92 @@ export function CodeHealth() {
           </fieldset>
         </div>
       </div>
-      <div className="ch-coverage" hidden={OWN_SCOPE.has(tab)}>
-        <strong className={blocked ? "warn-t" : "ok-t"}>
-          {disconnected
-            ? reconnecting
-              ? "Disconnected"
-              : "Connecting"
-            : stale
-              ? "Stale snapshot"
-              : active.loading
-                ? "Loading"
-                : "Connected"}
-        </strong>
-        <span>
-          {generatedAt !== undefined
-            ? `Read ${date(generatedAt)}`
-            : "Waiting for a bounded code-health read"}
-        </span>
-        {view && !summary && (
-          <>
-            <span>
-              Observed {shortDate(observedFrom)} to {shortDate(observedUntil)} UTC
-            </span>
-            <span>
-              Newest observation age at read:{" "}
-              {sourceAge === null
-                ? "not collected"
-                : sourceAge < 60
-                  ? `${sourceAge} min`
-                  : `${Math.floor(sourceAge / 60)} h`}
-            </span>
-            <span>Analysed SHA: {analysed.length ? analysed.join(", ") : "not collected"}</span>
-          </>
-        )}
-        {(summary ? !!overview : !!view) && (
-          <button type="button" onClick={coverageButton} disabled={summary && !!wanted}>
-            Inspect coverage
+      <div className="ch-bar">
+        <div className="ch-coverage" hidden={OWN_SCOPE.has(tab)}>
+          <strong className={blocked ? "warn-t" : "ok-t"}>
+            {disconnected
+              ? reconnecting
+                ? "Disconnected"
+                : "Connecting"
+              : stale
+                ? "Stale snapshot"
+                : active.loading
+                  ? "Loading"
+                  : "Connected"}
+          </strong>
+          <span>
+            {generatedAt !== undefined
+              ? `Read ${date(generatedAt)}`
+              : "Waiting for a bounded code-health read"}
+          </span>
+          {view && !summary && (
+            <>
+              <span>
+                Observed {shortDate(observedFrom)} to {shortDate(observedUntil)} UTC
+              </span>
+              <span>
+                Newest observation age at read:{" "}
+                {sourceAge === null
+                  ? "not collected"
+                  : sourceAge < 60
+                    ? `${sourceAge} min`
+                    : `${Math.floor(sourceAge / 60)} h`}
+              </span>
+              <span>Analysed SHA: {analysed.length ? analysed.join(", ") : "not collected"}</span>
+            </>
+          )}
+          {(summary ? !!overview : !!view) && (
+            <button type="button" onClick={coverageButton} disabled={summary && !!wanted}>
+              Inspect coverage
+            </button>
+          )}
+          <button type="button" onClick={retry} disabled={!readRef || active.loading}>
+            Refresh
           </button>
-        )}
-        <button type="button" onClick={retry} disabled={!readRef || active.loading}>
-          Refresh
-        </button>
-      </div>
-      <div role="tablist" aria-label="Code-health view" className="ch-tabs">
-        {TABS.map((t, i) => {
-          const props = {
-            type: "button" as const,
-            role: "tab",
-            id: `ch-tab-${t}`,
-            "aria-selected": tab === t,
-            "aria-controls": "ch-panel",
-            tabIndex: tab === t ? 0 : -1,
-            ref: (el: HTMLButtonElement | null) => {
-              tabRefs.current[i] = el;
-            },
-            onClick: () => changeScope(() => setTab(t)),
-            onKeyDown: (e: React.KeyboardEvent) => {
-              let next: number | undefined;
-              if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
-              if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
-              if (e.key === "Home") next = 0;
-              if (e.key === "End") next = TABS.length - 1;
-              if (next !== undefined) {
-                e.preventDefault();
-                tabRefs.current[next]?.click();
-                tabRefs.current[next]?.focus();
-              }
-            },
-          };
-          // The evidence capture finds this tab by its text (apps/server/test/qa-labels.test.ts).
-          return t === "history" ? (
-            <button key={t} {...props}>
-              Workflow history and earlier proposals
-            </button>
-          ) : (
-            <button key={t} {...props}>
-              {TAB_LABEL[t]}
-            </button>
-          );
-        })}
-        <span className="ch-links">
-          <a href="/audit?tab=risk">Code risk in Audit</a>
-          <a href="/qa">PR readiness and tests in QA</a>
-          <a href="/telemetry">Cost and flow context</a>
-        </span>
+        </div>
+        <div role="tablist" aria-label="Code-health view" className="ch-tabs">
+          {TABS.map((t, i) => {
+            const props = {
+              type: "button" as const,
+              role: "tab",
+              id: `ch-tab-${t}`,
+              "aria-selected": tab === t,
+              "aria-controls": "ch-panel",
+              tabIndex: tab === t ? 0 : -1,
+              ref: (el: HTMLButtonElement | null) => {
+                tabRefs.current[i] = el;
+              },
+              onClick: () => changeScope(() => setTab(t)),
+              onKeyDown: (e: React.KeyboardEvent) => {
+                let next: number | undefined;
+                if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
+                if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
+                if (e.key === "Home") next = 0;
+                if (e.key === "End") next = TABS.length - 1;
+                if (next !== undefined) {
+                  e.preventDefault();
+                  tabRefs.current[next]?.click();
+                  tabRefs.current[next]?.focus();
+                }
+              },
+            };
+            // The evidence capture finds this tab by its text (apps/server/test/qa-labels.test.ts).
+            return t === "history" ? (
+              <button key={t} {...props}>
+                Workflow history and earlier proposals
+              </button>
+            ) : (
+              <button key={t} {...props}>
+                {TAB_LABEL[t]}
+              </button>
+            );
+          })}
+          <span className="ch-links">
+            <a href="/audit?tab=risk">Code risk in Audit</a>
+            <a href="/qa">PR readiness and tests in QA</a>
+            <a href="/telemetry">Cost and flow context</a>
+          </span>
+        </div>
       </div>
       {notice && (
         <p role="status" className="ch-notice">

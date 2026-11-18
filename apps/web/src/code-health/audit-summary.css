@@ -27,17 +27,41 @@
     gap: var(--sp-2);
     min-height: 0;
   }
-  /* The title and its question share one line, and the view tabs sit close to the figures. */
-  .code-health.as-fit .ch-heading > div:first-child {
+  /* The verdict is the first line under the nav, with Repo and the window control beside it. The
+     coverage line, view tabs and cross-links sit in one bar under the work. */
+  .code-health.as-fit .ch-heading {
+    flex-wrap: nowrap;
+    align-items: center;
+    order: 0;
+  }
+  .code-health.as-fit .ch-title {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .code-health.as-fit > .ch-notice,
+  .code-health.as-fit > [role="status"],
+  .code-health.as-fit > [role="alert"] {
+    order: 1;
+  }
+  .code-health.as-fit #ch-panel {
+    order: 2;
+  }
+  .code-health.as-fit .ch-bar {
+    order: 3;
     display: flex;
-    align-items: baseline;
-    gap: var(--sp-3);
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    flex-wrap: nowrap;
   }
-  .code-health.as-fit .ch-heading p {
-    margin: 0;
+  .code-health.as-fit .ch-bar .ch-tabs {
+    border-bottom: 0;
+    padding-bottom: 0;
+    flex: 1 1 auto;
+    min-width: 0;
   }
-  .code-health.as-fit .ch-tabs {
-    padding-bottom: var(--sp-1);
+  .code-health.as-fit .ch-bar .ch-links {
+    margin-left: var(--sp-4);
   }
   /* Title, sub and actions share one line, as in the prototype, instead of stacking. */
   .code-health.as-fit .panel > .ph {
@@ -115,9 +139,6 @@
 }
 
 .as-verdict {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
   margin: 0;
   font-size: var(--fs-panel);
   line-height: var(--lh-panel);
@@ -129,23 +150,6 @@
 .as-verdict b {
   font-weight: 600;
   color: var(--fg);
-}
-.as-tone {
-  flex: none;
-  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-}
-.as-verdict[data-tone="warn"] .as-tone {
-  color: var(--warn);
-  border-color: var(--warn);
-}
-.as-verdict[data-tone="ok"] .as-tone {
-  color: var(--ok);
-  border-color: var(--ok);
 }
 
 .as-do .act,
