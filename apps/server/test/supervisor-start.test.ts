@@ -337,7 +337,7 @@ describe("startRun eligibility", () => {
   });
 
   it("0: refuses a closed card", async () => {
-    onBoard(boardCard(42, { closed: true }));
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
     await refused(422, startClosedText("mc#42"));
   });
 
