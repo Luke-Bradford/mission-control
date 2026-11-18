@@ -125,11 +125,11 @@ import {
   TIP_MOVED,
 } from "../src/engine/engine.ts";
 import type {
+  FastForwardResult,
   GateFacts,
   GateResult,
   OpenPrResult,
   Publisher,
-  FastForwardResult,
   PublishResult,
   RerunResult,
   RerunStateResult,
@@ -1708,9 +1708,7 @@ describe("refusals", () => {
     expect(loopOf().phase).toBe("ci");
     expect(h.fastForwards).toEqual([{ runId: RUN, worktree: join(dir, "wt"), sha: SHA_B }]);
     expect(loopOf().branchMoved).toBeUndefined();
-    expect(loopTexts()).toContain(
-      `the worktree is on ${SHA_B.slice(0, 7)} now`,
-    );
+    expect(loopTexts()).toContain(`the worktree is on ${SHA_B.slice(0, 7)} now`);
     // the seat is not sent a line: it could not act on one, and it would resume a quiet seat
     expect(h.sent.filter((m) => m.key.startsWith("branch-moved:"))).toEqual([]);
     // someone else's commit: the merge gate must not count it as the hub's

@@ -2316,12 +2316,7 @@ export function createEngine(deps: EngineDeps): Engine {
       !store.branchCommits(run.repoId, run.branch ?? "").has(pr.headSha) &&
       (await publisher.isDescendant(run, pushed.sha, pr.headSha)) &&
       // only the operator's own commits are taken into a seat's worktree; anyone else's park as stuck
-      (await publisher.commitsFrom(
-        run,
-        pushed.sha,
-        pr.headSha,
-        config.operator.githubLogins ?? [],
-      ))
+      (await publisher.commitsFrom(run, pushed.sha, pr.headSha, config.operator.githubLogins ?? []))
     ) {
       // the fetch can take a while: a commit or push the seat made meanwhile is not this push,
       // and the snapshot is stale; the next pass reads it again

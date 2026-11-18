@@ -1240,11 +1240,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     async commitsFrom(run, ancestor, head, logins) {
       const repo = repoOf(run);
       if (repo === undefined || !SHA.test(ancestor) || !SHA.test(head)) return false;
-      const compare = await ghJson(["api", `repos/${repo}/compare/${ancestor}...${head}`], "compare");
+      const compare = await ghJson(
+        ["api", `repos/${repo}/compare/${ancestor}...${head}`],
+        "compare",
+      );
       if (isRefusal(compare) || !Array.isArray(compare.commits) || compare.commits.length === 0)
         return false;
       // GitHub lists at most 250 commits: a longer range is not read whole
-      if (typeof compare.total_commits === "number" && compare.total_commits > compare.commits.length)
+      if (
+        typeof compare.total_commits === "number" &&
+        compare.total_commits > compare.commits.length
+      )
         return false;
       const loginOf = (who: unknown): unknown => (who as { login?: unknown } | null)?.login;
       // a merge made on GitHub is committed by its web flow: the author's login is the one that counts

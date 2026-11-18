@@ -472,7 +472,9 @@ describe("state step", () => {
 
   it("8: a worktree move the hub could not make parks once the window is spent, and names the reason", () => {
     const held = { sha: SHA2, epoch: 0, since: NOW - NO_CI_AFTER_MS - 1, why: "diverged" };
-    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), pushed: { sha: SHA2, at: NOW } }, { branchMoved: held }));
+    const r = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }), pushed: { sha: SHA2, at: NOW } }, { branchMoved: held }),
+    );
     expect(r.loop.parked?.kind).toBe("stuck");
     expect(r.loop.parked?.reason).toContain("could not move");
     expect(r.loop.parked?.reason).toContain("diverged");
