@@ -3045,7 +3045,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         tail = nextHeading === -1 ? "" : after.slice(nextHeading).trim();
         body = body.slice(0, at).trimEnd();
       }
-      if (unclosedMarkdown(`${body}\n${tail}`)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
+      if (unclosedMarkdown(`${body}\n${tail}`))
+        return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
 
       const tests = planTestCount(plan);
       if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
