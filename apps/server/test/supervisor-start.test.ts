@@ -823,6 +823,63 @@ describe("startRun", () => {
     });
   });
 
+  it("starts a fresh stage after its merged PR has expired from the live cache", async () => {
+    git(clone, "branch", BRANCH);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged stage",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 50,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      100,
+    );
+    store.sweepPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 2,
+          title: "Another PR",
+          url: "u",
+          branch: "feature/43-another",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      101,
+    );
+
+    const { sup } = make();
+    sup.start();
+    const out = await sup.startRun("guido-1", 42);
+
+    expect(store.pullRequests("mc").map((p) => p.number)).toEqual([2]);
+    expect(out.branch).toBe(`${BRANCH}-stage-2`);
+  });
+
   it("remakes a worktree recorded before a store restart, clearing only after installation", async () => {
     const wt = join(root, "mc-crew", "guido-1-42");
     writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
