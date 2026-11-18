@@ -20,7 +20,10 @@ describe("CI", () => {
     }
     // every sharded job lists as many shards as its command divides by, so no test file is skipped
     const shards = (job: string) => {
-      const body = workflow.slice(workflow.indexOf(`\n  ${job}:\n`));
+      const from = workflow.indexOf(`\n  ${job}:\n`) + 1;
+      // this job's lines only: up to the next job heading, so a missing value is not read from a later job
+      const next = workflow.slice(from + 1).search(/\n {2}[a-z-]+:\n/);
+      const body = next < 0 ? workflow.slice(from) : workflow.slice(from, from + 1 + next);
       const list = /shard: \[([\d, ]+)\]/.exec(body)?.[1].split(",").map(Number) ?? [];
       const of = Number(/--shard=\$\{\{ matrix\.shard \}\}\/(\d+)/.exec(body)?.[1]);
       return { list, of };
