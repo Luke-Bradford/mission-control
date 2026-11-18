@@ -3,8 +3,8 @@
 ## Stage size measurement
 
 Stage 2 of the light-harness work compares the merged main commit, `1dc257a`, with
-`d44c4d9`. Non-test TypeScript and TSX lines under `apps` and `packages` changed from
-204,000 to 202,974. Run this from the repository root once for each ref:
+`d8cedbe`. Non-test TypeScript and TSX lines under `apps` and `packages` changed from
+204,000 to 202,912. Run this from the repository root once for each ref:
 
 ```sh
 git ls-tree -r --name-only <ref> -- apps packages \
