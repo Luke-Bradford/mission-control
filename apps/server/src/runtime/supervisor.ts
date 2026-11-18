@@ -1208,7 +1208,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     closeRunItems(l.info, l.run.id);
     // read before the seat row changes
     const worktree = store.seatSession(seatId)?.worktree ?? null;
-    if (l.run.reviewId != null) void dropScratch(l.info, l.run.id, l.run.seq, worktree);
+    void dropScratch(l.info, l.run.id, l.run.seq, worktree);
     if (l.ending !== null) {
       setSeat(seatId, { state: l.hold ? "stopped" : "idle", reason: null, runId: null });
     } else if (isCheck) {
