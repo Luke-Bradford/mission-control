@@ -203,6 +203,18 @@
   gap: var(--sp-3);
 }
 
+/* The narrow-desktop header gives status controls their own row. Keep the active decision and
+   its stopped-FLIGHT recovery control together in the remaining first-screen pane. */
+@media (min-width: 1000px) and (max-width: 1399px) {
+  .needs-main {
+    padding-block: var(--sp-2);
+    gap: var(--sp-2);
+  }
+  .needs-main .composer {
+    padding-block: var(--sp-1);
+  }
+}
+
 .needs-side {
   display: flex;
   flex-direction: column;
