@@ -1961,7 +1961,7 @@ describe("sweepPullRequests", () => {
     await sweepPullRequests(repo, store, gql, NOW, true);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.q).toContain("defaultBranchRef");
-    expect(calls[0]?.q).toContain("contexts(first: 10)");
+    expect(calls[0]?.q).toContain("contexts(first: 50)");
     expect(JSON.parse(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`) ?? "null")).toEqual({
       sha: "main-sha",
       ci: "failing",

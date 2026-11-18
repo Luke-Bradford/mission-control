@@ -23,7 +23,6 @@ const SHOTS = process.env.MC_SHOT_DIR;
 
 function api(extra: number) {
   const base = desktopFixture().api;
-  const discussion = { id: "d1", itemKey: MAT_KEY, version: "v1", messages: [] };
   const path = `/api/attention/${encodeURIComponent(MAT_KEY)}`;
   return {
     ...base,
@@ -31,8 +30,7 @@ function api(extra: number) {
     "/api/attention/answered": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
-    [`${path}/discussion`]: discussion,
-    [`${path}/discussion?id=d1`]: discussion,
+    "/api/comms/flight": { messages: [] },
     [`${path}/materials`]: { packets: [storyPacket(extra)] },
     "/api/tickets/shop-app/1513": {
       repoId: "shop-app",

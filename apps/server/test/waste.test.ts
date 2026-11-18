@@ -6,6 +6,7 @@ import {
   type PullRequestView,
   type Run,
   type RunLoop,
+  WASTE_CHECKS,
   WASTE_THRESHOLDS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -696,7 +697,33 @@ describe("the waste_alarm FLIGHT signal", () => {
     expect(next[0]?.told).toBe(true);
   });
 
-  it("does not wake FLIGHT for an alarm that parks no ticket", () => {
+  it.each(WASTE_CHECKS)("%s wakes FLIGHT only if it is on the list of alarms that do", (check) => {
+    store.waste.insertAlarm(
+      {
+        check,
+        subject: `s:${check}`,
+        repoId: "mc",
+        ticket: "mc#1596",
+        seatId: null,
+        runId: null,
+        level: 1,
+        evidence: `evidence for ${check}`,
+      },
+      NOW,
+    );
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const raised = flightSignals({ config, store, session, seats: [], now: NOW }).signals.filter(
+      (s) => s.kind === "waste_alarm",
+    );
+    expect(raised.map((s) => s.evidence)).toEqual(
+      ["retry-loop", "failed-review-rounds", "runs-per-ticket"].includes(check)
+        ? [expect.stringContaining(`evidence for ${check}`)]
+        : [],
+    );
+  });
+
+  it("does not wake FLIGHT for an alarm the hub handles itself", () => {
     const r = run("guido-1", { ticket: "mc#1596" });
     store.upsertRun(r);
     for (let i = 0; i < 3; i++)

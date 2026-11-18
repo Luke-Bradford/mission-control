@@ -423,10 +423,9 @@ const CHECKS_ADVICE =
 export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
 /**
  * The `timeout` a seat gives a check call, and the most the CLI lets a call ask for
- * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, and a
- * branch that touches a widely imported file can never finish its related tests inside it (#1398).
- * 45 minutes is above the 39.5 minutes CI's five test jobs add up to on c2bea393, setup included,
- * and on a healthy Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
+ * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, which a
+ * suite a ticket asks for can pass (#1398). 45 minutes covers a full local suite, and on a healthy
+ * Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
  * count: it happens in the PreToolUse hook, before the CLI starts the command's clock.
  */
 export const CHECK_BASH_TIMEOUT_MS = 45 * 60_000;
@@ -437,6 +436,7 @@ export const CHECK_DROP_REASONS = [
   "dirty-end",
   "head-moved",
   "turn-ended",
+  "session-lost",
   "background",
   "timeout",
   "unreadable",
@@ -468,6 +468,8 @@ export const checkDropText = (d: CheckDrop): string => {
       return `a commit moved the head during the call (it started on ${sha7(d.head)}), so it was not counted. Run the check again at this commit.`;
     case "turn-ended":
       return `the turn ended before the call reported its end (it started on ${sha7(d.head)}), so it was not counted. Run the check again and wait for it.`;
+    case "session-lost":
+      return `the earlier check session disappeared before it reported an exit code (it started on ${sha7(d.head)}), so it was not counted. Run the check again; do not keep polling the lost session.`;
     case "background":
       return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
     case "timeout":
