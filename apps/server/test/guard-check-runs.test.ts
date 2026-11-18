@@ -23,6 +23,13 @@ describe("checksRun", () => {
     expect(checksRun(`${LINT} && ${TYPES}`, CHECKS)).toEqual([LINT, TYPES]);
   });
 
+  it("matches configured checks when related tests are another && segment", () => {
+    expect(checksRun(`${LINT} && ${TYPES} && pnpm -s test:related`, CHECKS)).toEqual([
+      LINT,
+      TYPES,
+    ]);
+  });
+
   it.each([
     ["an exit before it", `exit 0 && ${LINT}`],
     ["a shell function shadowing the runner", `pnpm() ( true ) && ${LINT}`],
@@ -158,6 +165,17 @@ describe("the check recorder", () => {
         exitCode: null,
         at: 99,
       },
+    ]);
+  });
+
+  it("records configured checks when related tests finish the plain chain", async () => {
+    const r = recorder();
+    const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
+    await r.begin(KEY, command);
+    await r.end(KEY, true, 0);
+    expect(rows).toMatchObject([
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: true, exitCode: 0 },
+      { command: TYPES, invokedCommand: command, headSha: HEAD, ok: true, exitCode: 0 },
     ]);
   });
 
@@ -312,12 +330,34 @@ describe("the check recorder", () => {
     ]);
   });
 
+  it("records no passing configured check when the related-tests chain fails", async () => {
+    const r = recorder();
+    const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
+    await r.begin(KEY, command);
+    await r.end(KEY, false, 1);
+    expect(rows).toMatchObject([
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+      { command: TYPES, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+    ]);
+  });
+
   it.each([
     "pnpm -s lint | tail",
     "pnpm -s lint || true",
     "pnpm -s lint; true",
     "pnpm -s lint\ntrue",
   ])("records nothing for %j", async (command) => {
+    const r = recorder();
+    await r.begin(KEY, command);
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
+  });
+
+  it.each([
+    `${LINT} && pnpm -s test:related | tail`,
+    `${LINT} && pnpm -s test:related; echo done`,
+    `${LINT} && sleep 1 && pnpm -s test:related`,
+  ])("does not count a related-tests chain with another command: %j", async (command) => {
     const r = recorder();
     await r.begin(KEY, command);
     await r.end(KEY, true);
@@ -409,6 +449,7 @@ describe("the check recorder", () => {
     expect(await r.lockedBy("r1", "ls")).toBeNull();
     // the related-tests run takes the lock by name, though the repo no longer lists it as a check
     expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
+    expect(await r.lockedBy("r1", `${LINT} && ${TYPES} && pnpm -s test:related`)).toBe(LINT);
     // refused while another seat held the lock: it began but never ended, so no failed row
     await r.begin(KEY, TYPES);
     expect(rows).toEqual([]);

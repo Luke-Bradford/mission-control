@@ -25,14 +25,19 @@ export { plainCall };
 
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
- * EVERY trimmed segment is a configured check. Anything else in the chain (`cd x`, `exit 0`, a
- * shell function, an edit) could change what the check sees or whether it runs, so it counts for
- * nothing. A command holding `|`, `||`, `;` or a line break counts for nothing too.
+ * EVERY trimmed segment is a configured check or the related-tests run. The latter is allowed as
+ * a companion to the configured checks, but is not itself recorded as one. Anything else in the
+ * chain (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees or whether
+ * it runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break counts for
+ * nothing too.
  */
+/** The related-tests run, as a repo's `checks` list spells it. */
+export const RELATED_CHECK = "pnpm -s test:related";
+
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
   const segments = command.split("&&").map((s) => s.trim());
-  if (segments.some((s) => !checks.includes(s))) return [];
+  if (segments.some((s) => !checks.includes(s) && s !== RELATED_CHECK)) return [];
   return checks.filter((c) => segments.includes(c));
 }
 
@@ -62,8 +67,6 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
  * The related-tests run, as a repo's `checks` list spells it. It loads the Mac like a suite, so it
  * takes the test lock whether or not the repo still lists it as a check.
  */
-export const RELATED_CHECK = "pnpm -s test:related";
-
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
   const ran = splitCommands(command).map(lockForm);
   for (const check of checks) {
