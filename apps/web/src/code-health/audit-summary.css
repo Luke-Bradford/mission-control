@@ -3,7 +3,6 @@
 .code-health.as-fit {
   --as-side: clamp(440px, 34vw, 600px);
   --as-out-max: 160px;
-  --as-h-max: 184px;
   --as-plot: 64px;
 }
 @media (min-width: 2200px) {
@@ -14,7 +13,6 @@
 @media (min-height: 1100px) {
   .code-health.as-fit {
     --as-out-max: 300px;
-    --as-h-max: 260px;
     --as-plot: 130px;
   }
 }
@@ -92,15 +90,17 @@
   .as-out {
     max-height: var(--as-out-max);
   }
+  /* All five figures show: the health table takes its natural height and the files list gives way. */
   .as-hscroll {
-    max-height: var(--as-h-max);
+    max-height: none;
+    flex: none;
   }
   .as-pastrows {
     max-height: 64px;
   }
   /* Always leave room for the header and a few file rows. */
   .as-files .as-grow {
-    min-height: 128px;
+    min-height: 96px;
   }
 }
 
@@ -543,7 +543,7 @@
   width: 76px;
 }
 .as-c-chg {
-  width: 150px;
+  width: 120px;
 }
 .as-c-out {
   width: 116px;
