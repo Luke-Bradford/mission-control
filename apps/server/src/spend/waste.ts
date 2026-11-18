@@ -450,14 +450,17 @@ export const ticketParked = (store: Store, ticket: string): string | null =>
 export function reviewsHeld(store: Store, authorRunId: string): boolean {
   const rounds = store.waste.maxRound(authorRunId);
   if (rounds <= WASTE_THRESHOLDS.reviewRounds) return false;
-  const resolved = store.waste
+  return rounds > resolvedReviewRound(store, authorRunId);
+}
+
+/** The highest review round FLIGHT has settled for this author run, or -1 when it has settled none. */
+export const resolvedReviewRound = (store: Store, authorRunId: string): number =>
+  store.waste
     .alarms(
       "WHERE check_id = 'review-rounds' AND subject = ? AND resolved_at IS NOT NULL",
       authorRunId,
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
-  return rounds > resolved;
-}
 
 /**
  * FLIGHT's settle closes this run's review-rounds hold at the live round, not at whatever level the

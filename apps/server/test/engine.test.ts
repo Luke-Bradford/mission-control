@@ -7004,6 +7004,47 @@ describe("the engine runs reviews", () => {
         expect(h.sent.at(-1)?.text).toContain("Important");
       });
 
+      it("rework grants one more round: the next push's review runs, and a fail parks at the cap again", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        const SHA_D = "d".repeat(40);
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        // rounds 1 and 2 fail; the push after round 2 is queued as round 3 and held
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        const push = async (sha: string) => {
+          clock += 1000;
+          report("Fixed it", sha);
+          await h.engine.reconcileRun(RUN);
+          setPr({ ci: "passing", headSha: sha });
+          await h.engine.reconcileRun(RUN);
+          await h.engine.tick();
+          await h.engine.reconcileRun(RUN);
+        };
+        await push(SHA_B);
+        const two = need(reviewRows().find((r) => r.round === 2));
+        reported(two.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(reviewsHeld(store, RUN)).toBe(true);
+
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        await push(SHA_D);
+        const granted = reviewRows().filter((r) => r.sha === SHA_D && r.state !== "superseded");
+        expect(granted).toHaveLength(1);
+        expect(granted[0]).toMatchObject({ round: 3, state: "running" });
+        expect(loopOf().phase).not.toBe("parked");
+
+        // that round fails: the next push's review is past the cap, held, and the run parks again
+        reported(need(granted[0]).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push("e".repeat(40));
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(reviewsHeld(store, RUN)).toBe(true);
+      });
+
       it("accept is refused when the last review failed the design check", async () => {
         await heldAtLimit([{ check: "design", result: "fail" }]);
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(false);

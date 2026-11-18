@@ -165,7 +165,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
+import { resolvedReviewRound, restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
@@ -1645,12 +1645,18 @@ export function createEngine(deps: EngineDeps): Engine {
           out.parked = true;
           return;
         }
+        // a settle starts a new epoch, but once FLIGHT has settled a hold at the cap the rounds
+        // count on across epochs: the granted review is the next round, and a fail past it makes
+        // the following one a round past the cap, held again
+        const settled = resolvedReviewRound(store, run.id) >= 0;
         const round =
           1 +
           store
             .reviewsOfRun(run.id)
-            .filter((r) => r.epoch === cur.epoch && r.state === "reported" && r.blocking > 0)
-            .length;
+            .filter(
+              (r) =>
+                (settled || r.epoch === cur.epoch) && r.state === "reported" && r.blocking > 0,
+            ).length;
         const id = store.requestReview({
           authorRunId: run.id,
           repoId: run.repoId,
@@ -3318,9 +3324,12 @@ export function createEngine(deps: EngineDeps): Engine {
         if (next.aside) next.aside = { ...next.aside, wake: true };
         checkBriefDispatch();
         // a settle that sends the change back to review is FLIGHT's decision on the round cap: it
-        // closes the run's review-rounds hold, or the review would be held and dropped at once
+        // closes the run's review-rounds hold, or the review would be held and dropped at once. A
+        // rework grants the review of the seat's next push: the hold closes at the live round, so
+        // that one round runs and a fail past it parks again.
         const reopens =
           opts?.action === "rereview" ||
+          opts?.action === "rework" ||
           opts?.action === "accept" ||
           opts?.action === "second_review";
         if (by === "FLIGHT" && reopens) {
