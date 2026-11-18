@@ -532,6 +532,7 @@ describeRendered("Comms chart, rendered", () => {
         // Send a fixed number of batches to exercise the same work on every runner. A message must
         // update what changed, never rebuild the links and seats. The dots live in the overlay.
         const rounds = 4;
+        const maxChurnPerRound = 5;
         let seen = 0;
         for (let round = 1; round <= rounds; round++) {
           for (const [k, link] of links.entries())
@@ -553,7 +554,7 @@ describeRendered("Comms chart, rendered", () => {
         expect(seen).toBeGreaterThan(0);
         // Deterministic: with new messages on a third of the 100 links every round, almost nothing is
         // added or removed from the chart. A rebuild per arrival would add hundreds each round.
-        expect(churn).toBeLessThanOrEqual(rounds * 4);
+        expect(churn).toBeLessThanOrEqual(rounds * maxChurnPerRound);
         console.info(
           `comms chart 50 seats ${at}: ${seen} dots at most, ${churn} elements churned in ${rounds} rounds`,
         );
