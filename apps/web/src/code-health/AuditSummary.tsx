@@ -304,6 +304,12 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
     bw = days.length ? W / days.length : W;
   const y = (v: number) => H - (v / max) * H;
   return (
+    <>
+    <div className="as-chart">
+      <div className="as-yscale" aria-hidden="true">
+        <span>{max}</span>
+        <span>0</span>
+      </div>
     <div className="as-plot">
       <svg
         role="img"
@@ -350,6 +356,19 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
         <span>{days.at(-1)?.day}</span>
       </div>
     </div>
+    </div>
+    <ul
+      className="as-daylist"
+      tabIndex={0}
+      aria-label={`Merged PRs per day, count by day, over ${days.length} days`}
+    >
+      {days.map((d, i) => (
+        <li key={d.day}>
+          {d.day.slice(5)} <b>{totals[i]}</b>
+        </li>
+      ))}
+    </ul>
+    </>
   );
 }
 

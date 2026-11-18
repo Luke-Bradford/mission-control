@@ -150,7 +150,7 @@ export function overviewFixture(
     wasteAlarms: { state: "available", note: "", rows: [] },
     build: {
       mergedPerDay: Array.from({ length: 14 }, (_, i) => ({
-        day: `2026-10-${String(22 + i).padStart(2, "0")}`,
+        day: new Date(Date.UTC(2026, 9, 22 + i)).toISOString().slice(0, 10),
         noHubReview: 5 + i,
         round1: 3,
         round2: 2,

@@ -584,3 +584,16 @@ it("shows each figure's own window, unit and state in the table, not in a hover 
   expect(text("Gamma")).toContain("partial");
   expect(text("Gamma")).toContain("—");
 });
+
+it("shows a count scale and each day's merged count, reachable by keyboard, crossing into November", async () => {
+  setup();
+  render(<CodeHealth />);
+  await ready();
+  const list = screen.getByRole("list", { name: /Merged PRs per day, count by day, over 14 days/ });
+  expect(list.getAttribute("tabindex")).toBe("0");
+  const items = within(list).getAllByRole("listitem");
+  expect(items).toHaveLength(14);
+  expect(items[0].textContent).toBe("10-22 13");
+  expect(items[10].textContent).toContain("11-01");
+  expect(document.querySelector(".as-yscale")?.textContent).toMatch(/^\d+0$/);
+});

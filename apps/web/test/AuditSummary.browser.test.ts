@@ -75,6 +75,10 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
           client: d.clientWidth,
         })),
       }),
+      landingRows: [...document.querySelectorAll(".as-files tr.as-frow")].filter((r) => {
+        const l = r.closest(".as-scroll");
+        return !!l && rect(r).top >= rect(l).top && rect(r).bottom <= rect(l).bottom;
+      }).length,
       listScrolls: list ? list.scrollHeight > list.clientHeight : false,
       small: [
         ...document.querySelectorAll(".as-cols button, .as-cols select, .as-cols a[href]"),
@@ -111,6 +115,7 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.totalRows).toBe(8);
             expect(m.visibleRows).toBeGreaterThanOrEqual(5);
             expect(m.firstOpen).toBe(true);
+            expect(m.landingRows).toBeGreaterThanOrEqual(2);
             expect(m.detailInside, m.detailDebug).toBe(true);
             expect(m.pageScrolls).toBe(false);
             expect(m.sideways).toBe(false);
