@@ -802,4 +802,59 @@ describeRendered("Needs you page", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "the fly-out keeps a long FLIGHT thread scrollable with its composer and newest message in reach",
+    async () => {
+      const newest = "Message 60: the newest FLIGHT update stays visible.";
+      const longThread = Array.from({ length: 60 }, (_, i) => ({
+        id: `comms:long-${i + 1}`,
+        at: NOW - (60 - i) * MIN,
+        from: "flight-1",
+        to: "CAPCOM",
+        operator: false,
+        text:
+          i === 59
+            ? newest
+            : `Message ${i + 1}: ${"A detailed FLIGHT update that needs a readable scrolling log. ".repeat(4)}`,
+      }));
+      const page = await renderAt({
+        page: "test/needsBrowser.html",
+        search: `?path=${encodeURIComponent(`/?item=${KEY}`)}`,
+        width: 1280,
+        height: 800,
+        api: { ...api(), "/api/comms/flight": { messages: longThread } },
+        assets: ASSETS,
+      });
+      try {
+        await page.box("#discuss .flight-thread-log");
+        const visible = await page.evaluate((newestText) => {
+          const body = document.querySelector("#discuss .item-body") as HTMLElement;
+          const log = document.querySelector("#discuss .flight-thread-log") as HTMLElement;
+          body.scrollTop = body.scrollHeight;
+          log.scrollTop = log.scrollHeight;
+          const input = document.querySelector("#discuss .flight-thread-input") as HTMLElement;
+          const last = [...log.querySelectorAll(".flight-thread-message")].at(-1) as HTMLElement;
+          const logBox = log.getBoundingClientRect();
+          const inputBox = input.getBoundingClientRect();
+          const lastBox = last.getBoundingClientRect();
+          return {
+            logHeight: logBox.height,
+            viewportHeight: window.innerHeight,
+            inputInView: inputBox.top >= 0 && inputBox.bottom <= window.innerHeight,
+            newestInLog:
+              last.textContent?.includes(newestText) &&
+              lastBox.top >= logBox.top &&
+              lastBox.bottom <= logBox.bottom,
+          };
+        }, newest);
+        expect(visible.logHeight).toBeLessThanOrEqual(800 * 0.6);
+        expect(visible.inputInView).toBe(true);
+        expect(visible.newestInLog).toBe(true);
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });
