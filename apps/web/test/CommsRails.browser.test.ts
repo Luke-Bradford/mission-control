@@ -214,6 +214,15 @@ describeRendered("Comms chart, rendered", () => {
         await page.box(".comms-rails svg");
         await page.box(".comms-node");
         await page.box(".comms-wait-mark");
+        // The initial SVG uses the fallback size until ResizeObserver receives the panel's box.
+        // Wait for that layout pass before judging whether the settled chart needs to scroll.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+            ),
+          null,
+        );
         const m = await measure(page);
         // Ten session seats plus FLIGHT, CAPCOM and #crew (the three hubs are drawn on the centre line).
         expect(m.nodes).toBe(13);
