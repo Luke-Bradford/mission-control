@@ -6223,6 +6223,17 @@ describe("report_plan", () => {
       expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", marked: true });
     });
 
+    it("a plan a ticket sent to the planner waits for is written again over an existing ## Plan", async () => {
+      withRules("every");
+      ghState(view(`Do X.\n\n## Plan\n\nold plan\n\nPlanned by FAO-1 (Mission Control).\n`));
+      store.plans.request("mc", 7, NOW);
+      expect(await call({})).toEqual({ text: MC_PLAN_WRITTEN });
+      expect(ghCalls().at(-1)?.body).toBe(
+        `Do X.\n\n## Plan\n\n${PLAN}\n\nPlanned by FAO-1 (Mission Control).\n`,
+      );
+      expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", marked: true });
+    });
+
     it("a plan sent back is written again in place of the old one", async () => {
       withRules("every");
       ghState(view(`Do X.\n\n## Plan\n\nold plan\n\nPlanned by FAO-1 (Mission Control).\n`));

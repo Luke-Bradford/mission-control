@@ -1,18 +1,21 @@
 /** The operator's sign-off of a ticket's plan: the Planner tab's lists, Approve and Send back. */
 import {
+  type BoardItem,
   COMMS_MC,
   hudColumnOf,
   PLAN_APPROVED_COMMS,
   PLAN_NO_SUCH,
   PLAN_NOT_WAITING,
-  type PlanSignoff,
   type PlansView,
+  planApprovedNotMovedComms,
   planHolds,
   planSentBackComms,
   type RepoRules,
   type TicketPlan,
+  type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
+import { readyBlock, readyEarlyBlock } from "../flight/ready-checks.ts";
 import { flightSeat } from "../flight/seat.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import type { Store } from "../store.ts";
@@ -25,6 +28,8 @@ export interface SignoffDeps {
   rules: (repoId: string) => Promise<RepoRules | Error>;
   /** Moves a card on the board; absent: approval signs off and leaves the card. */
   move?: (m: Move) => Promise<MoveResult>;
+  /** Reads the ticket's body, for the checks a card passes before Ready. */
+  fetchTicket?: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
 }
 
 export type SignoffResult =
@@ -65,10 +70,10 @@ export function plansView(store: Store, config: CcConfig): PlansView {
   };
 }
 
-/** The repo's live setting, or null when its rules cannot be read (decisions then fail closed). */
-const settingOf = async (deps: SignoffDeps, repoId: string): Promise<PlanSignoff | null> => {
+/** The repo's live rules, or null when they cannot be read (decisions then fail closed). */
+const rulesOf = async (deps: SignoffDeps, repoId: string): Promise<RepoRules | null> => {
   const rules = await deps.rules(repoId);
-  return rules instanceof Error ? null : (rules.planSignoff ?? "never");
+  return rules instanceof Error ? null : rules;
 };
 
 const tellFlight = (deps: SignoffDeps, plan: TicketPlan, text: string): void => {
@@ -116,6 +121,30 @@ function decided(
   return run;
 }
 
+/** Why a card cannot go to Ready yet (the checks promote runs), or null when it can. */
+async function notReadyWhy(
+  deps: SignoffDeps,
+  repoId: string,
+  ref: string,
+  card: BoardItem,
+  rules: RepoRules,
+): Promise<string | null> {
+  const early = readyEarlyBlock(deps.store, ref, card);
+  if (early !== null) return early;
+  const repo = deps.config.repos.find((r) => r.id === repoId);
+  let body: string | null = null;
+  try {
+    body =
+      repo === undefined || deps.fetchTicket === undefined
+        ? null
+        : ((await deps.fetchTicket(repo, card.issueNumber))?.body ?? null);
+  } catch {
+    body = null;
+  }
+  if (body === null) return `${ref} could not be read to check it is ready.`;
+  return readyBlock({ store: deps.store, repoId, ref, card, body, rules });
+}
+
 async function approveOne(
   deps: SignoffDeps,
   repoId: string,
@@ -125,47 +154,60 @@ async function approveOne(
   if (plan === null || !deps.config.repos.some((r) => r.id === repoId))
     return { ok: false, status: 404, error: PLAN_NO_SUCH };
   if (plan.state !== "awaiting-signoff") return { ok: false, status: 409, error: PLAN_NOT_WAITING };
-  const setting = await settingOf(deps, repoId);
-  if (setting === null)
+  const rules = await rulesOf(deps, repoId);
+  if (rules === null)
     return {
       ok: false,
       status: 502,
       error: "The repo's rules could not be read, so the plan is not signed off yet. Try again.",
     };
-  const held = planHolds(setting, plan);
+  const held = planHolds(rules.planSignoff ?? "never", plan);
   let moved = false;
+  let moveError: string | null = null;
   if (held) {
     const card = deps.store.board(repoId).find((i) => i.issueNumber === issue);
     const column = card === undefined ? null : hudColumnOf(card);
     // the cached card may be missing or stale, so the board mover (idempotent, and it reads GitHub)
     // confirms Ready; a card already further along is left where it is
     if (column === null || column === "Backlog" || column === "Refinement" || column === "Ready") {
-      if (deps.move === undefined)
-        return {
-          ok: false,
-          status: 502,
-          error: "The board cannot be written from this hub, so the plan is not signed off yet.",
-        };
-      const result = await deps.move({
-        runId: `plan:${plan.ref}`,
-        repoId,
-        issue,
-        column: "Ready",
-      });
-      if (!result.ok)
-        return {
-          ok: false,
-          status: 502,
-          error: `The card could not be confirmed in Ready (${result.reason}), so the plan is not signed off yet. Try again.`,
-        };
-      moved = result.changed;
+      // a card leaving Backlog or Refinement passes the checks promote runs; one that fails them is
+      // signed off but left where it is, for FLIGHT to promote once the wait clears
+      if (card !== undefined && column !== "Ready")
+        moveError = await notReadyWhy(deps, repoId, plan.ref, card, rules);
+      if (moveError === null) {
+        if (deps.move === undefined)
+          return {
+            ok: false,
+            status: 502,
+            error: "The board cannot be written from this hub, so the plan is not signed off yet.",
+          };
+        const result = await deps.move({
+          runId: `plan:${plan.ref}`,
+          repoId,
+          issue,
+          column: "Ready",
+        });
+        if (!result.ok)
+          return {
+            ok: false,
+            status: 502,
+            error: `The card could not be confirmed in Ready (${result.reason}), so the plan is not signed off yet. Try again.`,
+          };
+        moved = result.changed;
+      }
     }
   }
   if (!deps.store.plans.approve(repoId, issue, deps.now()))
     return { ok: false, status: 409, error: PLAN_NOT_WAITING };
   const signed = deps.store.plans.get(repoId, issue) as TicketPlan;
-  tellFlight(deps, signed, PLAN_APPROVED_COMMS(signed.ref));
-  return { ok: true, plan: withTitle(deps.store, signed), moved, moveError: null };
+  tellFlight(
+    deps,
+    signed,
+    moveError === null
+      ? PLAN_APPROVED_COMMS(signed.ref)
+      : planApprovedNotMovedComms(signed.ref, moveError),
+  );
+  return { ok: true, plan: withTitle(deps.store, signed), moved, moveError };
 }
 
 /** Sends a plan back to the planner with the operator's note. */

@@ -123,3 +123,11 @@ export function signedOffQaPlan(plan: TicketPlan | null): QaPlan | null {
 /** report_plan's refusal: the operator signs a plan off, so it needs every part. */
 export const planPartsText = (missing: readonly string[]): string =>
   `Not written: the operator reads this plan on the Planner tab, so it needs ${missing.join(", ")} too. Add them (mockups only when the work changes something the operator will see) and call report_plan again.`;
+
+/** send_to_planner's refusal: only a ticket that is not yet pickable can be held for a plan. */
+export const planSendColumnText = (ref: string, where: string): string =>
+  `Not sent: ${ref} is ${where}, and a seat can pick it up. Move it back to Backlog with promote { to: "Backlog" } first, then send it to the planner.`;
+
+/** FLIGHT's note that a plan was signed off but its card was left where it is. */
+export const planApprovedNotMovedComms = (ref: string, why: string): string =>
+  `The operator signed off the plan for ${ref}, but its card was not moved to Ready: ${why} Promote it once that clears; promote now accepts it.`;

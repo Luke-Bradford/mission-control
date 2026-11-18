@@ -4172,6 +4172,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         now,
         rules: deps.repoRules ?? (async () => DEFAULT_REPO_RULES),
         ...(deps.ticketMove === undefined ? {} : { move: deps.ticketMove }),
+        ...(deps.needsYou === undefined ? {} : { fetchTicket: deps.needsYou.fetchTicket }),
       });
       const planIssue = (raw: string): number =>
         /^[1-9]\d*$/.test(raw) && Number(raw) <= MAX_ISSUE_NUMBER ? Number(raw) : 0;

@@ -2,7 +2,7 @@ import "./temp-home.ts";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { type BoardItem, DEFAULT_REPO_RULES, type PlanSignoff } from "@mc/core";
+import { type BoardItem, DEFAULT_REPO_RULES, type PlanSignoff, type TicketView } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -30,7 +30,7 @@ const card = (n: number, status = "Backlog"): BoardItem => ({
   title: `Ticket ${n}`,
   status,
   state: "planned",
-  labels: [],
+  labels: ["area:server"],
   priority: null,
   updatedAt: NOW,
   url: "u",
@@ -47,6 +47,11 @@ const card = (n: number, status = "Backlog"): BoardItem => ({
   itemId: `I${n}`,
   projectId: "P1",
 });
+
+const AREAS = { "area:server": ["apps/server/**"] };
+/** The ticket reads as complete: it has Done when. */
+const readTicket = async (_repo: unknown, n: number) =>
+  ({ number: n, body: "Body\n\n## Done when\n\n- it works\n" }) as unknown as TicketView;
 
 const parts = (over: Record<string, unknown> = {}) => ({
   asks: "Show plans.",
@@ -77,6 +82,12 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+const needsYou = () => ({
+  board: { move: async () => ({ ok: true as const, changed: false }) },
+  rules: async () => DEFAULT_REPO_RULES,
+  fetchTicket: readTicket as never,
+});
+
 const app = () => {
   const bus = new ChangeBus();
   bus.subscribe((t) => emitted.push(t));
@@ -89,11 +100,14 @@ const app = () => {
       throw new Error("no gh in tests");
     },
     repoRules: async () =>
-      rulesFail ? new RepoRulesError("no rules") : { ...DEFAULT_REPO_RULES, planSignoff: setting },
+      rulesFail
+        ? new RepoRulesError("no rules")
+        : { ...DEFAULT_REPO_RULES, areas: AREAS, planSignoff: setting },
     ticketMove: async (m) => {
       moves.push(m);
       return moveResult;
     },
+    needsYou: needsYou(),
   });
 };
 
@@ -242,7 +256,8 @@ describe("sign-off", () => {
       store,
       bus: new ChangeBus(),
       now: () => NOW,
-      repoRules: async () => ({ ...DEFAULT_REPO_RULES, planSignoff: "every" }),
+      repoRules: async () => ({ ...DEFAULT_REPO_RULES, areas: AREAS, planSignoff: "every" }),
+      needsYou: needsYou(),
       ticketMove: async (m) => {
         moves.push(m);
         await gate;
@@ -287,7 +302,8 @@ describe("sign-off", () => {
       store,
       bus: new ChangeBus(),
       now: () => NOW,
-      repoRules: async () => ({ ...DEFAULT_REPO_RULES, planSignoff: "every" }),
+      repoRules: async () => ({ ...DEFAULT_REPO_RULES, areas: AREAS, planSignoff: "every" }),
+      needsYou: needsYou(),
       ticketMove: async (m) => {
         moves.push(m);
         await gate;
@@ -311,6 +327,34 @@ describe("sign-off", () => {
       .filter((c) => c.ticket === "shop-app#7")
       .map((c) => c.text);
     expect(told.some((t) => t.includes("sent the plan"))).toBe(false);
+    await a.close();
+  });
+
+  it("a card the operator set aside, or one blocked by an open issue, is signed off but not moved", async () => {
+    store.replaceBoard("shop-app", [
+      { ...card(7), labels: ["area:server", "waiting:operator"] },
+      { ...card(8), blockedBy: [{ ref: "shop-app#12", closed: false }] as BoardItem["blockedBy"] },
+    ]);
+    store.plans.file("shop-app", 7, parts(), false, NOW);
+    store.plans.file("shop-app", 8, parts(), false, NOW);
+    const a = app();
+    for (const [issue, wait] of [
+      [7, "waiting"],
+      [8, "#12"],
+    ] as const) {
+      const res = await a.inject({
+        method: "POST",
+        url: `/api/plans/shop-app/${issue}/approve`,
+        payload: {},
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).toMatchObject({ moved: false, plan: { state: "signed-off" } });
+      expect(body.moveError).toContain(wait);
+    }
+    expect(moves).toEqual([]);
+    const told = store.comms(0).map((c) => c.text);
+    expect(told.every((t) => !t.includes("sent the plan"))).toBe(true);
     await a.close();
   });
 

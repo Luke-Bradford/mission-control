@@ -3017,7 +3017,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       let body = String(issueJson.body ?? "");
       if (PLAN_HEADING_LINE.test(body)) {
         // a plan the operator sent back is written again, in place of the old one
-        if (loop !== "plan" || store.plans.get(run.repoId, issue)?.state !== "sent-back")
+        if (
+          loop !== "plan" ||
+          !["sent-back", "awaiting-plan"].includes(store.plans.get(run.repoId, issue)?.state ?? "")
+        )
           return { text: MC_PLAN_ALREADY, isError: true };
         body = body.slice(0, body.search(PLAN_HEADING_LINE)).trimEnd();
       }

@@ -2036,7 +2036,10 @@ board rules"): `every` holds every ticket, `larger` holds a ticket FLIGHT sent t
 major page changes and design shifts, or any other ticket it judges worth the operator's look), and
 `never` holds nothing. `never` is the default. FLIGHT's `promote` to Ready refuses a held ticket
 whose plan is not signed off, and says what to do; FLIGHT's `send_to_planner { issue, basis }` puts a
-ticket on the tab (any size, any setting) and a planner may then be started on it. `flight_state`
+ticket on the tab (any size, any setting) and a planner may then be started on it, even when the ticket already has a `## Plan` (the new plan replaces
+it). Only a card in Backlog or Refinement can be sent: one in Ready is already pickable, so move it back
+with `promote { to: "Backlog" }` first. `start_seat` refuses a developer start on a held ticket until its
+plan is signed off. `flight_state`
 shows `planSignoff` and `plans` (each waiting plan's `ref`, `state` and whether it is `held`) once the
 repo holds tickets or a plan waits; both are left out otherwise. Moving a card on
 GitHub by hand is not checked.
@@ -2076,8 +2079,11 @@ for the planner, with the operator's `note`) and `signed-off`.
   stale cached card is caught; a card already past Ready is left), and only then is the plan marked
   signed off. A failed move answers `502` and the plan stays waiting, so it can be approved again. Approve and send back run one at a time
   per ticket, so only one decision stands and the other answers `409`; if the repo's rules cannot be
-  read, approve answers `502` and the plan stays waiting. A plan that holds nothing is
-  recorded and the card stays. `409` when the plan is not waiting for sign-off.
+  read, approve answers `502` and the plan stays waiting. Before moving a card out of Backlog or
+  Refinement, approve runs the checks `promote` runs (set-aside label, a run on the ticket, needs,
+  area, open waits); a card that fails them is signed off but left where it is, the answer's
+  `moveError` names the wait, and FLIGHT is told it can promote once the wait clears. A plan that
+  holds nothing is recorded and the card stays. `409` when the plan is not waiting for sign-off.
 - `POST /api/plans/:repoId/:issue/send-back` with `{ note }` returns the ticket to the planner with
   the note, which the planner's next brief carries.
 - Both tell FLIGHT in Comms, and are refused with `409` on a hub that has loop writes off.

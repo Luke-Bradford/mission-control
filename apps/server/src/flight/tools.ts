@@ -17,7 +17,6 @@ import {
   accountStoppedText,
   answeredText,
   answerMessageText,
-  areaLabelsOf,
   askerRunEndedText,
   awayBugDecisionAbout,
   type BoardItem,
@@ -81,7 +80,6 @@ import {
   DEFAULT_PROFILES,
   DRAFT_BAD_TARGET,
   DRAFT_REPLY_DESCRIPTION,
-  dependsOn,
   draftedReplyText,
   duplicateLabelText,
   duplicateTitleText,
@@ -194,16 +192,11 @@ import {
   METRIC_IDS,
   mcToolHitText,
   messageAboutText,
-  missingNeedsText,
   modeOfSeat,
   movedDecision,
   movedText,
   moveFailedText,
-  moveHasRunText,
-  moveNoAreaText,
   moveNotOnBoardText,
-  moveTwoAreasText,
-  moveWaitsOnText,
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
@@ -246,6 +239,7 @@ import {
   planHolds,
   planNeedsSignoffText,
   plannerStartedDecision,
+  planSendColumnText,
   planSentText,
   planUnclosedText,
   promoteDraftText,
@@ -316,7 +310,6 @@ import {
   WAITS_ON_ONLY_BACKLOG,
   WITHDRAW_NOT_YOURS,
   WITHDRAW_SEAT_QUESTION,
-  waitingOperatorPromoteText,
   waitingOperatorStartText,
   withControllerCheckItem,
   withdrawnText,
@@ -416,6 +409,7 @@ import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { recordExternalMerge } from "./merged-line.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
+import { readyBlock, readyEarlyBlock } from "./ready-checks.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -1721,10 +1715,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       waits: waitReader(store, repo.id)(card),
     });
     if (refusal !== null) return fail(refusal);
+    // a developer is not started on a ticket the repo holds for the operator's plan sign-off
+    if (!planner && !handoff) {
+      const held = store.plans.get(repo.id, issue);
+      if (planHolds(rules.planSignoff, held))
+        return fail(planNeedsSignoffText(ref, held?.state ?? null));
+    }
     if (planner) {
-      // a plan the operator sent back is written again; a ticket sent to the Planner tab is planned at any size
+      // a plan the operator sent back, or one a ticket sent to the Planner tab still waits for, is
+      // written again; a ticket sent to the Planner tab is planned at any size
       const sent = store.plans.get(repo.id, issue);
-      if (hasPlanSection(body) && sent?.state !== "sent-back") return fail(planAlreadyText(ref));
+      const replan = sent?.state === "sent-back" || sent?.state === "awaiting-plan";
+      if (hasPlanSection(body) && !replan) return fail(planAlreadyText(ref));
       if (unclosedMarkdown(body)) return fail(planUnclosedText(ref));
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
@@ -2236,9 +2238,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         : column === "Backlog" || (column === "Refinement" && to === "Ready");
     if (!allowed) return fail(moveWrongColumnText(ref, column));
     // the operator set it aside with a question: it moves when they answer or move the card
-    if (to !== "Backlog" && card.labels.includes(WAITING_OPERATOR_LABEL))
-      return fail(waitingOperatorPromoteText(ref));
-    if (store.activeTickets().has(ref)) return fail(moveHasRunText(ref));
+    const early = readyEarlyBlock(store, ref, card, to === "Backlog");
+    if (early !== null) return fail(early);
     if (waitsOn !== undefined) {
       const waited = store.pullRequests(repo.id).find((p) => p.number === waitsOn);
       if (waited?.state !== "open") return fail(holdNotOpenPrText(repo.id, waitsOn));
@@ -2257,20 +2258,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }
-      const missing = rules.needs.filter((n) =>
-        n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
-      );
-      if (missing.length > 0) return fail(missingNeedsText(ref, missing));
-      const areas = areaLabelsOf(rules, card);
-      if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
-      if (areas.length === 0) return fail(moveNoAreaText(ref));
-      const waits = new Map(card.blockedBy.filter((b) => !b.closed).map((b) => [b.ref, b.ref]));
-      for (const n of dependsOn(body)) {
-        const dep = board.find((i) => i.issueNumber === n);
-        if (dep === undefined || !dep.closed) waits.set(`${repo.id}#${n}`, `${repo.id}#${n}`);
-      }
-      for (const w of waitReader(store, repo.id)(card)) waits.set(w.ref, w.text);
-      if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits.values()]));
+      const blocked = readyBlock({ store, repoId: repo.id, ref, card, body, rules });
+      if (blocked !== null) return fail(blocked);
     }
     if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
     const result = await deps.board.move({
@@ -2362,6 +2351,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const card = store.board(repo.id).find((i) => i.issueNumber === issue);
     if (card === undefined) return fail(moveNotOnBoardText(ref));
     if (store.plans.get(repo.id, issue)?.state === "signed-off") return fail(PLAN_SEND_REFUSED);
+    // a card in Ready is already pickable: it must leave Ready before it can be held for a plan
+    const where = hudColumnOf(card);
+    if (card.closed || (where !== "Backlog" && where !== "Refinement"))
+      return fail(planSendColumnText(ref, card.closed ? "closed" : where));
     const at = now();
     store.plans.request(repo.id, issue, at);
     record(at, {
