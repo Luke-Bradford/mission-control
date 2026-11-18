@@ -2045,7 +2045,9 @@ whose plan is not signed off, and says what to do; FLIGHT's `send_to_planner { i
 ticket on the tab (any size, any setting) and a planner may then be started on it, even when the ticket already has a `## Plan` (the new plan replaces
 it). Only a card in Backlog or Refinement can be sent: one in Ready is already pickable, so move it back
 with `promote { to: "Backlog" }` first. `start_seat` refuses a developer start on a held ticket until its
-plan is signed off. `flight_state`
+plan is signed off. The engine's own queue deals no held card, and `takeNext` reads the setting and
+the plan again before it starts a run, so a card already in Ready when a repo turns on sign-off is
+not started until it is signed off. `flight_state`
 shows `planSignoff` and `plans` (each waiting plan's `ref`, `state` and whether it is `held`) once the
 repo holds tickets or a plan waits; both are left out otherwise. Moving a card on
 GitHub by hand is not checked.
