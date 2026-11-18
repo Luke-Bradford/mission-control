@@ -329,13 +329,13 @@ describe("Telemetry refetch", () => {
 
 describe("Telemetry toolbar", () => {
   it("names the tab it shows and, on an unbuilt tab, says what is coming over the current panels", async () => {
-    await loaded(undefined, undefined, undefined, "throughput");
-    expect(screen.getByRole("tab", { name: "Throughput" }).getAttribute("aria-selected")).toBe(
+    await loaded(undefined, undefined, undefined, "quality");
+    expect(screen.getByRole("tab", { name: "Quality" }).getAttribute("aria-selected")).toBe(
       "true",
     );
-    screen.getByRole("heading", { level: 2, name: "Throughput is coming" });
+    screen.getByRole("heading", { level: 2, name: "Quality is coming" });
     // the current panels stay under the note, so nothing disappears meanwhile
-    for (const id of ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"])
+    for (const id of ["tQual", "tQualityTrend"])
       expect(panel(id)).toBeTruthy();
   });
 
@@ -1216,7 +1216,7 @@ describe("empty and failing telemetry", () => {
 
   it("every panel on Throughput, Quality and Machine shows its empty state", async () => {
     stub(EMPTY, { ...CFG, loops: [] });
-    await show("quality");
+    await show("throughput");
     await within(panel("tMerged")).findByText("No days to show yet.");
     within(panel("tCycleSize")).getByText("No tickets finished in the last 14 days.");
     cleanup();
@@ -1261,7 +1261,7 @@ describe("empty and failing telemetry", () => {
     await show("cost");
     await screen.findByText("Telemetry did not load.");
     cleanup();
-    await show("throughput");
+    await show("quality");
     await screen.findByText(/^Could not load telemetry:/);
   });
 });
