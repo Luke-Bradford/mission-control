@@ -3072,6 +3072,10 @@ describe("push and draft_pr", () => {
         expect(lost.isError).toBe(true);
         expect(lost.text).toContain(`Run ${LINT}, ${TYPES} again`);
         expect(checks.pending(RUN)).toEqual([]);
+        expect(checks.drops(RUN).map((drop) => [drop.reason, drop.command])).toEqual([
+          ["session-lost", LINT],
+          ["session-lost", TYPES],
+        ]);
 
         await checks.begin({ runId: RUN, toolUseId: "fresh-cell" }, joined);
         await checks.end({ runId: RUN, toolUseId: "fresh-cell" }, true, 0);
