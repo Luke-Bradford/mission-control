@@ -436,6 +436,7 @@ export const CHECK_DROP_REASONS = [
   "dirty-end",
   "head-moved",
   "turn-ended",
+  "session-lost",
   "background",
   "timeout",
   "unreadable",
@@ -467,6 +468,8 @@ export const checkDropText = (d: CheckDrop): string => {
       return `a commit moved the head during the call (it started on ${sha7(d.head)}), so it was not counted. Run the check again at this commit.`;
     case "turn-ended":
       return `the turn ended before the call reported its end (it started on ${sha7(d.head)}), so it was not counted. Run the check again and wait for it.`;
+    case "session-lost":
+      return `the earlier check session disappeared before it reported an exit code (it started on ${sha7(d.head)}), so it was not counted. Run the check again; do not keep polling the lost session.`;
     case "background":
       return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
     case "timeout":
