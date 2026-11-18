@@ -98,9 +98,9 @@ async function release(
       if (rules instanceof Error || ticket === null) {
         failed = true;
       } else {
+        const held = planHolds(rules.planSignoff, store.plans.get(repo.id, issue));
         const complete =
-          // a ticket held for plan sign-off stays Blocked until its plan is signed off
-          !planHolds(rules.planSignoff, store.plans.get(repo.id, issue)) &&
+          !held &&
           areaLabelsOf(rules, card).length === 1 &&
           rules.needs.every((n) =>
             n === "done_when" ? hasDoneWhenSection(ticket.body) : card.size !== null,
@@ -113,7 +113,11 @@ async function release(
               column: "Ready",
             })
           : { ok: true as const, changed: false };
-        if (moved.ok) {
+        if (held) {
+          // a ticket held for plan sign-off stays Blocked, and its release is tried again, so it
+          // moves once the plan is signed off
+          failed = true;
+        } else if (moved.ok) {
           patchReleased(store, repo.id, released.ref, released.at, { moved: true });
           if (moved.changed) d.pollGithub?.();
         } else failed = true;

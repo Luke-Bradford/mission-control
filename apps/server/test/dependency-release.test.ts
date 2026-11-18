@@ -245,6 +245,27 @@ describe("release on merge", () => {
     expect(moves).toHaveLength(1);
   });
 
+  it("a release held for plan sign-off is tried again, and moves once after the plan is signed off", async () => {
+    rulesNow = { ...RULES, planSignoff: "every" };
+    store.plans.file(
+      REPO,
+      1139,
+      { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] },
+      false,
+      T0,
+    );
+    seed();
+    await release(T0);
+    merge1015(T0 + 5 * MIN);
+    await release(T0 + 6 * MIN);
+    expect(moves).toEqual([]);
+    store.plans.approve(REPO, 1139, T0 + 7 * MIN);
+    await release(T0 + 6 * MIN + RELEASE_RETRY_MS + 1);
+    expect(moves).toEqual([{ runId: "dep:mc#1139", repoId: REPO, issue: 1139, column: "Ready" }]);
+    await release(T0 + 20 * MIN);
+    expect(moves).toHaveLength(1);
+  });
+
   it("keeps a dependent Blocked when its dependency closed without merging", async () => {
     seed();
     await release(T0);

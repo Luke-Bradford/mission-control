@@ -2058,7 +2058,8 @@ planner may be started on that ticket whatever its size.
 
 **Other ways to Ready.** A held ticket (per the setting above) is also kept out of Ready when an
 operator answer to a set-aside question would move it from Backlog (it stays in Backlog, the answer
-is delivered) and when a released dependency would move it from Blocked (it stays Blocked). Unreadable
+is delivered) and when a released dependency would move it from Blocked (it stays Blocked, and the release is tried
+again every few minutes, so it moves once the plan is signed off). Unreadable
 rules hold it too.
 
 **States.** `awaiting-plan` (sent by FLIGHT, no plan yet), `awaiting-signoff`, `sent-back` (waits
