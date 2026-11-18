@@ -521,7 +521,7 @@
 }
 .as-fig {
   display: block;
-  font: 600 var(--fs-panel) / var(--lh-panel) var(--mono);
+  font: 600 var(--fs) / var(--lh-s) var(--mono);
 }
 .as-sub {
   color: var(--muted);
@@ -740,6 +740,8 @@
 }
 .as-scroll .as-rec > td {
   vertical-align: middle;
+  padding-block: 0;
+  overflow: hidden;
 }
 .as-from {
   color: var(--fg-2);

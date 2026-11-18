@@ -71,6 +71,12 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
         );
       })(),
       detailDebug: JSON.stringify({
+        wide: list
+          ? [...list.querySelectorAll("*")]
+              .filter((e) => rect(e).right > rect(list).left + list.clientWidth + 1)
+              .slice(0, 4)
+              .map((e) => `${e.tagName}.${e.className}:${Math.round(rect(e).right)}`)
+          : [],
         list: list && { left: rect(list).left, client: list.clientWidth, scroll: list.scrollWidth },
         sections: [...document.querySelectorAll(".as-more .as-mg > div")].map((d) => ({
           left: Math.round(rect(d).left),

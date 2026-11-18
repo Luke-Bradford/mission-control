@@ -581,6 +581,10 @@ function useWholeRows(list: RefObject<HTMLElement | null>, rowSet: unknown) {
     if (typeof ResizeObserver === "undefined") return;
     const watch = new ResizeObserver(fit);
     watch.observe(panel);
+    watch.observe(el);
+    const table = el.querySelector("table");
+    if (table) watch.observe(table);
+    document.fonts?.ready.then(fit);
     return () => watch.disconnect();
   }, [list, rowSet]);
 }
@@ -778,27 +782,9 @@ export function AuditSummary({
         <Panel
           className="as-build"
           title="How we build"
-          sub="Merged PRs a day"
-          actions={
+          sub={
             <>
-              <span className="as-lg">
-                <span>
-                  <i className="as-k0" />
-                  no hub review
-                </span>
-                <span>
-                  <i className="as-k1" />
-                  round 1
-                </span>
-                <span>
-                  <i className="as-k2" />
-                  round 2
-                </span>
-                <span>
-                  <i className="as-k3" />
-                  round 3+
-                </span>
-              </span>
+              Merged PRs a day ·{" "}
               <button
                 type="button"
                 className="as-defbtn"
@@ -808,6 +794,26 @@ export function AuditSummary({
                 Count for each day
               </button>
             </>
+          }
+          actions={
+            <span className="as-lg">
+              <span>
+                <i className="as-k0" />
+                no hub review
+              </span>
+              <span>
+                <i className="as-k1" />
+                round 1
+              </span>
+              <span>
+                <i className="as-k2" />
+                round 2
+              </span>
+              <span>
+                <i className="as-k3" />
+                round 3+
+              </span>
+            </span>
           }
         >
           <MergedChart days={overview.build.mergedPerDay} showDays={showDays} />
