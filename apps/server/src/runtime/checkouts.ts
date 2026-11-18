@@ -1673,12 +1673,7 @@ export async function prepareCheckout(
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
   const ticket =
     i.handoff === undefined
-      ? await ticketBranch(
-          inClone,
-          i.issue,
-          i.mergedPullRequestBranches,
-          i.openPullRequestBranches,
-        )
+      ? await ticketBranch(inClone, i.issue, i.mergedPullRequestBranches, i.openPullRequestBranches)
       : null;
   const branch =
     i.handoff?.branch ??
