@@ -676,3 +676,18 @@ it("shows findings per touch from the stored summary's own figure, with no place
   expect(document.body.textContent).not.toContain("not yet supplied · ");
   expect(document.querySelector(".as-fmissing")).toBeNull();
 });
+
+it("keeps every past result one press away", async () => {
+  setup(overviewFixture({ past: 3 }));
+  render(<CodeHealth />);
+  await ready();
+  expect(screen.queryByRole("region", { name: "Past results" })).toBeNull();
+  const show = screen.getByRole("button", { name: /^Show \d+ results$/ });
+  expect(show.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(show);
+  const region = screen.getByRole("region", { name: "Past results" });
+  expect(within(region).getAllByRole("row").length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "Hide results" }).getAttribute("aria-expanded")).toBe(
+    "true",
+  );
+});

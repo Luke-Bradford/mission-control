@@ -154,7 +154,9 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.visibleRows).toBeGreaterThanOrEqual(5);
             expect(m.firstOpen).toBe(true);
             expect(m.landingRows).toBeGreaterThanOrEqual(2);
-            expect(m.plotHeight, "the chart shows").toBeGreaterThan(0);
+            expect(m.plotHeight, "the chart is a useful plot").toBeGreaterThanOrEqual(
+              width < 2200 ? 64 : 100,
+            );
             expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.figures).toBe(5);
             expect(m.figuresVisible, `every figure is fully visible: ${m.figuresDebug}`).toBe(5);
@@ -265,7 +267,9 @@ describeRendered("Audit first screen in a real browser", () => {
           const m = await measure(page);
           expect(m.landingRows, "two landing rows fit").toBeGreaterThanOrEqual(2);
           expect(m.figuresVisible, m.figuresDebug).toBe(5);
-          expect(m.plotHeight, "the chart shows").toBeGreaterThan(0);
+          expect(m.plotHeight, "the chart is a useful plot").toBeGreaterThanOrEqual(
+            width < 2200 ? 64 : 100,
+          );
           expect(m.filesScroll, "the files list scrolls").toBe(true);
           expect(m.landingOverlapsPast, "landing rows do not overlap past results").toBe(false);
           expect(m.pageScrolls).toBe(false);

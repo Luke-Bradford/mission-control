@@ -491,7 +491,8 @@ export function AuditSummary({
 }) {
   const [filter, setFilter] = useState<Who>("all"),
     [open, setOpen] = useState<string | null | undefined>(undefined),
-    [showDays, setShowDays] = useState(false);
+    [showDays, setShowDays] = useState(false),
+    [showPast, setShowPast] = useState(false);
   const rows = overview.rows,
     counts: Record<Who, number> = {
       all: rows.length,
@@ -745,6 +746,18 @@ export function AuditSummary({
             className="as-past"
             title="What past recommendations achieved"
             sub={`${overview.past.measured.improved} paid off · ${overview.past.measured.unchanged} unchanged · ${overview.past.measured.worse} worse · ${overview.past.measured.unmeasured} not measured`}
+            actions={
+              overview.past.items.length > 0 && (
+                <button
+                  type="button"
+                  className="as-defbtn"
+                  aria-expanded={showPast}
+                  onClick={() => setShowPast((v) => !v)}
+                >
+                  {showPast ? "Hide results" : `Show ${overview.past.items.length} results`}
+                </button>
+              )
+            }
           >
             <div className="as-fun">
               {overview.past.funnel.map((f) => (
@@ -759,40 +772,42 @@ export function AuditSummary({
                 No proposal has been decided yet, so there is no result to show.
               </p>
             ) : (
-              <ScrollRegion className="as-scroll as-pastrows" label="Past results">
-                <table>
-                  <colgroup>
-                    <col className="as-c-date" />
-                    <col />
-                    <col className="as-c-chg" />
-                    <col className="as-c-out" />
-                  </colgroup>
-                  <tbody>
-                    {overview.past.items.map((p) => (
-                      <tr key={p.id} className="as-prow">
-                        <td className="as-m">{day(p.decidedAt)}</td>
-                        <td>
-                          {p.title}
-                          <span className="as-sub"> · {p.metric}</span>
-                        </td>
-                        <td className="as-r">
-                          {p.after
-                            ? p.after.change
-                            : p.baseline === null
-                              ? "no baseline"
-                              : `from ${num(p.baseline)}`}
-                        </td>
-                        <td>
-                          <span className="as-vd">
-                            <i className={OUTCOME_SHAPE[p.outcome]} aria-hidden="true" />
-                            {OUTCOME_LABEL[p.outcome]}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </ScrollRegion>
+              showPast && (
+                <ScrollRegion className="as-scroll as-pastrows" label="Past results">
+                  <table>
+                    <colgroup>
+                      <col className="as-c-date" />
+                      <col />
+                      <col className="as-c-chg" />
+                      <col className="as-c-out" />
+                    </colgroup>
+                    <tbody>
+                      {overview.past.items.map((p) => (
+                        <tr key={p.id} className="as-prow">
+                          <td className="as-m">{day(p.decidedAt)}</td>
+                          <td>
+                            {p.title}
+                            <span className="as-sub"> · {p.metric}</span>
+                          </td>
+                          <td className="as-r">
+                            {p.after
+                              ? p.after.change
+                              : p.baseline === null
+                                ? "no baseline"
+                                : `from ${num(p.baseline)}`}
+                          </td>
+                          <td>
+                            <span className="as-vd">
+                              <i className={OUTCOME_SHAPE[p.outcome]} aria-hidden="true" />
+                              {OUTCOME_LABEL[p.outcome]}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </ScrollRegion>
+              )
             )}
           </Panel>
         </div>

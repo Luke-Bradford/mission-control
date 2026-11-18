@@ -4,7 +4,7 @@
   --as-side: clamp(440px, 34vw, 600px);
   --as-panel-head: 40px;
   --as-out-max: 160px;
-  --as-plot: 24px;
+  --as-plot: 64px;
 }
 @media (min-width: 2200px) {
   .code-health.as-fit {
