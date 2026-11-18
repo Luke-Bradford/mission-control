@@ -481,9 +481,17 @@ function FigureRow({ f, showWindow }: { f: CodeHealthFigure; showWindow: boolean
       </td>
       <td className="as-r as-m">{figureValue({ ...f, value: f.comparison?.value ?? null })}</td>
       <td className="as-r">{figureValue(f)}</td>
-      <td>
-        {f.state !== "available" && <span className="as-fstate">{FIGURE_STATE[f.state]} · </span>}
-        {change(f)}
+      <td className="as-chgcell" title={`${FIGURE_STATE[f.state]} ${change(f)}`.trim()}>
+        {f.state !== "available" && f.value === null ? (
+          <span className="as-fstate">{FIGURE_STATE[f.state]}</span>
+        ) : (
+          <>
+            {f.state !== "available" && (
+              <span className="as-fstate">{FIGURE_STATE[f.state]} · </span>
+            )}
+            {change(f)}
+          </>
+        )}
       </td>
       <td className="as-dotcell">
         <StateDot state={f.state} />

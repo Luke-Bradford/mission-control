@@ -216,7 +216,10 @@ describeRendered("Audit first screen in a real browser", () => {
             for (const h of m.recHeights)
               expect(h, "a closed Do next row is about 49 px").toBeLessThanOrEqual(52);
             for (const h of m.measureRowHeights)
-              expect(h, "a measure or file row is about 32 px").toBeLessThanOrEqual(35);
+              expect(
+                h,
+                `a measure or file row is about 32 px: ${m.measureRowHeights}`,
+              ).toBeLessThanOrEqual(35);
             expect(m.stageCells, "the stage strip has eight cells").toBe(8);
             expect(m.dayLabels, "every day is labelled on the axis").toBe(14);
             expect(m.legendInHeader, "the legend sits in the panel header").toBe(true);

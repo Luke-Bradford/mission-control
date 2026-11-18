@@ -804,3 +804,10 @@
   color: var(--fg-2);
   font-size: var(--fs-s);
 }
+
+/* The change cell is one line: a figure row stays about 32 px however long its words. */
+.as-scroll .as-chgcell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
