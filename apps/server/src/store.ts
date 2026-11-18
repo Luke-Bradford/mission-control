@@ -3307,6 +3307,16 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** Branches from durable merged-PR history, retained after the live PR cache drops them. */
+  mergedPullRequestBranches(repoId: RepoId): string[] {
+    return (
+      this.statement(
+        `SELECT DISTINCT json_extract(record, '$.branch') AS branch FROM pr_history
+         WHERE repo_id = ? AND json_extract(record, '$.branch') IS NOT NULL`,
+      ).all(repoId) as { branch: string }[]
+    ).map((row) => row.branch);
+  }
+
   /**
    * The p90 run time (ms) of each CI check run in the repo, by name, over its last merged PRs
    * that kept check timings; a name with fewer than CI_P90_MIN_SAMPLES runs is left out.
