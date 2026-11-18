@@ -154,6 +154,7 @@ export function briefSourceRevision(
                 flightClearedSha: run.loop.flightClearedSha,
                 flightSecondReview: run.loop.flightSecondReview,
                 flightReworks: run.loop.flightReworks,
+                flightReworkGrantEpoch: run.loop.flightReworkGrantEpoch,
                 awayBugDecision: run.loop.awayBugDecision,
                 aside: run.loop.aside,
                 merging: run.loop.merging,

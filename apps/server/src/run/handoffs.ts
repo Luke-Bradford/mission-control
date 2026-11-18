@@ -1,4 +1,4 @@
-import { NEW_LOOP, type Run, type RunHandoff, type RunLoop } from "@mc/core";
+import { MERGE_HOLD_PARK, NEW_LOOP, type Run, type RunHandoff, type RunLoop } from "@mc/core";
 import { cleanText } from "../repo/clean.ts";
 import { handoffCheckoutStatus } from "../runtime/checkouts.ts";
 import type { Store } from "../store.ts";
@@ -48,8 +48,13 @@ export function recordRunHandoff(
     ...(run.summary ? [safe(run.summary)] : []),
   ].slice(-6);
   const phase = run.loop?.phase ?? "building";
+  const hold = run.loop?.mergeHold;
   const left = [
     safe(run.loop?.parked?.reason ?? `Unfinished at ${phase}`),
+    // a merge hold stands until it is released: the next author must know why, and not re-push
+    ...(hold && run.loop?.parked?.kind !== MERGE_HOLD_PARK
+      ? [safe(`${hold.by} holds the merge: ${hold.reason}. Do not push the head again unchanged.`)]
+      : []),
     ...store
       .runDoneWhen(run.id)
       .slice(0, 8)
@@ -69,15 +74,19 @@ export function recordRunHandoff(
     goal: safe(run.ticketTitle ?? run.ticket),
     done: progress.length ? progress : digest?.lastText ? [safe(digest.lastText)] : [],
     left,
-    next: findings.length
-      ? "Resolve the open review findings, then report the updated head."
-      : run.loop?.parked
-        ? "Resolve the recorded stop reason, then continue the ticket."
-        : phase === "ci"
-          ? "Check CI for this branch and continue from the result."
-          : phase === "review"
-            ? "Check the latest review before changing the branch."
-            : "Inspect the preserved changes and continue the ticket's remaining work.",
+    next: hold
+      ? hold.by === "FLIGHT"
+        ? `Address the reason FLIGHT held the merge (${safe(hold.reason)}) with a new commit; the holder releases the hold. Do not push the same head again while it stands.`
+        : `Wait for ${hold.by} to release the merge hold, or address the reason if it names a change (${safe(hold.reason)}). The holder releases the hold.`
+      : findings.length
+        ? "Resolve the open review findings, then report the updated head."
+        : run.loop?.parked
+          ? "Resolve the recorded stop reason, then continue the ticket."
+          : phase === "ci"
+            ? "Check CI for this branch and continue from the result."
+            : phase === "review"
+              ? "Check the latest review before changing the branch."
+              : "Inspect the preserved changes and continue the ticket's remaining work.",
     branch: run.branch,
     worktree,
     gitStatus: [],

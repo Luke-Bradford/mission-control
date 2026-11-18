@@ -8,6 +8,7 @@ import {
   type RunLoop,
   WASTE_CHECKS,
   WASTE_THRESHOLDS,
+  type WasteCheck,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
@@ -18,9 +19,11 @@ import { attentionItems } from "../src/hud/hud.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import {
   openWasteAlarms,
+  resolvedReviewRound,
   resolveWasteAlarm,
   restartHold,
   reviewsHeld,
+  settleReviewRounds,
   syncWasteAlarms,
   ticketParked,
   wasteReport,
@@ -116,6 +119,8 @@ const mergedPr = (number: number, branch: string, mergedAt: number): PullRequest
 
 const checkOn = (runId: string, command: string, sha: string, at: number, ok = false) =>
   store.addCheckRun({ runId, command, headSha: sha, ok, exitCode: ok ? 0 : 1, at });
+
+const REVIEW_ROUNDS: WasteCheck = "review-rounds";
 
 describe("restart storm (7 November replay)", () => {
   it("raises an alarm within the minute tick and stops that agent's restarts", () => {
@@ -412,12 +417,65 @@ describe("review rounds", () => {
     // held at once, before the next scan
     expect(reviewsHeld(store, r.id)).toBe(true);
     syncWasteAlarms(config, store, NOW);
-    const alarm = openWasteAlarms(store).find((a) => a.check === "review-rounds");
+    const alarm = openWasteAlarms(store).find((a) => a.check === REVIEW_ROUNDS);
     expect(alarm).toMatchObject({ subject: r.id, level: 3 });
     resolveWasteAlarm(store, alarm?.id ?? 0, NOW, "fix: one more round");
     expect(reviewsHeld(store, r.id)).toBe(false);
     request(r.id, 4);
     expect(reviewsHeld(store, r.id)).toBe(true);
+  });
+});
+
+describe("settleReviewRounds", () => {
+  const blockingRound = (authorRunId: string, round: number) => {
+    const id = store.requestReview({
+      authorRunId,
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 4,
+      sha: `sha${round}`,
+      epoch: round,
+      attempt: 1,
+      round,
+      at: NOW - MIN,
+    });
+    if (id === null) throw new Error("fixture review missing");
+    store.setReviewState(id, ["queued"], "running", { at: NOW - MIN, runId: `rev-${round}` });
+    store.recordFindings(id, `rev-${round}`, {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "x",
+      findings: [
+        { severity: "Important", file: "f.ts", line: 1, summary: "s", scenario: "c", fix: "f" },
+      ],
+      at: NOW - MIN,
+    });
+  };
+  const at2 = (): Run => {
+    const r = run("guido-1", { ticket: "mc#5" });
+    store.upsertRun(r);
+    blockingRound(r.id, 1);
+    blockingRound(r.id, 2);
+    return r;
+  };
+
+  it("settles nothing when no hold stands and no grant is given", () => {
+    const r = at2();
+    expect(settleReviewRounds(store, r, NOW, "basis", false)).toBe(false);
+    expect(store.waste.alarms("WHERE check_id = ?", REVIEW_ROUNDS)).toEqual([]);
+  });
+
+  it("a grant resolves the hold at the round the next review gets", () => {
+    const r = at2();
+    expect(settleReviewRounds(store, r, NOW, "one more round", true)).toBe(true);
+    expect(resolvedReviewRound(store, r.id)).toBe(3);
+    // the next review is round 3: it runs
+    expect(reviewsHeld(store, r.id)).toBe(false);
+  });
+
+  it("settles nothing when that round is already resolved", () => {
+    const r = at2();
+    expect(settleReviewRounds(store, r, NOW, "one more round", true)).toBe(true);
+    expect(settleReviewRounds(store, r, NOW, "again", true)).toBe(false);
   });
 });
 
@@ -447,7 +505,7 @@ describe("review rounds on a sliced ticket", () => {
       });
     syncWasteAlarms(config, store, NOW);
     expect(reviewsHeld(store, r.id)).toBe(true);
-    expect(openWasteAlarms(store).find((a) => a.check === "review-rounds")).toMatchObject({
+    expect(openWasteAlarms(store).find((a) => a.check === REVIEW_ROUNDS)).toMatchObject({
       subject: r.id,
       level: 3,
     });
@@ -783,7 +841,7 @@ describe("an external PR's reviews", () => {
       });
     syncWasteAlarms(config, store, NOW);
     expect(reviewsHeld(store, "external-pr:mc#7")).toBe(false);
-    expect(openWasteAlarms(store).filter((a) => a.check === "review-rounds")).toEqual([]);
+    expect(openWasteAlarms(store).filter((a) => a.check === REVIEW_ROUNDS)).toEqual([]);
   });
 });
 

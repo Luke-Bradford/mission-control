@@ -30,6 +30,39 @@ beforeEach(() => {
 afterEach(() => store.close());
 
 describe("unfinished run handoffs", () => {
+  it("names a merge hold's holder and reason, and tells the next author not to push an unchanged head", () => {
+    const r = run({
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        prNumber: 9,
+        mergeHold: { by: "FLIGHT", reason: "design not approved", at: 1 },
+      },
+    });
+    store.upsertRun(r);
+    const h = recordRunHandoff(store, r, null);
+    expect(h?.left.join("\n")).toContain("FLIGHT holds the merge: design not approved");
+    expect(h?.left.join("\n")).toContain("Do not push the head again unchanged");
+    expect(h?.next).toContain("design not approved");
+    expect(h?.next).toContain("with a new commit");
+  });
+
+  it("tells the next author to wait for CAPCOM's release, not to push a new commit", () => {
+    const r = run({
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        prNumber: 9,
+        mergeHold: { by: "CAPCOM", reason: "operator hold", at: 1 },
+      },
+    });
+    store.upsertRun(r);
+    const h = recordRunHandoff(store, r, null);
+    expect(h?.next).toContain("Wait for CAPCOM to release");
+    expect(h?.next).toContain("operator hold");
+    expect(h?.next).not.toContain("with a new commit");
+  });
+
   it("records the goal, actual progress, remaining criteria, review findings and qualified messages once", () => {
     const r = run({ loop: { ...NEW_LOOP, phase: "review", prNumber: 9 } });
     store.upsertRun(r);
