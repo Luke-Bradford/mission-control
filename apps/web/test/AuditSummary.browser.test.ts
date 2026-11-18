@@ -11,6 +11,7 @@ interface Options {
   long?: boolean;
   files?: number;
   outside?: number;
+  longPath?: boolean;
 }
 function api(options: Options = {}) {
   const at = Date.now();
@@ -22,6 +23,7 @@ function api(options: Options = {}) {
     generatedAt: at,
     files: options.files,
     outside: options.outside,
+    longPath: options.longPath,
     rowOver: (n) =>
       options.long
         ? { title: `${long}${n}`, observation: `${long.repeat(3)}${n}`, uncertainty: long }
@@ -133,6 +135,7 @@ describeRendered("Audit first screen in a real browser", () => {
     ["one", { rows: 1 }],
     ["fifty", { rows: 50, files: 10, outside: 30 }],
     ["long text", { rows: 8, long: true }],
+    ["long file paths", { rows: 8, longPath: true }],
   ] as const)
     it(
       `keeps the page still and the lists reachable with ${name} rows at 1920x940`,
@@ -151,6 +154,33 @@ describeRendered("Audit first screen in a real browser", () => {
           expect(m.sideways).toBe(false);
           expect(m.panelsInside).toBe(true);
           if (options.rows === 50) expect(m.listScrolls).toBe(true);
+          if ("longPath" in options) {
+            expect(m.landingRows, "two landing rows fit").toBeGreaterThanOrEqual(2);
+            const p = await page.evaluate(() => {
+              const b = document.querySelector<HTMLButtonElement>(".as-files button.as-pathbtn");
+              if (!b) return null;
+              const cut = b.scrollWidth > b.clientWidth;
+              b.focus();
+              b.click();
+              const r = b.getBoundingClientRect();
+              const list = b.closest(".as-scroll");
+              return {
+                cut,
+                focused: document.activeElement === b,
+                open: b.getAttribute("aria-expanded") === "true",
+                whole: b.scrollWidth <= b.clientWidth + 1,
+                reachable:
+                  !!list && list.scrollHeight >= r.bottom - list.getBoundingClientRect().top,
+              };
+            }, undefined);
+            expect(p).toEqual({
+              cut: true,
+              focused: true,
+              open: true,
+              whole: true,
+              reachable: true,
+            });
+          }
           if (options.rows !== 0) expect(m.detailInside, m.detailDebug).toBe(true);
           if (options.rows !== 0) {
             const reachable = await page.reachable(".as-do .as-scroll tr.as-rec");

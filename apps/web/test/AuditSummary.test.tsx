@@ -599,3 +599,14 @@ it("shows a count scale and each day's merged count, reachable by keyboard, cros
   expect(items[10].textContent).toContain("11-01");
   expect(document.querySelector(".as-yscale")?.textContent).toMatch(/^\d+0$/);
 });
+
+it("shows a file path in full when its button is pressed", async () => {
+  setup();
+  render(<CodeHealth />);
+  await ready();
+  const b = screen.getAllByRole("button", { name: /file-number-0\.ts/ })[0];
+  expect(b.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(b);
+  expect(b.getAttribute("aria-expanded")).toBe("true");
+  expect(b.textContent).toBe("apps/server/src/very/long/path/to/a/file-number-0.ts");
+});

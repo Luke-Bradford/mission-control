@@ -373,6 +373,23 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
   );
 }
 
+/** A file path on one line; Enter or Space shows all of it, wrapped, for keyboard and touch users. */
+function FilePath({ path }: { path: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      type="button"
+      className="as-pathbtn"
+      aria-expanded={open}
+      aria-label={`${path}, ${open ? "full path shown" : "shortened if long; press to show all"}`}
+      title={path}
+      onClick={() => setOpen((v) => !v)}
+    >
+      {path}
+    </button>
+  );
+}
+
 /** A scrolling list the keyboard can reach and a screen reader can name. */
 function ScrollRegion({
   className,
@@ -662,8 +679,8 @@ export function AuditSummary({
                   <tbody>
                     {overview.landing.files.map((f) => (
                       <tr key={f.path} className="as-frow">
-                        <td className="as-path" title={f.path}>
-                          {f.path}
+                        <td className="as-path">
+                          <FilePath path={f.path} />
                         </td>
                         <td className="as-r">{f.findings}</td>
                         <td className="as-r">{f.touches}</td>

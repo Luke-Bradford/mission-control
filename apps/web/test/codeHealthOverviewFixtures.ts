@@ -84,6 +84,8 @@ export function overviewFixture(
     rowOver?: (n: number) => Partial<CodeHealthRecommendation>;
     outside?: number;
     files?: number;
+    /** A 300-character file path, longer than the schema's usual ones. */
+    longPath?: boolean;
     past?: number;
     waste?: boolean;
   } = {},
@@ -163,7 +165,7 @@ export function overviewFixture(
     },
     landing: {
       files: Array.from({ length: options.files ?? 3 }, (_, i) => ({
-        path: `apps/server/src/very/long/path/to/a/file-number-${i}.ts`,
+        path: `${options.longPath ? `${"deeply/nested/".repeat(20)}` : ""}apps/server/src/very/long/path/to/a/file-number-${i}.ts`,
         findings: 20 - i,
         touches: 10 + i,
         ratio: figure({
