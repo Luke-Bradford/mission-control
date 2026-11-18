@@ -75,7 +75,7 @@ export function recordRunHandoff(
     done: progress.length ? progress : digest?.lastText ? [safe(digest.lastText)] : [],
     left,
     next: hold
-      ? `Resolve the merge hold (${hold.by}: ${safe(hold.reason)}), then continue the ticket; do not push the same head again while it stands.`
+      ? `Address the reason ${hold.by} held the merge (${safe(hold.reason)}) with a new commit; the holder releases the hold. Do not push the same head again while it stands.`
       : findings.length
         ? "Resolve the open review findings, then report the updated head."
         : run.loop?.parked

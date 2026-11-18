@@ -6378,10 +6378,36 @@ describe("the engine runs reviews", () => {
         parked: { kind: MERGE_HOLD_PARK },
         mergeHold: { by: "FLIGHT", from: "review" },
       });
+      const sentBefore = h.sent.length;
       expect(await operate(RUN, "FLIGHT", { kinds: [MERGE_HOLD_PARK], action: "rework" })).toBe(
         true,
       );
       expect(loopOf().phase).toBe("working");
+      // the fix message reached the seat, and the hold still stands for its holder to release
+      expect(h.sent).toHaveLength(sentBefore + 1);
+      expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT" });
+      expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
+      expect(loopOf().mergeHold ?? null).toBeNull();
+    });
+
+    it("a run that already waits on FLIGHT when it is held parks on the hold, and a release returns it to review", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      // the hold is already on the loop (inherited at a handoff, or set in ci) when the pass runs
+      setLoop({ mergeHold: { by: "FLIGHT", reason: "design not approved", at: clock } });
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf()).toMatchObject({
+        phase: "parked",
+        parked: { kind: MERGE_HOLD_PARK },
+        mergeHold: { by: "FLIGHT", from: "review" },
+      });
+      expect(loopTexts().some((t) => t.includes("design not approved"))).toBe(true);
+      expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
+      expect(loopOf().mergeHold ?? null).toBeNull();
+      expect(loopOf().phase).toBe("review");
     });
 
     it("a stored pending controller check on the head is passed by FLIGHT's clearance", async () => {
@@ -7084,8 +7110,8 @@ describe("the engine runs reviews", () => {
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rereview" })).toBe(true);
         await h.engine.tick();
         await h.engine.reconcileRun(RUN);
-        const next = reviewRows().filter((r) => r.round >= 4 && r.state !== "superseded");
-        expect(next.map((r) => r.state)).toEqual(["running"]);
+        const next = reviewRows().filter((r) => r.sha === SHA_D && r.state === "running");
+        expect(next).toHaveLength(1);
         expect(loopOf().phase).not.toBe("parked");
       });
 
@@ -7103,10 +7129,54 @@ describe("the engine runs reviews", () => {
         ).toBe(true);
         await h.engine.tick();
         await h.engine.reconcileRun(RUN);
-        const next = reviewRows().filter((r) => r.round >= 4 && r.state !== "superseded");
+        const next = reviewRows().filter((r) => r.sha === SHA_D && r.state === "running");
         expect(next.map((r) => r.seatId)).toEqual(["retro-2"]);
         expect(next[0]?.state).toBe("running");
         expect(loopOf().phase).not.toBe("parked");
+      });
+
+      // a rereview or second_review is no grant: its epoch counts its own rounds, so after its review
+      // fails the seat's fix is reviewed, not held at a round counted across the old epochs
+      const failedThenFixed = async () => {
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const rerun = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        reported(rerun.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf().phase).not.toBe("parked"));
+        await push(SHA_E);
+        const fix = reviewRows().filter((r) => r.sha === SHA_E && r.state !== "superseded");
+        expect(fix).toHaveLength(1);
+        expect(fix[0]).toMatchObject({ state: "running" });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(loopOf().phase).not.toBe("parked");
+      };
+
+      it("after a rereview's review fails, the seat's fix is reviewed", async () => {
+        await grantedThenFailed();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rereview" })).toBe(true);
+        await failedThenFixed();
+      });
+
+      it("after a second_review's review fails, the seat's fix is reviewed", async () => {
+        config.accounts.push({ id: "claude-2", vendor: "claude", alertAt: 80, stopAt: 95 });
+        seats().push({ ...retroSeat(), id: "retro-2", accountId: "claude-2" });
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await grantedThenFailed();
+        expect(
+          await operate(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "second_review",
+            note: "the floor review looks wrong",
+          }),
+        ).toBe(true);
+        await failedThenFixed();
+      });
+
+      it("a rework from a review park below the cap leaves no review-rounds alarm", async () => {
+        await parkedForRework();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(store.waste.alarms("WHERE check_id = 'review-rounds'")).toEqual([]);
       });
 
       it("accept is refused when the last review failed the design check", async () => {
