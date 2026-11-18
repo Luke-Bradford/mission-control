@@ -1,7 +1,7 @@
 import {
+  type DefectVia,
   FLOW_DAYS,
   GUARD_RULES,
-  type DefectVia,
   type GuardHitsView,
   type GuardRule,
   type QaFlowView,
