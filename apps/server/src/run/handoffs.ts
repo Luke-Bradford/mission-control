@@ -77,14 +77,14 @@ export function recordRunHandoff(
     next: hold
       ? `Resolve the merge hold (${hold.by}: ${safe(hold.reason)}), then continue the ticket; do not push the same head again while it stands.`
       : findings.length
-      ? "Resolve the open review findings, then report the updated head."
-      : run.loop?.parked
-        ? "Resolve the recorded stop reason, then continue the ticket."
-        : phase === "ci"
-          ? "Check CI for this branch and continue from the result."
-          : phase === "review"
-            ? "Check the latest review before changing the branch."
-            : "Inspect the preserved changes and continue the ticket's remaining work.",
+        ? "Resolve the open review findings, then report the updated head."
+        : run.loop?.parked
+          ? "Resolve the recorded stop reason, then continue the ticket."
+          : phase === "ci"
+            ? "Check CI for this branch and continue from the result."
+            : phase === "review"
+              ? "Check the latest review before changing the branch."
+              : "Inspect the preserved changes and continue the ticket's remaining work.",
     branch: run.branch,
     worktree,
     gitStatus: [],

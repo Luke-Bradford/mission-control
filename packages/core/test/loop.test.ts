@@ -2310,7 +2310,11 @@ describe("review decisions", () => {
 
   it("a rework granted at the cap limits only the epoch it started", () => {
     const rows = [fact({ id: 4, epoch: 3, blocking: 1 })];
-    const granted = inReview(withReview(rows, [finding]), {}, { epoch: 3, flightReworkGrantEpoch: 3 });
+    const granted = inReview(
+      withReview(rows, [finding]),
+      {},
+      { epoch: 3, flightReworkGrantEpoch: 3 },
+    );
     const parked = reconcile(granted);
     expect(parked.loop.parked).toMatchObject({ kind: "review" });
     expect(sends(parked.actions)).toEqual([]);
