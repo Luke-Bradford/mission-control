@@ -89,17 +89,3 @@ export function reworkDueBesides(store: Store, run: Run): boolean {
     (r) => r.id !== run.id && !isDisplaced(store, r) && asideWakeDue(store, r),
   );
 }
-
-/**
- * Why a set-aside run is due back for a fix a fresh session may take (#1643): "ci" or "review".
- * Null for a displaced run, one parked on a question, one with a line owed on its return, one that
- * has not reported yet, and a run due back for any other reason (those resume).
- */
-export function fixWakeReason(store: Store, run: Run): "ci" | "review" | null {
-  if (!asideWakeDue(store, run)) return null;
-  const loop = run.loop;
-  if (!loop?.aside || loop.aside.ask !== undefined || loop.pendingLine) return null;
-  if (isDisplaced(store, run)) return null;
-  if (store.evidenceNotes(run.id).length < 1) return null;
-  return fixDueReason(store, run);
-}

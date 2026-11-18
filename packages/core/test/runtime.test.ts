@@ -97,10 +97,13 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
-  it("gives FLIGHT controller tools without a sandbox, preserving guard hooks", () => {
+  it("gives FLIGHT its listed tools without a sandbox or the operator's settings, preserving guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
-    for (const flag of ["--tools", "--disallowedTools", "--restricted"])
-      expect(args).not.toContain(flag);
+    for (const flag of ["--disallowedTools", "--restricted"]) expect(args).not.toContain(flag);
+    // Only the listed built-ins are defined to the model, and the operator's user settings (their
+    // installed plugins) are not loaded: both would add to every FLIGHT session's fixed start.
+    expect(args[args.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("project,local");
     // The credential scrub forces the CLI's permission mode to `default`, so a bypass flag does
     // nothing and FLIGHT's tools must be listed, or every hub tool call is refused.
     expect(CREW_CLI_ENV.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");

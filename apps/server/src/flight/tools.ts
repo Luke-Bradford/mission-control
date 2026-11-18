@@ -3900,7 +3900,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   const superTools = [
     superTool(
       MC_TOOL_NAMES.resolveWasteAlarm,
-      "Close an open waste alarm's hold: a parked ticket may start again, a stopped review may run, a restarted agent may start. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
+      "Close a retry-loop waste alarm's hold: the parked ticket may be dealt again. The alarm id is the key of the waste_alarm signal. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
       ResolveWasteAlarmArgs,
       "status",
       async (a) => {
@@ -4753,7 +4753,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.flightState,
       description:
-        "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and the runaway breaker; and your brief.",
+        "The crew now, in full, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review, every PR flow row with its timings and the merge queue; your recent decisions and the runaway breaker; your brief, the ledger index and your note titles. It is large: a wake already carries what changed.",
       inputSchema: {
         type: "object",
         properties: {},

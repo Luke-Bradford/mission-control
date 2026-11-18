@@ -38,6 +38,7 @@ import {
   WAITING_OPERATOR_LABEL,
   WAKE_STUCK_KEY_SUFFIX,
   WASTE_CHECK_TITLES,
+  WASTE_WAKES_FLIGHT,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { dueStuckPrs, prFitsSeat, type StuckPr } from "../engine/stuck-prs.ts";
@@ -755,11 +756,12 @@ export function flightSignals(i: {
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
-  // a waste alarm wakes FLIGHT once: the signal keeps its told mark for as long as the alarm stands
+  // An alarm about one ticket going round wakes FLIGHT, once: left unsaid, a ticket in its third
+  // review round or its fourth run stands unseen. The spend alarms are stored; GET
+  // /api/waste serves the open ones.
   for (const alarm of openWasteAlarms(store)) {
     if (alarm.repoId !== repo) continue;
-    // a refused rerun is already fixed by the hook: Audit records it, FLIGHT is not woken
-    if (alarm.check === "unchanged-rerun") continue;
+    if (!WASTE_WAKES_FLIGHT.includes(alarm.check)) continue;
     raise(
       "waste_alarm",
       String(alarm.id),

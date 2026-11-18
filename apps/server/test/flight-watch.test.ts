@@ -1445,10 +1445,9 @@ describe("FLIGHT's brief in the digest", () => {
     await watch.check();
     const line = startCalls[0]?.first ?? "";
     const state = JSON.parse(line.split("\n")[2] ?? "") as FlightWake;
-    expect(state.ledger.entries).toEqual([
-      { kind: "work", key: "w-ledger", title: "Wire the page", status: "active", next: "plan it" },
-    ]);
-    expect(state.ledgerMore).toBe(0);
+    // the open entry is counted; mc ledger reads it
+    expect(state.ledgerOpen).toBe(1);
+    expect(line).not.toContain("w-ledger");
     expect(state.headline).toBe("H");
     expect(state.brief?.map((b) => b.section)).toEqual(FLIGHT_NOTE_SECTIONS);
     expect(line).not.toContain("Wiring the page.");
@@ -1658,30 +1657,6 @@ describe("FLIGHT's brief in the digest", () => {
     expect(sentWake().questions).toHaveLength(3);
   });
 
-  it("does not repeat memory titles beyond the wake cap after a full tool read", async () => {
-    liveCrew();
-    ask();
-    for (let n = 0; n < 100; n++)
-      store.putFlightMemory({
-        repoId: "mc",
-        topic: `topic ${n}`,
-        kind: "lesson",
-        body: "Lesson",
-        source: "test",
-        author: "flight",
-        updatedAt: T0,
-      });
-    await watch.check();
-    const read = flightState({ config, store, busy: [], now: nowMs });
-    expect(read.memory).toHaveLength(100);
-    watch.seen("r-flight", read);
-    nowMs += HOUR;
-    ask(); // a new question changes a fact; an hour alone wakes no one
-    await watch.check();
-    expect(sentWake().memory.titles.lesson.entries).toEqual([]);
-    expect(sentWake().memory.titles.lesson.unchanged).toBe(100);
-  });
-
   it("emits attention at the triage deadline between watch ticks", async () => {
     liveCrew();
     nowMs = T0 + MIN;
@@ -1809,7 +1784,8 @@ describe("the FLIGHT watcher", () => {
     expect(digest.brief?.every((b) => b.text === "")).toBe(true);
     expect(digest.headline).toBe("");
     expect(digest.briefVersion).toBe(1);
-    for (const list of ["recent", "prs", "ledger", "tickets"] as const) {
+    expect(digest.prFlow).toEqual({ unowned: 0, entries: [], unchanged: 0, removed: [] });
+    for (const list of ["recent", "prs", "tickets", "mergeQueue"] as const) {
       expect(digest[list]).toEqual({ entries: [], unchanged: 0, removed: [] });
     }
     expect(digest.facts.q).toEqual([]);
@@ -2990,8 +2966,9 @@ describe("the FLIGHT watcher", () => {
       expect(startCalls).toHaveLength(1);
       const first = startCalls[0]?.first ?? "";
       expect(first).toContain("Mid-way through #77; promised the operator a PR by noon.");
-      expect(first).toContain("flight_state");
-      expect(first).toContain("tracked items, plans, memory");
+      // the digest is the state: a fresh session is pointed at what the digest leaves out
+      expect(first).toContain("mc ledger");
+      expect(first).toContain("mc recall");
     });
 
     it("tells the FLIGHT page the context and when the session is renewed", () => {
@@ -6028,7 +6005,9 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(line).toContain("guido-1");
     expect(line).toMatch(/working list/);
     expect(line).toMatch(/leave the seat idle/);
-    expect(line).toMatch(/do not promote parked work, file a ticket or log a wait/);
+    expect(line).toMatch(
+      /do not promote work the working list sets aside, file a ticket or log a wait/,
+    );
     expect(line).toMatch(/money, direction, irreversible/);
     expect(line).not.toMatch(/(start|open) (a|the|your) (new )?(controller |claude )?session/i);
     expect(line).not.toMatch(/controller session/i);

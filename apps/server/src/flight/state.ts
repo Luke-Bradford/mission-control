@@ -30,9 +30,7 @@ import {
   FLIGHT_LEDGER_OPEN,
   FLIGHT_MAX_WAKES,
   FLIGHT_MEMORY_HEADING,
-  FLIGHT_MEMORY_KINDS,
   FLIGHT_MEMORY_RECALL_MAX,
-  FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_MOVED_LISTED,
   FLIGHT_NOT_TRIAGING_KEY,
@@ -58,9 +56,7 @@ import {
   type FlightBriefView,
   type FlightDecision,
   type FlightIdleSeats,
-  type FlightMemoryKind,
   type FlightMemoryNote,
-  type FlightMemoryTitle,
   type FlightMovedPointer,
   type FlightPark,
   type FlightScheduleView,
@@ -1545,7 +1541,6 @@ export function flightState(i: {
 
 export interface FlightWakeSnapshot {
   linked: Map<string, string>;
-  memory: Map<string, string>;
   signals: Map<string, string>;
   brief: Map<string, string>;
   headlineHash: string;
@@ -1553,19 +1548,23 @@ export interface FlightWakeSnapshot {
   recent: Map<string, string>;
   prs: Map<string, string>;
   seats: Map<string, string>;
-  ledger: Map<string, string>;
   tickets: Map<string, string>;
+  prFlow: Map<string, string>;
+  mergeQueue: Map<string, string>;
 }
 
 const entryHash = (entry: unknown): string =>
   createHash("sha256").update(JSON.stringify(entry)).digest("hex");
 
-/** Prepare a wake without advancing the snapshot: only a delivered wake or tool read does that. */
+/**
+ * Prepare a wake without advancing the snapshot: only a delivered wake or tool read does that.
+ * The ledger and the memory titles are not sent: a wake carries their counts, and `mc ledger`,
+ * `mc recall` and `mc flight_state` read them on request.
+ */
 export function flightWake(
   state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
-  fullRead = false,
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
   const {
     brief,
@@ -1574,9 +1573,12 @@ export function flightWake(
     prs,
     seats,
     ledger,
+    ledgerMore,
     tickets,
     signals,
     memory = [],
+    prFlow: flow,
+    mergeQueue,
     wake: _wake,
     ...rest
   } = state;
@@ -1592,7 +1594,6 @@ export function flightWake(
     (previous?.briefVersion ?? 0) + (changedHeadline || changedNotes.length > 0 ? 1 : 0);
   const snapshot: FlightWakeSnapshot = {
     linked: new Map(previous?.linked),
-    memory: new Map(),
     signals: new Map(),
     brief: briefHashes,
     headlineHash,
@@ -1600,11 +1601,12 @@ export function flightWake(
     recent: new Map(),
     prs: new Map(),
     seats: new Map(),
-    ledger: new Map(),
     tickets: new Map(),
+    prFlow: new Map(),
+    mergeQueue: new Map(),
   };
   const changed = <T>(
-    list: "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals" | "memory",
+    list: "recent" | "prs" | "seats" | "tickets" | "signals" | "prFlow" | "mergeQueue",
     entries: T[],
     key: (entry: T) => string,
     // Poll times and age counters stay in sent entries, but do not make an entry new.
@@ -1628,31 +1630,6 @@ export function flightWake(
   const wakeSignals = signals.filter((signal) => !signal.told);
   const signalChanges = changed("signals", wakeSignals, (s) => `${s.kind}:${s.key}`);
   signalChanges.unchanged += signals.length - wakeSignals.length;
-  const memoryChanges = changed("memory", memory, (n) => `${n.kind}:${n.topic}`);
-  const titles = Object.fromEntries(
-    FLIGHT_MEMORY_KINDS.map((kind) => {
-      const changes = memoryChanges.entries.filter((n) => n.kind === kind);
-      const entries = changes.slice(0, FLIGHT_MEMORY_TITLES_MAX);
-      // Omitted titles have not been delivered; keep them eligible for the next wake.
-      for (const note of fullRead ? [] : changes.slice(FLIGHT_MEMORY_TITLES_MAX)) {
-        const key = `${kind}:${note.topic}`;
-        const prior = previous?.memory.get(key);
-        if (prior === undefined) snapshot.memory.delete(key);
-        else snapshot.memory.set(key, prior);
-      }
-      return [
-        kind,
-        {
-          entries,
-          more: changes.length - entries.length,
-          unchanged: memory.filter((n) => n.kind === kind).length - changes.length,
-          removed: memoryChanges.removed
-            .filter((key) => key.startsWith(`${kind}:`))
-            .map((key) => key.slice(kind.length + 1)),
-        },
-      ];
-    }),
-  ) as Record<FlightMemoryKind, FlightWakeList<FlightMemoryTitle> & { more: number }>;
   const linkedHash = ({ updatedAt: _updatedAt, ...note }: FlightMemoryNote): string =>
     entryHash(note);
   const linkedChanges = linkedMemory(notes, state).filter(
@@ -1660,6 +1637,7 @@ export function flightWake(
   );
   const linked = linkedChanges.slice(0, FLIGHT_MEMORY_RECALL_MAX);
   for (const note of linked) snapshot.linked.set(note.topic.toLowerCase(), linkedHash(note));
+  const overdueFacts = prFlowFacts(flow);
   const ticketChanges = changed("tickets", tickets.slice(0, FLIGHT_TICKETS_LISTED), (t) => t.ref);
   return {
     snapshot,
@@ -1667,7 +1645,7 @@ export function flightWake(
       ...rest,
       memory: {
         heading: FLIGHT_MEMORY_HEADING,
-        titles,
+        notes: memory.length,
         linked,
         linkedMore: linkedChanges.length - linked.length,
       },
@@ -1688,7 +1666,24 @@ export function flightWake(
         (s) => s.id,
         ({ idleMin: _idleMin, ...seat }) => seat,
       ),
-      ledger: changed("ledger", ledger, (e) => e.key),
+      ledgerOpen: ledger.length + ledgerMore,
+      prFlow: {
+        unowned: flow?.unowned ?? 0,
+        ...changed(
+          "prFlow",
+          (flow?.rows ?? []).map((row) => {
+            // a deadline passing changes no field of the row: the row carries what is overdue
+            const overdue = overdueFacts
+              .filter((fact) => fact.startsWith(`${row.pr}:`))
+              .map((fact) => fact.split(":")[1] ?? "");
+            return overdue.length > 0 ? { ...row, overdue } : row;
+          }),
+          (r) => String(r.pr),
+          // the last action moves with every CI run and every decision of FLIGHT's own
+          ({ lastAction: _a, lastActor: _b, lastActionAt: _c, ...row }) => row,
+        ),
+      },
+      mergeQueue: changed("mergeQueue", mergeQueue ?? [], (p) => String(p.pr)),
       tickets: {
         ...ticketChanges,
         entries: ticketChanges.entries.map((t) =>
@@ -1912,8 +1907,9 @@ export function immediateCategories(previous: string, current: string): string[]
 
 /**
  * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
- * moving. An operator message, question, blocker, park, signal, plan, instruction or the breaker is
- * never routine, so those wake FLIGHT at once. False when nothing changed.
+ * moving. An operator message, question, blocker, park, plan, instruction or the breaker is never
+ * routine, so those wake FLIGHT at once; so does a signal, unless its kind is not immediate and
+ * signals are a learned category. False when nothing changed.
  */
 export function routineOnly(
   previous: string,

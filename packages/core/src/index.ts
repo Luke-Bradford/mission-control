@@ -12,7 +12,6 @@ export * from "./comms.ts";
 export * from "./crew-pause.ts";
 export * from "./dependencies.ts";
 export * from "./external-text.ts";
-export * from "./fix-session-trial.ts";
 export * from "./flight.ts";
 export * from "./flight-access.ts";
 export * from "./flight-memory.ts";

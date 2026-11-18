@@ -1225,18 +1225,6 @@ export class Store {
     }));
   }
 
-  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
-  fixTrialRuns(): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
-           ORDER BY started_at, seq`,
-        )
-        .all() as Row[]
-    ).map(toRun);
-  }
-
   /** Context size of every stored model call of runs that started since `since`. */
   runCallContexts(since: number): { runId: string; context: number }[] {
     return this.db

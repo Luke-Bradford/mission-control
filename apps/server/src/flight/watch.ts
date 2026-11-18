@@ -14,6 +14,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_FULL_BUILTINS,
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_GUARD_SETTING,
@@ -147,10 +148,14 @@ export const changedWakeFacts = (previous: string, current: string): string[] =>
     });
 };
 
-/** The tool set a FLIGHT run started with is what it keeps: a digest of the names it was offered. */
+/**
+ * The tool set a FLIGHT run started with is what it keeps: a digest of the names it was offered,
+ * hub tools and built-ins. A resumed session keeps its old context, so a change to either list
+ * starts a fresh one.
+ */
 export const flightToolsDigest = (): string =>
   createHash("sha256")
-    .update([...FLIGHT_TOOLS].sort().join(","))
+    .update([...FLIGHT_TOOLS, ...FLIGHT_FULL_BUILTINS].sort().join(","))
     .digest("hex")
     .slice(0, 16);
 
@@ -515,12 +520,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = false;
       rotationRequested = false; // the fresh session already sees the current config
       try {
-        const { digest, snapshot } = flightWake(
-          state,
-          undefined,
-          store.flightMemory(state.repo),
-          false,
-        );
+        const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const note = store
           .flightMemory(state.repo)
@@ -684,7 +684,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         state,
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
-        false,
       );
       const changed = changedWakeFacts(lastFacts, wake);
       // A learned category rides with an immediate wake, but teaches the learned set only when it
@@ -816,12 +815,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (!seatId || store.seatSession(seatId)?.runId !== runId) return;
       delivered = {
         runId,
-        snapshot: flightWake(
-          state,
-          delivered?.runId === runId ? delivered.snapshot : undefined,
-          [],
-          true,
-        ).snapshot,
+        snapshot: flightWake(state, delivered?.runId === runId ? delivered.snapshot : undefined)
+          .snapshot,
       };
     },
     rotate() {

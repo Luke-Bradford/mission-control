@@ -27,8 +27,6 @@ import {
   type BriefInput,
   CLAUDE_MD_HEADING,
   CLAUDE_MD_MAX,
-  FIX_SESSION_BRIEF_MAX,
-  fixSessionBrief,
   MC_RESTART_TEXT,
   type ReviewBriefInput,
   readRepoAgentsMd,
@@ -128,72 +126,6 @@ describe("FAO file evidence", () => {
     expect(
       ticketBrief({ ...input, role: "FAO", loop: "build", fileContext: context }),
     ).not.toContain("## Relevant file evidence");
-  });
-});
-
-describe("fixSessionBrief", () => {
-  const fix = {
-    ...input,
-    reason: "ci" as const,
-    prNumber: 7,
-    headSha: "abc123",
-    doneWhen: [
-      { line: 1, text: "A plan exists", status: "met" as const, evidence: "plan.md" },
-      { line: 2, text: "Receipts", status: "not_met" as const, evidence: "needs the deploy" },
-    ],
-    notes: ["first note", "second note"],
-  };
-
-  it("opens with the fresh-session line and points at the ticket, not the old conversation", () => {
-    const out = fixSessionBrief(fix);
-    const lines = out.split("\n");
-    expect(lines[0]).toBe(
-      `Fresh session for ${input.call}: the earlier session's conversation is not loaded. This run's branch, worktree, commits, evidence and PR are unchanged.`,
-    );
-    expect(out).toContain(
-      "Read the ticket and its plan with mc read_ticket before changing code. Run git status and git log -5 to see where the work stands; do not repeat finished steps.",
-    );
-    expect(out).toContain(`Branch ${input.branch}, PR 7, pushed head abc123.`);
-    expect(out).toContain("The next message gives the CI failure to fix.");
-    expect(fixSessionBrief({ ...fix, reason: "review" })).toContain(
-      "The next message gives the review findings to fix.",
-    );
-  });
-
-  it("lists the Done-when lines and notes, and carries no findings", () => {
-    const out = fixSessionBrief(fix);
-    expect(out).toContain("Done when, as last reported:");
-    expect(out).toContain("1. met: A plan exists (plan.md)");
-    expect(out).toContain("2. not_met: Receipts (needs the deploy)");
-    expect(out).toContain("Latest report notes:");
-    expect(out).toContain("second note");
-    expect(out).not.toContain("blocking");
-  });
-
-  it("stays within the maximum with two notes of 20,000 characters", () => {
-    const long = "x".repeat(20_000);
-    const out = fixSessionBrief({ ...fix, notes: [long, long] });
-    expect(out.length).toBeLessThanOrEqual(FIX_SESSION_BRIEF_MAX);
-    expect(out).toContain("Latest report notes:");
-    // each note is cut to 1,500 characters
-    expect(out).not.toContain("x".repeat(1_501));
-  });
-
-  it("cuts the notes before anything else when the head is large", () => {
-    const decisions = Array.from({ length: 10 }, (_, n) => ({
-      question: "q".repeat(400),
-      answer: `a${n}`,
-    }));
-    const out = fixSessionBrief({
-      ...fix,
-      decisions,
-      checklist: undefined,
-      commands: Array.from({ length: 150 }, (_, n) => `pnpm -s check-${n}-${"y".repeat(30)}`),
-      notes: ["z".repeat(5_000), "w".repeat(5_000)],
-    } as never);
-    expect(out.length).toBeLessThanOrEqual(FIX_SESSION_BRIEF_MAX);
-    expect(out).toContain("Done when, as last reported:");
-    expect(out).not.toContain("Latest report notes:");
   });
 });
 
@@ -497,8 +429,7 @@ describe("rolePrompt", () => {
     expect(prompt).not.toContain("apps/server/src/guard/**");
     // everything else the seat is told stays
     // the push gate's commands stay: they are the only part of the block a seat runs
-    for (const c of ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test:related"])
-      expect(prompt).toContain(c);
+    for (const c of ["pnpm -s lint", "pnpm -s typecheck"]) expect(prompt).toContain(c);
     for (const kept of [
       "## Source of truth",
       "docs/direction.md",

@@ -45,9 +45,9 @@ export const WASTE_THRESHOLDS = Object.freeze({
   retryResumes: 3,
   /** A change past this many review rounds stops its reviews. */
   reviewRounds: 2,
-  /** An open PR with this many failed review rounds is raised to FLIGHT; its reviews go on. */
+  /** An open PR with this many failed review rounds raises an alarm; its reviews go on. */
   failedReviewRounds: 2,
-  /** A hard-rule PR waiting this long on FLIGHT's clearance is raised to FLIGHT. */
+  /** A hard-rule PR waiting this long on FLIGHT's clearance raises an alarm. */
   clearanceAlarmMs: 2 * HOUR_MS,
   /** The same wait shows on the Audit waste route from this long. */
   clearanceAuditMs: DAY_MS,
@@ -102,6 +102,20 @@ export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
   "failed-review-rounds": "alarm",
   "clearance-waiting": "alarm",
 };
+
+/**
+ * The alarms that wake FLIGHT, once each: work on one ticket that is going round, which a person
+ * would otherwise find only by reading the log. The rest are stored and served by GET /api/waste.
+ * Not here, and why: a review-rounds hold parks the run, and the park wakes FLIGHT; an unchanged
+ * rerun and a restart storm are refused or held by the hub itself; clearance waiting counts hours,
+ * so a resolved one would wake FLIGHT again every hour; cost, coordination and churn are left out
+ * by choice, as measures of spend for the Audit page.
+ */
+export const WASTE_WAKES_FLIGHT: readonly WasteCheck[] = [
+  "retry-loop",
+  "failed-review-rounds",
+  "runs-per-ticket",
+];
 
 /** One waste alarm as the hub keeps it. */
 export interface WasteAlarm {

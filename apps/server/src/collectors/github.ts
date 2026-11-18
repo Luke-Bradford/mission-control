@@ -243,7 +243,7 @@ const MILESTONES_QUERY = `query Milestones($owner: String!, $name: String!) {
 }`;
 
 const MAIN_SELECTION = `defaultBranchRef {
-      target { ... on Commit { oid committedDate statusCheckRollup { state contexts(first: 10) { nodes { ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } } } }
+      target { ... on Commit { oid committedDate statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { ... on CheckRun { name conclusion detailsUrl } ... on StatusContext { context state targetUrl } } } } } }
     }`;
 const prsQuery = (
   observe: boolean,
