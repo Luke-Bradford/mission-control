@@ -3,7 +3,7 @@
 .code-health.as-fit {
   --as-side: clamp(440px, 34vw, 600px);
   --as-out-max: 160px;
-  --as-plot: 64px;
+  --as-plot: 52px;
 }
 @media (min-width: 2200px) {
   .code-health.as-fit {
@@ -96,7 +96,7 @@
     flex: none;
   }
   .as-pastrows {
-    max-height: 64px;
+    max-height: 56px;
   }
   /* Always leave room for the header and a few file rows. */
   .as-files .as-grow {
@@ -682,4 +682,10 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-radius: 2px;
+}
+
+/* Figure and file rows are compact so the right column leaves room for the file list. */
+.as-scroll .as-hrow > td,
+.as-scroll .as-prow > td {
+  padding-block: var(--sp-1);
 }
