@@ -1872,6 +1872,8 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 
 - `pick_from`: statuses seats take tickets from; default `[Ready]`.
 - `promote_backlog`: default `false`.
+- `plan_signoff`: `every`, `larger` or `never` (default `never`): whether a ticket waits for the
+  operator's sign-off of its plan before it goes to Ready. See "Plan sign-off".
 - `needs`: promotion/start requirements; default `[done_when, size]`.
 - `templates`: label → template profile name (profiles live beside the config).
 - `areas`: area label → globs; a seat's focus is the labels inside its area.
@@ -1891,13 +1893,13 @@ Commands and protected files already live alongside `rules`, at `repos[].command
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
 from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
 
-**Roles & guards API.** `GET /api/repos/:repoId/rules` reads config.yaml fresh and returns 17 keys,
-each as `{ value, source }`: `pick_from`, `needs`, `areas`, `promote_backlog`, `protected`,
+**Roles & guards API.** `GET /api/repos/:repoId/rules` reads config.yaml fresh and returns 18 keys,
+each as `{ value, source }`: `pick_from`, `needs`, `areas`, `promote_backlog`, `plan_signoff`, `protected`,
 `hard_rules`, `hard_rules_by`, `commands.writer`, `commands.review`, `full_suite`, `required_checks`,
 `checks`, `uat.labels`, `uat.paths`, `always_ask`, and the read-only `autonomy` and `flight_powers`.
 The source is `set-here` (saved in config.yaml), `repo-file` (the repo's CLAUDE.md block),
 `default`, or `config-file` (Authority). The repo file owns `pick_from` and `areas` whenever its
-block names them, fills `needs`, `promote_backlog` and `hard_rules` that config.yaml leaves out, and
+block names them, fills `needs`, `promote_backlog`, `plan_signoff` and `hard_rules` that config.yaml leaves out, and
 only adds to `hard_rules` (when set here), `checks`, `uat.*` and `always_ask`: those keep their
 config source and list the additions in `repoAdds`. A block that cannot be read shows its reason in
 `repoFileError` and the config values still show. The response's `base` is the digest of the same
@@ -1910,7 +1912,8 @@ page loaded it; reload and try again` and writes nothing. Each save keeps the no
 config backup, validates with the config schema's own messages, and refuses `autonomy` and
 `flight_powers` (and any other key). It makes the saved rules, commands, checks and protected files
 live; any other change already on disk (Authority, crew, rotation) stays unapplied until the hub
-restarts. It makes no GitHub call.
+restarts. It makes no GitHub call. A saved `plan_signoff` takes effect at once: the next `promote`
+and the next approval read it.
 
 A repo block optionally tightens the rules in the first fenced `yaml` block under
 `## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
@@ -2031,6 +2034,83 @@ is never counted as spend.
   Mission Control write.
 - When an earlier usage source fails and a later one succeeds, the account stays `ok` and the
   earlier failure's message is kept as a note in the collector's `error` field.
+
+## Plan sign-off
+
+A ticket can wait for the operator to sign off its plan before it goes to Ready. The hub keeps one
+row per ticket (table `ticket_plans`) beside its comms and QA reports; the page that shows them is
+the Planner tab. Each plan has five parts: what the ticket asks (`asks`), what is proposed
+(`proposal`), pictures (`mockups`), a size estimate (`sizeEstimate`) and complications and risks
+(`risks`).
+
+**The setting.** `rules.plan_signoff` per repo, saved on Setup › Roles & guards (see "Per-repo
+board rules"): `every` holds every ticket, `larger` holds a ticket FLIGHT sent to the tab (epics,
+major page changes and design shifts, or any other ticket it judges worth the operator's look), and
+`never` holds nothing. `never` is the default. FLIGHT's `promote` to Ready refuses a held ticket
+whose plan is not signed off, and says what to do; FLIGHT's `send_to_planner { issue, basis }` puts a
+ticket on the tab (any size, any setting) and a planner may then be started on it, even when the ticket already has a `## Plan` (the new plan replaces
+it). Only a card in Backlog or Refinement can be sent: one in Ready is already pickable, so move it back
+with `promote { to: "Backlog" }` first. `start_seat` refuses a developer start on a held ticket until its
+plan is signed off. The engine's own queue deals no held card, and `takeNext` reads the setting and
+the plan again before it starts a run, so a card already in Ready when a repo turns on sign-off is
+not started until it is signed off. `flight_state`
+shows `planSignoff` and `plans` (each waiting plan's `ref`, `state` and whether it is `held`) once the
+repo holds tickets or a plan waits; both are left out otherwise. Moving a card on
+GitHub by hand is not checked.
+
+**How a plan gets on the tab.** The planner's `report_plan` takes, besides `plan` (what is
+proposed, also written under `## Plan` on the ticket), `summary` (what the ticket asks),
+`size_estimate`, `risks` and `mockups` (up to 8 `{ path, caption }`; each path is a PNG, JPEG or
+WebP file of at most 2 MB inside the planner's checkout, not a link). The hub keeps each picture by
+content hash under `plan-assets/` beside the database. Whether a ticket is held is
+worked out from the repo's current setting and FLIGHT's mark (`marked` on the plan: FLIGHT sent it as
+larger work): `every` holds all, `larger` the marked, `never` none, so a change on Setup applies to
+plans already filed. The text fields and picture captions are scanned for secrets, mentions and
+references like the plan itself. When the repo
+is `every` or `larger`, FLIGHT sent the ticket, or the planner gives any of the parts, `report_plan`
+is refused unless it has all of `summary`, `size_estimate` and `risks` (mockups only when the operator
+will see something). A bare `plan` in a `never` repo is still written to the ticket but stays off the tab. A plan the
+operator sent back is written again: `report_plan` replaces the old `## Plan` section, and a
+planner may be started on that ticket whatever its size.
+
+**Other ways to Ready.** A held ticket (per the setting above) is also kept out of Ready when an
+operator answer to a set-aside question would move it from Backlog (it stays in Backlog, the answer
+is delivered) and when a released dependency would move it from Blocked (with a plan waiting for sign-off it stays Blocked, and the
+release is tried again every few minutes, so it moves once the plan is signed off; with no plan, or one sent
+back, it goes to Backlog so FLIGHT can send it to the planner). A closed ticket drops out of the Planner tab's
+waiting list, and approve and send back answer 409 for it. Unreadable
+rules hold it too.
+
+**States.** `awaiting-plan` (sent by FLIGHT, no plan yet), `awaiting-signoff`, `sent-back` (waits
+for the planner, with the operator's `note`) and `signed-off`.
+
+**API.**
+- `GET /api/plans` returns `{ waiting, history }`: `waiting` is every plan in `awaiting-plan`,
+  `sent-back` or `awaiting-signoff` (oldest request first), `history` the `signed-off` ones (newest
+  decision first). Each is a `TicketPlan` (mc/core) with the ticket's title from the board copy.
+- `GET /api/plan-assets/:id` returns a kept picture (the operator token is needed, as for other
+  pictures). Ids are content hashes, so a picture never changes.
+- `POST /api/plans/:repoId/:issue/approve` (send `{}`) signs the plan off. For a ticket the repo
+  holds, the card is read live from the board (a card that cannot be read answers `502`, and the cache is
+  refreshed from the live card), then a card in Backlog or Refinement is moved to Ready (a card already past Ready is left), and only then is the plan marked
+  signed off. A failed move answers `502` and the plan stays waiting, so it can be approved again. Approve and send back run one at a time
+  per ticket, so only one decision stands and the other answers `409`; if the repo's rules cannot be
+  read, approve answers `502` and the plan stays waiting. Before moving a card out of Backlog or
+  Refinement, approve runs the checks `promote` runs (set-aside label, a run on the ticket, needs,
+  area, open waits, a prototype link outside the repo), on the live card and ticket; a card that fails them is signed off but left where it is, the answer's
+  `moveError` names the wait, and FLIGHT is told it can promote once the wait clears. A plan that
+  holds nothing is recorded and the card stays. `409` when the plan is not waiting for sign-off.
+- `POST /api/plans/:repoId/:issue/send-back` with `{ note }` returns the ticket to the planner with
+  the note, which the planner's next brief carries.
+- Both tell FLIGHT in Comms, and are refused with `409` on a hub that has loop writes off.
+- `GET /api/tickets/:repoId/:number` carries `plan` (the same `TicketPlan`, or `null`).
+
+**QA.** A native QA report for a ticket with a signed-off plan carries `plan` (a frozen copy: asks,
+proposal, size estimate, risks, mockups with their picture URLs, and when it was signed), shown in
+the report's Markdown under "Signed-off plan". The reviewer's brief includes the plan, with each signed-off mockup copied into the review's scratch
+copy under `.mc-review/plan-mockups/` and named in the brief (a missing picture refuses the review start
+with a retryable 409), and asks them to say where the work does
+not match it.
 
 ## QA board data
 

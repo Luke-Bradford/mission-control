@@ -3,6 +3,7 @@ import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
 import type { CrewMode, CrewRole, LoopKind } from "./runtime-model.ts";
+import type { TicketPlan } from "./ticket-plan.ts";
 import type {
   AccountId,
   AgentId,
@@ -768,6 +769,8 @@ export interface TicketHistory {
   prototypeProblem?: string | null;
   /** Why the body is missing; null when GitHub answered. */
   githubError: string | null;
+  /** The ticket's plan and where its sign-off stands; null when it has none. */
+  plan?: TicketPlan | null;
   runs: TicketRunView[];
   prs: TicketPrView[];
   /** Live closing PR references, including PRs not yet collected into local history. */

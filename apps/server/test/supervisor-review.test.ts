@@ -41,6 +41,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli/update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { keepMockups } from "../src/plans/assets.ts";
 import { createPrEvidence, evidenceReviewDeps } from "../src/pr-evidence/capture.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/preview/review.ts";
@@ -1203,6 +1204,69 @@ describe("startReview", () => {
     await sup.startReview("retro", r.reviewId);
     await until(() => expect(userLines()).toHaveLength(1));
     expect(userLines()[0]).not.toContain("- Preview:");
+  });
+
+  describe("signed-off plan mockups", () => {
+    const sign = async (id: string | null) => {
+      store.plans.file(
+        "mc",
+        42,
+        {
+          asks: "a",
+          proposal: "Add a tab.",
+          sizeEstimate: "M",
+          risks: "r",
+          mockups: [
+            {
+              id: id ?? "f".repeat(64),
+              caption: "The tab",
+              mediaType: "image/png",
+              url: "u",
+            },
+          ],
+        },
+        true,
+        1,
+      );
+      store.plans.approve("mc", 42, 2);
+    };
+
+    it("does not start a review when a signed-off mockup is missing, and removes the scratch copy", async () => {
+      const r = reviewOfPush();
+      await sign(null);
+      const { sup } = make({ scratchRetro: true });
+      sup.start();
+      const error = await refusal(sup.startReview("retro", r.reviewId));
+      expect(error.status).toBe(409);
+      expect(error.message).toContain("signed-off mockups cannot be staged");
+      expect(userLines()).toHaveLength(0);
+      expect(existsSync(scratch(r.reviewId))).toBe(false);
+    });
+
+    it("stages each signed-off mockup in the scratch copy and names it in the brief", async () => {
+      const r = reviewOfPush();
+      writeFileSync(
+        join(dir, "pic.png"),
+        Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffer.alloc(8, 3)]),
+      );
+      const kept = await keepMockups({
+        worktree: dir,
+        dbPath: store.path,
+        inputs: [{ path: "pic.png", caption: "The tab" }],
+        known: [],
+      });
+      if (!kept.ok) throw new Error(kept.text);
+      await sign(kept.mockups[0]?.id ?? null);
+      const { sup } = make({ scratchRetro: true });
+      sup.start();
+      await sup.startReview("retro", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const brief = userLines()[0] as string;
+      expect(brief).toContain("## The plan the operator signed off");
+      const named = /- (\.mc-review\/plan-mockups\/[^:]+): The tab/.exec(brief)?.[1];
+      expect(named).toBeDefined();
+      expect(existsSync(join(scratch(r.reviewId), named ?? ""))).toBe(true);
+    });
   });
 
   it("a review brief carries the Done-when table from the author's report", async () => {

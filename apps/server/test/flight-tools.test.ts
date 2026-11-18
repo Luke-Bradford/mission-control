@@ -103,11 +103,14 @@ import {
   OPERATOR_HEADER,
   openPrText,
   PACE_SETTING,
+  PLAN_SEND_REFUSED,
   PROFILE_PAIR_TEXT,
   PROTECTED_ITEM_REFUSED,
   type PullRequestView,
   passNeedsBriefText,
   pathGrantProblem,
+  planNeedsSignoffText,
+  planSentText,
   questionClosedText,
   READ_NO_GITHUB,
   READ_NO_PR,
@@ -1377,6 +1380,7 @@ describe("tool list", () => {
       "flight_state",
       "screenshot_hud",
       "promote",
+      "send_to_planner",
       "end_run",
       "accept_ruling",
       "sync_main",
@@ -11919,5 +11923,221 @@ describe("attach_materials", () => {
     expect(
       (await call("attach_materials", { key: `ask:${id}`, ...story({ extra: 1 }) })).isError,
     ).toBe(true);
+  });
+});
+
+describe("plan sign-off", () => {
+  const area = { "area:server": ["apps/server/**"] };
+  const GOOD = "Body\n\n## Done when\n\n- it works\n";
+  const P = { issue: 7, to: "Ready", basis: "it is complete" };
+  const backlog = (over: Partial<BoardItem> = {}) =>
+    card(7, { status: "Backlog", labels: ["area:server"], size: "S", ...over });
+  const setting = (planSignoff: "every" | "larger" | "never") => {
+    rulesNow = { ...DEFAULT_REPO_RULES, promoteBacklog: true, areas: area, planSignoff };
+  };
+  const signedOff = () => {
+    store.plans.file(
+      "mc",
+      7,
+      { asks: "a", proposal: "p", sizeEstimate: null, risks: null, mockups: [] },
+      true,
+      nowMs,
+    );
+    store.plans.approve("mc", 7, nowMs);
+  };
+
+  beforeEach(() => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "merge";
+    engineOn = true;
+    fetchImpl = async (n) => ticket(n, { body: GOOD });
+    board(backlog());
+  });
+
+  it("every: promote to Ready refuses without a signed-off plan, and moves once it is signed", async () => {
+    setting("every");
+    expect(await call("promote", P)).toEqual(refused(planNeedsSignoffText("mc#7", null)));
+    expect(moveCalls).toEqual([]);
+    store.plans.file(
+      "mc",
+      7,
+      { asks: null, proposal: "p", sizeEstimate: null, risks: null, mockups: [] },
+      true,
+      nowMs,
+    );
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+    store.plans.sendBack("mc", 7, "smaller");
+    expect(await call("promote", P)).toEqual(refused(planNeedsSignoffText("mc#7", "sent-back")));
+    signedOff();
+    expect((await call("promote", P)).isError).toBeUndefined();
+    expect(moveCalls).toHaveLength(1);
+  });
+
+  it("every: moving a ticket back to Backlog is not held", async () => {
+    setting("every");
+    board(backlog({ status: "Ready" }));
+    expect((await call("promote", { ...P, to: "Backlog" })).isError).toBeUndefined();
+  });
+
+  it("larger: refuses a marked ticket and lets an unmarked one through", async () => {
+    setting("larger");
+    expect((await call("promote", P)).isError).toBeUndefined();
+    board(backlog());
+    store.plans.request("mc", 7, nowMs);
+    nowMs += 60 * 60_000;
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-plan")),
+    );
+  });
+
+  it("changing every to larger lets an unmarked ticket through and still holds a marked one", async () => {
+    setting("every");
+    store.plans.file(
+      "mc",
+      7,
+      { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] },
+      false,
+      nowMs,
+    );
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+    setting("larger");
+    expect((await call("promote", P)).isError).toBeUndefined();
+    board(backlog());
+    nowMs += 60 * 60_000;
+    store.plans.request("mc", 7, nowMs);
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+  });
+
+  it("never: nothing is held, even a ticket marked earlier", async () => {
+    setting("never");
+    store.plans.request("mc", 7, nowMs);
+    expect((await call("promote", P)).isError).toBeUndefined();
+  });
+
+  it("send_to_planner marks a ticket of any size and the planner start accepts it", async () => {
+    setting("larger");
+    expect(await call("send_to_planner", { issue: 7, basis: "a design shift" })).toEqual({
+      text: planSentText("mc#7"),
+    });
+    expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-plan", marked: true });
+    expect(decisions()).toMatchObject([
+      { kind: "promote", ref: "mc#7", decision: "Sent to the Planner tab" },
+    ]);
+    expect(await call("start_seat", { seat: "fao-1", issue: 7, basis: "to plan" })).toEqual({
+      text: "Started FAO-1 on mc#7.",
+    });
+  });
+
+  describe("a developer start on a held ticket", () => {
+    const PLANNED = `${GOOD}\n## Plan\n\n1. do\n`;
+    const dev = () => call("start_seat", { seat: "guido-1", issue: 7, basis: "planned" });
+    const filed = () => {
+      fetchImpl = async (n) => ticket(n, { body: PLANNED });
+      board(backlog({ size: "M" }));
+      store.plans.file(
+        "mc",
+        7,
+        { asks: "a", proposal: "p", sizeEstimate: "M", risks: "r", mockups: [] },
+        false,
+        nowMs,
+      );
+    };
+
+    it("every: a plan waiting for sign-off blocks the start; signed off, it starts", async () => {
+      setting("every");
+      filed();
+      expect(await dev()).toEqual(refused(planNeedsSignoffText("mc#7", "awaiting-signoff")));
+      expect(startCalls).toEqual([]);
+      store.plans.approve("mc", 7, nowMs);
+      expect(await dev()).toEqual({ text: "Started GUIDO-1 on mc#7." });
+    });
+
+    it("larger: a marked ticket is blocked, an unmarked one starts", async () => {
+      setting("larger");
+      filed();
+      expect((await dev()).isError).toBeUndefined();
+      startCalls.length = 0;
+      nowMs += 60 * 60_000;
+      store.plans.request("mc", 7, nowMs);
+      expect(await dev()).toEqual(refused(planNeedsSignoffText("mc#7", "awaiting-signoff")));
+      expect(startCalls).toEqual([]);
+    });
+
+    it("never: the start is not held", async () => {
+      setting("never");
+      filed();
+      store.plans.request("mc", 7, nowMs);
+      expect((await dev()).isError).toBeUndefined();
+    });
+  });
+
+  it("a ticket that already has a ## Plan when it is sent to the planner is planned again", async () => {
+    setting("every");
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
+    board(backlog({ size: "M" }));
+    expect(await call("send_to_planner", { issue: 7, basis: "design shift" })).toEqual({
+      text: planSentText("mc#7"),
+    });
+    expect(await call("start_seat", { seat: "fao-1", issue: 7, basis: "again" })).toEqual({
+      text: "Started FAO-1 on mc#7.",
+    });
+  });
+
+  it("send_to_planner refuses a card in Ready, or closed, and writes no row", async () => {
+    board(backlog({ status: "Ready" }));
+    const ready = await call("send_to_planner", { issue: 7, basis: "x" });
+    expect(ready.isError).toBe(true);
+    expect(ready.text).toContain("Backlog");
+    board(backlog({ closed: true }));
+    expect((await call("send_to_planner", { issue: 7, basis: "x" })).isError).toBe(true);
+    expect(store.plans.get("mc", 7)).toBeNull();
+  });
+
+  it("a Size S ticket nobody sent still has no planner", async () => {
+    expect((await call("start_seat", { seat: "fao-1", issue: 7, basis: "to plan" })).isError).toBe(
+      true,
+    );
+  });
+
+  it("a plan sent back may be planned again though the ticket has a ## Plan", async () => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
+    board(backlog({ size: "M" }));
+    expect((await call("start_seat", { seat: "fao-1", issue: 7, basis: "again" })).isError).toBe(
+      true,
+    );
+    store.plans.file(
+      "mc",
+      7,
+      { asks: null, proposal: "p", sizeEstimate: null, risks: null, mockups: [] },
+      true,
+      nowMs,
+    );
+    store.plans.sendBack("mc", 7, "smaller");
+    expect(await call("start_seat", { seat: "fao-1", issue: 7, basis: "again" })).toEqual({
+      text: "Started FAO-1 on mc#7.",
+    });
+  });
+
+  it("flight_state tells FLIGHT the repo's setting and the plans waiting", async () => {
+    setting("every");
+    store.plans.request("mc", 7, nowMs);
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(state.planSignoff).toBe("every");
+    expect(state.plans).toEqual([{ ref: "mc#7", state: "awaiting-plan", held: true }]);
+  });
+
+  it("send_to_planner refuses a signed-off plan and a card not on the board", async () => {
+    signedOff();
+    expect(await call("send_to_planner", { issue: 7, basis: "x" })).toEqual(
+      refused(PLAN_SEND_REFUSED),
+    );
+    expect((await call("send_to_planner", { issue: 99, basis: "x" })).isError).toBe(true);
   });
 });

@@ -470,6 +470,14 @@ CREATE TABLE IF NOT EXISTS ticket_waits (
   repo_id TEXT NOT NULL, issue INTEGER NOT NULL, reason TEXT NOT NULL, frees_when TEXT NOT NULL,
   at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
 );
+-- A ticket's plan and the operator's sign-off: one row per ticket. proposal is the text the planner
+-- also wrote under ## Plan; mockups is a JSON list of kept pictures; required holds the ticket.
+CREATE TABLE IF NOT EXISTS ticket_plans (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, state TEXT NOT NULL, required INTEGER NOT NULL,
+  asks TEXT, proposal TEXT, size_estimate TEXT, risks TEXT, mockups TEXT NOT NULL DEFAULT '[]',
+  note TEXT, requested_at INTEGER NOT NULL, planned_at INTEGER, decided_at INTEGER,
+  PRIMARY KEY (repo_id, issue)
+);
 CREATE TABLE IF NOT EXISTS attention_materials (
   id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
 );

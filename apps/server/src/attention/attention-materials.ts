@@ -92,7 +92,7 @@ function mediaType(bytes: Buffer, path: string): AttentionMaterialImage["mediaTy
     return "image/webp";
   return null;
 }
-function storedMediaType(bytes: Buffer): AttentionMaterialImage["mediaType"] | null {
+export function storedMediaType(bytes: Buffer): AttentionMaterialImage["mediaType"] | null {
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
     return "image/png";
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
