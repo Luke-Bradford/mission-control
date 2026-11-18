@@ -3482,18 +3482,18 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
   });
 
-  it.each([
-    ["git commit -m x", "git-write"],
-    ["sleep 1 &", "background"],
-  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
-    const { sup } = codex({ command });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await untilCodex(() => expect(decision()).toBe("decline"));
-    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
-    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRunByEngine(runId);
-  });
+  it.each([["git commit -m x", "git-write"]] as const)(
+    "sends %s to the shared %s outcome guard",
+    async (command, rule) => {
+      const { sup } = codex({ command });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await untilCodex(() => expect(decision()).toBe("decline"));
+      expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
+      await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it.each([
     { name: "uncorrelated mc", server: MC_MCP_SERVER, correlated: false },

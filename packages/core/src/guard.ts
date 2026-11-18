@@ -11,7 +11,6 @@ import { CODEX_SHELL, type CrewMode } from "./runtime-model.ts";
 
 /** Rule id → the text the Guard drawer shows (catalogue §2.7.4). */
 export const GUARD_RULES = {
-  background: "Commands must stay attached to the seat's current tool call",
   "codex-allowlist": "The Codex request is outside the seat’s area, protected files or sandbox",
   "git-env": "Git reads must keep the seat’s isolated environment and stay in its worktree",
   "git-write":
@@ -22,7 +21,6 @@ export const GUARD_RULES = {
   "flight-powers": "Only repos with flight_powers: superuser may use these tools",
   "full-suite": "Full test suites only through Mission Control (one at a time)",
   "read-only": READ_ONLY_CANNOT_WRITE,
-  network: "No network from a crew's commands",
   "repo-rules":
     "FLIGHT must keep this repository's protected paths and Mission Control rules; on a standard repo ask a controller to approve an override; on a superuser repo change them through a seat's PR and mc merge_pr",
   unreadable: "Commands the guard cannot read to the end are refused",
@@ -339,274 +337,6 @@ const SHELL_KEYWORDS = new Set([
 const BACKGROUND_WRAPPERS = new Set(["coproc", "setsid"]);
 /** Terminal multiplexers: any command they are given runs detached, in the background. */
 const MULTIPLEXERS = new Set(["screen", "tmux"]);
-/**
- * Programs that hand a command to something outside this tool call (a scheduler, launchd, another
- * app): what they start outlives the call, so they are refused like a detached command.
- */
-const BACKGROUND_LAUNCHERS = new Set([
-  "at",
-  "batch",
-  "crontab",
-  "launchctl",
-  "osascript",
-  "open",
-  // daemonises, or runs a command under a new agent
-  "ssh-agent",
-  "systemd-run",
-  "daemonize",
-  // These use, or start, gpg-agent as needed.
-  "gpg",
-  "gpg-connect-agent",
-  // A shell builtin that detaches an existing job.
-  "disown",
-]);
-/**
- * Programs that start a daemon only with one option, which GnuPG also takes as any unambiguous
- * prefix: `gpg-agent --daemon` (from `--dae`), `gpgconf --launch` (from `--la`).
- */
-const BACKGROUND_LAUNCH_OPTIONS: Readonly<Record<string, { option: string; shortest: number }>> = {
-  "gpg-agent": { option: "--daemon", shortest: "--dae".length },
-  gpgconf: { option: "--launch", shortest: "--la".length },
-};
-
-/** SSH options whose value consumes the rest of a short-option cluster, or the next word. */
-const SSH_VALUED_OPTIONS = new Set([
-  "b",
-  "B",
-  "c",
-  "D",
-  "E",
-  "e",
-  "F",
-  "I",
-  "i",
-  "J",
-  "L",
-  "l",
-  "m",
-  "O",
-  "o",
-  "p",
-  "P",
-  "Q",
-  "R",
-  "S",
-  "W",
-  "w",
-]);
-/** autossh additionally takes a monitor port with `-M`. */
-const AUTOSSH_VALUED_OPTIONS = new Set([...SSH_VALUED_OPTIONS, "M"]);
-
-/** Whether SSH's local options include `-f`, before its destination or a `--` marker. */
-function sshBackgrounds(program: string, args: readonly string[]): boolean {
-  const valued = program === "autossh" ? AUTOSSH_VALUED_OPTIONS : SSH_VALUED_OPTIONS;
-  for (let at = 0; at < args.length; at++) {
-    const arg = args[at] ?? "";
-    if (arg === "--" || !arg.startsWith("-") || arg === "-") return false;
-    if (arg.startsWith("--")) continue;
-    for (let i = 1; i < arg.length; i++) {
-      const option = arg.charAt(i);
-      if (option === "f") return true;
-      if (valued.has(option)) {
-        if (i + 1 === arg.length) at++;
-        break;
-      }
-    }
-  }
-  return false;
-}
-
-/** start-stop-daemon options whose value consumes the rest of a short-option cluster. */
-const START_STOP_DAEMON_VALUED_OPTIONS = new Set([
-  "a",
-  "c",
-  "C",
-  "d",
-  "g",
-  "n",
-  "N",
-  "p",
-  "r",
-  "s",
-  "u",
-  "x",
-]);
-/** start-stop-daemon long options that consume the next argv element. */
-const START_STOP_DAEMON_VALUED_LONG_OPTIONS = new Set([
-  "--startas",
-  "--chuid",
-  "--chdir",
-  "--chroot",
-  "--group",
-  "--name",
-  "--nicelevel",
-  "--pidfile",
-  "--retry",
-  "--signal",
-  "--user",
-  "--exec",
-]);
-
-/** Whether start-stop-daemon starts its requested process in the background. */
-function startStopDaemonLaunches(args: readonly string[]): boolean {
-  let start = false;
-  let background = false;
-  for (let argAt = 0; argAt < args.length; argAt++) {
-    const arg = args[argAt] ?? "";
-    if (arg === "--") break;
-    if (arg === "--start") start = true;
-    else if (arg === "--background") background = true;
-    else if (START_STOP_DAEMON_VALUED_LONG_OPTIONS.has(arg)) argAt++;
-    else if (/^-[A-Za-z]+$/.test(arg)) {
-      for (let optionAt = 1; optionAt < arg.length; optionAt++) {
-        const option = arg.charAt(optionAt);
-        if (option === "S") start = true;
-        else if (option === "b") background = true;
-        if (START_STOP_DAEMON_VALUED_OPTIONS.has(option)) {
-          if (optionAt + 1 === arg.length) argAt++;
-          break;
-        }
-      }
-    }
-  }
-  return start && background;
-}
-
-/** Whether `program` with `args` hands work to something that outlives this tool call. */
-function launches(program: string, args: readonly string[]): boolean {
-  if (BACKGROUND_LAUNCHERS.has(program)) return true;
-  // ssh and autossh fork into the background under -f (including `ssh -Nf`).
-  if ((program === "ssh" || program === "autossh") && sshBackgrounds(program, args)) return true;
-  if (program === "start-stop-daemon" && startStopDaemonLaunches(args)) return true;
-  const spec = Object.hasOwn(BACKGROUND_LAUNCH_OPTIONS, program)
-    ? BACKGROUND_LAUNCH_OPTIONS[program]
-    : undefined;
-  if (spec === undefined) return false;
-  return args.some((a) => {
-    const name = a.split("=")[0] ?? "";
-    return name.length >= spec.shortest && spec.option.startsWith(name);
-  });
-}
-/** tmux's global options that take a value (`tmux -L sock ls`): the value is not the command. */
-const TMUX_VALUED = "cfLST";
-/** tmux commands that start nothing: they list, query, attach to, type into or end what exists. */
-const TMUX_SAFE = new Set([
-  "ls",
-  "lsb",
-  "lsc",
-  "lscm",
-  "lsk",
-  "lsp",
-  "lsw",
-  "has",
-  "has-session",
-  "a",
-  "attach",
-  "attach-session",
-  "show",
-  "showb",
-  "showenv",
-  "showmsgs",
-  "showw",
-  "killp",
-  "killw",
-  // typing into an existing session is allowed by decision (spec 2026-10-26)
-  "send",
-  "send-keys",
-]);
-/** Starts nothing only with `-p` (print to stdout, never to a buffer or the status line). */
-const TMUX_PRINT_ONLY = new Set(["display", "display-message", "capture-pane", "capturep"]);
-
-/** Whether a tmux invocation may start work: fail closed on any command it does not know is safe. */
-function tmuxStarts(rest: readonly string[]): boolean {
-  let at = 0;
-  for (; at < rest.length; at++) {
-    const word = rest[at] ?? "";
-    if (word === "--") {
-      at++;
-      break;
-    }
-    if (!word.startsWith("-") || word === "-") break;
-    // getopt: flags up to the first letter that takes a value, which is the rest or the next word
-    for (let k = 1; k < word.length; k++) {
-      const letter = word.charAt(k);
-      if (letter === "V") return false;
-      if (TMUX_VALUED.includes(letter)) {
-        if (k === word.length - 1) at++;
-        break;
-      }
-    }
-  }
-  // an expansion can become any option, command or `;` sequence. The words reach here unquoted,
-  // so a single-quoted `$` (which cannot expand) is refused too: fail closed.
-  if (rest.some((w) => EXPANDS.test(w))) return true;
-  const command = rest[at];
-  // no command is `new-session`
-  if (command === undefined) return true;
-  const args = rest.slice(at + 1);
-  // a command sequence (`ls \; new -d …`) or a format that runs a shell (`#(…)`) is not judged
-  if ([command, ...args].some((w) => w === ";" || w.endsWith(";") || w.includes("#("))) return true;
-  if (
-    TMUX_SAFE.has(command) ||
-    command.startsWith("list-") ||
-    command.startsWith("show-") ||
-    command.startsWith("kill-")
-  )
-    return false;
-  if (TMUX_PRINT_ONLY.has(command)) {
-    return !args.some((w) => /^-[A-Za-z]*p/.test(w));
-  }
-  return true;
-}
-
-/** screen's options that take a value; `-X` makes the rest a command for an existing session. */
-const SCREEN_VALUED = "ceEhpsStT";
-/** screen's single-word queries (no session starts). */
-const SCREEN_QUERIES = new Set(["-ls", "-list", "-wipe", "-v", "-version", "--version", "-help"]);
-/** Commands `screen -X` may send that start nothing (`stuff` types into the session by decision). */
-const SCREEN_X_SAFE = new Set(["stuff", "hardcopy", "quit", "kill", "detach", "info", "windows"]);
-
-/**
- * Whether a screen invocation may start work. Reattaching (`-r`, `-x`, `-d -r`) and detaching
- * start nothing; `-m`, `-R` (reattach or else start), a command or no command at all may.
- */
-function screenStarts(rest: readonly string[]): boolean {
-  let reattach = false;
-  for (let at = 0; at < rest.length; at++) {
-    const word = rest[at] ?? "";
-    if (SCREEN_QUERIES.has(word)) return false;
-    if (word === "-Logfile") {
-      at++;
-      continue;
-    }
-    if (word === "-fn" || word === "-fa" || word === "-ln") continue;
-    if (word === "-X") {
-      const command = rest[at + 1];
-      return command === undefined || !SCREEN_X_SAFE.has(command);
-    }
-    if (word === "-Q") return false;
-    if (!word.startsWith("-") || word === "-" || word === "--") {
-      // a session name after a reattach or detach; otherwise a command to start
-      return !reattach;
-    }
-    for (let k = 1; k < word.length; k++) {
-      const letter = word.charAt(k);
-      if (letter === "m" || letter === "R") return true;
-      if ("rxdD".includes(letter)) reattach = true;
-      if (SCREEN_VALUED.includes(letter)) {
-        if (k === word.length - 1) at++;
-        break;
-      }
-    }
-  }
-  // no command: a new session with a shell
-  return !reattach;
-}
-
-/** Whether the multiplexer invocation itself may start work that outlives this tool call. */
-function startsDetachedMultiplexer(name: string, rest: readonly string[]): boolean {
-  return name === "tmux" ? tmuxStarts(rest) : screenStarts(rest);
-}
 /** Runners whose options are not modelled (`watch`, `flock -c`, `script -c`, `parallel`, `npx -c` take a command line as one word): judged like a multiplexer, in the foreground. */
 const RUNNERS = new Set([
   "watch",
@@ -998,16 +728,12 @@ interface Cmd {
   braces?: boolean;
   /** The command receives a pipeline's output (preserved by the Codex walk). */
   piped?: boolean;
-  /** Judged from a later word of a multiplexer's arguments (`tmux send-keys -t x open`: `open`). */
-  suffix?: boolean;
 }
 
 /** One decision's walk over a command line. */
 interface Walk {
   /** A lone `&` somewhere in the line (or a script inside it). */
   lineBackground: boolean;
-  /** A wrapper or multiplexer explicitly starts work detached from this tool call. */
-  detachedCommand: boolean;
   /** Words still to examine; past it the line is too long to judge (fail closed). */
   budget: number;
   /** Codex must match exact argv: no expansion, hidden redirects or wrapper stripping. */
@@ -1625,10 +1351,7 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     } else if (Object.hasOwn(WRAPPERS, base)) {
       const spec = WRAPPERS[base];
       if (spec === undefined) break;
-      if (BACKGROUND_WRAPPERS.has(base)) {
-        bg = true;
-        walk.detachedCommand = true;
-      }
+      if (BACKGROUND_WRAPPERS.has(base)) bg = true;
       if (base === "xargs") viaXargs = true;
       if (base === "env") afterEnv = true;
       at++;
@@ -1708,7 +1431,6 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     ...extra,
   ];
   const multiplexer = MULTIPLEXERS.has(name);
-  if (multiplexer && startsDetachedMultiplexer(name, rest)) walk.detachedCommand = true;
   const from = multiplexer ? 0 : runnerStart(name, rest);
   if (multiplexer || from !== -1) {
     // `tmux new -d 'pnpm -s test'`, `screen -dmS s pnpm -s test`: which word starts the command is
@@ -1724,19 +1446,12 @@ function normalise(seg: Segment, walk: Walk, depth: number, background: boolean,
     // a multiplexer among a runner's words returns early as a suffix: its command is background
     const runBg = multiplexer || bg || run.some((w) => MULTIPLEXERS.has(baseName(w)));
     if (multiplexer) out[0] = { argv: [name, ...rest], background: true, braces: braced };
-    // A runner's later words are all judged as commands, launchers included: its options and
-    // their values are not modelled, so any word may be the one it runs. This refuses some
-    // ordinary lines (`npx vitest run -t open`, `npx cypress open`) on purpose (fail closed;
-    // refusal telemetry measures the cost). Accepted gap: a program that runs its own arguments
-    // (`npx cross-env A=1 open .`, `bun x open`) is beyond the guard, as it is without npx.
-    // Only a multiplexer's later words skip the launcher check: its own rules decide what it
-    // starts, and typing into a session (`tmux send-keys -t x open Enter`) is allowed.
+    // A runner's later words are all judged as commands: its options and their values are not
+    // modelled, so any word may be the one it runs.
     for (let i = 0; i < run.length; i++) {
       const suffix = wordsOnly(run.slice(i), runBraces.slice(i));
       const judged = wrappedGit(normalise(suffix, walk, depth + 1, runBg, "suffix"));
-      out.push(
-        ...(i > 0 && multiplexer ? judged.map((cmd) => ({ ...cmd, suffix: true })) : judged),
-      );
+      out.push(...judged);
     }
     for (const w of run) {
       if (/[\s;&|]/.test(w)) out.push(...wrappedGit(commands(w, walk, depth + 1, runBg, "script")));
@@ -1828,7 +1543,6 @@ export function splitCommands(cmd: string): string[][] {
 
 const newWalk = (): Walk => ({
   lineBackground: false,
-  detachedCommand: false,
   budget: WORD_BUDGET,
 });
 
@@ -2576,7 +2290,6 @@ export function guardDecision(
     background,
     braces,
     indirectGit,
-    suffix,
     directories: wrapperDirectories = [],
   } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
@@ -2590,8 +2303,6 @@ export function guardDecision(
     if (program === UNREADABLE_SCRIPT) return deny("unreadable", "shell -c");
     if (program === STDIN_SCRIPT) return deny("unreadable", "shell reading stdin");
     if (program === BRACE_WORD) return deny("unreadable", "brace expansion");
-    // not a multiplexer's later word: `tmux send-keys -t x open Enter` types `open` into a session
-    if (suffix !== true && launches(program, args)) return deny("background", program);
     if (
       program === GIT_ENV_OVERRIDE ||
       (["for", "select"].includes(program) && /^GIT_/.test(args[0] ?? "")) ||
@@ -2716,8 +2427,6 @@ export function guardDecision(
         return deny("git-env", "git environment or path override");
     } else if (program === "gh") {
       githubDenied ??= ghText(args);
-    } else if (program === "curl" || program === "wget") {
-      if (!ctx.fullAccess) return deny("network", program);
     }
     const suite =
       matchedSuite(argv, ctx.fullSuite) ??
@@ -2733,8 +2442,6 @@ export function guardDecision(
   if (lock !== null && (backgroundSuite || walk.lineBackground)) {
     return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
   }
-  if (backgroundCommand || walk.lineBackground || walk.detachedCommand)
-    return deny("background", "detached or background command");
   if (lock === null) return { kind: "allow" };
   return { kind: "lock", command: lock };
 }

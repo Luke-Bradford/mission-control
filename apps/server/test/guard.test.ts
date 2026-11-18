@@ -741,8 +741,8 @@ describe("POST /api/guard/check", () => {
       grant("merge-push", "git push origin main");
       const r = await check(tokA, bash("w1", "git push origin main"));
       expect(reason(r.body)).toContain(GUARD_RULES["git-write"]);
-      expect(reason((await check(tokA, bash("w2", "curl http://x"))).body)).toContain(
-        GUARD_RULES.network,
+      expect(reason((await check(tokA, bash("w2", "gh pr close 1"))).body)).toContain(
+        GUARD_RULES["gh-cli"],
       );
       expect(shell()).toEqual([]);
     });
@@ -1504,38 +1504,36 @@ describe("POST /api/guard/check", () => {
     store.addGuardHit({
       agentId: "guido-1",
       runId: "r",
-      rule: "network",
+      rule: "unreadable",
       text: "n: curl",
       at: NOW - 8 * DAY,
     });
     await check(tokA, bash("t1", "git push"));
     await check(tokA, bash("t2", "git commit -m x"));
-    await check(tokA, bash("t3", "curl https://x"));
+    await check(tokA, bash("t3", "gh pr close 1"));
     const r = await app.inject({ method: "GET", url: "/api/guard/hits?days=7" });
     expect(r.statusCode).toBe(200);
     const view = r.json<GuardHitsView>();
     expect(view.hits.map((h) => h.text)).toEqual([
-      `${GUARD_RULES.network}: curl`,
+      `${GUARD_RULES["gh-cli"]}: gh pr close`,
       `${GUARD_RULES["git-write"]}: git commit`,
       `${GUARD_RULES["git-write"]}: git push`,
     ]);
     expect(view.counts).toEqual({
-      background: 0,
       "git-write": 2,
       "codex-allowlist": 0,
       "git-env": 0,
-      "gh-cli": 0,
+      "gh-cli": 1,
       "merge-push": 0,
       "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
-      network: 1,
       "repo-rules": 0,
       unreadable: 0,
       secret: 0,
     });
     const all = await app.inject({ method: "GET", url: "/api/guard/hits?days=9" });
-    expect(all.json<GuardHitsView>().counts.network).toBe(2);
+    expect(all.json<GuardHitsView>().counts.unreadable).toBe(1);
     expect((await app.inject({ method: "GET", url: "/api/guard/hits" })).json()).toEqual(view);
     // each hit says whether its guard:{id} key is acknowledged; acking one tells the HUD
     expect(view.hits.map((h) => h.acked)).toEqual([false, false, false]);
@@ -1560,7 +1558,7 @@ describe("POST /api/guard/check", () => {
       store.addGuardHit({
         agentId: "guido-1",
         runId: "r",
-        rule: "network",
+        rule: "unreadable",
         text: `n${i}`,
         at: NOW - i,
       });
@@ -1572,7 +1570,7 @@ describe("POST /api/guard/check", () => {
     expect(view.hits).toHaveLength(GUARD_HITS_LIMIT);
     expect(view.hits[0]?.text).toBe("n0");
     expect(view.hits.at(-1)?.text).toBe(`n${GUARD_HITS_LIMIT - 1}`);
-    expect(view.counts.network).toBe(GUARD_HITS_LIMIT + 1);
+    expect(view.counts.unreadable).toBe(GUARD_HITS_LIMIT + 1);
   });
 
   it.each(["0", "x", "1.5", "31", "-1"])("GET /api/guard/hits?days=%s is a 400", async (d) => {

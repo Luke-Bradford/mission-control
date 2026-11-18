@@ -1792,7 +1792,7 @@ describe("Store", () => {
       );
       store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 150 });
       store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 151 });
-      store.addGuardHit({ agentId: "a2", runId: null, rule: "network", text: "t", at: 152 });
+      store.addGuardHit({ agentId: "a2", runId: null, rule: "unreadable", text: "t", at: 152 });
       const id = store.requestReview({
         authorRunId: "cheap1",
         repoId: "repo",
@@ -1816,7 +1816,7 @@ describe("Store", () => {
       ]);
       expect(audit.refusals).toEqual([
         { agentId: "a2", runId: "cheap2", rule: "read-only", count: 2 },
-        { agentId: "a2", runId: null, rule: "network", count: 1 },
+        { agentId: "a2", runId: null, rule: "unreadable", count: 1 },
       ]);
       expect(audit.spendOutliers).toEqual([
         { runId: "dear", agentId: "a3", ticket: "repo#9", costUsd: 9 },
@@ -1855,12 +1855,12 @@ describe("Store", () => {
         store.addGuardHit({
           agentId: "spiky",
           runId: "r",
-          rule: "network",
+          rule: "unreadable",
           text: "t",
           at: 100 + i,
         });
       }
-      store.addGuardHit({ agentId: "calm", runId: "r", rule: "network", text: "t", at: 100 });
+      store.addGuardHit({ agentId: "calm", runId: "r", rule: "unreadable", text: "t", at: 100 });
       store.setSetting(
         `${FLIGHT_SIGNALS_SETTING}:repo`,
         JSON.stringify({
@@ -2824,12 +2824,12 @@ describe("guard hits", () => {
   it("records a hit with its id and lists hits since a time, newest first", () => {
     const a = store.addGuardHit(hit({ at: 10 * DAY }));
     const b = store.addGuardHit(
-      hit({ at: 11 * DAY, rule: "network", text: "x: curl", runId: null }),
+      hit({ at: 11 * DAY, rule: "unreadable", text: "x: curl", runId: null }),
     );
     store.addGuardHit(hit({ at: 2 * DAY }));
     expect(b).toBeGreaterThan(a);
     expect(store.guardHits(4 * DAY)).toEqual([
-      { id: b, ...hit({ at: 11 * DAY, rule: "network", text: "x: curl", runId: null }) },
+      { id: b, ...hit({ at: 11 * DAY, rule: "unreadable", text: "x: curl", runId: null }) },
       { id: a, ...hit({ at: 10 * DAY }) },
     ]);
   });
@@ -2838,12 +2838,11 @@ describe("guard hits", () => {
     const now = 20 * DAY;
     store.addGuardHit(hit({ at: now - DAY }));
     store.addGuardHit(hit({ at: now - 2 * DAY }));
-    store.addGuardHit(hit({ at: now - 3 * DAY, rule: "network" }));
+    store.addGuardHit(hit({ at: now - 3 * DAY, rule: "unreadable" }));
     store.addGuardHit(hit({ at: now - 8 * DAY, rule: "read-only" }));
     // a hit stored under a rule since retired (github-write) is listed but not counted
     store.addGuardHit(hit({ at: now - DAY, rule: "github-write" as GuardRule }));
     expect(store.guardHitCounts(now - 7 * DAY)).toEqual({
-      background: 0,
       "git-write": 2,
       "git-env": 0,
       "codex-allowlist": 0,
@@ -2852,16 +2851,15 @@ describe("guard hits", () => {
       "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
-      network: 1,
       "repo-rules": 0,
-      unreadable: 0,
+      unreadable: 1,
       secret: 0,
     });
   });
 
   it("counts only the given run's hits", () => {
     store.addGuardHit(hit({ runId: "run-a" }));
-    store.addGuardHit(hit({ runId: "run-a", rule: "network" }));
+    store.addGuardHit(hit({ runId: "run-a", rule: "unreadable" }));
     store.addGuardHit(hit({ runId: "run-b" }));
     store.addGuardHit(hit({ runId: null }));
     expect(store.guardHitCount("run-a")).toBe(2);

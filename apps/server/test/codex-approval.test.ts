@@ -184,8 +184,6 @@ describe("Codex refusal records", () => {
   it.each([
     ["git commit -m x", "git-write"],
     ["gh pr view 1", "gh-cli"],
-    ["curl https://example.com", "network"],
-    ["sleep 1 &", "background"],
   ] as const)(
     "routes the retained hard gate for %s through the shared guard",
     async (command, rule) => {
@@ -197,7 +195,7 @@ describe("Codex refusal records", () => {
 
   it("includes the whole refused chain, even when its amendment matches an allowed segment", async () => {
     const h = approver();
-    const command = "sed -n 1p a && curl x";
+    const command = "sed -n 1p a && git commit -m x";
     expect(
       await h.approve(
         {
@@ -214,7 +212,10 @@ describe("Codex refusal records", () => {
         signal(),
       ),
     ).toBe("decline");
-    expect(h.record).toHaveBeenCalledWith("network", `${GUARD_RULES.network}: curl: ${command}`);
+    expect(h.record).toHaveBeenCalledWith(
+      "git-write",
+      `${GUARD_RULES["git-write"]}: git commit: ${command}`,
+    );
   });
 
   it.each([false, true])(
