@@ -857,12 +857,16 @@ const isDecisionPark = (kind: string | undefined): boolean =>
   kind === "review-ruling" ||
   kind === "review-failed";
 
+/** Parks the hub can settle from later GitHub state, without a new seat run. */
+const isLivePark = (kind: string | undefined): boolean =>
+  isDecisionPark(kind) || kind === "ci-pending" || kind === STUCK_PARK;
+
 /**
  * A run that cannot go on stops: it ends with the reason on its card and timeline, and its seat
- * takes the next ticket. A park that waits on FLIGHT, the controller or the operator stays parked.
+ * takes the next ticket. A live park waits for later GitHub state or a decision.
  */
 const park = (loop: RunLoop, kind: string, reason: string): Step =>
-  isDecisionPark(kind)
+  isLivePark(kind)
     ? {
         loop: { ...loop, phase: "parked", parked: { kind, reason, ended: false } },
         actions: [{ kind: "event", text: parkedEventText(reason) }],
@@ -1157,13 +1161,42 @@ function stateStep(s: LoopSnapshot): Step {
     if (
       loop.parked !== null &&
       !loop.parked.ended &&
-      !isDecisionPark(loop.parked.kind) &&
+      !isLivePark(loop.parked.kind) &&
       loop.parked.kind !== "ci"
     ) {
       return {
         loop: { ...loop, parked: { ...loop.parked, ended: true } },
         actions: [{ kind: "end-run" }, { kind: "take-next" }],
       };
+    }
+    if (
+      loop.parked?.kind === "ci-pending" &&
+      !loop.parked.ended &&
+      pushed !== null &&
+      headCommit === pushed.sha &&
+      pr?.state === "open" &&
+      pr.headSha === pushed.sha
+    ) {
+      if (pr.ci === "passing") {
+        const passed = ciPassed(loop, pushed.sha);
+        return {
+          loop: { ...loop, phase: "review", parked: null, ciFails: 0, rerun: passed.rerun },
+          actions: passed.actions,
+        };
+      }
+      if (pr.ci === "failing") {
+        return { loop: { ...loop, phase: "ci", parked: null, unparkedAt: now }, actions: [] };
+      }
+    }
+    if (
+      loop.parked?.kind === STUCK_PARK &&
+      !loop.parked.ended &&
+      pushed !== null &&
+      headCommit === pushed.sha &&
+      pr?.state === "open" &&
+      pr.headSha === pushed.sha
+    ) {
+      return { loop: { ...loop, phase: "ci", parked: null, unparkedAt: now }, actions: [] };
     }
     // a stop whose run is still live (the hub went down between saving the stop and ending the run)
     // ends it now

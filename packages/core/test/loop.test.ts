@@ -288,8 +288,8 @@ describe("state step", () => {
     expect(r.loop.parked?.ended).toBe(true);
   });
 
-  it("3: an old non-decision park stops on upgrade, while a review park waits", () => {
-    const l = { phase: "parked" as const, parked: { kind: "stuck", reason: "r", ended: false } };
+  it("3: an old non-live park stops on upgrade, while live parks wait", () => {
+    const l = { phase: "parked" as const, parked: { kind: "gate", reason: "r", ended: false } };
     const r = reconcile(snap({ evidence: { id: 9, at: 1, ruling: false }, headCommit: SHA }, l));
     expect(r.loop.parked?.ended).toBe(true);
     expect(r.actions.map((action) => action.kind)).toEqual(
@@ -451,7 +451,7 @@ describe("state step", () => {
     ];
     for (const [over, why] of cases) {
       const r = reconcile(inCi(over, late));
-      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: true });
+      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: false });
     }
   });
 
@@ -461,6 +461,12 @@ describe("state step", () => {
     expect(r.loop.phase).toBe("ci");
     expect(r.loop.parked ?? null).toBeNull();
     expect(r.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
+  });
+
+  it("8: a stuck park lifts when GitHub shows the pushed head", () => {
+    const parked = reconcile(inCi({ pr: null }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 })).loop;
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA }) }, parked));
+    expect(r.loop).toMatchObject({ phase: "ci", parked: null });
   });
 
   it("8: a descending head is adopted while the seat is busy inside the window, and parks once the window is spent", () => {
@@ -789,8 +795,12 @@ describe("state step", () => {
     expect(r.loop.parked).toEqual({
       kind: "ci-pending",
       reason: "CI pending for 30 minutes on aaaaaaa",
-      ended: true,
+      ended: false,
     });
+    const passing = reconcile(inCi({ ...old, pr: pr({ ci: "passing" }) }, r.loop));
+    expect(passing.loop).toMatchObject({ phase: "review", parked: null });
+    const failing = reconcile(inCi({ ...old, pr: pr({ ci: "failing" }) }, r.loop));
+    expect(failing.loop).toMatchObject({ phase: "ci", parked: null });
     const r2 = reconcile(inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS } }));
     expect(r2.loop.phase).toBe("ci");
   });
@@ -821,7 +831,7 @@ describe("state step", () => {
       expect(r.loop.parked).toEqual({
         kind: "ci-pending",
         reason: "CI pending for 60 minutes on aaaaaaa (pending: web)",
-        ended: true,
+        ended: false,
       });
     });
 
