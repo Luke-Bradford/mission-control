@@ -714,6 +714,7 @@ export async function main(): Promise<void> {
     checks: runChecks,
     checkDrops: (runId) => checkRecorder.drops(runId),
     pendingChecks: (runId) => checkRecorder.pending(runId),
+    lostCheck: (runId, command) => checkRecorder.lost(runId, command),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)

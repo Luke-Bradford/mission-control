@@ -1954,6 +1954,75 @@ describe("crew seats", () => {
     });
   });
 
+  it("carries a state recorded before midnight over midnight while a run is active", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    // The seat went running yesterday, and its run has been active since.
+    store.addAgentEvent({
+      agentId: "GUIDO-1",
+      at: midnight - 5 * HOUR,
+      from: "idle",
+      to: "running",
+      text: "state",
+    });
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 5 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 100,
+      unknown: 0,
+    });
+  });
+  it("carries a pre-midnight state when the run started after the last state event", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    store.addAgentEvent({
+      agentId: "GUIDO-1",
+      at: midnight - 5 * HOUR,
+      from: "idle",
+      to: "running",
+      text: "state",
+    });
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 4 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 100,
+      unknown: 0,
+    });
+  });
+  it("still counts a seat with no recorded event at all as unknown", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 4 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 0,
+      unknown: 100,
+    });
+  });
   it("scopes to a seat by id or by its account", () => {
     store.upsertRun(
       run({

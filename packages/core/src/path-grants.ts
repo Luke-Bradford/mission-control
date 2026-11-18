@@ -3,7 +3,7 @@
  * the files in a `Paths:` line. FLIGHT approves them with a logged decision before the start; the
  * run that starts may then write exactly those files, and no other run may.
  */
-import { foldForMatch, globMatches, isProtectedPath } from "./runtime.ts";
+import { foldForMatch, globMatches, isProtectedPath, pathInArea } from "./runtime.ts";
 
 /** A `Paths:` line of a ticket body, with an optional list marker in front. */
 const PATHS_LINE = /^[ \t]*(?:[-*][ \t]+)?Paths:[ \t]*(.*)$/gm;
@@ -36,6 +36,45 @@ export function ticketPathGrants(body: string): string[] {
     }
   }
   return found;
+}
+
+/** Ticket Paths entries outside `area` or protected by the repo, which need validation and a FLIGHT grant. */
+export function pathsNeedingGrant(
+  area: readonly string[],
+  paths: readonly string[],
+  extra: readonly string[] = [],
+): string[] {
+  return paths.filter((path) => !entryInArea(area, path) || isProtectedPath(path, extra));
+}
+
+/**
+ * Whether every path `entry` can match lies in `area`. A plain file is matched as `pathInArea` does.
+ * A glob counts as inside only when some area glob provably covers it segment by segment (a glob
+ * also covers what lies under a folder it matches, as `globMatches` does); anything else is kept
+ * for the grant checks.
+ */
+function entryInArea(area: readonly string[], entry: string): boolean {
+  if (!entry.includes("*")) return pathInArea(area, entry);
+  if (area.length === 0 || area.includes(entry)) return true;
+  const e = entry.split("/");
+  if (e.includes("..") || e.some((s) => s.includes("**") && s !== "**")) return false;
+  return area.some((g) => {
+    const a = g.split("/");
+    return !a.some((s) => s.includes("**") && s !== "**") && globCovers(a, 0, e, 0);
+  });
+}
+
+/** Whether the segments of area glob `a` from `ai` cover everything the segments of `e` from `ei` can match. */
+function globCovers(a: readonly string[], ai: number, e: readonly string[], ei: number): boolean {
+  if (ai === a.length) return true;
+  const seg = a[ai] as string;
+  if (seg === "**") {
+    if (ai === a.length - 1) return true;
+    for (let j = ei; j <= e.length; j++) if (globCovers(a, ai + 1, e, j)) return true;
+    return false;
+  }
+  if (ei === e.length || e[ei] === "**") return false;
+  return (seg === "*" || seg === e[ei]) && globCovers(a, ai + 1, e, ei + 1);
 }
 
 /**

@@ -221,7 +221,14 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
+import {
+  ChoiceRefused,
+  choiceReceipt,
+  chooseOption,
+  claimMessagePick,
+  MESSAGE_PICK_SENDERS,
+  type MessagePick,
+} from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
@@ -737,6 +744,17 @@ const MessageBody = z.strictObject({
   question: z.number().int().positive().optional(),
   /** The Needs-you item this reply is about: it shows in that item's conversation. */
   itemKey: z.string().min(1).max(200).optional(),
+  /**
+   * The text is an option of that item's brief, picked on the page: the brief the page showed and
+   * the option's place in it. The pick is stored with the message, so the FLIGHT conversation
+   * draws it as the choice. Used for an option the choose route does not take.
+   */
+  choice: z
+    .strictObject({
+      briefAt: z.number().int().nonnegative(),
+      option: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -4968,7 +4986,40 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             store.run(named.runId)?.loop?.aside != null
               ? named
               : undefined;
+          // A picked option is claimed before its text is sent, and tied to the stored message.
+          let pick: MessagePick | null | undefined;
+          if (b.choice !== undefined) {
+            // the operator token lets FLIGHT send a message here; it does not let FLIGHT pick
+            if (!MESSAGE_PICK_SENDERS.includes(sender.kind))
+              throw new SupervisorError(
+                403,
+                "FLIGHT cannot pick an option with a message. Send the text without `choice`.",
+              );
+            if (b.itemKey === undefined)
+              throw new SupervisorError(400, "A picked option names its item.");
+            try {
+              pick = claimMessagePick(
+                {
+                  store,
+                  now,
+                  sender,
+                  crew: commsCrew,
+                  flightId: flightSeat(config)?.seat.id ?? null,
+                },
+                currentDiscussionItem(b.itemKey),
+                b.itemKey,
+                b.choice,
+                { to: id, text: b.text, question: b.question },
+              );
+            } catch (e) {
+              if (e instanceof ChoiceRefused) throw new SupervisorError(e.status, e.message);
+              throw e;
+            }
+            // the brief already has a pick: its message is stored, and nothing is sent twice
+            if (pick === null) return { ok: true };
+          }
           if (parked !== undefined) {
+            let stored = false;
             try {
               await answerAsideQuestion(
                 {
@@ -4984,8 +5035,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 parked.id,
                 sender.from,
                 b.text,
+                (messageId) => {
+                  stored = true;
+                  pick?.sent(messageId);
+                },
               );
             } catch (e) {
+              if (!stored) pick?.release();
               throw new SupervisorError(
                 e instanceof AsideAnswerChanged
                   ? 409
@@ -5007,6 +5063,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   .itemThreadNow(b.itemKey)
                   .filter((m) => m.from === id && m.to === sender.from)
                   .at(-1)?.id;
+          let stored = false;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -5044,17 +5101,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            stored = true;
+            pick?.sent(sent.id);
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
             // a retry of the same text wakes the seat again
             if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
             // the reply names its question: that one closes, and no other
-            if (named !== null) {
-              store.answerQuestion(named.id, now());
-              bus.emit("attention");
-            }
+            if (named !== null) store.answerQuestion(named.id, now());
+            // a closed question leaves Needs you, and a pick shows on its item
+            if (named !== null || pick != null) bus.emit("attention");
             return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
+            // nothing was stored: let the operator pick again
+            if (!stored) pick?.release();
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
               400,

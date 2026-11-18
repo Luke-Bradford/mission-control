@@ -132,6 +132,8 @@ export interface CheckRecorder {
   rerun?(runId: string, command: string): Promise<string | null>;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
+  /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
+  lost(runId: string, command: string): boolean;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
   /** Configured checks still executing or validating their completion, once per command. */
@@ -279,6 +281,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             CHECK_BASH_TIMEOUT_MS,
           ),
         };
+        // A new Codex call with the same command replaces an earlier one that never delivered a
+        // completion. Its exec cell no longer exists, so keeping the old receipt pending would
+        // block both this fresh call and the eventual push until the turn ends.
+        const replaced = new Set<StartedCall>();
+        for (const [id, startedCall] of started) {
+          if (startedCall.runId !== key.runId || startedCall.command !== command) continue;
+          started.delete(id);
+          replaced.add(startedCall);
+        }
+        for (const prior of replaced)
+          noteDrop(key.runId, "session-lost", prior.matched, prior.head, prior.command);
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
@@ -337,6 +350,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
       for (const call of calls)
         noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+    },
+    lost(runId, command) {
+      const calls = new Set<StartedCall>();
+      for (const [id, call] of started) {
+        if (call.runId !== runId || !call.matched.includes(command)) continue;
+        started.delete(id);
+        calls.add(call);
+      }
+      for (const call of calls)
+        noteDrop(runId, "session-lost", call.matched, call.head, call.command);
+      return calls.size > 0;
     },
     drops(runId) {
       return dropped.get(runId) ?? [];
