@@ -1734,6 +1734,29 @@ describe("refusals", () => {
     expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(false);
   });
 
+  it("a line already waiting for the seat goes first and carries the branch-moved notice after it", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA });
+    report();
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("ci");
+    // an answer is waiting for the seat when someone pushes on top
+    setLoop({ pendingLine: { key: `${RUN}:answer:1`, text: "The answer to your question." } });
+    setPr({ ci: "pending", headSha: SHA_B });
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    const told = h.sent.filter((m) => m.text.includes("Your branch moved"));
+    expect(told).toHaveLength(1);
+    expect(told[0]?.key).toBe(`${RUN}:answer:1`);
+    expect(told[0]?.text).toBe(
+      `The answer to your question.\n\nYour branch moved to ${SHA_B.slice(0, 7)} (1 commit pushed on top); files may have changed, re-read before editing.`,
+    );
+    expect(loopOf().pendingLine ?? null).toBeNull();
+  });
+
   it("keeps the worktree move held when the hub cannot do it, never asks the seat to merge, and tries again", async () => {
     h.descends = true;
     h.fastForwardResult = { ok: false, text: "diverged", transient: false };

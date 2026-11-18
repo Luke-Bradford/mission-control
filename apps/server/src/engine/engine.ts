@@ -714,13 +714,14 @@ export function createEngine(deps: EngineDeps): Engine {
       return;
     }
     delete loop.branchMoved;
-    // the seat hears of it on its next turn (a line already waiting for it, such as an answer, goes first)
-    if (loop.pendingLine == null) {
-      loop.pendingLine = {
-        key: `${run.id}:${held.epoch}:branch-moved:${held.sha}`,
-        text: branchMovedText(held.sha, moved.commits ?? 1),
-      };
-    }
+    // The seat hears of it on its next turn. A line already waiting for it (an answer, a fix)
+    // goes first and carries the notice after it, as one line; a waiting line already sent is moot.
+    const notice = branchMovedText(held.sha, moved.commits ?? 1);
+    const waiting = loop.pendingLine;
+    loop.pendingLine =
+      waiting != null && !(waiting.key in store.claimedKeys(run.id))
+        ? { key: waiting.key, text: `${waiting.text}\n\n${notice}` }
+        : { key: `${run.id}:${held.epoch}:branch-moved:${held.sha}`, text: notice };
     store.addLoopEvent(
       `${run.id}:${held.epoch}:moved:${held.sha}`,
       run.id,
@@ -1571,7 +1572,12 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "send": {
-        const sent = await send(run.id, a.key, a.text);
+        // the waiting line may have taken the branch-moved notice earlier in this pass
+        const sent = await send(
+          run.id,
+          a.key,
+          a.key === cur.pendingLine?.key ? cur.pendingLine.text : a.text,
+        );
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
           const review = store.review(id);
