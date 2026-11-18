@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { PullRequestView, Run, RunLoop } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { flightSignals } from "../src/flight/signals.ts";
+import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
 import { flightState } from "../src/flight/state.ts";
 import {
   openWasteAlarms,
@@ -169,9 +169,16 @@ describe("failed review rounds", () => {
     expect(openWasteAlarms(store).map((a) => a.check)).toContain("failed-review-rounds");
     const first = read(NOW);
     expect(first).toHaveLength(1);
+    expect(first[0]?.told).toBe(false);
     expect(first[0]?.evidence).toContain("has failed 2 review rounds");
-    // the same alarm is the same signal on a later read: it does not wake FLIGHT again
-    expect(read(NOW + MIN).map((s) => s.key)).toEqual(first.map((s) => s.key));
+    markFlightSignalsShown(store, { repo: "mc", signals: first, triage: [] } as never, NOW);
+    // a third failed round raises the same alarm's level: the same signal, already told
+    reported("r1", 7, 3, 1);
+    syncWasteAlarms(config, store, NOW + MIN);
+    const next = read(NOW + MIN);
+    expect(next.map((s) => s.key)).toEqual(first.map((s) => s.key));
+    expect(next[0]?.told).toBe(true);
+    expect(next[0]?.evidence).toContain("has failed 3 review rounds");
   });
 });
 
@@ -210,12 +217,12 @@ describe("clearance waiting", () => {
     expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toEqual([]);
   });
 
-  it("wakes FLIGHT for the wait once it is an alarm", () => {
+  it("does not wake FLIGHT while the wait stands", () => {
     hold(NOW - 3 * HOUR);
     syncWasteAlarms(config, store, NOW);
     syncWasteAlarms(config, store, NOW + HOUR);
     const signals = flightSignals({ config, store, session, seats: [], now: NOW + HOUR }).signals;
-    expect(signals.filter((s) => s.kind === "waste_alarm")).toHaveLength(1);
+    expect(signals.filter((s) => s.kind === "waste_alarm")).toEqual([]);
   });
 
   it("raises one alarm for each head: a new head restarts the two hours", () => {

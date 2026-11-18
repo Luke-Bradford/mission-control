@@ -696,7 +696,7 @@ describe("the waste_alarm FLIGHT signal", () => {
     expect(next[0]?.told).toBe(true);
   });
 
-  it("does not wake FLIGHT for an alarm that parks no ticket", () => {
+  it("does not wake FLIGHT for an alarm the hub handles itself", () => {
     const r = run("guido-1", { ticket: "mc#1596" });
     store.upsertRun(r);
     for (let i = 0; i < 3; i++)
