@@ -724,32 +724,49 @@ describe("supervisor events (Plan 7a)", () => {
     });
 
     it("carries on the last review's open findings and reachable commits", async () => {
-      const first = await idleRun({ loop: LOOP });
+      const first = make({
+        extraSeat: {
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          effort: "high",
+          area: ["apps/**"],
+        },
+      });
+      first.sup.start();
+      const priorStart = await first.sup.startRun("guido-1", 42, { loop: LOOP });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
       const worktree = store.seatSession("guido-1")?.worktree;
       if (worktree === null || worktree === undefined) throw new Error("missing worktree");
       writeFileSync(join(worktree, "continued.txt"), "continued\n");
       git(worktree, "add", "continued.txt");
       git(worktree, "commit", "-qm", "continued work");
       const head = git(worktree, "rev-parse", "HEAD");
-      await first.sup.endRun("guido-1", { hold: true });
-      const prior = store.run(first.runId);
+      const prior = store.run(priorStart.runId);
       if (prior === null) throw new Error("missing prior run");
       store.upsertRun({
         ...prior,
         summary: "Earlier summary",
-        loop: { ...LOOP, prNumber: 9 },
+        loop: { ...LOOP, phase: "ci", prNumber: 9 },
       });
-      store.addEvidence(first.runId, "Earlier evidence", 2);
-      store.addRunCommit({ runId: first.runId, repoId: "mc", branch: BRANCH, sha: head, at: 2 });
+      store.addEvidence(priorStart.runId, "Earlier evidence", 2);
       store.addRunCommit({
-        runId: first.runId,
+        runId: priorStart.runId,
+        repoId: "mc",
+        branch: BRANCH,
+        sha: head,
+        at: 2,
+      });
+      store.addRunCommit({
+        runId: priorStart.runId,
         repoId: "mc",
         branch: BRANCH,
         sha: "f".repeat(40),
         at: 3,
       });
       const review = store.requestReview({
-        authorRunId: first.runId,
+        authorRunId: priorStart.runId,
         repoId: "mc",
         seatId: "retro",
         prNumber: 9,
@@ -784,7 +801,8 @@ describe("supervisor events (Plan 7a)", () => {
         at: 5,
       });
 
-      const { runId } = await first.sup.startRun("guido-1", 42, { loop: LOOP });
+      await first.sup.endRunByEngine(priorStart.runId);
+      const { runId } = await first.sup.startRun("guido-2", 42, { loop: LOOP });
       await until(() => expect(userLines()).toHaveLength(2));
       const brief = userLines()[1] as string;
       expect(brief).toContain("## Continue the earlier run");
