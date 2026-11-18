@@ -438,7 +438,7 @@ export const ACTIONS = {
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
-  /** Body `{ text, interrupt? }`. */
+  /** Body `{ text, interrupt?, question?, itemKey?, choice? }`; `choice` is a picked option: `{ briefAt, option }`. */
   seatMessage: (seatId: string) => `/api/seats/${enc(seatId)}/message`,
   /** Body `{}`. */
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,
