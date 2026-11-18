@@ -944,6 +944,8 @@ export function demoPageAnswers(
     "/api/boards/site-builder": [],
     [`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`]: openPrs(tickets),
     [`/api/repos/${DEMO_REPO}/prs`]: openPrs(tickets),
+    [`/api/repos/${DEMO_REPO}/prs?shape=summary`]: openPrs(tickets),
+    "/api/repos/site-builder/prs?shape=summary": [],
     [`/api/repos/${DEMO_REPO}/map`]: mapSnapshot(
       SEAT_IDS.filter((id) => id !== "flight-1"),
       tickets,
