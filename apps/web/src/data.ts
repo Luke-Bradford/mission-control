@@ -279,6 +279,11 @@ export const RESOURCES = {
     path: prListPath(repoId),
     topic: "boards",
   }),
+  /** One retained PR, including older work which the default list no longer returns. */
+  pr: (repoId: string, number: number): ResourceRef => ({
+    path: `/api/repos/${enc(repoId)}/prs/${number}`,
+    topic: "boards",
+  }),
   // Runs git in the worktree on each fetch, so it is fetched once per visit.
   files: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/files`,

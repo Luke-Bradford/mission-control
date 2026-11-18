@@ -1,18 +1,19 @@
 import type { ReactNode } from "react";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { PlanPictures } from "./PlanView.tsx";
-import { type Plan, type PlansView, ticketNumberOf } from "./types.ts";
+import { type PlansView, ticketNumberOf } from "./types.ts";
 import "./plans.css";
 
-/** The newest approved plan of one ticket; undefined when it has none or the read has not landed. */
-export function useSignedOffPlan(repoId: string, number: number | null): Plan | undefined {
+/** The newest approved plan and its read state for one ticket. */
+export function useSignedOffPlan(repoId: string, number: number | null) {
   const res = useResource<PlansView>(number === null ? null : RESOURCES.plans(repoId));
-  return res.data?.history
+  const plan = res.data?.history
     .filter(
       (p) => p.status === "approved" && p.repoId === repoId && ticketNumberOf(p.ticket) === number,
     )
     .sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))[0];
+  return { plan, ...res };
 }
 
 /**
@@ -31,7 +32,33 @@ export function SignedOffPlan({
   built: ReactNode;
   className?: string;
 }) {
-  const plan = useSignedOffPlan(repoId, number);
+  const { plan, loading, error } = useSignedOffPlan(repoId, number);
+  if (number === null) return null;
+  if (loading && !plan)
+    return (
+      <Panel
+        title="Signed-off plan"
+        className={className ? `plan-beside ${className}` : "plan-beside"}
+      >
+        <p className="pb" role="status">
+          Loading the signed-off plan…
+        </p>
+      </Panel>
+    );
+  if (error)
+    return (
+      <Panel
+        title="Signed-off plan"
+        className={className ? `plan-beside ${className}` : "plan-beside"}
+      >
+        <p className="pb crit-t" role="alert">
+          Could not load the signed-off plan. {error.message}{" "}
+          <button type="button" onClick={() => hub.refetch(RESOURCES.plans(repoId).path)}>
+            Try again
+          </button>
+        </p>
+      </Panel>
+    );
   if (!plan) return null;
   return (
     <Panel

@@ -189,26 +189,26 @@ describe("the signed-off plan beside what was built", () => {
     pending: [],
     history: [plan({ repoId: "mission-control", ticket: "mission-control#2037" })],
   };
-  const PRS = "/api/repos/mission-control/prs?shape=summary";
-  const prRow = (ticket: string | null) => [{ repoId: "mission-control", number: 1011, ticket }];
+  const PR = "/api/repos/mission-control/prs/1011";
+  const prRow = (ticket: string | null) => ({ repoId: "mission-control", number: 1011, ticket });
 
   it("finds the plan of an archived report that has no branch, from the PR's ticket", async () => {
     const report = qaReportFixture();
     expect(report.branch).toBeUndefined();
-    serve({ "/api/plans?repoId=mission-control": signed, [PRS]: prRow("mission-control#2037") });
+    serve({ "/api/plans?repoId=mission-control": signed, [PR]: prRow("mission-control#2037") });
     render(<QaReportRead report={report} archived />);
     expect(await screen.findByRole("region", { name: "Signed-off plan" })).toBeTruthy();
   });
 
   it("finds it when the branch name does not carry the ticket", async () => {
     const report = { ...qaReportFixture(), branch: "inco-1-planner" };
-    serve({ "/api/plans?repoId=mission-control": signed, [PRS]: prRow("mission-control#2037") });
+    serve({ "/api/plans?repoId=mission-control": signed, [PR]: prRow("mission-control#2037") });
     render(<QaReportRead report={report} archived />);
     expect(await screen.findByRole("region", { name: "Signed-off plan" })).toBeTruthy();
   });
 
   it("shows nothing for an archived report whose ticket cannot be found", async () => {
-    serve({ "/api/plans?repoId=mission-control": signed, [PRS]: prRow(null) });
+    serve({ "/api/plans?repoId=mission-control": signed, [PR]: prRow(null) });
     render(<QaReportRead report={qaReportFixture()} archived />);
     await screen.findByRole("article");
     expect(screen.queryByRole("region", { name: "Signed-off plan" })).toBeNull();
@@ -222,5 +222,41 @@ describe("the signed-off plan beside what was built", () => {
     const built = within(panel).getByRole("region", { name: "What was built" });
     expect(built.textContent).toContain(`Built · ${report.visual.pairs[0].label}`);
     expect(within(panel).getByRole("region", { name: "What was proposed" })).toBeTruthy();
+  });
+
+  it("explains a failed signed-off plan read on the ticket page", async () => {
+    serve({
+      "/api/config": CONFIG,
+      "/api/tickets/shop-app/3349": ticket(),
+      "/api/plans?repoId=shop-app": () => ({ status: 503, body: { error: "plans offline" } }),
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("alert").textContent).toMatch(
+      /Could not load the signed-off plan/,
+    );
+    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("explains a failed signed-off plan read on a QA report", async () => {
+    serve({
+      "/api/plans?repoId=mission-control": () => ({
+        status: 503,
+        body: { error: "plans offline" },
+      }),
+    });
+    render(<QaReportRead report={qaReportFixture()} ticket="mission-control#2037" />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("alert").textContent).toMatch(
+      /Could not load the signed-off plan/,
+    );
+    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("names a signed-off plan that is still loading on a QA report", async () => {
+    serve({ "/api/plans?repoId=mission-control": () => new Promise(() => {}) });
+    render(<QaReportRead report={qaReportFixture()} ticket="mission-control#2037" />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("status").textContent).toMatch(/Loading the signed-off plan/);
   });
 });

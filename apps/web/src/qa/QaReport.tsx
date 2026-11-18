@@ -188,14 +188,17 @@ const branchTicket = (branch: string | undefined): number | null => {
 
 /**
  * The ticket number a report's signed-off plan is looked up by: the PR's ticket when the caller
- * knows it, else the stored PR row's (a report saved without a branch still finds its plan), else
+ * knows it, else its retained PR row (a report saved without a branch still finds its plan), else
  * the one a conventional branch name carries.
  */
 function usePlanTicket(r: QaReport, ticket: string | null | undefined): number | null {
   const known = ticket ? ticketNumberOf(ticket) : null;
-  const prs = useResource<PullRequestView[]>(known === null ? RESOURCES.allPrs(r.repoId) : null);
-  const row = prs.data?.find((p) => p.number === r.prNumber);
-  return known ?? (row?.ticket ? ticketNumberOf(row.ticket) : null) ?? branchTicket(r.branch);
+  const pr = useResource<PullRequestView>(
+    known === null ? RESOURCES.pr(r.repoId, r.prNumber) : null,
+  );
+  return (
+    known ?? (pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null) ?? branchTicket(r.branch)
+  );
 }
 
 /** The selected head is mandatory: an older approval never fills a new head's evidence gap. */
