@@ -26,7 +26,7 @@ const SIZES = [
 const READY = {
   accounts: ".sgrid .panel table",
   repos: ".repo-card",
-  roles: ".sgrid .panel table",
+  roles: ".rg-page .panel table",
   loops: ".loop-chain",
   sources: ".sgrid .yaml",
   access: ".sgrid .panel",

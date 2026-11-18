@@ -1442,7 +1442,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
         }
         // Waste alarms are read once a minute: a restart storm shows within minutes. They never
-        // raise a Needs-you item; FLIGHT is woken once per alarm.
+        // raise a Needs-you item; one about a ticket going round wakes FLIGHT once.
         try {
           syncWasteAlarms(deps.config, store, at);
         } catch (e) {

@@ -96,6 +96,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildApp,
   CHECK_FAILED,
+  CONFIG_FILE_UNAVAILABLE,
   CONFIG_WRITES_UNAVAILABLE,
   LOOP_WRITES_DISABLED,
   NO_OPEN_NOTE,
@@ -256,7 +257,7 @@ const stubSupervisor = (): Supervisor => {
     endRun: call("end", undefined),
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),
-    wakeRun: call("wakeRun", { freshSessionId: null, fallback: null }),
+    wakeRun: call("wakeRun", undefined),
     endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
     resumeRun: call("resumeRun", undefined),
@@ -1637,7 +1638,6 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/tokens?days=7"],
-  ["GET", "/api/audit/fix-sessions"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -2263,6 +2263,46 @@ describe("Setup Roles & guards", () => {
     const read = await view();
     expect(read.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
     expect(createHash("sha256").update(readFileSync(configPath)).digest("hex")).toBe(read.base);
+  });
+
+  it("a preview that may not write config still reads the rules, and saves nothing", async () => {
+    onDisk("    rules:\n      pick_from: [Todo]\n");
+    const before = readFileSync(configPath, "utf8");
+    // a preview on the live file: the path it loaded, and no writable `configPath`
+    const preview = buildApp({ config, store, bus, configReadPath: configPath });
+    try {
+      const read = await preview.inject({ method: "GET", url: "/api/repos/shop-app/rules" });
+      expect(read.statusCode).toBe(200);
+      const body = read.json<View>();
+      expect(Object.keys(body.rules)).toEqual(KEYS);
+      expect(body.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
+      expect(
+        (await preview.inject({ method: "GET", url: "/api/repos/nope/rules" })).statusCode,
+      ).toBe(404);
+      const saved = await preview.inject({
+        method: "POST",
+        url: "/api/repos/shop-app/rules",
+        headers: json,
+        payload: JSON.stringify({ base: body.base, rules: rolesBody }),
+      });
+      expect(saved.statusCode).toBe(409);
+      expect(saved.json()).toEqual({ error: CONFIG_WRITES_UNAVAILABLE });
+    } finally {
+      await preview.close();
+    }
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
+  });
+
+  it("a server with no config file says the rules cannot be read", async () => {
+    const bare = buildApp({ config, store, bus });
+    try {
+      const read = await bare.inject({ method: "GET", url: "/api/repos/shop-app/rules" });
+      expect(read.statusCode).toBe(409);
+      expect(read.json()).toEqual({ error: CONFIG_FILE_UNAVAILABLE });
+    } finally {
+      await bare.close();
+    }
   });
 
   it("a rules save never makes an unapplied Authority change on disk live", async () => {
@@ -8763,6 +8803,39 @@ describe("the first loop's engine", () => {
         await a.close();
       },
     );
+
+    it("ties an option picked for a set-aside run's question to the message that run gets", async () => {
+      parkedRun("parked", "shop-app#9");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q = passed("parked", "Which provider?");
+      const key = `ask:${q}`;
+      // an older brief: its option carries no id, so the pick travels with the reply
+      store.addBrief({
+        key,
+        context: "The seat asks which provider to use.",
+        recommendation: "Stripe.",
+        options: [{ label: "Stripe", answer: "Use Stripe." }],
+        basis: "read the ticket",
+        at: NOW,
+      });
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, {
+        text: "Use Stripe.",
+        question: q,
+        itemKey: key,
+        choice: { briefAt: NOW, option: 0 },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(store.comms(0, "parked")).toEqual([
+        expect.objectContaining({ to: "guido-1", text: "Use Stripe." }),
+      ]);
+      const stored = store.latestChoice(key);
+      expect(stored).toMatchObject({ label: "Stripe", target: "guido-1", targetKind: "seat" });
+      expect(store.commsRun(stored?.messageId ?? "")?.id).toBe("parked");
+      expect(store.openQuestions()).toEqual([]);
+      expect(reconciled).toEqual(["parked"]);
+      await a.close();
+    });
 
     it("a plain message closes no question, and a reply that names one closes only that one", async () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));

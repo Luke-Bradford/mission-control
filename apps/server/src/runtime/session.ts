@@ -404,6 +404,8 @@ function createDriver(i: {
     await endKeeper(i.dir, i.stopGraceMs, i.log);
     if (finished || detached) return;
     const e = readKeeperExit(i.dir);
+    // The keeper may end before the socket hands over the CLI's last words; its exit file kept them.
+    if (e?.lastStderr != null) stderrText(e.lastStderr);
     end({ code: e?.code ?? null, signal: e?.signal ?? null });
   }
 

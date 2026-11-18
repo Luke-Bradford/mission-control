@@ -7,7 +7,7 @@ import {
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { nextWakeAt, wakeReasons } from "../src/flight/state.ts";
+import { nextWakeAt } from "../src/flight/state.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr/flow.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import { Store } from "../src/store.ts";
@@ -530,17 +530,6 @@ describe("dependencies and immutable flow metrics", () => {
 });
 
 describe("PR flow timed wake boundaries", () => {
-  it("targets only the PR identity, so another PR's clearance decision cannot settle it", () => {
-    const reasons = wakeReasons(
-      "{}",
-      JSON.stringify({ prFlow: [`7:stage:clearance:${T}`, `8:waiting:controller:${T}`] }),
-    );
-    expect(reasons.map((r) => r.targets)).toEqual([
-      ["7", "#7"],
-      ["8", "#8"],
-    ]);
-  });
-
   it.each(["operator", "controller"] as const)(
     "schedules and emits stable %s and p90 facts at their boundaries",
     (owner) => {

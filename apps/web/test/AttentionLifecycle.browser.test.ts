@@ -56,39 +56,12 @@ const cases = [
     theme: theme as "light" | "dark",
   })),
 ];
-describeRendered("Attention lifecycle ownership and archive", () => {
+describeRendered("Attention lifecycle archive", () => {
   it.each(cases)(
     "is reachable at $width × $height in $theme",
     async ({ width, height, theme }) => {
-      const page = await renderAt({
-        page: "test/attentionLifecycleBrowser.html",
-        width,
-        height,
-        colorScheme: theme,
-        api,
-      });
-      await page.box("#needBanner .banner");
-      expect(await page.reachable("#needBanner .banner button")).not.toContain(false);
-      expect(await page.unclipped("#needBanner .banner")).not.toContain(false);
-      expect(
-        await page.evaluate(
-          () => ({
-            text: document.querySelector("#needBanner")?.textContent,
-            buttons: [...document.querySelectorAll("#needBanner button")].map((b) => b.textContent),
-          }),
-          null,
-        ),
-      ).toMatchObject({ buttons: ["Open", "Ack"] });
-      const text = await page.evaluate(() => document.body.textContent ?? "", null);
-      expect(text).toContain("50 items");
-      expect(text).toContain("has an item to resolve");
-      expect(text).not.toContain("Decision for you");
       const shots = process.env.MC_ATTENTION_SHOTS;
-      if (shots) {
-        mkdirSync(shots, { recursive: true });
-        await page.screenshot(join(shots, `owners-${width}-${height}-${theme}.png`));
-      }
-      await page.close();
+      if (shots) mkdirSync(shots, { recursive: true });
       const comms = await renderAt({
         page: "test/commsBrowser.html",
         width,

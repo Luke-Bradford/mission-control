@@ -1,6 +1,5 @@
 import {
   COMMS_CONTROLLER,
-  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_RUNAWAY_NOTE_KEY,
   NEW_LOOP,
   OPERATOR_HEADER,
@@ -183,13 +182,6 @@ it.each([
   expect(store.notes()).toHaveLength(1);
 });
 
-it("keeps FLIGHT's unfinished-wake reminder out of attention while retaining its source", () => {
-  raise(FLIGHT_LEFT_NOTE_KEY);
-  expect(
-    attentionItems(config, store, now).some((i) => i.key === `note:${FLIGHT_LEFT_NOTE_KEY}`),
-  ).toBe(false);
-  expect(store.notes().some((n) => n.key === FLIGHT_LEFT_NOTE_KEY)).toBe(true);
-});
 it("clears the source, records a closure and stays gone until a newly raised item", async () => {
   raise();
   const key = "note:hub-update-held";

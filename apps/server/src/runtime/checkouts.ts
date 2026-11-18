@@ -317,6 +317,10 @@ export interface PendingCheckouts {
 export interface CheckoutInput {
   /** An ended author's branch; an existing managed worktree can be adopted in place. */
   handoff?: { branch: string; worktree: string | null };
+  /** Branches whose cached PR has merged; these start a new stage unless they also have an open PR. */
+  mergedPullRequestBranches?: readonly string[];
+  /** Branches whose cached PR is still open and can therefore be resumed. */
+  openPullRequestBranches?: readonly string[];
   /** Mission Control's clone of the repo (a session's `checkout`). */
   checkout: string;
   /** `crew.worktrees`. */
@@ -1118,6 +1122,32 @@ async function installAll(
   }
 }
 
+/**
+ * Empties the worktree's own `.mc-tmp` (git-ignored scratch: a test run leaves fixtures there,
+ * links included) so the disk check can walk the whole tree as it always did. Nothing is followed:
+ * the folder must be a real directory that resolves inside the worktree, and each entry is removed
+ * with `rm`, which unlinks a symlink and never enters it. A `.mc-tmp` that is itself a link is
+ * unlinked, its target untouched; a directory that resolves elsewhere is left alone for the disk
+ * check to refuse. Only the resume path calls it: the caller holds the clone lock and no seat is
+ * running in the worktree.
+ */
+async function clearScratch(worktree: string): Promise<void> {
+  const scratch = join(worktree, MC_TMP_DIR_NAME);
+  const stat = await lstat(scratch).catch(() => null);
+  if (stat === null) return;
+  if (stat.isSymbolicLink()) {
+    // unlink the link itself; rm without `recursive` never follows it
+    await rm(scratch, { force: true });
+    return;
+  }
+  if (!stat.isDirectory()) return;
+  const real = await realpath(scratch);
+  if (real !== join(await realpath(worktree), MC_TMP_DIR_NAME)) return;
+  for (const name of await readdir(scratch)) {
+    await rm(join(scratch, name), { recursive: true, force: true });
+  }
+}
+
 /** Reused pnpm worktrees must be relinked to Codex's stable, seat-read-only store. */
 async function installReusedPnpm(
   s: InstallVerification & { name: string },
@@ -1233,7 +1263,9 @@ async function fetchOriginBase(
 async function ticketBranch(
   inClone: (args: string[]) => Promise<string>,
   issue: number,
-): Promise<string | null> {
+  mergedPullRequestBranches: readonly string[] = [],
+  openPullRequestBranches: readonly string[] = [],
+): Promise<{ branch: string | null; branches: ReadonlySet<string> }> {
   let refs: string;
   try {
     refs = await inClone([
@@ -1257,13 +1289,30 @@ async function ticketBranch(
       .map((ref) => ref.replace(/^refs\/(?:heads|remotes\/origin)\//, ""))
       .filter((branch) => pattern.test(branch)),
   );
-  if (branches.size > 1) {
+  const merged = new Set(mergedPullRequestBranches);
+  const open = new Set(openPullRequestBranches);
+  const openBranches = [...branches].filter((branch) => open.has(branch));
+  // An open PR is the ticket's active work. Local branches from ended runs must not compete with
+  // it: an earlier stage's branch can remain until the tidy removes it.
+  const reusable =
+    openBranches.length > 0
+      ? openBranches
+      : [...branches].filter((branch) => !merged.has(branch) || open.has(branch));
+  if (reusable.length > 1) {
     throw new CheckoutError(
       "branch",
-      `#${issue} has more than one branch (${branches.size}); delete the extra ones`,
+      `#${issue} has more than one branch (${reusable.length}); delete the extra ones`,
     );
   }
-  return branches.values().next().value ?? null;
+  return { branch: reusable[0] ?? null, branches };
+}
+
+function freshTicketBranch(issue: number, title: string, branches: ReadonlySet<string>): string {
+  const base = branchFor(issue, title);
+  for (let stage = 2; ; stage += 1) {
+    const branch = `${base}-stage-${stage}`;
+    if (!branches.has(branch)) return branch;
+  }
 }
 
 /** A fresh detached copy of the ticket's branch, or origin's default tip when it has none. */
@@ -1273,7 +1322,7 @@ export async function prepareReadOnlyCheckout(
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
   const path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
-  const branch = await ticketBranch(inClone, i.issue);
+  const { branch } = await ticketBranch(inClone, i.issue);
   const refSha = (ref: string) =>
     inClone(["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`]).then(
       (s) => s.trim(),
@@ -1622,8 +1671,16 @@ export async function prepareCheckout(
   runInstall: InstallRunner = execFileP,
 ): Promise<Checkout> {
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
+  const ticket =
+    i.handoff === undefined
+      ? await ticketBranch(inClone, i.issue, i.mergedPullRequestBranches, i.openPullRequestBranches)
+      : null;
   const branch =
-    i.handoff?.branch ?? (await ticketBranch(inClone, i.issue)) ?? branchFor(i.issue, i.title);
+    i.handoff?.branch ??
+    ticket?.branch ??
+    (ticket === null || ticket.branches.size === 0
+      ? branchFor(i.issue, i.title)
+      : freshTicketBranch(i.issue, i.title, ticket.branches));
   // a worktree made before sessions had folders is reused where it is
   let path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
@@ -1828,6 +1885,7 @@ export async function reinstallTrimmed(
   if (gitDir === null) throw new CheckoutError("path", `${path} is not this run's checkout`);
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
+  await clearScratch(path);
   await installReusedPnpm(
     {
       checkout: i.checkout,

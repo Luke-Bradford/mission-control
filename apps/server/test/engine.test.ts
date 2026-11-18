@@ -35,10 +35,7 @@ import {
   EVIDENCE_RULING_PREFIX,
   FINDING_FIX_MAX,
   FIX_TEXT_MAX,
-  fixArmEventText,
   fixSentText,
-  freshFallbackEventText,
-  freshWokenEventText,
   globMatches,
   hardRulesBySettingKey,
   hardRulesFlagKey,
@@ -109,6 +106,8 @@ import {
   uatParkText,
   uatSendBackText,
   wakeFailedText,
+  wakeStuckKey,
+  wakeStuckText,
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
@@ -397,9 +396,7 @@ interface Harness {
   /** wakeRun's calls, and what it throws (null: it puts the run back on its seat). */
   wakes: string[];
   /** The options of each wakeRun call, and what the next ones answer (a fresh start, or a fallback text). */
-  wakeOptions: ({ reviewResume?: boolean; fresh?: "ci" | "review" } | undefined)[];
-  freshStart: boolean;
-  freshFallback: string | null;
+  wakeOptions: ({ reviewResume?: boolean } | undefined)[];
   wakeError: Error | null;
   /** The run's local branch no longer exists (localBranchGone answers true). */
   branchGone: boolean;
@@ -480,8 +477,6 @@ function harness(): Harness {
     asides: [],
     wakes: [],
     wakeOptions: [],
-    freshStart: false,
-    freshFallback: null,
     wakeError: null,
     branchGone: false,
     rulingReruns: [],
@@ -693,11 +688,6 @@ function harness(): Harness {
             const aside = r?.loop?.aside;
             if (r === null || !aside) throw new SupervisorError(409, "the run is not waiting");
             seatIdle(runId, r.agentId);
-            return {
-              freshSessionId:
-                options?.fresh !== undefined && x.freshStart ? "fresh-session-1" : null,
-              fallback: options?.fresh !== undefined ? x.freshFallback : null,
-            };
           },
           busy: () => x.busyList,
           async startReview(seat, id) {
@@ -7974,162 +7964,6 @@ describe("the engine runs reviews", () => {
       expect(sentKeys()).toEqual([wakeDue(first().id)]);
     });
 
-    describe("the fix-session trial", () => {
-      const trialOn = (size: string | null = "S") => {
-        need(config.crew).fixSessionTrial = true;
-        store.replaceBoard(REPO, [
-          item({ size }),
-          item({ issueNumber: 50, itemId: "PVTI_50", size: size ?? "S" }),
-        ]);
-      };
-      /** Another ticket's run, already in `arm` and ended: it tips the tie in RUN's stratum. */
-      const inTrial = (arm: "continue" | "fresh") =>
-        store.upsertRun(
-          run({
-            id: "guido-1:other",
-            seq: 2,
-            ticket: `${REPO}#50`,
-            endedAt: clock,
-            status: "ok",
-            loop: { ...NEW_LOOP, phase: "done", fixArm: arm },
-          }),
-        );
-      const wakeForFix = async () => {
-        await setAside();
-        reported(first().id, [finding("Important")]);
-        await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
-        await vi.waitFor(() => expect(asideRun()).toBeNull());
-      };
-
-      it("starts the fresh arm's wake in a fresh session, and records it", async () => {
-        trialOn();
-        inTrial("continue");
-        h.freshStart = true;
-        await wakeForFix();
-        expect(h.wakeOptions).toEqual([{ fresh: "review" }]);
-        expect(loopOf().fixArm).toBe("fresh");
-        expect(loopOf().fixSessions).toEqual([
-          { sessionId: "fresh-session-1", at: expect.any(Number), reason: "review" },
-        ]);
-        expect(loopTexts()).toContain(fixArmEventText(`${REPO}#7`, "fresh", "small"));
-        expect(loopTexts()).toContain(freshWokenEventText("GUIDO-1"));
-        expect(loopTexts()).not.toContain(wokenEventText("GUIDO-1"));
-      });
-
-      it("a fresh start that fell back resumed: the receipt names why", async () => {
-        trialOn();
-        inTrial("continue");
-        h.freshFallback = "spawn failed";
-        await wakeForFix();
-        expect(loopOf().fixSessions ?? []).toEqual([]);
-        expect(loopOf().fixFallbacks).toEqual([{ at: expect.any(Number), reason: "spawn failed" }]);
-        expect(loopTexts()).toContain(freshFallbackEventText("GUIDO-1", "spawn failed"));
-        expect(loopTexts()).toContain(wokenEventText("GUIDO-1"));
-      });
-
-      it("keeps the continue arm resuming, as today", async () => {
-        trialOn();
-        inTrial("fresh");
-        await wakeForFix();
-        expect(loopOf().fixArm).toBe("continue");
-        expect(h.wakeOptions).toEqual([undefined]);
-        expect(loopTexts()).toContain(fixArmEventText(`${REPO}#7`, "continue", "small"));
-      });
-
-      it("with the switch off, assigns no arm and sends no fresh option", async () => {
-        store.replaceBoard(REPO, [item({ size: "S" })]);
-        await wakeForFix();
-        expect(loopOf().fixArm).toBeUndefined();
-        expect(h.wakeOptions).toEqual([undefined]);
-      });
-
-      it("assigns no ticket that has no Size", async () => {
-        trialOn(null);
-        store.replaceBoard(REPO, [item({ size: null })]);
-        await wakeForFix();
-        expect(loopOf().fixArm).toBeUndefined();
-      });
-
-      it("never assigns a Codex run", async () => {
-        trialOn();
-        inTrial("continue");
-        const db = new DatabaseSync(join(dir, "mc.sqlite"));
-        try {
-          db.prepare("UPDATE runs SET vendor = 'codex' WHERE id = ?").run(RUN);
-        } finally {
-          db.close();
-        }
-        await wakeForFix();
-        expect(loopOf().fixArm).toBeUndefined();
-        expect(h.wakeOptions).toEqual([undefined]);
-      });
-
-      it("assigns nothing when the ticket already has a run in the trial", async () => {
-        trialOn();
-        store.upsertRun(
-          run({
-            id: "guido-1:earlier",
-            seq: 3,
-            ticket: `${REPO}#7`,
-            endedAt: clock,
-            status: "failed",
-            loop: { ...NEW_LOOP, phase: "done", fixArm: "continue" },
-          }),
-        );
-        await wakeForFix();
-        expect(loopOf().fixArm).toBeUndefined();
-        expect(h.wakeOptions).toEqual([undefined]);
-      });
-
-      it("an account at its stop gives no wake, no arm and no session", async () => {
-        trialOn();
-        inTrial("continue");
-        await setAside();
-        for (const window of ["5h", "7d"] as const) {
-          store.addUsage({
-            accountId: "claude-main",
-            window,
-            at: clock - 1000,
-            pct: 96,
-            resetAt: clock + 60 * MIN,
-            source: "test",
-          });
-        }
-        reported(first().id, [finding("Important")]);
-        await vi.waitFor(() => expect(asideRun()?.wake).toBe(true));
-        await h.engine.reconcileRun(RUN);
-        expect(h.wakes).toEqual([]);
-        expect(loopOf().fixArm).toBeUndefined();
-        expect(loopOf().fixSessions).toBeUndefined();
-      });
-
-      it("a paused seat gives no wake, no arm and no session", async () => {
-        trialOn();
-        inTrial("continue");
-        await setAside();
-        writeCrewPause(
-          store,
-          { seats: [SEAT], reason: "Keep new work paused", at: clock, by: "operator" },
-          clock,
-        );
-        reported(first().id, [finding("Important")]);
-        await h.engine.reconcileRun(RUN);
-        expect(h.wakes).toEqual([]);
-        expect(loopOf().fixArm).toBeUndefined();
-      });
-
-      it("a displaced run resumes, whatever its arm", async () => {
-        trialOn();
-        inTrial("continue");
-        await setAside();
-        setLoop({ aside: { worktree: WT, wake: true, displaced: true } });
-        await h.engine.reconcileRun(RUN);
-        await vi.waitFor(() => expect(h.wakes).toEqual([RUN]));
-        expect(h.wakeOptions).toEqual([undefined]);
-        expect(loopOf().fixArm).toBeUndefined();
-      });
-    });
-
     it("waits for a busy seat, and comes back when the other run ends", async () => {
       await setAside();
       h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
@@ -8181,6 +8015,52 @@ describe("the engine runs reviews", () => {
       store.setRunEnded(RUN, clock, "failed", "exit");
       await h.engine.reconcileRun(RUN);
       expect(loopOf().parked).toMatchObject({ kind: "ended", ended: true });
+    });
+
+    it("a wake that fails the same way twice running is recorded once, for FLIGHT; the retries go on", async () => {
+      await setAside();
+      const failure = "could not resume: dependencies could not be reinstalled";
+      h.wakeError = new SupervisorError(502, failure);
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      expect(store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN))).toEqual([]);
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      const stuck = store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN));
+      expect(stuck.map((e) => e.text)).toEqual([wakeStuckText(failure)]);
+      // still aside: the next pass tries again
+      expect(asideRun()?.wake).toBe(true);
+    });
+
+    it("a 409 between two 502s breaks the streak", async () => {
+      await setAside();
+      const stuck = () => store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN));
+      h.wakeError = new SupervisorError(
+        502,
+        "could not resume: dependencies could not be reinstalled",
+      );
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      await h.engine.reconcileRun(RUN);
+      h.wakeError = new SupervisorError(
+        502,
+        "could not resume: dependencies could not be reinstalled",
+      );
+      await h.engine.reconcileRun(RUN);
+      expect(stuck()).toEqual([]);
+      await h.engine.reconcileRun(RUN);
+      expect(stuck()).toHaveLength(1);
+    });
+
+    it("a busy seat's 409 is never reported as a stuck wake", async () => {
+      await setAside();
+      h.wakeError = new SupervisorError(409, "GUIDO-1 already has a run");
+      reported(first().id, [finding("Important")]);
+      await vi.waitFor(() => expect(h.wakes.length).toBeGreaterThan(0));
+      await h.engine.reconcileRun(RUN);
+      await h.engine.reconcileRun(RUN);
+      expect(store.loopEvents(0).filter((e) => e.key === wakeStuckKey(RUN))).toEqual([]);
     });
 
     it("a park wakes it", async () => {

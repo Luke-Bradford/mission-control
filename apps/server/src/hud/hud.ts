@@ -32,7 +32,6 @@ import {
   escalationKind,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_NOTES,
-  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
@@ -868,7 +867,7 @@ const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k
 
 /** The watch's FLIGHT-down notes as items: folded into the one "FLIGHT is not triaging" item. */
 const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
-  [...FLIGHT_DOWN_NOTES, FLIGHT_LEFT_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
+  FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
 );
 
 /**

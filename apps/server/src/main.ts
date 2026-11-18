@@ -713,6 +713,7 @@ export async function main(): Promise<void> {
     checks: runChecks,
     checkDrops: (runId) => checkRecorder.drops(runId),
     pendingChecks: (runId) => checkRecorder.pending(runId),
+    lostCheck: (runId, command) => checkRecorder.lost(runId, command),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
@@ -1133,6 +1134,8 @@ export async function main(): Promise<void> {
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath: writableConfigPath,
+    // Reads may use the loaded file on any server: a preview shows its rules and cannot save them.
+    configReadPath: configPath,
     crewReloader: writableConfigPath === undefined ? undefined : crewReloader,
     // A preview writes only a config file it was explicitly pointed at, never the live one.
     seatWrites: !preview || process.env.MC_CONFIG !== undefined,

@@ -72,6 +72,7 @@ import {
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightPointerKind,
+  type FlightWakeAction,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -1216,18 +1217,6 @@ export class Store {
         ...sessionsOf(r.a_sessions),
       },
     }));
-  }
-
-  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
-  fixTrialRuns(): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
-           ORDER BY started_at, seq`,
-        )
-        .all() as Row[]
-    ).map(toRun);
   }
 
   /** Context size of every stored model call of runs that started since `since`. */
@@ -3318,6 +3307,16 @@ export class Store {
       "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
     ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
+  }
+
+  /** Branches from durable merged-PR history, retained after the live PR cache drops them. */
+  mergedPullRequestBranches(repoId: RepoId): string[] {
+    return (
+      this.statement(
+        `SELECT DISTINCT json_extract(record, '$.branch') AS branch FROM pr_history
+         WHERE repo_id = ? AND json_extract(record, '$.branch') IS NOT NULL`,
+      ).all(repoId) as { branch: string }[]
+    ).map((row) => row.branch);
   }
 
   /**
@@ -6619,8 +6618,15 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
+  addFlightWake(
+    runId: string,
+    at: number,
+    reasons: string[],
+    wakeId?: string,
+    rode: string[] = [],
+    immediate: string[] = [],
+  ): void {
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -6631,6 +6637,14 @@ export class Store {
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     return this.flightQ.flightWakes(since);
+  }
+
+  flightWakeActions(
+    since: number,
+    until: number,
+    nonActing: readonly string[],
+  ): FlightWakeAction[] {
+    return this.flightQ.flightWakeActions(since, until, nonActing);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
@@ -6772,11 +6786,6 @@ export class Store {
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
     return this.flightQ.flightDecisions(since, limit);
-  }
-
-  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
-  flightWaitTimes(since: number): number[] {
-    return this.flightQ.flightWaitTimes(since);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

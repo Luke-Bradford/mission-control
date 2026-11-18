@@ -740,7 +740,8 @@ describe("PrEvidence gate", () => {
     expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
   });
   it("stops an expired side before another capture starts and never saves its late render", async () => {
-    let release!: (png: Buffer) => void;
+    // unset when the side expires before its render starts, which a loaded CI runner can do in 40 ms
+    let release: ((png: Buffer) => void) | undefined;
     let active = 0;
     let maxActive = 0;
     let blocked = true;
@@ -769,7 +770,7 @@ describe("PrEvidence gate", () => {
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
     expect(active).toBe(0);
     await t.evidence.ensure({ pr: 8, sha: NEXT, paths: WEB });
-    release(encodePng(pageBox(HEAD, "light")));
+    release?.(encodePng(pageBox(HEAD, "light")));
     await new Promise((r) => setTimeout(r, 10));
     expect(maxActive).toBe(1);
     expect(t.store.manifest("mc", 7, HEAD)).toBeNull();

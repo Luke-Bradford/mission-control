@@ -493,12 +493,12 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 | Retry loop | A ticket has 2 failed attempts (a run that ended failed, or parked as stuck, refused, conflict, no CI or gate), or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
 | Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
 | Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
-| Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm to FLIGHT with the runs listed |
+| Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm with the runs listed |
 | Coordination overhead | FLIGHT's recorded spend passes the developers' over a day (and is at least $10) | Alarm with the split; controller tokens are named, not priced |
-| Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm to FLIGHT naming the tickets |
-| Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm to FLIGHT with the runs and their blocking review findings |
-| Failed review rounds | An open PR has 2 reviews that reported blocking findings or a failed verdict | Alarm to FLIGHT; reviews go on. FLIGHT's state also lists the count on each PR (`prs[].reviewRounds`) |
-| Clearance waiting | A run has waited 2 hours on FLIGHT's clearance (a hard-rule PR, `awaitingFlight`) | Alarm to FLIGHT, once, with the hours waited. `GET /api/waste` lists it from 24 hours |
+| Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm naming the tickets |
+| Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm with the runs and their blocking review findings |
+| Failed review rounds | An open PR has 2 reviews that reported blocking findings or a failed verdict | Alarm; reviews go on. FLIGHT's state also lists the count on each PR (`prs[].reviewRounds`) |
+| Clearance waiting | A run has waited 2 hours on FLIGHT's clearance (a hard-rule PR, `awaitingFlight`) | Alarm with the hours waited. `GET /api/waste` lists it from 24 hours |
 
 - `GET /waste` also serves `flight`: 14 rolling 24-hour buckets (oldest first, the last ending now) of
   FLIGHT's wakes, its `wait` decisions, and its tokens against every run's new tokens (`tokenShare`, null
@@ -506,17 +506,24 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   is counted by when the wake, decision or run started.
 - `GET /waste` also serves `counts`: the latest daily retrospective's tickets opened and closed, runs per
   ticket (tickets with runs, mean, busiest), review rounds (reported, failed) and idle seat-hours, over the
-  retrospective's 24 hours; null before the first. `budget_unused` is a FLIGHT signal, not an alarm: a free
-  build seat idle 30 minutes while its account's 7-day use is under 50% raises one fact per idle spell.
+  retrospective's 24 hours; null before the first.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
-- FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
-  the hook has already refused that rerun, so Audit records it and FLIGHT is not woken. An alarm is
-  not a question: it never reaches Needs you.
-- FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
-  you). The alarm stays closed until its cause grows past the level it had. For a seat's or a
-  repo's alarm (restart storm, coordination overhead, ticket churn) that silence lasts one window,
-  not for good.
+- An alarm about one ticket going round wakes FLIGHT, once, through the `waste_alarm` signal: a
+  retry loop (the dealer will not deal the parked ticket until FLIGHT resolves the alarm or its
+  cause ends), failed review rounds at the limit, and runs per ticket. The wake comes at the
+  watch's next pass, not in a batch, unless FLIGHT's recent wakes for signals were mostly no-ops
+  (see Batching). The other alarms wake nobody: clearance waiting, cost without output,
+  coordination overhead and ticket churn are stored only; a review-rounds hold parks the run, and
+  that park's Needs-you item wakes FLIGHT; a restart storm lifts when the hour's count falls
+  back. Open alarms are served by `GET /api/waste` (a clearance wait from 24
+  hours; before that it is only stored). An alarm is not a question: it never reaches Needs you.
+- FLIGHT lifts a retry-loop park with `resolve_waste_alarm` (the alarm id is the signal's key, and a
+  basis, recorded in Decided without you). The alarm stays closed until its cause grows past the
+  level it had. The signal for failed review rounds and for runs per ticket also carries its
+  alarm's id, but those alarms hold nothing: they close when the PR or the ticket moves on, and
+  resolving one only makes the next failed round or run raise a new alarm. A review-rounds hold is
+  lifted by settling the park.
 - A held start is not a fault: the engine keeps the card or the review queued and raises no
   question. Reviews of an external PR are never held by the rounds check.
 - A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
@@ -1252,6 +1259,12 @@ A start of that ticket is refused (422) until FLIGHT has approved the files: `mc
 paths, basis }` logs a `grant` decision ("Approved mc#7 to write package.json") and then starts the seat.
 Every start path checks it, FLIGHT's, the engine's and the operator's.
 
+Entries the seat's own area already covers are dropped first and need no grant: a plain file in the
+area, or a glob that lies wholly inside it, compared segment by segment (for example the area `apps/*` covers
+`apps/server/**`). A glob is kept, and refused like any outside glob, when
+the start cannot prove it stays inside the area (for example `apps/**/server/**` against the area
+`apps/*/server/**`).
+
 - The run may write exactly the listed files that sit outside its area or are protected, for that
   run only. Another run on the same seat holds nothing it was not given. The grant is fixed when
   the run starts; editing the ticket later changes nothing.
@@ -1460,29 +1473,28 @@ under 10 minutes for its seat. They stay in `flight_state` (prs, mergeQueue, sea
 wake FLIGHT only when a timed rule below says they have stood still (`old_park`, `merge_stalled`,
 `idle_seat`, or idle review seats with a review queued 10 minutes). Nothing re-wakes FLIGHT on a timer: it
 wakes only for activity (an operator message or tag, a seat's question or call, a hub check it could not
-settle, an error in its own work, a merge or clearance only it can give, a fact it waited on changing, a
-`wait_on` deadline passing), plus the daily retrospective. Work that still waits on it, with no fact changed,
+settle, an error in its own work, a merge or clearance only it can give, a fact changing), plus the daily retrospective. Work that still waits on it, with no fact changed,
 stays silent. Each wake stores its reasons (the fact categories, e.g. `q`, `signals`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
 by reason and by hour over the last day.
 
 **A free seat with open tickets (#1451).** The hub checks this itself, with no FLIGHT tokens: a free
 build seat, open tickets near its area (all open tickets, not only the 30 the digest lists; Backlog, Refinement or Ready; an area label that is the seat's,
-or none or several, which need triage), and no `wait_on` on the seat or the ticket. A ticket with no
+or none or several, which need triage). A ticket with no
 board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
 `idle` wake fact names it, one value for the whole idle spell, so FLIGHT is woken once, at 10 minutes, and not again for
-that spell (it is woken again when the seat starts and goes idle again). An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
+that spell (it is woken again when the seat starts and goes idle again). The wake tells FLIGHT to start what the repo's working list allows, and that a seat with nothing it may start stays idle. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
 line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
-The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
-direction, irreversible actions and security exceptions go to the operator, parked with a brief.
+A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
+security exceptions go to the operator, parked with a brief.
 
 **Stuck PRs (#1791).** The engine's tick (`engine/stuck-prs.ts`) finds, with no FLIGHT or seat tokens, open PRs on a
 branch this hub has a run on (so not an external PR) in a `merge` repo that conflict with main (`CONFLICTING`) or have
 red CI, that `prFlow` shows owned by nobody, with no unended run on the ticket. The hub notes when it first saw each
 stuck state on a head (the `stuck-prs` setting), and the PR is stuck once it has stood 30 minutes since that, or since
 the last run on it ended, whichever is later. Never taken: a ticket labelled `waiting:operator`, a ticket with an open
-retry-loop waste alarm, a ticket or PR with a running `wait_on`, a ticket held behind a PR, a PR whose author run holds a
-merge hold (operator or FLIGHT), a PR the operator holds in Needs you, a PR that has failed two reviews or whose run FLIGHT ended (the two-attempt rule: that call stays FLIGHT's, whether or not a wait has expired), a stacked PR, a closed card.
+retry-loop waste alarm, a ticket held behind a PR, a PR whose author run holds a
+merge hold (operator or FLIGHT), a PR the operator holds in Needs you, a PR that has failed two reviews or whose run FLIGHT ended (the two-attempt rule: that call stays FLIGHT's), a stacked PR, a closed card.
 A conflicting PR is first tried without a model: the hub merges main into the branch with `git merge-tree` in the
 session's clone, commits `Merge main into <branch>` as Mission Control, and pushes it plain (never forced), the same
 push `mc push` makes; a clean merge ends there. A real conflict, and a red PR, are started on a free build seat of the
@@ -1495,15 +1507,13 @@ its area raises `idle_seat`; `stuck_pr` is raised when no seat of its area could
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued, or with a stuck PR in its area that no run is on (see Stuck PRs) |
 | `stuck_pr` | an open crew PR in conflict with main or red has had no run on it for 30 minutes and no seat of its area can take it (see Stuck PRs); once per PR head and kind |
-| `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
-| `budget_unused` | a free build seat is idle 30 minutes while its account has used under 50% of its 7-day window; the evidence names the account and its weekly use. Once per idle spell |
+| `wake_stuck` | a set-aside run's wake met the same hub error (a 502, such as its dependencies not reinstalling) on two passes in a row; the hub keeps trying every pass. The evidence names the run and the error. Once per run |
 | `old_park` | a run has been parked for 15 minutes |
 | `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |
 | `run_no_pr` | a build run ended (crashed or not) with a ticket and no PR, within the last day, and not already a missing report |
-| `controller_unanswered` | a FLIGHT decision carrying "For the controller:" has had no Comms message from CAPCOM to FLIGHT for 15 minutes (a brief or wait on the decision's ref handles it too) |
-| `wait_over` | a `wait_on` time has passed |
+| `controller_unanswered` | a FLIGHT decision carrying "For the controller:" has had no Comms message from CAPCOM to FLIGHT for 15 minutes |
 | `seat_call` | a seat called FLIGHT |
 
 **Call FLIGHT.** `mcp__mc__call_flight { reason, ref }` is offered to every writer and read-only seat but FLIGHT (a
@@ -1512,26 +1522,13 @@ within the debounce, always inside one tick, with the seat's reason in the wake.
 FLIGHT's: FLIGHT decides. The same seat, ref and reason is one call until FLIGHT has been told; a repeat after that is a new call. `ref` defaults to the
 seat's ticket.
 
-**Accountability.** The watch keeps the reasons each wake listed. When FLIGHT's turn ends it checks each:
-a reason is handled if its fact is no longer true (the question answered, the seat started, the park
-lifted), or FLIGHT recorded a decision since the wake that names its target (the ref, seat, run or
-question id, or the key such as `ask:12`, in `ref`, `seat`, `about` or `decision`: an act, a brief, a
-note or a `wait`). FLIGHT is not woken again for the reasons not handled: the watch raises one operator
-item (Needs you, key `flight:left`, the operator's own, never FLIGHT's to triage) listing them. The item clears when
-every reason it lists is handled, not when some later audit is clean. The audit lives in the hub's memory: a restart drops it.
+**A reason FLIGHT leaves alone.** A wake lists what changed. FLIGHT acts on what it can and leaves the rest: nothing checks that each reason got a decision, and there is no wait to record. A reason left alone stays in the digest and does not wake FLIGHT again until its fact changes (a new head SHA, a stage change, a run ending); a timed check on the same thing (such as `item_stale`, `old_park` or `merge_stalled`) can still wake it once more. A seat's call FLIGHT leaves alone is told once and goes to nobody else: the seat calls again if it still needs an answer. A wait no longer keeps the engine from starting a seat on a stuck PR. What does is in the never-taken list under the stuck PR check; the one FLIGHT can set on a PR whose run has ended is a hold on the PR's Needs-you item (`hold_item`). To look at a PR again at a set time FLIGHT adds a planned `PR recheck` entry to its brief. A stored `wait_over` signal from before is dropped when the signals are read; a `flight:left` note still open is cleared, and the `flight.waits` setting deleted, when the watch starts.
 
-**Wait.** For a reason FLIGHT cannot act on yet: `mcp__mc__wait_on { target, on, until, basis }` records a
-`wait` decision on the target (handled). The wait silences that fact until its value changes (a new head
-SHA, a stage change, a run ending), and wakes FLIGHT at `until` (at most 7 days) with `wait_over`. A `wait_over` signal's id passed back as the target waits on the original target again, so the key
-never nests. An ended wait stays in the digest until FLIGHT deals with it: a decision made after it ended that
-names the signal key (`wait_over:<target>:<until>`) or has the target as its ref or seat, or a new `wait_on` on
-the target. The hub then drops the wait. The same pass clears waits nested before this rule.
-
-**What a free seat or an item wakes.** A free build seat, and the Ready tickets listed with it, wake FLIGHT only when a Ready ticket is in that seat's area (one `area:` label the seat covers, not held by another login). A seat or ticket FLIGHT recorded a `wait_on` for stays out until the wait is due. An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`); the target is under 15% of `total`.
+**What a free seat or an item wakes.** A free build seat, and the Ready tickets listed with it, wake FLIGHT only when a Ready ticket is in that seat's area (one `area:` label the seat covers, not held by another login). An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`). It has no target: FLIGHT logs no decision for what it leaves alone.
 
 **Ledger pointers and wake ids.** A ledger entry can carry `pointers` (`mc track`): each names a `pr` or `ticket` (`repo#n`), a `seat`, `repo`, `person` or `metric`. They live in `flight_pointers`, so a restart keeps them. The hub marks a pointer when its target changes: a stored PR's state, head, CI, review or draft flag, and a card's column or close. No agent runs for that. The wake digest's `moved` lists the pointers marked since FLIGHT last read them, once each; delivering a wake, or a `flight_state` read, stamps their `read_at`. Changes are ordered by a counter (`changed_seq`, `read_seq`), not by clock, so a change the poll stamped before FLIGHT's read still counts as unread. `track` refuses a target the hub could not mark: `<repo id>#<n>` for a pr or ticket, a seat in the session, a configured repo id, a GitHub login, a metric id. The store holds seat, repo, person and metric pointers too, but no hub event feeds them, so `track` accepts only `pr` and `ticket` pointers. The digest lists at most `FLIGHT_MOVED_LISTED` moved pointers (the rest wait, unread, for the next wake) and leaves out a PR pointer whose PR the digest's `prs` already lists and whose change `prs` shows (opened, a state, a new commit); that one is read with the wake. CI, review and draft changes are not in the `prs` entry, so they stay in `moved`. Each wake has an id, `<runId>:<n>` (0 is the start brief), kept on `flight_wakes.wake_id` and on every decision made in it (`flight_decisions.wake_id`).
 
-**Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a `wait_on`, a planned entry, a PR-flow time, an idle seat's next period, the end of the batch window), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
+**Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a planned entry, a PR-flow time, an idle seat's next period, the end of the batch window), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
 
 ### FLIGHT adds a controller check to a ticket
 
@@ -1633,7 +1630,7 @@ named pause or attributes an unknown grant to FLIGHT.
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
 | `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. |
-| `resolve_waste_alarm` | Close an open waste alarm's hold (a parked ticket, stopped reviews, a restart storm) with a recorded basis. See Waste alarms. |
+| `resolve_waste_alarm` | Close a retry-loop alarm's hold, so the parked ticket is dealt again, with a recorded basis. See Waste alarms. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
@@ -1647,7 +1644,7 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 
 | Tool | What it does |
 |---|---|
-| `operator` | `{ method, path, body?, basis }` calls one of the hub's own operator routes in process, with the operator token and authenticated FLIGHT actor added by the hub. `POST` works on a run's `resume`, `end`, `message`, `controller-check` and `merge-hold`; an external PR's `controller-check` and `merge-hold`; a seat's `start`, `message`, `interrupt` and `end`; `settings/crew-pause`, `settings/away`, `update`; and an attention item's `dismiss`, `hold` and `hold/release`. `GET` reads any other `/api` path except the operator bootstrap and stored screenshots. Any other route (accounts, repos, config, `flight/approvals`) is refused, naming the allowed ones. The route's own checks still apply and its answer comes back (a 4xx is an error). Decision kind `operator`. |
+| `operator` | `{ method, path, body?, basis }` calls one of the hub's own operator routes in process, with the operator token and authenticated FLIGHT actor added by the hub. `POST` works on a run's `resume`, `end`, `message`, `controller-check` and `merge-hold`; an external PR's `controller-check` and `merge-hold`; a seat's `start`, `message`, `interrupt` and `end`; `settings/crew-pause`, `settings/away`, `update`, `version/check`; and an attention item's `dismiss`, `hold` and `hold/release`. `GET` reads any other `/api` path except the operator bootstrap and stored screenshots (`GET /api/version` shows whether an Update waits). Any other route (accounts, repos, config, `flight/approvals`) is refused, naming the allowed ones. The route's own checks still apply and its answer comes back (a 4xx is an error). Decision kind `operator`. |
 | `gh_write` | `{ action, target, number, ... }` runs one `gh` verb on FLIGHT's session repo only: `comment`, `label`, `edit`, `close`, `reopen`, `ready`, or `delete_branch`. Text is scanned for secrets and @mentions as `create_ticket` does; `always_ask` and other-lane tickets are not edited, labelled or closed; a branch is never deleted when it is `main`, `archive/*`, on the repo's keep list, has an open PR or a live run, or when the open PRs could not be read. Merging stays `merge_pr`, board fields `set_fields`. Decision kind `github`. |
 | `crew_tidy` | `remove_worktree { runId }` removes the clean worktree an ended run's branch is checked out in (under the crew's worktree folder, with no live run on the branch and no seat holding it) and keeps the branch, so a seat can start the ticket again; a dirty worktree is refused with nothing removed. `prune_branches` drops the seat clones' local branches that are merged or whose remote is gone. Decision kind `tidy`. |
 
@@ -1656,9 +1653,14 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 FLIGHT's watch run uses the `flight-full` profile. Claude starts without `--restricted` or a Bash
 sandbox, and its tools are listed with no path or command limits; its guard hooks stay installed.
 The list is required: the credential scrub makes the CLI ignore `bypassPermissions`. It stays
-narrower than bypass: in a `-p` run, Edit and Write to protected paths are refused. User, project
-and local Claude settings also apply, since `--restricted` is off, so their allow, deny and ask
-rules can change what FLIGHT may run. Codex requests and verifies a
+narrower than bypass: in a `-p` run, Edit and Write to protected paths are refused. Only the listed
+built-ins are defined to the model (`--tools`), and the operator's user settings are not loaded
+(`--setting-sources project,local`), so nothing of the operator's own Claude set-up is in FLIGHT's
+session: their plugins (with those plugins' skills, agents and hooks), their user-level skills and
+their user `CLAUDE.md`. Every model call re-read all of it. A change to the built-in list starts a
+fresh FLIGHT session, as a change to the hub tools does. Project and local Claude settings and the
+repo's `CLAUDE.md` still apply, so their allow, deny and ask rules can change what
+FLIGHT may run. The repo's skills still reach FLIGHT through the hub's plugin folder. Codex requests and verifies a
 `dangerFullAccess` thread while retaining the hub's approval callback. Every other seat keeps its
 existing filesystem, network and tool restrictions.
 
@@ -1893,7 +1895,8 @@ block names them, fills `needs`, `promote_backlog` and `hard_rules` that config.
 only adds to `hard_rules` (when set here), `checks`, `uat.*` and `always_ask`: those keep their
 config source and list the additions in `repoAdds`. A block that cannot be read shows its reason in
 `repoFileError` and the config values still show. The response's `base` is the digest of the same
-config.yaml bytes every value came from.
+config.yaml bytes every value came from. A preview on the live config.yaml answers this read too;
+its `POST` still answers 409, so it shows the rules and never saves them.
 
 `POST` to the same route saves the approved keys only; `commands` and `uat` may name one leaf and
 keep the other. Send `base` from the read: a changed file answers `config.yaml changed since this
@@ -2796,13 +2799,6 @@ The route only reads data the hub already stores.
 - **Output.** A run's output tokens are the sum of its `result` events' `usage.output_tokens`, the CLI's own figure; the streamed figure of an assistant message is only a part of it. Per-call output in the audit is still the streamed figure. Runs folded before this change keep the old output count until their transcript is folded again.
 - **Controller sessions (off by default).** `audit: { controller_sessions: true }` in `config.yaml` makes the same job read the Claude Code session files of the controller from `~/.claude/projects/<checkout path with every non-alphanumeric character as a dash>/`. The checkout is the hub's own (where the controller works), or `audit.controller_checkout` when set; the crew's clones and worktrees are not read. Session files and each session's `subagents/*.jsonl` are read once each, after the file has been idle for an hour (again if it grew). Only usage numbers are stored, per assistant message id in `controller_messages`; a message id that appears in several files (a resumed session copies its history) counts once, and the figures are summed by message time. No message text is kept. With the switch off, nothing outside the hub's data folder is listed or read, and `controller` is null. The operator turns it on; no seat can.
 
-**Fix-session trial.** `GET /api/audit/fix-sessions` (no query; any query answers 400 `send no query`; read-only, same access as `/audit/tokens`) returns the receipts of the fix-session trial (#1643): whether a developer run woken for a fix saves tokens in a fresh Claude CLI session with a bounded handoff, against resuming its own session, without more rework. It returns `FixTrialView` from mc/core: one row per run in the trial (`arm`, `stratum`, `size`, `status` of `merged`, `open`, `held` or `ended-unmerged` with the held reason, fix wakes, fresh sessions, fallbacks, CI failures, review and blocking rounds, and token figures: calls, peak and median context, the context a fresh session started at, cache read, read after the report and its share, cache write, output, rewrites, re-read and cost, or null before the run's audit is stored), and for each arm the number assigned and merged, `incomplete` (every run not merged, named with its status and reason), and `median` and `total` over its merged runs. A CI failure is a claimed `ci:<run>:<sha>` line; a review round is a reported review.
-- **The switch.** `crew.fix_session_trial: true` in `config.yaml` (default false; read at load, so it takes a reload). Off, no run is assigned an arm and every wake resumes as before. Turning it off ends the trial: runs already in an arm keep it on their record, and nothing new starts.
-- **Assignment.** Once per run, at its first fix boundary, kept for its later fixes. The boundary is the engine's `wake` of a run set aside that is owed a fix (CI failing after its re-run, or blocking review findings) after its first report. Displaced runs, runs waiting on an answered question, controller-check notes, restarts and a fix sent to a run still on its seat resume in both arms. Eligible: a Claude build-loop writer run whose ticket has a Size, and no other run of that ticket in the trial. Strata: small (XS, S), medium (M), large (L, XL); a ticket with no Size is not assigned. An arm is full at 10 merged or 15 assigned; both full, none; one full, the other; otherwise the arm with fewer in the stratum, and on a tie an even issue number goes to fresh and an odd one to continue.
-- **The fresh arm.** `wakeRun` starts a new CLI session (a new session id, no `--resume`) in the run's own worktree, with the same prompt file, model and tools. Every Claude launch of the run, the fresh start and any later resume of a fresh session, gets `--max-budget-usd` equal to the run's budget less what its other sessions spent (a run with one session keeps its whole budget), so the dollar cap holds across sessions; a run with nothing left resumes instead and parks on the cap. The run's cost is the sum of each session's latest `total_cost_usd`. Branch, commits, evidence and PR are the run's own; it is not a fork of the old history. The handoff (`fixSessionBrief`, at most 12,000 characters) goes in the same turn as the fix text, ahead of it, and is held in the `fix-session.brief:<run>` setting until then, so it survives a restart. If the fresh launch throws or is not alive, the old id is restored and the run resumes as before, with a `fallback` receipt; if that resume fails the run ends `failed` as today. Pauses, the account stop, CLI holds and the budget ceiling are checked first and unchanged. A hub crash between the id swap and the spawn fails the resume of the new id; the run ends `failed` and the ticket handoff applies.
-- **Tokens.** The token audit splits a run with fresh sessions at each fresh session id: the first call of a fresh session adds its whole context to the source `fix session start` (not a rewrite), and re-read is tokens added times the calls left in that session. `run_token_audit.sessions` keeps one entry per session. A run with no fresh session is audited as before. `readAfterReport` (provider cache reads after the first report) stays a separate figure from source-attributed re-reads.
-- **Order.** The twenty crew runs need the merge: FLIGHT turns the switch on, waits for ten merged tickets per arm and posts this route's output on the ticket. Held and incomplete tickets are named in `incomplete`; no stop, budget or ownership rule is lifted to fill an arm.
-
 **Automatic CLI updates (Auto tier).** With `updates.cli: between_runs`, the `cliAuto` job runs every `CLI_UPDATE_INTERVAL_MS` (`apps/server/src/cli-auto.ts`) for `claude` and `codex`. A tool is managed only when its binary resolves into an npm global prefix (`<prefix>/lib/node_modules/<package>/`, `npmPrefix`); a Homebrew cask or formula, or the native installer, is left to whatever installed it and shows on a `cli-auto:<tool>` health row. The hub installs into that same prefix (`npm --prefix <prefix> install -g pkg@x.y.z`), so the copy seats start is the one that changes. Per tool: read the newest version (`npm view`); if it is newer than the installed one and is a plain `x.y.z`, then
 - a new **major** version installs nothing and records one `cli-update-major` (go-ahead) item;
 - a version at or below the **held** one (`cli-auto-held:<tool>` setting) is skipped;
@@ -2812,9 +2808,9 @@ The live check starts the new version the way a real seat does (`checkCli` in `a
 - If no build seat of that vendor is configured, no run can break on that tool, and the old bare check applies instead (`claude -p --allowedTools=Read` or `codex exec --sandbox read-only` in an empty temp dir, same nonce read).
 A pass keeps the version, clears the pending record and records a `cli-update` item; the next seat run uses it. A failure (install, wrong version or check) puts the previous version back (skipped when the failed install changed nothing), holds the failed version until a newer one appears, records a `cli-update-failed` item and raises one Needs-you note (`cli-auto:<tool>:<version>`). If the previous version is not back, new runs stay held and the update stays pending: the next pass (or the hub after a restart, which re-holds runs at start) re-checks and retries the rollback. Each step writes a server log line starting `cli update <tool>:`. The job never touches the guard, the safety floor, CI workflows or the Mission Control block.
 
-**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. Other non-routine facts keep the 2-minute gap: operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
+**Batching.** A wake whose only new facts are routine (`t`, reviews, PR flow, or a PR item) waits until `FLIGHT_BATCH_MS` (30 minutes) after the last wake. The hub also learns categories that caused at least ten wakes in seven days and had no state-changing FLIGHT call more than 80% of the time. Learned facts ride with the next immediate wake, or go at the end of the window. Free and idle seats, releases, questions, operator messages, parks, ready PRs, a red main, seat calls, merges and lifts wake at once. The daily retrospective records wake reasons, riders, no-action share and the learned set. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. Other non-routine facts keep the 2-minute gap. The safety floor is never held back.
 
-**Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list. An item FLIGHT has a live `wait_on` for (its full key) raises no `item_stale` signal until the wait ends. A `wait_on` whose target is a reason's whole key (an item's full key, or a `repeat_park` key with spaces) counts as handling that reason, including an `item_stale` signal for the item.
+**Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list.
 
 **What FLIGHT costs.** `GET /api/flight` `wakeCost` has the last 14 days: `totalUsd` (FLIGHT), `crewUsd`, `share` (0..1, the whole 14 days) and `weekShare` (the last 7 days only; read this one against the 0.2 target after a week of live work), `byDay`, and `byReason` (a run's cost spread over its messages by tokens, each message given to the latest wake before it, a wake's cost split over its reasons; `start` is the turn before a run's first wake). `wakeWaits` has the median milliseconds an operator message, a blocker to FLIGHT and a seat's `call_flight` waited, per day and overall. A wait ends at the first recorded wake after it or the first message FLIGHT's run produced after it, whichever is earlier; seat calls come from the signal record, which keeps them for the 14 days the figures cover. Compare the days before and after a change to see that decisions did not slow down.
 
@@ -2875,8 +2871,7 @@ A dirty checkout's result is not proof of an unchanged commit.
 
 ## Affected tests before a crew push
 
-This repo requires `pnpm -s lint`, `pnpm -s typecheck` and
-`pnpm -s test:related` before `mc push`. The existing hub check recorder counts
+This repo requires `pnpm -s lint` and `pnpm -s typecheck` before `mc push`; CI runs the tests. The existing hub check recorder counts
 a command only when it starts and finishes on the same clean commit in the session clone. A
 failed or missing command holds the push and names the check to run. Run checks after committing;
 a check on uncommitted edits is not evidence for that commit. Re-run after changing the head.
@@ -3061,6 +3056,19 @@ keep their permission checks.
   reads it later. A non-question item (a note, a crew error, an open Comms item) is closed at its
   source, then acked. `store.isChoiceAnswer(id)` tells a reader the message is a hub-built answer,
   not something the operator owes a reply to with the current delivery time.
+- **An option the choose route does not take.** An older brief's options carry no id, and some briefs
+  are not FLIGHT's to the operator. The page sends such an option's answer through
+  `POST /api/seats/:id/message` with `itemKey` and `choice: { briefAt, option }`, the option's place in
+  the brief it showed. Only the operator or the controller may send one: FLIGHT's message with a
+  `choice` is refused with 403. The pick passes the choose route's refusals (an escalation, a brief
+  the hub wrote, a changed brief, a closed question), and an option the choose route takes is refused
+  here with 409. The hub reads the option from the stored brief: a text that is not that option's
+  answer is refused with 400. The message must go to the seat that asked (a question's seat, else the
+  item's seat) while it is in the crew, else to FLIGHT; any other seat is refused with 409. A pick sent
+  to the seat that asked a question must name that `question`. The hub claims the brief as above and
+  ties the stored message to the pick in `question_choices`, so the FLIGHT conversation draws the
+  pick as the choice; a question closes with its pick. A second pick on the same brief answers 200
+  and sends nothing. An item that is not a question stays open, as with any message.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
 - **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or
@@ -3160,6 +3168,6 @@ The hub removes its own finished work so its data folder stops growing (#1756). 
 
 - **One cap.** The hub's budget is 10 GB (`MC_DISK_BUDGET_GB` overrides it), counted over the data folder (worktrees are the tidy's). Over it, the same sweep removes idle scratch (untouched for a day) oldest first, and logs `disk budget: ...` naming what the hub holds by kind. It never removes an open PR's evidence, a QA image or review shot an open PR cites, or scratch touched in the last day (a running preview or capture); when only that is left it logs `only open or in-use work is left` and stops. The disk flag ("Machine headroom is tight") adds `The hub holds: worktrees ..., scratch ..., evidence ..., pictures ..., database ...` when the disk is what is tight.
 - **No stalls.** The sweep, the sizes and the deletes use async file calls, and one measurement (cached for a minute) serves `/api/disk-use`, the sweep and the flag.
-- **Crew worktrees.** Every 10 minutes (where the engine runs) the crew tidy looks at runs from the last 30 days. For an ended run, if the branch's PR has merged or closed, or its ticket is Done or closed on GitHub (PR or not), the clean worktree is removed (the branch stays). A run set aside at review (not ended, no seat running it) keeps its worktree but loses `node_modules`, so it stays small; waking it reinstalls them under the clone lock before the CLI launches. The checks and the removal run under the clone lock, and a worktree a run is starting in (the supervisor marks it from the checkout, or a wake's reinstall, until the seat's session points at it) is never touched. A dirty worktree, a live run's, one a seat still holds and one with a checkout being prepared are left alone. The log line is `worktree tidy: removed N worktree(s), trimmed M node_modules`.
+- **Crew worktrees.** Every 10 minutes (where the engine runs) the crew tidy looks at runs from the last 30 days. For an ended run, if the branch's PR has merged or closed, or its ticket is Done or closed on GitHub (PR or not), the clean worktree is removed (the branch stays). A run set aside at review (not ended, no seat running it) keeps its worktree but loses `node_modules`, so it stays small; waking it reinstalls them under the clone lock before the CLI launches. Before that reinstall the hub empties the worktree's own `.mc-tmp` (git-ignored test scratch, where a test run can leave symlinks): it unlinks each entry without following links, and unlinks a `.mc-tmp` that is itself a link (its target is never touched). Only a wake does this, never an ordinary checkout reuse. The disk check then walks the whole tree as before and refuses a symlink anywhere an install could follow it. A wake that fails the same way (a 502) twice running on one run, with nothing else between, raises one `wake_stuck` signal. The checks and the removal run under the clone lock, and a worktree a run is starting in (the supervisor marks it from the checkout, or a wake's reinstall, until the seat's session points at it) is never touched. A dirty worktree, a live run's, one a seat still holds and one with a checkout being prepared are left alone. The log line is `worktree tidy: removed N worktree(s), trimmed M node_modules`.
 
 Not built yet: a budget key in `config.yaml`, and the Mac panel's disk view (it reads `/api/disk-use`).
