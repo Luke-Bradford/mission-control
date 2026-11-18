@@ -69,6 +69,7 @@ describe("Header chat button", () => {
   it("badges only the unread messages to the operator, not the Needs-you items", async () => {
     const mention = (id: string, seen: boolean) => ({
       seen,
+      needsReply: true,
       message: { id, from: "inco-1", to: "CAPCOM", text: "hello", at: NOW },
     });
     routes({
@@ -473,7 +474,8 @@ describe("Header", () => {
     unmount();
     render(<Header page="comms" />);
     const open = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(open.title).toBe("FLIGHT chat is open in Comms");
+    expect(open.title).toBe("Show or hide FLIGHT's chat (f)");
+    // The click on Setup opened the dock; the same button on Comms reports that state.
     expect(open.getAttribute("aria-pressed")).toBe("true");
   });
 });

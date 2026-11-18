@@ -94,9 +94,10 @@
   margin: var(--sp-4) 0 0;
 }
 
+/* time, kind, sender tag (messages only), then the text; an untagged event's text spans the last two */
 .tk-event {
   display: grid;
-  grid-template-columns: 96px auto minmax(0, 1fr);
+  grid-template-columns: 96px auto auto minmax(0, 1fr);
   align-items: baseline;
   gap: var(--sp-2);
   padding: var(--sp-2) 0;
@@ -110,6 +111,7 @@
 }
 
 .tk-line {
+  grid-column: 3 / -1;
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 4;
@@ -119,8 +121,14 @@
 
 .tk-more,
 .tk-findings {
-  grid-column: 3;
+  grid-column: 3 / -1;
   font-size: var(--fs-s);
+}
+
+.tk-event .comms-sender-tag ~ .tk-line,
+.tk-event .comms-sender-tag ~ .tk-more,
+.tk-event .comms-sender-tag ~ .tk-findings {
+  grid-column: 4;
 }
 
 .tk-more > summary,
@@ -139,4 +147,64 @@
   .tk-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Questions sit above the timeline in the wide column. */
+.tk-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+/* One vertical budget for the column: questions and timeline each scroll inside their panel,
+   so both show on the first screen. */
+.tk-grid .tk-questions .pb {
+  max-height: calc(30 * var(--vh));
+}
+
+.tk-grid .tk-main.has-questions .tk-timeline .pb {
+  max-height: calc(36 * var(--vh));
+}
+
+.tk-qlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.tk-question {
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.tk-qhead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-1);
+}
+
+.tk-answer {
+  margin-top: var(--sp-2);
+  padding-left: var(--sp-3);
+  border-left: 2px solid var(--accent);
+}
+
+.tk-answer h4 {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.tk-convo-list {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
 }

@@ -1480,6 +1480,29 @@ describe("parseChecks", () => {
     };
     expect(parseChecks(rollup).map((c) => c.id)).toEqual(["CR_1", undefined]);
   });
+
+  it("carries a check run's start and finish, and none for a queued run or a status", () => {
+    const rollup = {
+      contexts: {
+        nodes: [
+          {
+            ...checkRun("test", "SUCCESS"),
+            startedAt: "2026-11-14T10:00:00Z",
+            completedAt: "2026-11-14T10:25:00Z",
+          },
+          checkRun("queued", "SUCCESS"),
+          statusContext("ci/x", "SUCCESS"),
+        ],
+      },
+    };
+    const [done, queued, status] = parseChecks(rollup);
+    expect(done).toMatchObject({
+      startedAt: Date.parse("2026-11-14T10:00:00Z"),
+      completedAt: Date.parse("2026-11-14T10:25:00Z"),
+    });
+    expect(queued).not.toHaveProperty("startedAt");
+    expect(status).not.toHaveProperty("completedAt");
+  });
 });
 
 describe("collectGithub pull requests", () => {
@@ -1938,7 +1961,7 @@ describe("sweepPullRequests", () => {
     await sweepPullRequests(repo, store, gql, NOW, true);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.q).toContain("defaultBranchRef");
-    expect(calls[0]?.q).toContain("contexts(first: 10)");
+    expect(calls[0]?.q).toContain("contexts(first: 50)");
     expect(JSON.parse(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`) ?? "null")).toEqual({
       sha: "main-sha",
       ci: "failing",

@@ -23,6 +23,11 @@ export const EVIDENCE_PAGE_PATHS = {
 } as const;
 export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
 export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
+/** The sizes of the head's Demo renders, each page at its busiest. */
+export const EVIDENCE_DEMO_VIEWPORTS = [
+  { width: 1920, height: 940 },
+  { width: 2560, height: 1145 },
+] as const;
 export const EVIDENCE_KINDS = ["before", "after", "diff"] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
@@ -46,6 +51,13 @@ export interface EvidencePair {
   regions: EvidenceRegion[];
 }
 
+/** One Demo render of a page on the head, stored as `evidenceDemoImageName(page, width)`. */
+export interface EvidenceDemo {
+  page: EvidencePage;
+  width: number;
+  height: number;
+}
+
 /** What a capture stored for one head sha (`manifest.json`, and `GET /api/prs/:n/evidence`). */
 export interface EvidenceManifest {
   repoId: string;
@@ -55,6 +67,8 @@ export interface EvidenceManifest {
   mainSha: string;
   capturedAt: number;
   pairs: EvidencePair[];
+  /** The head's Demo renders; absent on a capture made before they existed. */
+  demos?: EvidenceDemo[];
 }
 
 const WEB_PREFIX = "apps/web/";
@@ -211,9 +225,25 @@ export function evidenceRefusalText(missing: readonly EvidenceGap[]): string {
   return `kept in draft until its screenshot evidence exists; missing pages: ${pages}`;
 }
 
+/** Every Demo render a head needs for `pages` that `manifest` lacks. */
+export function evidenceDemoMissing(
+  manifest: EvidenceManifest | null,
+  sha: string,
+  pages: readonly EvidencePage[],
+): EvidenceDemo[] {
+  const have = manifest?.sha === sha ? (manifest.demos ?? []) : [];
+  return pages.flatMap((page) =>
+    EVIDENCE_DEMO_VIEWPORTS.filter(
+      (v) => !have.some((d) => d.page === page && d.width === v.width && d.height === v.height),
+    ).map((v) => ({ page, ...v })),
+  );
+}
+
 const IMAGE_NAME = new RegExp(
-  `^(?:${EVIDENCE_PAGES.join("|")})-(?:${EVIDENCE_SCHEMES.join("|")})-(?:${EVIDENCE_KINDS.join("|")})\\.png$`,
+  `^(?:${EVIDENCE_PAGES.join("|")})-(?:(?:${EVIDENCE_SCHEMES.join("|")})-(?:${EVIDENCE_KINDS.join("|")})|demo-(?:${EVIDENCE_DEMO_VIEWPORTS.map((v) => v.width).join("|")}))\\.png$`,
 );
+export const evidenceDemoImageName = (page: EvidencePage, width: number): string =>
+  `${page}-demo-${width}.png`;
 export const evidenceImageName = (
   page: EvidencePage,
   scheme: EvidenceScheme,
@@ -265,12 +295,17 @@ export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string)
     (p) =>
       `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${regionsText(p.regions.length)}`} (${EVIDENCE_KINDS.map((k) => link(p, k)).join(" · ")})`,
   );
+  const demoLines = (manifest.demos ?? []).map(
+    (d) =>
+      `- ${d.page}, Demo at its busiest, ${d.width}×${d.height} ([demo](${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}/${evidenceDemoImageName(d.page, d.width)}))`,
+  );
   return [
     EVIDENCE_HEADING,
     "",
-    `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, on the same data. Links open on the hub that rendered them.`,
+    `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, on the same data; the Demo renders are the head alone, in Demo. Links open on the hub that rendered them.`,
     "",
     ...lines,
+    ...demoLines,
   ].join("\n");
 }
 
@@ -284,3 +319,13 @@ export const QA_DISCLOSURE_LABEL = "Workflow history and earlier proposals";
 /** The button text of each Audit tab a capture selects. */
 export const QA_TAB_LABELS = { readiness: "PR readiness", hotspots: "Hotspots" } as const;
 export type QaTab = keyof typeof QA_TAB_LABELS;
+
+/**
+ * What the Demo render relies on in the web app: the sessionStorage key that turns Demo on, and the
+ * marker's label that shows it is running. apps/web keeps its own copies (`DEMO_KEY` in
+ * storage.ts, `DEMO_MARKER_TEXT` in demo/mode.ts); apps/server/test/demo-labels.test.ts fails
+ * when either side changes alone.
+ */
+export const DEMO_SESSION_KEY = "mc-demo";
+export const DEMO_MARKER_LABEL =
+  "Simulated crew. Nothing here is real, and nothing is sent to the hub.";

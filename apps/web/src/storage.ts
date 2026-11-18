@@ -20,6 +20,12 @@ export const LANE_KEY = "mc-lane";
 export const BOARD_LAYOUT_KEY = "mc-board-layout";
 /** The Board view: a display filter (labels, priority, assignee, milestone), JSON, one per browser. */
 export const BOARD_VIEW_KEY = "mc-board-view";
+/** The unsent message typed to a seat, one per seat, so it survives a refresh and a change of seat. */
+export const agentDraftKey = (seatId: string): string => `mc-agent-draft:${seatId}`;
+/** The Agents page's All time / This run switch. */
+export const AGENT_FIGURES_KEY = "mc-agent-figures";
+/** The Agents roster's folded repo groups (a JSON list of repo ids). */
+export const AGENT_FOLDED_KEY = "mc-agent-folded";
 /** The away period whose digest this viewer acknowledged. */
 export const AWAY_DIGEST_KEY = "mc-away-digest";
 
@@ -28,8 +34,6 @@ export const PALETTE_RECENT_KEY = "mc-palette-recent";
 
 /** The footer's build-status toggle. */
 export const BUILD_STATUS_KEY = "mc-build-status";
-/** PR heads the operator checked locally in this browser. */
-export const QA_CHECKED_HEADS_KEY = "mc-qa-checked-heads";
 
 /** The tab's Demo choice, in sessionStorage: per tab, kept over a reload, copied to a popout. */
 export const DEMO_KEY = "mc-demo";

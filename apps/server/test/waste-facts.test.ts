@@ -4,9 +4,14 @@ import { join } from "node:path";
 import type { PullRequestView, Run, RunLoop } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { flightSignals } from "../src/flight/signals.ts";
+import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
 import { flightState } from "../src/flight/state.ts";
-import { openWasteAlarms, syncWasteAlarms, wasteReport } from "../src/spend/waste.ts";
+import {
+  openWasteAlarms,
+  resolveWasteAlarm,
+  syncWasteAlarms,
+  wasteReport,
+} from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
@@ -151,7 +156,7 @@ describe("failed review rounds", () => {
     expect(state.prs.find((p) => p.pr === 7)?.reviewRounds).toBe(2);
   });
 
-  it("wakes FLIGHT once for the alarm", () => {
+  it("wakes FLIGHT once for the alarm, with the evidence", () => {
     store.upsertPullRequests("mc", [pr(7)], NOW);
     store.upsertRun(author());
     reported("r1", 7, 1, 2);
@@ -161,9 +166,19 @@ describe("failed review rounds", () => {
       flightSignals({ config, store, session, seats: [], now: at }).signals.filter(
         (s) => s.kind === "waste_alarm",
       );
-    expect(read(NOW)).toHaveLength(1);
-    expect(read(NOW + MIN)).toHaveLength(1);
-    expect(read(NOW + MIN)[0]?.key).toBe(read(NOW)[0]?.key);
+    expect(openWasteAlarms(store).map((a) => a.check)).toContain("failed-review-rounds");
+    const first = read(NOW);
+    expect(first).toHaveLength(1);
+    expect(first[0]?.told).toBe(false);
+    expect(first[0]?.evidence).toContain("has failed 2 review rounds");
+    markFlightSignalsShown(store, { repo: "mc", signals: first, triage: [] } as never, NOW);
+    // a third failed round raises the same alarm's level: the same signal, already told
+    reported("r1", 7, 3, 1);
+    syncWasteAlarms(config, store, NOW + MIN);
+    const next = read(NOW + MIN);
+    expect(next.map((s) => s.key)).toEqual(first.map((s) => s.key));
+    expect(next[0]?.told).toBe(true);
+    expect(next[0]?.evidence).toContain("has failed 3 review rounds");
   });
 });
 
@@ -202,11 +217,53 @@ describe("clearance waiting", () => {
     expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toEqual([]);
   });
 
-  it("wakes FLIGHT once while the wait stands", () => {
+  it("does not wake FLIGHT while the wait stands", () => {
     hold(NOW - 3 * HOUR);
     syncWasteAlarms(config, store, NOW);
     syncWasteAlarms(config, store, NOW + HOUR);
     const signals = flightSignals({ config, store, session, seats: [], now: NOW + HOUR }).signals;
-    expect(signals.filter((s) => s.kind === "waste_alarm")).toHaveLength(1);
+    expect(signals.filter((s) => s.kind === "waste_alarm")).toEqual([]);
+  });
+
+  it("raises one alarm for each head: a new head restarts the two hours", () => {
+    const open = () => openWasteAlarms(store).filter((a) => a.check === "clearance-waiting");
+    const keys = () => open().map((a) => a.id);
+    hold(NOW - 3 * HOUR);
+    syncWasteAlarms(config, store, NOW);
+    const first = keys();
+    expect(first).toHaveLength(1);
+    // the level grows from 3 to 4 hours: the same alarm, not a new one
+    syncWasteAlarms(config, store, NOW + HOUR);
+    expect(keys()).toEqual(first);
+    // a new head: the wait starts over, so the old head's alarm closes and nothing is raised
+    store.setRunLoop(
+      "r1",
+      { phase: "review", awaitingFlight: "sha2", prNumber: 7 } as unknown as RunLoop,
+      NOW + 2 * HOUR,
+    );
+    syncWasteAlarms(config, store, NOW + 3 * HOUR);
+    expect(open()).toEqual([]);
+    // two hours on the new head: one new alarm, then the same one as its level grows
+    syncWasteAlarms(config, store, NOW + 4 * HOUR + 2 * MIN);
+    const second = keys();
+    expect(second.filter((k) => !first.includes(k))).toHaveLength(1);
+    syncWasteAlarms(config, store, NOW + 6 * HOUR);
+    expect(keys()).toEqual(second);
+  });
+
+  it("a resolved alarm on one head does not silence the next head", () => {
+    hold(NOW - 6 * HOUR);
+    syncWasteAlarms(config, store, NOW);
+    const a1 = openWasteAlarms(store).find((a) => a.check === "clearance-waiting");
+    if (a1 === undefined) throw new Error("no alarm");
+    resolveWasteAlarm(store, a1.id, NOW, "b");
+    store.setRunLoop(
+      "r1",
+      { phase: "review", awaitingFlight: "sha2", prNumber: 7 } as unknown as RunLoop,
+      NOW + MIN,
+    );
+    for (let t = NOW + 2 * MIN; t <= NOW + 3 * HOUR; t += 10 * MIN)
+      syncWasteAlarms(config, store, t);
+    expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toHaveLength(1);
   });
 });

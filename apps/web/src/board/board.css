@@ -347,3 +347,11 @@
 .boardview .bv-options .ffield-check {
   align-items: start;
 }
+
+/* A waiting ticket's reason and what frees it: two short lines, no seat. */
+.kcard .kwait {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  overflow-wrap: anywhere;
+}

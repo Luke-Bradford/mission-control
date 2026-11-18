@@ -4,6 +4,8 @@ import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
   asideInCiEventText,
+  blockedItemPrefix,
+  blockedNoteKey,
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
@@ -31,6 +33,7 @@ import {
   NEW_LOOP,
   NO_CI_AFTER_MS,
   NO_NEW_COMMIT_TEXT,
+  NOTE_ITEM_PREFIX,
   NUDGE_TEXT,
   noShaDeleteText,
   pendingSeatWork,
@@ -714,6 +717,90 @@ describe("state step", () => {
     });
     const r2 = reconcile(inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS } }));
     expect(r2.loop.phase).toBe("ci");
+  });
+
+  describe("13: the pending limit follows each job's normal time", () => {
+    const min = 60_000;
+    const runningFor = (m: number, startedMin: number) => ({
+      pushed: { sha: SHA, at: NOW - m * min },
+      ciP90Ms: { web: 30 * min },
+      pr: pr({
+        checks: {
+          failing: [],
+          pending: ["web"],
+          missing: [],
+          startedAt: { web: NOW - startedMin * min },
+        },
+      }),
+    });
+
+    it("a job within twice its p90 does not park", () => {
+      const r = reconcile(inCi(runningFor(45, 40)));
+      expect(r.loop.phase).toBe("ci");
+      expect(r.loop.parked).toBeNull();
+    });
+
+    it("a job past twice its p90 parks, naming the job", () => {
+      const r = reconcile(inCi(runningFor(75, 62)));
+      expect(r.loop.parked).toEqual({
+        kind: "ci-pending",
+        reason: "CI pending for 60 minutes on aaaaaaa (pending: web)",
+        ended: false,
+      });
+    });
+
+    it("a queued job with no start is judged from the push", () => {
+      const queued = runningFor(75, 0);
+      const r = reconcile(
+        inCi({
+          ...queued,
+          pr: pr({ checks: { failing: [], pending: ["web"], missing: [] } }),
+        }),
+      );
+      expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
+    });
+
+    describe("a short gate job waiting on a slow one", () => {
+      const gate = (m: number, checks: { pending: string[]; missing: string[] }) =>
+        inCi({
+          pushed: { sha: SHA, at: NOW - m * min },
+          ciP90Ms: { "web-core": 30 * min, check: 10_000 },
+          pr: pr({ checks: { failing: [], ...checks } }),
+        });
+
+      it("a missing check is not parked while the slowest job may still run", () => {
+        const r = reconcile(gate(12, { pending: [], missing: ["check"] }));
+        expect(r.loop.parked).toBeNull();
+        const late = reconcile(gate(61, { pending: [], missing: ["check"] }));
+        expect(late.loop.parked?.reason).toBe(
+          "CI pending for 60 minutes on aaaaaaa (missing: check)",
+        );
+      });
+
+      it("a queued check with no start is judged the same way", () => {
+        const r = reconcile(gate(26, { pending: ["check"], missing: [] }));
+        expect(r.loop.parked).toBeNull();
+      });
+    });
+
+    it("a job with no history keeps the fixed limit", () => {
+      const r = reconcile(inCi({ ...runningFor(31, 31), ciP90Ms: {} }));
+      expect(r.loop.parked?.kind).toBe("ci-pending");
+    });
+
+    it("a ci-pending park lifts itself when every check is green", () => {
+      const parked = reconcile(inCi(runningFor(75, 62))).loop;
+      const r = reconcile(
+        inCi({ pr: pr({ ci: "passing" }) }, { phase: "parked", parked: parked.parked }),
+      );
+      expect(r.loop.phase).toBe("review");
+      expect(r.loop.parked).toBeNull();
+      expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
+      const still = reconcile(
+        inCi({ pr: pr({ ci: "pending" }) }, { phase: "parked", parked: parked.parked }),
+      );
+      expect(still.loop.phase).toBe("parked");
+    });
   });
 
   it("14: no CI reported within ten minutes of the push parks", () => {
@@ -3739,5 +3826,16 @@ describe("withControllerCheckItem", () => {
     expect(withControllerCheckItem("## Why\r\nx\r\n", item).body).toBe(
       `## Why\r\nx\r\n\r\n## Controller check\r\n\r\n- ${item}\r\n`,
     );
+  });
+});
+
+describe("park note keys", () => {
+  it("every park item of a run shares one prefix, and another run's does not", () => {
+    expect(
+      `${NOTE_ITEM_PREFIX}${blockedNoteKey("r-1", 3)}`.startsWith(blockedItemPrefix("r-1")),
+    ).toBe(true);
+    expect(
+      `${NOTE_ITEM_PREFIX}${blockedNoteKey("r-10", 0)}`.startsWith(blockedItemPrefix("r-1")),
+    ).toBe(false);
   });
 });

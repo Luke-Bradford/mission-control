@@ -55,7 +55,7 @@ describeRendered("Review state across the HUD", () => {
       expect(
         await page.evaluate(() => {
           const row = [...document.querySelectorAll<HTMLElement>(".trow")].find((r) =>
-            r.textContent?.includes("retro-cx"),
+            r.textContent?.includes("RETRO-CX"),
           );
           return (
             !!row &&

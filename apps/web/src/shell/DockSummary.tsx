@@ -12,10 +12,13 @@ export function DockSummary({ canMessage }: { canMessage: boolean }) {
   const stale = (summary.data?.headlineAgeMin ?? 0) >= 60;
   const headline = summary.data?.headline;
   const unread = useOperatorUnread();
+  // The first open is not a fault: a loaded summary needs no warning while it lands.
+  const opening = !connection.connected && !connection.reconnecting;
+  const quietOpen = opening && !!summary.data && !summary.error;
   return (
     <section className="dock-summary scroll" aria-label="FLIGHT summary">
       <div className="dock-summary-state s" aria-live="polite">
-        {!connection.connected && (
+        {!connection.connected && !quietOpen && (
           <Pill tone="warn">{connection.reconnecting ? "Disconnected" : "Connecting"}</Pill>
         )}
         {stale && <Pill tone="warn">Stale headline · {summary.data?.headlineAgeMin} min old</Pill>}
@@ -58,7 +61,7 @@ export function DockSummary({ canMessage }: { canMessage: boolean }) {
       )}
       {unread.length > 0 && (
         <div className="dock-messages" id="dockMessages">
-          <h3>Messages to you · {unread.length}</h3>
+          <h3>Waiting for your answer · {unread.length}</h3>
           {unread.slice(0, 3).map((m) => (
             <a
               key={m.message.id}

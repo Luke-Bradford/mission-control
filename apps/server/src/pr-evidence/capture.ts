@@ -2,16 +2,20 @@
  * Captures a web PR's screenshot pairs: every affected HUD page at 1600x1000, light and dark, on
  * main and on the PR head, both rendered from copies of one snapshot of the live database.
  */
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
+  EVIDENCE_DEMO_VIEWPORTS,
   EVIDENCE_KINDS,
   EVIDENCE_PAGE_PATHS,
   EVIDENCE_SCHEMES,
+  type EvidenceDemo,
   type EvidenceManifest,
   type EvidencePage,
   type EvidencePair,
   type EvidenceScheme,
+  evidenceDemoImageName,
+  evidenceDemoMissing,
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
@@ -20,6 +24,7 @@ import {
   prEvidenceUncatalogued,
   type WebPageGraph,
 } from "@mc/core";
+import { OPERATOR_TOKEN_FILE } from "../operator.ts";
 import { decodePng, diffImages } from "./png.ts";
 import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
 
@@ -39,7 +44,7 @@ export interface PrEvidenceDeps {
   store: PrEvidenceStore;
   /** The one repo whose HUD this hub serves; other repos are never captured or held. */
   repoId: string;
-  /** Where the database snapshot and its copies are made; removed after each capture. */
+  /** Where the database snapshot and its copies are made; removed after each capture, except a failed capture's kept snapshot, which stays until the head is captured or replaced. */
   workDir: string;
   /** The hub's own address, for the links in the PR body. */
   baseUrl: string;
@@ -49,11 +54,25 @@ export interface PrEvidenceDeps {
   snapshot(to: string): Promise<void>;
   /** Serves `sha`'s HUD from `db`; on cancellation rejects only after cleaning owned resources. */
   startSide(input: { sha: string; db: string; signal: AbortSignal }): Promise<EvidenceSide>;
-  /** One screenshot of a page on a side, in a colour scheme. */
+  /**
+   * One screenshot of a page on a side, in a colour scheme. `operatorToken` is that side's own
+   * throwaway hub's token, for pages that need it; it must never reach an image, a log or the PR.
+   */
   render(
     origin: string,
     path: string,
     scheme: EvidenceScheme,
+    signal: AbortSignal,
+    operatorToken?: string,
+  ): Promise<Buffer>;
+  /**
+   * One screenshot of a page on the head in Demo, at its busiest, at `viewport`. Without it a
+   * capture makes no Demo renders and none are required.
+   */
+  renderDemo?(
+    origin: string,
+    path: string,
+    viewport: { width: number; height: number },
     signal: AbortSignal,
   ): Promise<Buffer>;
   /**
@@ -83,11 +102,26 @@ export interface PrEvidence {
   readonly baseUrl: string;
   /** Captures the head's pairs if it needs them and has none; never rejects. */
   ensure(target: EvidenceTarget): Promise<void>;
+  /** The pages the head's changes reach: the ones `ensure` photographs and `gate` waits for. */
+  pages(target: EvidenceTarget): Promise<readonly EvidencePage[]>;
   /** Why the PR must stay in draft (the pages without pairs), or null when it may leave. */
   gate(target: EvidenceTarget): string | null;
   /** Cancel captures and wait for their owned hubs/worktrees to be removed. */
   stop(): Promise<void>;
 }
+
+/** One head's renders: by side, page and scheme (live), and by image name (Demo). */
+interface Kept {
+  sha: string;
+  /** The main commit the "main" renders show. */
+  mainSha: string;
+  /** The database snapshot every kept render and every render still to come is taken from. */
+  snapshot: string;
+  shots: Map<string, Buffer>;
+}
+
+const shotKey = (side: string, page: EvidencePage, scheme: EvidenceScheme): string =>
+  `${side}:${page}:${scheme}`;
 
 /** Stop waiting for a read/render at cancellation. Owned side startup awaits its cleanup. */
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -125,6 +159,11 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
   const controllers = new Set<AbortController>();
+  /**
+   * Renders of a head that succeeded in an attempt that failed, so the next attempt renders only
+   * what is missing. Per PR, one head at a time: a new head drops the old one's.
+   */
+  const kept = new Map<number, Kept>();
   /** Successfully read head graphs, plus deduplicated reads still in flight. */
   const pagesOf = new Map<string, EvidencePage[]>();
   const readingPages = new Map<string, Promise<EvidencePage[]>>();
@@ -137,6 +176,13 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     if (!m) return null;
     return {
       ...m,
+      ...(m.demos === undefined
+        ? {}
+        : {
+            demos: m.demos.filter((d) =>
+              deps.store.hasImage(deps.repoId, t.pr, t.sha, evidenceDemoImageName(d.page, d.width)),
+            ),
+          }),
       pairs: m.pairs.filter((p) =>
         EVIDENCE_KINDS.every((kind) =>
           deps.store.hasImage(deps.repoId, t.pr, t.sha, evidenceImageName(p.page, p.scheme, kind)),
@@ -145,36 +191,80 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     };
   }
 
+  /** Renders what `shots` lacks, once more at once if a render fails, and keeps each success. */
   async function render(
     side: EvidenceSide,
+    operatorToken: string | undefined,
     name: string,
     pages: EvidencePage[],
     signal: AbortSignal,
+    shots: Map<string, Buffer>,
   ) {
-    const shots = new Map<string, Buffer>();
     for (const page of pages)
       for (const scheme of EVIDENCE_SCHEMES) {
-        signal.throwIfAborted();
-        try {
-          shots.set(
-            `${page}:${scheme}`,
-            await abortable(
-              deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
-              signal,
-            ),
-          );
-        } catch (e) {
-          // A stopped capture says why it stopped; the page in progress did not fail.
-          if (signal.aborted) throw e;
-          // Say which render failed: the render's own message names neither page nor side.
-          const why = e instanceof Error ? e.message : String(e);
-          throw new Error(`${page} page, ${scheme} scheme, ${name} side: ${why}`, { cause: e });
+        const key = shotKey(name, page, scheme);
+        if (shots.has(key)) continue;
+        for (let attempt = 1; ; attempt++) {
+          signal.throwIfAborted();
+          try {
+            shots.set(
+              key,
+              await abortable(
+                deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal, operatorToken),
+                signal,
+              ),
+            );
+            break;
+          } catch (e) {
+            // A stopped capture says why it stopped; the page in progress did not fail.
+            if (signal.aborted) throw e;
+            if (attempt < 2) continue;
+            // Say which render failed: the render's own message names neither page nor side.
+            const why = e instanceof Error ? e.message : String(e);
+            throw new Error(`${page} page, ${scheme} scheme, ${name} side: ${why}`, { cause: e });
+          }
         }
       }
-    return shots;
   }
 
-  /** Builds one side from its own copy of the snapshot, photographs it, and always stops it. */
+  /** The head in Demo: each page at each Demo size, skipping the ones already in `shots`. */
+  async function renderDemos(
+    side: EvidenceSide,
+    pages: EvidencePage[],
+    signal: AbortSignal,
+    shots: Map<string, Buffer>,
+  ): Promise<void> {
+    const renderDemo = deps.renderDemo;
+    if (renderDemo === undefined) return;
+    for (const page of pages)
+      for (const viewport of EVIDENCE_DEMO_VIEWPORTS) {
+        const key = evidenceDemoImageName(page, viewport.width);
+        if (shots.has(key)) continue;
+        for (let attempt = 1; ; attempt++) {
+          signal.throwIfAborted();
+          try {
+            shots.set(
+              key,
+              await abortable(
+                renderDemo(side.origin, EVIDENCE_PAGE_PATHS[page], viewport, signal),
+                signal,
+              ),
+            );
+            break;
+          } catch (e) {
+            if (signal.aborted) throw e;
+            if (attempt < 2) continue;
+            const why = e instanceof Error ? e.message : String(e);
+            throw new Error(
+              `${page} page, Demo at ${viewport.width}x${viewport.height}, head side: ${why}`,
+              { cause: e },
+            );
+          }
+        }
+      }
+  }
+
+  /** Builds one side from its own copy of the snapshot, photographs what is missing, and always stops it. */
   async function photograph(
     sha: string,
     snapshot: string,
@@ -182,17 +272,43 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     name: string,
     pages: EvidencePage[],
     signal: AbortSignal,
-  ): Promise<Map<string, Buffer>> {
-    const db = join(dir, `${name}.sqlite`);
+    shots: Map<string, Buffer>,
+    withDemos = false,
+  ): Promise<void> {
+    const need =
+      pages.some((p) => EVIDENCE_SCHEMES.some((s) => !shots.has(shotKey(name, p, s)))) ||
+      (withDemos &&
+        !!deps.renderDemo &&
+        pages.some((p) =>
+          EVIDENCE_DEMO_VIEWPORTS.some((v) => !shots.has(evidenceDemoImageName(p, v.width))),
+        ));
+    if (!need) return;
+    // Each side's hub writes its own token beside its database, so the sides get a folder each.
+    const sideDir = join(dir, name);
+    await mkdir(sideDir, { recursive: true, mode: 0o700 });
+    const db = join(sideDir, `${name}.sqlite`);
     await copyFile(snapshot, db);
     signal.throwIfAborted();
     const side = await deps.startSide({ sha, db, signal });
     try {
       signal.throwIfAborted();
-      return await render(side, name, pages, signal);
+      // The hub's token file is the throwaway hub's own key, never the live hub's.
+      const operatorToken = (
+        await readFile(join(dirname(db), OPERATOR_TOKEN_FILE), "utf8").catch(() => "")
+      ).trim();
+      await render(side, operatorToken || undefined, name, pages, signal, shots);
+      if (withDemos) await renderDemos(side, pages, signal, shots);
     } finally {
       await side.stop().catch(() => {});
     }
+  }
+
+  /** Where a PR's kept snapshot lives: outside a capture's own folder, which is removed after it. */
+  const keptDir = (pr: number): string => join(deps.workDir, `kept-${pr}`);
+
+  async function dropKept(pr: number): Promise<void> {
+    kept.delete(pr);
+    await rm(keptDir(pr), { recursive: true, force: true });
   }
 
   async function capture(
@@ -205,17 +321,49 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     try {
       signal.throwIfAborted();
       const mainSha = await abortable(deps.mainSha(signal), signal);
-      const snapshot = join(dir, "snapshot.sqlite");
-      await abortable(deps.snapshot(snapshot), signal);
-      const before = await photograph(mainSha, snapshot, dir, "main", pages, signal);
-      const after = await photograph(t.sha, snapshot, dir, "head", pages, signal);
+      // Renders kept from a failed attempt stay, with the snapshot they were taken from, so a
+      // retried page is paired with renders of the same data. Main's are stale once main moves.
+      let keep = kept.get(t.pr);
+      if (keep !== undefined && keep.sha !== t.sha) {
+        await dropKept(t.pr);
+        keep = undefined;
+      }
+      if (keep === undefined) {
+        const keepDir = keptDir(t.pr);
+        await rm(keepDir, { recursive: true, force: true });
+        await mkdir(keepDir, { recursive: true, mode: 0o700 });
+        const snapshot = join(keepDir, "snapshot.sqlite");
+        try {
+          await abortable(deps.snapshot(snapshot), signal);
+        } catch (e) {
+          await rm(keepDir, { recursive: true, force: true });
+          throw e;
+        }
+        keep = { sha: t.sha, mainSha, snapshot, shots: new Map() };
+        kept.set(t.pr, keep);
+      } else if (keep.mainSha !== mainSha) {
+        for (const k of [...keep.shots.keys()]) if (k.startsWith("main:")) keep.shots.delete(k);
+        keep.mainSha = mainSha;
+      }
+      const snapshot = keep.snapshot;
+      const shots = keep.shots;
+      await photograph(mainSha, snapshot, dir, "main", pages, signal, shots);
+      await photograph(t.sha, snapshot, dir, "head", pages, signal, shots, true);
+      const demoShots = shots;
       const pairs: EvidencePair[] = [];
       const images: EvidenceImage[] = [];
+      const demos: EvidenceDemo[] = [];
+      for (const page of pages)
+        for (const v of EVIDENCE_DEMO_VIEWPORTS) {
+          const png = demoShots.get(evidenceDemoImageName(page, v.width));
+          if (png === undefined) continue;
+          demos.push({ page, width: v.width, height: v.height });
+          images.push({ name: evidenceDemoImageName(page, v.width), png });
+        }
       for (const page of pages) {
         for (const scheme of EVIDENCE_SCHEMES) {
-          const key = `${page}:${scheme}`;
-          const b = before.get(key) as Buffer;
-          const a = after.get(key) as Buffer;
+          const b = shots.get(shotKey("main", page, scheme)) as Buffer;
+          const a = shots.get(shotKey("head", page, scheme)) as Buffer;
           const d = diffImages(decodePng(b), decodePng(a));
           pairs.push({
             page,
@@ -231,9 +379,18 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       }
       signal.throwIfAborted();
       deps.store.save(
-        { repoId: deps.repoId, pr: t.pr, sha: t.sha, mainSha, capturedAt: now(), pairs },
+        {
+          repoId: deps.repoId,
+          pr: t.pr,
+          sha: t.sha,
+          mainSha,
+          capturedAt: now(),
+          pairs,
+          ...(deps.renderDemo ? { demos } : {}),
+        },
         images,
       );
+      await dropKept(t.pr);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -276,6 +433,14 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     return pending;
   }
 
+  /** How many pairs and Demo renders `pages` still lacks at this head. */
+  function missingEvidence(have: EvidenceManifest | null, sha: string, pages: EvidencePage[]) {
+    return (
+      evidenceMissing(have, sha, pages).length +
+      (deps.renderDemo ? evidenceDemoMissing(have, sha, pages).length : 0)
+    );
+  }
+
   async function post(t: EvidenceTarget): Promise<void> {
     const manifest = deps.store.manifest(deps.repoId, t.pr, t.sha);
     if (manifest === null || posted.has(keyOf(t)) || t.onStored === undefined) return;
@@ -295,7 +460,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (stopped || pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
-      if (evidenceMissing(have, t.sha, pages).length === 0) return post(t);
+      if (missingEvidence(have, t.sha, pages) === 0) return post(t);
       const failed = failedAt.get(key);
       if (failed !== undefined && now() - failed < retryMs) return;
       const going = running.get(key);
@@ -332,19 +497,38 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       );
       return running.get(key);
     },
+    pages: pagesFor,
     gate(t) {
       if (t.repoId !== deps.repoId) return null;
       const uncatalogued = prEvidenceUncatalogued(t.paths);
       if (uncatalogued.length > 0) return evidenceUncataloguedText(uncatalogued);
       const pages = pagesOf.get(keyOf(t)) ?? prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
-      const missing = evidenceMissing(manifest(t), t.sha, pages);
-      if (missing.length === 0)
+      const have = manifest(t);
+      const missing = evidenceMissing(have, t.sha, pages);
+      const demoGaps = deps.renderDemo ? evidenceDemoMissing(have, t.sha, pages) : [];
+      if (missing.length === 0 && demoGaps.length === 0)
         return posted.has(keyOf(t))
           ? null
           : "kept in draft until its screenshot evidence links are posted to the PR";
       const why = failedWhy.get(keyOf(t));
-      return `${evidenceRefusalText(missing)}; capture failed: ${why ?? ""}`.replace(
+      // A page whose renders a failed attempt kept is not missing: the next attempt skips it.
+      const keep = kept.get(t.pr);
+      const rendered = (page: EvidencePage): boolean =>
+        keep?.sha === t.sha &&
+        ["main", "head"].every((side) =>
+          EVIDENCE_SCHEMES.every((scheme) => keep.shots.has(shotKey(side, page, scheme))),
+        ) &&
+        (!deps.renderDemo ||
+          EVIDENCE_DEMO_VIEWPORTS.every((v) =>
+            keep.shots.has(evidenceDemoImageName(page, v.width)),
+          ));
+      const gaps = [
+        ...missing,
+        ...demoGaps.map(({ page }) => ({ page, scheme: "light" as const })),
+      ].filter((g) => !rendered(g.page));
+      const demoNote = demoGaps.length > 0 ? " (Demo renders of the head included)" : "";
+      return `${evidenceRefusalText(gaps)}${demoNote}; capture failed: ${why ?? ""}`.replace(
         /; capture failed: $/,
         "",
       );
@@ -355,4 +539,25 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       await Promise.allSettled([...running.values(), ...readingPages.values()]);
     },
   };
+}
+
+/**
+ * What the supervisor needs to hold a web review for screenshot evidence. `pages` is required, so
+ * a caller cannot fall back to the folder rule: the capture and the review start check must agree
+ * on what a head touches.
+ */
+export interface ReviewEvidenceDeps {
+  store: PrEvidenceStore;
+  /** The one repo whose web PRs carry screenshot pairs. */
+  repoId: string;
+  /** The pages the capture itself reads for a head. */
+  pages(target: EvidenceTarget): Promise<readonly EvidencePage[]>;
+}
+
+export function evidenceReviewDeps(
+  evidence: PrEvidence,
+  store: PrEvidenceStore,
+  repoId: string,
+): ReviewEvidenceDeps {
+  return { store, repoId, pages: (target) => evidence.pages(target) };
 }

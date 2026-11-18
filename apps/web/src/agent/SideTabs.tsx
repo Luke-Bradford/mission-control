@@ -13,9 +13,17 @@ import {
   type SeatInstructionList,
   SUBAGENT_PILL,
 } from "@mc/core";
-import { useEffect, useRef, useState } from "react";
-import { apiPost, errorNote } from "../api.ts";
-import { LOOP_PHASE_LABEL } from "../crew.ts";
+import { useEffect, useId, useRef, useState } from "react";
+import { ApiError, apiPost, errorNote } from "../api.ts";
+import {
+  ErrorSummary,
+  FieldError,
+  fieldProps,
+  isUncertain,
+  UNCERTAIN_TEXT,
+  useSubmitGuard,
+} from "../components/formSupport.tsx";
+import { callSign, LOOP_PHASE_LABEL } from "../crew.ts";
 import { hub, RESOURCES, type Resource, RUNS_LIMIT, useResource, useResources } from "../data.ts";
 import { dur, kTokens, shortSha } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
@@ -28,6 +36,7 @@ import { BuildChips } from "../shell/buildStatus.tsx";
 import { openItem } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { PromptTab } from "./PromptTab.tsx";
+import { seatError } from "./seat.ts";
 
 const DASH = "—";
 
@@ -90,7 +99,7 @@ function Plan({
 }
 
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
-function Queue({ row }: { row: CrewRow }) {
+export function Queue({ row }: { row: CrewRow }) {
   const focusRef = RESOURCES.focus(row.id);
   const focus = useResource<FocusInstructionView>(
     row.kind === "crew" && row.mode === "writer" ? focusRef : null,
@@ -105,7 +114,12 @@ function Queue({ row }: { row: CrewRow }) {
   const focusEntries = useResource<SeatInstructionList>(
     row.kind === "crew" && row.mode === "writer" ? RESOURCES.seatInstructions(row.id) : null,
   );
-  const focusSave = useRef(false);
+  const guard = useSubmitGuard();
+  const fieldId = useId();
+  const [focusIssue, setFocusIssue] = useState<string | null>(null);
+  const [focusError, setFocusError] = useState<string | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [focusKey, setFocusKey] = useState(0);
   const failureBox = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     if (failure) failureBox.current?.focus();
@@ -126,6 +140,9 @@ function Queue({ row }: { row: CrewRow }) {
     setDraft((saved ?? focus.data)?.focus ?? "");
     setEditing(true);
     setFailure(null);
+    setFocusIssue(null);
+    setFocusError(null);
+    setUncertain(false);
     toast(
       'Focus is what FLIGHT assigns from: a lane, labels or a ticket list. Change it here, or tell FLIGHT, e.g. "GUIDO-2: catalog bugs only this week".',
     );
@@ -179,12 +196,24 @@ function Queue({ row }: { row: CrewRow }) {
         <span className="muted">Focus</span>
         {editing ? (
           <form
+            className="fform fform-480"
+            noValidate
+            aria-label={`Focus for ${callSign(row)}`}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !busy) {
+                e.preventDefault();
+                e.stopPropagation();
+                cancel();
+              }
+            }}
             onSubmit={async (e) => {
               e.preventDefault();
-              if (busy || focusSave.current) return;
-              focusSave.current = true;
+              if (!guard.take()) return;
               setBusy(true);
               setFailure(null);
+              setFocusIssue(null);
+              setFocusError(null);
+              setUncertain(false);
               try {
                 const result = await apiPost<FocusInstructionView & InstructionMutation>(
                   focusRef.path,
@@ -197,36 +226,65 @@ function Queue({ row }: { row: CrewRow }) {
                 hub.refetch(focusRef.path);
                 refreshInstructions();
               } catch (e) {
-                setFailure(e instanceof Error ? e.message : String(e));
+                const status = e instanceof ApiError ? e.status : undefined;
+                const message = seatError(e);
+                // A refusal is about what was typed: link it to the field. A dropped connection
+                // or a broken server says nothing about the draft, so the field stays unmarked.
+                if (isUncertain(status)) {
+                  setFocusError(message);
+                  setUncertain(true);
+                  hub.refetch(focusRef.path);
+                } else setFocusIssue(message);
+                setFocusKey((key) => key + 1);
               } finally {
-                focusSave.current = false;
+                guard.release();
                 setBusy(false);
               }
             }}
           >
-            <input
-              aria-label="Focus"
-              ref={input}
-              onKeyDown={(e) => {
-                if (e.key === "Escape" && !busy) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  cancel();
-                }
-              }}
-              value={draft}
-              maxLength={500}
-              onChange={(e) => setDraft(e.target.value)}
-            />
-            <span className="note xs">
-              Use lane:name, label:name or repo#issue selectors. Leave empty to clear.
-            </span>
-            <button type="submit" className="sm" disabled={busy}>
-              Save
-            </button>
-            <button type="button" className="sm ghost" disabled={busy} onClick={cancel}>
-              Cancel
-            </button>
+            <fieldset className="fgroup">
+              <legend>Focus for {callSign(row)}</legend>
+              <div className="ffield">
+                <label htmlFor={fieldId}>Focus</label>
+                <input
+                  {...fieldProps(fieldId, focusIssue ?? undefined, `${fieldId}-hint`)}
+                  ref={input}
+                  value={draft}
+                  maxLength={500}
+                  disabled={busy}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    setFocusIssue(null);
+                  }}
+                />
+                <span id={`${fieldId}-hint`} className="fhint muted xs">
+                  What FLIGHT assigns to {callSign(row)} from. Use lane:name, label:name or
+                  repo#issue selectors. Leave empty to clear.
+                </span>
+                <FieldError id={fieldId} error={focusIssue ?? undefined} />
+              </div>
+            </fieldset>
+            <ErrorSummary
+              title={uncertain ? "Result unknown" : "Focus not saved"}
+              issues={focusIssue ? [{ id: fieldId, message: focusIssue }] : []}
+              message={focusError}
+              focusKey={focusKey}
+            >
+              {uncertain && <p className="s">{UNCERTAIN_TEXT}</p>}
+            </ErrorSummary>
+            {busy && (
+              <p role="status" className="fstatus s">
+                Saving…
+              </p>
+            )}
+            <div className="fact">
+              <button type="submit" className="primary" disabled={busy}>
+                Save
+              </button>
+              <button type="button" disabled={busy} onClick={cancel}>
+                Cancel
+              </button>
+            </div>
           </form>
         ) : (
           <>
@@ -287,7 +345,7 @@ function Queue({ row }: { row: CrewRow }) {
           {failure}
         </p>
       )}
-      {busy && (
+      {busy && !editing && (
         <p role="status" className="note">
           Saving…
         </p>

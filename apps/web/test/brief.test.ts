@@ -193,3 +193,20 @@ describe("standup: a PR waiting on me", () => {
     expect(out).not.toContain("In review");
   });
 });
+
+describe("a ticket the hub holds", () => {
+  const waiting = { reason: "Needs the schema change", freesWhen: "shop-app#9 merges", at: NOW };
+  const held = [mk(20, "In progress", { waiting })];
+
+  it("standup lists it with its reason and what frees it", () => {
+    expect(standup(held, ctx(), NOW, TZ)).toContain(
+      "Blocked or waiting on me\n- shop-app#20: Ticket 20 (waiting: Needs the schema change; frees when shop-app#9 merges)",
+    );
+  });
+
+  it("the weekly update lists it in its own Waiting section", () => {
+    expect(weekly(held, ctx(), 7, NOW, TZ)).toContain(
+      "Waiting\n- shop-app#20: Ticket 20 (waiting: Needs the schema change; frees when shop-app#9 merges)",
+    );
+  });
+});

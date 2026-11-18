@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   cpuPercent,
   type MachineDeps,
+  parseFileServiceBytes,
   parseMemoryPressure,
   parsePs,
   parseSwapUsage,
@@ -126,6 +127,26 @@ const PS_TREE = `  100     1  1000  1.0 /bin/zsh -c pnpm -s test
   300     1   500  1.0 node other.js
 `;
 
+describe("file-change service memory", () => {
+  const TOP = "Processes: 1\nPID    MEM    CMPRS\n312    1M+    27G\n";
+  it("takes the larger of MEM and CMPRS, so compressed pages count", () => {
+    expect(parseFileServiceBytes(TOP)).toBe(27 * 1024 ** 3);
+    expect(parseFileServiceBytes("PID MEM CMPRS\n312 28G- 0B\n")).toBe(28 * 1024 ** 3);
+    expect(parseFileServiceBytes("nothing here")).toBeNull();
+  });
+
+  it("stores the reading, treats no process as zero, and keeps the last figure on failure", async () => {
+    const r = await sampleMachine(deps({ fileService: async () => TOP }));
+    expect(r.errors).toEqual([]);
+    expect(r.sample.fileServiceBytes).toBe(27 * 1024 ** 3);
+    const none = await sampleMachine(deps({ fileService: async () => "" }));
+    expect(none.sample.fileServiceBytes).toBe(0);
+    const bad = await sampleMachine(deps({ fileService: async () => "garbled", prev: r.sample }));
+    expect(bad.errors).toEqual(["fseventsd: unrecognised top output"]);
+    expect(bad.sample.fileServiceBytes).toBe(27 * 1024 ** 3);
+  });
+});
+
 describe("sampleMachine", () => {
   it.each(["", " --run"])("excludes similarly named test commands (suffix %j)", async (suffix) => {
     const r = await sampleMachine(
@@ -181,6 +202,7 @@ describe("sampleMachine", () => {
       load1: 1.25,
       agents: { count: 5, rssBytes: 985920 * 1024, cpuPct: 14.7 },
       topConsumers: parseTopConsumers(PS),
+      fileServiceBytes: null,
       testRun: null,
     });
     expect(r.cpus).toHaveLength(2);

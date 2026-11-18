@@ -54,7 +54,7 @@ import {
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
-import { setRunPathGrants } from "../src/path-grants.ts";
+import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { Store } from "../src/store.ts";
 
 const tools = vi.hoisted(() => ({
@@ -2250,6 +2250,26 @@ describe("merge steps", () => {
         facts: { mainSha: MAIN, containsMain: true, hubOnly: true, strays: [], webChanged: false },
       });
       expect(gitCalls).toHaveLength(1);
+    });
+
+    it("reads origin's tip once for a tick that shares it, not once per run", async () => {
+      gitAnswers = { "ls-remote": lsRemote() };
+      const p = withArea();
+      const tip = await p.originTip(R);
+      expect(tip).toEqual({ ok: true, defaultBranch: "main", mainSha: MAIN });
+      const known = {
+        sha: SHA,
+        mainSha: MAIN,
+        containsMain: true,
+        hubOnly: true,
+        strays: [],
+        webChanged: false,
+      };
+      if (!tip.ok) throw new Error("no tip");
+      for (let i = 0; i < 12; i++) {
+        expect(await p.gateFacts(R, SHA, known, tip)).toMatchObject({ ok: true });
+      }
+      expect(gitCalls.filter((a) => a[0] === "ls-remote")).toHaveLength(1);
     });
 
     it("refuses a sha that is not a sha without running git", async () => {

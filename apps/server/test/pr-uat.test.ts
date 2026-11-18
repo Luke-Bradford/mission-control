@@ -168,31 +168,6 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
     ).toBeUndefined();
   });
 
-  it("serves the selected PR's exact changed files without requiring a cookie", async () => {
-    store.upsertPullRequests(
-      "shop-app",
-      [
-        {
-          ...pr("shop-app", 30),
-          files: [
-            { path: "src/a.ts", changeType: "MODIFIED" },
-            { path: "new/b.ts", changeType: "ADDED" },
-          ],
-        },
-      ],
-      NOW + 1,
-    );
-    const response = await get("/api/repos/shop-app/prs/30/files");
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      repoId: "shop-app",
-      number: 30,
-      sha: "sha3",
-      files: ["new/b.ts", "src/a.ts"],
-    });
-    expect((await get("/api/repos/unconfigured/prs/30/files")).statusCode).toBe(404);
-    expect((await get(`/api/repos/shop-app/prs/${"9".repeat(100)}/files`)).statusCode).toBe(404);
-  });
   beforeEach(() => {
     store.upsertRun(run("dev-2"));
     store.upsertPullRequests("shop-app", [pr("shop-app", 30)], NOW);

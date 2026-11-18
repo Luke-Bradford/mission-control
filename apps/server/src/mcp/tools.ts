@@ -203,13 +203,13 @@ import { CodeHealthReader } from "../code-health/read.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
+import type { ProfilesError } from "../config/profiles.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
-import { runPathGrants } from "../path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,
@@ -222,8 +222,8 @@ import {
   type PreviewResult,
   previewRequest,
 } from "../preview/browser.ts";
-import type { ProfilesError } from "../profiles.ts";
 import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
+import { runPathGrants } from "../repo/path-grants.ts";
 import { isExternalReview } from "../review/external-key.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
 import {
@@ -234,6 +234,7 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
+import { originHeads } from "../runtime/origin-heads.ts";
 import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
@@ -292,6 +293,8 @@ export interface McToolsDeps {
   checkDrops?: (runId: string) => readonly CheckDrop[];
   /** Configured checks still executing or validating their completion. */
   pendingChecks?: (runId: string) => readonly string[];
+  /** Drops a check whose Codex exec cell or process has disappeared before it reported an exit. */
+  lostCheck?: (runId: string, command: string) => boolean;
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -498,6 +501,7 @@ const FindingsArgs = z.strictObject({
 });
 const EvidenceArgs = z.strictObject({
   note: text(MC_EVIDENCE_MAX),
+  lostCheck: text(MC_TEXT_MAX).optional(),
   doneWhen: z
     .array(
       z.strictObject({
@@ -760,36 +764,6 @@ export async function readKnown(
   }
 }
 
-/** origin's default branch (name and tip) and the run's branch tip, from one `ls-remote`. */
-interface OriginHeads {
-  defaultBranch: string;
-  defaultSha: string;
-  branchSha: string | null;
-}
-
-export function originHeads(out: string, branch: string | null): OriginHeads {
-  let defaultRef: string | null = null;
-  let defaultSha: string | null = null;
-  let branchSha: string | null = null;
-  for (const line of out.split("\n")) {
-    const [left = "", name = ""] = line.split("\t");
-    if (name !== "HEAD" && name !== `refs/heads/${branch}`) continue;
-    if (left.startsWith("ref: ")) {
-      if (name === "HEAD") defaultRef = left.slice("ref: ".length);
-    } else if (SHA.test(left)) {
-      if (name === "HEAD") defaultSha = left;
-      else branchSha = left;
-    }
-  }
-  const defaultBranch = defaultRef?.startsWith("refs/heads/")
-    ? defaultRef.slice("refs/heads/".length)
-    : null;
-  if (defaultBranch === null || defaultSha === null || !/^[A-Za-z0-9._/-]+$/.test(defaultBranch)) {
-    throw new Error("origin has no default branch");
-  }
-  return { defaultBranch, defaultSha, branchSha };
-}
-
 /**
  * The run's seat and session, when the seat may write; else the answer to give. A seat no longer
  * configured is answered as an ended run.
@@ -808,7 +782,7 @@ function writerPlace(
 
 /**
  * Whether `branch` is the run's own: the `branchFor` shape for the run's issue, not origin's
- * default, and not any other live run's. The push takes no argument, so this guards the
+ * default, and not any other live run's (a watch run holds no branch of its own). The push takes no argument, so this guards the
  * supervisor's own rows, not a seat's input.
  */
 function ownBranch(store: Store, run: Run, branch: string, defaultBranch: string): boolean {
@@ -820,7 +794,12 @@ function ownBranch(store: Store, run: Run, branch: string, defaultBranch: string
   return !store.activeSeatSessions().some((row) => {
     if (row.runId === null || row.runId === run.id) return false;
     const other = store.run(row.runId);
-    return other !== null && other.repoId === run.repoId && other.branch === branch;
+    return (
+      other !== null &&
+      other.loopKind !== "watch" &&
+      other.repoId === run.repoId &&
+      other.branch === branch
+    );
   });
 }
 
@@ -2581,7 +2560,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { note, tests, testsAdded, doneWhen } = parsed.data;
+    const { note, tests, testsAdded, doneWhen, lostCheck } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -2621,6 +2600,19 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const currentRefusal = loopRefusal(currentLoop);
       if (currentRefusal !== null) return currentRefusal;
       if (currentLoop === null || currentLoop === undefined) return ENDED;
+
+      // The Codex CLI has already confirmed this cell or process vanished. Clear its aliases now,
+      // before the seat starts a replacement, so the lost call cannot keep evidence pending.
+      if (lostCheck !== undefined) deps.lostCheck?.(currentRun.id, lostCheck);
+      const lost = (deps.checkDrops?.(currentRun.id) ?? []).filter(
+        (drop) => drop.reason === "session-lost",
+      );
+      if (lost.length > 0) {
+        return {
+          text: `Evidence not recorded: ${lost.map((drop) => drop.command).join(", ")} lost its Codex check session before it reported an exit code. Run ${lost.map((drop) => drop.command).join(", ")} again; do not keep polling the lost session. Wait for the new call's final numeric exit code before reporting evidence or ending your turn.`,
+          isError: true,
+        };
+      }
 
       const newest = store.newestRunCommit(currentRun.id);
       const reported = store.latestEvidence(currentRun.id);
@@ -2703,12 +2695,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
       const pending = deps.pendingChecks?.(currentRun.id) ?? [];
-      if (pending.length > 0) {
+      if (pending.length > 0)
         return {
           text: `Evidence not recorded: these checks have no completed receipt yet: ${pending.join(", ")}. A yielded session is still running. Continue polling that session until it reports a final numeric exit code before reporting evidence or ending your turn. If polling is refused, report the blocker; do not claim a pass.`,
           isError: true,
         };
-      }
       store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused or timed-out publication. Budget, account and every other operator hold stay parked.
@@ -3286,6 +3277,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             maxLength: MC_EVIDENCE_MAX,
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
+          },
+          lostCheck: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_TEXT_MAX,
+            description:
+              "The exact configured command whose Codex exec cell or process disappeared before reporting an exit code. Use only after the CLI confirms the loss; rerun it before reporting evidence again.",
           },
           doneWhen: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: DoneWhenAnswerSchema },
           tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },

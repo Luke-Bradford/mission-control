@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_HEADING,
   type EvidenceManifest,
+  evidenceDemoImageName,
+  evidenceDemoMissing,
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
@@ -128,6 +130,36 @@ describe("evidenceMissing", () => {
     expect(text).toContain("board");
     expect(text).toContain("map");
     expect(text).toMatch(/draft/);
+  });
+});
+
+describe("Demo renders", () => {
+  const demos = (...widths: number[]) =>
+    widths.map((width) => ({ page: "board" as const, width, height: width === 1920 ? 940 : 1145 }));
+
+  it("lists each page and size with no Demo render for this head", () => {
+    const sha = "a".repeat(40);
+    expect(evidenceDemoMissing(manifest(), sha, ["board"])).toEqual([
+      { page: "board", width: 1920, height: 940 },
+      { page: "board", width: 2560, height: 1145 },
+    ]);
+    expect(evidenceDemoMissing(manifest({ demos: demos(1920) }), sha, ["board"])).toEqual([
+      { page: "board", width: 2560, height: 1145 },
+    ]);
+    expect(evidenceDemoMissing(manifest({ demos: demos(1920, 2560) }), sha, ["board"])).toEqual([]);
+    expect(
+      evidenceDemoMissing(manifest({ demos: demos(1920, 2560) }), "c".repeat(40), ["board"]),
+    ).toHaveLength(2);
+  });
+
+  it("names the Demo image and links it in the PR body next to the live ones", () => {
+    expect(isEvidenceImageName(evidenceDemoImageName("board", 1920))).toBe(true);
+    expect(isEvidenceImageName("board-demo-1000.png")).toBe(false);
+    const text = evidenceSectionText(manifest({ demos: demos(1920, 2560) }), "http://h");
+    expect(text).toContain(`http://h/api/prs/7/evidence/${"a".repeat(40)}/board-demo-1920.png`);
+    expect(text).toContain(`http://h/api/prs/7/evidence/${"a".repeat(40)}/board-demo-2560.png`);
+    expect(text).toContain("board, Demo at its busiest, 2560×1145");
+    expect(text.indexOf("board, light")).toBeLessThan(text.indexOf("board, Demo"));
   });
 });
 

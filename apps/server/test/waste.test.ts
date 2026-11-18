@@ -6,6 +6,7 @@ import {
   type PullRequestView,
   type Run,
   type RunLoop,
+  WASTE_CHECKS,
   WASTE_THRESHOLDS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,7 +14,7 @@ import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import {
   openWasteAlarms,
@@ -194,6 +195,76 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     expect(ticketParked(store, TICKET)).not.toBeNull();
   });
 
+  describe("the restarted-after-park alarm", () => {
+    const restarted = () =>
+      openWasteAlarms(store).filter(
+        (a) => a.check === "ticket-churn" && a.subject.endsWith(":restarted"),
+      );
+    const decide = (at: number, kind: "re-plan" | "note", about: string) =>
+      store.addFlightDecision({
+        at,
+        kind,
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        about,
+        decision: "d",
+        basis: "b",
+      });
+    const parked = () => {
+      replay();
+      syncWasteAlarms(config, store, NOW);
+    };
+
+    it("opens when the ticket restarts with no re-plan logged", () => {
+      parked();
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      decide(NOW + MIN, "note", `${TICKET} revived`);
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("stays quiet when a re-plan for the ticket came after the alarm and before the run", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toEqual([]);
+    });
+
+    it("opens when the re-plan has the same timestamp as the restart", () => {
+      parked();
+      decide(NOW + 2 * MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("ignores a re-plan for another ticket, one before the alarm, or one after the run", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", "mc#15960 re-planned");
+      decide(NOW - HOUR, "re-plan", `${TICKET} re-planned`);
+      decide(NOW + 5 * MIN, "re-plan", `${TICKET} re-planned`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 6 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("opens again for a second restart after the revived run ends", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", `${TICKET} re-planned`);
+      store.upsertRun(
+        run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN, endedAt: NOW + 10 * MIN }),
+      );
+      syncWasteAlarms(config, store, NOW + 11 * MIN);
+      expect(restarted()).toEqual([]);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 20 * MIN }));
+      syncWasteAlarms(config, store, NOW + 21 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+  });
+
   it("counts three carry-on resumes without a report", () => {
     const r = run("guido-1", { ticket: "mc#7" });
     store.upsertRun(r);
@@ -340,15 +411,59 @@ describe("review rounds on a sliced ticket", () => {
   });
 });
 
+const boardCard = (issueNumber: number, closed: boolean): BoardItem => ({
+  repoId: "mc",
+  issueNumber,
+  title: `Ticket ${issueNumber}`,
+  status: closed ? "Done" : "In progress",
+  state: "planned",
+  labels: [],
+  assignees: [],
+  priority: null,
+  updatedAt: NOW,
+  url: "u",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: "S",
+  closed,
+  prioritySource: null,
+  createdAt: NOW - DAY,
+  itemId: `I${issueNumber}`,
+  projectId: "P",
+});
+
 describe("alarms that only alarm", () => {
-  it("flags a ticket that passes three runs without a merge, with its runs and findings", () => {
+  const fourRuns = (ticket: string) => {
     for (let i = 0; i < 4; i++)
-      store.upsertRun(run("guido-1", { ticket: "mc#30", startedAt: NOW - (5 - i) * HOUR }));
+      store.upsertRun(run("guido-1", { ticket, startedAt: NOW - (5 - i) * HOUR }));
+  };
+
+  it("flags an open ticket that passes three runs without a merge, with its runs and findings", () => {
+    store.replaceBoard("mc", [boardCard(30, false)]);
+    fourRuns("mc#30");
     syncWasteAlarms(config, store, NOW);
     const a = openWasteAlarms(store).find((x) => x.check === "runs-per-ticket");
     expect(a?.evidence).toMatch(/mc#30 has taken 4 runs without a merge/);
     expect(a?.evidence).toMatch(/r\d+ \(0\)/);
     expect(ticketParked(store, "mc#30")).toBeNull();
+  });
+
+  it("raises no runs-per-ticket alarm for a closed ticket", () => {
+    store.replaceBoard("mc", [boardCard(30, true)]);
+    fourRuns("mc#30");
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store).find((x) => x.check === "runs-per-ticket")).toBeUndefined();
+  });
+
+  it("raises no runs-per-ticket alarm for a ticket that is not on the board", () => {
+    store.replaceBoard("mc", [boardCard(31, false)]);
+    fourRuns("mc#30");
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store).find((x) => x.check === "runs-per-ticket")).toBeUndefined();
   });
 
   it("flags cost past 3x the median of the ticket's size when nothing merged", () => {
@@ -435,6 +550,7 @@ describe("alarms that only alarm", () => {
 
 describe("no waste alarm reaches Needs you", () => {
   it("leaves the notes and the attention items empty with checks firing", () => {
+    store.replaceBoard("mc", [boardCard(30, false)]);
     for (let i = 0; i < 8; i++) store.upsertRun(run("flight-1", { startedAt: NOW - i * MIN }));
     for (let i = 0; i < 4; i++)
       store.upsertRun(
@@ -555,52 +671,26 @@ describe("the read route's report", () => {
 });
 
 describe("FLIGHT's activity per day on the read route", () => {
-  const wait = (at: number) =>
-    store.addFlightDecision({
-      at,
-      kind: "wait",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: "mc#1: waiting on CI",
-      decision: "waiting",
-      basis: "b",
-    });
   const tokens = (n: number) => ({ input: n, output: 0, cacheRead: 0, cacheCreate: 0 });
 
-  it("counts wakes, waits and FLIGHT's share of tokens in each 24-hour bucket", () => {
+  it("counts wakes and FLIGHT's share of tokens in each 24-hour bucket", () => {
     store.upsertRun(run("flight-1", { startedAt: NOW - 2 * HOUR, tokens: tokens(300) }));
     store.upsertRun(run("guido-1", { startedAt: NOW - 3 * HOUR, tokens: tokens(700) }));
     store.upsertRun(run("flight-1", { startedAt: NOW - 30 * HOUR, tokens: tokens(100) }));
     for (const at of [NOW - HOUR, NOW - 2 * HOUR, NOW - 3 * HOUR, NOW - 30 * HOUR])
       store.addFlightWake("r1", at, ["q"]);
-    for (const at of [NOW - HOUR, NOW - 30 * HOUR, NOW - 31 * HOUR]) wait(at);
-    // a decision that is not a wait is not counted
-    store.addFlightDecision({
-      at: NOW - HOUR,
-      kind: "note",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: "a",
-      decision: "d",
-      basis: "b",
-    });
     const days = wasteReport(config, store, NOW).flight;
     expect(days).toHaveLength(14);
     expect(days.at(-1)?.since).toBe(NOW - DAY);
     expect(days.at(-1)).toMatchObject({
       wakes: 3,
-      waits: 1,
       flightTokens: 300,
       totalTokens: 1000,
     });
     expect(days.at(-1)?.tokenShare).toBeCloseTo(0.3);
-    expect(days.at(-2)).toMatchObject({ wakes: 1, waits: 2, flightTokens: 100, totalTokens: 100 });
+    expect(days.at(-2)).toMatchObject({ wakes: 1, flightTokens: 100, totalTokens: 100 });
     expect(days.at(-2)?.tokenShare).toBe(1);
-    expect(days[0]).toMatchObject({ wakes: 0, waits: 0, totalTokens: 0, tokenShare: null });
+    expect(days[0]).toMatchObject({ wakes: 0, totalTokens: 0, tokenShare: null });
   });
 });
 
@@ -655,9 +745,13 @@ describe("an external PR's reviews", () => {
 });
 
 describe("the waste_alarm FLIGHT signal", () => {
-  it("is raised once for an open alarm and stays told across ticks", () => {
-    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));
+  it("is raised once for an alarm that parks a ticket and stays told across ticks", () => {
+    for (let i = 0; i < 2; i++)
+      store.upsertRun(
+        run("guido-1", { ticket: "mc#1596", startedAt: NOW - (i + 1) * HOUR, status: "failed" }),
+      );
     syncWasteAlarms(config, store, NOW);
+    expect(ticketParked(store, "mc#1596")).not.toBeNull();
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const read = (at: number) =>
@@ -673,13 +767,43 @@ describe("the waste_alarm FLIGHT signal", () => {
     expect(next[0]?.told).toBe(true);
   });
 
-  it("does not wake FLIGHT for an unchanged rerun the hook already refused", () => {
+  it.each(WASTE_CHECKS)("%s wakes FLIGHT only if it is on the list of alarms that do", (check) => {
+    store.waste.insertAlarm(
+      {
+        check,
+        subject: `s:${check}`,
+        repoId: "mc",
+        ticket: "mc#1596",
+        seatId: null,
+        runId: null,
+        level: 1,
+        evidence: `evidence for ${check}`,
+      },
+      NOW,
+    );
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const raised = flightSignals({ config, store, session, seats: [], now: NOW }).signals.filter(
+      (s) => s.kind === "waste_alarm",
+    );
+    expect(raised.map((s) => s.evidence)).toEqual(
+      ["retry-loop", "failed-review-rounds", "runs-per-ticket"].includes(check)
+        ? [expect.stringContaining(`evidence for ${check}`)]
+        : [],
+    );
+  });
+
+  it("does not wake FLIGHT for an alarm the hub handles itself", () => {
     const r = run("guido-1", { ticket: "mc#1596" });
     store.upsertRun(r);
     for (let i = 0; i < 3; i++)
       store.addRerunRefusal(r.id, "pnpm -s lint", "abc1234def", NOW - i * MIN);
+    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-2", { startedAt: NOW - i * MIN }));
     syncWasteAlarms(config, store, NOW);
-    expect(openWasteAlarms(store).map((a) => a.check)).toContain("unchanged-rerun");
+    const open = openWasteAlarms(store).map((a) => a.check);
+    expect(open).toContain("unchanged-rerun");
+    expect(open).toContain("restart-storm");
+    expect(open).not.toContain("retry-loop");
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const signals = flightSignals({ config, store, session, seats: [], now: NOW }).signals;

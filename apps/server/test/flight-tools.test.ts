@@ -96,6 +96,7 @@ import {
   MC_RUN_ENDED,
   MC_TICKET_READERS_ONLY,
   MC_TOOLS,
+  MERGE_HOLD_PARK,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsYouItems,
@@ -144,10 +145,12 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { AttentionMaterialsError } from "../src/attention/attention-materials.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../src/config/crew-pause.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -155,28 +158,26 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
+import { setReviewHold } from "../src/engine/review-hold.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
+import { observeFlightMain } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
   flightTriageItems,
   operatorItems,
-  unhandledReasons,
-  wakeReasons,
 } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
-import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
+import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
-import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
+import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run/handoffs.ts";
+import { inheritedHandoffLoop, recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -244,6 +245,7 @@ let lockNow: TestLockState;
 let cfg: CcConfig;
 const stateSeen = vi.fn();
 let tools: McTool[];
+let flightDeps: () => FlightToolsDeps;
 let startCalls: unknown[][];
 let endCalls: string[];
 let interruptCalls: string[];
@@ -274,6 +276,7 @@ let refuseWith: OperatorRefusal | null = null;
 let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
+let materialsImpl: (key: string, story: { repoId: string; label: string }) => Promise<unknown>;
 let endImpl: (seatId: string) => Promise<void>;
 let asideEnds: string[];
 let rulingImpl: () => Promise<AcceptRulingResult>;
@@ -387,6 +390,11 @@ beforeEach(() => {
   reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
+  materialsImpl = async (_key, story) => ({
+    label: story.label,
+    images: [{}, {}],
+    sourceCommit: "a".repeat(40),
+  });
   // what the supervisor's endRun leaves behind: the run ended, the seat stopped
   endImpl = async (seatId) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -430,7 +438,8 @@ beforeEach(() => {
   };
   stateSeen.mockClear();
   previewTickets = [];
-  tools = createFlightTools({
+  flightDeps = (): FlightToolsDeps => ({
+    attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
     hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
@@ -568,87 +577,13 @@ beforeEach(() => {
     },
     now: () => nowMs,
   });
+  tools = createFlightTools(flightDeps());
   const t = tools.find((candidate) => candidate.name === "log_decision");
   if (t === undefined) throw new Error("no tool");
   tool = t;
   live("flight-1", "r-flight");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-describe("wait_on", () => {
-  const waitArgs = (over: Record<string, unknown> = {}) => ({
-    target: "mc#7",
-    on: "its PR merging",
-    until: new Date(NOW + 30 * 60_000).toISOString(),
-    basis: "the PR is in CI",
-    ...over,
-  });
-
-  it("is a FLIGHT tool, granted to the read-only watch role", () => {
-    expect(named("wait_on")).toMatchObject({ modes: [], grantable: ["read-only"] });
-  });
-
-  it("records a wait decision on the target, and keeps the time for the wake that ends it", async () => {
-    const r = await call("wait_on", waitArgs());
-    expect(r.isError).toBeUndefined();
-    expect(store.flightDecisions(0, 10)).toEqual([
-      expect.objectContaining({
-        kind: "wait",
-        ref: "mc#7",
-        about: "mc#7: waiting on its PR merging",
-        decision: `waiting until ${new Date(NOW + 30 * 60_000).toISOString()}`,
-        basis: "the PR is in CI",
-      }),
-    ]);
-    expect(flightWaits(store)["mc#7"]).toEqual({
-      on: "its PR merging",
-      until: NOW + 30 * 60_000,
-      at: NOW,
-    });
-  });
-
-  it("waits on the original target when given a wait_over signal's id", async () => {
-    const r = await call("wait_on", waitArgs({ target: `wait_over:wait_over:mc#7:${NOW}:${NOW}` }));
-    expect(r.isError).toBeUndefined();
-    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
-    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
-      ref: "mc#7",
-      about: "mc#7: waiting on its PR merging",
-    });
-  });
-
-  it.each([
-    ["items", `pr:mc#7:${NOW}`, `pr:mc#7:${NOW}`],
-    ["signals", `hub_error:loop:engine:${NOW}`, `loop:engine:${NOW}`],
-    ["signals", `merge_stalled:mc#9:1559:${NOW}`, `mc#9:1559:${NOW}`],
-  ])(
-    "keeps a reason's own key whole, so a wait on it handles the %s fact %s",
-    async (category, fact, target) => {
-      expect((await call("wait_on", waitArgs({ target }))).isError).toBeUndefined();
-      expect(Object.keys(flightWaits(store))).toEqual([target]);
-      const reasons = wakeReasons("", JSON.stringify({ [category]: [fact] }));
-      expect(unhandledReasons(store, reasons, NOW - 1, new Set(reasons.map((x) => x.id)))).toEqual(
-        [],
-      );
-    },
-  );
-
-  it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
-    expect(
-      (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,
-    ).toBe(true);
-    expect(
-      (await call("wait_on", waitArgs({ until: new Date(NOW + 8 * 86_400_000).toISOString() })))
-        .isError,
-    ).toBe(true);
-    live("guido-1", "r-guido");
-    expect(await call("wait_on", waitArgs(), ctx("guido-1", "r-guido"))).toEqual({
-      text: MC_FLIGHT_ONLY,
-      isError: true,
-    });
-    expect(store.flightDecisions(0, 10)).toEqual([]);
-  });
-});
 
 describe("log_decision", () => {
   it("is shown only to a role that is granted it", () => {
@@ -1430,11 +1365,11 @@ describe("tool list", () => {
       "instruct_seat",
       "revoke_instruction",
       "log_decision",
-      "wait_on",
       "read_ticket",
       "answer_question",
       "return_question",
       "withdraw_question",
+      "attach_materials",
       "start_seat",
       "reassign_ticket",
       "message_seat",
@@ -2178,6 +2113,54 @@ describe("start_seat", () => {
         .isError,
     ).toBeUndefined();
     expect(startCalls).toHaveLength(1);
+  });
+  it("reassigns a held PR's ticket: the new run starts under the engine and the hold comes with it", async () => {
+    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+    engineOn = true;
+    board(sc(7, { status: "In review" }));
+    const hold = { by: "CAPCOM" as const, reason: "reproduced bug", at: NOW - 5 };
+    const old = run("old", "guido-cx", {
+      ticket: "mc#7",
+      branch: "feature/7-old",
+      endedAt: NOW - 1000,
+      loop: { ...NEW_LOOP, prNumber: 9, mergeHold: hold },
+    });
+    store.upsertRun(old);
+    recordRunHandoff(store, old, null);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR",
+          url: "u",
+          branch: "feature/7-old",
+          ticket: "mc#7",
+          state: "open" as const,
+          isDraft: false,
+          review: null,
+          ci: "pending" as const,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    expect(
+      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the bug" })).isError,
+    ).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+    const [seatId, issue, opts] = need(startCalls[0]) as [string, number, { loop?: RunLoop }];
+    expect([seatId, issue]).toEqual(["guido-1", 7]);
+    // the supervisor builds the new run's loop from the ended run's loop in just this way
+    expect(inheritedHandoffLoop(old.loop, opts.loop)?.mergeHold).toMatchObject({
+      by: "CAPCOM",
+      reason: "reproduced bug",
+    });
   });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
@@ -3393,15 +3376,21 @@ describe("end_run", () => {
     ]);
   });
 
-  it("refuses a set-aside run that is not parked, and a set-aside run with uncommitted work", async () => {
+  it("refuses a set-aside run with uncommitted work, in any phase", async () => {
     setAside();
     const r = store.run("r-g");
     if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
-    expect((await call("end_run", E())).isError).toBe(true);
-    if (r?.loop) store.setRunLoop("r-g", r.loop);
     dirty = ["apps/a.ts"];
     expect((await call("end_run", E())).isError).toBe(true);
     expect(asideEnds).toEqual([]);
+  });
+
+  it("ends a set-aside run that never parked (an evidence hold keeps it in review)", async () => {
+    setAside();
+    const r = store.run("r-g");
+    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    expect((await call("end_run", E())).isError).toBeFalsy();
+    expect(asideEnds.length).toBe(1);
   });
 
   it("reports a failed end and records nothing", async () => {
@@ -3690,52 +3679,6 @@ describe("flight_state", () => {
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
   });
 
-  describe("500 expired waits (#1632)", () => {
-    const waits = async (args: Record<string, unknown>) => {
-      for (let i = 0; i < 500; i++)
-        recordFlightWait(store, `mc#${1000 + i}`, {
-          on: "a long wait",
-          until: NOW - 3 * 24 * 60 * 60_000,
-          at: NOW - 4 * 24 * 60 * 60_000,
-        });
-      const read = JSON.parse((await call("flight_state", args)).text) as {
-        signals: { kind: string; evidence: string }[];
-      };
-      return read.signals.filter((s) => s.kind === "wait_over");
-    };
-
-    it("fold into one summary line with the count", async () => {
-      const over = await waits({});
-      expect(over).toHaveLength(1);
-      expect(over[0]?.evidence).toContain("500 expired waits");
-      expect(JSON.stringify(over).length).toBeLessThan(1000);
-    });
-
-    it("keep a wait that ended an hour ago listed on every read", async () => {
-      recordFlightWait(store, "mc#77", {
-        on: "PR 77 to merge",
-        until: NOW - 3_600_000,
-        at: NOW - 7_200_000,
-      });
-      const keys = async () =>
-        (
-          JSON.parse((await call("flight_state", {})).text) as {
-            signals: { kind: string; key: string }[];
-          }
-        ).signals
-          .filter((s) => s.kind === "wait_over")
-          .map((s) => s.key);
-      await keys();
-      const second = await keys();
-      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
-      expect(second).not.toContain("expired");
-    });
-
-    it("are all listed with full: true", async () => {
-      expect(await waits({ full: true })).toHaveLength(500);
-    });
-  });
-
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -3901,7 +3844,16 @@ describe("flight_state", () => {
         }
       ).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
 
-    expect(queuedReview()).not.toBeNull();
+    const id = queuedReview();
+    expect(id).not.toBeNull();
+    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #3.", prNumber: 3 });
+    expect(
+      (
+        (await state()) as {
+          reviewQueue: { seats: { seat: string; holds: unknown[] }[] };
+        }
+      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1")?.holds,
+    ).toEqual([{ prNumber: 7, reason: "Waiting for older PR #3.", waitsOn: 3 }]);
     writeCrewPause(
       store,
       { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
@@ -4190,6 +4142,7 @@ describe("flight_state", () => {
         seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
       },
       mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
+      conflicts: [],
       flowHolds: [],
       recent: [
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
@@ -5552,6 +5505,50 @@ describe("brief_item", () => {
       expect(await call("brief_item", B({ priority: undefined }))).toEqual({ text: BRIEFED_TEXT });
       expect(store.briefs().get(KEY)?.priority).toBe("P0");
     });
+    it("uses the stated priority when the main card's is not P0 to P2 (#1869)", async () => {
+      board(card(7, { priority: "P3" }));
+      expect(await call("brief_item", B({ priority: "P2" }))).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(KEY)?.priority).toBe("P2");
+    });
+    it("briefs an item whose own ticket is in a repo the hub no longer watches (#1869)", async () => {
+      store.upsertRun(run("r-old", "guido-1", { ticket: "autonomy-engine#410" }));
+      store.replaceBoard("autonomy-engine", [
+        { ...card(410, { priority: "P3" }), repoId: "autonomy-engine" },
+      ]);
+      raise("blocked:r-old:0", { runId: "r-old", repoId: "autonomy-engine" });
+      const key = "note:blocked:r-old:0";
+      const ok = await call(
+        "brief_item",
+        B({
+          key,
+          ticket: undefined,
+          priority: "P2",
+          noTicket: { repo: "mc", reason: "The repo is no longer watched." },
+        }),
+      );
+      expect(ok).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(key)?.priority).toBe("P2");
+    });
+    it("noTicket skips the item's own ticket for the priority (#1869)", async () => {
+      store.upsertRun(run("r-old", "guido-1", { ticket: "autonomy-engine#410" }));
+      store.replaceBoard("autonomy-engine", [
+        { ...card(410, { priority: "P0" }), repoId: "autonomy-engine" },
+      ]);
+      raise("blocked:r-old:0", { runId: "r-old", repoId: "autonomy-engine" });
+      const key = "note:blocked:r-old:0";
+      expect(
+        await call(
+          "brief_item",
+          B({
+            key,
+            ticket: undefined,
+            priority: "P2",
+            noTicket: { repo: "mc", reason: "The repo is no longer watched." },
+          }),
+        ),
+      ).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(key)?.priority).toBe("P2");
+    });
     it("takes a question with no ticket when the repo and a reason are given", async () => {
       store.upsertRun(run("r-none", "guido-1"));
       raise("blocked:r2:0", { runId: "r-none" });
@@ -6169,8 +6166,6 @@ describe("brief_item", () => {
     expect(await call("brief_item", B({ key: "note:nope" }))).toEqual(
       refused("Not briefed: note:nope is not an item in the operator's Needs-you list."),
     );
-    raise("cleanup-branch:x");
-    expect((await call("brief_item", B({ key: "note:cleanup-branch:x" }))).isError).toBe(true);
     expect(store.briefs().size).toBe(0);
   });
 
@@ -7796,6 +7791,7 @@ describe("superuser housekeeping", () => {
         {
           kinds: ["review", "review-ruling"],
           action: "second_review",
+          basis: "the finding misreads the guard",
           note: "the finding misreads the guard",
         },
       ],
@@ -7825,8 +7821,9 @@ describe("superuser housekeeping", () => {
         "r-pr",
         "FLIGHT",
         {
-          kinds: ["review", "review-ruling"],
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
           action: "rework",
+          basis: "Checked the current state",
           note: "Fix the validation branch and add its regression test.",
         },
       ],
@@ -7844,6 +7841,37 @@ describe("superuser housekeeping", () => {
       text: "Settled r-pr: rework.",
     });
     expect(engineCalls).toHaveLength(5);
+  });
+  it("sends a merge-hold park back for rework, and no other settle touches it", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: MERGE_HOLD_PARK, reason: "merge held by CAPCOM: bug", ended: false },
+      mergeHold: { by: "CAPCOM", reason: "bug", at: NOW },
+    });
+    for (const action of ["accept", "rereview", "lift", "second_review"] as const) {
+      expect(await call("settle_park", { runId: "r-pr", action })).toEqual(
+        refused("This action cannot settle this park."),
+      );
+    }
+    expect(engineCalls).toEqual([]);
+    expect(
+      await call("settle_park", { runId: "r-pr", action: "rework", note: "Fix the overlap." }),
+    ).toEqual({ text: "Settled r-pr: rework." });
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
+          action: "rework",
+          basis: "Checked the current state",
+          note: "Fix the overlap.",
+        },
+      ],
+    ]);
   });
   it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
     elevated();
@@ -7866,7 +7894,9 @@ describe("superuser housekeeping", () => {
       mergeHold: { by: "CAPCOM", reason: "veto", at: NOW },
     });
     expect(await call("hold_pr", { runId: "r-pr", action: "release", basis: "fine now" })).toEqual(
-      refused("The controller set this hold; only the controller can release it."),
+      refused(
+        "The operator set this hold; only the operator can release it. If its reason is met, ask them in one brief.",
+      ),
     );
     expect(store.getSetting("flight.runaway")).toBeNull();
   });
@@ -7941,7 +7971,7 @@ describe("superuser housekeeping", () => {
       basis: "I think it is fine now.",
     });
     expect(refusal).toHaveProperty("isError", true);
-    expect(JSON.stringify(refusal)).toContain("controller");
+    expect(JSON.stringify(refusal)).toContain("operator");
     expect(holdCalls).toEqual([]);
     expect(need(store.run("r-pr")?.loop).mergeHold).toMatchObject({ by, reason: "veto" });
   });
@@ -8355,6 +8385,21 @@ describe("superuser housekeeping", () => {
       "isError",
       true,
     );
+  });
+  it("answers a repo-less held Update note as protected, not missing (#1886)", async () => {
+    elevated();
+    store.raiseNote({
+      key: HUB_UPDATE_HELD_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW,
+    });
+    const r = await call("dismiss_item", { key: `note:${HUB_UPDATE_HELD_KEY}` });
+    expect(r).toHaveProperty("isError", true);
+    expect(JSON.stringify(r)).not.toContain("No open item with that key");
   });
   it.each(["stopped", "account", "approval"])(
     "dismiss_item respects real %s records even for ended runs",
@@ -9655,6 +9700,26 @@ describe("attention hold tools", () => {
       expect((await call("release_hold", { key: cc.key })).isError).toBeUndefined();
     }
   });
+  it("refuses to hold the held Update even when FLIGHT may run it: a hold would keep it from the operator (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call("hold_item", {
+        key: "note:hub-update-held",
+        reason: "Waiting",
+        condition: { kind: "date", at: NOW + 7 * 86_400_000 },
+      }),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
+  });
   it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
     expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
       refused(HOLD_NOT_TRIAGING_REFUSED),
@@ -9859,6 +9924,29 @@ describe("brief_item with a hold (#760)", () => {
     expect(r.isError).toBe(true);
     expect(holds(store)[key]).toBeUndefined();
     expect(store.briefs().has(key)).toBe(false);
+  });
+
+  it("refuses to brief the held Update with a hold, even when FLIGHT may run it (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call(
+        "brief_item",
+        brief({
+          key: "note:hub-update-held",
+          hold: { condition: { kind: "date", at: NOW + 7 * 86_400_000 } },
+        }),
+      ),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
   });
 
   it("refuses an item hold that closes a cycle, storing neither brief nor hold", async () => {
@@ -11671,5 +11759,189 @@ describe("start_seat and the open-ticket list leave a waiting:operator card alon
     expect(
       flightState({ config: cfg, store, busy: [], now: NOW }).tickets.map((t) => t.ref),
     ).not.toContain("mc#7");
+  });
+});
+
+describe("attach_materials", () => {
+  const story = (over: Record<string, unknown> = {}) => ({
+    sourceCommit: "a".repeat(40),
+    label: "Comms layout",
+    sections: [
+      {
+        heading: "This page",
+        images: [
+          { path: "docs/a.png", caption: "Before" },
+          { path: "docs/b.png", caption: "After" },
+        ],
+        comparison: "before-after",
+        children: [{ heading: "Also here", text: "It shrinks." }],
+      },
+    ],
+    optionImages: [{ optionId: "a", imagePaths: ["docs/a.png"] }],
+    ...over,
+  });
+  const ask = () => {
+    live("guido-1", "r-guido");
+    return store.addQuestion({ agentId: "guido-1", runId: "r-guido", text: "Which?", at: NOW });
+  };
+
+  it("attaches a nested story with a comparison and picture options to a question in one call", async () => {
+    const id = ask();
+    const seenCalls: [string, unknown][] = [];
+    materialsImpl = async (key, s) => {
+      seenCalls.push([key, s]);
+      return { label: s.label, images: [{}, {}], sourceCommit: "a".repeat(40) };
+    };
+    const result = await call("attach_materials", { key: `ask:${id}`, ...story() });
+    expect(result.isError).not.toBe(true);
+    expect(result.text).toContain("2 images");
+    expect(seenCalls).toHaveLength(1);
+    expect(seenCalls[0]?.[0]).toBe(`ask:${id}`);
+    expect(seenCalls[0]?.[1]).toMatchObject({
+      label: "Comms layout",
+      sections: [{ comparison: "before-after", children: [{ heading: "Also here" }] }],
+      optionImages: [{ optionId: "a" }],
+    });
+  });
+
+  it("refuses a question that is not open, and says why a story was not kept", async () => {
+    expect(await call("attach_materials", { key: "ask:999", ...story() })).toEqual(
+      refused("Not attached: that question is no longer open."),
+    );
+    const id = ask();
+    materialsImpl = async () => {
+      throw new AttentionMaterialsError(400, "Images must be bounded PNG, JPEG or WebP files.");
+    };
+    expect(await call("attach_materials", { key: `ask:${id}`, ...story() })).toEqual(
+      refused("Not attached: Images must be bounded PNG, JPEG or WebP files."),
+    );
+  });
+
+  it("keeps the story the real tool attaches, and the read route returns it in order with its bytes", async () => {
+    // real Git, the hub's own service (no stub), the real API over the same store
+    const repoDir = join(dir, "story-repo");
+    mkdirSync(join(repoDir, "docs/s"), { recursive: true });
+    const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const files: Record<string, Buffer> = {};
+    for (const n of ["page", "before", "after", "a", "b"])
+      files[`docs/s/${n}.png`] = Buffer.concat([sig, Buffer.from(`image-${n}`)]);
+    for (const [path, bytes] of Object.entries(files)) writeFileSync(join(repoDir, path), bytes);
+    const git = (...a: string[]) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=T",
+          "-c",
+          "user.email=t@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          "-C",
+          repoDir,
+          ...a,
+        ],
+        { encoding: "utf8" },
+      ).trim();
+    git("init", "--quiet");
+    git("add", "-A");
+    git("commit", "-qm", "images");
+    const commit = git("rev-parse", "HEAD");
+    need(cfg.crew?.sessions[0]).checkout = repoDir;
+    const id = ask();
+    const key = `ask:${id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: NOW,
+      ask: "Which layout?",
+      context: "Two layouts.",
+      recommendation: "A.",
+      basis: "Both checked.",
+      options: [
+        { id: "a", label: "A", answer: "A." },
+        { id: "b", label: "B", answer: "B." },
+      ],
+    });
+    const deps = flightDeps();
+    delete deps.attentionMaterials;
+    const real = createFlightTools(deps).find((t) => t.name === "attach_materials");
+    const result = await need(real).call(
+      ctx(),
+      story({
+        key,
+        sourceCommit: commit,
+        sections: [
+          {
+            heading: "This page",
+            images: [{ path: "docs/s/page.png", caption: "Today" }],
+            children: [
+              {
+                heading: "This part changes",
+                images: [
+                  { path: "docs/s/before.png", caption: "Before" },
+                  { path: "docs/s/after.png", caption: "After" },
+                ],
+                comparison: "before-after",
+                children: [{ heading: "Also here", text: "It shrinks." }],
+              },
+            ],
+          },
+        ],
+        optionImages: [
+          { optionId: "a", imagePaths: ["docs/s/a.png"] },
+          { optionId: "b", imagePaths: ["docs/s/b.png"] },
+        ],
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+    const app = buildApp({
+      store,
+      bus: new ChangeBus(),
+      config: cfg,
+      operatorToken: "secret",
+      now: () => nowMs,
+    });
+    const headers = { "x-mc-operator": "secret" };
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/attention/${key}/materials`,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    const packet = res.json().packets[0];
+    expect(packet.sourcePath).toBeNull();
+    expect(packet.story[0].heading).toBe("This page");
+    expect(packet.story[0].children[0]).toMatchObject({
+      heading: "This part changes",
+      comparison: "before-after",
+    });
+    expect(packet.story[0].children[0].children[0].heading).toBe("Also here");
+    const byId = new Map(packet.images.map((i: { id: string; path: string }) => [i.id, i]));
+    expect(
+      packet.optionImages.map((o: { optionId: string; imageIds: string[] }) => [
+        o.optionId,
+        (byId.get(o.imageIds[0] ?? "") as { path: string }).path,
+      ]),
+    ).toEqual([
+      ["a", "docs/s/a.png"],
+      ["b", "docs/s/b.png"],
+    ]);
+    for (const image of packet.images) {
+      const bytes = await app.inject({ method: "GET", url: image.url, headers });
+      expect(bytes.statusCode).toBe(200);
+      expect(bytes.rawPayload).toEqual(files[image.path]);
+    }
+    await app.close();
+  });
+
+  it("refuses a story with no sections or an unknown field", async () => {
+    const id = ask();
+    expect(
+      (await call("attach_materials", { key: `ask:${id}`, ...story({ sections: [] }) })).isError,
+    ).toBe(true);
+    expect(
+      (await call("attach_materials", { key: `ask:${id}`, ...story({ extra: 1 }) })).isError,
+    ).toBe(true);
   });
 });

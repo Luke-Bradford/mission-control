@@ -1,10 +1,15 @@
 import type { AttentionBrief, AttentionItem, Run } from "@mc/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "../src/choose.ts";
+import {
+  ChoiceRefused,
+  choiceReceipt,
+  chooseOption,
+  claimMessagePick,
+} from "../src/brief/choose.ts";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
+import { ticketHistory } from "../src/hud/ticket-history.ts";
 import { Store } from "../src/store.ts";
-import { ticketHistory } from "../src/ticket-history.ts";
 
 const seat = (id: string, role: string) => ({
   id,
@@ -456,5 +461,196 @@ describe("a seat's tag or message item", () => {
     const text = store.comms(0).find((m) => m.to === "flight-1")?.text ?? "";
     expect(text).toContain("not known");
     expect(text).not.toContain("has ended");
+  });
+});
+
+describe("an option picked with a message, which the choose route does not take", () => {
+  /** An older brief: it names no reader, so the choose route refuses it. */
+  const { for: _reader, ...older } = brief;
+  const SHIP = { to: "guido-1", text: "Go ahead and ship." };
+  const claim = (
+    it: AttentionItem | undefined,
+    key: string,
+    option: number,
+    message: { to: string; text: string; question?: number },
+    flightId: string | null = "flight-1",
+  ) =>
+    claimMessagePick(
+      { store, now: () => nowMs, sender: { from: "CAPCOM", kind: "operator" }, crew, flightId },
+      it,
+      key,
+      { briefAt: BRIEF_AT, option },
+      message,
+    );
+  /** The refusal a pick gets, as `[status, text]`; null when it is taken. */
+  const refused = (...args: Parameters<typeof claim>): [number, string] | null => {
+    try {
+      claim(...args);
+      return null;
+    } catch (e) {
+      if (e instanceof ChoiceRefused) return [e.status, e.message];
+      throw e;
+    }
+  };
+  const note = (over: Partial<AttentionItem> = {}) =>
+    item("note:held", { kind: "blocked", brief: older, ...over });
+
+  it("refuses what the choose route refuses: an escalation, a brief the hub wrote, a changed brief", () => {
+    expect(refused(note({ escalationId: "mc#7" }), "note:held", 0, SHIP)).toEqual([
+      409,
+      "That question is answered on GitHub, not here.",
+    ]);
+    expect(refused(note({ brief: { ...older, by: "hub" } }), "note:held", 0, SHIP)).toEqual([
+      409,
+      "Use the item's own buttons for this one.",
+    ]);
+    expect(refused(note({ brief: { ...older, at: BRIEF_AT + 1 } }), "note:held", 0, SHIP)).toEqual([
+      409,
+      "The question changed since you opened it. Reload and choose again.",
+    ]);
+    expect(refused(undefined, "note:held", 0, SHIP)).toEqual([
+      404,
+      "That question is no longer open.",
+    ]);
+    expect(store.latestChoice("note:held")).toBeNull();
+  });
+
+  it("leaves an option the choose route takes to that route, and takes the same brief's option with no id", () => {
+    const current = note({ brief });
+    expect(refused(current, "note:held", 0, SHIP)).toEqual([
+      409,
+      "That option is picked with the choose route, not a message.",
+    ]);
+    expect(store.latestChoice("note:held")).toBeNull();
+    expect(refused(current, "note:held", 2, { to: "guido-1", text: "unbound" })).toBeNull();
+    expect(store.latestChoice("note:held")).toMatchObject({ label: "No id", target: "guido-1" });
+  });
+
+  it("takes an older brief's option that has an id, since the choose route refuses that brief", () => {
+    expect(refused(note(), "note:held", 0, SHIP)).toBeNull();
+    expect(store.latestChoice("note:held")).toMatchObject({ optionId: "yes", label: "Ship it" });
+  });
+
+  it("goes only to the seat the item belongs to, or to FLIGHT when that is not a crew seat", () => {
+    const other = "That question belongs to another seat.";
+    // a crew seat's item: not another seat, and not FLIGHT
+    expect(refused(note(), "note:held", 0, { ...SHIP, to: "inco-1" })).toEqual([409, other]);
+    expect(refused(note(), "note:held", 0, { ...SHIP, to: "flight-1" })).toEqual([409, other]);
+    // a loop's item is FLIGHT's to answer: not a seat's
+    const loops = note({ agentId: "shop-app-ta" });
+    expect(refused(loops, "note:held", 0, SHIP)).toEqual([409, other]);
+    expect(refused(loops, "note:held", 0, { ...SHIP, to: "flight-1" }, null)).toEqual([
+      409,
+      "There is no FLIGHT seat to take this answer.",
+    ]);
+    expect(store.latestChoice("note:held")).toBeNull();
+    expect(refused(loops, "note:held", 0, { ...SHIP, to: "flight-1" })).toBeNull();
+    expect(store.latestChoice("note:held")).toMatchObject({
+      target: "flight-1",
+      targetKind: "flight",
+    });
+  });
+
+  it("goes to the seat that asked a question, whatever seat the request names", () => {
+    const q = ask();
+    const key = `ask:${q}`;
+    const asked = item(key, { brief: older });
+    for (const to of ["inco-1", "flight-1"])
+      expect(refused(asked, key, 0, { ...SHIP, to, question: q })).toEqual([
+        409,
+        "That question belongs to another seat.",
+      ]);
+    expect(store.latestChoice(key)).toBeNull();
+    expect(store.question(q)?.answeredAt).toBeNull();
+  });
+
+  it("on a seat's question, names that question, and closes it when the message is stored", () => {
+    const q = ask();
+    const key = `ask:${q}`;
+    const asked = item(key, { brief: older });
+    expect(refused(asked, key, 0, SHIP)).toEqual([
+      400,
+      "A pick on a seat's question names that question.",
+    ]);
+    const another = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Other?", at: 3 });
+    expect(refused(asked, key, 0, { ...SHIP, question: another })).toEqual([
+      400,
+      "The option picked is not for the question the message names.",
+    ]);
+    // a named question on an item that is not a question is not the pick's own either
+    expect(refused(note(), "note:held", 0, { ...SHIP, question: q })).toEqual([
+      400,
+      "The option picked is not for the question the message names.",
+    ]);
+    expect(store.latestChoice(key)).toBeNull();
+    expect(store.latestChoice("note:held")).toBeNull();
+
+    const pick = claim(asked, key, 0, { ...SHIP, question: q });
+    expect(store.question(q)?.answeredAt).toBeNull();
+    const sent = store.addComms({
+      at: nowMs,
+      from: "CAPCOM",
+      senderKind: "operator",
+      to: "guido-1",
+      ticket: null,
+      text: SHIP.text,
+    });
+    if (sent === null) throw new Error("the message was not stored");
+    pick?.sent(sent.id);
+    expect(store.question(q)?.answeredAt).toBe(10_000);
+    expect(store.isChoiceAnswer(sent.id)).toBe(true);
+    expect(store.question(another)?.answeredAt).toBeNull();
+    // the brief has its pick: a second one claims and sends nothing
+    const again = { to: "guido-1", text: "Wait for me.", question: q };
+    expect(claim(asked, key, 1, again)).toBeNull();
+    expect(store.latestChoice(key)?.label).toBe("Ship it");
+    // and the closed question takes no pick on a later brief
+    const later = { ...older, at: BRIEF_AT + 5 };
+    expect(() =>
+      claimMessagePick(
+        {
+          store,
+          now: () => nowMs,
+          sender: { from: "CAPCOM", kind: "operator" },
+          crew,
+          flightId: "flight-1",
+        },
+        item(key, { brief: later }),
+        key,
+        { briefAt: later.at, option: 1 },
+        again,
+      ),
+    ).toThrow("That question is already closed.");
+  });
+
+  it("closes FLIGHT's own question, and a question whose seat has left the crew, with the pick", () => {
+    for (const [agentId, runId] of [
+      ["flight-1", "r-flight"],
+      ["gone-1", "r-gone"],
+    ] as const) {
+      const q = store.addQuestion({ agentId, runId, text: "Ship the plan?", at: 2 });
+      const key = `ask:${q}`;
+      const asked = item(key, { agentId, brief: older });
+      // the seat that left is not a seat to send to
+      if (agentId === "gone-1")
+        expect(refused(asked, key, 0, { ...SHIP, to: "gone-1", question: q })).toEqual([
+          409,
+          "That question belongs to another seat.",
+        ]);
+      const pick = claim(asked, key, 0, { ...SHIP, to: "flight-1" });
+      expect(pick).not.toBeNull();
+      const sent = store.addComms({
+        at: nowMs,
+        from: "CAPCOM",
+        senderKind: "operator",
+        to: "flight-1",
+        ticket: null,
+        text: SHIP.text,
+      });
+      if (sent === null) throw new Error("the message was not stored");
+      pick?.sent(sent.id);
+      expect(store.question(q)?.answeredAt).toBe(10_000);
+      expect(store.latestChoice(key)).toMatchObject({ target: "flight-1", targetKind: "flight" });
+    }
   });
 });

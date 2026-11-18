@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 import {
   CODE_HEALTH_EVIDENCE_PAGE_MAX,
+  CODE_HEALTH_OVERVIEW_TTL_MS,
+  CODE_HEALTH_OVERVIEW_VERSION,
   type CodeHealthCoverage,
   type CodeHealthEvidenceRef,
+  type CodeHealthOverview,
   type CodeHealthTab,
   type CodeHealthView,
   type CodeHealthWindow,
@@ -13,10 +16,12 @@ import {
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import { groupRecommendations } from "./groups.ts";
+import { buildOverview, rankProposals } from "./overview.ts";
 import type { RecommendationRecord } from "./recommendations.ts";
 import { buildRiskTab } from "./risk-view.ts";
 import type { CodeHealthEvidenceKind } from "./source.ts";
 import { buildTestTab } from "./test-view.ts";
+import { wasteAlarmRows } from "./waste-rows.ts";
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 200;
@@ -35,6 +40,8 @@ interface EvidenceQuery {
   seriesKey?: string;
   environmentKey?: string;
   category?: string;
+  findingSummary?: string;
+  findingFix?: string;
   pr?: number;
 }
 
@@ -115,6 +122,66 @@ export class CodeHealthReader {
     return this.store.codeHealthSnapshot(() => this.build(repoId, window, tab));
   }
 
+  /** Builds counted since construction; lets a test prove a read was served from the stored summary. */
+  overviewBuilds = 0;
+
+  /**
+   * The Audit first screen. It is stored per repo and window and served while the source revision is
+   * unchanged and the summary is under the TTL. Reads and rebuilds run synchronously, so concurrent
+   * requests coalesce: the second finds the row the first stored.
+   */
+  overview(repoId: string, window: CodeHealthWindow) {
+    this.repo(repoId);
+    const at = this.now();
+    const stored = this.store.codeHealthOverviewRow(repoId, window);
+    if (
+      stored &&
+      stored.version === CODE_HEALTH_OVERVIEW_VERSION &&
+      stored.sourceRevision === this.store.codeHealthRevision(repoId) &&
+      at >= stored.generatedAt &&
+      at - stored.generatedAt < CODE_HEALTH_OVERVIEW_TTL_MS
+    ) {
+      const view = JSON.parse(stored.body) as CodeHealthOverview;
+      // Alarms open and close without touching the code-health source, so the stored rows are compared with the live ones.
+      if (
+        JSON.stringify(view.wasteAlarms.rows) ===
+        JSON.stringify(wasteAlarmRows(this.store, repoId, at))
+      )
+        return { view, rebuilt: false, changed: false };
+    }
+    // Refreshing proposals writes the source revision, so the stored revision is read after it.
+    this.refreshProposals(repoId, at);
+    return this.store.codeHealthSnapshot(() => {
+      const sourceRevision = this.store.codeHealthRevision(repoId);
+      const view = buildOverview({ store: this.store, repoId, window, at, sourceRevision });
+      this.overviewBuilds++;
+      this.store.saveCodeHealthOverview(repoId, window, {
+        version: view.version,
+        sourceRevision,
+        summaryRevision: view.summaryRevision,
+        generatedAt: at,
+        body: JSON.stringify(view),
+      });
+      return {
+        view,
+        rebuilt: true,
+        changed: stored !== null && stored.summaryRevision !== view.summaryRevision,
+      };
+    });
+  }
+
+  private refreshProposals(repoId: string, at: number): void {
+    const cached = this.recommendationRefresh.get(repoId);
+    const revision = this.store.codeHealthRevision(repoId);
+    if (!cached || cached.revision !== revision || at - cached.at >= CACHE_MS) {
+      this.store.refreshCodeHealthRecommendations(repoId, at, this.checkout(repoId));
+      this.recommendationRefresh.set(repoId, {
+        revision: this.store.codeHealthRevision(repoId),
+        at,
+      });
+    }
+  }
+
   private build(repoId: string, window: CodeHealthWindow, tab: CodeHealthTab): CodeHealthView {
     this.repo(repoId);
     const at = this.now();
@@ -179,22 +246,7 @@ export class CodeHealthReader {
         ),
       );
       if (tab === "overview") {
-        const recommendations = this.store
-          .codeHealthRecommendations(repoId, at)
-          .filter(
-            (row) =>
-              row.active &&
-              (row.state.kind === "proposed" ||
-                (row.state.kind === "snoozed" && row.state.until <= at)),
-          );
-        const priority = (rule: string) =>
-          rule === "recurring-correction" ? 0 : rule === "repeated-rounds" ? 1 : 2;
-        recommendations.sort(
-          (a, b) =>
-            priority(a.rule) - priority(b.rule) ||
-            (b.target.baseline ?? 0) - (a.target.baseline ?? 0) ||
-            a.id.localeCompare(b.id),
-        );
+        const recommendations = rankProposals(this.store.codeHealthRecommendations(repoId, at), at);
         describe(
           "recommendations",
           at,
@@ -260,7 +312,7 @@ export class CodeHealthReader {
       complete: false,
       note: "Conservative fixed-30-day triage, independent of the selected dashboard window. Coverage describes the observed cohort; this query is narrowed to the recommendation's PR or category/file. Earlier unobserved periods are not zero.",
     };
-    const { file, category, pr, from, until } = scope;
+    const { file, category, pr, from, until, findingSummary, findingFix } = scope;
     if (scope.kind === "file-risk") {
       if (!file || !scope.sizeSha || scope.sizeVersion !== 1)
         throw new CodeHealthReadError(
@@ -302,15 +354,20 @@ export class CodeHealthReader {
             revision,
             from,
             until,
-            file,
+            file:
+              row.rule === "recurring-correction" && findingSummary && findingFix
+                ? undefined
+                : file,
             category,
+            findingSummary,
+            findingFix,
             pr,
             kind: row.rule === "recurring-correction" ? "findings" : "review-rounds",
           },
           row.rule === "recurring-correction"
             ? "Recurring correction evidence · 30d"
             : "Repeated review rounds · 30d",
-          "Reported rows in the recommendation's own 30-day window, filtered to its category/file or PR.",
+          "Reported rows in the recommendation's own 30-day window, filtered to its recorded cause or PR.",
           coverage,
         ),
       ],

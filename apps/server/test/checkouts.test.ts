@@ -44,6 +44,7 @@ import {
   preparePlanCheckout,
   prepareReadOnlyCheckout,
   prepareScratch,
+  reinstallTrimmed,
   removeCheckout,
   sweepPnpmStores,
   syncReusedWorktree,
@@ -335,6 +336,15 @@ describe("prepareCheckout", () => {
     });
     expect(back.branch).toBe("feature/pr-head");
     expect(git(back.path, "symbolic-ref", "HEAD")).toBe("refs/heads/feature/pr-head");
+  });
+
+  it("uses an explicit handoff branch despite other ticket branches", async () => {
+    git(clone, "branch", BRANCH);
+    git(clone, "branch", "feature/42-ended-stage");
+
+    expect(
+      await prepareCheckout({ ...input(), handoff: { branch: BRANCH, worktree: null } }),
+    ).toMatchObject({ branch: BRANCH, created: true });
   });
 
   it("refuses to move a seat's worktree with unpushed work onto the PR's ref", async () => {
@@ -1482,6 +1492,105 @@ describe("prepareCheckout", () => {
       expect(existsSync(wtPath())).toBe(false);
     });
 
+    describe("a set-aside run resumed after its tests left symlinks in .mc-tmp", () => {
+      beforeEach(() => {
+        commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+        git(seed, "push", "-q", "origin", "main");
+      });
+      const plant = (root: string, rel: string) => {
+        const roles = join(root, rel, "mc-hub-abc", "roles");
+        mkdirSync(roles, { recursive: true });
+        symlinkSync(outside, join(roles, "LINK.md"));
+      };
+      const resume = (path: string) =>
+        reinstallTrimmed(
+          { checkout: clone, worktreesRoot: root, sessionId: "a" },
+          path,
+          BRANCH,
+          payloadInstall,
+        );
+      /** A worktree as the crew tidy leaves it: no root node_modules. */
+      const trimmed = async () => {
+        const first = await prepareCheckout(input(), payloadInstall);
+        rmSync(join(first.path, "node_modules"), { recursive: true, force: true });
+        return first.path;
+      };
+
+      it("empties .mc-tmp without following links and reinstalls (16 Nov)", async () => {
+        const path = await trimmed();
+        plant(path, join(MC_TMP_DIR_NAME, "t1"));
+        mkdirSync(join(path, MC_TMP_DIR_NAME, "pnpm-store-root", "a", "node_modules"), {
+          recursive: true,
+        });
+        writeFileSync(join(path, MC_TMP_DIR_NAME, "note.txt"), "x\n");
+        expect(await resume(path)).toBe(true);
+        expect(readdirSync(join(path, MC_TMP_DIR_NAME))).toEqual([]);
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        expect(existsSync(join(path, "node_modules"))).toBe(true);
+      });
+
+      it("unlinks a .mc-tmp that is itself a symlink and leaves its target", async () => {
+        const path = await trimmed();
+        symlinkSync(outside, join(path, MC_TMP_DIR_NAME));
+        expect(await resume(path)).toBe(true);
+        expect(existsSync(join(path, MC_TMP_DIR_NAME))).toBe(false);
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+      });
+
+      it("still refuses a link in a same-named folder anywhere else", async () => {
+        const path = await trimmed();
+        plant(path, join("docs", MC_TMP_DIR_NAME, "t1"));
+        const e = await fail(resume(path));
+        expect(e.code).toBe("protected");
+        expect(e.message).toContain(`has a symlink at docs/${MC_TMP_DIR_NAME}/t1/`);
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+      });
+
+      it("still refuses a link elsewhere while clearing the scratch folder", async () => {
+        const path = await trimmed();
+        plant(path, MC_TMP_DIR_NAME);
+        symlinkSync(outside, join(path, "planted"));
+        const e = await fail(resume(path));
+        expect(e.code).toBe("protected");
+        expect(e.message).toContain("has a symlink at planted");
+        expect(readdirSync(outside)).toEqual(["keep.txt"]);
+      });
+
+      it("an ordinary checkout reuse leaves .mc-tmp alone", async () => {
+        const first = await prepareCheckout(input(), payloadInstall);
+        mkdirSync(join(first.path, MC_TMP_DIR_NAME), { recursive: true });
+        writeFileSync(join(first.path, MC_TMP_DIR_NAME, "note.txt"), "x\n");
+        await prepareCheckout(input(), payloadInstall);
+        expect(readdirSync(join(first.path, MC_TMP_DIR_NAME))).toEqual(["note.txt"]);
+      });
+
+      describe("a base whose pnpm settings route the install through .mc-tmp", () => {
+        const cases: [string, Record<string, string>][] = [
+          [".npmrc modules-dir", { ".npmrc": `modules-dir=${MC_TMP_DIR_NAME}/deps\n` }],
+          [
+            "workspace virtualStoreDir written with YAML escapes",
+            {
+              "pnpm-workspace.yaml": `${String.raw`"virtual\u0053toreDir": ".mc\u002Dtmp/deps"`}\n`,
+            },
+          ],
+          [
+            "workspace package under .mc-tmp, lockfile stale",
+            { "pnpm-workspace.yaml": `packages:\n  - ${MC_TMP_DIR_NAME}/deps\n` },
+          ],
+        ];
+        it.each(cases)("a link at the target is removed, not followed: %s", async (_n, files) => {
+          commit(seed, { "package.json": PAYLOAD_PKG, "pnpm-lock.yaml": EMPTY_LOCK, ...files });
+          git(seed, "push", "-q", "origin", "main");
+          const path = await trimmed();
+          mkdirSync(join(path, MC_TMP_DIR_NAME), { recursive: true });
+          symlinkSync(outside, join(path, MC_TMP_DIR_NAME, "deps"));
+          await resume(path);
+          expect(readdirSync(join(path, MC_TMP_DIR_NAME))).toEqual([]);
+          expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        });
+      });
+    });
+
     it("refuses the same on a reused branch", async () => {
       git(seed, "push", "-q", "origin", "main");
       git(clone, "pull", "-q");
@@ -1539,6 +1648,34 @@ describe("prepareCheckout", () => {
 });
 
 describe("ticket checkout recovery", () => {
+  it("starts a fresh stage branch when the ticket branch's PR has merged", async () => {
+    git(clone, "branch", BRANCH);
+
+    expect(
+      await prepareCheckout({ ...input(), mergedPullRequestBranches: [BRANCH] }),
+    ).toMatchObject({ branch: `${BRANCH}-stage-2`, created: true });
+  });
+
+  it("reuses a ticket branch with an open PR", async () => {
+    git(clone, "branch", BRANCH);
+
+    expect(await prepareCheckout({ ...input(), openPullRequestBranches: [BRANCH] })).toMatchObject({
+      branch: BRANCH,
+      created: true,
+    });
+  });
+
+  it("reuses an open PR branch over an ended local ticket branch", async () => {
+    const open = "feature/42-stage-2";
+    git(clone, "branch", BRANCH);
+    git(clone, "branch", open);
+
+    expect(await prepareCheckout({ ...input(), openPullRequestBranches: [open] })).toMatchObject({
+      branch: open,
+      created: true,
+    });
+  });
+
   it("keeps the ticket's branch after a title change, its worktree there or not", async () => {
     await prepareCheckout(input());
     const renamed = { ...input(), title: "A new name" };
@@ -1945,18 +2082,82 @@ describe("review scratch checkouts", () => {
     expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
   });
 
-  it("a PR head that changes an install input is refused and removed", async () => {
+  it("a PR head that changes a protected install input other than the manifest is refused and removed", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
-    const { head } = pr({ "package.json": `${PKG}\n` });
+    const { head } = pr({ ".npmrc": "ignore-scripts=false\n" });
     const e = await fail(prepareScratch(scratchInput(head)));
     expect(e.code).toBe("protected");
-    expect(e.message).toBe(
-      `the PR head ${head.slice(0, 7)} changes package.json; Mission Control won't install from it`,
-    );
     expect(existsSync(scratchPath())).toBe(false);
     expect(worktrees()).toHaveLength(1);
   });
+
+  it.each([
+    ["package.json plus a root .npmrc", { "package.json": `${PKG}\n`, ".npmrc": "a=b\n" }],
+    ["package.json plus .pnpmfile.cjs", { "package.json": `${PKG}\n`, ".pnpmfile.cjs": "x\n" }],
+    [
+      "package.json plus pnpm-workspace.yaml",
+      { "package.json": `${PKG}\n`, "pnpm-workspace.yaml": "verifyDepsBeforeRun: install\n" },
+    ],
+    ["package.json plus a nested .npmrc", { "package.json": `${PKG}\n`, "sub/.npmrc": "a=b\n" }],
+  ])("a PR head that changes %s fails, whichever input sorts first", async (_n, files) => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr(files);
+    const install = vi.fn(async () => {});
+    const e = await fail(prepareScratch(scratchInput(head), install));
+    expect(e.code).toBe("protected");
+    expect(install).not.toHaveBeenCalled();
+    expect(existsSync(scratchPath())).toBe(false);
+  });
+
+  it("a pnpm and uv repo: package.json plus uv.lock fails, since every tool's inputs decide", async () => {
+    commit(seed, {
+      "package.json": PKG,
+      "pnpm-lock.yaml": EMPTY_LOCK,
+      "pyproject.toml": PYPROJECT,
+      "uv.lock": UV_LOCK,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr({ "package.json": `${PKG}\n`, "uv.lock": `${UV_LOCK}\n` });
+    const install = vi.fn(async () => {});
+    expect((await fail(prepareScratch(scratchInput(head), install))).code).toBe("protected");
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "several package.json files and the lockfile",
+      {
+        "package.json": `${PKG}\n`,
+        "packages/x/package.json": `${PKG}\n`,
+        "pnpm-lock.yaml": `${EMPTY_LOCK}\n`,
+      },
+    ],
+    ["package.json scripts (PR 1520)", { "package.json": `${PKG}\n` }],
+    ["pnpm-lock.yaml", { "pnpm-lock.yaml": `${EMPTY_LOCK}\n` }],
+    [
+      "package.json plus pnpm-lock.yaml (PR 1640)",
+      { "package.json": `${PKG}\n`, "pnpm-lock.yaml": `${EMPTY_LOCK}\n` },
+    ],
+  ])(
+    "a PR head that changes %s is reviewed read-only, with nothing installed",
+    async (_n, files) => {
+      commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+      git(seed, "push", "-q", "origin", "main");
+      const { head } = pr(files);
+      const install = vi.fn(async () => {});
+      const s = await prepareScratch(scratchInput(head), install);
+      expect(install).not.toHaveBeenCalled();
+      expect(s.installNote).toMatch(
+        new RegExp(
+          `^Reviewed, not installed: the PR head ${head.slice(0, 7)} changes .*; Mission Control won't install from it$`,
+        ),
+      );
+      expect(existsSync(scratchPath())).toBe(true);
+      expect(existsSync(join(scratchPath(), "node_modules"))).toBe(false);
+    },
+  );
 
   describe("writeReviewInputs", () => {
     const read = (f: string) => readFileSync(join(scratchPath(), f), "utf8");

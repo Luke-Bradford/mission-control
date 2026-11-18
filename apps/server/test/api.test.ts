@@ -1,4 +1,13 @@
-import { AUDIT_MEASURED_TOOLS, FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
+import { createHash } from "node:crypto";
+import {
+  AUDIT_MEASURED_TOOLS,
+  COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
+  FLIGHT_TRIAGE_WAIT_MS,
+  joinMapGraph,
+  SPEC_BOUNCE_CAUSES,
+  unpackMap,
+} from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -87,10 +96,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildApp,
   CHECK_FAILED,
+  CONFIG_FILE_UNAVAILABLE,
   CONFIG_WRITES_UNAVAILABLE,
   LOOP_WRITES_DISABLED,
   NO_OPEN_NOTE,
 } from "../src/api.ts";
+import { LocalNotifications } from "../src/attention/local-notifications.ts";
 import { AWAY_STARTED_SETTING } from "../src/away.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
@@ -100,31 +111,29 @@ import {
   personKey,
 } from "../src/collectors/notifications.ts";
 import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
+import { noSessionText, SEATS_CHANGED } from "../src/config/config-write.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
-import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
 import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
-import * as files from "../src/files.ts";
-import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { LocalNotifications } from "../src/local-notifications.ts";
-import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
-import { CallRing } from "../src/map/ring.ts";
+import * as views from "../src/hud/views.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
 import { qaNativeIdentity } from "../src/qa/history-key.ts";
+import * as files from "../src/repo/files.ts";
+import { GitFailed, NO_WORKTREE_NOTE } from "../src/repo/files.ts";
 import { recordRunHandoff } from "../src/run/handoffs.ts";
+import { readStreamPage } from "../src/run/stream.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
-import { readStreamPage } from "../src/stream.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
-import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -263,6 +272,7 @@ const stubSupervisor = (): Supervisor => {
     seatBusy: () => false,
     status: () => supervisorStatus,
     inClone: (_checkout, fn) => fn(),
+    isStartingWorktree: () => false,
   };
 };
 let streamReads: ReturnType<typeof vi.fn<typeof readStreamPage>>;
@@ -499,6 +509,7 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    bugEscapes: [],
     improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
       subject: name,
@@ -509,6 +520,10 @@ describe("audit", () => {
       calls: 0,
       chars: 0,
     })),
+    specBounces: {
+      rows: [],
+      counts: SPEC_BOUNCE_CAUSES.map((cause) => ({ cause, days7: 0, days30: 0 })),
+    },
     surgeonProposals: [],
   });
 
@@ -1218,6 +1233,64 @@ describe("Comms API", () => {
     });
   });
 
+  it("marks a mention as needing a reply exactly while its question is open on Needs you", async () => {
+    await withCommsApp(async (comms) => {
+      // Needs you lists Comms questions sent after the rollout
+      clock = Math.max(clock, COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 1);
+      const ask = store.addComms({
+        at: clock++,
+        from: "alpha",
+        to: "CAPCOM",
+        ticket: null,
+        text: "Which layout?",
+        label: "question",
+        mentions: ["CAPCOM"],
+      });
+      if (ask === null) throw new Error("question not stored");
+      const needsReply = async (id: string) =>
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === id)?.needsReply;
+      // the badge counts exactly what is open on the operator's Needs you
+      const onNeedsYou = async () =>
+        (
+          (await comms.inject({ method: "GET", url: "/api/attention" })).json() as {
+            key: string;
+            owner: string;
+          }[]
+        ).some((i) => i.key.endsWith(`:${ask.id}`) && i.owner === "operator");
+      expect(await needsReply(ask.id)).toBe(await onNeedsYou());
+      // FLIGHT passes it to the operator: on their Needs you, so on the badge
+      store.addBrief({
+        key: `comms-open:${ask.id}`,
+        for: "operator",
+        ask: "Which layout should the page use?",
+        ticket: "shop-app#703",
+        context: "The developer has two layouts ready and needs one.",
+        recommendation: "The first one: it matches the mockup.",
+        options: [
+          { label: "First", answer: "Use the first layout." },
+          { label: "Second", answer: "Use the second layout." },
+        ],
+        basis: "the developer's question",
+        at: clock,
+      });
+      clock += COMMS_FLIGHT_ESCALATION_MS + 60_000;
+      expect(await onNeedsYou()).toBe(true);
+      expect(await needsReply(ask.id)).toBe(true);
+      store.addComms({
+        at: clock++,
+        from: "CAPCOM",
+        to: "alpha",
+        ticket: null,
+        text: "The first one.",
+        replyTo: ask.id,
+      });
+      clock += 10_000; // past the attention memo
+      expect(await needsReply(ask.id)).toBe(false);
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
@@ -1306,6 +1379,8 @@ describe("Comms API", () => {
       ).toMatchObject({
         message: { id: mention.id },
         seen: false,
+        // a plain mention is read in the conversation; the bell counts only open asks
+        needsReply: false,
       });
       expect(
         (
@@ -1318,7 +1393,9 @@ describe("Comms API", () => {
         ).statusCode,
       ).toBe(200);
       expect(
-        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0].seen,
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === mention.id).seen,
       ).toBe(true);
       expect(
         (await comms.inject({ method: "GET", url: "/api/comms/pins" })).json().messages[0].id,
@@ -1568,11 +1645,13 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa-reports/:id"],
   ["GET", "/api/qa-reports/:id/markdown"],
   ["GET", "/api/qa-report-assets/:id"],
+  ["GET", "/api/attention-material-assets/:id"],
   ["GET", "/api/code-health/recommendations?repo=shop-app"],
   ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
   ["POST", "/api/code-health/test-reports", {}],
   ["POST", "/api/code-health/test-qa", {}],
   ["GET", "/api/code-health?repo=shop-app"],
+  ["GET", "/api/code-health/overview?repo=shop-app"],
   ["GET", "/api/code-health/evidence/:id?repo=shop-app"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
@@ -1602,6 +1681,18 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/comms:1/reply-route"],
   ["GET", "/api/comms/comms:1/state"],
   ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  [
+    "POST",
+    "/api/attention/unknown/materials",
+    {
+      repoId: "shop-app",
+      sourceCommit: "a".repeat(40),
+      sourcePath: "docs/plan.md",
+      label: "Plan",
+    },
+  ],
+  ["GET", "/api/attention/unknown/materials"],
+  ["GET", "/api/attention/unknown/thread"],
   ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
@@ -1615,12 +1706,15 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos"],
   ["GET", "/api/previews"],
   ["GET", "/api/design-previews"],
+  ["GET", "/api/disk-use"],
   ["POST", "/api/design-previews/41/open", {}],
   ["POST", "/api/previews", { pr: 41 }],
   ["DELETE", "/api/previews/41", {}],
   ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
+  ["GET", "/api/repos/shop-app/rules"],
+  ["POST", "/api/repos/shop-app/rules", {}],
   [
     "POST",
     "/api/repos/shop-app/setup",
@@ -1652,12 +1746,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs/4"],
-  ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
-  ["GET", "/api/repos/shop-app/map/diff"],
-  ["GET", "/api/repos/shop-app/map/tree"],
   ["GET", "/api/repos/shop-app/map/graph"],
-  ["GET", "/api/repos/shop-app/map/live"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1824,7 +1914,6 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/review-shots/:id"],
   ["GET", "/api/qa/uat/:repoId/:number"],
   ["GET", "/api/qa/queue"],
-  ["GET", "/api/repos/:repoId/prs/:number/files"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2063,6 +2152,279 @@ describe("add a repo (POST /api/repos)", () => {
     expect(readFileSync(target, "utf8")).toBe(exampleText());
     expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
     expect(config.repos).toHaveLength(2);
+  });
+});
+
+describe("Setup Roles & guards", () => {
+  const rolesBody = {
+    pick_from: ["Ready"],
+    needs: ["done_when", "size"],
+    areas: { server: ["apps/server/**"] },
+    promote_backlog: true,
+    protected: [".github/**"],
+    hard_rules: ["roles/**"],
+    hard_rules_by: "operator",
+    commands: { writer: ["pnpm -s test"], review: ["pnpm -s test"] },
+    full_suite: ["pnpm -s test"],
+    required_checks: ["ci / test"],
+    checks: ["pnpm -s lint"],
+    uat: { labels: ["needs-uat"], paths: ["apps/web/**"] },
+    always_ask: ["deploy"],
+  };
+
+  type View = {
+    base: string;
+    rules: Record<string, { value: unknown; source: string; repoAdds?: string[] }>;
+  };
+  const KEYS = [
+    "pick_from",
+    "needs",
+    "areas",
+    "promote_backlog",
+    "protected",
+    "hard_rules",
+    "hard_rules_by",
+    "commands.writer",
+    "commands.review",
+    "full_suite",
+    "required_checks",
+    "checks",
+    "uat.labels",
+    "uat.paths",
+    "always_ask",
+    "autonomy",
+    "flight_powers",
+  ];
+  const SHOP = "    github: octo-org/shop-app\n";
+  /** Puts lines under shop-app in the file on disk, behind the hub's loaded config. */
+  const onDisk = (lines: string) =>
+    writeFileSync(configPath, exampleText().replace(SHOP, `${SHOP}${lines}`));
+  const view = async () => (await get("/api/repos/shop-app/rules")).json<View>();
+  /** A crew clone whose origin/HEAD CLAUDE.md holds `block`. */
+  const repoFile = (block: string) => {
+    withCrew();
+    const checkout = mapCheckout(dir);
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = checkout;
+    writeFileSync(
+      join(checkout, "CLAUDE.md"),
+      `## Mission Control\n\n\`\`\`yaml\n${block}\`\`\`\n`,
+    );
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", checkout, "-c", "user.email=a@b", "-c", "user.name=n", ...args]);
+    git("add", "CLAUDE.md");
+    git("commit", "-qm", "rules");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+  };
+
+  it("reads all 17 keys with defaults, then saves every editable rule with a backup, without GitHub", async () => {
+    const first = await view();
+    expect(Object.keys(first.rules)).toEqual(KEYS);
+    expect(first.rules.pick_from).toMatchObject({ value: ["Ready"], source: "default" });
+    expect(first.rules["commands.writer"]?.source).toBe("default");
+    expect(first.rules.autonomy).toMatchObject({ value: "draft", source: "config-file" });
+    expect(first.rules.flight_powers).toMatchObject({ source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: first.base,
+      rules: rolesBody,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ backup: "config.yaml.bak-20261017T120000Z" });
+    expect(readFileSync(configPath, "utf8")).toContain("pick_from:");
+    expect(readdirSync(dir)).toContain("config.yaml.bak-20261017T120000Z");
+    expect(refreshed).toBe(0);
+    expect(gqlCalls).toEqual([]);
+    const reread = await view();
+    for (const key of KEYS.slice(0, 15)) expect(reread.rules[key]?.source).toBe("set-here");
+    expect(reread.rules["commands.review"]?.value).toEqual(["pnpm -s test"]);
+    expect(reread.rules.areas?.value).toEqual({ server: ["apps/server/**"] });
+    // the live config took the owned fields only
+    expect(config.repos.find((r) => r.id === "shop-app")?.rules?.checks).toEqual(["pnpm -s lint"]);
+  });
+
+  it("saves one leaf of commands or uat and keeps its sibling", async () => {
+    const first = await view();
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: first.base,
+      rules: { uat: { labels: ["needs-uat"] }, commands: { writer: ["pnpm -s test"] } },
+    });
+    expect(saved.statusCode).toBe(200);
+    const read = await view();
+    expect(read.rules["uat.labels"]).toMatchObject({ value: ["needs-uat"], source: "set-here" });
+    expect(read.rules["uat.paths"]).toMatchObject({ value: [], source: "default" });
+    expect(read.rules["commands.writer"]?.value).toEqual(["pnpm -s test"]);
+    expect(read.rules["commands.review"]?.value).toEqual(first.rules["commands.review"]?.value);
+  });
+
+  it("reads the file on disk, not stale loaded rules, so the page saves what it shows", async () => {
+    expect(config.repos.find((r) => r.id === "shop-app")?.rules).toBeUndefined();
+    onDisk("    rules:\n      pick_from: [Todo]\n");
+    const read = await view();
+    expect(read.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
+    expect(createHash("sha256").update(readFileSync(configPath)).digest("hex")).toBe(read.base);
+  });
+
+  it("a preview that may not write config still reads the rules, and saves nothing", async () => {
+    onDisk("    rules:\n      pick_from: [Todo]\n");
+    const before = readFileSync(configPath, "utf8");
+    // a preview on the live file: the path it loaded, and no writable `configPath`
+    const preview = buildApp({ config, store, bus, configReadPath: configPath });
+    try {
+      const read = await preview.inject({ method: "GET", url: "/api/repos/shop-app/rules" });
+      expect(read.statusCode).toBe(200);
+      const body = read.json<View>();
+      expect(Object.keys(body.rules)).toEqual(KEYS);
+      expect(body.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
+      expect(
+        (await preview.inject({ method: "GET", url: "/api/repos/nope/rules" })).statusCode,
+      ).toBe(404);
+      const saved = await preview.inject({
+        method: "POST",
+        url: "/api/repos/shop-app/rules",
+        headers: json,
+        payload: JSON.stringify({ base: body.base, rules: rolesBody }),
+      });
+      expect(saved.statusCode).toBe(409);
+      expect(saved.json()).toEqual({ error: CONFIG_WRITES_UNAVAILABLE });
+    } finally {
+      await preview.close();
+    }
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
+  });
+
+  it("a server with no config file says the rules cannot be read", async () => {
+    const bare = buildApp({ config, store, bus });
+    try {
+      const read = await bare.inject({ method: "GET", url: "/api/repos/shop-app/rules" });
+      expect(read.statusCode).toBe(409);
+      expect(read.json()).toEqual({ error: CONFIG_FILE_UNAVAILABLE });
+    } finally {
+      await bare.close();
+    }
+  });
+
+  it("a rules save never makes an unapplied Authority change on disk live", async () => {
+    onDisk("    flight_powers: superuser\n");
+    const live = config.repos.find((r) => r.id === "shop-app");
+    const before = { autonomy: live?.autonomy, flightPowers: live?.flightPowers };
+    const read = await view();
+    expect(read.rules.flight_powers).toMatchObject({ value: "superuser", source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: read.base,
+      rules: { checks: ["pnpm -s lint"] },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(readFileSync(configPath, "utf8")).toContain("flight_powers: superuser");
+    expect({ autonomy: live?.autonomy, flightPowers: live?.flightPowers }).toEqual(before);
+    expect(live?.rules?.checks).toEqual(["pnpm -s lint"]);
+  });
+
+  describe("repo-file sources come from what the block declares, not from equal values", () => {
+    it("replacing keys: pick_from and areas belong to the repo file even when equal", async () => {
+      onDisk(
+        "    rules:\n      pick_from: [Ready]\n      areas: {server: [apps/server/**]}\n      always_ask: [deploy]\n",
+      );
+      repoFile("mc:\n  pick_from: [Ready]\n  areas: {server: [apps/server/**]}\n");
+      const read = await view();
+      expect(read.rules.pick_from).toMatchObject({ value: ["Ready"], source: "repo-file" });
+      expect(read.rules.areas).toMatchObject({ source: "repo-file" });
+      expect(read.rules.always_ask).toMatchObject({ source: "set-here", repoAdds: [] });
+      expect(gqlCalls).toEqual([]);
+    });
+
+    it("filling keys: needs and promote_backlog fill only when config.yaml leaves them out", async () => {
+      onDisk("    rules:\n      needs: [size]\n");
+      repoFile("mc:\n  needs: [done_when]\n  promote_backlog: false\n");
+      const read = await view();
+      expect(read.rules.needs).toMatchObject({ value: ["size"], source: "set-here" });
+      expect(read.rules.promote_backlog).toMatchObject({ value: false, source: "repo-file" });
+    });
+
+    it("additive keys keep the config source and list the repo file's additions apart", async () => {
+      onDisk(
+        "    rules:\n      hard_rules: [config.yaml]\n      checks: [pnpm -s lint]\n      uat:\n        labels: [needs-uat]\n",
+      );
+      repoFile(
+        "mc:\n  hard_rules: [CLAUDE.md]\n  checks: [pnpm -s lint, pnpm -s typecheck]\n  uat:\n    labels: [needs-uat]\n    paths: [apps/web/**]\n  always_ask: [security]\n",
+      );
+      const { rules } = await view();
+      expect(rules.hard_rules).toMatchObject({
+        value: ["config.yaml"],
+        source: "set-here",
+        repoAdds: ["CLAUDE.md"],
+      });
+      expect(rules.checks).toMatchObject({
+        value: ["pnpm -s lint"],
+        source: "set-here",
+        repoAdds: ["pnpm -s typecheck"],
+      });
+      expect(rules["uat.labels"]).toMatchObject({ source: "set-here", repoAdds: [] });
+      expect(rules["uat.paths"]).toMatchObject({
+        value: [],
+        source: "default",
+        repoAdds: ["apps/web/**"],
+      });
+      expect(rules.always_ask).toMatchObject({ source: "default", repoAdds: ["security"] });
+    });
+
+    it("hard_rules the config leaves out come from the repo file", async () => {
+      repoFile("mc:\n  hard_rules: [CLAUDE.md]\n");
+      const { rules } = await view();
+      expect(rules.hard_rules).toMatchObject({ value: ["CLAUDE.md"], source: "repo-file" });
+    });
+
+    it("an unreadable block is named and the config values still show", async () => {
+      repoFile("mc:\n  nonsense: 1\n");
+      const read = (await get("/api/repos/shop-app/rules")).json<
+        View & { repoFileError: string }
+      >();
+      expect(read.repoFileError).toContain("unknown key");
+      expect(read.rules.pick_from?.source).toBe("default");
+    });
+  });
+
+  it.each([
+    ["pick_from", { ...rolesBody, pick_from: [] }, "expected array to have >=1 items"],
+    ["needs", { ...rolesBody, needs: ["missing"] }, "needs"],
+    ["areas", { ...rolesBody, areas: { server: [] } }, "areas"],
+    ["promote_backlog", { ...rolesBody, promote_backlog: "yes" }, "expected boolean"],
+    ["protected", { ...rolesBody, protected: [""] }, "protected"],
+    ["hard_rules", { ...rolesBody, hard_rules: [""] }, "must hold only letters"],
+    ["hard_rules_by", { ...rolesBody, hard_rules_by: "flight" }, "expected one of"],
+    ["commands", { ...rolesBody, commands: { writer: [""], review: [] } }, "commands"],
+    ["full_suite", { ...rolesBody, full_suite: ["not a writer command"] }, "full_suite"],
+    ["required_checks", { ...rolesBody, required_checks: ["mc/review"] }, "not a CI check"],
+    ["checks", { ...rolesBody, checks: ["pnpm -s lint && pnpm -s test"] }, "checks"],
+    ["uat", { ...rolesBody, uat: { labels: [""], paths: [] } }, "uat"],
+    ["always_ask", { ...rolesBody, always_ask: [""] }, "expected string"],
+    ["autonomy", { ...rolesBody, autonomy: "merge" }, undefined],
+    ["flight_powers", { ...rolesBody, flight_powers: "superuser" }, undefined],
+  ])("refuses %s without writing", async (_name, rules, key) => {
+    const read = await get("/api/repos/shop-app/rules");
+    const before = readFileSync(configPath, "utf8");
+    const response = await postBody("/api/repos/shop-app/rules", {
+      base: read.json<{ base: string }>().base,
+      rules,
+    });
+    expect(response.statusCode).toBe(400);
+    if (key) expect(response.json<{ error: string }>().error).toContain(key);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  it("refuses a stale page without a backup", async () => {
+    const read = await get("/api/repos/shop-app/rules");
+    writeFileSync(configPath, `${readFileSync(configPath, "utf8")}# changed\n`);
+    const response = await postBody("/api/repos/shop-app/rules", {
+      base: read.json<{ base: string }>().base,
+      rules: rolesBody,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "config.yaml changed since this page loaded it; reload and try again",
+    });
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
   });
 });
 
@@ -2589,11 +2951,6 @@ describe("local access", () => {
                 payload: body,
               })
             : await post(url, json, body);
-      if (url === "/api/repos/:repoId/prs/:number/files") {
-        // This DB-backed read has no placeholder PR; unlike worktree files it answers unknown.
-        expect(r.statusCode).toBe(404);
-        continue;
-      }
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);
@@ -2654,6 +3011,11 @@ describe("local access", () => {
       }
       if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/rules") {
+        // The route-table POST body has no version or rules; route-specific tests cover saves.
+        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 200 : 400);
         continue;
       }
       if (
@@ -2720,6 +3082,8 @@ describe("local access", () => {
         continue;
       }
       if (
+        url === "/api/attention-material-assets/:id" ||
+        url === "/api/attention/unknown/materials" ||
         url === "/api/attention/unknown" ||
         url === "/api/attention/unknown/clear" ||
         /^\/api\/attention\/unknown\/choo?[si]/.test(url)
@@ -2737,25 +3101,17 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/repos/shop-app/map/diff") {
-        expect(r.statusCode).toBe(503);
-        expect(r.json()).toEqual({ error: "map collector unavailable" });
-        continue;
-      }
-      if (
-        url === "/api/repos/shop-app/map/conflicts" ||
-        url === "/api/repos/shop-app/map" ||
-        url === "/api/repos/shop-app/map/tree" ||
-        url === "/api/repos/shop-app/map/graph" ||
-        url === "/api/repos/shop-app/map/live"
-      ) {
+      if (url === "/api/repos/shop-app/map" || url === "/api/repos/shop-app/map/graph") {
         // This fixture has no crew checkout to check.
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
         continue;
       }
-      if (url.startsWith("/api/code-health/recommendations")) {
-        // This local-access fixture has no operator token; recommendation history and decisions always require it.
+      if (
+        url.startsWith("/api/code-health/recommendations") ||
+        url.startsWith("/api/code-health/overview")
+      ) {
+        // This local-access fixture has no operator token; these reads and decisions always require it.
         expect(r.statusCode).toBe(401);
         continue;
       }
@@ -3020,6 +3376,7 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
+            .replace(/\/attention\/[^/]+\/materials$/, "/attention/:key/materials")
             .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(
               /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
@@ -4616,6 +4973,26 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
+  it("shows a waiting ticket without an owner", async () => {
+    store.replaceBoard("shop-app", [{ ...item, assignees: ["hub"], owner: "Agent" }]);
+    store.setTicketWait({
+      repoId: "shop-app",
+      issue: 7,
+      reason: "CI is running",
+      freesWhen: "CI finishes",
+      at: NOW,
+    });
+
+    expect((await get("/api/boards/shop-app")).json()).toEqual([
+      {
+        ...item,
+        assignees: [],
+        owner: null,
+        waiting: { reason: "CI is running", freesWhen: "CI finishes", at: NOW },
+      },
+    ]);
+  });
+
   it("says in words why the map snapshot is unavailable, without git's command text", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
@@ -4859,9 +5236,6 @@ describe("boards, escalations, health", () => {
       });
       return { a, builds, checkout };
     };
-    const call = (name: string, input: Record<string, string>) =>
-      `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: name, name: "Read", input }] } })}\n`;
-
     it("builds the tree once however often the map loads, and again when the head moves", async () => {
       const { a, builds, checkout } = openMap(join(dir, "tree.jsonl"));
       try {
@@ -4877,51 +5251,6 @@ describe("boards, escalations, health", () => {
         expect(unpackMap(moved.json()).tree).toContainEqual(
           expect.objectContaining({ path: "added.ts" }),
         );
-      } finally {
-        await a.close();
-      }
-    });
-
-    it("answers a repeat tree request with 304 and a seat's move rebuilds only the live part", async () => {
-      const transcriptPath = join(dir, "move.jsonl");
-      const { a, builds } = openMap(transcriptPath);
-      try {
-        const tree = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/tree" });
-        expect(tree.statusCode).toBe(200);
-        const etag = tree.headers.etag as string;
-        expect(etag).toBeTruthy();
-        expect(tree.json()).not.toHaveProperty("seats");
-        const repeat = await a.inject({
-          method: "GET",
-          url: "/api/repos/shop-app/map/tree",
-          headers: { "if-none-match": etag },
-        });
-        expect(repeat.statusCode).toBe(304);
-
-        const before = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
-        expect(before.json()).not.toHaveProperty("tree");
-        expect(before.json().seats[0].recent).toEqual([]);
-        appendFileSync(transcriptPath, call("r1", { file_path: "packages/core/src/map.ts" }));
-        clock += 5000;
-        const after = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
-        expect(after.json().seq).toBeGreaterThan(before.json().seq);
-        expect(after.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
-          "packages/core/src/map.ts",
-        ]);
-        appendFileSync(transcriptPath, call("r2", { file_path: "packages/core/src/types.ts" }));
-        clock += 5000;
-        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
-        expect(moved.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
-          "packages/core/src/map.ts",
-          "packages/core/src/types.ts",
-        ]);
-        const same = await a.inject({
-          method: "GET",
-          url: "/api/repos/shop-app/map/tree",
-          headers: { "if-none-match": etag },
-        });
-        expect(same.statusCode).toBe(304);
-        expect(builds).toHaveLength(1);
       } finally {
         await a.close();
       }
@@ -5421,143 +5750,6 @@ describe("boards, escalations, health", () => {
       }
     });
   }
-  it("exposes repo-scoped modified seat entries from the live map ring", async () => {
-    const cwd = join(dir, "diff-checkout");
-    mkdirSync(cwd);
-    const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args]);
-    git("init", "-q");
-    git("config", "user.name", "Fixture");
-    git("config", "user.email", "fixture");
-    writeFileSync(join(cwd, "file.ts"), "base\n");
-    git("add", ".");
-    git("commit", "-qm", "base");
-    git("update-ref", "refs/remotes/origin/main", "HEAD");
-    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-    writeFileSync(join(cwd, "file.ts"), "edited\nextra\n");
-    const transcriptPath = join(cwd, "transcript.jsonl");
-    writeFileSync(transcriptPath, "");
-    const ring = new CallRing(() => [
-      { id: "run", seat: "seat", repoId: "shop-app", cwd, transcriptPath },
-      { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
-    ]);
-    const a = buildApp({ config, store, bus, mapRing: ring });
-    const unsubscribe = ring.subscribe("shop-app", () => {});
-    const stop = ring.start();
-    try {
-      await expect
-        .poll(
-          async () => {
-            const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/diff" });
-            expect(r.statusCode).toBe(200);
-            return r.json();
-          },
-          { timeout: 4500 },
-        )
-        .toEqual({
-          seats: [
-            {
-              seat: "seat",
-              scope: { modified: [{ file: "file.ts", add: 2, rem: 1, source: "diff" }] },
-            },
-          ],
-        });
-      expect((await a.inject({ method: "GET", url: "/api/repos/nope/map/diff" })).statusCode).toBe(
-        404,
-      );
-      // the snapshot reads the same per-run diff (map/seats.ts runChanges)
-      expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
-      expect(ring.diff("unknown")).toBeNull();
-    } finally {
-      unsubscribe();
-      stop();
-      await a.close();
-    }
-  });
-
-  it("serves computed map conflicts from stored open PR tips without changing the checkout", async () => {
-    withCrew();
-    const checkout = join(dir, "clone");
-    mkdirSync(checkout, { recursive: true });
-    const git = (...args: string[]) =>
-      execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8" }).trim();
-    git("init", "-q");
-    git("config", "user.name", "Fixture");
-    git("config", "user.email", "fixture@example.invalid");
-    writeFileSync(join(checkout, "file.txt"), "base\n");
-    git("add", ".");
-    git("commit", "-qm", "base");
-    const base = git("rev-parse", "HEAD");
-    git("checkout", "-qb", "left");
-    writeFileSync(join(checkout, "file.txt"), "left\n");
-    git("commit", "-qam", "left");
-    const left = git("rev-parse", "HEAD");
-    git("checkout", "-qb", "right", base);
-    writeFileSync(join(checkout, "file.txt"), "right\n");
-    git("commit", "-qam", "right");
-    const right = git("rev-parse", "HEAD");
-    git("branch", "-f", "left", base);
-    const prs = [left, right].map((headSha, i) => ({
-      repoId: "shop-app",
-      number: i + 1,
-      title: "Fixture",
-      url: "https://example.invalid/pr",
-      branch: i === 0 ? "left" : "right",
-      ticket: null,
-      state: "open" as const,
-      isDraft: false,
-      review: null,
-      ci: "pending" as const,
-      createdAt: 1,
-      updatedAt: 2,
-      mergedAt: null,
-      mergeCommitSha: null,
-      headSha,
-      mergeable: null,
-      author: null,
-      assignees: [],
-      checks: [],
-      closingIssues: [],
-    }));
-    store.upsertPullRequests("shop-app", prs, 0);
-    const before = git("count-objects", "-v");
-    const response = await get("/api/repos/shop-app/map/conflicts");
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      conflicts: [
-        { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [2, 1] },
-      ],
-      unchecked: [],
-    });
-    expect(git("count-objects", "-v")).toBe(before);
-    expect(git("status", "--porcelain")).toBe("");
-    expect(readFileSync(join(checkout, "file.txt"), "utf8")).toBe("right\n");
-    store.upsertPullRequests(
-      "shop-app",
-      prs.map((pr) => ({ ...pr, state: "closed" })),
-      0,
-    );
-    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({
-      conflicts: [],
-      unchecked: [],
-    });
-    // a head the checkout hasn't fetched is named unchecked, never reported clean
-    store.upsertPullRequests(
-      "shop-app",
-      [prs[0], { ...prs[1], headSha: "f".repeat(40) }].map((pr) => ({ ...pr, state: "open" })),
-      0,
-    );
-    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toMatchObject({
-      unchecked: [{ reason: "head not fetched" }],
-    });
-  });
-
-  it("does not report a clean merge when the map checkout is unavailable", async () => {
-    expect((await get("/api/repos/nope/map/conflicts")).statusCode).toBe(404);
-    expect((await get("/api/repos/shop-app/map/conflicts")).statusCode).toBe(503);
-    withCrew();
-    expect((await get("/api/repos/shop-app/map/conflicts")).statusCode).toBe(503);
-  });
-
   it("repos/:repoId/prs returns the stored pull requests, 404 for an unknown repo", async () => {
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([]);
     const pr = {
@@ -6173,6 +6365,10 @@ describe("telemetry", () => {
         at: NOW - 6 * 60 * 60_000 + index * 60 * 60_000,
         merged: 0,
       })),
+      ticketsInProgress: Array.from({ length: 14 }, (_, index) => ({
+        day: `2026-10-${String(index + 4).padStart(2, "0")}`,
+        tickets: null,
+      })),
       quality: [
         {
           at: NOW - 6 * 60 * 60_000,
@@ -6426,6 +6622,40 @@ describe("reload", () => {
     await a.close();
   });
 
+  it("/api/telemetry?range=24h serves the machine series and stays within 60 KB with a full day sampled", async () => {
+    withCrew();
+    const GB = 1024 ** 3;
+    for (let i = 1; i <= 24 * 60; i += 1) {
+      store.addMachineSample({
+        at: NOW - (24 * 60 - i) * 60_000,
+        cpuPct: 20 + (i % 50),
+        cores: 8,
+        memUsedBytes: 5 * GB + i,
+        memTotalBytes: 16 * GB,
+        diskFreeBytes: 16 * GB,
+        diskTotalBytes: 100 * GB,
+        swapUsedBytes: (i % 7) * GB + 12_345,
+        swapTotalBytes: 8 * GB,
+        memoryPressureFreePct: 33.3333 + (i % 9),
+        agents: { count: 3, rssBytes: 6.123456 * GB + i, cpuPct: 1 },
+        testRun: { count: 5, rssBytes: 4.654321 * GB + i, cpuPct: 9 },
+      });
+    }
+    const response = await get("/api/telemetry?range=24h");
+    expect(response.statusCode).toBe(200);
+    const body = response.json<Telemetry>();
+    expect(body.machine).toHaveLength(72);
+    expect(body.machine.every((p) => p.swapPct != null && p.agentGb != null)).toBe(true);
+    // The budget is the 60 KB the other bounded routes keep; the four added series are a small share.
+    const bytes = Buffer.byteLength(response.body);
+    expect(bytes).toBeLessThan(60_000);
+    const without = JSON.stringify({
+      ...body,
+      machine: body.machine.map(({ at, cpuPct, memPct }) => ({ at, cpuPct, memPct })),
+    });
+    expect(bytes - Buffer.byteLength(without)).toBeLessThan(8_000);
+  });
+
   it("uses machine-capacity thresholds applied by reload immediately", async () => {
     withCrew();
     const latest: MachineSample = {
@@ -6669,133 +6899,6 @@ describe("SSE stream", () => {
 
     expect(counts).toEqual([1, 2, 1, 0]);
   });
-
-  it("stops map polling after the last map stream closes", async () => {
-    vi.useFakeTimers();
-    await app.close();
-    const poll = vi.spyOn(CallRing.prototype, "poll");
-    app = buildApp({ config, store, bus });
-    try {
-      const client = await open("/api/stream?map=shop-app");
-      await client.until(": connected");
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(poll).toHaveBeenCalledOnce();
-
-      client.res.raw.res.emit("close");
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(poll).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each(["claude", "codex"] as const)(
-    "%s: sends ordered map calls only to the selected repo and keeps changed pings",
-    async (vendor) => {
-      withCrew();
-      const transcriptPath = join(dir, "map.jsonl");
-      writeFileSync(transcriptPath, "");
-      store.upsertRun(run({ id: "map-run", agentId: "guido-1", vendor, transcriptPath }));
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: "map-run",
-        cliSessionId: null,
-        state: "running",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      const selected = await open("/api/stream?map=shop-app");
-      const other = await open("/api/stream?map=site-builder");
-      const plain = await open();
-      await Promise.all([
-        selected.until(": connected"),
-        other.until(": connected"),
-        plain.until(": connected"),
-      ]);
-      const otherWrite = vi.spyOn(other.res.raw.res, "write");
-      const plainWrite = vi.spyOn(plain.res.raw.res, "write");
-      const frames = mapFixture(vendor).trim().split("\n");
-      appendFileSync(transcriptPath, `${frames[0]}\n${frames[1]}\n`);
-      bus.emit("boards");
-      await selected.until('"type":"invalidate"');
-      const deltas = selected
-        .text()
-        .split("\n")
-        .filter((line) => line.startsWith("data: "))
-        .map((line) => JSON.parse(line.slice(6)))
-        .filter((d) => d.seq !== undefined);
-      expect(deltas.map((d) => [d.seq, d.type])).toEqual([
-        [1, "call.start"],
-        [2, "edit"],
-        [3, "call.end"],
-        [4, "invalidate"],
-      ]);
-      expect(deltas[0]).toMatchObject({
-        seat: "guido-1",
-        tool: "Edit",
-        files: ["file.ts"],
-        writeTok: 3,
-      });
-      expect(deltas[2]).toMatchObject({
-        seat: "guido-1",
-        files: ["file.ts"],
-        error: false,
-        refused: false,
-      });
-      for (const writes of [otherWrite, plainWrite]) {
-        expect(writes.mock.calls.some(([chunk]) => String(chunk).includes("event: map"))).toBe(
-          false,
-        );
-        expect(
-          writes.mock.calls.some(([chunk]) => String(chunk).includes('"topic":"boards"')),
-        ).toBe(true);
-      }
-      for (const client of [selected, other, plain]) client.res.raw.res.emit("close");
-    },
-  );
-
-  it.each(["cleared", "reassigned"] as const)(
-    "finishes the previous run's calls after its seat is %s",
-    async (transition) => {
-      withCrew();
-      const transcriptPath = join(dir, "previous-map.jsonl");
-      const frames = mapFixture("claude").trim().split("\n");
-      writeFileSync(transcriptPath, `${frames[0]}\n`);
-      store.upsertRun(run({ id: "previous-map", agentId: "guido-1", transcriptPath }));
-      const session = {
-        seatId: "guido-1",
-        runId: "previous-map",
-        cliSessionId: null,
-        state: "running" as const,
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      };
-      store.setSeatSession(session);
-      const client = await open("/api/stream?map=shop-app");
-      await client.until('"type":"call.start"');
-      store.setSeatSession({
-        ...session,
-        runId: transition === "cleared" ? null : "next-map",
-        worktree: null,
-      });
-      appendFileSync(transcriptPath, `${frames[1]}\n`);
-      const write = vi.spyOn(client.res.raw.res, "write");
-      try {
-        await vi.waitFor(
-          () => {
-            expect(
-              write.mock.calls.some(([chunk]) => String(chunk).includes('"type":"call.end"')),
-            ).toBe(true);
-          },
-          { timeout: 2000 },
-        );
-      } finally {
-        client.res.raw.res.emit("close");
-      }
-    },
-  );
 
   it("emits event: changed with the topic, sends heartbeats, and cleans up on close", async () => {
     const s = await open();
@@ -7414,6 +7517,9 @@ describe("crew routes", () => {
         seat: null,
         decisions: [],
         controllerDecisions: [],
+        costLastHour: null,
+        sessionsLastHour: null,
+        runStartedAt: null,
         promptWakes: [],
       });
     });
@@ -7592,6 +7698,114 @@ describe("crew routes", () => {
       expect(body.wakeCost?.totalUsd).toBeCloseTo(7);
       expect(body.wakeCost?.weekShare).toBeCloseTo(1);
       expect(body.wakeWaits?.blockerMedianMs).toBe(60_000);
+    });
+
+    it("GET /api/flight serves FLIGHT's hourly status figures", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const startedAt = now - 20 * 60_000;
+      store.upsertRun(run({ id: "live-flight", agentId: "flight-1", costUsd: 7, startedAt }));
+      store.setDigest(
+        "live-flight",
+        digest({ attemptUsage: [{ id: "hour", at: now - 1000, tokens: 1 }] }),
+      );
+      store.upsertRun(
+        run({ id: "earlier-flight", agentId: "flight-1", startedAt: now - 40 * 60_000 }),
+      );
+      store.upsertRun(run({ id: "old-flight", agentId: "flight-1", startedAt: now - 61 * 60_000 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "live-flight",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: now,
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeCloseTo(7);
+      expect(body.sessionsLastHour).toBe(2);
+      expect(body.runStartedAt).toBe(startedAt);
+    });
+
+    it("GET /api/flight returns null hourly status figures with no data", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeNull();
+      expect(body.sessionsLastHour).toBeNull();
+      expect(body.runStartedAt).toBeNull();
+    });
+
+    describe("hourly status figures edge cases", () => {
+      const seat = () =>
+        config.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+      const session = (runId: string, state: "running" | "error", now: number) =>
+        store.setSeatSession({
+          seatId: "flight-1",
+          runId,
+          cliSessionId: null,
+          state,
+          reason: null,
+          worktree: null,
+          updatedAt: now,
+        });
+
+      it("serves no run start when the seat's run has ended", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({
+            id: "dead-flight",
+            agentId: "flight-1",
+            startedAt: now - 30 * 60_000,
+            endedAt: now - 10 * 60_000,
+            status: "failed",
+          }),
+        );
+        session("dead-flight", "error", now);
+        expect((await get("/api/flight")).json<FlightView>().runStartedAt).toBeNull();
+      });
+
+      it("serves 0 sessions, not null, when a steady run started before the hour", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "steady", agentId: "flight-1", costUsd: 1, startedAt: now - 90 * 60_000 }),
+        );
+        session("steady", "running", now);
+        const body = (await get("/api/flight")).json<FlightView>();
+        expect(body.sessionsLastHour).toBe(0);
+      });
+
+      it("serves no cost while the only run in the hour has none recorded", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "fresh", agentId: "flight-1", costUsd: null, startedAt: now - 60_000 }),
+        );
+        session("fresh", "running", now);
+        expect((await get("/api/flight")).json<FlightView>().costLastHour).toBeNull();
+      });
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -8010,6 +8224,24 @@ describe("update routes", () => {
     expect(r.json()).toEqual({ upToDate: true });
     expect(updaterCalls).toEqual(["update"]);
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("drops the held-Update notes once an Update has run (#1886)", async () => {
+    for (const key of ["hub-update-held", "hub-update-person"])
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "A new version of Mission Control is waiting.",
+        at: NOW - 1,
+      });
+    store.setSetting("hub-update-held-since", String(NOW - 1));
+    updaterResult = async () => ({ restarting: true });
+    await post("/api/update");
+    expect(store.notes()).toEqual([]);
+    expect(store.getSetting("hub-update-held-since")).toBeNull();
   });
 
   it("restarts a successful Update when the client disconnects before its response", async () => {
@@ -8571,6 +8803,39 @@ describe("the first loop's engine", () => {
         await a.close();
       },
     );
+
+    it("ties an option picked for a set-aside run's question to the message that run gets", async () => {
+      parkedRun("parked", "shop-app#9");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q = passed("parked", "Which provider?");
+      const key = `ask:${q}`;
+      // an older brief: its option carries no id, so the pick travels with the reply
+      store.addBrief({
+        key,
+        context: "The seat asks which provider to use.",
+        recommendation: "Stripe.",
+        options: [{ label: "Stripe", answer: "Use Stripe." }],
+        basis: "read the ticket",
+        at: NOW,
+      });
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, {
+        text: "Use Stripe.",
+        question: q,
+        itemKey: key,
+        choice: { briefAt: NOW, option: 0 },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(store.comms(0, "parked")).toEqual([
+        expect.objectContaining({ to: "guido-1", text: "Use Stripe." }),
+      ]);
+      const stored = store.latestChoice(key);
+      expect(stored).toMatchObject({ label: "Stripe", target: "guido-1", targetKind: "seat" });
+      expect(store.commsRun(stored?.messageId ?? "")?.id).toBe("parked");
+      expect(store.openQuestions()).toEqual([]);
+      expect(reconciled).toEqual(["parked"]);
+      await a.close();
+    });
 
     it("a plain message closes no question, and a reply that names one closes only that one", async () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
@@ -10180,6 +10445,7 @@ describe("operator token", () => {
         configPath,
         supervisor: stubSupervisor(),
         operatorToken: "tok-1",
+        controllerToken: "ctl-1",
         get noLoopWrites() {
           return noWrites;
         },
@@ -10220,7 +10486,42 @@ describe("operator token", () => {
       expect(calls).toEqual([]);
     });
 
-    it("holds and releases as the controller, and names a refusal", async () => {
+    it("refuses the controller's key on the PR hold route and on the operator's brief", async () => {
+      const ctl = { ...json, "x-mc-controller": "ctl-1" };
+      const held = await app.inject({
+        method: "POST",
+        url: "/api/prs/shop-app/12/merge-hold",
+        headers: ctl,
+        payload: { action: "hold", sha: "a".repeat(40), reason: "my check" },
+      });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      const chose = await app.inject({
+        method: "POST",
+        url: "/api/attention/example/choice",
+        headers: ctl,
+        payload: {
+          briefId: 1,
+          sourceRevision: "a".repeat(64),
+          optionId: "apply",
+          requestId: "controller",
+        },
+      });
+      expect(chose.statusCode).toBe(403);
+      expect(chose.json().error).toContain("controller");
+      expect(calls).toEqual([]);
+    });
+
+    it("refuses the controller's key: it neither holds nor releases a merge", async () => {
+      const ctl = { "x-mc-controller": "ctl-1" };
+      const held = await post(ctl, { action: "hold", reason: "my check" });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      expect((await post(ctl, { action: "release" })).statusCode).toBe(403);
+      expect(calls).toEqual([]);
+    });
+
+    it("holds and releases as the operator, and names a refusal", async () => {
       expect((await post(key, { action: "hold", reason: "design vetoed" })).statusCode).toBe(200);
       const refused = await post(key, { action: "release" });
       expect(refused.statusCode).toBe(409);

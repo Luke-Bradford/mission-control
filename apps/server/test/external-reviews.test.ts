@@ -18,8 +18,8 @@ import {
 } from "../src/external-pr-control.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { prTextProblem } from "../src/mcp/tools.ts";
-import { ownsPr } from "../src/ownership.ts";
 import { prUat } from "../src/pr/uat.ts";
+import { ownsPr } from "../src/queue/ownership.ts";
 import { reviewCheckFor } from "../src/review/check.ts";
 import { branchOwned, createExternalReviews, externalReviewKey } from "../src/review/external.ts";
 import { Store } from "../src/store.ts";
@@ -536,6 +536,7 @@ describe("external PR review subjects", () => {
               evidence: {
                 baseUrl: "http://preview.test",
                 ensure: async () => {},
+                pages: async () => [],
                 gate: () => null,
                 stop: async () => {},
               },
@@ -1151,6 +1152,7 @@ describe("external PR review subjects", () => {
       evidence: {
         baseUrl: "http://preview.test",
         ensure,
+        pages: async () => [],
         gate: () => "missing screenshot pairs",
         stop: async () => {},
       },

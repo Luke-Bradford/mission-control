@@ -126,8 +126,19 @@ export const EVIDENCE_RULING_PREFIX = "Ruling:";
 export const CI_TRIES = 3;
 /** The push or PR is refused this many times before the run parks. */
 export const REFUSAL_TRIES = 3;
-/** CI may stay pending this long on a pushed sha. */
+/** A CI job with no recorded history may stay pending this long on a pushed sha. */
 export const CI_PENDING_MAX_MS = 30 * 60_000;
+/** A job with history parks once it is pending this many times its recent p90... */
+export const CI_PENDING_P90_FACTOR = 2;
+/** ...but never sooner than this. */
+export const CI_PENDING_MIN_MS = 10 * 60_000;
+
+/** How long a running job may stay pending: twice its recent p90, else the fixed default. */
+export function ciPendingLimitMs(p90Ms: number | undefined): number {
+  return p90Ms === undefined || !(p90Ms > 0)
+    ? CI_PENDING_MAX_MS
+    : Math.max(CI_PENDING_MIN_MS, Math.round(p90Ms * CI_PENDING_P90_FACTOR));
+}
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
 /** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
@@ -151,6 +162,13 @@ export const cardMark = (phase: string, epoch: number): string => `${phase}:${ep
 export const REWORK_PHASE = "rework";
 /** The key of a run's blocked note for one epoch. */
 export const blockedNoteKey = (runId: string, epoch: number): string => `blocked:${runId}:${epoch}`;
+/** The start every park note key of `runId` shares, whatever its epoch. */
+export const blockedNotePrefix = (runId: string): string => `blocked:${runId}:`;
+/** The prefix of an attention item made from a hub note. */
+export const NOTE_ITEM_PREFIX = "note:";
+/** The start of the Needs-you item key for any park of `runId`. */
+export const blockedItemPrefix = (runId: string): string =>
+  `${NOTE_ITEM_PREFIX}${blockedNotePrefix(runId)}`;
 
 /** Shared prefixes for CI activity events and parking reasons. */
 export const CI_PASSED_EVENT_PREFIX = "CI passed on ";
@@ -524,6 +542,11 @@ export const asideForReworkEventText = (call: string): string =>
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
+/** A wake that failed twice running for the same reason: the hub keeps trying, FLIGHT is told once. */
+export const WAKE_STUCK_KEY_SUFFIX = ":wake-stuck";
+export const wakeStuckKey = (runId: string): string => `${runId}${WAKE_STUCK_KEY_SUFFIX}`;
+export const wakeStuckText = (reason: string): string =>
+  `could not go back to its seat, twice running: ${reason}; the hub keeps trying`;
 export const reworkFirstText = (call: string, ref: string): string =>
   `${call} has rework waiting on ${ref}; that goes first`;
 
@@ -661,10 +684,18 @@ export interface LoopSnapshot {
     polledAt: number;
     isDraft?: boolean;
     /** The names behind `ci`; absent or empty: the texts say none. */
-    checks?: { failing: string[]; pending: string[]; missing: string[] };
+    checks?: {
+      failing: string[];
+      pending: string[];
+      missing: string[];
+      /** When each running check started (ms), by name; absent: queued or not known. */
+      startedAt?: Record<string, number>;
+    };
     /** The state of `mc/review` on GitHub; null when not reported. Absent: not reported. */
     reviewStatus?: PrCheck["state"] | null;
   } | null;
+  /** The recent p90 run time (ms) of each CI job in the repo, by check name; absent: no history. */
+  ciP90Ms?: Record<string, number>;
   /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
   autoMerge?: boolean;
   /**
@@ -739,6 +770,40 @@ const forSha = (sha: string | null | undefined): string =>
   sha === null || sha === undefined ? "" : ` for ${sha7(sha)}`;
 
 const minutes = (ms: number): number => Math.round(ms / 60_000);
+
+/**
+ * The pending or missing checks that have waited past their normal time (twice the job's recent
+ * p90, else the fixed default), with the limit of the first; null when none has. A pending CI
+ * that names no check is judged by the fixed default from `since`.
+ */
+function ciOverdue(
+  s: LoopSnapshot,
+  checks: NonNullable<LoopSnapshot["pr"]>["checks"],
+  since: number,
+  now: number,
+): { pending: string[]; missing: string[]; limitMs: number } | null {
+  if (!checks || checks.pending.length + checks.missing.length === 0) {
+    return now - since > CI_PENDING_MAX_MS
+      ? { pending: [], missing: [], limitMs: CI_PENDING_MAX_MS }
+      : null;
+  }
+  // a running job is judged from its start, but never from before the push or un-park
+  // a check that has not started (missing or queued) may be waiting on a slow job, so it gets the
+  // longest limit among the repo's jobs, never below the fixed default
+  const unstarted = Math.max(
+    CI_PENDING_MAX_MS,
+    ...Object.values(s.ciP90Ms ?? {}).map((p90) => ciPendingLimitMs(p90)),
+  );
+  const over = (name: string) => {
+    const startedAt = checks.startedAt?.[name];
+    const limit = startedAt === undefined ? unstarted : ciPendingLimitMs(s.ciP90Ms?.[name]);
+    return now - Math.max(since, startedAt ?? 0) > limit ? limit : null;
+  };
+  const pending = checks.pending.filter((n) => over(n) !== null);
+  const missing = checks.missing.filter((n) => over(n) !== null);
+  const first = [...pending, ...missing][0];
+  return first === undefined ? null : { pending, missing, limitMs: over(first) as number };
+}
 
 /** Which fact kept a pushed run from reaching CI: the first of push, newest commit, PR, PR head. */
 function missingWhy(
@@ -1078,6 +1143,31 @@ function stateStep(s: LoopSnapshot): Step {
       ],
     };
   }
+  // a pending-CI stop lifts itself once every check is green on the pushed head
+  if (
+    loop.phase === "parked" &&
+    loop.parked?.kind === "ci-pending" &&
+    !loop.parked.ended &&
+    pr?.state === "open" &&
+    pr.ci === "passing" &&
+    headCommit !== null &&
+    pushed?.sha === headCommit &&
+    pr.headSha === headCommit
+  ) {
+    const passed = ciPassed(loop, headCommit);
+    return {
+      loop: {
+        ...loop,
+        phase: "review",
+        parked: null,
+        ciFails: 0,
+        ciFailedSha: null,
+        rerun: passed.rerun,
+        unparkedAt: now,
+      },
+      actions: passed.actions,
+    };
+  }
   if (loop.phase === "parked") return unchanged(loop);
   // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
   // in review or working with it still recorded: a ruling park resumes straight into review, and
@@ -1281,15 +1371,16 @@ function stateStep(s: LoopSnapshot): Step {
       loop.unparkedAt ?? 0,
       loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
     );
-    if (pr.ci === "pending" && now - since > CI_PENDING_MAX_MS) {
+    const overdue = pr.ci === "pending" ? ciOverdue(s, pr.checks, since, now) : null;
+    if (overdue !== null) {
       const parts = [
-        pr.checks?.pending.length ? `pending: ${pr.checks.pending.join(", ")}` : "",
-        pr.checks?.missing.length ? `missing: ${pr.checks.missing.join(", ")}` : "",
+        overdue.pending.length ? `pending: ${overdue.pending.join(", ")}` : "",
+        overdue.missing.length ? `missing: ${overdue.missing.join(", ")}` : "",
       ].filter((p) => p !== "");
       return park(
         loop,
         "ci-pending",
-        `CI pending for ${minutes(CI_PENDING_MAX_MS)} minutes on ${short}${
+        `CI pending for ${minutes(overdue.limitMs)} minutes on ${short}${
           parts.length > 0 ? ` (${parts.join("; ")})` : ""
         }`,
       );

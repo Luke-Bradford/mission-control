@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pickEncoding } from "../src/compress.ts";
+import { pickEncoding } from "../src/run/compress.ts";
 
 describe("pickEncoding", () => {
   it("prefers brotli over gzip", () => {

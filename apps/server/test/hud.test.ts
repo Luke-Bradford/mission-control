@@ -34,9 +34,11 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { protectedDecisionItem } from "../src/attention/holds.ts";
 import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
 import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
+import { setReviewHold } from "../src/engine/review-hold.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
   agentViews,
@@ -49,13 +51,18 @@ import {
   markHubStarted,
   NO_LOCK,
   pinned,
-} from "../src/hud.ts";
+} from "../src/hud/hud.ts";
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
-import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
+import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue/queue-reorder.ts";
+import { clearLeftovers } from "../src/repo/leftovers.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import { Store } from "../src/store.ts";
-import { foldTranscript } from "../src/streamjson.ts";
-import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
+import {
+  HUB_UPDATE_HELD_KEY,
+  HUB_UPDATE_HELD_SINCE,
+  HUB_UPDATE_PERSON_KEY,
+} from "../src/update.ts";
 import { defined } from "./defined.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
@@ -1513,6 +1520,50 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
   });
 
+  it("shows the hold the engine recorded for a queued review instead of the generic wait", () => {
+    const c = withCrew();
+    const sha = "c".repeat(40);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 12,
+          title: "Review target",
+          url: "https://github.com/example/sample/pull/12",
+          branch: "feature/12",
+          ticket: "shop-app#90",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: sha,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    const id = store.requestReview({
+      authorRunId: "external-pr:shop-app#12",
+      repoId: "shop-app",
+      seatId: "RETRO-1",
+      prNumber: 12,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - MIN,
+    });
+    expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toBe(
+      "Waiting for the reviewer to become available.",
+    );
+    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #7.", prNumber: 7 });
+    expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toBe("Waiting for older PR #7.");
+  });
+
   it("carries the CLI version, configured effort and active template dollar cap; a loop has neither", () => {
     const c = withCrew();
     const seatCfg = c.crew?.sessions[0]?.seats[0];
@@ -1837,6 +1888,8 @@ describe("crew seats in the rows", () => {
       });
       it("seat: a set-aside run flagged to wake", () => {
         start({ phase: "review", aside: { ...aside, wake: true } });
+        // a set-aside run has left its seat
+        store.setSeatSession(seat({ runId: null, state: "idle" }));
         expect(waitOf(withCrew())).toBe("seat");
       });
       it("seat: the text names the ticket the seat is on, while it is on one", () => {
@@ -2531,6 +2584,189 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(items(c, lock).filter((i) => i.kind === "lock")).toEqual([]);
     store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
     expect(items(c, { ...lock, waiting: [] }).filter((i) => i.kind === "lock")).toEqual([]);
+  });
+
+  describe("leftovers of finished work (#1811)", () => {
+    const DAY = 24 * HOUR;
+    const raise = (key: string, runId: string) =>
+      store.raiseNote({
+        key,
+        kind: "flag",
+        runId,
+        seatId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "a note",
+        at: NOW - 20 * DAY,
+      });
+    const setup = (over: Partial<Run>) => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5, closed: true })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          startedAt: NOW - 21 * DAY,
+          ...over,
+        }),
+      );
+      const id = store.addQuestion({
+        agentId: "GUIDO-1",
+        runId: "c1",
+        text: "Lanes?",
+        at: NOW - 20 * DAY,
+      });
+      raise("old-note", "c1");
+      return id;
+    };
+    const keys = (c: CcConfig) => items(c).map((i) => i.key);
+    const putPr = (number: number, state: PullRequestView["state"], mergedAt: number | null) =>
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number,
+            title: "pr",
+            url: `https://github.com/o/shop-app/pull/${number}`,
+            branch: `b${number}`,
+            ticket: null,
+            state,
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW - DAY,
+            updatedAt: NOW - DAY,
+            mergedAt,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+
+    it("an ended run with a closed ticket leaves no question or note", () => {
+      const id = setup({ endedAt: NOW - 20 * DAY, status: "ok" });
+      expect(keys(withCrew())).not.toContain(`ask:${id}`);
+      expect(keys(withCrew())).not.toContain("note:old-note");
+    });
+
+    it("a live run's question and note still show", () => {
+      const id = setup({});
+      expect(keys(withCrew())).toEqual(expect.arrayContaining([`ask:${id}`, "note:old-note"]));
+    });
+
+    it("a run ended under 7 days ago on an open ticket keeps its question; past 7 days it goes", () => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - 2 * DAY,
+          status: "ok",
+        }),
+      );
+      const id = store.addQuestion({
+        agentId: "GUIDO-1",
+        runId: "c1",
+        text: "Lanes?",
+        at: NOW - 2 * DAY,
+      });
+      expect(keys(withCrew())).toContain(`ask:${id}`);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - 8 * DAY,
+          status: "ok",
+        }),
+      );
+      expect(keys(withCrew())).not.toContain(`ask:${id}`);
+    });
+
+    it("the unfiled minor findings flag outlives its merged run", () => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - MIN,
+          status: "ok",
+          loop: { ...NEW_LOOP, phase: "done", prNumber: 12 },
+        }),
+      );
+      putPr(12, "merged", NOW - MIN);
+      raise("c1:file-minor", "c1");
+      expect(keys(withCrew())).toContain("note:c1:file-minor");
+    });
+
+    it("the cleanup pass sets the question aside, and releases a hold and a park, each with a hub event", () => {
+      const id = setup({
+        endedAt: NOW - 20 * DAY,
+        status: "ok",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+          mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - 21 * DAY },
+        },
+      });
+      store.upsertRun(
+        run({
+          id: "live",
+          agentId: "GUIDO-2",
+          ticket: "shop-app#6",
+          loop: { ...NEW_LOOP, mergeHold: { by: "FLIGHT", reason: "wait", at: NOW } },
+        }),
+      );
+      store.replaceBoard("shop-app", [
+        boardItem({ issueNumber: 5, closed: true }),
+        boardItem({ issueNumber: 6 }),
+      ]);
+      putPr(13, "open", null);
+      const parkedEnded = {
+        kind: "ended",
+        reason: "run ended (stopped)",
+        ended: true,
+      };
+      store.upsertRun(
+        run({
+          id: "held",
+          agentId: "GUIDO-2",
+          ticket: "shop-app#6",
+          endedAt: NOW - DAY,
+          status: "ok",
+          loop: {
+            ...NEW_LOOP,
+            prNumber: 13,
+            phase: "parked",
+            parked: parkedEnded,
+            mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - DAY },
+          },
+        }),
+      );
+      const cleared = clearLeftovers({ store, config: withCrew(), now: NOW });
+      expect(cleared).toHaveLength(3);
+      expect(store.run("held")?.loop?.mergeHold).not.toBeNull();
+      expect(store.run("held")?.loop?.parked).not.toBeNull();
+      expect(store.question(id)).toMatchObject({ answeredAt: null });
+      expect(store.openQuestions().map((q) => q.id)).not.toContain(id);
+      expect(store.asideQuestions().map((q) => q.id)).toContain(id);
+      const ended = store.run("c1")?.loop;
+      expect(ended?.mergeHold).toBeNull();
+      expect(ended?.parked).toBeNull();
+      expect(store.endedRunsWithHoldOrPark().map((r) => r.id)).toEqual(["held"]);
+      expect(store.run("live")?.loop?.mergeHold).not.toBeNull();
+      expect(store.hubEvents(0).map((e) => e.text)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("merge hold"),
+          expect.stringContaining("parked"),
+        ]),
+      );
+      expect(clearLeftovers({ store, config: withCrew(), now: NOW })).toEqual([]);
+    });
   });
 });
 
@@ -4379,6 +4615,107 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate(NOW, noFlight)).toBeUndefined();
     expect(all(NOW, noFlight).find((i) => i.key === `ask:${id}`)).toMatchObject({
       owner: "operator",
+    });
+  });
+
+  describe("a held hub Update (#1834)", () => {
+    const superuser = (): CcConfig => ({
+      ...c,
+      repos: c.repos.map((r) => (r.id === "shop-app" ? { ...r, flightPowers: "superuser" } : r)),
+    });
+    const held = (key: string, at = NOW - 5 * MIN) =>
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "A new version is waiting.",
+        at,
+      });
+    const heldItem = (cfg: CcConfig, at = NOW, key = HUB_UPDATE_HELD_KEY) =>
+      attentionItems(cfg, store, at, NO_LOCK, []).find((i) => i.key === `note:${key}`);
+
+    it("is FLIGHT's, inside its window, while FLIGHT is live on a superuser repo", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY);
+      const cfg = superuser();
+      const item = heldItem(cfg);
+      expect(item).toMatchObject({ owner: "flight", flightTriage: "handling" });
+      expect(
+        needsYouItems(attentionItems(cfg, store, NOW, NO_LOCK, [])).map((i) => i.key),
+      ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
+      // the predicates agree with the owner: FLIGHT may keep it
+      expect(
+        isOperatorCall({ key: `note:${HUB_UPDATE_HELD_KEY}`, kind: "blocked" }, store, cfg),
+      ).toBe(false);
+      expect(item && protectedDecisionItem(store, item, cfg, NOW)).toBe(false);
+    });
+
+    it("stays FLIGHT's, off Needs you, after FLIGHT's window has passed", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY);
+      const cfg = superuser();
+      const at = NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS + HOUR;
+      const late = heldItem(cfg, at);
+      expect(late).toMatchObject({ owner: "flight", flightTriage: "handling" });
+      expect(late?.triageDueAt).toBeUndefined();
+      expect(
+        needsYouItems(attentionItems(cfg, store, at, NO_LOCK, [])).map((i) => i.key),
+      ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
+    });
+
+    it("stays FLIGHT's however long ago the Update was first held", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY, NOW - MIN);
+      store.setSetting(HUB_UPDATE_HELD_SINCE, String(NOW - 25 * MIN));
+      expect(heldItem(superuser())).toMatchObject({ owner: "flight", flightTriage: "handling" });
+    });
+
+    it("is the operator's at once when FLIGHT is stopped", () => {
+      flight({ state: "stopped" });
+      held(HUB_UPDATE_HELD_KEY);
+      expect(heldItem(superuser())).toMatchObject({ owner: "operator" });
+    });
+
+    it("is the operator's on a standard repo, and with no FLIGHT seat", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY, NOW - 30 * MIN);
+      // as before this change: nobody can run it for FLIGHT, so it is the operator's once missed
+      const item = heldItem(c);
+      expect(item).toMatchObject({ owner: "operator", flightTriage: "missed" });
+      expect(
+        isOperatorCall({ key: `note:${HUB_UPDATE_HELD_KEY}`, kind: "blocked" }, store, c),
+      ).toBe(true);
+      const noFlight: CcConfig = {
+        ...superuser(),
+        crew: c.crew && {
+          ...c.crew,
+          sessions: c.crew.sessions.map((s) => ({
+            ...s,
+            seats: s.seats.filter((x) => x.id !== "flight-1"),
+          })),
+        },
+      };
+      expect(heldItem(noFlight)).toMatchObject({ owner: "operator" });
+      expect(item && protectedDecisionItem(store, item, c, NOW)).toBe(true);
+    });
+
+    it("keeps a person-only Update the operator's from the start, whoever FLIGHT is", () => {
+      flight();
+      held(HUB_UPDATE_PERSON_KEY);
+      const cfg = superuser();
+      const item = heldItem(cfg, NOW, HUB_UPDATE_PERSON_KEY);
+      expect(item).toMatchObject({ owner: "operator" });
+      expect(item?.flightTriage).toBeUndefined();
+      expect(needsYouAlert({ key: `note:${HUB_UPDATE_PERSON_KEY}`, kind: "blocked" })).toBe(true);
+      expect(
+        isOperatorCall({ key: `note:${HUB_UPDATE_PERSON_KEY}`, kind: "blocked" }, store, cfg),
+      ).toBe(true);
+      expect(item && protectedDecisionItem(store, item, cfg, NOW)).toBe(true);
+      expect(
+        needsYouItems(attentionItems(cfg, store, NOW, NO_LOCK, [])).map((i) => i.key),
+      ).toContain(`note:${HUB_UPDATE_PERSON_KEY}`);
     });
   });
 });

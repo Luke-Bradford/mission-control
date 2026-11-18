@@ -15,7 +15,6 @@ export const MC_TOOL_NAMES = {
   draftPr: "draft_pr",
   askFlight: "ask_flight",
   callFlight: "call_flight",
-  waitOn: "wait_on",
   reportEvidence: "report_evidence",
   reportFindings: "report_findings",
   restoreFile: "restore_file",
@@ -69,6 +68,7 @@ export const MC_TOOL_NAMES = {
   releaseHold: "release_hold",
   returnQuestion: "return_question",
   withdrawQuestion: "withdraw_question",
+  attachMaterials: "attach_materials",
   screenshotHud: "screenshot_hud",
   previewBrowser: "preview_browser",
   editIssue: "edit_issue",
@@ -93,7 +93,6 @@ export const MC_TOOLS = {
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
   askFlight: mcTool(MC_TOOL_NAMES.askFlight),
   callFlight: mcTool(MC_TOOL_NAMES.callFlight),
-  waitOn: mcTool(MC_TOOL_NAMES.waitOn),
   reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
   reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
   restoreFile: mcTool(MC_TOOL_NAMES.restoreFile),
@@ -147,6 +146,7 @@ export const MC_TOOLS = {
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
   returnQuestion: mcTool(MC_TOOL_NAMES.returnQuestion),
   withdrawQuestion: mcTool(MC_TOOL_NAMES.withdrawQuestion),
+  attachMaterials: mcTool(MC_TOOL_NAMES.attachMaterials),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
   previewBrowser: mcTool(MC_TOOL_NAMES.previewBrowser),
   editIssue: mcTool(MC_TOOL_NAMES.editIssue),
@@ -213,7 +213,7 @@ function pathList(paths: readonly string[]): string {
 const isAre = (paths: readonly string[]) => (paths.length === 1 ? "is" : "are");
 
 export const clashText = (paths: readonly string[], call: string, ticket: string): string =>
-  `Note: ${pathList(paths)} ${isAre(paths)} also changed by ${call} on ${ticket}, which is still open; the two PRs may conflict when the second one is merged, and the operator or the controller will resolve it.`;
+  `Note: ${pathList(paths)} ${isAre(paths)} also changed by ${call} on ${ticket}, which is still open; the two PRs may conflict when the second one is merged, and FLIGHT will sort out the order.`;
 
 /** The most paths one commit may remove, and the longest path. */
 export const MC_REMOVE_MAX = 50;
@@ -423,10 +423,9 @@ const CHECKS_ADVICE =
 export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
 /**
  * The `timeout` a seat gives a check call, and the most the CLI lets a call ask for
- * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, and a
- * branch that touches a widely imported file can never finish its related tests inside it (#1398).
- * 45 minutes is above the 39.5 minutes CI's five test jobs add up to on c2bea393, setup included,
- * and on a healthy Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
+ * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, which a
+ * suite a ticket asks for can pass (#1398). 45 minutes covers a full local suite, and on a healthy
+ * Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
  * count: it happens in the PreToolUse hook, before the CLI starts the command's clock.
  */
 export const CHECK_BASH_TIMEOUT_MS = 45 * 60_000;
@@ -437,6 +436,7 @@ export const CHECK_DROP_REASONS = [
   "dirty-end",
   "head-moved",
   "turn-ended",
+  "session-lost",
   "background",
   "timeout",
   "unreadable",
@@ -468,6 +468,8 @@ export const checkDropText = (d: CheckDrop): string => {
       return `a commit moved the head during the call (it started on ${sha7(d.head)}), so it was not counted. Run the check again at this commit.`;
     case "turn-ended":
       return `the turn ended before the call reported its end (it started on ${sha7(d.head)}), so it was not counted. Run the check again and wait for it.`;
+    case "session-lost":
+      return `the earlier check session disappeared before it reported an exit code (it started on ${sha7(d.head)}), so it was not counted. Run the check again; do not keep polling the lost session.`;
     case "background":
       return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
     case "timeout":

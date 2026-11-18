@@ -3,7 +3,6 @@ import {
   type CrewRow,
   type FlightPrFlowRow,
   HUD_COLUMNS,
-  type HudColumn,
   type PullRequestView,
   statusOutOfDate,
 } from "@mc/core";
@@ -12,6 +11,7 @@ import type { NeedsYou } from "../attention.ts";
 import { agoDays, plural } from "../fmt.ts";
 import { Card, type CardProps } from "./Card.tsx";
 import {
+  type BoardColumn,
   type CardRework,
   cardAgent,
   cardColumn,
@@ -27,6 +27,8 @@ import {
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
+  WAITING_COLUMN,
+  withWaiting,
 } from "./cards.ts";
 import { usePhone } from "./phone.ts";
 import { flowChip, flowKey } from "./prFlowChip.ts";
@@ -63,14 +65,16 @@ interface CardCtx {
  * Everything one card shows, in one place: `Card` takes only these values and is memoised on them,
  * so the 5 s clock re-renders only a card whose shown value changed (#26 A1).
  */
-function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
+function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
   const prs = ctx.prsByTicket.get(ticketRef(item)) ?? NO_PRS;
   let when = "";
   if (col === "Done") {
     when =
       ctx.tz === null ? "—" : agoDays(daysAgo(item.updatedAt, ctx.now, ctx.tz, ctx.todayStart));
   }
-  const agent = cardAgent(item, ctx.crew);
+  // a waiting ticket holds no seat: no agent, queue slot or reviewer on its card
+  const waits = col === WAITING_COLUMN;
+  const agent = waits ? null : cardAgent(item, ctx.crew);
   const pr = cardPr(item, prs);
   const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
   const check = pr?.check ? flowChip(pr.check, ctx.flow.get(flowKey(pr.repoId, pr.number))) : null;
@@ -81,7 +85,7 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     agent,
     step: agent ? cardStep(agent) : null,
     queued: agent ? null : cardQueue(item, ctx.crew),
-    reviewer: col === "Done" ? null : cardReviewer(item, pr, ctx.crew),
+    reviewer: col === "Done" || waits ? null : cardReviewer(item, pr, ctx.crew),
     pr,
     checkLabel: check?.label ?? null,
     checkTone: check?.tone ?? null,
@@ -120,7 +124,7 @@ export function Kanban({
   todayStart,
   rework = NO_REWORK,
   flow = NO_FLOW,
-  columns = HUD_COLUMNS,
+  columns: columnsProp = HUD_COLUMNS,
   notIn,
   metrics = {},
   id = "kanban",
@@ -139,11 +143,11 @@ export function Kanban({
   /** The PR flow's rows per `repo#pr` (`flowByPr`). */
   flow?: ReadonlyMap<string, FlightPrFlowRow>;
   /** The columns to draw, in order; default all eight. */
-  columns?: readonly HudColumn[];
+  columns?: readonly BoardColumn[];
   /** Per column, the repo ids that lack it (Together layout): shown as `not in {ids}`. */
-  notIn?: ReadonlyMap<HudColumn, string[]>;
+  notIn?: ReadonlyMap<BoardColumn, string[]>;
   /** Registry figures shown in place of a Status-column's local card count. */
-  metrics?: Partial<Record<HudColumn, KanbanColumnMetric>>;
+  metrics?: Partial<Record<BoardColumn, KanbanColumnMetric>>;
   id?: string;
 }) {
   const prsByTicket = useMemo(() => {
@@ -167,9 +171,10 @@ export function Kanban({
     rework,
     flow,
   };
+  const columns = withWaiting(columnsProp, items);
   const phone = usePhone();
   const uid = useId();
-  const [picked, setPicked] = useState<HudColumn | null>(null);
+  const [picked, setPicked] = useState<BoardColumn | null>(null);
   const [doneExpanded, setDoneExpanded] = useState(false);
   const lists = new Map(
     columns.map((col) => [col, sortCards(items.filter((i) => cardColumn(i) === col))]),
@@ -179,7 +184,7 @@ export function Kanban({
   // A picked column that has emptied is forgotten, so a refill does not silently reopen it.
   if (picked !== null && !filled.includes(picked)) setPicked(null);
   const openCol = picked !== null && filled.includes(picked) ? picked : (filled[0] ?? null);
-  const panelId = (col: HudColumn) => `${uid}-${col.replace(/\W+/g, "-")}`;
+  const panelId = (col: BoardColumn) => `${uid}-${col.replace(/\W+/g, "-")}`;
   return (
     <div className="kanban" id={id}>
       {columns.map((col) => {

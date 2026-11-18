@@ -45,11 +45,13 @@ import {
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
+  COMMS_MC,
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
   CREW_GIT_ENV,
   CREW_PNPM_ENV,
+  CREW_PNPM_NO_INSTALL_ENV,
   type CrewVendor,
   carriedFrom,
   clockHm,
@@ -75,7 +77,7 @@ import {
   handoffText,
   hasPlanSection,
   inferTicket,
-  isProtectedPath,
+  isObj,
   isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
@@ -93,8 +95,7 @@ import {
   type Profile,
   type ProfileOverride,
   pathGrantProblem,
-  pathInArea,
-  prEvidenceAffectedPages,
+  pathsNeedingGrant,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -136,10 +137,11 @@ import { accountBindingProblem, codexProfile } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
-import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli/update.ts";
 import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
+import { chooseRunProfile, type ProfilesError, profileHash } from "../config/profiles.ts";
 import {
   applySeatAccount,
   type CcConfig,
@@ -151,8 +153,6 @@ import {
   realish,
   seatUnavailable,
 } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
-import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -162,24 +162,19 @@ import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
+import { mapTree } from "../map/snapshot.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
-import { paceStartCheck } from "../pace.ts";
-import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
+import type { ReviewEvidenceDeps } from "../pr-evidence/capture.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
-import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import type { ReviewPreviews } from "../preview/review.ts";
-import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
-import {
-  mergeSections,
-  type PromptPiece,
-  promptSections,
-  textBytes,
-  ticketPiece,
-} from "../prompt-cost.ts";
+import { waitReader } from "../queue/dependencies.ts";
+import { cleanText } from "../repo/clean.ts";
+import { approvedPaths, runPathGrants, setRunPathGrants } from "../repo/path-grants.ts";
 import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
+import { reviewReach } from "../review/reach.ts";
 import {
   enrichHandoff,
   handoffForBrief,
@@ -205,6 +200,14 @@ import {
   crewTranscriptPath,
 } from "../store/crew-paths.ts";
 import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
+import { paceStartCheck } from "../telemetry/pace.ts";
+import {
+  mergeSections,
+  type PromptPiece,
+  promptSections,
+  textBytes,
+  ticketPiece,
+} from "../telemetry/prompt-cost.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,
@@ -236,6 +239,7 @@ import {
   prepareScratch,
   prepareSharedPnpmStore,
   type RepoPeer,
+  reinstallTrimmed,
   removeCheckout,
   sharedPnpmStoreDir,
   sweepPnpmStores,
@@ -274,6 +278,7 @@ import {
   processInfo,
 } from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
+import { nodeFirstPath, ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "./node-first.ts";
 import {
   attachSession,
   type CrewSession,
@@ -291,6 +296,9 @@ export function crewTempRoot(dbPath: string, runId: string, uid: number): string
   const key = createHash("sha256").update(`${dbPath}:${runId}`).digest("hex").slice(0, 12);
   return `/tmp/m${uid.toString(36)}/${key}`;
 }
+
+/** The least a session is given when the run's budget is spent: it stops at once, and the hub parks the run. */
+const MIN_SESSION_BUDGET_USD = 0.01;
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
@@ -461,10 +469,8 @@ export interface SupervisorDeps {
   login: () => string | null;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
-  /** A web PR's stored screenshot pairs; a review of a head that has them reads them in its copy. */
-  prEvidence?: PrEvidenceStore;
-  /** The repo whose web PRs carry screenshot pairs. */
-  prEvidenceRepo?: RepoId;
+  /** A web PR's stored screenshot pairs, which a review of a head that has them reads in its copy, and the pages the capture finds for a head. */
+  evidence?: ReviewEvidenceDeps;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -523,6 +529,8 @@ export interface SupervisorDeps {
   inbox?: (seatId: string, runId: string) => InboxContext;
   /** Opens a preview of a web PR's head for its review run and closes it when the run ends. */
   reviewPreviews?: ReviewPreviews;
+  /** The default branch's import edges for a clone; tests replace it, the hub reads the map tree. */
+  importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
 }
 
 export interface InboxContext {
@@ -642,7 +650,7 @@ export interface Supervisor {
    * "carry on" line. A 409 while the seat is busy (or the run is not aside); a run that cannot be
    * resumed is ended `failed` and a 500 thrown.
    */
-  wakeRun(runId: string): Promise<void>;
+  wakeRun(runId: string, options?: { reviewResume?: boolean }): Promise<void>;
   /**
    * The operator ends a run that is set aside, without waking a CLI: the run ends ok (endedBy
    * operator), its worktree is removed and the seat is left as it is. A 409 when the run is not
@@ -734,6 +742,8 @@ export interface Supervisor {
    * does not block what follows. The mc tools' git writes go through here.
    */
   inClone<T>(checkout: string, fn: () => Promise<T>): Promise<T>;
+  /** Whether a run is starting in the worktree: from its install until the seat's session points at it. */
+  isStartingWorktree(path: string): boolean;
 }
 
 /** One seat `busy()` names. */
@@ -933,7 +943,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
   const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
-  const FLIGHT_RUNTIME_PROFILE = "controller-v2";
+  const FLIGHT_RUNTIME_PROFILE = "controller-v3";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
     createHash("sha256")
       .update(JSON.stringify(Object.entries(env ?? {}).sort()))
@@ -947,10 +957,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
+  const startingWorktrees = new Set<string>();
+  /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
   const handoffJobs = new Map<string, Promise<void>>();
   const handoffWorktrees = new Map<string, string>();
+  /** Runs the engine is waking for rework: that is a fix, not a "carry on" resume the waste alarm counts. */
+  const wakingRuns = new Set<string>();
   const deferredRecoveries = new Set<string>();
   let recoveringDeferred: Promise<void> | null = null;
   let unpauseResume: (() => void) | undefined;
@@ -1190,6 +1205,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
+    // a fresh fix session that died at start is the wake's to answer (it resumes the old one)
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
@@ -1414,7 +1430,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return p;
   }
 
-  function writeLine(l: Live, text: string, beforeWrite?: () => void): DeliveryEnvelope {
+  function writeLine(l: Live, line: string, beforeWrite?: () => void): DeliveryEnvelope {
     // Reload applies focus by replacing seat objects. Never import the launch-time copy again.
     const current = findSeat(l.info.seat.id);
     if (!current)
@@ -1427,7 +1443,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       current.seat,
       l.run.id,
       seatDef(l.info.seat).loop === "watch",
-      text,
+      line,
     );
     beforeWrite?.();
     const pending = pendingPromptVersions.get(l.run.id);
@@ -1478,6 +1494,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /** The map tree's import edges at the default branch, cached per commit in the store. */
+  const defaultImportGraph = async (checkout: string) =>
+    (
+      await mapTree(checkout, "origin/HEAD", [], [], Date.now(), {
+        get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+        put: (kind, scope, key, value, exclusive) =>
+          store.mapCachePut(kind, scope, key, value, exclusive),
+      })
+    ).imports;
+
   function inClone<T>(checkout: string, fn: () => Promise<T>): Promise<T> {
     const prev = cloneQueues.get(checkout) ?? Promise.resolve();
     const p = prev.then(fn, fn);
@@ -1508,13 +1534,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * pnpm's store is hub-owned below crew.worktrees, never inside a worktree or seat temp root.
    * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
-  function crewEnv(seatId: string, tmp: string, fullGit = false): NodeJS.ProcessEnv {
+  function crewEnv(
+    seatId: string,
+    tmp: string,
+    fullGit = false,
+    readOnlyReview = false,
+  ): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
       if (v !== undefined) env[k] = v;
     }
     env.HOME = homedir();
+    env.PATH = nodeFirstPath(process.execPath, env.PATH ?? "");
     env.TMPDIR = tmp;
     env.TMP = tmp;
     env.TEMP = tmp;
@@ -1530,7 +1562,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       delete git.GIT_CONFIG_NOSYSTEM;
       delete git.GIT_ATTR_NOSYSTEM;
     }
-    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...git };
+    // a review with nothing installed: a stray pnpm call must not start an install from the PR
+    const noInstall: NodeJS.ProcessEnv = readOnlyReview ? CREW_PNPM_NO_INSTALL_ENV : {};
+    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...noInstall, ...git };
   }
 
   /**
@@ -1808,6 +1842,48 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     );
   }
 
+  /**
+   * The dollars one CLI session may spend: the run's budget less what its other sessions spent. The
+   * CLI counts only its own session, so a fresh fix session (#1643), or a resume of one, would
+   * otherwise get the whole budget again. A run with one session gets its whole budget. The spend
+   * is the larger of the run's cost and the sum of the transcript's latest `total_cost_usd` per
+   * session; this session's own figure is left out. Undefined when the run has no dollar cap.
+   */
+  function sessionBudget(run: Run, sessionId: string): number | undefined {
+    const budget = run.profile?.profile.budgetUsd;
+    if (budget == null) return undefined;
+    const costs = new Map<string, number>();
+    try {
+      let current = "";
+      for (const line of readFileSync(run.transcriptPath, "utf8").split("\n")) {
+        if (!line.startsWith("{")) continue;
+        const init = line.includes('"init"');
+        if (!init && !line.includes('"total_cost_usd"')) continue;
+        let ev: unknown;
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!isObj(ev)) continue;
+        if (ev.type === "system" && ev.subtype === "init" && typeof ev.session_id === "string")
+          current = ev.session_id;
+        else if (ev.type === "result" && typeof ev.total_cost_usd === "number")
+          costs.set(typeof ev.session_id === "string" ? ev.session_id : current, ev.total_cost_usd);
+      }
+    } catch {
+      // no readable transcript: the run's own cost stands
+    }
+    const spent = Math.max(
+      run.costUsd ?? 0,
+      [...costs.values()].reduce((a, b) => a + b, 0),
+    );
+    const others = Math.max(0, spent - (costs.get(sessionId) ?? 0));
+    // whole cents, rounded down, so the CLI never gets more than is left
+    const cents = Math.floor((budget - others) * 100 + 1e-9) / 100;
+    return Math.max(cents, MIN_SESSION_BUDGET_USD);
+  }
+
   function launch(
     info: SeatInfo,
     run: Run,
@@ -1823,6 +1899,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const pause = pausedSeat(store, info.seat.id, run.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
     const def = seatDef(info.seat);
+    const readOnlyReview =
+      run.reviewId != null && store.review(run.reviewId)?.installNote !== undefined;
     const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
     const upgradeFlight =
       fullAccess && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
@@ -2043,10 +2121,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const dir = crewKeeperDir(deps.dbPath, run.id);
         const runDir = crewCodexDir(deps.dbPath, run.id);
         const home = join(runDir, "codex-home");
-        const zdotdir = join(runDir, "zsh-empty");
+        // outside the data folder, which the seat sandbox denies: zsh could not read a .zprofile there
+        const zdotdir = join(crew?.worktrees ?? "", ZSH_NODE_FIRST_DIR);
         const env = Object.fromEntries(
           Object.entries(
-            crewEnv(info.seat.id, tmp, crewProfileOf(info.seat.role, def.loop) === "flight-full"),
+            crewEnv(
+              info.seat.id,
+              tmp,
+              crewProfileOf(info.seat.role, def.loop) === "flight-full",
+              readOnlyReview,
+            ),
           ).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
           ),
@@ -2093,6 +2177,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(runDir, { recursive: true, mode: 0o700 });
             mkdirSync(home, { recursive: true, mode: 0o700 });
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
+            // a login shell's /etc/zprofile reorders PATH: put the hub's Node back first
+            // (the same file for every seat, so one folder; read-only to a seat)
+            writePrivate(join(zdotdir, ".zprofile"), zprofileNodeFirst(process.execPath));
             writePrivate(
               join(home, "config.toml"),
               // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
@@ -2129,7 +2216,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
-          maxBudgetUsd: run.profile?.profile.budgetUsd,
+          maxBudgetUsd: sessionBudget(run, cliSessionId),
           mode: def.mode,
           profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
@@ -2165,6 +2252,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             info.seat.id,
             tmpPath,
             crewProfileOf(info.seat.role, def.loop) === "flight-full",
+            readOnlyReview,
           ),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
@@ -2190,7 +2278,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       spawnedAt: resume ? Date.now() : null,
     });
     // a carry-on resume is recorded: three without a report is a retry loop (waste alarm)
-    if (l.resumedAt !== null) store.addResumeAttempt(run.id, l.resumedAt);
+    if (l.resumedAt !== null && !wakingRuns.has(run.id))
+      store.addResumeAttempt(run.id, l.resumedAt);
     // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
     if (resume) {
       void session.ready.then(() => {
@@ -2226,6 +2315,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       cwd,
       lock: deps.lock,
       ...(deps.checks === undefined ? {} : { checks: deps.checks }),
+      tell: (text) => {
+        const l = live.get(info.seat.id);
+        if (l?.run.id !== run.id) return;
+        try {
+          l.session.send(text);
+        } catch {
+          // the seat is gone; the guard hit still records the refusal
+        }
+      },
       superuserTools: deps.superuserTools,
       runGrants: () => runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }),
       record: (rule, text) => {
@@ -3421,6 +3519,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
+    let startedWorktree: string | null = null;
     let handoff: RunHandoff | null = null;
     const handoffClaim = randomUUID();
     try {
@@ -3545,10 +3644,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const grants: string[] = [];
       if (def.mode === "writer" && !planner) {
         const extra = info.repo.protectedFiles ?? [];
-        for (const p of ticketPathGrants(ticket.body)) {
+        for (const p of pathsNeedingGrant(info.seat.area, ticketPathGrants(ticket.body), extra)) {
           const why = pathGrantProblem(p, extra);
           if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
-          if (!pathInArea(info.seat.area, p) || isProtectedPath(p, extra)) grants.push(p);
+          grants.push(p);
         }
         const approved = approvedPaths(store, ref);
         const unapproved = grants.filter((p) => !approved.includes(p));
@@ -3595,6 +3694,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
+                mergedPullRequestBranches: store.mergedPullRequestBranches(info.repo.id),
+                openPullRequestBranches: store
+                  .pullRequests(info.repo.id)
+                  .filter((pr) => pr.state === "open")
+                  .map((pr) => pr.branch),
                 ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),
@@ -3602,6 +3706,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                   clearPending: (path) => store.clearCheckoutPending(path),
                 },
               });
+        // still under the clone lock: the tidy never sees the gap before the run row exists
+        if (!planner && !readOnly) {
+          startedWorktree = c.path;
+          startingWorktrees.add(c.path);
+        }
         return {
           checkout: c,
           repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
@@ -3902,6 +4011,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } finally {
       if (handoff && !readOnly && !planner) store.releaseHandoff(handoff.runId, handoffClaim);
       starting.delete(seatId);
+      if (startedWorktree !== null) startingWorktrees.delete(startedWorktree);
     }
   }
 
@@ -4383,7 +4493,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           try {
             const inputs = await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null);
             const screenshots = await stageReviewEvidence(
-              deps.prEvidence,
+              deps.evidence?.store,
               info.repo.id,
               review.prNumber,
               review.sha,
@@ -4395,15 +4505,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 { cause: e },
               );
             });
-            if (
-              screenshots === undefined &&
-              deps.prEvidenceRepo === info.repo.id &&
-              prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
-            )
-              throw new SupervisorError(
-                409,
-                "screenshot evidence is not ready for this review head",
-              );
+            if (screenshots === undefined && deps.evidence?.repoId === info.repo.id) {
+              const pages = await deps.evidence.pages({
+                repoId: info.repo.id,
+                pr: review.prNumber,
+                sha: review.sha,
+                paths: store.prFilePaths(info.repo.id, review.prNumber),
+              });
+              if (pages.length > 0)
+                throw new SupervisorError(
+                  409,
+                  "screenshot evidence is not ready for this review head",
+                );
+            }
             return {
               scratch: s,
               inputs,
@@ -4458,11 +4572,28 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      if (scratch.installNote !== undefined) {
+        store.setReviewInstallNote(reviewId, scratch.installNote);
+        const flight = config.crew?.sessions
+          .flatMap((session) => session.seats)
+          .find((seat) => seatDef(seat).loop === "watch");
+        if (flight !== undefined)
+          store.addComms({
+            at: now(),
+            from: COMMS_MC,
+            senderKind: "hub",
+            to: flight.id,
+            ticket: run.ticket,
+            ref: run.ticket,
+            text: `PR #${review.prNumber} is reviewed without an install. ${scratch.installNote}`,
+          });
+      }
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       // A web PR's review gets a preview of its head, built in the background: the review does not
       // wait for it, and one that cannot start does not stop the review.
+      // A read-only review installs nothing from the PR, and a preview would install its packages.
       const previewStarting =
-        deps.reviewPreviews === undefined
+        deps.reviewPreviews === undefined || scratch.installNote !== undefined
           ? false
           : await deps.reviewPreviews.open({
               runId,
@@ -4479,6 +4610,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // An ended run's PR: its earlier heads' reviews belong to the crew run, so the findings still
       // open there are not in `prev`.
       const olderFindings = external ? openOlderFindings(store, review, prev?.id ?? null) : [];
+      // The files that import the change: a missing graph leaves the line out, never the review.
+      const changedPaths = store.prFilePaths(info.repo.id, review.prNumber);
+      const reach = await (deps.importGraph ?? defaultImportGraph)(info.session.checkout).then(
+        (edges) => reviewReach(edges, changedPaths),
+        () => null,
+      );
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
@@ -4502,10 +4639,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           : [],
         prevReply,
         ...(olderFindings.length > 0 ? { olderFindings } : {}),
+        ...(reach === null ? {} : { reach }),
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
+        ...(scratch.installNote === undefined ? {} : { installNote: scratch.installNote }),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),
@@ -4837,6 +4976,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
     starting.add(seatId);
+    wakingRuns.add(runId);
     try {
       /** The run cannot go back: it ends `failed`, the seat (another run's now) untouched. */
       const fail = (reason: string, cause?: unknown): never => {
@@ -4858,10 +4998,41 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return fail(RESUME_MODE_CHANGED);
       }
       let checkout: { path: string; branch: string; gitDir: string };
+      /** Set when the dependencies could not come back: a blip the engine retries, not a lost run. */
+      const reinstall: { failed: boolean; cause: unknown } = { failed: false, cause: null };
       try {
-        checkout = await existingCheckout(info.session.checkout, aside.worktree, run.branch);
+        const branch = run.branch;
+        // Under the clone lock, as the crew tidy is: the worktree is marked in use before the lock
+        // lets go, and its dependencies are back (the tidy trims a set-aside run's) before launch.
+        checkout = await inClone(info.session.checkout, async () => {
+          const c = await existingCheckout(info.session.checkout, aside.worktree, branch);
+          startingWorktrees.add(aside.worktree);
+          try {
+            await reinstallTrimmed(
+              {
+                checkout: info.session.checkout,
+                worktreesRoot: crew?.worktrees ?? "",
+                sessionId: info.session.id,
+                peers: clonePeers(deps.config, deps.hubRoot),
+              },
+              aside.worktree,
+              branch,
+            );
+          } catch (e) {
+            reinstall.failed = true;
+            reinstall.cause = e;
+          }
+          return c;
+        });
       } catch (e) {
         return fail("could not resume: checkout missing", e);
+      }
+      if (reinstall.failed) {
+        // the run, its session and its worktree stay: the engine's next pass tries again
+        log(`${seatId}: could not reinstall dependencies: ${errText(reinstall.cause)}`);
+        throw new SupervisorError(502, "could not resume: dependencies could not be reinstalled", {
+          cause: reinstall.cause,
+        });
       }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // the check awaited: the engine may have ended the run meanwhile
@@ -4957,7 +5128,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           store.setRunLoop(runId, { ...current, aside: null });
       }
     } finally {
+      wakingRuns.delete(runId);
       starting.delete(seatId);
+      startingWorktrees.delete(aside.worktree);
     }
   }
 
@@ -5377,6 +5550,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     },
 
     inClone,
+
+    isStartingWorktree: (path) => startingWorktrees.has(path),
   };
 }
 

@@ -126,6 +126,10 @@ export async function apiQaReportImage(id: string): Promise<Blob> {
 /** A picture on an operator route, as a PNG blob; only paths `pictureRoute` accepted come here. */
 export const apiOperatorPicture = (path: string): Promise<Blob> => operatorPng(path);
 
+/** Retained question pictures may be PNG, JPEG or WebP; every other operator image is a PNG. */
+const RASTER_TYPE = /^image\/(?:png|jpeg|webp)/;
+const PNG_TYPE = /^image\/png/;
+
 async function operatorPng(path: string): Promise<Blob> {
   await loadOperatorToken();
   const read = () =>
@@ -140,7 +144,8 @@ async function operatorPng(path: string): Promise<Blob> {
     response = await read();
   }
   if (!response.ok) throw await errorOf(response);
-  if (!response.headers.get("content-type")?.startsWith("image/png"))
+  const type = response.headers.get("content-type") ?? "";
+  if (!(path.startsWith("/api/attention-material-assets/") ? RASTER_TYPE : PNG_TYPE).test(type))
     throw new Error("The review image is not a PNG.");
   return response.blob();
 }

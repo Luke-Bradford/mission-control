@@ -27,10 +27,10 @@ import {
   STDERR_TEXT_MAX,
   STOP_GRACE_MS,
 } from "@mc/core";
-import { cleanText } from "../clean.ts";
 import { CLAUDE_COMMAND } from "../cli/version.ts";
-import { toolResultBytes } from "../prompt-cost.ts";
-import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
+import { cleanText } from "../repo/clean.ts";
+import { STREAM_EVENT_PREFIX } from "../run/streamjson.ts";
+import { toolResultBytes } from "../telemetry/prompt-cost.ts";
 import { sleep, str } from "../util.ts";
 import {
   CLI_PID_FILE,
@@ -404,6 +404,8 @@ function createDriver(i: {
     await endKeeper(i.dir, i.stopGraceMs, i.log);
     if (finished || detached) return;
     const e = readKeeperExit(i.dir);
+    // The keeper may end before the socket hands over the CLI's last words; its exit file kept them.
+    if (e?.lastStderr != null) stderrText(e.lastStderr);
     end({ code: e?.code ?? null, signal: e?.signal ?? null });
   }
 

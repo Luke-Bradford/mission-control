@@ -5,8 +5,7 @@ import { COMMS_FLIGHT_ESCALATION_MS, COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT } from "@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { evaluateHolds, holdItem, nothingForOperator } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
-import { wakeReasonWords } from "../src/flight/state.ts";
-import { agentViews, attentionItems } from "../src/hud.ts";
+import { agentViews, attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const SENT = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -72,7 +71,7 @@ afterEach(() => {
 });
 
 describe("Needs you counts only what the operator must answer", () => {
-  it("a FLIGHT message starting 'For the controller:' is never the operator's", () => {
+  it("a FLIGHT message starting 'For the controller:' makes no item: no controller reads it", () => {
     for (const label of ["question", "blocker"] as const) {
       store.addComms({
         at: SENT,
@@ -97,12 +96,8 @@ describe("Needs you counts only what the operator must answer", () => {
     );
     const mine = items.filter((i) => i.owner === "operator");
     expect(mine.map((i) => i.text)).not.toContain("For the controller: tooling question blocker");
-    expect(items.some((i) => i.text.startsWith("For the controller:"))).toBe(true);
-    expect(
-      items
-        .filter((i) => i.text.startsWith("For the controller:"))
-        .every((i) => i.owner === "controller"),
-    ).toBe(true);
+    expect(items.some((i) => i.text.startsWith("For the controller:"))).toBe(false);
+    expect(items.some((i) => i.text === "A real question for you")).toBe(true);
   });
 
   it("a loop paused by its configured issue keeps its issues on its card", () => {
@@ -160,66 +155,6 @@ describe("Needs you counts only what the operator must answer", () => {
     ).toBe(false);
   });
 
-  it("each wake fact reads in words: no category name, no colon-joined key, no epoch", () => {
-    const at = Date.UTC(2026, 10, 6, 14, 3);
-    const cases: [string, unknown, string][] = [
-      ["q", 1, "question 1"],
-      [
-        "prFlow",
-        `1415:stage:review:${at}`,
-        "PR #1415 has stood at the review step since 6 Nov 14:03",
-      ],
-      ["prFlow", `9:unowned:${at}`, "PR #9 has had no owner since 6 Nov 14:03"],
-      ["prFlow", `9:waiting:operator:${at}`, "PR #9 has waited on the operator since 6 Nov 14:03"],
-      ["signals", "seat_call:GUIDO-1", "seat call on GUIDO-1"],
-      ["signals", "item_stale:esc:repo#7", "item stale on esc:repo#7"],
-      ["triage", "repo#12:missed", "FLIGHT missed repo#12"],
-      ["items", "comms-open:42", "Comms message 42 waits for an answer"],
-      ["items", "pr:repo#9:PR #9 · You: review", "PR #9 · You: review"],
-      ["parked", "GUIDO-1:repo#5:budget", "GUIDO-1 is parked on repo#5 (budget)"],
-      ["idle", "GUIDO-1:30m", "GUIDO-1 idle 30m"],
-      ["prs", "repo#12:9:true:open:review:", "PR #9 (repo#12) waits on FLIGHT to review"],
-      [
-        "planned",
-        ["p1", at, "check", "repo#12", "look again"],
-        "look again on repo#12, due 6 Nov 14:03",
-      ],
-      ["stopped", "GUIDO-1", "GUIDO-1 is stopped"],
-    ];
-    for (const [category, item, words] of cases) {
-      const got = wakeReasonWords(
-        { id: `${category}:${JSON.stringify(item)}`, label: "ignored", targets: [] },
-        "Europe/London",
-      );
-      expect(got).toBe(words);
-      expect(got).not.toMatch(/\d{13}/);
-      expect(got.startsWith(`${category} `)).toBe(false);
-    }
-  });
-
-  const noteItems = (c: CcConfig) =>
-    attentionItems(c, store, NOW).filter((i) => i.key === "note:flight:left");
-  const leftNote = (text: string) =>
-    store.raiseNote({
-      key: "flight:left",
-      kind: "blocked",
-      runId: null,
-      seatId: "FLIGHT-1",
-      repoId: "repo",
-      text,
-      at: SENT,
-    });
-
-  it("keeps the wake-left reminder off operator attention, however many reasons it names", () => {
-    leftNote("FLIGHT left 1 wake reason without a decision after two wakes: PR #9 waited");
-    expect(noteItems(config(false))).toEqual([]);
-    expect(store.notes().some((n) => n.key === "flight:left")).toBe(true);
-    store.clearNote("flight:left", SENT + 1);
-    leftNote("FLIGHT left 5 wake reasons without a decision after two wakes: PR #9 waited");
-    expect(noteItems(config(false))).toEqual([]);
-    expect(store.notes().some((n) => n.key === "flight:left")).toBe(true);
-  });
-
   it("a review PR no run owns is FLIGHT's, not the operator's", () => {
     store.replaceBoard("repo", [
       {
@@ -274,7 +209,7 @@ describe("Needs you counts only what the operator must answer", () => {
     expect(prs[0]?.owner).not.toBe("operator");
     expect(prs[0]?.text).toBe("PR #9 · You: review");
   });
-  it("the 17:40 crew items stay off operator attention while their internal reminder remains readable", () => {
+  it("the 17:40 crew items stay off operator attention", () => {
     const c = config();
     c.repos.push({ id: "repo2", github: "o/repo2", project: 2, statusMap: {}, autonomy: "draft" });
     store.upsertRun({
@@ -310,21 +245,6 @@ describe("Needs you counts only what the operator must answer", () => {
       escalation(31, "studio question one"),
       escalation(32, "studio question two"),
     ]);
-    // the wake-left alert, in words
-    const at = Date.UTC(2026, 10, 6, 14, 3);
-    const words = wakeReasonWords(
-      { id: `prFlow:"1415:stage:review:${at}"`, label: "x", targets: [] },
-      "Europe/London",
-    );
-    store.raiseNote({
-      key: "flight:left",
-      kind: "blocked",
-      runId: null,
-      seatId: "FLIGHT-1",
-      repoId: "repo",
-      text: `FLIGHT left 5 wake reasons without a decision after two wakes: ${words}`,
-      at: SENT,
-    });
     // three review PRs no run owns
     const board = [1, 2, 3].map((n) => ({
       repoId: "repo2",
@@ -391,9 +311,6 @@ describe("Needs you counts only what the operator must answer", () => {
     const all = attentionItems(c, store, NOW, undefined, undefined, null, true);
     const mine = all.filter((i) => i.owner === "operator");
     expect(mine).toEqual([]);
-    const reminder = store.notes().find((n) => n.key === "flight:left");
-    expect(reminder).toBeDefined();
-    expect(reminder?.text).not.toMatch(/\d{13}/);
     expect(all.filter((i) => i.hold && !nothingForOperator(i))).toEqual([]);
     expect(all.filter((i) => i.kind === "pr")).toHaveLength(3);
   });

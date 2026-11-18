@@ -480,7 +480,7 @@ async function boundPersonChoice(kind: "person-post" | "person-handled", teams =
     required(n.message).source.kind = "teams";
     store.upsertNotifications([n], false, NOW);
   }
-  const { attentionItems } = await import("../src/hud.ts");
+  const { attentionItems } = await import("../src/hud/hud.ts");
   const { bindCompleteBrief } = await import("../src/brief/prepare.ts");
   const source = required(attentionItems(config, store, NOW).find((item) => item.key === KEY));
   const content: AttentionBrief = {

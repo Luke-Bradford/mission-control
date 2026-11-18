@@ -7,7 +7,7 @@ import {
   type RepoRules,
 } from "@mc/core";
 import { z } from "zod";
-import { protectedGlob } from "../globs.ts";
+import { protectedGlob } from "../repo/globs.ts";
 
 /**
  * A label glob: repo-relative, and `**` only as a trailing `/**`, else it would match wrongly
@@ -57,6 +57,9 @@ export const repoRulesSchema = z.strictObject({
   // exact commands, matched whole against a seat's shell call: see check-runs.ts
   checks: z.array(checkCommand).optional(),
 });
+
+/** What a repo block or the config.yaml `rules` key declares, before defaults fill in. */
+export type RepoBlock = z.infer<typeof repoRulesSchema>;
 
 /** Resolve user config over defaults; supplied maps and lists replace defaults. */
 export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules {

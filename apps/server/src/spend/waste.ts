@@ -1,7 +1,8 @@
 /**
  * Waste alarms: hub code over recorded runs, check runs and reviews. Each check is scoped to one
- * ticket, run or seat. An alarm never becomes a Needs-you item: FLIGHT is woken once per alarm
- * (the `waste_alarm` signal), and Audit shows it.
+ * ticket, run or seat. An alarm never becomes a Needs-you item. An alarm about one ticket going
+ * round wakes FLIGHT once (`WASTE_WAKES_FLIGHT`, the `waste_alarm` signal); the rest are stored,
+ * and GET /api/waste serves the open ones.
  */
 import {
   FLIGHT_ACTIVITY_DAYS,
@@ -148,7 +149,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
       seatId: null,
       runId: null,
       level: failed.length + resumed.reduce((n, x) => n + x.n, 0),
-      evidence: `${ticket} is parked: ${parts.join("; ")}. FLIGHT takes the next ticket.`,
+      evidence: `${ticket} is parked: ${parts.join("; ")}. It stays parked until FLIGHT resolves this alarm.`,
     });
   }
 
@@ -224,7 +225,8 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     const hours = Math.floor((now - w.since) / HOUR_MS);
     out.push({
       check: "clearance-waiting",
-      subject: w.runId,
+      // per head: resolving one head's alarm must not hold back the next head's
+      subject: `${w.runId}@${w.head}`,
       repoId: w.repoId,
       ticket: w.ticket,
       seatId: w.agentId,
@@ -260,10 +262,11 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     });
   }
 
-  // Runs per ticket: more than three developer runs without a merge.
+  // Runs per ticket: more than three developer runs without a merge, on a ticket still open on the board.
+  const open = q.openTickets();
   for (const [ticket, list] of byTicket) {
     const own = list.filter(developer);
-    if (done(ticket) || own.length <= t.runsPerTicket) continue;
+    if (done(ticket) || !open.has(ticket) || own.length <= t.runsPerTicket) continue;
     const blocking = q.blockingByRun(own.map((r) => r.id));
     out.push({
       check: "runs-per-ticket",
@@ -343,11 +346,26 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     "WHERE check_id = 'retry-loop' AND opened_at >= ?",
     now - 7 * 24 * HOUR_MS,
   );
+  const rePlans = parkedBefore.length
+    ? store.flightDecisions(now - 7 * 24 * HOUR_MS, -1).filter((d) => d.kind === "re-plan")
+    : [];
   for (const a of parkedBefore) {
     if (a.ticket === null) continue;
-    const startedAfter = (byTicket.get(a.ticket) ?? []).filter(
-      (r) => r.startedAt > a.openedAt && developer(r),
-    );
+    const ticket = a.ticket;
+    const developerRuns = (byTicket.get(ticket) ?? []).filter(developer);
+    // A deliberate revive: FLIGHT logged a re-plan for the ticket after the alarm opened and after
+    // the run before this one began, and before this run started. A later restart is not covered.
+    const aboutTicket = (about: string): boolean => {
+      for (let i = about.indexOf(ticket); i >= 0; i = about.indexOf(ticket, i + 1))
+        if (!/\d/.test(about[i + ticket.length] ?? "")) return true;
+      return false;
+    };
+    const revived = (r: Run): boolean => {
+      const before = developerRuns.filter((x) => x.startedAt < r.startedAt);
+      const from = Math.max(a.openedAt, ...before.map((x) => x.startedAt));
+      return rePlans.some((d) => d.at > from && d.at < r.startedAt && aboutTicket(d.about));
+    };
+    const startedAfter = developerRuns.filter((r) => r.startedAt > a.openedAt && !revived(r));
     if (startedAfter.length === 0 || done(a.ticket)) continue;
     out.push({
       check: "ticket-churn",
@@ -435,6 +453,42 @@ export function reviewsHeld(store: Store, authorRunId: string): boolean {
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
   return rounds > resolved;
+}
+
+/**
+ * FLIGHT's settle closes this run's review-rounds hold at the live round, not at whatever level the
+ * scan last wrote (or before it wrote one), so reviews start again. False when no hold stands.
+ */
+export function settleReviewRounds(
+  store: Store,
+  run: { id: string; agentId: string; ticket: string | null; repoId?: string | null },
+  at: number,
+  basis: string,
+): boolean {
+  if (!reviewsHeld(store, run.id)) return false;
+  const rounds = store.waste.maxRound(run.id);
+  const evidence = `${run.ticket ?? run.id} is on review round ${rounds}; FLIGHT settled the park.`;
+  const open = store.waste.alarms(
+    "WHERE check_id = 'review-rounds' AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",
+    run.id,
+  )[0];
+  let id = open?.id;
+  if (open !== undefined) store.waste.updateAlarm(open.id, rounds, evidence);
+  else
+    id = store.waste.insertAlarm(
+      {
+        check: "review-rounds",
+        subject: run.id,
+        repoId: run.repoId ?? "",
+        ticket: run.ticket,
+        seatId: run.agentId,
+        runId: run.id,
+        level: rounds,
+        evidence,
+      },
+      at,
+    );
+  return id !== undefined && store.waste.resolveAlarm(id, at, basis);
 }
 
 /** The refusal text for an unchanged rerun, and the record of it, for the hook. */
@@ -525,7 +579,7 @@ export function wasteReport(config: CcConfig, store: Store, now: number): WasteR
   return {
     at: now,
     spend: WASTE_WINDOWS.map((w) => spendFor(config, store, w, now)),
-    // a clearance wait shows here from a day; before that it only wakes FLIGHT
+    // a clearance wait shows here from a day; before that it is only recorded
     alarms: openWasteAlarms(store).filter(
       (a) =>
         a.check !== "clearance-waiting" || a.level * HOUR_MS >= WASTE_THRESHOLDS.clearanceAuditMs,
@@ -613,7 +667,6 @@ function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[
   const days: FlightDay[] = Array.from({ length: FLIGHT_ACTIVITY_DAYS }, (_, i) => ({
     since: since + i * 24 * HOUR_MS,
     wakes: 0,
-    waits: 0,
     flightTokens: 0,
     totalTokens: 0,
     tokenShare: null,
@@ -625,10 +678,6 @@ function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[
   for (const w of store.flightWakes(since)) {
     const d = bucket(w.at);
     if (d !== undefined) d.wakes += 1;
-  }
-  for (const at of store.flightWaitTimes(since)) {
-    const d = bucket(at);
-    if (d !== undefined) d.waits += 1;
   }
   for (const r of store.waste.runsSince(since)) {
     const d = bucket(r.startedAt);

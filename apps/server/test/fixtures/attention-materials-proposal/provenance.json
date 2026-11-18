@@ -1,0 +1,113 @@
+{
+  "at": "2026-11-10T15:49:49.745900+00:00",
+  "repoId": "mission-control",
+  "sourceSha": "33230f9ef1371e9e7d99ebcf3adbf92cfdecfdc2",
+  "path": "docs/reviews/2026-11-10/comms-1513-proposal/README.md",
+  "markdownSha256": "7875fc1e3a30e423a8b58ab0170d69d63e65d6e39e04a811ae486791c4987791",
+  "markdownBytes": 5867,
+  "referencedImages": [
+    {
+      "label": "Before",
+      "path": "comms-before-1600x1000-dark.png",
+      "bytes": 277019,
+      "sha256": "9aa644b3f9da83e4bdb0553e22de5df217b8d11f633ac38ec973b8f74f65eaec"
+    },
+    {
+      "label": "Proposal",
+      "path": "comms-after-1600x1000-dark.png",
+      "bytes": 231453,
+      "sha256": "4f55682ca29d0a2adf65583254130ab2198038c6f20ded8b19577aac5c45b2a9"
+    },
+    {
+      "label": "Before",
+      "path": "ticket-before-1600x1000-dark.png",
+      "bytes": 162561,
+      "sha256": "2622dbe0b434944eb5554f9dd08ea38dc241eb26ec0d0f6a962ca83b79c501ae"
+    },
+    {
+      "label": "Proposal",
+      "path": "ticket-after-1600x1000-dark.png",
+      "bytes": 166163,
+      "sha256": "4f9afac6f74e642a49d94baaebf0a90b47c7db3b90c9d098cf375a1488849ba0"
+    },
+    {
+      "label": "Before",
+      "path": "comms-before-1600x700-light.png",
+      "bytes": 199388,
+      "sha256": "1ff1764018ee902640e69bb145bd610111b6adb2b3153b18f233dc73729403a8"
+    },
+    {
+      "label": "Proposal",
+      "path": "comms-after-1600x700-light.png",
+      "bytes": 167903,
+      "sha256": "9c262594013e128e9087c488a027765e183e1c9adefb8ca19206af5704334de6"
+    },
+    {
+      "label": "Before",
+      "path": "ticket-before-1280x900-dark.png",
+      "bytes": 143777,
+      "sha256": "4e9c17f0401cfbe92ad20b8e8a20aa5d1b8b169cddb495498e5787dbc742ce73"
+    },
+    {
+      "label": "Proposal",
+      "path": "ticket-after-1280x900-dark.png",
+      "bytes": 153487,
+      "sha256": "03683c940b21b36d3e37e8dcc6951b0b3a386f5ce6464a448d727f88f1768565"
+    },
+    {
+      "label": "Hub conversation",
+      "path": "interaction-hub-contact-1600x700-light.png",
+      "bytes": 139919,
+      "sha256": "82584f823572c14367dfbf4184ca05c521d040dce4a567b6b06492d5e6ac7b75"
+    },
+    {
+      "label": "Question and answer context",
+      "path": "interaction-question-answer-1600x700-light.png",
+      "bytes": 144460,
+      "sha256": "926def5f0c3c041d1ee2467839cf5fa6a7979fd2e0e24a8fd6a960618706da91"
+    },
+    {
+      "label": "Last record entry",
+      "path": "interaction-ticket-context-1600x700-light.png",
+      "bytes": 144406,
+      "sha256": "b4c741fed1309fe5d081dc084391381732b1cb4f245079f80ae932330020e82f"
+    },
+    {
+      "label": "Comms empty",
+      "path": "comms-state-empty-1280x900-dark.png",
+      "bytes": 127892,
+      "sha256": "4458bf4af351cc9a6a96d62ab78971e9640e2bd5bb02fa8fda34fb755e6750cc"
+    },
+    {
+      "label": "Comms loading",
+      "path": "comms-state-loading-1280x900-dark.png",
+      "bytes": 129813,
+      "sha256": "9dd2a413fa21007ed649961fba2377cfe2a497d3f0f0865083cc2defae6c7421"
+    },
+    {
+      "label": "Comms error",
+      "path": "comms-state-error-1280x900-dark.png",
+      "bytes": 131723,
+      "sha256": "5b93e70f5cccf564dc737d40a9a11d04c0990d1e9f1e9bba0be9e1491fefb56b"
+    },
+    {
+      "label": "Ticket empty",
+      "path": "ticket-state-empty-1280x900-dark.png",
+      "bytes": 103547,
+      "sha256": "e40537e0aec222f339e4bbf5e45b0370a8fc0ce79f1afbafd03b1ff6a6a3fa72"
+    },
+    {
+      "label": "Ticket loading",
+      "path": "ticket-state-loading-1280x900-dark.png",
+      "bytes": 101745,
+      "sha256": "19fec12b0d2f9248168805ee3fc5d783aad5fa3432ee56eb6d3329efb0cd4e75"
+    },
+    {
+      "label": "Ticket error",
+      "path": "ticket-state-error-1280x900-dark.png",
+      "bytes": 104301,
+      "sha256": "1ff6bfe15ecabe50d03ffc2c12441e2d84e3267be6ec4611d844ec23081917dd"
+    }
+  ],
+  "note": "README links a useful subset of larger32matchedimagepacket. OnlyexactREADMEreferencedimagesrequiredinregistration; notfake32whenonlysubset."
+}

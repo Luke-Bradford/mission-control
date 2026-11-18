@@ -86,6 +86,8 @@ const prep = vi.hoisted(() => ({
   peers: [] as unknown[],
   handoffGate: null as Promise<void> | null,
   handoffChecks: 0,
+  /** Set: the install command a review's checkout runs (the real one when null). */
+  installRunner: null as import("../src/runtime/checkouts.ts").InstallRunner | null,
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
@@ -115,7 +117,7 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
     },
     prepareScratch: async (i: Parameters<typeof real.prepareScratch>[0]) => {
       prep.peers.push(i.peers);
-      return real.prepareScratch(i);
+      return real.prepareScratch(i, prep.installRunner ?? undefined);
     },
     prepareCheckout: async (i: Parameters<typeof real.prepareCheckout>[0]) => {
       prep.peers.push(i.peers);
@@ -321,13 +323,15 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
-    prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
-    prEvidenceRepo?: string;
+    importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
+    evidence?: import("../src/pr-evidence/capture.ts").ReviewEvidenceDeps;
     rolesDir?: string;
     node?: string;
     nodeNote?: string;
     scratchRetro?: boolean;
     retroLightModel?: string;
+    /** The area GUIDO-1 may write, in place of apps/**. */
+    guidoArea?: string[];
     extraSeat?: CrewSeatConfig;
     /** A second, seatless session "other". */
     secondSession?: boolean;
@@ -351,6 +355,8 @@ function make(
   const cfg = config();
   if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
   if (over.repo && cfg.repos[0]) Object.assign(cfg.repos[0], over.repo);
+  const guido = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1");
+  if (over.guidoArea !== undefined && guido) guido.area = over.guidoArea;
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
   if (over.node !== undefined && cfg.crew) cfg.crew.node = over.node;
   if (over.nodeNote !== undefined && cfg.crew) cfg.crew.nodeNote = over.nodeNote;
@@ -413,8 +419,8 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
-    ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
-    ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
+    ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
+    ...(over.evidence === undefined ? {} : { evidence: over.evidence }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),
@@ -492,6 +498,7 @@ beforeEach(() => {
   prep.peers = [];
   prep.handoffGate = null;
   prep.handoffChecks = 0;
+  prep.installRunner = null;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");

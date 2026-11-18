@@ -40,9 +40,9 @@ it("updates the accessible State lock-wait duration without rebuilding the roste
   });
   const order = vi.spyOn(crewModule, "crewOrder");
   render(<AgentsPanel />);
-  await screen.findByText("lock-review");
+  await screen.findByText("LOCK-REVIEW");
   await settled(fetch, "/api/crew?shape=summary");
-  const element = defined(screen.getByText("lock-review").closest(".trow"));
+  const element = defined(screen.getByText("LOCK-REVIEW").closest(".trow"));
   const state = defined(element.querySelector(".state-cell"));
   expect(state.getAttribute("title")).toContain("0:05");
   order.mockClear();
@@ -99,9 +99,9 @@ it("updates set-aside lock-wait details while the current seat is idle without r
   });
   const order = vi.spyOn(crewModule, "crewOrder");
   render(<AgentsPanel />);
-  await screen.findByText("aside-clock");
+  await screen.findByText("ASIDE-CLOCK");
   await settled(fetch, "/api/crew?shape=summary");
-  const element = defined(screen.getByText("aside-clock").closest(".trow"));
+  const element = defined(screen.getByText("ASIDE-CLOCK").closest(".trow"));
   const identity = defined(element.querySelector(".agent-identity"));
   const link = identity.querySelector(".rowlink");
   expect(identity.getAttribute("title")).toContain("0:05");

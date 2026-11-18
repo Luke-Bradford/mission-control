@@ -3,6 +3,7 @@ import {
   API_PREFIX,
   clockHm,
   FLIGHT_COSTLY_RUNS_MAX,
+  FLIGHT_NON_ACTING_TOOLS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_RETROSPECTIVE_TIME,
   type FlightRetrospective,
@@ -11,15 +12,16 @@ import {
   parkedEventText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
-import { originHeads } from "../mcp/tools.ts";
 import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit, crewGitBytes } from "../runtime/git.ts";
+import { originHeads } from "../runtime/origin-heads.ts";
 import { wasteCounts } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { flightMetrics } from "./ledger.ts";
 import { flightSignalHistory } from "./signals.ts";
 import { flightSeat } from "./state.ts";
 import { cut } from "./tools.ts";
+import { batchedWakeReasons, wakeActionSummary } from "./wake-actions.ts";
 
 export const FLIGHT_RETROSPECTIVE_PRS_MAX = 100;
 export const FLIGHT_RETROSPECTIVE_PARKS_MAX = 10;
@@ -315,6 +317,10 @@ export async function prepareRetrospective(
       .map((r) => ({ runId: r.id, seat: r.agentId, ticket: r.ticket, costUsd: r.costUsd })),
     productPass: { pages: hudProductPages(config), instruction: PRODUCT_PASS_INSTRUCTION },
     counts: wasteCounts(config, store, repoId, day, metrics.since, now),
+    wakeActions: wakeActionSummary(
+      store.flightWakeActions(metrics.since, now, FLIGHT_NON_ACTING_TOOLS),
+      batchedWakeReasons(store, now),
+    ),
   };
   store.setSetting(
     setting(repoId),

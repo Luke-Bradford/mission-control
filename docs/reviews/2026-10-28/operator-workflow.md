@@ -109,7 +109,7 @@ History in the preview DB: 793 engine notes raised in total (602 flags, 113 bloc
 5. **Defer means hold.** A brief whose recommendation is "nothing now" must be filed as a hold with a condition (the hold mechanism exists: `attention/holds.ts`, `/attention/:key/hold`). Time-conditioned items (#1818) come back automatically at their condition with a refreshed brief.
 6. **Defaults act.** For reversible choices within standing authority, FLIGHT posts "I will do X at T unless you object". It appears in Needs you as an **FYI with a countdown**, not counted as an ask, and FLIGHT executes at T. Irreversible, money, product and security asks never default to action.
 7. **Batch the slow ones.** Items with no cost of delay (stale drafts, cutover decisions) go to a daily digest card, not live Needs you or notifications.
-8. **Notifications follow ownership.** `local-notifications.ts:63-90` notifies stalls, PRs and blocked runs to the operator by default. Notify only briefed operator asks, plus "FLIGHT is down".
+8. **Notifications follow ownership.** `attention/local-notifications.ts:63-90` notifies stalls, PRs and blocked runs to the operator by default. Notify only briefed operator asks, plus "FLIGHT is down".
 
 Under these rules the 13 live items would be **2 asks** (#450, #1818 resume) plus **1 FYI** (#551, if FLIGHT gets a ready-for-review power, or an ask if not), with #410 held.
 
@@ -182,7 +182,7 @@ Under these rules the 13 live items would be **2 asks** (#450, #1818 resume) plu
 | Five disagreeing counts make the operator open every surface to reconcile them | §1 | One `needsYouItems` set everywhere (dock, Comms, Command), and the header opens FLIGHT › Needs you. |
 | Unread narration from seats and FLIGHT becomes Needs you and notifications (`agentMessages` is off by default, but the items still count) | `comms.ts:204-227`, `hud.ts:615-646` | Rule 3 above. |
 | Raw seat questions reach the operator when FLIGHT misses triage, with no brief | `hud.ts:768-806` | Rule 2: a single "FLIGHT not triaging" item. |
-| Stalls, PRs and blocked runs notify the operator by default | `local-notifications.ts:48-90` | Notify briefed asks only, plus FLIGHT down. |
+| Stalls, PRs and blocked runs notify the operator by default | `attention/local-notifications.ts:48-90` | Notify briefed asks only, plus FLIGHT down. |
 | FLIGHT's real blockers (missing powers) go to a controller only through `log_decision` text that nobody sees | 130 rows in `flight_decisions` | Tab 2's pinned "Needs a power FLIGHT lacks", plus a ticket per power (the retrospective already asks FLIGHT to file them). |
 | The Overview crew table puts "Answer" and "End the run" buttons on rows | `home.png` | Move them into the canonical brief. Rows say "waiting on FLIGHT" or "waiting on you (1 ask)". |
 | The Agent page banner says "guido-cx needs you · Answer · Ack" for a question FLIGHT should own | `agent/NeedBanner.tsx` | Show "Waiting on FLIGHT (triage due in 12 min)" while FLIGHT owns it. |

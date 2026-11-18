@@ -1056,6 +1056,17 @@
   font-weight: 600;
 }
 
+/* The seat link is a click target: 24 px tall, and its row drops its padding so the row keeps its height. */
+#actList .log-who a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: var(--sp-5);
+}
+
+#actList .arow:has(.log-who a) {
+  padding-block: 0;
+}
+
 /* away mode */
 .awaystrip {
   display: flex;
@@ -2584,9 +2595,14 @@ button.quota-details {
   font: var(--fs-micro) / var(--lh-axis) var(--mono);
   color: var(--muted);
 }
+.plot-reading span,
+.plot-axis span {
+  white-space: nowrap;
+}
 .plot-reading {
   display: flex;
   justify-content: space-between;
+  column-gap: var(--sp-2);
   line-height: var(--lh-s);
   color: var(--fg-2);
 }

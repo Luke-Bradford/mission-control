@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerTarget, askedQuestion, flightText } from "../src/comms/answer.ts";
+import { answerTarget, askedQuestion } from "../src/comms/answer.ts";
 import type { FlightSeat } from "../src/flight/flightTypes.ts";
 import { crewRow, item, SEAT_Q } from "./fixtures.ts";
 
@@ -34,15 +34,6 @@ describe("answerTarget", () => {
   it("a loop's item goes to FLIGHT", () => {
     const stall = { ...SEAT_Q, agentId: "shop-app-ta" };
     expect(answerTarget(stall, ROWS, FLIGHT)).toEqual({ to: "flight" });
-  });
-});
-
-describe("flightText", () => {
-  it("leads with the key and the about", () => {
-    expect(flightText("ask:7", "Which port?", "Use port 5180.")).toBe(
-      "Re: ask:7 · Which port?\n\nUse port 5180.",
-    );
-    expect(flightText("ask:7", "", "Use port 5180.")).toBe("Re: ask:7\n\nUse port 5180.");
   });
 });
 

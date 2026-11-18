@@ -1,7 +1,8 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { gzipSync } from "node:zlib";
 import { OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -58,7 +59,7 @@ const text = (value: string, at: number | null) => ({
   ...(at === null ? {} : { timestamp: new Date(at).toISOString() }),
   message: { content: [{ type: "text", text: value }] },
 });
-function run(id: string, frames: object[], seq = 1) {
+function run(id: string, frames: object[], seq = 1, vendor?: "codex") {
   let body = "";
   const ids: string[] = [];
   for (const frame of frames) {
@@ -90,6 +91,7 @@ function run(id: string, frames: object[], seq = 1) {
     transcriptPath: path,
     prs: [],
     summary: null,
+    ...(vendor ? { vendor } : {}),
   };
   store.upsertRun(row);
   return ids;
@@ -528,4 +530,151 @@ it("includes an actual operator choice for this crew without exposing ordinary p
       itemKey: "question:GUIDO-1",
     }),
   ]);
+});
+
+const wake = (at: number) => ({
+  type: "user",
+  timestamp: new Date(at).toISOString(),
+  message: { content: "[Mission Control] woke you" },
+});
+const toolUse = (at: number) => ({
+  type: "assistant",
+  timestamp: new Date(at).toISOString(),
+  message: { content: [{ type: "tool_use", id: "t1", name: "mc", input: {} }] },
+});
+const texts = (result: { messages: { text: string }[] }) => result.messages.map((m) => m.text);
+
+it("a turn that messaged the operator adds one message: the end text is not posted again", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Looking at it.", AT + 2),
+    toolUse(AT + 3),
+    text("Summary of the turn.", AT + 5),
+  ]);
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Here is your answer."]);
+  expect(readFileSync(join(dir, "flight-run.jsonl"), "utf8")).toContain("Summary of the turn.");
+});
+
+it("a turn that messaged nobody still shows its end text once", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Looking at it.", AT + 2),
+    toolUse(AT + 3),
+    text("Summary of the turn.", AT + 5),
+  ]);
+  expect(texts(await page())).toEqual(["Summary of the turn."]);
+});
+
+it("a turn with three text blocks and no operator message shows only the last", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("First progress.", AT + 2),
+    toolUse(AT + 3),
+    text("Second progress.", AT + 4),
+    toolUse(AT + 5),
+    text("The answer.", AT + 6),
+  ]);
+  expect(texts(await page())).toEqual(["The answer."]);
+  expect(readFileSync(join(dir, "flight-run.jsonl"), "utf8")).toContain("First progress.");
+});
+
+it("a Codex turn with three text blocks and no operator message shows only the last", async () => {
+  run(
+    "flight-run",
+    [
+      codexStart(AT + 1),
+      codexText("First progress.", AT + 2),
+      codexSend(AT + 3),
+      codexText("Second progress.", AT + 4),
+      codexText("The answer.", AT + 6),
+    ],
+    1,
+    "codex",
+  );
+  expect(texts(await page())).toEqual(["The answer."]);
+});
+
+it("a message in an earlier turn does not hide a later turn's end text", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Done one.", AT + 3),
+    wake(AT + 10),
+    text("Done two.", AT + 12),
+  ]);
+  stored("Answer to the first.", AT + 2, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Answer to the first.", "Done two."]);
+});
+
+const codexStart = (at: number) => ({
+  method: "turn/started",
+  timestamp: new Date(at).toISOString(),
+  params: { turn: { id: `turn-${at}` } },
+});
+const codexText = (value: string, at: number) => ({
+  method: "item/completed",
+  timestamp: new Date(at).toISOString(),
+  params: { item: { type: "agentMessage", id: `m-${at}`, text: value } },
+});
+const codexSend = (at: number) => ({
+  method: "item/completed",
+  timestamp: new Date(at).toISOString(),
+  params: {
+    item: { type: "mcpToolCall", id: `c-${at}`, server: "mc", tool: "comms_send", arguments: {} },
+  },
+});
+
+it("a Codex turn that messaged the operator adds one message", async () => {
+  run(
+    "flight-run",
+    [codexStart(AT + 1), codexSend(AT + 3), codexText("Summary of the turn.", AT + 5)],
+    1,
+    "codex",
+  );
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Here is your answer."]);
+});
+
+it("a Codex turn that messaged nobody still shows its end text", async () => {
+  run(
+    "flight-run",
+    [codexStart(AT + 1), codexSend(AT + 3), codexText("Summary of the turn.", AT + 5)],
+    1,
+    "codex",
+  );
+  expect(texts(await page())).toEqual(["Summary of the turn."]);
+});
+
+it("a gzipped Codex transcript cuts the end text after a reply too", async () => {
+  run(
+    "flight-run",
+    [codexStart(AT + 1), codexSend(AT + 3), codexText("Summary of the turn.", AT + 5)],
+    1,
+    "codex",
+  );
+  const path = join(dir, "flight-run.jsonl");
+  writeFileSync(`${path}.gz`, gzipSync(readFileSync(path)));
+  rmSync(path);
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Here is your answer."]);
+});
+
+it("a closing frame with several text blocks is cut whole after a reply", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Looking at it.", AT + 2),
+    toolUse(AT + 3),
+    {
+      type: "assistant",
+      timestamp: new Date(AT + 5).toISOString(),
+      message: {
+        content: [
+          { type: "text", text: "Summary, part one." },
+          { type: "text", text: "Summary, part two." },
+        ],
+      },
+    },
+  ]);
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Here is your answer."]);
 });

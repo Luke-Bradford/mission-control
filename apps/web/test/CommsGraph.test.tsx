@@ -1,10 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
-import { TrafficChart } from "../src/comms/TrafficChart.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { crewRow, seatRow } from "./fixtures.ts";
+import { crewRow, item, seatRow } from "./fixtures.ts";
 
 const rows = [
   seatRow({ id: "flight-1", index: 0, role: "FLIGHT" }),
@@ -460,36 +459,6 @@ it("does not turn hub notices into live messages", async () => {
   expect(within(traffic).queryByText("Hub notice")).toBeNull();
 });
 
-it("labels traffic buckets by their start in the operator's timezone", async () => {
-  stubFetch({ "/api/config": { operator: { timezone: "Asia/Kolkata" } } });
-  // UTC-hour buckets start at :30 in a half-hour zone.
-  const start = Date.UTC(2026, 9, 28, 0);
-  const hours = Array.from({ length: 24 }, (_, index) => ({
-    hour: start + index * 60 * 60 * 1000,
-    total: index === 3 ? 4 : 0,
-    part: 0,
-  }));
-  render(
-    <TrafficChart
-      hours={hours}
-      label="Traffic"
-      totalLabel="All messages"
-      partLabel="With CAPCOM"
-      emptyText="None"
-      live
-    />,
-  );
-  await waitFor(() =>
-    expect([...document.querySelectorAll(".comms-chart-tick")].map((el) => el.textContent)).toEqual(
-      ["05:30", "17:30", "now"],
-    ),
-  );
-  expect(document.querySelectorAll(".comms-hour title")[3]?.textContent).toBe(
-    "08:30 · 4 messages · 0 with capcom",
-  );
-  expect(document.querySelector(".comms-chart-now.live")).not.toBeNull();
-});
-
 it("shows each sender's message-length p95 and count against the limit, flagging long ones", async () => {
   stubFetch({
     "/api/comms/links": { links: [] },
@@ -662,4 +631,57 @@ it("words a long wait by its largest unit, and names seats by call sign, in both
   expect(waiting.textContent).toContain("GUIDO-1");
   const said = await screen.findByRole("region", { name: "Just said" });
   expect(said.textContent).toMatch(/RETRO-1 → GUIDO-1/);
+});
+
+it("keeps what the operator owes off Waiting on a reply, and counts waits as Needs you does", async () => {
+  const open = (id: string, from: string, to: string, question: string) => ({
+    id,
+    label: "question",
+    from,
+    to,
+    ticket: null,
+    waitedMs: 60_000,
+    question,
+  });
+  const answers = (attention: unknown[]) => ({
+    "/api/comms/links": {
+      links: [
+        { from: "guido-1", to: "retro-1", count: 1 },
+        { from: "guido-1", to: "CAPCOM", count: 1 },
+        { from: "CAPCOM", to: "retro-1", count: 1 },
+      ],
+    },
+    "/api/comms/open": {
+      items: [
+        open("a", "guido-1", "retro-1", "Which branch?"),
+        open("b", "guido-1", "CAPCOM", "Ship it?"),
+        open("c", "CAPCOM", "retro-1", "Status?"),
+      ],
+    },
+    "/api/attention": attention,
+    "/api/comms/feed": { messages: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  stubFetch(
+    answers([
+      item({ key: "ask:1", kind: "question", owner: "operator" }),
+      item({ key: "ask:2", kind: "question", owner: "operator" }),
+      item({ key: "ask:3", kind: "question", owner: "flight" }),
+    ]),
+  );
+  const view = render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const waiting = await screen.findByRole("region", { name: "Waiting on a reply" });
+  expect(waiting.textContent).toContain("Which branch?");
+  expect(waiting.textContent).not.toContain("Ship it?");
+  expect(waiting.textContent).not.toContain("Status?");
+  // the number is Needs you's own (2 operator items), not the open items on CAPCOM's links
+  const link = await screen.findByRole("link", { name: "2 waiting for you" });
+  expect(link.getAttribute("href")).toBe("/needs-you");
+  view.unmount();
+  hub.clear();
+  stubFetch(answers([]));
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await screen.findByRole("region", { name: "Waiting on a reply" });
+  expect(screen.queryByRole("link", { name: /waiting for you/ })).toBeNull();
 });

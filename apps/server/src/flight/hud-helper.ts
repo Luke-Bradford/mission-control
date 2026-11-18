@@ -22,6 +22,9 @@ process.once("message", async (job: HudHelperJob) => {
       deadlineMs: job.deadlineMs,
       ...(job.executablePath === undefined ? {} : { executablePath: job.executablePath }),
       ...(job.colorScheme === undefined ? {} : { colorScheme: job.colorScheme }),
+      ...(job.viewport === undefined ? {} : { viewport: job.viewport }),
+      ...(job.demo === undefined ? {} : { demo: job.demo }),
+      ...(job.operatorToken === undefined ? {} : { operatorToken: job.operatorToken }),
     });
     reply = { ok: true, png: png.toString("base64") };
   } catch (e) {

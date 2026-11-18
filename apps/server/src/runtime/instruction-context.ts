@@ -1,8 +1,8 @@
 import { isUtf8 } from "node:buffer";
 import { INSTRUCTION_PRECEDENCE, instructionSnapshot, seatInstructionBlock } from "@mc/core";
 import type { CrewSeatConfig } from "../config.ts";
-import type { PromptPiece } from "../prompt-cost.ts";
 import type { Store } from "../store.ts";
+import type { PromptPiece } from "../telemetry/prompt-cost.ts";
 import { readBaseEntry } from "./checkouts.ts";
 
 export const DIRECTION_MAX_BYTES = 64 * 1024;

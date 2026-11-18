@@ -97,10 +97,13 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
-  it("gives FLIGHT controller tools without a sandbox, preserving guard hooks", () => {
+  it("gives FLIGHT its listed tools without a sandbox or the operator's settings, preserving guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
-    for (const flag of ["--tools", "--disallowedTools", "--restricted"])
-      expect(args).not.toContain(flag);
+    for (const flag of ["--disallowedTools", "--restricted"]) expect(args).not.toContain(flag);
+    // Only the listed built-ins are defined to the model, and the operator's user settings (their
+    // installed plugins) are not loaded: both would add to every FLIGHT session's fixed start.
+    expect(args[args.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("project,local");
     // The credential scrub forces the CLI's permission mode to `default`, so a bypass flag does
     // nothing and FLIGHT's tools must be listed, or every hub tool call is refused.
     expect(CREW_CLI_ENV.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
@@ -131,6 +134,8 @@ describe("crewCliArgs", () => {
 
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
+    // FLIGHT decides fix or park on a waste alarm; without this grant a review it holds never runs
+    expect(FLIGHT_TOOLS).toContain("resolve_waste_alarm");
     const argv = crewCliArgs({ ...base, mode: "read-only", mcTools: ["draft_reply"] });
     const allowed = argv.slice(
       argv.indexOf("--allowedTools") + 1,
@@ -329,11 +334,11 @@ describe("the allowlist in phase 2b", () => {
       releaseHold: "mcp__mc__release_hold",
       returnQuestion: "mcp__mc__return_question",
       withdrawQuestion: "mcp__mc__withdraw_question",
+      attachMaterials: "mcp__mc__attach_materials",
       screenshotHud: "mcp__mc__screenshot_hud",
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
       callFlight: "mcp__mc__call_flight",
-      waitOn: "mcp__mc__wait_on",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
@@ -701,7 +706,6 @@ describe("crew constants", () => {
         tools: [
           "code_health",
           "log_decision",
-          "wait_on",
           "read_ticket",
           "answer_question",
           "start_seat",
@@ -722,6 +726,7 @@ describe("crew constants", () => {
           "rerun_ci",
           "edit_card",
           "dismiss_item",
+          "resolve_waste_alarm",
           "sync_main",
           "create_ticket",
           "comment_ticket",
@@ -744,6 +749,7 @@ describe("crew constants", () => {
           "release_hold",
           "return_question",
           "withdraw_question",
+          "attach_materials",
           "edit_issue",
           "set_fields",
           "operator",
@@ -835,7 +841,6 @@ describe("mc tool grants", () => {
     expect(FLIGHT_TOOLS).toEqual([
       "code_health",
       "log_decision",
-      "wait_on",
       "read_ticket",
       "answer_question",
       "start_seat",
@@ -856,6 +861,7 @@ describe("mc tool grants", () => {
       "rerun_ci",
       "edit_card",
       "dismiss_item",
+      "resolve_waste_alarm",
       "sync_main",
       "create_ticket",
       "comment_ticket",
@@ -878,6 +884,7 @@ describe("mc tool grants", () => {
       "release_hold",
       "return_question",
       "withdraw_question",
+      "attach_materials",
       "edit_issue",
       "set_fields",
       "operator",

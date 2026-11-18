@@ -55,14 +55,17 @@ import { z } from "zod";
 import { accountBindingProblem, type CliBinding } from "./accounts/bindings.ts";
 import { CLI_UPDATES, type CliUpdates } from "./cli/update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
-import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
-import { seatFocus } from "./focus.ts";
-import { areaGlob, protectedGlob } from "./globs.ts";
-import { MACHINE_CAPACITY_DEFAULTS, type MachineCapacityConfig } from "./machine-capacity.ts";
+import { seatFocus } from "./instructions/focus.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "./repo/files.ts";
+import { areaGlob, protectedGlob } from "./repo/globs.ts";
 import { type CodexModels, codexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  type MachineCapacityConfig,
+} from "./telemetry/machine-capacity.ts";
 
-export { areaGlob } from "./globs.ts";
+export { areaGlob } from "./repo/globs.ts";
 
 export const REPO_AUTONOMIES = ["draft", "merge"] as const;
 export type RepoAutonomy = (typeof REPO_AUTONOMIES)[number];
@@ -681,6 +684,8 @@ const fileSchema = z
         max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
         lane_default: z.boolean().default(false),
+        /** Retired with the fix-session trial: still accepted so an existing config loads; ignored. */
+        fix_session_trial: z.boolean().optional(),
         roles: z.record(z.string(), roleSchema).default({}),
         sessions: z.array(
           z.strictObject({
@@ -1393,7 +1398,7 @@ function isValidationCommand(writer: readonly string[], cmd: string): boolean {
 
 /**
  * Validates config.yaml text: the one loader for the file the server starts with and for any text
- * it would write (`config-write.ts`). `source` names the text in errors (a path, or a description).
+ * it would write (`config/config-write.ts`). `source` names the text in errors (a path, or a description).
  * `guard.hubRoot` is the hub's own checkout, which crew paths must stay clear of; with no guard it is
  * found from this module's location. A crew section with no hub root is an error (fails closed).
  * `deferModels` is for loading existing files: Codex model errors become seat unavailability.

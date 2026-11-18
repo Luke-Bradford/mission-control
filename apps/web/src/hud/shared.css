@@ -555,6 +555,7 @@ td.wrap {
 }
 
 .keys {
+  padding-inline: var(--sp-4);
   color: var(--muted);
   font-size: var(--fs-s);
   display: flex;
@@ -722,10 +723,6 @@ details.guard > summary {
 
 #discuss .dmsgs {
   overflow: visible;
-}
-
-.item-conversation > summary {
-  margin: var(--sp-2) var(--sp-3);
 }
 
 .brief-section {

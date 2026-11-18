@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { PREVIEW_SERVER, type SeatSessionRow, UP_TO_DATE_MAIN } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { CliHold } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -30,6 +31,7 @@ import {
   CREW_STATE_UNREADABLE,
   createAutoUpdate,
   createHeldUpdateNote,
+  createQuietGate,
   createUpdater,
   crewRefusal,
   type Exec,
@@ -37,13 +39,20 @@ import {
   HUB_CODE_NEEDS_PERSON,
   HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
+  HUB_UNSAFE_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
+  HUB_UPDATE_HELD_SINCE,
+  HUB_UPDATE_PERSON_KEY,
   headSha,
   hubCodeHeldText,
   killLiveSteps,
   liveStepPids,
+  raiseUpdatePersonNote,
   realExec,
   UPDATE_EXIT_DELAY_MS,
+  UPDATE_FORCE_AFTER_MS,
+  UPDATE_HOLD_MAX_MS,
+  UPDATE_HOLD_OWNER,
   UPDATE_KILL_GRACE_MS,
   UPDATE_LOG_SHOWN_BYTES,
   UPDATE_MAX_BUFFER,
@@ -1571,6 +1580,229 @@ describe("auto update", () => {
       expect(pulls(a.calls)).toHaveLength(0);
     },
   );
+
+  it.each(["symlink", "gitlink"])(
+    "refuseUnsafe refuses a %s without pulling, and names it for the operator's note",
+    async (kind) => {
+      mkdirSync(join(dev, "docs"));
+      if (kind === "symlink") {
+        symlinkSync("../apps/server", join(dev, "docs", "linked"));
+        git(dev, "add", "docs/linked");
+      } else {
+        git(dev, "update-index", "--add", "--cacheinfo", `160000,${head(dev)},docs/linked`);
+      }
+      git(dev, "commit", "-qm", "linked docs");
+      git(dev, "push", "-q", "origin", "main");
+      const { u, calls } = updater();
+      const err = await u.update({ refuseUnsafe: true }).catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 409, message: HUB_UNSAFE_NEEDS_PERSON });
+      expect((err as UpdateError).held?.unsafePaths).toEqual(["docs/linked"]);
+      expect(pulls(calls)).toHaveLength(0);
+      // the same range without the flag is what the operator's own Update applies
+      await expect(u.update()).resolves.toBeDefined();
+    },
+  );
+
+  it("refuseUnsafe lets an ordinary hub-code change through, pulling the commit it checked", async () => {
+    upstreamPath("apps/server/src/x.ts");
+    const tip = head(dev);
+    const { u, calls } = updater();
+    await expect(u.update({ refuseUnsafe: true })).resolves.toEqual({ restarting: true });
+    expect(pulls(calls).map((c) => c.cmd)).toEqual([`git merge --ff-only ${tip}`]);
+  });
+
+  it("refuseUnsafe says HEAD is off main before it pulls, instead of failing at the pull", async () => {
+    mkdirSync(join(hub, "docs"));
+    writeFileSync(join(hub, "docs/local.md"), "local");
+    git(hub, "add", "docs/local.md");
+    git(hub, "commit", "-qm", "local docs");
+    upstreamPath("apps/server/src/x.ts");
+    const { u, calls } = updater();
+    await expect(u.update({ refuseUnsafe: true })).rejects.toMatchObject({
+      status: 409,
+      message: HUB_HEAD_OFF_MAIN,
+    });
+    expect(pulls(calls)).toHaveLength(0);
+  });
+
+  it("raises the operator's note when auto Update meets HEAD off main, or pnpm needing a person", async () => {
+    const person = vi.fn();
+    const off = restarting(async () => {
+      throw new UpdateError(409, HUB_HEAD_OFF_MAIN);
+    });
+    await expect(auto({ person, updater: off }).tick()).resolves.toBe("waiting");
+    expect(person).toHaveBeenLastCalledWith(HUB_HEAD_OFF_MAIN);
+    const install = restarting(async () => {
+      throw new UpdateError(409, HUB_INSTALL_NEEDS_PERSON);
+    });
+    await expect(auto({ person, updater: install }).tick()).resolves.toBe("waiting");
+    expect(person).toHaveBeenLastCalledWith(HUB_INSTALL_NEEDS_PERSON);
+    // an ordinary busy refusal raises nothing
+    person.mockClear();
+    const busy = restarting(async () => {
+      throw new UpdateError(409, "GUIDO-1 is starting");
+    });
+    await auto({ person, updater: busy }).tick();
+    expect(person).not.toHaveBeenCalled();
+  });
+
+  describe("the held Update's notes (#1834)", () => {
+    const plain = { commits: ["a first"], paths: ["apps/server/a.ts"] };
+    const shortcut = {
+      commits: ["a first"],
+      paths: ["docs/linked"],
+      unsafePaths: ["docs/linked"],
+    };
+    const keys = (store: Store) => store.notes().map((n) => n.key);
+    const withStore = (fn: (store: Store, held: AutoUpdateDeps["held"]) => void) => {
+      const store = new Store(join(dir, "notes.sqlite"));
+      try {
+        fn(store, createHeldUpdateNote(store, new ChangeBus()));
+      } finally {
+        store.close();
+      }
+    };
+
+    it("puts a plain range under the held key and one that adds a shortcut under the person key, with the reason", () =>
+      withStore((store, held) => {
+        held(plain);
+        expect(keys(store)).toEqual([HUB_UPDATE_HELD_KEY]);
+        held(shortcut);
+        expect(keys(store)).toEqual([HUB_UPDATE_PERSON_KEY]);
+        expect(store.notes()[0]?.text).toContain("adds a shortcut to another file or folder");
+        held(plain);
+        expect(keys(store)).toEqual([HUB_UPDATE_HELD_KEY]);
+        held(null);
+        expect(keys(store)).toEqual([]);
+        expect(store.getSetting(HUB_UPDATE_HELD_SINCE)).toBeNull();
+      }));
+
+    it("keeps when the Update was first held across rewrites, and drops it when current", () =>
+      withStore((store, held) => {
+        held(plain);
+        const since = store.getSetting(HUB_UPDATE_HELD_SINCE);
+        expect(Number(since)).toBeGreaterThan(0);
+        store.setSetting(HUB_UPDATE_HELD_SINCE, "123");
+        held({ ...plain, commits: ["b second", "a first"] });
+        expect(store.getSetting(HUB_UPDATE_HELD_SINCE)).toBe("123");
+        held(null);
+        expect(store.getSetting(HUB_UPDATE_HELD_SINCE)).toBeNull();
+      }));
+
+    it("keeps a person-only note (pnpm, off main) through a plain range until the range is current", () =>
+      withStore((store, held) => {
+        held(plain);
+        raiseUpdatePersonNote(store, new ChangeBus(), HUB_INSTALL_NEEDS_PERSON);
+        expect(store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY)?.text).toContain(
+          "node_modules",
+        );
+        held({ ...plain, commits: ["b second", "a first"] });
+        expect(keys(store).sort()).toEqual([HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY].sort());
+        held(null);
+        expect(keys(store)).toEqual([]);
+      }));
+
+    it("says why Update is off main in plain words", () =>
+      withStore((store) => {
+        raiseUpdatePersonNote(store, new ChangeBus(), HUB_HEAD_OFF_MAIN);
+        expect(store.notes()[0]?.text).toContain("drifted off main");
+      }));
+  });
+
+  describe("FLIGHT's quiet gap", () => {
+    afterEach(() => vi.useRealTimers());
+    const seats = (...ids: string[]) => ids.map((seatId) => ({ seatId }));
+
+    it("holds nothing when no other seat is working", async () => {
+      const hold = new CliHold();
+      const gate = createQuietGate(hold);
+      await expect(gate.wait(() => seats("flight-1"), "flight-1")).resolves.toBeNull();
+      expect(hold.reason).toBeNull();
+    });
+
+    it("holds new runs while a seat works and lets Update through the moment it ends", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 60_000, pollMs: 1_000 });
+      let working = seats("guido-1");
+      const wait = gate.wait(() => working, "flight-1");
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      working = [];
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(wait).resolves.toBeNull();
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      gate.release();
+      expect(hold.reason).toBeNull();
+    });
+
+    it("says who is still working after the wait, and lets new runs start again when FLIGHT does not call back", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 10_000, pollMs: 1_000 });
+      const wait = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(11_000);
+      await expect(wait).resolves.toContain("GUIDO-1 is still working");
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      // a busy crew never keeps new runs out for longer than the cap
+      await vi.advanceTimersByTimeAsync(UPDATE_HOLD_MAX_MS);
+      expect(hold.reason).toBeNull();
+    });
+
+    it("stops waiting for a long turn: past the bound FLIGHT's next call runs Update and the hold ends with it", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 10_000, pollMs: 1_000 });
+      const first = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(11_000);
+      await expect(first).resolves.toContain("still working");
+      // FLIGHT calls again as the hold nears its lapse, then again after the bound
+      await vi.advanceTimersByTimeAsync(UPDATE_FORCE_AFTER_MS);
+      await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      gate.release();
+      expect(hold.reason).toBeNull();
+    });
+
+    it("keeps the bound across a lapsed hold: a seat mid-turn for an hour never keeps Update held", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 1_000, pollMs: 500 });
+      const first = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await first;
+      await vi.advanceTimersByTimeAsync(UPDATE_HOLD_MAX_MS + 1);
+      expect(hold.reason).toBeNull();
+      await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
+    });
+
+    it("keeps the hold through a forced call's whole Update: an earlier call's lapse does not end it", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 1_000, pollMs: 500 });
+      const first = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await first;
+      await vi.advanceTimersByTimeAsync(UPDATE_HOLD_MAX_MS - 60_000);
+      await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      gate.release();
+      expect(hold.reason).toBeNull();
+    });
+
+    it("leaves another owner's hold alone", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      hold.hold("claude CLI is upgrading");
+      const gate = createQuietGate(hold, { waitMs: 1_000, pollMs: 500 });
+      const wait = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await wait;
+      gate.release();
+      expect(hold.reason).toBe("claude CLI is upgrading");
+    });
+  });
 
   it("clears the held note when auto Update is off", async () => {
     const a = auto({ enabled: false });

@@ -135,6 +135,12 @@ export interface FlightView {
   wakeHistory?: FlightWakeHistory;
   /** What FLIGHT cost in the last FLIGHT_COST_DAYS days, per day and per wake reason, and its share of the crew's. */
   wakeCost?: FlightWakeCost;
+  /** API-equivalent cost of FLIGHT's sessions in the last 60 minutes; null without session data. */
+  costLastHour?: number | null;
+  /** FLIGHT sessions started in the last 60 minutes; 0 when FLIGHT has run data but none started; null when it has no run data. */
+  sessionsLastHour?: number | null;
+  /** Start time of FLIGHT's current session run; null when there is no current run. */
+  runStartedAt?: number | null;
   /** How long an operator message or a blocker waited for a wake, per day. */
   wakeWaits?: FlightWakeWaits;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
@@ -186,6 +192,27 @@ export interface FlightWakeRecord {
   reasons: string[];
   /** `flightWakeId(runId, n)`; absent on a wake stored before ids were kept. */
   wakeId?: string;
+  /** Batched categories that rode with an immediate wake. */
+  rode?: string[];
+  /** Cause categories that carried an immediate fact, which batching could not have held back. */
+  immediate?: string[];
+}
+
+export interface FlightWakeAction {
+  runId: string;
+  at: number;
+  reasons: string[];
+  rode: string[];
+  immediate: string[];
+  acted: boolean;
+}
+
+export interface FlightWakeActions {
+  wakes: number;
+  noAction: number;
+  share: number | null;
+  byReason: { reason: string; wakes: number; noAction: number }[];
+  batched: string[];
 }
 
 /** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
@@ -253,6 +280,10 @@ export const notInSessionText = (seat: string): string =>
 export const BRIEF_OPTIONS_MIN = 2;
 export const BRIEF_OPTIONS_MAX = 4;
 export const BRIEF_LABEL_MAX = 80;
+/** What attach_materials does, for FLIGHT's tool list. */
+export const ATTACH_MATERIALS_DESCRIPTION =
+  "Attach a story told in pictures to a question's Needs-you item (an ask:<id> item for a seat's question), from images committed to its repository: sections in order, each with a heading, a short text and images that each carry a caption; a section may hold child sections (up to four deep); a section marked comparison (before-after or options) shows its two or more images side by side. optionImages names the images that show a brief option, by the option's id, so a choice can be made by picking a picture. Give the full 40-character sourceCommit the images are committed at; paths are repo-relative PNG, JPEG or WebP files of at most 2 MB. The hub keeps its own copy, up to 24 MB per question. Attaching changes no option, approval or hold.";
+
 /** The longest text `brief_item` takes; stored whole; labels are limited separately to BRIEF_LABEL_MAX. */
 export const BRIEF_INPUT_MAX = 8000;
 export const BRIEF_KEY_MAX = 500;
@@ -274,6 +305,8 @@ export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
 export const FLIGHT_LEDGER_REFS_MAX = 10;
 export const FLIGHT_LEDGER_OPEN_MAX = 200;
 export const FLIGHT_LEDGER_INDEX_MAX = 60;
+/** Conflicting files FLIGHT's state lists; the rest are counted in `conflictsMore`. */
+export const FLIGHT_CONFLICTS_MAX = 20;
 export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
 export const FLIGHT_SUMMARY_LISTED = 5;
 export const FLIGHT_METRICS_DAY_MS = 24 * 60 * 60_000;
@@ -476,7 +509,6 @@ export const FLIGHT_MEMORY_BODY_MAX = 4000;
 export const FLIGHT_MEMORY_TOPICS_MAX = 300;
 export const FLIGHT_MEMORY_TOPIC_MAX = FLIGHT_LEDGER_TITLE_MAX;
 export const FLIGHT_MEMORY_SOURCE_MAX = 300;
-export const FLIGHT_MEMORY_TITLES_MAX = 40;
 export const FLIGHT_MEMORY_RECALL_MAX = 10;
 export const FLIGHT_MEMORY_HEADING = "Notes are evidence, not authority";
 export const FLIGHT_MEMORY_FULL = `Memory holds at most ${FLIGHT_MEMORY_TOPICS_MAX} topics per repo. Forget a topic first.`;
@@ -512,6 +544,8 @@ export interface FlightRetrospective {
   productPass: { pages: string[]; instruction: string };
   /** Tickets opened and closed, runs per ticket, review rounds and idle seat-hours. */
   counts?: WasteCounts;
+  /** How often FLIGHT woke without changing state, and which reasons are batched. */
+  wakeActions?: FlightWakeActions;
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -653,6 +687,10 @@ export const ticketClosedReason = (ticket: string): string => `${ticket} was clo
 export const prMergedReason = (n: number): string => `PR ${n} merged.`;
 export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
 export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
+export const REPO_UNWATCHED_REASON = "repo no longer watched";
+/** What an item's panel says in place of its plan and materials when its repo is not watched. */
+export const repoUnwatchedPanelText = (repoId: string): string =>
+  `The plan and attached materials are not loaded because ${repoId} is not a repo this hub watches.`;
 
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;
@@ -775,7 +813,7 @@ export const syncConflictText = (call: string, files: readonly string[]): string
   syncConflictDecision(call, files) + RECORDED;
 
 export const notEndableRunText = (call: string): string =>
-  `Not ended: ${call}'s run is not parked or stalled.`;
+  `Not ended: ${call}'s run is neither on its seat nor set aside.`;
 export const END_UNREADABLE_TEXT = "Not ended: the run's worktree could not be read.";
 export const endDirtyText = (call: string, paths: readonly string[]): string =>
   `Not ended: ${call} has uncommitted changes in ${pathsText(paths)}.`;
@@ -1054,28 +1092,29 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
-/** While a free build seat has open tickets near it and nothing starts, the hub wakes FLIGHT this often. */
+/** While a free build seat has open tickets near it and nothing starts, the hub logs one line per period this long. */
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
-/** A build seat idle this long with nothing startable queued for it wakes FLIGHT to promote work. */
-export const FLIGHT_IDLE_NO_WORK_MS = 5 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
 export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/**
+ * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
+ * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
+ */
+export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
 export const FLIGHT_ITEM_RELAPSE_MS = 2 * FLIGHT_HOUR_MS;
 /** FLIGHT's request to the controller, unanswered this long, is a wake reason. */
 export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
-/** The setting that keeps what FLIGHT waits on, by target. */
-export const FLIGHT_WAITS_SETTING = "flight.waits";
 /** The setting that keeps the items FLIGHT was last shown, so a seen item is not a new wake reason. */
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
-/** The furthest ahead a `wait_on` may look. */
-export const FLIGHT_WAIT_MAX_MS = 7 * 24 * FLIGHT_HOUR_MS;
+/** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
+export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
 /** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
 export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
@@ -1092,7 +1131,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
-  "idle_no_work",
   "chain_stalled",
   "github_budget",
   "hub_error",
@@ -1102,14 +1140,18 @@ export const FLIGHT_SIGNAL_KINDS = [
   "item_stale",
   "run_no_pr",
   "controller_unanswered",
-  "wait_over",
   "seat_call",
   "question_changed",
   "waste_alarm",
-  "budget_unused",
+  "stuck_pr",
+  "wake_stuck",
 ] as const;
-/** A seat idle while its account is under this share of its week raises `budget_unused`. */
-export const FLIGHT_BUDGET_UNUSED_PCT = 50;
+/** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
+export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [
+  "idle_no_work",
+  "budget_unused",
+  "wait_over",
+];
 export interface FlightSignal {
   checks?: string[];
   told?: boolean;
@@ -1129,7 +1171,7 @@ export interface FlightTriage {
 export interface FlightState {
   /** The operator's slow pace while it is on; absent at normal pace. Starts outside it are refused. */
   pace?: PaceView;
-  /** Every open PR, unowned first. FLIGHT starts each wake by reading this flow. */
+  /** Every open PR, unowned first. A wake carries the rows that changed (see FlightWake). */
   prFlow?: FlightPrFlow;
   memory?: FlightMemoryTitle[];
   retrospective?: FlightRetrospective;
@@ -1211,6 +1253,11 @@ export interface FlightState {
     text: string;
     ageMin: number;
     triageRemainingMs: number;
+    /**
+     * Set on FLIGHT's own question: when it was last briefed (0 if never). Its lines grow the text,
+     * so the wake keys on this, and FLIGHT is woken once per brief, not once per line.
+     */
+    ownBriefAt?: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
     /**
@@ -1247,8 +1294,14 @@ export interface FlightState {
       waitMin?: number;
       /** Free to start a review: not paused, stopped, busy or at its quota stop. */
       idle: boolean;
+      /** Why the engine left a queued review unstarted on its last pass, with the PR it waits on. */
+      holds?: { prNumber: number; reason: string; waitsOn: number | null }[];
     }[];
   };
+  /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
+  conflicts?: { file: string; prs: number[] }[];
+  /** Conflicting files left off `conflicts` once it reaches FLIGHT_CONFLICTS_MAX. */
+  conflictsMore?: number;
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
   /** Machine, crew, quota and stopped-seat holds that currently prevent queued work. */
@@ -1284,14 +1337,12 @@ export interface FlightState {
 
 /** What decides which seats, tickets and items wake FLIGHT; absent: every Ready ticket and item counts. */
 export interface FlightWakeInputs {
-  /** Build seat id to the Ready tickets it could start now: its area, no claim by another, no live wait. */
+  /** Build seat id to the Ready tickets it could start now: its area, no claim by another. */
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
-  /** FLIGHT has a live `wait_on` for the idle-reviewers fault. */
-  reviewsWaited?: boolean;
   /**
-   * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
+   * Free build seats with open tickets near their area, and how long
    * that has stood. Absent when no seat is in that state.
    */
   idle?: FlightIdleSeats;
@@ -1323,12 +1374,12 @@ export const idlePeriod = (ms: number): number | null =>
 export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["seats"] =>
   idle?.seats.filter((x) => idlePeriod(x.ms) !== null) ?? [];
 
-/** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
 /** What the wake says on every wake while the operator's messages are owed an answer. */
 export const owedAsk = (ids: readonly string[]): string =>
   `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
+/** The sentence FLIGHT is told when seats idle with tickets open: follow the working list; an idle seat is allowed. */
 export const IDLE_SEAT_ASK =
-  "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
+  "A free seat has stood idle while tickets are open. Start the next ticket the repo's pinned working list allows for that seat (in a repo with no working list, the board's next complete ticket), or triage the tickets with no board status. If nothing may start, leave the seat idle and do nothing more: do not promote work the working list sets aside, file a ticket or log a wait to keep it busy. A wait on a person is never the reason a seat idles: only money, direction, irreversible actions and security exceptions go to the operator, each parked with a brief.";
 
 export interface FlightWakeList<T> {
   entries: T[];
@@ -1347,14 +1398,18 @@ export interface FlightWake
     | "prs"
     | "seats"
     | "ledger"
+    | "ledgerMore"
     | "tickets"
     | "signals"
     | "memory"
+    | "prFlow"
+    | "mergeQueue"
     | "wake"
   > {
+  /** Notes tied to what the wake lists, in full; the rest are counted and read with `mc recall`. */
   memory: {
     heading: typeof FLIGHT_MEMORY_HEADING;
-    titles: Record<FlightMemoryKind, FlightWakeList<FlightMemoryTitle> & { more: number }>;
+    notes: number;
     linked: FlightMemoryNote[];
     linkedMore: number;
   };
@@ -1365,7 +1420,17 @@ export interface FlightWake
   recent: FlightWakeList<FlightState["recent"][number]>;
   prs: FlightWakeList<FlightState["prs"][number]>;
   seats: FlightWakeList<FlightSeatState>;
-  ledger: FlightWakeList<FlightLedgerIndexEntry>;
+  /** Open ledger entries, counted; `mc ledger` reads them. */
+  ledgerOpen: number;
+  /**
+   * Open PRs' flow rows that changed since the last wake, or passed a deadline (`overdue` names
+   * which: unowned, stage or waiting). A new last action alone does not re-send a row. The flow's
+   * timings stay on the HUD.
+   */
+  prFlow: FlightWakeList<FlightPrFlow["rows"][number] & { overdue?: string[] }> & {
+    unowned: number;
+  };
+  mergeQueue: FlightWakeList<NonNullable<FlightState["mergeQueue"]>[number]>;
   tickets: FlightWakeList<FlightState["tickets"][number] | string>;
   signals: FlightWakeList<FlightSignal>;
   facts: Record<string, unknown[]>;
@@ -1382,8 +1447,6 @@ export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
-/** The one Needs-you note raised when a wake's reasons are left without a decision (FLIGHT is not woken again for them). */
-export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 /**
  * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
  * raised (a reply, an item) would wake it again straight away: on 2026-10-23 that was a wake every
@@ -1396,7 +1459,29 @@ export const FLIGHT_OPERATOR_WAKE_GAP_MS = 30_000;
  * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
  * together. Anything else wakes at once.
  */
-export const FLIGHT_BATCH_MS = 15 * 60_000;
+export const FLIGHT_BATCH_MS = 30 * 60_000;
+export const FLIGHT_BATCH_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
+export const FLIGHT_BATCH_NO_ACTION_SHARE = 0.8;
+export const FLIGHT_BATCH_MIN_WAKES = 10;
+export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
+  "q",
+  "operator",
+  "owed",
+  "triage",
+  "parked",
+  "free",
+  "idle",
+  "release",
+  "breaker",
+  "holdsInForce",
+  "discussions",
+  "instructions",
+];
+export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [
+  "main_red",
+  "seat_call",
+  "merge_stalled",
+];
 /** @deprecated Unread operator requests no longer expire from FLIGHT's wake inputs. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** An operator message FLIGHT read and has not answered stays owed this long. */
@@ -1440,7 +1525,7 @@ export const handoverKey = (runId: string): string => `flight:handover:${runId}`
  * One line, as the brief's digest stays on the lines after it.
  */
 export const freshStartLine = (handover: { body: string; updatedAt: number } | null): string =>
-  `Fresh session: nobody will tell you what is going on. Read mc flight_state first, then your tracked items, plans, memory (recall) and the latest handover.${
+  `Fresh session: nobody will tell you what is going on. The digest below is the current state. Your tracked items are in mc ledger and your notes in mc recall; read the ones this wake needs, and the latest handover.${
     handover === null
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
@@ -1529,7 +1614,7 @@ export const flightDownText = (reason: string): string =>
 export const flightStartFailedText = (reason: string): string =>
   `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
 export const WAKE_ASK =
-  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary for the operator.";
+  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 
 /** "1 change", "2 changes". */
 export const counted = (n: number, one: string, many: string): string =>
@@ -1586,7 +1671,7 @@ export function wakeLine(
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
   const idleReviewFault = reviewFaultStands(s.reviewQueue)
-    ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
+    ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
     : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
   const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";

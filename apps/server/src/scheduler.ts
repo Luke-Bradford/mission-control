@@ -29,9 +29,12 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
+import { closeAnsweredItems } from "./attention/answered.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
-import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
+import { closeSettledQuestions } from "./attention/question-watch.ts";
+import { closeUnwatchedRepoItems } from "./attention/unwatched-repos.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
+import { applyDecisionDefaults } from "./brief/decision-defaults.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -104,7 +107,7 @@ import {
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
-import { applyDecisionDefaults } from "./decision-defaults.ts";
+import type { DiskUse } from "./disk/use.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
@@ -116,22 +119,24 @@ import {
   forgetViews,
   NO_LOCK,
   stateInputs,
-} from "./hud.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  MACHINE_CAPACITY_KEY,
-  storedMachineCapacity,
-} from "./machine-capacity.ts";
-import { closeSettledQuestions } from "./question-watch.ts";
+} from "./hud/hud.ts";
+import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
+import {
+  FILE_SERVICE_RESTART_ADVICE,
+  fileServiceFault,
+  MACHINE_CAPACITY_DEFAULTS,
+  MACHINE_CAPACITY_KEY,
+  storedMachineCapacity,
+} from "./telemetry/machine-capacity.ts";
 import {
   auditEndedRuns,
   TOKEN_AUDIT_FIRST_DELAY_MS,
   TOKEN_AUDIT_INTERVAL_MS,
 } from "./token-audit/audit.ts";
-import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
@@ -312,6 +317,8 @@ export interface SchedulerDeps {
   debug?: (line: string) => void;
   /** Lines for the server log (a gh token missing a scope); dropped when absent. */
   log?: (line: string) => void;
+  /** What the hub holds on disk, as last measured; the disk flag names it. Null: not measured yet. */
+  hubDiskUse?: () => DiskUse | null;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
@@ -606,7 +613,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         lock: deps.lockState?.(),
         deliver: deps.deliverDefault,
       });
-      if (closed > 0) bus.emit("attention");
+      const answered = closeAnsweredItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
+      const unwatched = closeUnwatchedRepoItems({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+      });
+      if (closed + unwatched + answered > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,
@@ -1406,20 +1425,24 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
                 )
                 .join("; ")
             : "unavailable";
+          const held = capacity.reason?.startsWith("disk") ? deps.hubDiskUse?.() : null;
+          const holds = held
+            ? ` The hub holds: worktrees ${gb(held.worktrees)}, scratch ${gb(held.scratch)}, evidence ${gb(held.evidence)}, pictures ${gb(held.pictures)}, database ${gb(held.database)}.`
+            : "";
           store.refreshNoteInEpisode({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,
             seatId: null,
             repoId: null,
-            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap used: ${gb(r.sample.swapUsedBytes)}. RAM: ${gb(r.sample.memTotalBytes)}. Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}. New crew runs and reviews are paused; running work continues.`,
+            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap used: ${gb(r.sample.swapUsedBytes)}. RAM: ${gb(r.sample.memTotalBytes)}. Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}.${holds} New crew runs and reviews are paused; running work continues.${fileServiceFault(r.sample) === null ? "" : ` ${FILE_SERVICE_RESTART_ADVICE}`}`,
             at,
           });
         } else {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
         }
         // Waste alarms are read once a minute: a restart storm shows within minutes. They never
-        // raise a Needs-you item; FLIGHT is woken once per alarm.
+        // raise a Needs-you item; one about a ticket going round wakes FLIGHT once.
         try {
           syncWasteAlarms(deps.config, store, at);
         } catch (e) {

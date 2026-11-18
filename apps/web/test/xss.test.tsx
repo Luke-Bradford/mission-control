@@ -127,15 +127,16 @@ describe("untrusted text renders literally", () => {
     await screen.findByText(SCRIPT + PAYLOAD);
     expect(container.querySelector("img, script")).toBeNull();
     const text = container.textContent ?? "";
-    // the question, the reasoning, the effort and both answers, each shown once as text
-    expect(text.split(PAYLOAD).length - 1).toBe(5);
+    // the thread's About heading (the item's title), the question, the reasoning, the effort
+    // and both answers, each shown once as text
+    expect(text.split(PAYLOAD).length - 1).toBe(6);
     expect(text).toContain(SCRIPT);
     for (const a of container.querySelectorAll("a")) {
       expect(a.getAttribute("href") ?? "").not.toMatch(/^javascript:/i);
     }
   });
 
-  it("agent stream: every kind's text, tool name, input and result; subagents and files", async () => {
+  it("agent stream: every kind's text, tool name, input and result; and the run list", async () => {
     const agentRow = crewRow({
       ticketTitle: PAYLOAD,
       digest: {
@@ -207,21 +208,9 @@ describe("untrusted text renders literally", () => {
     expect(pre).toContain(`input: ${SCRIPT}`);
     expect(pre).toContain(`result: ${PAYLOAD + SCRIPT}`);
     expect(container.querySelector("#liveCall")?.textContent).toContain(PAYLOAD);
-    act(() =>
-      within(container.querySelector("#sideP") as HTMLElement)
-        .getByRole("button", { name: "Subagents 1" })
-        .click(),
-    );
-    expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
-    act(() =>
-      within(container.querySelector("#sideP") as HTMLElement)
-        .getByRole("button", { name: /^Files/ })
-        .click(),
-    );
     await waitFor(() =>
-      expect(container.querySelector("#sideBody")?.textContent).toContain(PAYLOAD),
+      expect(container.querySelector(".side-body")?.textContent).toContain(PAYLOAD),
     );
-    expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
     expect(container.querySelector("img, script")).toBeNull();
   });
 });

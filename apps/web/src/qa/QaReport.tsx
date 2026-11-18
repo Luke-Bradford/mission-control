@@ -5,6 +5,7 @@ import { hub, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { NOTHING_TO_SEE } from "./nothingToSee.ts";
 import "./qa-report.css";
 
 const TOPICS = ["agents", "boards"] as const;
@@ -182,11 +183,14 @@ export function CurrentQaReport({
   repo,
   pr,
   head,
+  awaiting,
   children,
 }: {
   repo: string;
   pr: number;
   head: string | null;
+  /** Whether the PR waits for the operator's acceptance; the gaps list is for that decision only. */
+  awaiting: boolean;
   children?: ReactNode;
 }) {
   const resource = useResource<{ reports: QaReport[] }>(
@@ -212,7 +216,7 @@ export function CurrentQaReport({
           </button>
         </p>
       ) : report ? (
-        <QaReportRead report={report} currentHead={head} />
+        <QaReportRead report={report} currentHead={head} awaiting={awaiting} />
       ) : (
         <p className="uat-banner" role="status">
           {resource.loading
@@ -421,9 +425,11 @@ export const QaReportRead = memo(function QaReportRead({
   report: r,
   currentHead,
   archived = false,
+  awaiting = true,
 }: {
   report: QaReport;
   currentHead?: string | null;
+  awaiting?: boolean;
   archived?: boolean;
 }) {
   const stale = currentHead !== undefined && currentHead !== r.headSha;
@@ -503,7 +509,7 @@ export const QaReportRead = memo(function QaReportRead({
             <EvidenceLink url={r.prUrl}>GitHub PR</EvidenceLink>
             {r.sourceRef && <EvidenceLink url={r.sourceRef}>Review source</EvidenceLink>}
           </nav>
-          {r.completeness.missing.length > 0 && (
+          {awaiting && !stale && r.completeness.missing.length > 0 && (
             <div className="uat-banner">
               <strong>Missing evidence</strong>
               <ul>
@@ -635,6 +641,9 @@ export const QaReportRead = memo(function QaReportRead({
         }
       >
         <div className="pb uat-pairs">
+          {r.visual.applicability === "not_applicable" && !r.visual.pairs.length && (
+            <p className="uat-no-capture">{NOTHING_TO_SEE}</p>
+          )}
           <p>
             {r.visual.reason ?? "QA has not recorded why visual evidence does or does not apply."}
           </p>

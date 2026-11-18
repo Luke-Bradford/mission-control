@@ -52,6 +52,16 @@
   font-size: var(--fs-s);
 }
 
+/* a grid item holding long unbroken paths: it must shrink to the pane, not widen it */
+.tprivate {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tprivate p {
+  margin: 0;
+}
+
 .tlist {
   list-style: none;
   margin: 0;

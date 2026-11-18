@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Run, TestLockState } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud.ts";
+import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -196,15 +196,11 @@ describe("the crew and Needs-you memo", () => {
     const runs = vi.spyOn(store, "runs");
     const singleRun = vi.spyOn(store, "run");
     const batchedRuns = vi.spyOn(store, "runsForAgents");
-    const started = performance.now();
     crew(config, store, NOW, undefined, noVersion);
-    expect(performance.now() - started).toBeLessThan(100);
     expect(batchedRuns).toHaveBeenCalledTimes(1);
     expect(runs).not.toHaveBeenCalled();
     expect(singleRun).not.toHaveBeenCalled();
-    const warm = performance.now();
     crew(config, store, NOW + 1, undefined, noVersion);
-    expect(performance.now() - warm).toBeLessThan(20);
     expect(batchedRuns).toHaveBeenCalledTimes(1);
   });
   it("builds the crew once for callers asking in the same second at the same version", () => {

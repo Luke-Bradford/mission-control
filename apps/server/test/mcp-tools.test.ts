@@ -113,12 +113,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
+import { ProfilesError } from "../src/config/profiles.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-preview/previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
-import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -129,8 +130,7 @@ import {
   pushRun,
   seatWroteBody,
 } from "../src/mcp/tools.ts";
-import { setRunPathGrants } from "../src/path-grants.ts";
-import { ProfilesError } from "../src/profiles.ts";
+import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
@@ -922,7 +922,7 @@ describe("commit: another open run changed the same file", () => {
     writeFileSync(join(wt2, rel), text);
   };
   const clashLine = (paths: string, verb = "is") =>
-    `Note: ${paths} ${verb} also changed by GUIDO-2 on mc#43, which is still open; the two PRs may conflict when the second one is merged, and the operator or the controller will resolve it.`;
+    `Note: ${paths} ${verb} also changed by GUIDO-2 on mc#43, which is still open; the two PRs may conflict when the second one is merged, and FLIGHT will sort out the order.`;
 
   beforeEach(() => {
     wt2 = join(dir, "worktrees", "guido-2-43");
@@ -3049,6 +3049,47 @@ describe("push and draft_pr", () => {
         expect(remoteTip()).toBe(sha);
       });
 
+      it("pushes after a fresh Codex check replaces a disappeared session", async () => {
+        const sha = await commitOk("apps/a.ts", "a2\n");
+        store.setRunLoop(RUN, { ...NEW_LOOP, phase: "working" });
+        const checks = createCheckRecorder({
+          store,
+          checks: async () => [LINT, TYPES],
+          state: async () => ({ head: head(), clean: true }),
+        });
+        const t = gated({
+          checkDrops: (runId) => checks.drops(runId),
+          lostCheck: (runId, command) => checks.lost(runId, command),
+          pendingChecks: (runId) => checks.pending(runId),
+        });
+        const joined = `${LINT} && ${TYPES}`;
+        await checks.begin({ runId: RUN, toolUseId: "lost-cell" }, joined);
+
+        const lost = await tool("report_evidence", t).call(CTX, {
+          note: "The check session disappeared.",
+          lostCheck: LINT,
+        });
+        expect(lost.isError).toBe(true);
+        expect(lost.text).toContain(`Run ${LINT}, ${TYPES} again`);
+        expect(checks.pending(RUN)).toEqual([]);
+        expect(checks.drops(RUN).map((drop) => [drop.reason, drop.command])).toEqual([
+          ["session-lost", LINT],
+          ["session-lost", TYPES],
+        ]);
+
+        await checks.begin({ runId: RUN, toolUseId: "fresh-cell" }, joined);
+        await checks.end({ runId: RUN, toolUseId: "fresh-cell" }, true, 0);
+        expect(checks.drops(RUN)).toEqual([]);
+        expect(
+          await tool("report_evidence", t).call(CTX, { note: "The replacement check passed." }),
+        ).toEqual({ text: EVIDENCE_RECORDED });
+
+        expect(await push(t)).toEqual({
+          text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
+        });
+        expect(remoteTip()).toBe(sha);
+      });
+
       it("holds the repo's affected-tests check until it passes on the pushed head", async () => {
         const related = "pnpm -s test:related";
         const checks = gated({ checks: async () => [LINT, TYPES, related] });
@@ -3085,6 +3126,7 @@ describe("push and draft_pr", () => {
         ["dirty-end", "left uncommitted or untracked files"],
         ["head-moved", "moved the head during the call"],
         ["turn-ended", "the turn ended before the call reported its end"],
+        ["session-lost", "check session disappeared"],
         ["background", "went to the background"],
         ["timeout", "Bash timeout"],
         ["unreadable", "could not read the seat's clone"],
@@ -3703,6 +3745,22 @@ describe("push and draft_pr", () => {
         "Not pushed: No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
       );
       expect(remoteTip()).toBeNull();
+    });
+
+    it("pushes while FLIGHT's watch run is live, even if its row carries the seat's branch", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      store.upsertRun(run({ id: "flight-1:1", agentId: "flight-1", loopKind: "watch" }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-1:1",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+      expect(remoteTip()).toBe(sha);
     });
 
     it("refuses an ended run and a read-only seat", async () => {
@@ -4525,6 +4583,37 @@ describe("report_evidence", () => {
     await checks.end(key, true, 0);
     expect(await report("Checks completed with exit code 0.")).toEqual({ text: EVIDENCE_RECORDED });
     expect(told).toEqual([[CTX.seatId, CTX.runId]]);
+  });
+
+  it("tells a Codex seat to rerun a check after its session disappears", async () => {
+    await committed();
+    const command = "pnpm -s test:related";
+    const checks = createCheckRecorder({
+      store,
+      checks: async () => [command],
+      state: async () => ({ head: head(), clean: true }),
+    });
+    ev = make({
+      pendingChecks: (runId) => checks.pending(runId),
+      checkDrops: (runId) => checks.drops(runId),
+      lostCheck: (runId, lost) => checks.lost(runId, lost),
+    });
+    await checks.begin({ runId: RUN, toolUseId: "codex-lost-cell" }, command);
+
+    const result = await tool("report_evidence", ev).call(CTX, {
+      note: "The check session disappeared.",
+      lostCheck: command,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("lost its Codex check session");
+    expect(result.text).toContain(`Run ${command} again`);
+    expect(result.text).not.toContain("Continue polling that session");
+
+    await checks.begin({ runId: RUN, toolUseId: "codex-fresh-cell" }, command);
+    await checks.end({ runId: RUN, toolUseId: "codex-fresh-cell" }, true, 0);
+    expect(await report("The replacement check passed with exit code 0.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
   });
 
   it("takes a fresh recovery report after a push-wait stop and its check completes", async () => {

@@ -89,6 +89,9 @@ type PageDocument = {
 const pageDocument = (): PageDocument | undefined =>
   (globalThis as { document?: PageDocument }).document;
 
+/** One array, so a resource's subscription keeps its identity between renders. */
+const ITEM_THREAD_TOPICS = ["attention", "agents"] as const;
+
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
   agentDetail: (id: string): ResourceRef => ({
@@ -125,8 +128,14 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
-  discussion: (key: string, id = ""): ResourceRef => ({
-    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
+  /** One item's conversation: the messages sent from it and their replies, from Comms. */
+  itemThread: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/thread`,
+    topic: ITEM_THREAD_TOPICS,
+  }),
+  /** Retained plans and picture stories of one open item; 404 when it has none. */
+  attentionMaterials: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/materials`,
     topic: "attention",
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
@@ -223,6 +232,8 @@ export const RESOURCES = {
   }),
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  /** All-time stored messages per ticket (not a recent window). */
+  commsTicketCounts: { path: "/api/comms/ticket-counts", topic: "agents" },
   /** A nav row's read: the conversation list and counts, no messages. */
   commsNav: (agentId: string): ResourceRef => ({
     path: commsNavPath(agentId),
@@ -237,7 +248,8 @@ export const RESOURCES = {
     path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
     topic: "agents",
   }),
-  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  // a mention's needsReply follows its Needs-you item, so attention changes refresh it too
+  commsMentions: { path: "/api/comms/mentions", topic: ITEM_THREAD_TOPICS },
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
@@ -294,6 +306,11 @@ export const RESOURCES = {
   }),
   repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
+  /** One repo's rules with where each value comes from (Setup › Roles & guards). */
+  repoRules: (id: string): ResourceRef => ({
+    path: `/api/repos/${enc(id)}/rules`,
+    topic: "config",
+  }),
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },
   // Run-derived: refetched when runs change.
@@ -311,9 +328,20 @@ export const RESOURCES = {
     topic: null,
   }),
   // What Mission Control knows of one ticket: its form and the crew's timeline. `before` pages older.
-  ticketHistory: (repoId: string, issueNumber: number, before = ""): ResourceRef => ({
-    path: `/api/tickets/${enc(repoId)}/${issueNumber}${before ? `?before=${enc(before)}` : ""}`,
-    topic: before ? null : TICKET_TOPICS,
+  ticketHistory: (
+    repoId: string,
+    issueNumber: number,
+    before = "",
+    questionsBefore = "",
+  ): ResourceRef => ({
+    path: `/api/tickets/${enc(repoId)}/${issueNumber}${
+      before
+        ? `?before=${enc(before)}`
+        : questionsBefore
+          ? `?questionsBefore=${enc(questionsBefore)}`
+          : ""
+    }`,
+    topic: before || questionsBefore ? null : TICKET_TOPICS,
   }),
   // Read live from the CLI on each fetch, so not tied to agents events: the Context tile
   // refetches it every SEAT_CONTEXT_REFRESH_MS while the seat runs, and when its turn ends.
@@ -381,6 +409,8 @@ export const ACTIONS = {
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{ briefId, sourceRevision, optionId, requestId }`; answers a `BriefChoiceReceipt`. */
+  briefChoice: (key: string) => `/api/attention/${enc(key)}/choice`,
   /** Body `{ optionId, briefAt }`; answers a `ChoiceReceipt`. */
   choose: (key: string) => `/api/attention/${enc(key)}/choose`,
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */
@@ -404,7 +434,7 @@ export const ACTIONS = {
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
-  /** Body `{ text, interrupt? }`. */
+  /** Body `{ text, interrupt?, question?, itemKey?, choice? }`; `choice` is a picked option: `{ briefAt, option }`. */
   seatMessage: (seatId: string) => `/api/seats/${enc(seatId)}/message`,
   /** Body `{}`. */
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,
@@ -506,6 +536,7 @@ const readResource = async <T>(path: string): Promise<T> => {
   return path === RESOURCES.prFlow.path ||
     path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
+    /^\/api\/attention\/[^/]+\/materials$/.test(path) ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);

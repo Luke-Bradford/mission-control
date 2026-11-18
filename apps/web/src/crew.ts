@@ -32,6 +32,7 @@ import {
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
 import { cost, cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
+import { mcpToolPart, toolLabel } from "./toolLabel.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
 const SEAT_PALETTE = 7;
@@ -161,8 +162,11 @@ const sessionOpen = (row: CrewRow): boolean =>
 function toolLine(row: CrewRow, now: number): string | null {
   const live = row.digest?.liveTool;
   if (!live?.detail || !sessionOpen(row)) return null;
+  const head = `${toolLabel(live.name)} ${mss(now - live.since)}`;
+  // An mcp tool's detail is its own name, already said by the label.
+  if (live.detail === mcpToolPart(live.name)) return head;
   // The time comes before the detail: a line cut short on a narrow row still shows how long.
-  return `${live.name} ${mss(now - live.since)}${DOING_SEP}${cutText(live.detail, LIVE_DETAIL_MAX)}`;
+  return `${head}${DOING_SEP}${cutText(live.detail, LIVE_DETAIL_MAX)}`;
 }
 
 /** A running seat waiting on its own background task (ruling R21): the newest one. */
@@ -209,7 +213,7 @@ export function doingLine(
       const tool = toolLine(row, now);
       if (tool) return tool;
       const live = row.digest?.liveTool;
-      if (live) return `${seq}${DOING_SEP}${live.name} ${mss(now - live.since)}`;
+      if (live) return `${seq}${DOING_SEP}${toolLabel(live.name)} ${mss(now - live.since)}`;
       // Waiting on its own background task: the newest one, ahead of the last text.
       const task = backgroundLine(row);
       if (task) return `${seq}${DOING_SEP}${task}`;
@@ -423,7 +427,10 @@ export function needLine(
   if (parked) parts.push({ text: `Parked: ${parked.text}`, action: "open", key: parked.key });
   const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
   if (asks.length > 0) {
-    const others = asks.filter((i) => i.owner !== "operator");
+    // FLIGHT's own ask to the operator is never a "question for FLIGHT" on its own row
+    const others = asks.filter(
+      (i) => i.owner !== "operator" && !(i.owner === "flight" && row.role === "FLIGHT"),
+    );
     for (const owner of new Set(others.map((i) => i.owner))) {
       const group = others.filter((i) => i.owner === owner);
       const ask = group.reduce((a, b) => (b.at < a.at ? b : a));
@@ -547,7 +554,7 @@ export const LOOP_PHASE_LABEL: Record<LoopPhase, string> = {
   working: "Working",
   ci: "CI",
   review: "In review",
-  parked: "Blocked",
+  parked: "Parked",
   done: "Done",
 };
 
@@ -570,6 +577,8 @@ export const WAIT_TEXT = {
   operator: "waiting on you",
   lock: "in line for the test lock",
 } as const;
+/** The lead of a parked run's wait line; the park's reason follows. */
+export const PARKED_WAIT_LEAD = "Held";
 /** A set-aside run whose rework or park is due back on its seat. */
 export const seatWaitText = (call: string): string => `waiting on ${call} for rework`;
 /** Waits shown amber, as the mockup's lock line. */
@@ -608,9 +617,11 @@ export function waitText(
     case "main":
       return WAIT_TEXT[wait];
     case "operator":
-      return loop.phase === "parked" && loop.parked
-        ? `${WAIT_TEXT.operator}: ${loop.parked}`
-        : WAIT_TEXT.operator;
+      // a park's reason names who settles it (FLIGHT, or the operator's acceptance), so the line
+      // does not claim the operator for every park
+      if (loop.phase === "parked")
+        return loop.parked ? `${PARKED_WAIT_LEAD}: ${loop.parked}` : PARKED_WAIT_LEAD;
+      return WAIT_TEXT.operator;
     case "lock":
       return lockSince === null
         ? WAIT_TEXT.lock
@@ -741,6 +752,13 @@ export function seatStatus(row: CrewRow): SeatStatus {
     return { label: "Checking", tone: "neutral" };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
   const reason = row.loop?.parked ?? row.note ?? undefined;
+  // The hub holds a stuck ticket on the ticket, not on a seat: a crew seat is never "Blocked".
+  // Without an open run it is free; with one it waits on its own command.
+  if (row.kind === "crew" && row.hudState === "blocked") {
+    if (isSeatFree(row)) return { label: SEAT_STATUS_LABEL.free, tone: "neutral" };
+    const waiting = { label: HUD_STATE_LABEL.waiting, tone: HUD_STATE_TONE.waiting };
+    return reason ? { ...waiting, reason } : waiting;
+  }
   if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) {
     return (row.hudState === "blocked" || row.hudState === "parked") && reason
       ? { ...engine, reason }

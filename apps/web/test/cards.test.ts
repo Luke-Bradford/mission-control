@@ -271,6 +271,13 @@ describe("cardColumn", () => {
   it("no blocker leaves the column the Status gives", () => {
     expect(cardColumn(boardItem(ready))).toBe("Ready");
   });
+  it("a ticket the hub set to Waiting is in Waiting, whatever its Status or blockers", () => {
+    const waiting = { reason: "Needs the migration", freesWhen: "#12 merges", at: NOW };
+    expect(cardColumn(boardItem({ waiting }))).toBe("Waiting");
+    const blockedBy = [{ ref: "shop-app#2", closed: false }];
+    expect(cardColumn(boardItem({ ...ready, blockedBy, waiting }))).toBe("Waiting");
+    expect(cardColumn(boardItem({ waiting, closed: true }))).toBe("Done");
+  });
   it("work under way or done stays where it is, blocker or not", () => {
     const blockedBy = [{ ref: "shop-app#2", closed: false }];
     expect(cardColumn(boardItem({ blockedBy }))).toBe("In progress");

@@ -15,7 +15,6 @@ import { DEFAULT_SEAT_COMMANDS, type NewRepo, OPERATOR_HEADER, type SeatInput } 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import {
   addAccount,
   addRepo,
@@ -30,9 +29,9 @@ import {
   SeatsBody,
   setAccount,
   setSessionSeats,
-} from "../src/config-write.ts";
+} from "../src/config/config-write.ts";
+import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import { codexModels } from "../src/runtime/codex-models.ts";
-import { setSeatFocus } from "../src/seat-focus.ts";
 import { Store } from "../src/store.ts";
 import { fakeModels } from "./config-codex.ts";
 
@@ -466,25 +465,6 @@ describe("setSessionSeats", () => {
     setSessionSeats(path, SESSION, base, seats, NOW);
   const change = (id: string, over: Partial<ConfigSeatInput>) =>
     set(read().map((s) => (s.id === id ? { ...s, ...over } : s)));
-
-  it("bases repeated focus updates on persisted pending seat edits", async () => {
-    const live = loadConfig(path);
-    await change("guido-1", { model: "opus", focus: "label:first" });
-    const reload = vi.fn(async () => ({
-      sessions: [],
-      pending: [],
-      restartNeeded: [],
-      error: null,
-      checkedAt: NOW,
-      applied: [],
-    }));
-    await setSeatFocus(live, path, { reload }, "guido-1", "label:second", NOW);
-    await setSeatFocus(live, path, { reload }, "guido-1", "label:third", NOW);
-    expect(read().find((s) => s.id === "guido-1")).toMatchObject({
-      model: "opus",
-      focus: "label:third",
-    });
-  });
 
   it("persists and reloads per-seat focus, preserves omitted focus and clears it explicitly", async () => {
     await change("guido-1", { focus: "label:catalog lane:work" });

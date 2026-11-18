@@ -2,13 +2,13 @@ import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type FoldState, foldPath } from "../src/collectors/common.ts";
-import { foldTranscript } from "../src/streamjson.ts";
+import { applyFacts, type FoldState, foldPath } from "../src/collectors/common.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 // Records the bytes handed to each fold call, passing through to the real fold.
 const foldCalls = vi.hoisted(() => ({ bytes: [] as number[] }));
-vi.mock("../src/streamjson.ts", async (orig) => {
-  const real = await orig<typeof import("../src/streamjson.ts")>();
+vi.mock("../src/run/streamjson.ts", async (orig) => {
+  const real = await orig<typeof import("../src/run/streamjson.ts")>();
   return {
     ...real,
     foldTranscript: (...args: Parameters<typeof real.foldTranscript>) => {
@@ -109,5 +109,39 @@ describe("foldPath", () => {
     const facts = foldPath(state, path, 2048);
     expect(facts).toEqual(foldTranscript(null, [], mtimeOf(path)));
     expect(state.get(path)?.facts).toEqual(facts);
+  });
+});
+
+describe("applyFacts branch", () => {
+  const facts = { ...foldTranscript(null, fixtureLines, 0), branch: "feature/1941-x" };
+  const base = {
+    id: "r",
+    agentId: "flight-1",
+    repoId: "mc",
+    seq: 1,
+    startedAt: 0,
+    endedAt: null,
+    status: "running" as const,
+    sessionId: null,
+    model: null,
+    branch: null,
+    ticket: null,
+    costUsd: null,
+    tokens: null,
+    transcriptPath: "",
+    prs: [],
+    summary: null,
+  };
+
+  it("never gives a watch run the branch its transcript mentions", () => {
+    const r = { ...base, loopKind: "watch" as const };
+    applyFacts(r, facts);
+    expect(r.branch).toBeNull();
+  });
+
+  it("still takes the transcript's branch for a run that has no crew loop kind", () => {
+    const r = { ...base, agentId: "loop" };
+    applyFacts(r, facts);
+    expect(r.branch).toBe("feature/1941-x");
   });
 });

@@ -38,6 +38,7 @@ import {
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   estimateTokens,
+  FLIGHT_FULL_BUILTINS,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -79,8 +80,9 @@ import {
   wrongAreaText,
 } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
+import { loadProfiles, profileHash } from "../src/config/profiles.ts";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
-import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
@@ -89,13 +91,12 @@ import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { runPathGrants } from "../src/path-grants.ts";
-import { loadProfiles, profileHash } from "../src/profiles.ts";
-import { textBytes, wakePieces } from "../src/prompt-cost.ts";
+import { runPathGrants } from "../src/repo/path-grants.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
+import { ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "../src/runtime/node-first.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -113,6 +114,7 @@ import {
   crewSkillsDir,
   crewTokenPath,
 } from "../src/store/crew-paths.ts";
+import { textBytes, wakePieces } from "../src/telemetry/prompt-cost.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -493,6 +495,50 @@ describe("startRun eligibility", () => {
       });
     });
 
+    it("starts a Paths: line of files and globs in the seat's area with no grant", async () => {
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({
+          body: "Paths: apps/server/src/telemetry/**, apps/server/src/a.ts\n",
+        }),
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it.each(["apps/server", "apps/*"])(
+      "starts Paths: globs under the area %s with no grant",
+      async (guidoArea) => {
+        const { sup } = make({
+          rules: withRules(),
+          guidoArea: [guidoArea],
+          fetchTicket: ticketWith({ body: "Paths: apps/server/src/**, apps/server/**\n" }),
+        });
+        sup.start();
+        const { runId } = await sup.startRun("guido-1", 42);
+        expect(runPathGrants(store, runId)).toEqual([]);
+      },
+    );
+
+    it("refuses an outside glob with the text it always had", async () => {
+      await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
+      });
+    });
+
+    it("asks FLIGHT only for the outside file of a mixed Paths: line", async () => {
+      const body = "Paths: apps/server/src/**, package.json\n";
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body }),
+      });
+      approve();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({ body }) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual(["package.json"]);
+    });
+
     it("starts a ticket with no Paths: line holding no grant", async () => {
       const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
       sup.start();
@@ -820,6 +866,63 @@ describe("startRun", () => {
     await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
       message: ticketHasRunText("mc#42"),
     });
+  });
+
+  it("starts a fresh stage after its merged PR has expired from the live cache", async () => {
+    git(clone, "branch", BRANCH);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged stage",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 50,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      100,
+    );
+    store.sweepPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 2,
+          title: "Another PR",
+          url: "u",
+          branch: "feature/43-another",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      101,
+    );
+
+    const { sup } = make();
+    sup.start();
+    const out = await sup.startRun("guido-1", 42);
+
+    expect(store.pullRequests("mc").map((p) => p.number)).toEqual([2]);
+    expect(out.branch).toBe(`${BRANCH}-stage-2`);
   });
 
   it("remakes a worktree recorded before a store restart, clearing only after installation", async () => {
@@ -2884,14 +2987,16 @@ describe("repo guidance at launch", () => {
       );
   });
 
-  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+  it("starts FLIGHT unsandboxed with its listed tools and without the operator's settings", async () => {
     const { sup } = make({ extraSeat: FLIGHT });
     sup.start();
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    for (const flag of ["--restricted", "--tools", "--disallowedTools", "--permission-mode"])
+    for (const flag of ["--restricted", "--disallowedTools", "--permission-mode"])
       expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
@@ -3133,8 +3238,21 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env.SHELL).toBe(CODEX_SHELL);
     expect(spawn.env.pnpm_config_pm_on_fail).toBe("ignore");
     expect(spawn.env.npm_config_update_notifier).toBe("false");
-    expect(spawn.env.ZDOTDIR).toBe(join(folder, "zsh-empty"));
-    expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([]);
+    expect(spawn.env.ZDOTDIR).toBe(join(root, ZSH_NODE_FIRST_DIR));
+    // zsh must be able to read it: not inside any path the seat sandbox denies
+    const denied = [
+      ...readFileSync(join(home, "config.toml"), "utf8").matchAll(/^"(.+)"="deny"$/gm),
+    ];
+    expect(denied.length).toBeGreaterThan(0);
+    expect(
+      denied.some(([, d]) => spawn.env.ZDOTDIR === d || spawn.env.ZDOTDIR.startsWith(`${d}/`)),
+    ).toBe(false);
+    expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([".zprofile"]);
+    expect(readFileSync(join(spawn.env.ZDOTDIR, ".zprofile"), "utf8")).toBe(
+      zprofileNodeFirst(process.execPath),
+    );
+    // the hub's Node folder leads PATH, ahead of any other folder that holds a node
+    expect(spawn.env.PATH.split(":")[0]).toBe(dirname(process.execPath));
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [
@@ -3640,4 +3758,43 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   expect(store.run(run.id)?.endedAt).toBeNull();
   expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
   expect(recorded()).toEqual([]);
+});
+
+describe("a worktree a start is using (#1756)", () => {
+  const wt = () => join(root, "mc-crew", "guido-1-42");
+
+  it("is marked from the checkout until the seat's session points at it", async () => {
+    let open: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      open = r;
+    });
+    const claim = vi.fn(async () => {
+      await gate;
+    });
+    const { sup } = make({ claim });
+    sup.start();
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+    const started = sup.startRun("guido-1", 42);
+    await until(() => expect(claim).toHaveBeenCalled());
+    expect(existsSync(wt())).toBe(true);
+    // the checkout is made and nothing yet points at it: the tidy must leave it alone
+    expect(sup.isStartingWorktree(wt())).toBe(true);
+    expect(store.seatSession("guido-1")?.worktree ?? null).toBeNull();
+    open();
+    await started;
+    expect(store.seatSession("guido-1")?.worktree).toBe(wt());
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
+  it("is cleared when the start fails after the checkout", async () => {
+    const claim = vi.fn(async () => {
+      expect(sup.isStartingWorktree(wt())).toBe(true);
+      throw new Error("no");
+    });
+    const { sup } = make({ claim });
+    sup.start();
+    await refusal(sup.startRun("guido-1", 42));
+    expect(claim).toHaveBeenCalled();
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
 });

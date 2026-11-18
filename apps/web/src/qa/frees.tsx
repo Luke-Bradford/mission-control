@@ -38,12 +38,7 @@ export function FreesLine({
   chain: DependencyChain | undefined;
   repoId: string;
 }) {
-  if (!chain || (!chain.frees.length && !chain.stillWaiting.length))
-    return (
-      <div className="uat-frees">
-        <p>No recorded work waits on this PR.</p>
-      </div>
-    );
+  if (!chain || (!chain.frees.length && !chain.stillWaiting.length)) return null;
   const more = chain.frees.length - FREES_SHOWN;
   return (
     <div className="uat-frees">

@@ -9,6 +9,13 @@ import type {
 } from "@mc/core";
 import { agentView } from "./agentV2Fixture.ts";
 import {
+  DEMO_ARRIVING_KEY,
+  demoAnswered,
+  demoAttention,
+  demoDiscussions,
+  demoMaterials,
+} from "./demoNeeds.ts";
+import {
   DEMO_REPO,
   DEMO_TICKETS,
   demoPageAnswers,
@@ -32,6 +39,7 @@ import {
   seatRow,
 } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
+import { rulesFixture } from "./rolesRulesFixture.ts";
 
 function defined<T>(value: T | null | undefined): T {
   if (value == null) throw new Error("Test expected a value to exist");
@@ -588,17 +596,7 @@ export function demoSeed() {
   const config = structuredClone(base.config);
   for (const session of config.crew?.sessions ?? [])
     for (const seat of session.seats) seat.role = SEAT_ROLES[seat.id] ?? seat.role;
-  const attention = base.attention.map((entry, i) => ({
-    ...entry,
-    ticket: i === 0 ? `${DEMO_REPO}#104` : entry.ticket,
-    agentId: i === 0 ? "dev-4" : entry.agentId,
-    offers: i === 0 ? (["not-now", "drop"] as const) : undefined,
-    text: [
-      "Which breakpoint should the address form use: 600 or 720 pixels?",
-      "Confirm the import scope for the order export.",
-      "Choose the retry policy for failed payment webhooks.",
-    ][i] as string,
-  }));
+  const attention = demoAttention();
   const summary: OverviewSummary = {
     ...base.summary,
     pipeline: pipelineStages(DEMO_TICKETS),
@@ -623,6 +621,14 @@ export function demoSeed() {
     ),
     "/api/crew?shape=summary": { rows, firstRunToday: NOW - 3 * 60 * MIN },
     "/api/attention": attention,
+    "/api/attention/answered": demoAnswered(),
+    ...Object.fromEntries(
+      Object.entries(demoMaterials()).map(([key, packets]) => [
+        `/api/attention/${encodeURIComponent(key)}/materials`,
+        packets,
+      ]),
+    ),
+    ...demoDiscussions([...attention.map((a) => a.key), DEMO_ARRIVING_KEY]),
     "/api/config": config,
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
@@ -652,6 +658,7 @@ export function demoSeed() {
       ),
     },
     "/api/flight/summary": flightSummary(),
+    [`/api/repos/${DEMO_REPO}/rules`]: rulesFixture(DEMO_REPO),
     "/api/settings/away": {
       on: false,
       until: "",

@@ -18,6 +18,7 @@ const spy = () => {
     end: async (k, ok) => void calls.push(["end", k, ok]),
     lockedBy: async () => null,
     dropRun: (runId) => void calls.push(["drop", runId]),
+    lost: () => false,
     drops: () => [],
     pending: () => [],
   };

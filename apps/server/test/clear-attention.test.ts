@@ -1,6 +1,5 @@
 import {
   COMMS_CONTROLLER,
-  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_RUNAWAY_NOTE_KEY,
   NEW_LOOP,
   OPERATOR_HEADER,
@@ -11,7 +10,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const AT = Date.parse("2026-11-09T06:00:00Z");
@@ -183,13 +182,6 @@ it.each([
   expect(store.notes()).toHaveLength(1);
 });
 
-it("keeps FLIGHT's unfinished-wake reminder out of attention while retaining its source", () => {
-  raise(FLIGHT_LEFT_NOTE_KEY);
-  expect(
-    attentionItems(config, store, now).some((i) => i.key === `note:${FLIGHT_LEFT_NOTE_KEY}`),
-  ).toBe(false);
-  expect(store.notes().some((n) => n.key === FLIGHT_LEFT_NOTE_KEY)).toBe(true);
-});
 it("clears the source, records a closure and stays gone until a newly raised item", async () => {
   raise();
   const key = "note:hub-update-held";

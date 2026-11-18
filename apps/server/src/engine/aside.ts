@@ -1,6 +1,6 @@
 import { carriedFrom, fixKey, type Run, reviewFor, seatIsPaused } from "@mc/core";
-import { readCrewPause } from "../crew-pause.ts";
-import type { Store } from "../store.ts";
+import { readCrewPause } from "../config/crew-pause.ts";
+import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 
 /**
  * Whether a run set aside in CI or review is due back on its seat: the loop flagged it
@@ -12,24 +12,37 @@ import type { Store } from "../store.ts";
 export function asideWakeDue(store: Store, run: Run): boolean {
   const aside = run.loop?.aside;
   if (!aside || run.endedAt !== null || run.loop?.phase === "done") return false;
+  // a run on its seat is not waiting for one: a restart between its wake and the loop clearing
+  // `aside` leaves the flag set, and it must not set the seat's next run aside, over and over
+  const row = store.seatSession(run.agentId);
+  if (row?.runId === run.id && ACTIVE_SEAT_STATES.includes(row.state)) return false;
   if (aside.wake) return true;
   // parked on the operator's question: not due back until it is answered (the loop then wakes it)
   if (aside.ask !== undefined) return false;
+  return fixDueReason(store, run) !== null;
+}
+
+/**
+ * What a run set aside is owed a fix for, read from the store: "ci" when CI is failing on its
+ * pushed sha after its one re-run, "review" when its current review has reported blocking
+ * findings whose fix line is not yet claimed; else null.
+ */
+function fixDueReason(store: Store, run: Run): "ci" | "review" | null {
   const pushed = store.runPush(run.id);
-  if (pushed === null || run.loop === null || run.loop === undefined) return false;
+  if (pushed === null || run.loop === null || run.loop === undefined) return null;
   if (run.loop.phase === "ci") {
     const prNumber = run.loop.prNumber;
     const pr = store.pullRequests(run.repoId).find((p) => p.number === prNumber);
     // the loop's rule: the first failure on a sha is re-run, not sent; it is due after that re-run
     const rerun = run.loop.rerun;
-    return (
-      pr !== undefined &&
+    return pr !== undefined &&
       pr.headSha === pushed.sha &&
       pr.ci === "failing" &&
       (run.loop.ciFailedSha === pushed.sha ||
         (rerun?.sha === pushed.sha &&
           (store.pullRequestReadAt(run.repoId, pr.number) ?? 0) > rerun.at))
-    );
+      ? "ci"
+      : null;
   }
   const cur = reviewFor(
     store.reviewsOfRun(run.id),
@@ -37,12 +50,12 @@ export function asideWakeDue(store: Store, run: Run): boolean {
     pushed.sha,
     carriedFrom(run.loop.carry, run.loop.reviewWaivedSha, pushed.sha),
   );
-  return (
-    cur !== null &&
+  return cur !== null &&
     cur.state === "reported" &&
     cur.blocking > 0 &&
     !(fixKey(run.id, run.loop.epoch, cur.id) in store.claimedKeys(run.id))
-  );
+    ? "review"
+    : null;
 }
 
 /**

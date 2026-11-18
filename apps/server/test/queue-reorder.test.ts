@@ -12,20 +12,20 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { applyDecisionDefaults } from "../src/brief/decision-defaults.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { routineBriefChoices } from "../src/brief/routine.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { refillQueues } from "../src/engine/queue.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import {
   prepareQueueReorderSnapshot,
   proposeQueueReorder,
   type QueueReorderDeps,
   reorderQueue,
   resolveQueueReorder,
-} from "../src/queue-reorder.ts";
+} from "../src/queue/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { liveBriefSeat } from "./brief-fixture.ts";
 

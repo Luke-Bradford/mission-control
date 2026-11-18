@@ -19,9 +19,9 @@ import {
   scanSecrets,
 } from "@mc/core";
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
-import { statNoted } from "../file-deps.ts";
+import { statNoted } from "../repo/file-deps.ts";
+import { readStream } from "../run/stream.ts";
 import { commsPosition, type Store } from "../store.ts";
-import { readStream } from "../stream.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 
 export const COMMS_INBOX_PROMPT_MAX = 8_000;
@@ -111,6 +111,7 @@ export async function sendComms(
   await validateCommsText(deps.knownSecrets, input.text);
   let replyFrom: string | undefined;
   let replyTicket: string | null | undefined;
+  let replyItemKey: string | undefined;
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
     if (original === null) throw new Error("Unknown reply message.");
@@ -121,6 +122,8 @@ export async function sendComms(
     )
       throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
+    // A reply stays in the Needs-you item's conversation its message belongs to.
+    replyItemKey = original.itemKey;
     if (input.ref === undefined || input.ref === original.ref) replyTicket = original.ticket;
   }
   crew = deps.crew();
@@ -155,7 +158,7 @@ export async function sendComms(
           deps.senderTicket,
         ),
         text: input.text,
-        itemKey: input.itemKey,
+        itemKey: input.itemKey ?? replyItemKey,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
@@ -368,6 +371,14 @@ function transcript(path: string): ReturnType<typeof readStream> {
 /** Shared ceiling for a displayed snapshot and its read acknowledgement. */
 export const COMMS_SNAPSHOT_LIMIT = 10200;
 
+/** A stored line tags the operator: `@CAPCOM` written by anyone but CAPCOM or the hub. */
+export const taggedCapcom = (m: { from: string; text: string }): boolean =>
+  m.from !== COMMS_CAPCOM && m.from !== COMMS_MC && /@CAPCOM\b/i.test(m.text);
+
+/** A stored line that can raise an attention item for its sender: a tag, or a line to CAPCOM. */
+export const raisesAttention = (m: { from: string; to: string; text: string }): boolean =>
+  taggedCapcom(m) || m.to === COMMS_CAPCOM;
+
 /** Needs you scans only the newest run; the thread retains a small recent history. */
 export function threadMessages(
   store: Store,
@@ -384,7 +395,7 @@ export function threadMessages(
       : rows.findLast((m) => m.from === COMMS_CAPCOM && m.to === id);
   const messages: Omit<CommsThreadMessage, "seen">[] = rows.map((m) => ({
     ...m,
-    tagged: m.from !== COMMS_CAPCOM && m.from !== COMMS_MC && /@CAPCOM\b/i.test(m.text),
+    tagged: taggedCapcom(m),
     direct:
       m.to === COMMS_CAPCOM &&
       m.from === id &&

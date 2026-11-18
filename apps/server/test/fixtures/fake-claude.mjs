@@ -6,7 +6,8 @@
 // `--boot-delay <ms>` blocks startup that long before it reads stdin (a slow boot with no signal
 // handler yet, so a SIGTERM during it ends the process by signal). With
 // `--fail-resume` it exits 1 at once when started with `--resume` (an unknown session, say). With
-// `--record-exit` it also records `{"exited":<pid>}` when it exits, and SIGTERM becomes exit 143.
+// `--fail-new-while <file>` it exits 1 at once when started with `--session-id` while <file> exists (a fresh
+// session that cannot start; a resume is unaffected). With `--record-exit` it also records `{"exited":<pid>}` when it exits, and SIGTERM becomes exit 143.
 //
 // Nothing is printed until the first user line. Each user line starts a turn: `system/init`, a
 // `rate_limit_event` (allowed), an assistant reply `echo: <text>` and a `result`. A user line that
@@ -59,6 +60,11 @@ if (argv.includes("--record-exit")) {
 record(JSON.stringify({ argv, cwd: process.cwd(), env: process.env }));
 if (argv.includes("--fail-resume") && argv.includes("--resume")) {
   process.stderr.write("No conversation found with session ID\n");
+  process.exit(1);
+}
+const failNewWhile = flag("--fail-new-while");
+if (failNewWhile !== undefined && argv.includes("--session-id") && existsSync(failNewWhile)) {
+  process.stderr.write("cannot start a new session\n");
   process.exit(1);
 }
 

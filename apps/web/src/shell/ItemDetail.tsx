@@ -1,9 +1,9 @@
 import type {
   AttentionItem,
+  BriefChoiceReceipt,
   BriefOption,
   ChoiceReceipt,
   Crew,
-  ItemDiscussion as Discussion,
   Escalation,
   FlightView,
   TicketView,
@@ -13,11 +13,13 @@ import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import {
   answerTarget,
-  askFlight,
+  boundChoice,
+  boundChoiceStands,
   choiceLine,
   choosable,
   dismissItem,
   sendAnswer,
+  sendBoundChoice,
   sendChoice,
 } from "../comms/answer.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
@@ -29,19 +31,26 @@ import {
   PersonChoices,
   Recommendation,
 } from "../comms/ItemBrief.tsx";
-import { ItemDiscussion } from "../comms/ItemDiscussion.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import { FlightThread } from "../flight/FlightThread.tsx";
 import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { LinksSection } from "../needs/LinksSection.tsx";
+import {
+  OptionPictures,
+  PlanAndMockups,
+  useAttentionMaterials,
+  useImageViewer,
+} from "../needs/Materials.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
 import { PreviewOpener } from "../needs/PreviewFrame.tsx";
+import { titleOf } from "../needs/QuestionBand.tsx";
 import {
   CATCH_UP_LABEL,
   catchUpTone,
@@ -57,7 +66,7 @@ import "./ItemPanel.css";
 
 /**
  * A 540px fly-out for one thing that needs the operator. Every item uses the same brief sections;
- * escalations retain their GitHub reply link. Item discussion uses its own persisted history.
+ * escalations retain their GitHub reply link. The FLIGHT thread beside the question is the one stored conversation.
 
 /** Everything one open item shows and does, shared by the flyout and the Needs you page. */
 export function useItemDetail(key: string | null) {
@@ -105,6 +114,7 @@ export function useItemDetail(key: string | null) {
   >({});
   const [chosenLocal, setChosen] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
+  const [boundReceipts, setBoundReceipts] = useState<Record<string, BriefChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
@@ -127,16 +137,25 @@ export function useItemDetail(key: string | null) {
       ? choiceRes.data
       : undefined;
   const recorded = choices[k] ?? serverChoice;
+  // The bound choice made on this item: this page's receipt, else the one the hub stored.
+  const boundReceipt = boundReceipts[k] ?? item?.brief?.choice;
+  const boundLabel =
+    boundReceipt && boundChoiceStands(boundReceipt)
+      ? item?.brief?.options.find((o) => o.id === boundReceipt.optionId)?.label
+      : undefined;
   const chosen =
-    recorded && !chosenLocal[k] ? { ...chosenLocal, [k]: recorded.label } : chosenLocal;
+    recorded && !chosenLocal[k]
+      ? { ...chosenLocal, [k]: recorded.label }
+      : boundLabel && !chosenLocal[k]
+        ? { ...chosenLocal, [k]: boundLabel }
+        : chosenLocal;
   const esc = item?.escalationId ? escalations?.find((e) => e.id === item.escalationId) : undefined;
   // An escalation item waits for its escalations rather than flash the generic view.
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
-  const live = seat?.live === true;
-  // Led by the item's title, so the answer reads in context.
-  const about = esc?.title ?? item?.text ?? "";
+  // The thread beside the question is headed with the title the page and the list show for it.
+  const about = item ? titleOf(item) : "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
   const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
   // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
@@ -154,7 +173,7 @@ export function useItemDetail(key: string | null) {
     const body = text.trim();
     if (!item || !target || !body || !replyOk || busy) return;
     void act(async () => {
-      const failed = await sendAnswer(target, seat, item, about, body);
+      const failed = await sendAnswer(target, seat, item, body);
       if (failed === null && getDraft("answer", item.key) === text) {
         clearDraft("answer", item.key);
         if (activeKey.current === item.key) setTextState("");
@@ -193,9 +212,30 @@ export function useItemDetail(key: string | null) {
       });
       return;
     }
+    if (item && boundChoice(item, o)) {
+      if (busy || chosen[item.key]) return;
+      void act(async () => {
+        const result = await sendBoundChoice(item, o);
+        if ("error" in result) return result.error;
+        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+        setBoundReceipts((prev) => ({ ...prev, [item.key]: result.receipt }));
+        return null;
+      });
+      return;
+    }
     if (!item || !target || !replyOk || busy || chosen[item.key]) return;
+    // An option the choose routes do not take: its answer goes as a message that carries the pick.
+    const answerWith = () =>
+      void act(async () => {
+        const failed = await sendAnswer(target, seat, item, o.answer, o);
+        if (failed !== null) return failed;
+        // The thread beside the question shows the pick: it is the one message sent.
+        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+        hub.refetch(RESOURCES.choice(item.key).path);
+        return null;
+      });
     if (item.kind === "person") {
-      void act(() => sendAnswer(target, seat, item, about, o.answer));
+      answerWith();
       return;
     }
     if (item.kind === "approval" && o.label === "Edit") {
@@ -213,48 +253,7 @@ export function useItemDetail(key: string | null) {
       });
       return;
     }
-    const resource = RESOURCES.discussion(item.key);
-    const discussion = hub.snapshot(resource.path, resource.topic).data as Discussion | undefined;
-    const id = crypto.randomUUID();
-    const receiptText = `You chose: ${o.label}\n\n${o.answer}`;
-    const receipt = (note?: string) =>
-      setReceipts((prev) => ({ ...prev, [item.key]: { id, text: receiptText, note } }));
-    const refresh = () => {
-      hub.refetch(resource.path);
-      if (discussion) hub.refetch(RESOURCES.discussion(item.key, discussion.id).path);
-    };
-    void act(async () => {
-      if (target.to !== "flight") {
-        const failed = await sendAnswer(target, seat, item, about, o.answer);
-        if (failed !== null) return failed;
-      } else {
-        if (!discussion)
-          return "The discussion couldn't be loaded. Refresh discussion and try again.";
-        try {
-          await askFlight(item.key, discussion.version, id, o.answer);
-          refresh();
-        } catch (e) {
-          return e instanceof Error ? e.message : "server unreachable";
-        }
-      }
-      // These results belong to the captured item even if another item is now open.
-      setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-      if (target.to === "flight") {
-        receipt("FLIGHT hasn't replied yet.");
-      } else if (discussion && live) {
-        receipt("FLIGHT hasn't replied yet.");
-        void askFlight(item.key, discussion.version, id, `You chose: ${o.label}`)
-          .catch(() => receipt("Answer sent. FLIGHT hasn't replied yet."))
-          .finally(refresh);
-      } else {
-        receipt(
-          discussion
-            ? "FLIGHT hasn't replied yet."
-            : "Answer sent. The discussion couldn't be loaded.",
-        );
-      }
-      return null;
-    });
+    answerWith();
   };
   const dismiss = (after?: () => void) => {
     if (!item) return;
@@ -286,7 +285,7 @@ export function useItemDetail(key: string | null) {
     agentId,
     agentIndex,
     seat,
-    live,
+    about,
     flight,
     target,
     queueApproval,
@@ -297,6 +296,7 @@ export function useItemDetail(key: string | null) {
     err,
     chosen,
     recorded,
+    boundReceipt,
     receipts,
     handledHow,
     options,
@@ -332,7 +332,7 @@ export function ItemDetail({
     notesRes,
     tz,
     now,
-    live,
+    about,
     flight,
     target,
     queueApproval,
@@ -343,6 +343,7 @@ export function ItemDetail({
     err,
     chosen,
     recorded,
+    boundReceipt,
     receipts,
     handledHow,
     options,
@@ -352,8 +353,10 @@ export function ItemDetail({
     act,
     setJustHandled,
   } = detail;
-  if (key === null) return null;
   const page = layout === "page";
+  const materials = useAttentionMaterials(page && item && !holding ? item : null);
+  const viewer = useImageViewer();
+  if (key === null) return null;
   const p = page ? "needs" : "ds";
   const flightSeat = flight === undefined ? undefined : flight.seat;
   const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
@@ -426,6 +429,9 @@ export function ItemDetail({
       )}
     </div>
   );
+  // Every option has an action the server prepared: they go through the bound choice route.
+  const bound =
+    item !== undefined && options.length > 0 && options.every((o) => boundChoice(item, o));
   const answerBlock = (
     <>
       {item?.brief && !holding && <h3 className="bsec answer-heading">Your answer</h3>}
@@ -438,31 +444,33 @@ export function ItemDetail({
         <div className="composer" id={`${p}Opts`}>
           {options.length > 0 && (
             <>
-              {chosen[k] && (
-                <p>
-                  You chose: <b>{chosen[k]}</b>
-                  {recorded && (
-                    <span className="note" data-testid="choice-line">
-                      {" "}
-                      · {choiceLine(recorded, tz ?? "UTC")}
-                    </span>
-                  )}
+              {/* The pick itself shows once, in the FLIGHT thread; here only where it went. */}
+              {chosen[k] && (recorded || boundReceipt) && (
+                <p className="note" data-testid="choice-line">
+                  {recorded ? choiceLine(recorded, tz ?? "UTC") : boundReceipt?.text}
                 </p>
               )}
               <BriefOptions
                 options={options}
                 recommendedOptionId={item.brief?.recommendedOptionId}
                 recommendation={item.brief?.recommendation}
-                live={queueApproval || target?.to !== "github"}
-                disabled={busy || (!queueApproval && !replyOk) || Boolean(chosen[k])}
+                live={queueApproval || bound || target?.to !== "github"}
+                disabled={busy || (!queueApproval && !bound && !replyOk) || Boolean(chosen[k])}
                 title={
-                  !queueApproval && target?.to === "github"
+                  !queueApproval && !bound && target?.to === "github"
                     ? "Reply on GitHub to answer this item."
                     : undefined
                 }
                 variant={item.kind === "approval" ? "row" : "panel"}
                 rowLabel={item.kind === "approval" ? "Your call:" : undefined}
                 primaryFirst={item.kind === "approval"}
+                pictures={
+                  materials.packets.length > 0
+                    ? (o) => (
+                        <OptionPictures option={o} packets={materials.packets} open={viewer.open} />
+                      )
+                    : undefined
+                }
                 onPick={pick}
               />
               {!queueApproval && target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
@@ -544,15 +552,7 @@ export function ItemDetail({
   const discussionBlock = (
     <>
       {item && !holding && (
-        <ItemDiscussion
-          layout={layout}
-          itemKey={item.key}
-          live={flight === undefined ? undefined : live}
-          seat={flightSeat}
-          receipt={queueApproval ? undefined : receipts[item.key]}
-          focus={options.length === 0 && !item.brief?.person?.replies?.length}
-          collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
-        />
+        <FlightThread key={item.key} id={`${p}Thread`} itemKey={item.key} about={about} />
       )}
     </>
   );
@@ -584,6 +584,8 @@ export function ItemDetail({
             {replyBlock}
           </div>
           {previewBlock}
+          <PlanAndMockups item={item} open={viewer.open} {...materials} />
+          {viewer.element}
           <Pictures item={item} />
           {item.brief ? (
             <details className="needs-more">

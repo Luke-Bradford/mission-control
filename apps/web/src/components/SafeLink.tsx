@@ -19,7 +19,16 @@ function hostOf(href: string): string | null {
  * A link from agent text. Allowed ones open in a new tab with the host beside the label; a refused
  * one (see `openableHref`) is its URL as plain text with the reason, never an anchor.
  */
-export function SafeLink({ url, children }: { url: string; children?: ReactNode }) {
+export function SafeLink({
+  url,
+  children,
+  showHost = true,
+}: {
+  url: string;
+  children?: ReactNode;
+  /** False leaves the host off the page; it is then said to screen readers inside the link. */
+  showHost?: boolean;
+}) {
   const href = openableHref(url);
   if (href === null) {
     return (
@@ -34,8 +43,14 @@ export function SafeLink({ url, children }: { url: string; children?: ReactNode 
     <span className="safe-link">
       <a href={href} target="_blank" rel="noopener noreferrer">
         {children ?? url}
+        {host && !showHost && (
+          <>
+            {" "}
+            <span className="sr-only">{`(opens ${host} in a new tab)`}</span>
+          </>
+        )}
       </a>
-      {host && <span className="safe-link-host s"> {host}</span>}
+      {host && showHost && <span className="safe-link-host s"> {host}</span>}
     </span>
   );
 }

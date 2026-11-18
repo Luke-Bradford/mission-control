@@ -37,8 +37,8 @@ import {
   portFromEnv,
   seatUnavailable,
 } from "../src/config.ts";
+import { configView } from "../src/hud/views.ts";
 import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
-import { configView } from "../src/views.ts";
 import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
 
 const catalog = fakeModels();
@@ -608,6 +608,14 @@ ${seats.join("\n")}
     expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
   });
 
+  it("still loads a config that sets the retired fix_session_trial, and ignores it", () => {
+    for (const v of ["true", "false"]) {
+      const text = crewText({}).replace("\ncrew:\n", `\ncrew:\n  fix_session_trial: ${v}\n`);
+      expect(text).toContain(`fix_session_trial: ${v}`);
+      expect(load(text).crew).not.toHaveProperty("fixSessionTrial");
+    }
+  });
+
   it("rejects overlapping writer areas", () => {
     const e = fails(
       crewText({
@@ -781,6 +789,7 @@ ${seats.join("\n")}
       expect(s?.model).toBe("opus");
       expect(s?.def).toMatchObject({ mode: "read-only", loop: "watch", mcTools: FLIGHT_TOOLS });
       expect(crewSeatGrants(cfg, "flight-1")).toEqual(FLIGHT_TOOLS);
+      expect(crewSeatGrants(cfg, "flight-1")).toContain("resolve_waste_alarm");
     });
 
     it("only one seat may watch, in any session", () => {

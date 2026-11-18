@@ -1,7 +1,10 @@
 import {
+  DEMO_MARKER_LABEL,
+  DEMO_SESSION_KEY,
   HUD_PAGE_PATHS,
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
+  OPERATOR_HEADER,
   QA_DISCLOSURE_LABEL,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
@@ -32,7 +35,7 @@ describe("hudRenderRequest page allowlist", () => {
 });
 
 class FakeRoute {
-  readonly continued = vi.fn(async () => {});
+  readonly continued = vi.fn(async (_options?: { headers: Record<string, string> }) => {});
   readonly aborted = vi.fn(async () => {});
   private readonly method: string;
   private readonly target: string;
@@ -43,10 +46,14 @@ class FakeRoute {
   }
 
   request() {
-    return { method: () => this.method, url: () => this.target };
+    return {
+      method: () => this.method,
+      url: () => this.target,
+      headers: () => ({ accept: "application/json" }),
+    };
   }
-  continue() {
-    return this.continued();
+  continue(options?: { headers: Record<string, string> }) {
+    return this.continued(options);
   }
   abort() {
     return this.aborted();
@@ -122,6 +129,7 @@ function fakePlaywright(
       order.push("websocket");
       websocketHandler = handler;
     }),
+    addInitScript: vi.fn(async () => {}),
     newPage: vi.fn(async () => {
       order.push("page");
       return page;
@@ -343,6 +351,26 @@ describe("renderHudWithPlaywright", () => {
     expect(opened).not.toHaveProperty("colorScheme");
   });
 
+  it("renders in Demo at the size it is asked for: the flag is set before the page boots", async () => {
+    const fake = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(fake.playwright),
+      demo: true,
+      viewport: { width: 2560, height: 1145 },
+    });
+    expect(fake.browser.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({ viewport: { width: 2560, height: 1145 } }),
+    );
+    expect(fake.context.addInitScript).toHaveBeenCalledWith(
+      expect.stringContaining(`sessionStorage.setItem("${DEMO_SESSION_KEY}", "true")`),
+    );
+    const waited = (fake.page.waitForSelector.mock.calls as unknown as [string][]).map((c) => c[0]);
+    expect(waited.some((s) => s.includes(DEMO_MARKER_LABEL))).toBe(true);
+    const live = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(live.playwright));
+    expect(live.context.addInitScript).not.toHaveBeenCalled();
+  });
+
   it("sandboxes Chrome and installs context routes before creating the main page", async () => {
     const fake = fakePlaywright();
     const png = await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(fake.playwright));
@@ -387,6 +415,24 @@ describe("renderHudWithPlaywright", () => {
       code: 1008,
       reason: "HUD screenshot blocks WebSockets",
     });
+  });
+
+  it("sends a side hub's own token on its API reads only, never to the page", async () => {
+    const fake = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(fake.playwright),
+      operatorToken: "side-secret",
+    });
+    const api = await fake.request("GET", "http://127.0.0.1:7420/api/code-health");
+    expect(api.continued).toHaveBeenCalledWith({
+      headers: { accept: "application/json", [OPERATOR_HEADER]: "side-secret" },
+    });
+    const asset = await fake.request("GET", "http://127.0.0.1:7420/assets/app.js");
+    expect(asset.continued).toHaveBeenCalledWith(undefined);
+    const bootstrap = await fake.request("GET", `http://127.0.0.1:7420${OPERATOR_BOOTSTRAP_PATH}`);
+    expect(bootstrap.aborted).toHaveBeenCalledOnce();
+    const post = await fake.request("POST", "http://127.0.0.1:7420/api/board");
+    expect(post.aborted).toHaveBeenCalledOnce();
   });
 
   it("aborts bootstrap, SSE and every non-GET before consulting the generic guard", async () => {

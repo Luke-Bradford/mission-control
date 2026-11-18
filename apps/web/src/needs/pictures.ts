@@ -20,6 +20,7 @@ const ROUTES: readonly { re: RegExp; auth: PictureRoute["auth"] }[] = [
   { re: /^\/api\/hud-screenshots\/[0-9a-f]{32}$/, auth: "operator" },
   { re: /^\/api\/qa\/review-shots\/[0-9a-f]{32}$/, auth: "operator" },
   { re: /^\/api\/qa-report-assets\/[0-9a-f]{64}$/, auth: "operator" },
+  { re: /^\/api\/attention-material-assets\/[0-9a-f]{64}$/, auth: "operator" },
 ];
 
 /** The route a picture URL names, or null when it is not one the hub serves (it is a link then). */

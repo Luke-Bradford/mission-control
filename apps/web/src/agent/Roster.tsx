@@ -6,6 +6,7 @@ import { percent } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { chooseSeat } from "./chooseSeat.ts";
+import { CONTEXT_HANDOVER_PCT } from "./control.ts";
 import {
   contextShown,
   hourMarks,
@@ -16,8 +17,6 @@ import {
 } from "./roster.ts";
 import "./roster.css";
 
-/** A context bar turns amber from here, as the mockup's marker line does. */
-const CONTEXT_WARN_PCT = 75;
 /** How often the state ages are rewritten; the same rhythm as the shared 5 s clock. */
 const AGE_TICK_MS = 5000;
 
@@ -227,7 +226,7 @@ function SeatCard({
           >
             {ctx !== null && (
               <b
-                className={ctx >= CONTEXT_WARN_PCT ? "warn" : undefined}
+                className={ctx >= CONTEXT_HANDOVER_PCT ? "warn" : undefined}
                 style={{ width: `${ctx}%` }}
               />
             )}

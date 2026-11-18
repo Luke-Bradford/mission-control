@@ -11,6 +11,7 @@ import {
   API_PREFIX,
   type AttentionCompactItem,
   type AttentionItem,
+  type AttentionMaterialsResponse,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
@@ -71,6 +72,7 @@ import {
   fixesSent,
   flightShellBreakerWrite,
   flightShellWrite,
+  freezeRules,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -109,6 +111,7 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
   PR_LIST_DAYS,
@@ -179,7 +182,11 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
-import { agentDetail } from "./agent-detail.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention/attention-materials.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -188,6 +195,22 @@ import {
   nothingForOperator,
   releaseHold,
 } from "./attention/holds.ts";
+import { itemThread } from "./attention/item-thread.ts";
+import {
+  LocalNotifications,
+  NotificationPreferencesBody,
+} from "./attention/local-notifications.ts";
+import {
+  type ActionResult,
+  answerSetAside,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+  setAsideQuestions,
+} from "./attention/needs-you-actions.ts";
+import { withRepoWatch } from "./attention/unwatched-repos.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -196,11 +219,17 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import {
+  ChoiceRefused,
+  choiceReceipt,
+  chooseOption,
+  claimMessagePick,
+  MESSAGE_PICK_SENDERS,
+  type MessagePick,
+} from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
-import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -229,6 +258,7 @@ import {
   COMMS_SNAPSHOT_LIMIT,
   commsSendState,
   pinComms,
+  raisesAttention,
   reactComms,
   sendComms,
   threadMessages,
@@ -236,17 +266,6 @@ import {
 } from "./comms/index.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
-import { compressResponse } from "./compress.ts";
-import {
-  agentIds,
-  type CcConfig,
-  configuredAgents,
-  crewSeatDef,
-  crewSeatMode,
-  DEFAULT_MAX_SEATS,
-  flightPowersOf,
-  TeamsSelection,
-} from "./config.ts";
 import {
   AccountBody,
   accountDuplicateReason,
@@ -262,26 +281,42 @@ import {
   onboardRepo,
   RepoLocation,
   RepoOnboardBody,
+  RepoRolesBody,
   RepoSetupBody,
+  readRepoRolesConfig,
   removeAccount,
   SeatsBody,
   setAccount,
+  setRepoRoles,
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
-} from "./config-write.ts";
-import type { CrewReloader } from "./crew-apply.ts";
+} from "./config/config-write.ts";
 import {
   CrewPauseBody,
   pausedSeat,
   readCrewPause,
   startUnpausedRun,
   writeCrewPause,
-} from "./crew-pause.ts";
-import { readDependencyChains } from "./dependency-chains.ts";
+} from "./config/crew-pause.ts";
+import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
+import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
+import { repoRulesView } from "./config/repo-roles-view.ts";
+import {
+  agentIds,
+  type CcConfig,
+  configuredAgents,
+  crewSeatDef,
+  crewSeatMode,
+  DEFAULT_MAX_SEATS,
+  flightPowersOf,
+  TeamsSelection,
+} from "./config.ts";
+import type { CrewReloader } from "./crew-apply.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
+import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
-import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { RepoRulesError, readRepoBlock, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   askExternalReview,
@@ -292,14 +327,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import {
-  changedFiles,
-  committedLines,
-  fileDiff,
-  type GitExec,
-  GitFailed,
-  NO_WORKTREE_NOTE,
-} from "./files.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -326,6 +353,7 @@ import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
+import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -337,11 +365,18 @@ import {
   NOTE_KEY,
   pinned,
   seatQuestionTriage,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { overviewSummary } from "./hud/overview.ts";
+import {
+  decodeCursor,
+  TICKET_PAGE_DEFAULT,
+  TICKET_PAGE_MAX,
+  ticketHistory,
+} from "./hud/ticket-history.ts";
+import { overviewTimeline } from "./hud/timeline.ts";
+import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -356,20 +391,7 @@ import {
   readKnown,
   seatPlace,
 } from "./mcp/tools.ts";
-import { metricsView } from "./metrics.ts";
-import {
-  type ActionResult,
-  answerSetAside,
-  drop as dropQuestion,
-  type NeedsYouContext,
-  type NeedsYouDeps,
-  notNow as notNowQuestion,
-  offersFor,
-  setAsideQuestions,
-} from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { overviewSummary } from "./overview.ts";
-import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -377,7 +399,6 @@ import {
   PreviewHubError,
   type PreviewManager,
 } from "./preview/previews.ts";
-import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
@@ -387,13 +408,22 @@ import {
   type QaReportService,
   qaReportMarkdown,
 } from "./qa/reports.ts";
+import { readDependencyChains } from "./queue/dependency-chains.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
   QueueReorderError,
   resolveQueueReorder,
-} from "./queue-reorder.ts";
-import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
+} from "./queue/queue-reorder.ts";
+import { cleanText } from "./repo/clean.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./repo/files.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
 import {
@@ -401,7 +431,9 @@ import {
   AsideAnswerUnconfirmed,
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
+import { compressResponse } from "./run/compress.ts";
 import { publicHandoff } from "./run/handoffs.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
   type PrCache,
@@ -425,20 +457,25 @@ import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
-import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
-import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
-import {
-  decodeCursor,
-  TICKET_PAGE_DEFAULT,
-  TICKET_PAGE_MAX,
-  ticketHistory,
-} from "./ticket-history.ts";
-import { overviewTimeline } from "./timeline.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
+import { metricsView } from "./telemetry/metrics.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
+import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
-import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
-import { activity, configView } from "./views.ts";
+import {
+  createHeldUpdateNote,
+  HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
+  HUB_UNSAFE_NEEDS_PERSON,
+  HUB_UPDATE_HELD_KEY,
+  type QuietGate,
+  raiseUpdatePersonNote,
+  UPDATE_FAILED,
+  UpdateError,
+  type Updater,
+} from "./update.ts";
 import { webHandler } from "./web.ts";
 
 export const TELEMETRY_COMMIT_READ_LIMIT = 32;
@@ -470,6 +507,7 @@ export const STUDIO_PAUSE_ERROR = "pause for studio-loop arrives with cutover";
 export const HEARTBEAT_MS = 25_000;
 export const LOOP_WRITES_DISABLED = "loop writes are disabled on this server";
 export const CONFIG_WRITES_UNAVAILABLE = "config writes are not available on this server";
+export const CONFIG_FILE_UNAVAILABLE = "this server has no config.yaml to read";
 export const CONFIG_WRITE_FAILED = "could not write config.yaml";
 /** The check route's answer to a failure outside the updater's own (502) errors. */
 export const CHECK_FAILED = "could not check for updates";
@@ -505,6 +543,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -520,6 +559,8 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** The cached disk-use reader the hub shares with its sweep; absent: the route measures itself. */
+  diskUse?: DiskUseReader;
   /** A web PR's stored screenshot pairs; absent: the evidence routes answer 404. */
   prEvidence?: PrEvidenceStore;
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
@@ -537,6 +578,8 @@ export interface AppDeps {
   operatorToken?: string;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
+  /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
+  updateGate?: QuietGate;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -581,6 +624,11 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /**
+   * The config.yaml the server loaded, for routes that only read it. A preview on the live file
+   * has this and no `configPath`: it shows that file's rules and can never write them.
+   */
+  configReadPath?: string;
   /** Trusted embedded hosts may override the path used to validate crew path containment. */
   configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
@@ -681,6 +729,19 @@ const MessageBody = z.strictObject({
    * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
    */
   question: z.number().int().positive().optional(),
+  /** The Needs-you item this reply is about: it shows in that item's conversation. */
+  itemKey: z.string().min(1).max(200).optional(),
+  /**
+   * The text is an option of that item's brief, picked on the page: the brief the page showed and
+   * the option's place in it. The pick is stored with the message, so the FLIGHT conversation
+   * draws it as the choice. Used for an option the choose route does not take.
+   */
+  choice: z
+    .strictObject({
+      briefAt: z.number().int().nonnegative(),
+      option: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -1117,16 +1178,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store.pullRequests(repo.id),
       store.board(repo.id),
     );
-  /** The live part, built per request from the map ring: seats, findings and conflicts. */
-  const mapLivePayload = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    log: FastifyBaseLogger,
-  ): Promise<MapLive> => {
-    mapRingReady();
-    const { rows, lock } = mapCrewRows(repo);
-    return await buildMapLive(checkout, repo.id, rows, lock, store.pullRequests(repo.id), log);
-  };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
     repo: (typeof config.repos)[number],
@@ -1405,6 +1456,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
+  /** A Needs-you key built from a Comms message: `comms-open:<id>`, `tag:<seat>:<id>`, `message:<agent>:<id>`. */
+  const COMMS_ITEM_KEY = /^(?:comms-open|tag:[^:]+|message:[^:]+):(comms:\d+)$/;
+  const CONTROLLER_HOLD_REFUSED =
+    "the controller does not hold or release merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
     const { controllerToken, operatorToken: held } = deps;
     app.addHook("onRequest", async (req) => {
@@ -1610,6 +1665,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     return attentionMemo.items;
   };
+  // retained materials follow a question that is held too: a hold is not a close
+  let heldMemo: { at: number; items: AttentionItem[] } | undefined;
+  const attentionWithHeld = (): AttentionItem[] => {
+    const at = now();
+    if (!heldMemo || at - heldMemo.at >= HUD_MEMO_MS) {
+      heldMemo = {
+        at,
+        items: attentionItems(
+          config,
+          store,
+          at,
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew(at).rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ),
+      };
+    }
+    return heldMemo.items;
+  };
+  const attentionMaterials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({
+      store,
+      config,
+      item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
+      now,
+    });
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2417,12 +2500,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
-      api.get("/comms/mentions", () => ({
-        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
-          message: storedCommsMessage(row),
-          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-        })),
-      }));
+      api.get("/comms/mentions", () => {
+        // A message needs the operator's reply when its question is open on their Needs you: the
+        // same rules close it in both places, so the badge and Needs you never disagree. Every
+        // Comms-sourced item key (an open question, a tag or a direct line) ends in its message id.
+        const asks = new Set<string>();
+        for (const item of sharedAttention()) {
+          if (item.owner !== OWNER_OPERATOR) continue;
+          const id = COMMS_ITEM_KEY.exec(item.key)?.[1];
+          if (id !== undefined) asks.add(id);
+        }
+        return {
+          mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+            message: storedCommsMessage(row),
+            seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+            needsReply: asks.has(row.id),
+          })),
+        };
+      });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
       api.post("/comms/mentions/seen", (req, reply) => {
         const body = z
@@ -2514,8 +2609,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
         store.markCommsScopeRead(scope.key, body.data.messageId);
+        // Opening an agent's direct thread also moves the cursor its attention items key on (the
+        // web reads through this route, not the per-thread one)
+        const all = scope.key.match(/^agent-all:(.+)$/)?.[1];
+        const direct = all ?? directAgent(scope.key);
+        if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
+          let through: string | null = body.data.messageId;
+          if (all === undefined) {
+            // The pair view shows only the CAPCOM line: its agent's other lines stay unread, and
+            // the cursor stops before the first one the view did not show that could raise an item
+            const shown = new Set(scope.rows.map((row) => row.id));
+            const limit = Number(body.data.messageId.slice("comms:".length));
+            const after = store.threadReadCursors(direct).get("comms")?.offset ?? 0;
+            through = null;
+            for (const row of store.threadComms(direct, after)) {
+              if (Number(row.id.slice("comms:".length)) > limit) break;
+              // an unshown line that raises no item (a seat's handoff) is stepped over
+              if (!shown.has(row.id) && raisesAttention(row)) break;
+              through = row.id;
+            }
+          }
+          if (through !== null) {
+            store.markThreadRead(direct, [through]);
+            bus.emit("attention");
+          }
+        }
         return { ok: true };
       });
+
+      /** The agent on the other end of CAPCOM's direct line, for a `pair:` scope key. */
+      const directAgent = (key: string): string | undefined => {
+        const pair = key.match(/^pair:([^:]+):([^:]+)$/);
+        if (!pair) return undefined;
+        if (pair[1] === COMMS_CAPCOM) return pair[2];
+        return pair[2] === COMMS_CAPCOM ? pair[1] : undefined;
+      };
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
@@ -3033,6 +3161,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .header("content-disposition", `attachment; filename="qa-${report.id}.md"`)
           .send(qaReportMarkdown(report));
       });
+      // Reader: docs/runbook.md#disk-housekeeping (what the hub holds on disk, by kind; the Mac panel shows it)
+      const holdings =
+        deps.diskUse ??
+        cachedDiskUse({ dataDir: dirname(store.path), worktrees: config.crew?.worktrees });
+      api.get("/disk-use", async () => await holdings.read());
       // Reader: docs/runbook.md#durable-qa-reports (retained before/after and review-browser PNGs)
       api.get<{ Params: { id: string } }>("/qa-report-assets/:id", async (req, reply) => {
         if (
@@ -3406,6 +3539,87 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
+      const rolesError = (reply: FastifyReply, e: unknown) => {
+        captureError(reply, e);
+        if (e instanceof ConfigWriteError) {
+          const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+            missing: 404,
+            invalid: 400,
+            current: 409,
+            conflict: 409,
+          };
+          const code = status[e.kind];
+          if (code !== undefined) return reply.code(code).send({ error: e.message });
+        }
+        return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+      };
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        // A read needs no writable config: a preview shows the rules of the file it loaded.
+        const configPath = deps.configPath ?? deps.configReadPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_FILE_UNAVAILABLE });
+        try {
+          // Every value comes from the same config.yaml bytes the version is taken from, so the
+          // page can never save a version it did not show.
+          const { base, repo, raw } = await readRepoRolesConfig(configPath, req.params.repoId);
+          const checkout = config.crew?.sessions.find(
+            (session) => session.repoId === repo.id,
+          )?.checkout;
+          const repoFile =
+            checkout === undefined
+              ? null
+              : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+          return repoRulesView({
+            base,
+            repo,
+            raw,
+            repoFile: repoFile instanceof RepoRulesError ? repoFile.message : repoFile,
+          });
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoRolesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoRoles(
+            configPath,
+            req.params.repoId,
+            body.data.base,
+            body.data.rules,
+            now(),
+          );
+          const live = config.repos.find((repo) => repo.id === req.params.repoId);
+          const saved = result.config.repos.find((repo) => repo.id === req.params.repoId);
+          if (!live || !saved) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can hold unapplied Authority, crew or rotation changes. This route owns only
+          // the rule, command, check and protected-file fields; nothing else goes live.
+          live.protectedFiles = saved.protectedFiles;
+          live.commands = saved.commands;
+          live.fullSuite = saved.fullSuite;
+          live.requiredChecks = saved.requiredChecks;
+          if (saved.rules === undefined) delete live.rules;
+          else {
+            const { templates, techDebtIssue } = live.rules ?? {};
+            live.rules = freezeRules({
+              ...saved.rules,
+              ...(templates === undefined ? {} : { templates }),
+              ...(techDebtIssue === undefined ? {} : { techDebtIssue }),
+            });
+          }
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
@@ -3643,13 +3857,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         };
 
-      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
+      // The map snapshot: apps/web/src/qa/useRepoGraph.ts and the Setup repo list read it through RESOURCES.repoMap.
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map",
         mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
       );
 
-      // Reader: apps/web/src/map/useGraphSnapshot.ts (lazy QA Impact and History analysis)
+      // Reader: apps/web/src/qa/useRepoGraph.ts (lazy QA Impact and History analysis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/graph",
         mapRoute(async (repo, checkout, req, reply) => {
@@ -3662,61 +3876,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (req.headers["if-none-match"] === etag) return reply.code(304).send();
           return graph;
         }),
-      );
-
-      // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/tree",
-        mapRoute(async (repo, checkout, req, reply) => {
-          const { etag, tree } = await mapTreePayload(repo, checkout);
-          reply.header("etag", etag).header("cache-control", "no-cache");
-          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          const { imports: _imports, hist: _hist, ...light } = tree;
-          return light;
-        }),
-      );
-
-      // Reader: apps/web/src/data.ts (the Map page's live read lands with its web ticket; for diagnosis until then)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/live",
-        mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
-      );
-
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
-      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
-        if (!config.repos.some((r) => r.id === req.params.repoId))
-          return reply.code(404).send({ error: "unknown repo" });
-        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
-        return { seats: deps.mapRing.scopes(req.params.repoId) };
-      });
-
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads conflicts from the snapshot; for diagnosis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/conflicts",
-        async (req, reply) => {
-          const repo = config.repos.find((r) => r.id === req.params.repoId);
-          if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
-          try {
-            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
-              return reply.code(503).send({ error: "map checkout unavailable" });
-            }
-            const { conflicts, unchecked, failures } = await mapConflicts.check(
-              checkout,
-              store.pullRequests(repo.id),
-            );
-            for (const failure of failures)
-              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-            return { conflicts, unchecked };
-          } catch (e) {
-            reply.log.warn(
-              { reason: e instanceof Error ? e.message : String(e) },
-              "map conflicts unavailable",
-            );
-            return reply.code(503).send({ error: "map conflicts unavailable" });
-          }
-        },
       );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
@@ -3804,25 +3963,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
           return { ...pr, ...prPreviewFor(repo)(pr), ...prAcceptanceFor(store, repo.id)(pr) };
-        },
-      );
-
-      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
-      // Reader: apps/web/src/map/CrewMap.tsx (a QA deep link selects the PR's exact changed paths)
-      api.get<{ Params: { repoId: string; number: string } }>(
-        "/repos/:repoId/prs/:number/files",
-        (req, reply) => {
-          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
-            ? store.pullRequest(req.params.repoId, Number(req.params.number))
-            : null;
-          if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)
-            return reply.code(404).send({ error: "unknown pull request" });
-          return {
-            repoId: pr.repoId,
-            number: pr.number,
-            sha: pr.headSha,
-            files: store.prFilePaths(pr.repoId, pr.number),
-          };
         },
       );
 
@@ -3918,17 +4058,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
         return store.board(repo.id).map((card) => {
           const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
-          return h
-            ? {
-                ...card,
-                handoff: {
-                  runId: h.runId,
-                  fromSeat: h.fromSeat,
-                  at: h.at,
-                  acceptedBy: h.acceptedBy,
-                },
-              }
-            : card;
+          const waiting = store.ticketWait(repo.id, card.issueNumber);
+          return {
+            ...card,
+            ...(waiting ? { waiting, assignees: [], owner: null } : {}),
+            ...(h
+              ? {
+                  handoff: {
+                    runId: h.runId,
+                    fromSeat: h.fromSeat,
+                    at: h.at,
+                    acceptedBy: h.acceptedBy,
+                  },
+                }
+              : {}),
+          };
         });
       });
 
@@ -4783,7 +4927,40 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             store.run(named.runId)?.loop?.aside != null
               ? named
               : undefined;
+          // A picked option is claimed before its text is sent, and tied to the stored message.
+          let pick: MessagePick | null | undefined;
+          if (b.choice !== undefined) {
+            // the operator token lets FLIGHT send a message here; it does not let FLIGHT pick
+            if (!MESSAGE_PICK_SENDERS.includes(sender.kind))
+              throw new SupervisorError(
+                403,
+                "FLIGHT cannot pick an option with a message. Send the text without `choice`.",
+              );
+            if (b.itemKey === undefined)
+              throw new SupervisorError(400, "A picked option names its item.");
+            try {
+              pick = claimMessagePick(
+                {
+                  store,
+                  now,
+                  sender,
+                  crew: commsCrew,
+                  flightId: flightSeat(config)?.seat.id ?? null,
+                },
+                currentDiscussionItem(b.itemKey),
+                b.itemKey,
+                b.choice,
+                { to: id, text: b.text, question: b.question },
+              );
+            } catch (e) {
+              if (e instanceof ChoiceRefused) throw new SupervisorError(e.status, e.message);
+              throw e;
+            }
+            // the brief already has a pick: its message is stored, and nothing is sent twice
+            if (pick === null) return { ok: true };
+          }
           if (parked !== undefined) {
+            let stored = false;
             try {
               await answerAsideQuestion(
                 {
@@ -4799,8 +4976,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 parked.id,
                 sender.from,
                 b.text,
+                (messageId) => {
+                  stored = true;
+                  pick?.sent(messageId);
+                },
               );
             } catch (e) {
+              if (!stored) pick?.release();
               throw new SupervisorError(
                 e instanceof AsideAnswerChanged
                   ? 409
@@ -4813,6 +4995,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return { ok: true };
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          // Sent from an item's conversation, it answers the seat's latest message there, so a
+          // question the seat asked in that conversation closes.
+          const answers =
+            b.itemKey === undefined
+              ? undefined
+              : store
+                  .itemThreadNow(b.itemKey)
+                  .filter((m) => m.from === id && m.to === sender.from)
+                  .at(-1)?.id;
+          let stored = false;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4845,20 +5037,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 to: id,
                 text: b.text,
                 ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ...(b.itemKey === undefined ? {} : { itemKey: b.itemKey }),
+                ...(answers === undefined ? {} : { replyTo: answers }),
                 ref: ticket ?? undefined,
               },
             );
+            stored = true;
+            pick?.sent(sent.id);
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
             // a retry of the same text wakes the seat again
             if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
             // the reply names its question: that one closes, and no other
-            if (named !== null) {
-              store.answerQuestion(named.id, now());
-              bus.emit("attention");
-            }
+            if (named !== null) store.answerQuestion(named.id, now());
+            // a closed question leaves Needs you, and a pick shows on its item
+            if (named !== null || pick != null) bus.emit("attention");
             return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
+            // nothing was stored: let the operator pick again
+            if (!stored) pick?.release();
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
               400,
@@ -5092,6 +5289,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return codeHealthFailure(error, reply);
         }
       });
+      // Reader: docs/runbook.md (the Audit page's stored first-screen summary)
+      api.get("/code-health/overview", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const parsed = z
+          .strictObject({
+            repo: z.string().trim().min(1).max(128),
+            window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
+          })
+          .safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
+        reply.header("cache-control", "no-store");
+        try {
+          const { view, changed } = codeHealth.overview(parsed.data.repo, parsed.data.window);
+          // Only a rebuild that changed what the page shows tells open pages to read again.
+          if (changed) bus.emit("health");
+          return await codeHealthOutput(view);
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
       // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
       api.get("/code-health/evidence/:id", async (req, reply) => {
         if (
@@ -5204,7 +5422,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid repo" });
@@ -5243,7 +5461,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true, id: approval.id };
       });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.put("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         const body = FlightMemoryInput.omit({ topic: true }).strict().safeParse(req.body);
@@ -5265,7 +5483,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.delete("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         if (!params.success) return reply.code(400).send({ error: "Invalid memory topic" });
@@ -5866,6 +6084,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (body.data.action === "hold" && !body.data.reason)
           )
             return reply.code(400).send({ error: "invalid merge-hold request" });
+          // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+          if (controllerRequests.has(req))
+            return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
           const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
           if (!target) return reply;
           const previous = externalMergeHold(store, target.repo.id, number);
@@ -5873,7 +6094,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
             return reply
               .code(403)
-              .send({ error: "Only the controller may change this operator merge hold." });
+              .send({ error: "Only the operator may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
           checkBriefDispatch();
           setExternalMergeHold(
@@ -5967,8 +6188,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
-      // The controller holds a run's PR from merging, or releases a hold (FLIGHT's or its own).
-      // FLIGHT's hold_pr tool cannot release one set here; the operator token is required.
+      // The operator holds a run's PR from merging, or releases a hold (FLIGHT's or their own).
+      // FLIGHT's hold_pr tool cannot release one set here. The controller's key is refused.
       // Reader: docs/runbook.md#hold-a-run-from-merging
       api.post<{ Params: { id: string } }>("/runs/:id/merge-hold", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -5977,6 +6198,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!crewGate(run.agentId, reply)) return reply;
         const body = MergeHoldBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+        if (controllerRequests.has(req))
+          return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
         if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
         const engine = deps.engine;
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {
@@ -6279,26 +6503,50 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(409)
               .send({ error: "No Update is held for a person.", logged: false });
-          const working = (supervisor?.busy() ?? []).find((b) => b.seatId !== actor.seatId);
-          if (working !== undefined)
-            return reply.code(409).send({
-              error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
-              logged: false,
-            });
+          // a busy crew: hold new runs and wait for the running turns to end (a quiet gap)
+          const busy = () => supervisor?.busy() ?? [];
+          if (deps.updateGate === undefined) {
+            const working = busy().find((b) => b.seatId !== actor.seatId);
+            if (working !== undefined)
+              return reply.code(409).send({
+                error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
+                logged: false,
+              });
+          } else {
+            const wait = await deps.updateGate.wait(busy, actor.seatId);
+            if (wait !== null) return reply.code(409).send({ error: wait, logged: false });
+          }
         }
+        let restarting = false;
         try {
-          const out = await updater.update();
-          if ("restarting" in out) updater.restart();
+          // FLIGHT's run never applies a shortcut: only a person does
+          const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          // main is now running (or was already): no Update is waiting any more
+          createHeldUpdateNote(store, bus)(null);
+          if ("restarting" in out) {
+            restarting = true;
+            updater.restart();
+          }
           if (!("upToDate" in out))
             store.addHubEvent(actor === null ? "Updated manually" : "Updated by FLIGHT", now());
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
+          // a person-only refusal is the operator's at once, with its reason in the note
+          if (actor !== null && e instanceof UpdateError) {
+            if (e.message === HUB_UNSAFE_NEEDS_PERSON && e.held !== undefined)
+              createHeldUpdateNote(store, bus)(e.held);
+            else if (e.message === HUB_INSTALL_NEEDS_PERSON || e.message === HUB_HEAD_OFF_MAIN)
+              raiseUpdatePersonNote(store, bus, e.message);
+          }
           // logged: update.log says why (the page opens it); false for a refusal before the log
           if (e instanceof UpdateError)
             return reply.code(e.status).send({ error: e.message, logged: e.logged });
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
           return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+        } finally {
+          // the hub exits after a restart; otherwise new runs start again
+          if (!restarting) deps.updateGate?.release();
         }
       });
       // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)
@@ -6338,7 +6586,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const offers = needsYou === null ? undefined : offersFor(needsYou, item);
         return isOperatorItem(item)
           ? {
-              ...pinned(item, store, config),
+              ...withRepoWatch(pinned(item, store, config), config),
               ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
               ...(offers === undefined ? {} : { offers }),
             }
@@ -6365,7 +6613,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
-      registerBriefChoiceRoutes(api, app, deps, flightActor);
+      registerBriefChoiceRoutes(api, app, deps, flightActor, (req) => controllerRequests.has(req));
       // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
       api.get("/attention/answered", async () =>
         store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),
@@ -6374,6 +6622,67 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ? pinnedFor(item) : reply.code(404).send({ error: "Item is no longer open." });
+      });
+      const materialInput = z.strictObject({
+        repoId: z.string().min(1).max(200),
+        sourceCommit: z.string().max(40),
+        sourcePath: z.string().min(1).max(1000),
+        label: z.string().min(1).max(300),
+      });
+      // Reader: docs/runbook.md#retained-needs-you-materials (operator registers an inspectable source packet)
+      api.post<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const input = materialInput.safeParse(req.body);
+        if (!input.success)
+          return reply
+            .code(400)
+            .send({ error: "Give a repository, full commit, docs Markdown path and label." });
+        try {
+          return reply
+            .code(201)
+            .send(await attentionMaterials.register(req.params.key, input.data));
+        } catch (error) {
+          return reply.code(error instanceof AttentionMaterialsError ? error.status : 503).send({
+            error:
+              error instanceof AttentionMaterialsError
+                ? error.message
+                : "Materials could not be retained.",
+          });
+        }
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (selected item material panel; planned #1705)
+      api.get<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const packets = attentionMaterials.read(req.params.key);
+        if (packets.length === 0)
+          return reply.code(404).send({ error: "No retained materials for this item." });
+        const body: AttentionMaterialsResponse = { packets };
+        return body;
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (authenticated raster image in a retained packet; planned #1705)
+      api.get<{ Params: { id: string } }>("/attention-material-assets/:id", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = attentionMaterials.asset(req.params.id);
+        return asset
+          ? reply
+              .type(asset.mediaType)
+              .header("x-content-type-options", "nosniff")
+              .header("cache-control", "private, no-store")
+              .send(asset.bytes)
+          : reply.code(404).send({ error: "Material image not found." });
       });
       // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
@@ -6507,6 +6816,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
+      // Reader: apps/web/src/data.ts (the item thread read)
+      api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
+        const key = req.params.key;
+        if (key.length > 200) return reply.code(400).send({ error: "key too long" });
+        // A note key is raised again later: only this run of the note owns the conversation.
+        // Other item keys name one message, question or issue, so all of theirs is the item's.
+        return itemThread(store.itemThreadNow(key));
+      });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
         "/attention/:key/discussion",
@@ -6911,10 +7228,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
-        const repoId = req.query.map;
-        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
-          return reply.code(404).send({ error: "repo not found" });
+      api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -6938,20 +7252,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
-        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        let unsubscribeMap: (() => void) | undefined;
-        if (repoId !== undefined) {
-          stopMapRing ??= mapRing.start();
-          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
-            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-          });
-        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
-          unsubscribeMap?.();
           streams.delete(end);
           deps.onStreamCount?.(streams.size);
         };

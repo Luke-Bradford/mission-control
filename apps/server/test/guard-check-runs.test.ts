@@ -15,6 +15,7 @@ import {
 
 const LINT = "pnpm -s lint";
 const TYPES = "pnpm -s typecheck";
+const RELATED = "pnpm -s test:related";
 const CHECKS = [LINT, TYPES];
 
 describe("checksRun", () => {
@@ -22,6 +23,22 @@ describe("checksRun", () => {
     expect(checksRun(LINT, CHECKS)).toEqual([LINT]);
     expect(checksRun(`  ${LINT}  `, CHECKS)).toEqual([LINT]);
     expect(checksRun(`${LINT} && ${TYPES}`, CHECKS)).toEqual([LINT, TYPES]);
+  });
+
+  it("matches configured checks when related tests are another && segment", () => {
+    expect(checksRun(`${LINT} && ${TYPES} && pnpm -s test:related`, CHECKS)).toEqual([LINT, TYPES]);
+  });
+
+  it("matches nothing when related tests are not last", () => {
+    expect(checksRun(`pnpm -s test:related && ${LINT}`, CHECKS)).toEqual([]);
+  });
+
+  it("keeps related tests as a configured check when it runs alone", () => {
+    expect(checksRun(RELATED, [LINT, RELATED])).toEqual([RELATED]);
+  });
+
+  it("keeps related tests as a configured check when it ends a chain", () => {
+    expect(checksRun(`${LINT} && ${RELATED}`, [LINT, RELATED])).toEqual([LINT, RELATED]);
   });
 
   it.each([
@@ -74,6 +91,29 @@ describe("lockedCheck", () => {
     ["extra spaces", "pnpm  -s   typecheck"],
   ])("names the check behind %s", (_n, command) => {
     expect(lockedCheck(command, CHECKS)).toBe(TYPES);
+  });
+
+  it("names the related-tests check for its other spellings, which load the Mac the same", () => {
+    const RELATED = "pnpm -s test:related";
+    const checks = [LINT, RELATED];
+    for (const command of [
+      "pnpm test:related",
+      "pnpm run test:related",
+      "pnpm -s run test:related",
+      "node --experimental-strip-types scripts/check-related.ts",
+      `cd x && pnpm run test:related | tail`,
+    ]) {
+      expect(lockedCheck(command, checks), command).toBe(RELATED);
+    }
+    expect(lockedCheck("pnpm run lint", checks)).toBe(LINT);
+  });
+
+  it("takes no lock for a single test file or another script", () => {
+    const checks = [LINT, "pnpm -s test:related"];
+    expect(lockedCheck("pnpm -s vitest run apps/server/test/a.test.ts", checks)).toBeNull();
+    expect(lockedCheck("pnpm test:related:other", checks)).toBeNull();
+    expect(lockedCheck("pnpm run test:related --foo", checks)).toBeNull();
+    expect(lockedCheck("echo pnpm run test:related", checks)).toBeNull();
   });
 
   it("names nothing for a command that only mentions or extends a check", () => {
@@ -148,6 +188,17 @@ describe("the check recorder", () => {
         exitCode: null,
         at: 99,
       },
+    ]);
+  });
+
+  it("records configured checks when related tests finish the plain chain", async () => {
+    const r = recorder();
+    const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
+    await r.begin(KEY, command);
+    await r.end(KEY, true, 0);
+    expect(rows).toMatchObject([
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: true, exitCode: 0 },
+      { command: TYPES, invokedCommand: command, headSha: HEAD, ok: true, exitCode: 0 },
     ]);
   });
 
@@ -302,12 +353,54 @@ describe("the check recorder", () => {
     ]);
   });
 
+  it("records no passing configured check when the related-tests chain fails", async () => {
+    const r = recorder();
+    const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
+    await r.begin(KEY, command);
+    await r.end(KEY, false, 1);
+    expect(rows).toMatchObject([
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: false, exitCode: null },
+      { command: TYPES, invokedCommand: command, headSha: HEAD, ok: false, exitCode: null },
+    ]);
+  });
+
+  it("records nothing when related tests precede a configured check", async () => {
+    const r = recorder();
+    const command = `pnpm -s test:related && ${LINT}`;
+    await r.begin(KEY, command);
+    await r.end(KEY, false, 1);
+    expect(rows).toEqual([]);
+  });
+
+  it("records a configured related-tests check with its real failure exit", async () => {
+    checks = [LINT, RELATED];
+    const r = recorder();
+    const command = `${LINT} && ${RELATED}`;
+    await r.begin(KEY, command);
+    await r.end(KEY, false, 1);
+    expect(rows).toMatchObject([
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+      { command: RELATED, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+    ]);
+  });
+
   it.each([
     "pnpm -s lint | tail",
     "pnpm -s lint || true",
     "pnpm -s lint; true",
     "pnpm -s lint\ntrue",
   ])("records nothing for %j", async (command) => {
+    const r = recorder();
+    await r.begin(KEY, command);
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
+  });
+
+  it.each([
+    `${LINT} && pnpm -s test:related | tail`,
+    `${LINT} && pnpm -s test:related; echo done`,
+    `${LINT} && sleep 1 && pnpm -s test:related`,
+  ])("does not count a related-tests chain with another command: %j", async (command) => {
     const r = recorder();
     await r.begin(KEY, command);
     await r.end(KEY, true);
@@ -507,6 +600,9 @@ describe("the check recorder", () => {
     const r = recorder();
     expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
     expect(await r.lockedBy("r1", "ls")).toBeNull();
+    // the related-tests run takes the lock by name, though the repo no longer lists it as a check
+    expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
+    expect(await r.lockedBy("r1", `${LINT} && ${TYPES} && pnpm -s test:related`)).toBe(LINT);
     // refused while another seat held the lock: it began but never ended, so no failed row
     await r.begin(KEY, TYPES);
     expect(rows).toEqual([]);
@@ -668,6 +764,31 @@ describe("why the recorder dropped a check call", () => {
     expect(rows).toEqual([]);
   });
 
+  it("replaces a Codex check whose session disappeared with a fresh run in the same turn", async () => {
+    const r = recorder();
+    const joined = `${LINT} && ${TYPES}`;
+    await r.begin(KEY, joined, [{ runId: "r1", toolUseId: "codex-item-1" }]);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    expect(r.lost("r1", LINT)).toBe(true);
+    expect(r.pending("r1")).toEqual([]);
+    expect(reasons(r)).toEqual([
+      ["session-lost", LINT, HEAD],
+      ["session-lost", TYPES, HEAD],
+    ]);
+
+    const fresh = { runId: "r1", toolUseId: "codex-item-2" };
+    await r.begin(fresh, joined, [{ runId: "r1", toolUseId: "codex-item-3" }]);
+
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    await r.end({ runId: "r1", toolUseId: "codex-item-3" }, true, 0);
+
+    expect(rows).toMatchObject([
+      { command: LINT, headSha: HEAD, ok: true, exitCode: 0 },
+      { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
+    ]);
+    expect(r.pending("r1")).toEqual([]);
+  });
+
   describe("an unchanged rerun", () => {
     type Row = {
       runId: string;
@@ -735,6 +856,21 @@ describe("why the recorder dropped a check call", () => {
       await r.end(KEY, false, 1);
       expect(await r.rerun?.("r1", LINT)).toMatch(/Not run/);
       expect(refused).toEqual([LINT]);
+    });
+
+    it("allows configured checks to run again after related tests fail twice", async () => {
+      const { r, refused } = withRerun();
+      const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
+      await r.begin(KEY, command);
+      await r.end(KEY, false, 1);
+      await r.begin({ runId: "r1", toolUseId: "t2" }, command);
+      await r.end({ runId: "r1", toolUseId: "t2" }, false, 1);
+      expect(await r.rerun?.("r1", LINT)).toBeNull();
+      expect(refused).toEqual([]);
+
+      await r.begin({ runId: "r1", toolUseId: "t3" }, LINT);
+      await r.end({ runId: "r1", toolUseId: "t3" }, true, 0);
+      expect(rows.at(-1)).toMatchObject({ command: LINT, ok: true, exitCode: 0 });
     });
 
     it("is not refused after a call the Bash timeout killed: it may run again with a longer one", async () => {

@@ -1,7 +1,7 @@
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { NeedBanner } from "../src/agent/NeedBanner.tsx";
 import { sortNeeds } from "../src/attention.ts";
+import { needOwnerLabel } from "../src/crew.ts";
 import { hub } from "../src/data.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -23,7 +23,7 @@ it("puts FLIGHT down before normally higher-priority asks without changing their
   expect(sortNeeds(source).map((i) => i.key)).toEqual(["down", ...normal.map((i) => i.key)]);
   expect(source.map((i) => i.key)).toEqual(["decision", "error", "down", "question"]);
 });
-it("names the loop owner in Overview and Agent, with one reachable action for fifty asks", async () => {
+it("names the loop owner in Overview, with one reachable action for fifty asks", async () => {
   const row = crewRow({
     id: "studio",
     kind: "loop",
@@ -43,12 +43,7 @@ it("names the loop owner in Overview and Agent, with one reachable action for fi
     "/api/test-lock": { holder: null, waiting: [] },
     "/api/crew/status": { enabled: true },
   });
-  const { container } = render(
-    <>
-      <AgentsPanel />
-      <NeedBanner row={row} items={items} />
-    </>,
-  );
+  const { container } = render(<AgentsPanel />);
   // The observed loop is a row of the Crew table; its need names the loop and the count.
   const need = await waitFor(() => {
     const el = container.querySelector<HTMLElement>("#agentsList .trow.needs .need");
@@ -59,9 +54,5 @@ it("names the loop owner in Overview and Agent, with one reachable action for fi
   expect(need.textContent).not.toContain("needs you");
   expect(within(need).getAllByRole("button")).toHaveLength(1);
   expect(within(need).queryByRole("button", { name: "Answer" })).toBeNull();
-  const banner = container.querySelector("#needBanner");
-  expect(banner?.textContent).toContain("studio has an item to resolve.");
-  expect(banner?.textContent).toContain("50 items");
-  expect(banner?.querySelectorAll("button")).toHaveLength(2);
-  expect(screen.queryByRole("button", { name: "Answer" })).toBeNull();
+  expect(needOwnerLabel(row, items)).toBe("has an item to resolve");
 });

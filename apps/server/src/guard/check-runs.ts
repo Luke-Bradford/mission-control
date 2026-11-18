@@ -23,17 +23,30 @@ import { NOT_PLAIN, plainCall } from "./plain-call.ts";
 
 export { plainCall };
 
+/** The related-tests run, as a repo's `checks` list spells it. */
+export const RELATED_CHECK = "pnpm -s test:related";
+
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
- * EVERY trimmed segment is a configured check. Anything else in the chain (`cd x`, `exit 0`, a
- * shell function, an edit) could change what the check sees or whether it runs, so it counts for
- * nothing. A command holding `|`, `||`, `;` or a line break counts for nothing too.
+ * EVERY trimmed segment is a configured check. When it is not configured, `pnpm -s test:related`
+ * is allowed only at the end as a companion, not a recorded check. Anything else in the chain
+ * (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees or whether it
+ * runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break counts for
+ * nothing too.
  */
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
   const segments = command.split("&&").map((s) => s.trim());
-  if (segments.some((s) => !checks.includes(s))) return [];
-  return checks.filter((c) => segments.includes(c));
+  const relatedAtEnd =
+    !checks.includes(RELATED_CHECK) && segments.length > 1 && segments.at(-1) === RELATED_CHECK;
+  const checkSegments = relatedAtEnd ? segments.slice(0, -1) : segments;
+  if (checkSegments.some((s) => !checks.includes(s))) return [];
+  return checks.filter((c) => checkSegments.includes(c));
+}
+
+function hasRelatedTestsCompanion(command: string): boolean {
+  const segments = command.split("&&");
+  return segments.length > 1 && segments.at(-1)?.trim() === RELATED_CHECK;
 }
 
 /** A leading `cd <path>` joined to the rest by `&&` or `;`; the path is bare, or in single or double quotes. */
@@ -59,11 +72,12 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
-  const ran = splitCommands(command);
+  const ran = splitCommands(command).map(lockForm);
   for (const check of checks) {
     const want = splitCommands(check)[0];
     if (want === undefined) continue;
-    if (ran.some((argv) => argv.length === want.length && argv.every((w, i) => w === want[i]))) {
+    const form = lockForm(want);
+    if (ran.some((argv) => argv.length === form.length && argv.every((w, i) => w === form[i]))) {
       return check;
     }
   }
@@ -78,6 +92,22 @@ export function testCommand(command: string): boolean {
     if (program !== "pnpm") return false;
     return argv.slice(1).some((word) => /^test(?::|$)/.test(word) || word === "vitest");
   });
+}
+
+/** The script the related-tests check runs: `pnpm test:related` is this node call. */
+const RELATED_SCRIPT = ["node", "--experimental-strip-types", "scripts/check-related.ts"];
+
+/**
+ * A command's words with the spellings of one pnpm script folded together: `pnpm -s test:related`,
+ * `pnpm test:related` and `pnpm run test:related` load the Mac alike, so they take the same lock.
+ * The related-tests script run through node folds to `pnpm test:related`.
+ */
+function lockForm(argv: readonly string[]): readonly string[] {
+  if (argv.length === RELATED_SCRIPT.length && argv.every((w, i) => w === RELATED_SCRIPT[i]))
+    return ["pnpm", "test:related"];
+  if (argv[0] !== "pnpm") return argv;
+  const rest = argv.slice(1).filter((w, i) => !(i === 0 && w === "-s"));
+  return ["pnpm", ...(rest[0] === "run" ? rest.slice(1) : rest)];
 }
 
 /** The seat clone's state at one moment: its checked-out commit, and whether the worktree has no change, untracked files included. */
@@ -131,6 +161,8 @@ export interface CheckRecorder {
    * ran on this commit and no file has changed), or null. A refusal is recorded for the waste alarm.
    */
   rerun?(runId: string, command: string): Promise<string | null>;
+  /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
+  lost(runId: string, command: string): boolean;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
   /** Configured checks still executing or validating their completion, once per command. */
@@ -167,6 +199,8 @@ interface StartedCall {
   worktree: string | null;
   /** Set when a turn ended with the call still running: past this the hub stops waiting for its exit. */
   keptUntil?: number;
+  /** The related-tests companion is last, so its failure must not exhaust a check retry. */
+  relatedTests: boolean;
 }
 
 const callKey = (id: string): CallKey => {
@@ -239,7 +273,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   return {
     async lockedBy(runId, command) {
       try {
-        return lockedCheck(command, await d.checks(runId));
+        const checks = await d.checks(runId);
+        return lockedCheck(
+          command,
+          checks.includes(RELATED_CHECK) ? checks : [...checks, RELATED_CHECK],
+        );
       } catch (e) {
         d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
         return null;
@@ -356,6 +394,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             startedAt: now(),
             timeoutMs: 0,
             worktree: own,
+            relatedTests: false,
           };
           started.set(callId(key), call);
           for (const alias of aliases) started.set(callId(alias), call);
@@ -406,7 +445,19 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             CHECK_BASH_TIMEOUT_MS,
           ),
           worktree: own,
+          relatedTests: !matched.includes(RELATED_CHECK) && hasRelatedTestsCompanion(command),
         };
+        // A new Codex call with the same command replaces an earlier one that never delivered a
+        // completion. Its exec cell no longer exists, so keeping the old receipt pending would
+        // block both this fresh call and the eventual push until the turn ends.
+        const replaced = new Set<StartedCall>();
+        for (const [id, startedCall] of started) {
+          if (startedCall.runId !== key.runId || startedCall.command !== command) continue;
+          started.delete(id);
+          replaced.add(startedCall);
+        }
+        for (const prior of replaced)
+          noteDrop(key.runId, "session-lost", prior.matched, prior.head, prior.command);
         started.set(callId(key), call);
         cancel(key);
         for (const alias of aliases) started.set(callId(alias), call);
@@ -445,7 +496,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             invokedCommand: call.command,
             headSha: call.head,
             ok,
-            exitCode,
+            // The shell only returns one status. When related tests are last, a failure could be
+            // theirs, so it cannot be evidence that a configured check failed or consume its retry.
+            exitCode: !ok && call.relatedTests ? null : exitCode,
             at: now(),
           });
         }
@@ -474,6 +527,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
       for (const [checkout, admission] of admitted)
         if (admission.key.runId === runId) admitted.delete(checkout);
+    },
+    lost(runId, command) {
+      const calls = new Set<StartedCall>();
+      for (const [id, call] of started) {
+        if (call.runId !== runId || !call.matched.includes(command)) continue;
+        started.delete(id);
+        calls.add(call);
+      }
+      for (const call of calls)
+        noteDrop(runId, "session-lost", call.matched, call.head, call.command);
+      return calls.size > 0;
     },
     drops(runId) {
       return dropped.get(runId) ?? [];

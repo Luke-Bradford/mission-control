@@ -1,10 +1,13 @@
 // biome-ignore-all lint/a11y/useSemanticElements: ARIA table roles preserve the responsive CSS grid layout.
 import {
   type AttentionItem,
+  type BoardItem,
+  blockedItemPrefix,
   type ConfigView,
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
+  isOperatorItem,
   type OverviewTimeline,
   type RunLoop,
   type TestLockState,
@@ -52,7 +55,7 @@ import { CrewOff } from "../hud/CrewOff.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
+import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { metricTitle, useMetrics } from "../metrics.ts";
 import { addAgentPath, agentPath, followLink, navigate } from "../router.ts";
 import { openDockChat } from "../shell/overlays.ts";
@@ -106,6 +109,7 @@ function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
   });
 }
 
+const NO_WORK_LINE = "No current work";
 const OPEN_RUN_LINE = "Run open, not in a turn";
 
 /** The issue that pauses a watched loop; a link when the server knows its GitHub page, else plain text. */
@@ -142,6 +146,17 @@ function WorkCell({
   const prNumber =
     row?.reviewing?.prNumber ?? row?.loop?.prNumber ?? row?.review?.prNumber ?? row?.prs[0]?.number;
   const current = row && isCurrentWork(row);
+  // A stopped seat whose ticket and PRs are all closed has no work to show, not even as "last".
+  const stoppedTicket = row?.hudState === "stopped" && row.ticket ? parseTicket(row.ticket) : null;
+  const board = useResource<BoardItem[]>(
+    stoppedTicket ? RESOURCES.boards(stoppedTicket.repoId) : null,
+  ).data;
+  const finished =
+    !!row &&
+    !!stoppedTicket &&
+    row.review === null &&
+    row.prs.every((pr) => pr.state !== "open") &&
+    board?.some((b) => b.issueNumber === stoppedTicket.number && b.state === "done") === true;
   // The server supplies the oldest current-head queued review and its actual hold reason.
   // A paused seat alone is never enough to infer that a review is queued.
   if (row?.queuedReview && !row.reviewing) {
@@ -158,6 +173,14 @@ function WorkCell({
           {queued.reason}
         </span>
         {note}
+        {actions}
+      </span>
+    );
+  }
+  if (finished) {
+    return (
+      <span role="cell" className="ellip s ticket-cell work-cell muted" title={NO_WORK_LINE}>
+        <span className="ellip xs muted">{NO_WORK_LINE}</span>
         {actions}
       </span>
     );
@@ -377,7 +400,7 @@ function FlightRow({
           title="FLIGHT"
           onClick={go}
         >
-          <AgentTag bare id="FLIGHT" index="flight" />
+          <AgentTag bare named id={row?.id ?? "FLIGHT"} index="flight" />
         </button>
         <a
           className="xs muted"
@@ -484,7 +507,7 @@ function AgentWork({
           <AgentNeeds row={row} items={items} now={now} lock={lock} />
         ) : undefined
       }
-      actions={<ReviewParkSeatActions row={row} />}
+      actions={<ReviewParkSeatActions row={row} items={items} />}
     />
   );
 }
@@ -726,7 +749,7 @@ function AgentRow({
             followLink(e, to);
           }}
         >
-          <AgentTag bare id={row.id} index={row.index} />
+          <AgentTag bare named id={row.id} index={row.index} />
         </a>
         <span className="ellip xs muted" title={roleLabel}>
           {row.kind === "crew"
@@ -757,11 +780,32 @@ function AgentRow({
   );
 }
 
-/** The overview keeps the explicit review waiver beside the parked seat, including set-aside runs. */
-function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
+/**
+ * The overview keeps the explicit review waiver beside a parked seat, including set-aside runs, only
+ * while the park's own Needs-you item (its `blocked:` note) is the operator's, or FLIGHT is not
+ * triaging it (down or missed). Otherwise FLIGHT settles the park; the Agent page keeps the waiver
+ * as an operator override. An item the operator has put on hold is not listed, so it shows none.
+ */
+function ReviewParkSeatActions({
+  row,
+  items,
+}: {
+  row: Crew["rows"][number];
+  items: AttentionItem[];
+}) {
+  const operatorSettles = (runId: string) => {
+    const key = blockedItemPrefix(runId);
+    return items.some(
+      (i) =>
+        i.key.startsWith(key) &&
+        (isOperatorItem(i) || i.flightTriage === "down" || i.flightTriage === "missed"),
+    );
+  };
   const ids = [
-    ...(row.loop?.phase === "parked" && row.run ? [row.run.id] : []),
-    ...(row.asideRuns ?? []).filter((run) => run.loop.phase === "parked").map((run) => run.runId),
+    ...(row.loop?.phase === "parked" && row.run && operatorSettles(row.run.id) ? [row.run.id] : []),
+    ...(row.asideRuns ?? [])
+      .filter((run) => run.loop.phase === "parked" && operatorSettles(run.runId))
+      .map((run) => run.runId),
   ];
   const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));
   const parks = ids.flatMap((runId, i) => {
@@ -900,7 +944,8 @@ export function AgentsPanel() {
           {crew.data && (
             <span>
               {" "}
-              · {plural(seatCount, "seat")}
+              {/* "N of M agents working" already says how many there are. */}
+              {working ? "" : ` · ${plural(seatCount, "seat")}`}
               {loopRows.length ? ` · ${plural(loopRows.length, "observed loop")}` : ""}
             </span>
           )}

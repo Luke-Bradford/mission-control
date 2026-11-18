@@ -29,8 +29,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
+import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
+import { ProfilesError } from "../src/config/profiles.ts";
 import type { CcConfig } from "../src/config.ts";
-import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
@@ -48,7 +49,6 @@ import {
   takeNext,
 } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
-import { ProfilesError } from "../src/profiles.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -1141,6 +1141,16 @@ describe("takeNext", () => {
     await take();
     expect(started).toEqual([]);
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-aside");
+  });
+
+  it("a stale wake flag on the run the seat is on does not hold up the seat's next ticket", () => {
+    // the hub restarted after waking the run and before it cleared its aside: the run is on its seat
+    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
+    store.upsertRun(run({ id: "r-on-seat", agentId: SERVER, ticket: `${REPO}#9`, loop: aside }));
+    seatRow("running", "r-on-seat");
+    expect(wakeDueAsideRun(store, SERVER)).toBeUndefined();
+    store.upsertRun(run({ id: "r-next", agentId: SERVER, ticket: `${REPO}#10`, loop: NEW_LOOP }));
+    expect(reworkDueBesides(store, store.run("r-next") as Run)).toBe(false);
   });
 
   it("rework first: two reworks come back oldest first, and a run displaced mid-build after both", () => {

@@ -9,6 +9,8 @@ export const TOKEN_SOURCE_START = "start of run";
 export const TOKEN_SOURCE_HUB_LINE = "hub line";
 export const TOKEN_SOURCE_OWN_OUTPUT = "own earlier output";
 export const TOKEN_SOURCE_UNATTRIBUTED = "unattributed";
+/** The whole context of the first call of a fresh fix session (#1643): carried in, not added. */
+export const TOKEN_SOURCE_FIX_START = "fix session start";
 
 export const TOKEN_AUDIT_DAYS_MAX = 365;
 export const TOKEN_AUDIT_DAYS_DEFAULT = 7;
@@ -51,6 +53,15 @@ export interface TokenCounts {
   events: number;
 }
 
+/** One CLI session of a run that has fresh fix sessions. */
+export interface TokenAuditSession {
+  fresh: boolean;
+  calls: number;
+  startContext: number;
+  peakContext: number;
+  cacheRead: number;
+}
+
 /** What one run's transcript says about where its tokens went. */
 export interface RunTokenAudit {
   calls: number;
@@ -66,6 +77,8 @@ export interface RunTokenAudit {
   readAfterReport: number | null;
   bySource: Record<string, TokenCounts>;
   byCommand: Record<string, TokenCounts>;
+  /** Set only when the run started a fresh session for a fix: one entry per session, in order. */
+  sessions?: TokenAuditSession[];
 }
 
 export interface TokenAuditRole {

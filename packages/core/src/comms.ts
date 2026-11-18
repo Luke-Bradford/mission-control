@@ -198,6 +198,8 @@ export interface CommsContact {
 export interface CommsMention {
   message: CommsMessage;
   seen: boolean;
+  /** A question or blocker to the operator that nobody has answered yet: what the bell counts. */
+  needsReply: boolean;
 }
 export interface CommsLinkCount {
   from: string;
@@ -253,4 +255,24 @@ export interface CommsOpenItem {
   /** "operator": no FLIGHT seat, so the question is the operator's now. */
   nextStep: "flight" | "flight-not-triaging" | "operator";
   nextAt: number;
+}
+
+/** One message in a Needs-you item's conversation (`GET /api/attention/:key/thread`). */
+export interface ItemThreadMessage {
+  id: string;
+  at: number;
+  from: string;
+  to: string;
+  text: string;
+  /** The operator sent it. */
+  operator: boolean;
+  /** When the recipient seat took it; null while it is only stored. */
+  deliveredAt: number | null;
+  /** The operator's message only: stored, taken by its recipient, or answered in this thread. */
+  state?: "stored" | "delivered" | "answered";
+  /** The label of the option the operator picked, when this message is that pick. */
+  choice?: string;
+}
+export interface ItemThread {
+  messages: ItemThreadMessage[];
 }
