@@ -1948,6 +1948,47 @@ describe("crew seats", () => {
       });
     });
 
+    it("a set-aside run's open blocked and waiting notes do not hide the seat's live work", () => {
+      ran();
+      store.upsertRun(
+        run({
+          id: "parked",
+          agentId: "GUIDO-1",
+          startedAt: at("2026-10-15T07:00:00Z"),
+          endedAt: at("2026-10-15T09:00:00Z"),
+        }),
+      );
+      for (const [kind, key] of [
+        ["blocked", "hold:parked"],
+        ["review", "review:parked"],
+      ] as const) {
+        store.raiseNote({
+          key,
+          kind,
+          runId: "parked",
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: kind,
+          at: at("2026-10-15T09:00:00Z"),
+        });
+      }
+      expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0 });
+    });
+
+    it("a run's blocked note still counts while that run is the seat's latest", () => {
+      ran();
+      store.raiseNote({
+        key: "hold:c1",
+        kind: "blocked",
+        runId: "c1",
+        seatId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "held",
+        at: at("2026-10-17T09:00:00Z"),
+      });
+      expect(seatShare()?.blocked).toBeGreaterThan(0);
+    });
+
     it("an unanswered question blocks until now", () => {
       ask("GUIDO-1", "2026-10-17T13:00:00Z");
       expect(seatShare()).toMatchObject({ working: 0, waiting: 0, blocked: 12.5, unknown: 87.5 });

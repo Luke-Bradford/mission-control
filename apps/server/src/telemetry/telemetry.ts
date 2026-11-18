@@ -499,14 +499,23 @@ export function telemetry(
     const lockWaits = lockRuns
       .filter((l) => l.seatId === agent.id)
       .map((l): Interval => [Math.max(dayStart, l.queuedAt), Math.min(now, l.startedAt)]);
-    const waits = [
-      ...lockWaits,
-      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["ready", "review"]),
-    ];
-    const blocked = [
-      ...questions,
-      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["blocked"]),
-    ];
+    // A note speaks for the seat only while its own run is the seat's current one: from that
+    // run's start until it ends or the seat starts another. A set-aside run's note stays open
+    // for days and must not hide the seat's live state.
+    const seatRunStarts = runs.filter((r) => r.agentId === agent.id).map((r) => r.startedAt);
+    const noteIntervals = (kinds: string[]): Interval[] =>
+      store.telemetryNoteEpisodes(agent.id, dayStart, now, kinds).flatMap((e): Interval[] => {
+        const owner = e.runId === null ? null : store.run(e.runId);
+        if (owner === null) return [e.interval];
+        const next = Math.min(...seatRunStarts.filter((s) => s > owner.startedAt), Infinity);
+        const clipped: Interval = [
+          Math.max(e.interval[0], owner.startedAt),
+          Math.min(e.interval[1], next, owner.endedAt ?? Infinity),
+        ];
+        return clipped[0] < clipped[1] ? [clipped] : [];
+      });
+    const waits = [...lockWaits, ...noteIntervals(["ready", "review"])];
+    const blocked = [...questions, ...noteIntervals(["blocked"])];
     // Ordinary loop transitions are not recorded. Bound carried state by run activity,
     // using the same foreground/background silence threshold as the HUD.
     const active = runs

@@ -5663,6 +5663,11 @@ export class Store {
     return attention.telemetryNoteIntervals(this.db, seatId, since, now, kinds);
   }
 
+  /** Like telemetryNoteIntervals, each episode with the run its note belongs to. */
+  telemetryNoteEpisodes(seatId: string, since: number, now: number, kinds: string[]) {
+    return attention.telemetryNoteEpisodes(this.db, seatId, since, now, kinds);
+  }
+
   openNoteKeys(runId: string): string[] {
     return attention.openNoteKeys(this.db, runId);
   }

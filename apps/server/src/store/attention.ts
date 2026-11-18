@@ -85,17 +85,33 @@ export function telemetryNoteIntervals(
   now: number,
   kinds: string[],
 ): [number, number][] {
+  return telemetryNoteEpisodes(db, seatId, since, now, kinds).map((e) => e.interval);
+}
+
+/** The seat's note episodes of these kinds in the window, each with the run its note belongs to. */
+export function telemetryNoteEpisodes(
+  db: DatabaseSync,
+  seatId: string,
+  since: number,
+  now: number,
+  kinds: string[],
+): { runId: string | null; interval: [number, number] }[] {
   const rows = db
     .prepare(
-      "SELECT at, cleared_at, kind FROM attention_episodes WHERE seat_id = ? AND at < ? AND (cleared_at IS NULL OR cleared_at > ?) ORDER BY at",
+      `SELECT e.at, e.cleared_at, e.kind, n.run_id FROM attention_episodes e
+         LEFT JOIN attention_notes n ON n.key = e.key
+         WHERE e.seat_id = ? AND e.at < ? AND (e.cleared_at IS NULL OR e.cleared_at > ?) ORDER BY e.at`,
     )
     .all(seatId, now, since) as Row[];
   return rows
     .filter((r) => kinds.includes(r.kind as string))
-    .map((r) => [
-      Math.max(since, r.at as number),
-      Math.min(now, (r.cleared_at as number | null) ?? now),
-    ]);
+    .map((r) => ({
+      runId: (r.run_id as string | null) ?? null,
+      interval: [
+        Math.max(since, r.at as number),
+        Math.min(now, (r.cleared_at as number | null) ?? now),
+      ],
+    }));
 }
 
 export function openNoteKeys(db: DatabaseSync, runId: string): string[] {
