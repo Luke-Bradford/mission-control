@@ -254,7 +254,11 @@ describeRendered("Accountable QA report", () => {
         pair.after.url = wide(`after-${index}`);
         pair.before.url = wide(`before-${index}`);
       }
-      const api: Record<string, unknown> = qaReportApi(0);
+      // Keep the report in the current QA queue. With an empty queue no detail is selected, so
+      // the report (and its signed-off-plan comparison) never mounts.
+      const api: Record<string, unknown> = qaReportApi(1);
+      const queue = api["/api/qa/queue"] as { prs: Array<{ ticket: string }> };
+      queue.prs[0]!.ticket = "mission-control#2037";
       api[`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${report.headSha}`] = {
         reports: [report],
       };
