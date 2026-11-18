@@ -153,6 +153,7 @@ import {
   costAggregate,
   installOverview,
   landingAggregate,
+  landingTotals,
   mergedAggregate,
   mergedObserved,
   readOverviewRow,
@@ -692,6 +693,9 @@ export class Store {
   }
   codeHealthCostAggregate(repoId: string, from: number, until: number) {
     return costAggregate(this.db, repoId, from, until);
+  }
+  codeHealthLandingTotals(repoId: string, from: number, until: number) {
+    return landingTotals(this.db, repoId, from, until);
   }
   codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
     return landingAggregate(this.db, repoId, from, until, limit);
@@ -1421,6 +1425,14 @@ export class Store {
 
   run(id: string): Run | null {
     return this.runQ.run(id);
+  }
+
+  /** When the seat started its first run after `after`, or null when it has not. */
+  nextRunStart(agentId: AgentId, after: number): number | null {
+    const row = this.db
+      .prepare("SELECT MIN(started_at) AS at FROM runs WHERE agent_id = ? AND started_at > ?")
+      .get(agentId, after) as { at: number | null };
+    return row.at;
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
@@ -5518,6 +5530,11 @@ export class Store {
     kinds: string[],
   ): [number, number][] {
     return attention.telemetryNoteIntervals(this.db, seatId, since, now, kinds);
+  }
+
+  /** Like telemetryNoteIntervals, each episode with the run its note belongs to. */
+  telemetryNoteEpisodes(seatId: string, since: number, now: number, kinds: string[]) {
+    return attention.telemetryNoteEpisodes(this.db, seatId, since, now, kinds);
   }
 
   openNoteKeys(runId: string): string[] {

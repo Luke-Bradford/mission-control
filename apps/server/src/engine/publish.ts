@@ -996,33 +996,87 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     async ciExcerpt(repo, sha) {
       try {
         const listed = await deps.gh(
-          ["run", "list", `--repo=${repo}`, `--commit=${sha}`, "--json=databaseId,name,conclusion"],
+          [
+            "run",
+            "list",
+            `--repo=${repo}`,
+            `--commit=${sha}`,
+            "--json=databaseId,name,conclusion,status,attempt",
+          ],
           { cwd: cwd() },
         );
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
         const runs: unknown = JSON.parse(listed.stdout);
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
-        const failed = runs.flatMap((r: unknown) => {
-          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
-          return x?.conclusion === "failure" &&
-            typeof x.databaseId === "number" &&
-            Number.isSafeInteger(x.databaseId)
-            ? [{ id: x.databaseId, name: typeof x.name === "string" ? x.name : "CI" }]
-            : [];
-        });
+        const failed: { id: number; name: string; attempt: number | null; rerun: boolean }[] = [];
+        for (const r of runs) {
+          const x = r as {
+            databaseId?: unknown;
+            name?: unknown;
+            conclusion?: unknown;
+            status?: unknown;
+            attempt?: unknown;
+          } | null;
+          if (
+            x === null ||
+            typeof x.databaseId !== "number" ||
+            !Number.isSafeInteger(x.databaseId)
+          ) {
+            continue;
+          }
+          const name = typeof x.name === "string" ? x.name : "CI";
+          const attempt =
+            typeof x.attempt === "number" && Number.isSafeInteger(x.attempt) && x.attempt > 0
+              ? x.attempt
+              : null;
+          if (x.conclusion === "failure") {
+            failed.push({ id: x.databaseId, name, attempt, rerun: false });
+          } else if (x.status !== "completed" && attempt !== null && attempt > 1) {
+            // a run being re-run has no conclusion yet: the attempt before it may be the one that
+            // failed, but a re-run can also start from a green attempt
+            const before = await deps.gh(
+              [
+                "run",
+                "view",
+                `--repo=${repo}`,
+                String(x.databaseId),
+                `--attempt=${attempt - 1}`,
+                "--json=conclusion",
+              ],
+              { cwd: cwd() },
+            );
+            if (before.code !== 0) return CI_LOG_UNREADABLE;
+            const state: unknown = JSON.parse(before.stdout);
+            if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
+              failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
+            }
+          }
+        }
         if (failed.length === 0) return NO_FAILED_RUN;
         // bytes, not characters: what is left of CI_EXCERPT_MAX, separators and headers included
         let budget = CI_EXCERPT_MAX;
         const sections: string[] = [];
         for (const f of failed) {
-          const head = `${cleanLog(f.name).slice(0, RUN_NAME_MAX)}:\n`;
+          const name = cleanLog(f.name).slice(0, RUN_NAME_MAX);
+          const named =
+            f.attempt === null
+              ? name
+              : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
+          const head = `${named}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
           const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
           const room = share - byteLength(head);
           if (room <= 0) continue; // no room for a header with anything under it
           const viewed = await deps.gh(
-            ["run", "view", `--repo=${repo}`, String(f.id), "--log-failed"],
+            [
+              "run",
+              "view",
+              `--repo=${repo}`,
+              String(f.id),
+              ...(f.attempt === null ? [] : [`--attempt=${f.attempt}`]),
+              "--log-failed",
+            ],
             { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
           );
           if (viewed.code !== 0) return CI_LOG_UNREADABLE;
