@@ -441,6 +441,28 @@ describeRendered("Needs you page", () => {
         }, undefined);
         expect(clipped.scrolls, "the tabs need no sideways scroll").toBe(false);
         expect(clipped.outside, "no tab sits under the status readout").toEqual([]);
+        const session = await page.evaluate(() => {
+          const select = document.querySelector<HTMLSelectElement>("#sess");
+          return {
+            label: select?.selectedOptions[0]?.textContent,
+            fits: !!select && select.scrollWidth <= select.clientWidth + 1,
+            painted:
+              !!select &&
+              (() => {
+                const style = getComputedStyle(select);
+                const canvas = document.createElement("canvas");
+                const context = canvas.getContext("2d");
+                if (!context) return false;
+                context.font = `${style.fontSize} ${style.fontFamily}`;
+                return select.clientWidth >= context.measureText("All sessions").width + 32;
+              })(),
+            height: select?.getBoundingClientRect().height ?? 0,
+          };
+        }, undefined);
+        expect(session.label).toBe("All sessions");
+        expect(session.fits, "the session label is clipped").toBe(true);
+        expect(session.painted, "the complete session label has room to paint").toBe(true);
+        expect(session.height, "the session picker is a usable control").toBeGreaterThanOrEqual(24);
         if (SHOTS) await page.screenshot(join(SHOTS, "needs-1280x900-nav.png"));
       } finally {
         await page.close();

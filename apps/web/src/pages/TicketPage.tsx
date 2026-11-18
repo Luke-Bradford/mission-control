@@ -1,4 +1,11 @@
-import type { ItemThread, QaReport, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
+import type {
+  ConfigView,
+  ItemThread,
+  QaReport,
+  TicketEvent,
+  TicketHistory,
+  TicketQuestion,
+} from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -12,7 +19,13 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
 import { QaBuiltEvidence } from "../qa/QaReport.tsx";
-import { TicketQaReports } from "../qa/TicketQaReports.tsx";
+import {
+  configuredTicketQaPrs,
+  TicketQaReports,
+  ticketQaPrs,
+  type ConfiguredTicketQaPr,
+  type TicketQaPr,
+} from "../qa/TicketQaReports.tsx";
 import { boardPath, followLink } from "../router.ts";
 import {
   eventLine,
@@ -70,25 +83,80 @@ function Field({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-/** The newest retained QA result for this ticket's newest PR, for comparison with its plan. */
-function TicketPlanResult({ repoId, prs }: { repoId: string; prs: TicketHistory["prs"] }) {
-  const pr = [...prs].sort((a, b) => b.createdAt - a.createdAt)[0];
-  const resource = useResource<{ reports: QaReport[] }>(
-    pr
-      ? {
-          path: `/api/qa-reports?repoId=${encodeURIComponent(repoId)}&prNumber=${pr.number}`,
-          topic: ["agents", "boards"],
-        }
-      : null,
+type TicketQaResult = { pr: ConfiguredTicketQaPr; reports: QaReport[]; error: Error | null };
+
+/** The newest available retained QA result across every collected or live PR for this ticket. */
+function TicketPlanResult({ prs }: { prs: TicketQaPr[] }) {
+  const config = useResource<ConfigView>(RESOURCES.config);
+  const configured = useMemo(
+    () => (config.data ? configuredTicketQaPrs(prs, config.data.repos) : []),
+    [config.data, prs],
   );
-  const report = resource.data?.reports
-    .filter((item) => item.repoId === repoId && item.prNumber === pr?.number)
-    .sort((a, b) => b.registeredAt - a.registeredAt)[0];
-  if (resource.error)
+  const evidenceKey = configured
+    .map(
+      ({ pr, repoId, github }) => `${repoId}:${github}:${pr.number}:${pr.url}:${pr.createdAt ?? 0}`,
+    )
+    .join("|");
+  const [results, setResults] = useState<{
+    key: string;
+    loading: boolean;
+    items: TicketQaResult[];
+  }>({
+    key: "",
+    loading: false,
+    items: [],
+  });
+  useEffect(() => {
+    if (!config.data || configured.length === 0) return;
+    let cancelled = false;
+    setResults({ key: evidenceKey, loading: true, items: [] });
+    void Promise.all(
+      configured.map(async (pr): Promise<TicketQaResult> => {
+        try {
+          const data = await apiGet<{ reports: QaReport[] }>(
+            `/api/qa-reports?repoId=${encodeURIComponent(pr.repoId)}&prNumber=${pr.pr.number}`,
+          );
+          return {
+            pr,
+            reports: data.reports.filter(
+              (report) =>
+                report.repoId === pr.repoId &&
+                report.prNumber === pr.pr.number &&
+                report.github.toLowerCase() === pr.github.toLowerCase(),
+            ),
+            error: null,
+          };
+        } catch (error) {
+          return {
+            pr,
+            reports: [],
+            error: error instanceof Error ? error : new Error("Unknown error"),
+          };
+        }
+      }),
+    ).then((items) => {
+      if (!cancelled) setResults({ key: evidenceKey, loading: false, items });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [config.data, configured, evidenceKey]);
+  const report = results.items
+    .flatMap(({ pr, reports }) => reports.map((item) => ({ pr, report: item })))
+    .sort(
+      (a, b) =>
+        (b.pr.pr.createdAt ?? 0) - (a.pr.pr.createdAt ?? 0) ||
+        b.report.registeredAt - a.report.registeredAt,
+    )[0]?.report;
+  if (config.error || results.items.some((item) => item.error))
     return <p className="muted">QA evidence could not be loaded to compare with this plan.</p>;
-  if (!pr || (!resource.loading && !report))
+  if (!config.data)
+    return <p className="muted">Loading the QA result to compare with this plan…</p>;
+  if (configured.length === 0)
     return <p className="muted">No QA report yet: nothing built to compare.</p>;
-  if (!report) return <p className="muted">Loading the QA result to compare with this plan…</p>;
+  if (results.key !== evidenceKey || results.loading)
+    return <p className="muted">Loading the QA result to compare with this plan…</p>;
+  if (!report) return <p className="muted">No QA report yet: nothing built to compare.</p>;
   return (
     <>
       <p>{report.summary}</p>
@@ -179,6 +247,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
     return [...seen.values()].sort((a, b) => b.at - a.at || b.id - a.id);
   }, [t, olderQ]);
   const qNext = olderQ ? olderQ.next : (t?.questionsNextBefore ?? null);
+  const qaPrs = useMemo(() => ticketQaPrs(t?.prs ?? [], t?.linkedPullRequests), [t]);
   const loadOlderQuestions = async () => {
     if (qNext === null) return;
     setQPaging("loading");
@@ -268,14 +337,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
               <p className="warn-t s">{`GitHub could not be reached: ${t.githubError}`}</p>
             )}
             <h3>QA reports</h3>
-            <TicketQaReports
-              prs={[
-                ...t.prs,
-                ...(t.linkedPullRequests ?? []).filter(
-                  (pr) => !t.prs.some((local) => local.url === pr.url),
-                ),
-              ]}
-            />
+            <TicketQaReports prs={qaPrs} />
             <h3>Outcome</h3>
             {t.outcome ? (
               <p className="tk-text">{t.outcome}</p>
@@ -321,11 +383,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
           </div>
         </Panel>
         <div className={`tk-main${questions.length > 0 ? " has-questions" : ""}`}>
-          <SignedOffPlan
-            repoId={repoId}
-            number={number}
-            built={<TicketPlanResult repoId={repoId} prs={t.prs} />}
-          />
+          <SignedOffPlan repoId={repoId} number={number} built={<TicketPlanResult prs={qaPrs} />} />
           {questions.length > 0 && (
             <Panel id="questionsP" title="Questions" sub="newest first" className="tk-questions">
               <div className="pb scroll">

@@ -157,6 +157,80 @@ describe("the signed-off plan beside what was built", () => {
     expect(within(panel).getByText("No QA report yet: nothing built to compare.")).toBeTruthy();
   });
 
+  it("compares a linked-only pull request when its saved QA report is available", async () => {
+    const report = ticketQaReportFixture();
+    const linkedOnly = {
+      ...ticket(),
+      linkedPullRequests: [
+        {
+          number: 40,
+          url: "https://github.com/octo-org/shop-app/pull/40",
+          title: "Cache quotes",
+          state: "merged",
+          repoId: "shop-app",
+        },
+      ],
+    } as TicketHistory;
+    serve({
+      "/api/config": CONFIG,
+      "/api/tickets/shop-app/3349": linkedOnly,
+      "/api/plans?repoId=shop-app": { pending: [], history: [plan({})] },
+      "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [report] },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("region", { name: "What was built" }).textContent).toContain(
+      report.summary,
+    );
+  });
+
+  it("uses an older saved QA report when the newer associated pull request has none", async () => {
+    const report = ticketQaReportFixture();
+    const withPrs = {
+      ...ticket(),
+      prs: [
+        {
+          number: 40,
+          url: "https://github.com/octo-org/shop-app/pull/40",
+          title: "Earlier cache",
+          state: "merged",
+          isDraft: false,
+          branch: "feature/3349-cache",
+          headSha: "a".repeat(40),
+          createdAt: 1,
+          mergedAt: 2,
+          rounds: [],
+          ci: [],
+        },
+        {
+          number: 41,
+          url: "https://github.com/octo-org/shop-app/pull/41",
+          title: "Later cache",
+          state: "merged",
+          isDraft: false,
+          branch: "feature/3349-cache-follow-up",
+          headSha: "b".repeat(40),
+          createdAt: 2,
+          mergedAt: 3,
+          rounds: [],
+          ci: [],
+        },
+      ],
+    } as TicketHistory;
+    serve({
+      "/api/config": CONFIG,
+      "/api/tickets/shop-app/3349": withPrs,
+      "/api/plans?repoId=shop-app": { pending: [], history: [plan({})] },
+      "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [report] },
+      "/api/qa-reports?repoId=shop-app&prNumber=41": { reports: [] },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("region", { name: "What was built" }).textContent).toContain(
+      report.summary,
+    );
+  });
+
   it("shows on the QA report, against the report's own result", async () => {
     const report = qaReportFixture();
     serve({

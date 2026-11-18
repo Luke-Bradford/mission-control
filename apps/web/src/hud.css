@@ -769,11 +769,11 @@ select {
   }
 }
 
-/* Ten tabs (Planner is the tenth): at the narrowest desktop widths the session picker, the brand's
-   tracking and the tabs' tracking give up room so every tab still sits beside the status meters. */
+/* Ten tabs (Planner is the tenth): status may use the second row at narrow desktop widths, but its
+   controls retain enough room for their selected text. */
 @media (min-width: 1280px) and (max-width: 1599px) {
   #sess {
-    max-width: 80px;
+    min-width: 104px;
   }
   .brand {
     letter-spacing: 0.04em;
