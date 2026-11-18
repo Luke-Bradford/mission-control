@@ -316,6 +316,15 @@ describe("mixed hub startup", () => {
     expect(leftovers.map((path) => existsSync(path))).toEqual([true, true]);
   });
 
+  it("hands the config file it loaded to the routes that only read it, so the rules read answers", async () => {
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(boot.deps?.configReadPath).toBe(join(dir, "config.yaml"));
+    const read = (await get("/api/repos/mission-control/rules")).json<{ rules: object }>();
+    expect(Object.keys(read.rules)).toHaveLength(17);
+  });
+
   it("connects stream counts to scheduler client presence", async () => {
     boot.models = preparing.deps;
     boot.expectSupervisorEnabled = false;

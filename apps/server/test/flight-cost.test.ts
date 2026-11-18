@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
-import { onlySettled, routineOnly, unhandledReasons, wakeReasons } from "../src/flight/state.ts";
+import { immediateFact, onlySettled, routineOnly } from "../src/flight/state.ts";
 import { Store } from "../src/store.ts";
 
 const MIN = 60_000;
@@ -171,8 +171,8 @@ describe("the handover threshold", () => {
 
 describe("routine wakes wait for the batch window", () => {
   const facts = (o: Record<string, unknown[]>) => JSON.stringify(o);
-  it("treats a free seat or a PR item alone as routine", () => {
-    expect(routineOnly(facts({}), facts({ free: ["guido-1"], t: ["mc#1"] }))).toBe(true);
+  it("wakes for a free seat, while a PR item alone stays routine", () => {
+    expect(routineOnly(facts({}), facts({ free: ["guido-1"], t: ["mc#1"] }))).toBe(false);
     expect(routineOnly(facts({}), facts({ items: ["pr:mc#7:text"] }))).toBe(true);
   });
   it("never batches an operator message, a question, a blocker, a signal or the breaker", () => {
@@ -189,7 +189,7 @@ describe("routine wakes wait for the batch window", () => {
       expect(routineOnly(facts({}), facts({ free: ["guido-1"], ...o }))).toBe(false);
   });
   it("does not count a settled question or park as a change, only a new routine fact", () => {
-    expect(routineOnly(facts({ q: [3] }), facts({ q: [], free: ["g"] }))).toBe(true);
+    expect(routineOnly(facts({ q: [3] }), facts({ q: [], free: ["g"] }))).toBe(false);
     expect(routineOnly(facts({ parked: ["a:b:c"] }), facts({ parked: [], t: ["mc#1"] }))).toBe(
       true,
     );
@@ -219,46 +219,29 @@ describe("routine wakes wait for the batch window", () => {
   it("is not routine when nothing changed", () => {
     expect(routineOnly(facts({ free: ["a"] }), facts({ free: ["a"] }))).toBe(false);
   });
-  it("has a window of fifteen minutes", () => {
-    expect(FLIGHT_BATCH_MS).toBe(15 * MIN);
+  it("has a window of thirty minutes", () => {
+    expect(FLIGHT_BATCH_MS).toBe(30 * MIN);
   });
-});
 
-describe("wakes that ended in nothing are handled by a wait on their exact key", () => {
-  const wait = (target: string, at: number) =>
-    store.addFlightDecision({
-      at,
-      kind: "wait",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: `${target}: waiting on a thing`,
-      decision: "waiting until later",
-      basis: "b",
-    });
-  it("a wait on a repeat_park key with spaces handles the signal", () => {
-    const key = "mc#9:review failed on the same file";
-    const facts = JSON.stringify({ signals: [`repeat_park:${key}`] });
-    const reasons = wakeReasons("", facts);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      1,
-    );
-    wait(key, NOW + MIN);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      0,
-    );
-  });
-  it("a wait on an item's full key handles its item_stale signal", () => {
-    const item = "message:guido-1:stream:guido-1:20261105T020751Z:271748:0";
-    const refs = [{ key: item, ticket: null }];
-    const facts = JSON.stringify({
-      signals: ["item_stale:message:guido-1:stream:guido-1:20261105T020751Z:271748"],
-    });
-    const reasons = wakeReasons("", facts, refs);
-    wait(item, NOW + MIN);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      0,
-    );
+  it("does not batch immediate facts even in a learned category", () => {
+    const learned = new Set(["signals", "items", "prs", "discussions", "instructions"]);
+    for (const factsAdded of [
+      { q: ["x"] },
+      { operator: ["x"] },
+      { parked: ["x"] },
+      { triage: ["x"] },
+      { release: ["x"] },
+      { free: ["x"] },
+      { idle: ["x"] },
+      { signals: ["main_red:sha"] },
+      { items: ["comms-open:4"] },
+      { prs: ["mc#1:7:true:open::"] },
+      { discussions: [["d1", ["m1"]]] },
+      { instructions: ["r2"] },
+    ] as Record<string, unknown[]>[])
+      expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);
+    expect(routineOnly(facts({}), facts({ signals: ["push_unseen:x"] }), learned)).toBe(true);
+    expect(routineOnly(facts({}), facts({ signals: ["waste_alarm:x"] }), learned)).toBe(true);
+    expect(immediateFact("prs", "mc#1:7:true:open::")).toBe(true);
   });
 });

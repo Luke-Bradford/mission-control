@@ -8,7 +8,7 @@ import { InstrumentCharts } from "./InstrumentCharts.tsx";
 import { Kpis } from "./Kpis.tsx";
 import { VisiblePanels } from "./TPanel.tsx";
 
-type UnbuiltTab = Exclude<TelemetryTab, "crew" | "cost">;
+type UnbuiltTab = Exclude<TelemetryTab, "crew" | "cost" | "throughput">;
 
 interface Coming {
   /** What the finished tab will hold, in one sentence. */
@@ -22,15 +22,10 @@ interface Coming {
 /**
  * Where each panel of the earlier page lives until its tab is built, so no telemetry disappears.
  * tCrewState, tUtil, tLat, tSubs and tCapcom moved to the Crew tab; tTurn to the seat's Agent page;
- * the cost, token and quota panels to the Cost and tokens tab.
+ * the cost, token and quota panels to the Cost and tokens tab; tThru, tCycle, tFlow and tCycleControl to
+ * the Throughput tab (tForecast is dropped).
  */
 export const COMING: Record<UnbuiltTab, Coming> = {
-  throughput: {
-    holds:
-      "Merged per day, cycle time per ticket and by size, tickets in progress, and the tickets table.",
-    panels: ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"],
-    tiles: ["commits"],
-  },
   quality: {
     holds:
       "CI green on first push, first-pass review, rounds per PR, guard blocks by rule, and escaped defects.",

@@ -386,7 +386,6 @@ describe("the tabs", () => {
 
   it("shows a short coming note, never an empty chart, on each tab not built yet", async () => {
     for (const [tab, name] of [
-      ["throughput", "Throughput is coming"],
       ["quality", "Quality is coming"],
       ["machine", "Machine is coming"],
     ] as const) {
@@ -399,7 +398,6 @@ describe("the tabs", () => {
   it("keeps each earlier panel on the tab that will take it", async () => {
     const expected: Record<string, string[]> = {
       cost: ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"],
-      throughput: ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"],
       quality: ["tQual", "tQualityTrend"],
       machine: ["tMach", "tLock"],
     };
@@ -409,7 +407,20 @@ describe("the tabs", () => {
       for (const id of all)
         expect(document.getElementById(id) !== null, `${tab}: ${id}`).toBe(ids.includes(id));
       // moved to the Crew tab, or to the seat's Agent page
-      for (const id of ["tCrewState", "tUtil", "tLat", "tSubs", "tCapcom", "tTurn"])
+      for (const id of [
+        "tCrewState",
+        "tUtil",
+        "tLat",
+        "tSubs",
+        "tCapcom",
+        "tTurn",
+        // moved to the Throughput tab, which draws its own (the forecast is dropped)
+        "tThru",
+        "tCycle",
+        "tFlow",
+        "tCycleControl",
+        "tForecast",
+      ])
         expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
       // the Cost and tokens tab's table view holds these, and no other tab does
       for (const id of ["tTotals", "tCostTable", "tStepTable", "quotaP", "tQuota", "tCostMerged"])

@@ -38,6 +38,7 @@ import {
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   estimateTokens,
+  FLIGHT_FULL_BUILTINS,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -492,6 +493,50 @@ describe("startRun eligibility", () => {
       await refused(422, grantRefusedText("mc#42", ["package.json"]), {
         fetchTicket: ticketWith({ body: BODY }),
       });
+    });
+
+    it("starts a Paths: line of files and globs in the seat's area with no grant", async () => {
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({
+          body: "Paths: apps/server/src/telemetry/**, apps/server/src/a.ts\n",
+        }),
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it.each(["apps/server", "apps/*"])(
+      "starts Paths: globs under the area %s with no grant",
+      async (guidoArea) => {
+        const { sup } = make({
+          rules: withRules(),
+          guidoArea: [guidoArea],
+          fetchTicket: ticketWith({ body: "Paths: apps/server/src/**, apps/server/**\n" }),
+        });
+        sup.start();
+        const { runId } = await sup.startRun("guido-1", 42);
+        expect(runPathGrants(store, runId)).toEqual([]);
+      },
+    );
+
+    it("refuses an outside glob with the text it always had", async () => {
+      await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
+      });
+    });
+
+    it("asks FLIGHT only for the outside file of a mixed Paths: line", async () => {
+      const body = "Paths: apps/server/src/**, package.json\n";
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body }),
+      });
+      approve();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({ body }) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual(["package.json"]);
     });
 
     it("starts a ticket with no Paths: line holding no grant", async () => {
@@ -2885,14 +2930,16 @@ describe("repo guidance at launch", () => {
       );
   });
 
-  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+  it("starts FLIGHT unsandboxed with its listed tools and without the operator's settings", async () => {
     const { sup } = make({ extraSeat: FLIGHT });
     sup.start();
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    for (const flag of ["--restricted", "--tools", "--disallowedTools", "--permission-mode"])
+    for (const flag of ["--restricted", "--disallowedTools", "--permission-mode"])
       expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
