@@ -606,6 +606,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const tickCache = new AsyncLocalStorage<{
     prs: Map<RepoId, ReturnType<Store["pullRequests"]>>;
     notes: ReturnType<Store["notes"]>;
+    /** origin's tip per crew clone: one `ls-remote` serves every run's gate read in the tick. */
+    tips: Map<string, ReturnType<Publisher["originTip"]>>;
   }>();
   const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
     const cache = tickCache.getStore();
@@ -614,6 +616,23 @@ export function createEngine(deps: EngineDeps): Engine {
     const rows = store.pullRequests(repoId);
     cache?.prs.set(repoId, rows);
     return rows;
+  };
+  /**
+   * origin's tip for a run's gate read: shared by every pass of one tick (each would otherwise run
+   * its own `ls-remote`, one at a time in the clone's queue); null outside a tick, which reads its own.
+   */
+  const tickTip = (run: Run): ReturnType<Publisher["originTip"]> | null => {
+    const cache = tickCache.getStore();
+    if (cache === undefined) return null;
+    const key =
+      config.crew?.sessions.find((s) => s.seats.some((x) => x.id === run.agentId))?.checkout ??
+      run.repoId;
+    let tip = cache.tips.get(key);
+    if (tip === undefined) {
+      tip = publisher.originTip(run);
+      cache.tips.set(key, tip);
+    }
+    return tip;
   };
   let started = false;
   let unsubscribe: (() => void) | null = null;
@@ -2140,7 +2159,13 @@ export function createEngine(deps: EngineDeps): Engine {
           ? input.gate
           : null;
       if (known === null) input.gate = null;
-      const g = await publisher.gateFacts(run, pushed.sha, known);
+      const shared = await tickTip(run);
+      const g =
+        shared === null
+          ? await publisher.gateFacts(run, pushed.sha, known)
+          : shared.ok
+            ? await publisher.gateFacts(run, pushed.sha, known, shared)
+            : shared;
       if (g.ok) {
         input.gate = { sha: pushed.sha, ...g.facts, area };
         rules = await rulesFor(run.repoId, g.facts.mainSha);
@@ -3013,7 +3038,11 @@ export function createEngine(deps: EngineDeps): Engine {
         timer = setTimeout(noteOverrun, ENGINE_TICK_MS);
         timer.unref();
         const notes = await phase("load notes", () => store.notes());
-        const cache = { prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(), notes };
+        const cache = {
+          prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
+          notes,
+          tips: new Map<string, ReturnType<Publisher["originTip"]>>(),
+        };
         await tickCache.run(cache, async () => {
           const runs = await phase("list runs", loopRuns);
           await phase("wake pending work", () =>

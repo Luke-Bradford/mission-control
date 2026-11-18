@@ -23,6 +23,7 @@ import {
 } from "../router.ts";
 import { useStore } from "../shell/store.ts";
 import { ComingTab } from "../telemetry/ComingTab.tsx";
+import { CostPanels, CostSummaryRow } from "../telemetry/CostTab.tsx";
 import { CrewPanels, CrewSummaryRow } from "../telemetry/CrewTab.tsx";
 import type { AgentInfo, Scope } from "../telemetry/common.ts";
 import { HealthBand } from "../telemetry/HealthBand.tsx";
@@ -174,6 +175,7 @@ export function Telemetry() {
     range,
     all,
     agents,
+    agent,
     account,
     ticket,
     wait: res.error && !t ? "Telemetry did not load." : "Loading…",
@@ -280,13 +282,16 @@ export function Telemetry() {
         {tab === "crew" && (
           <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />
         )}
+        {tab === "cost" && (
+          <CostSummaryRow t={t} scope={scope} onNeedsRoute={setRuns} refreshing={refetching} />
+        )}
         {tab === "throughput" && <ThroughputSummaryRow t={t} onNeedsRoute={setRuns} />}
         <section
           id={TAB_PANEL_ID}
           className="tabpanel"
           role="tabpanel"
           aria-labelledby={tabId(tab)}
-          aria-busy={t === undefined && res.error === null}
+          aria-busy={refetching || (t === undefined && res.error === null)}
         >
           {!def.built && res.error && !res.data && (
             <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
@@ -296,6 +301,8 @@ export function Telemetry() {
               <div className="grid" data-state={state}>
                 <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
               </div>
+            ) : tab === "cost" ? (
+              <CostPanels t={t} scope={scope} view={view} dim={dim} />
             ) : tab === "throughput" ? (
               view === "table" ? (
                 <ThroughputTable t={t} wait={scope.wait} dim={dim} now={now} />
@@ -307,7 +314,7 @@ export function Telemetry() {
             )
           ) : (
             <ComingTab
-              tab={tab as Exclude<TelemetryTab, "crew" | "throughput">}
+              tab={tab as Exclude<TelemetryTab, "crew" | "cost" | "throughput">}
               label={def.label}
               t={t}
               scope={scope}

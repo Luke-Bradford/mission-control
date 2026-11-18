@@ -175,6 +175,12 @@ export interface ReviewPrSnapshot {
   mergeCommitSha: string | null;
 }
 
+/** origin's default branch and its tip, as one `ls-remote` read them. */
+export interface OriginTip {
+  defaultBranch: string;
+  mainSha: string;
+}
+
 export interface Publisher {
   /** An authoritative read, independent of the collector's snapshot. */
   reviewPr(run: Run, number: number): Promise<ReviewPrSnapshot | null>;
@@ -230,14 +236,20 @@ export interface Publisher {
     mergeCommitSha?: string,
     baseSha?: string,
   ): Promise<string[]>;
+  /** origin's default branch and tip now (one `ls-remote`), for a caller that shares it across runs. */
+  originTip(
+    run: Run,
+  ): Promise<({ ok: true } & OriginTip) | { ok: false; text: string; transient: boolean }>;
   /**
-   * The merge gate's reads for `sha`. origin's tip is read every call; when `known` is for the same
-   * sha and tip, it is returned without the rest of the reads.
+   * The merge gate's reads for `sha`. origin's tip is read every call unless `tip` (a read the
+   * caller shares) is given; when `known` is for the same sha and tip, it is returned without the
+   * rest of the reads.
    */
   gateFacts(
     run: Run,
     sha: string,
     known?: (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean }) | null,
+    tip?: OriginTip,
   ): Promise<GateResult>;
   /**
    * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
@@ -1208,10 +1220,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       });
     },
 
-    async gateFacts(run, sha, known) {
+    originTip(run) {
+      return inGit(run, async (g) => {
+        const { defaultBranch, mainSha } = await originNow(g, null);
+        return { ok: true, defaultBranch, mainSha };
+      });
+    },
+
+    async gateFacts(run, sha, known, tip) {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
-        const { defaultBranch, mainSha } = await originNow(g, null);
+        const { defaultBranch, mainSha } = tip ?? (await originNow(g, null));
         if (known?.sha === sha && known.mainSha === mainSha && known.webChanged !== undefined) {
           const { containsMain, hubOnly, strays, missionControlChanged, webChanged } = known;
           return {
