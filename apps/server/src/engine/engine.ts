@@ -165,7 +165,12 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { resolvedReviewRound, restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
+import {
+  resolvedReviewRound,
+  restartHold,
+  reviewsHeld,
+  settleReviewRounds,
+} from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
@@ -1654,8 +1659,7 @@ export function createEngine(deps: EngineDeps): Engine {
           store
             .reviewsOfRun(run.id)
             .filter(
-              (r) =>
-                (settled || r.epoch === cur.epoch) && r.state === "reported" && r.blocking > 0,
+              (r) => (settled || r.epoch === cur.epoch) && r.state === "reported" && r.blocking > 0,
             ).length;
         const id = store.requestReview({
           authorRunId: run.id,
