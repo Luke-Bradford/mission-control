@@ -219,7 +219,7 @@ describeRendered("Comms chart, rendered", () => {
         await page.evaluate(
           () =>
             new Promise<void>((resolve) =>
-              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
             ),
           null,
         );
@@ -348,6 +348,14 @@ describeRendered("Comms chart, rendered", () => {
         api,
       });
       await page.box(".comms-node");
+      // Do not count the chart's initial ResizeObserver layout as idle work.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+        null,
+      );
       await page.evaluate(() => {
         const w = window as unknown as { __raf: number; __mut: number; __long: number };
         w.__raf = 0;
