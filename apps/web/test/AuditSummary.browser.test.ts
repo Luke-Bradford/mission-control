@@ -49,7 +49,12 @@ function api(options: Options = {}) {
 }
 
 const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
-  page.evaluate(() => {
+  page.evaluate(async () => {
+    // Let fonts load and the layout settle (the whole-row fit re-runs then) before reading any box.
+    await document.fonts.ready;
+    await new Promise<void>((done) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => done())),
+    );
     const rect = (e: Element) => e.getBoundingClientRect();
     const list = document.querySelector(".as-do .as-scroll");
     const rows = [...document.querySelectorAll(".as-rec")];
