@@ -7095,6 +7095,32 @@ describe("the engine runs reviews", () => {
         await grantedThenFailed();
       });
 
+      it("a grant survives a new epoch started by something other than FLIGHT", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        // a main sync or CI ruling starts another epoch before the fix is pushed
+        setLoop({ epoch: loopOf().epoch + 1 });
+        await push(SHA_D);
+        const granted = reviewRows().filter((r) => r.sha === SHA_D && r.state !== "superseded");
+        expect(granted).toHaveLength(1);
+        expect(granted[0]).toMatchObject({ round: 3, state: "running" });
+        const sentBefore = h.sent.length;
+        reported(need(granted[0]).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(loopOf().parked?.kind).toBe("review");
+        expect(h.sent).toHaveLength(sentBefore);
+      });
+
       it("a second rework after the granted round fails grants the next review again", async () => {
         await grantedThenFailed();
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);

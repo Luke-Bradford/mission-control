@@ -1579,14 +1579,16 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
 /**
  * A FLIGHT rework grant permits exactly one more blocking RETRO outcome: on the head it was granted
  * for (`flightReworks`), or, at the review-round cap, in the epoch the grant started
- * (`flightReworkGrantEpoch`), since the seat's fix is a new head.
+ * (`flightReworkGrantEpoch`) and after it, until FLIGHT decides again, since the seat's fix is a new
+ * head and a sync or CI ruling may start another epoch before it is reviewed.
  */
 function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   // FLIGHT's second review of this head always gets a fix round, whatever rework was granted before
   if (loop.flightSecondReview?.[sha]?.epoch === loop.epoch)
     return Math.max(2, s.limits?.rounds ?? REVIEW_ROUNDS);
   const granted =
-    (loop.flightReworks?.[sha] ?? 0) > 0 || loop.flightReworkGrantEpoch === loop.epoch;
+    (loop.flightReworks?.[sha] ?? 0) > 0 ||
+    (loop.flightReworkGrantEpoch !== undefined && loop.epoch >= loop.flightReworkGrantEpoch);
   return granted ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
 

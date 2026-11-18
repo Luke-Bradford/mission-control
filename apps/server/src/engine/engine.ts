@@ -1648,7 +1648,8 @@ export function createEngine(deps: EngineDeps): Engine {
         // a settle starts a new epoch. Only the epoch a FLIGHT rework grant covers counts the rounds
         // across epochs (the granted review is the next round, and a fail past it parks again);
         // every other epoch counts its own
-        const settled = cur.flightReworkGrantEpoch === cur.epoch;
+        const settled =
+          cur.flightReworkGrantEpoch !== undefined && cur.epoch >= cur.flightReworkGrantEpoch;
         const round =
           1 +
           store
@@ -3251,6 +3252,13 @@ export function createEngine(deps: EngineDeps): Engine {
           lastRefusal: null,
           unparkedAt: at,
         };
+        // a grant lasts until FLIGHT decides again, whatever else starts a new epoch meanwhile
+        if (
+          opts?.action === "rereview" ||
+          opts?.action === "accept" ||
+          opts?.action === "second_review"
+        )
+          delete next.flightReworkGrantEpoch;
         if (kind === "budget") {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
