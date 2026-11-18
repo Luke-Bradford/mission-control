@@ -3050,7 +3050,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
 
       const tests = planTestCount(plan);
       if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
-      const doneWhen = doneWhenCount(body);
+      const doneWhen = doneWhenCount(`${body}\n\n${tail}`);
       if (tests < doneWhen) return { text: planFewTestsText(tests, doneWhen), isError: true };
       const unsafe = planUnsafePaths(plan);
       if (unsafe.length > 0) return { text: planUnsafePathsText(unsafe), isError: true };

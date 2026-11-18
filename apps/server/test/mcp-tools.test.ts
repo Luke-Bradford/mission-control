@@ -6326,6 +6326,25 @@ describe("report_plan", () => {
       expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", note: null });
     });
 
+    it("a plan written again is counted against the Done when items kept after the old plan", async () => {
+      withRules("every");
+      ghState(
+        view(
+          `Do X.\n\n## Plan\n\nold plan\n\nPlanned by FAO-1 (Mission Control).\n\n## Done when\n\n- A works.\n- B works.\n`,
+        ),
+      );
+      store.plans.file(
+        "mc",
+        7,
+        { asks: null, proposal: "old plan", sizeEstimate: null, risks: null, mockups: [] },
+        true,
+        NOW,
+      );
+      store.plans.sendBack("mc", 7, "smaller please");
+      expect(await call({})).toEqual(refused(planFewTestsText(1, 2)));
+      expect(ghCalls().map((c) => c.args[1])).toEqual(["view"]);
+    });
+
     it("a plan written again keeps the sections after the old one", async () => {
       withRules("every");
       ghState(
