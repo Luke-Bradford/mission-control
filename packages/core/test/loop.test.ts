@@ -2263,6 +2263,21 @@ describe("review decisions", () => {
     ]);
   });
 
+  it("a loop-chosen CI stop during rework stays Blocked, not Ready", () => {
+    const stopped = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" } },
+      {
+        phase: "parked",
+        parked: { kind: "ci", reason: "CI failed 3 times", ended: true },
+        cardFor: null,
+      },
+    );
+    expect(kinds(reconcile(stopped).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Blocked" },
+    ]);
+  });
+
   it("an ended run whose PR was closed keeps its card Blocked", () => {
     const closed = inReview(
       withReview([fact({ id: 5, blocking: 1 })], [finding]),
