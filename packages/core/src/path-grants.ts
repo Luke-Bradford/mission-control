@@ -49,21 +49,32 @@ export function pathsNeedingGrant(
 
 /**
  * Whether every path `entry` can match lies in `area`. A plain file is matched as `pathInArea` does.
- * A glob counts as inside only when it is an area glob itself, or its folder before the first
- * wildcard sits under a wildcard-free `X/**` area glob; anything else is kept for the grant checks.
+ * A glob counts as inside only when some area glob provably covers it segment by segment (a glob
+ * also covers what lies under a folder it matches, as `globMatches` does); anything else is kept
+ * for the grant checks.
  */
 function entryInArea(area: readonly string[], entry: string): boolean {
   if (!entry.includes("*")) return pathInArea(area, entry);
   if (area.length === 0 || area.includes(entry)) return true;
-  const segs = entry.split("/");
-  if (segs.includes("..")) return false;
-  const wild = segs.findIndex((s) => s.includes("*"));
-  const folder = segs.slice(0, wild);
+  const e = entry.split("/");
+  if (e.includes("..") || e.some((s) => s.includes("**") && s !== "**")) return false;
   return area.some((g) => {
-    if (!g.endsWith("/**") || g.slice(0, -3).includes("*")) return false;
-    const base = g.slice(0, -3).split("/");
-    return base.length <= folder.length && base.every((s, i) => s === folder[i]);
+    const a = g.split("/");
+    return !a.some((s) => s.includes("**") && s !== "**") && globCovers(a, 0, e, 0);
   });
+}
+
+/** Whether the segments of area glob `a` from `ai` cover everything the segments of `e` from `ei` can match. */
+function globCovers(a: readonly string[], ai: number, e: readonly string[], ei: number): boolean {
+  if (ai === a.length) return true;
+  const seg = a[ai] as string;
+  if (seg === "**") {
+    if (ai === a.length - 1) return true;
+    for (let j = ei; j <= e.length; j++) if (globCovers(a, ai + 1, e, j)) return true;
+    return false;
+  }
+  if (ei === e.length || e[ei] === "**") return false;
+  return (seg === "*" || seg === e[ei]) && globCovers(a, ai + 1, e, ei + 1);
 }
 
 /**

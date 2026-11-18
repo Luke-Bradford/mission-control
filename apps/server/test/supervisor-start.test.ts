@@ -506,6 +506,20 @@ describe("startRun eligibility", () => {
       expect(runPathGrants(store, runId)).toEqual([]);
     });
 
+    it.each(["apps/server", "apps/*"])(
+      "starts Paths: globs under the area %s with no grant",
+      async (guidoArea) => {
+        const { sup } = make({
+          rules: withRules(),
+          guidoArea: [guidoArea],
+          fetchTicket: ticketWith({ body: "Paths: apps/server/src/**, apps/server/**\n" }),
+        });
+        sup.start();
+        const { runId } = await sup.startRun("guido-1", 42);
+        expect(runPathGrants(store, runId)).toEqual([]);
+      },
+    );
+
     it("refuses an outside glob with the text it always had", async () => {
       await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
         fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
