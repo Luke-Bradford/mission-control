@@ -366,7 +366,9 @@ export async function prepareBriefActions(
       case "merge-hold": {
         const target = action.target;
         if (target.kind === "run") {
-          if (!namesRun(target.runId))
+          // Only a merge hold may be named through the item's PR or ticket; a controller verdict
+          // needs the item to be that run's own source.
+          if (action.kind === "merge-hold" ? !namesRun(target.runId) : target.runId !== itemRun)
             throw new BriefError(409, "The approval target is not this item's run.");
           const run = store.run(target.runId);
           const pr = run?.loop?.prNumber ? store.pullRequest(run.repoId, run.loop.prNumber) : null;

@@ -512,6 +512,21 @@ describe("a held PR named by a Comms question", () => {
       "The approval target is not this item's run",
     );
   });
+  it("refuses a controller-check on a run the item only names through its PR", async () => {
+    holdRun(7);
+    const key = ask("repo#7");
+    await expect(
+      brief(
+        {
+          kind: "controller-check",
+          target: { kind: "run", runId: "target", sha: SHA },
+          verdict: "pass",
+          evidence: "Fixture check.",
+        },
+        key,
+      ),
+    ).rejects.toThrow("The approval target is not this item's run");
+  });
   it("refuses at dispatch when the head moved after the brief", async () => {
     holdRun(7);
     const key = ask("repo#7");
