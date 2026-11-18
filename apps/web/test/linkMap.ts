@@ -391,5 +391,6 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Telemetry.tsx": "page: the same page, another tab or view",
   "src/telemetry/CrewTab.tsx": "page: Agents, a seat's Agent page, Needs you, Overview",
   "src/telemetry/Kpis.tsx": "page: the KPI's source",
+  "src/telemetry/ThroughputTab.tsx": "page: the Board, a ticket's page",
   "src/telemetry/Stat.tsx": "page: Needs you, Board, Overview, another Telemetry tab",
 };
