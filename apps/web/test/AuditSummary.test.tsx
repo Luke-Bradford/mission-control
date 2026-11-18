@@ -737,3 +737,43 @@ it("shows the From column, status dots, the eight-stage strip and the closed-loo
   expect(days[0]).toBe("22 Oct");
   expect(days).toContain("1 Nov");
 });
+
+it("names a zero-result decider filter even when waste alarms exist", async () => {
+  const over = overviewFixture({
+    rows: 1,
+    rowOver: () => ({ decision: { owner: "operator", tier: "operator" } }),
+  });
+  over.wasteAlarms = {
+    state: "available",
+    note: "",
+    rows: [
+      {
+        id: "cost-without-output:T1",
+        check: "cost-without-output",
+        title: "Spent $40 with nothing merged",
+        scope: { repoId: "sample", ticket: "T1", runId: null, seatId: null },
+        evidence: "Four runs, no merged PR.",
+        measure: { value: 40, unit: "USD" },
+        threshold: "Over $25 with no output",
+        costUsd: 40,
+        owner: "FLIGHT",
+        state: "open",
+        openedAt: NOW,
+      },
+    ],
+  };
+  setup(over);
+  render(<CodeHealth />);
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "FLIGHT 0" }));
+  expect(screen.getByText(/No FLIGHT decisions in this list/)).toBeTruthy();
+  expect(document.querySelectorAll("tr.as-rec, tr.as-waste")).toHaveLength(0);
+});
+
+it("states each row's decider, state and review date in its open detail", async () => {
+  setup();
+  render(<CodeHealth />);
+  await ready();
+  const more = document.querySelector("tr.as-more") as HTMLElement;
+  expect(more.textContent).toMatch(/Decides: FLIGHT .*\. Proposed, Review date unset\./);
+});

@@ -173,6 +173,9 @@ function Detail({
               ))}
             </ol>
             <p>
+              Decides: {who(row).head} {who(row).sub}. {stateText(row).word}, {stateText(row).date}.
+            </p>
+            <p>
               {step === -1
                 ? `Set aside: ${label(row.state.kind)}.`
                 : row.decision?.tier === "operator"
@@ -685,7 +688,7 @@ export function AuditSummary({
           }
         >
           <ScrollRegion className="as-scroll as-grow" label="Recommendations" innerRef={doNextList}>
-            {shown.length === 0 && alarms.length === 0 ? (
+            {shown.length === 0 && (filter !== "all" || alarms.length === 0) ? (
               <p className="as-empty">
                 {rows.length === 0
                   ? "No open proposal meets the measured triage rules. Missing collection is named in coverage; this is not a healthy-repo verdict."

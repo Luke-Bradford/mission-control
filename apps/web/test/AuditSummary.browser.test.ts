@@ -153,6 +153,9 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
       dayLabels: [...document.querySelectorAll(".as-axis span")].filter((e) => e.textContent)
         .length,
       legendInHeader: !!document.querySelector(".as-build .ph .as-lg"),
+      decClipped: [...document.querySelectorAll(".as-rec .as-dec div")]
+        .filter((e) => e.scrollWidth > e.clientWidth)
+        .map((e) => e.textContent),
       truncatedMeta: [...document.querySelectorAll(".as-hrow .as-fmeta")].filter(
         (e) => e.scrollWidth > e.clientWidth,
       ).length,
@@ -207,6 +210,7 @@ describeRendered("Audit first screen in a real browser", () => {
               expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.truncatedMeta, "no figure unit or window is cut off").toBe(0);
             expect(m.cutRow, "Do next ends on a whole row").toBe(0);
+            expect(m.decClipped, "owner, state and review date are not clipped").toEqual([]);
             expect(m.verdictTop, "the verdict is the first line under the nav").toBeLessThan(90);
             expect(m.verdictBeside, "Repo and the window control sit on the verdict line").toBe(
               true,
