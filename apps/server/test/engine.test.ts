@@ -332,6 +332,10 @@ interface Harness {
   gateReads: { sha: string; known: boolean }[];
   /** How many times a pass asked the publisher for origin's tip. */
   tipReads: number;
+  /** What one `ls-remote` costs: a tip read, or a gate read that has no shared tip, moves the clock by it. */
+  originLatencyMs: number;
+  /** A transient refusal for the tip read, as when origin is down. */
+  tipError: string | null;
   /** The shared tip each gate read was handed. */
   gateTips: (unknown | undefined)[];
   duringGate?: () => void;
@@ -442,6 +446,8 @@ function harness(): Harness {
     },
     gateReads: [],
     tipReads: 0,
+    originLatencyMs: 0,
+    tipError: null,
     gateTips: [],
     steps: [],
     stepEnded: {},
@@ -570,11 +576,14 @@ function harness(): Harness {
         },
         async originTip() {
           x.tipReads++;
+          clock += x.originLatencyMs;
+          if (x.tipError !== null) return { ok: false as const, text: x.tipError, transient: true };
           return { ok: true as const, defaultBranch: "main", mainSha: x.gate?.mainSha ?? x.tip };
         },
         async gateFacts(_r, sha, known, tip): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
           x.gateTips.push(tip);
+          if (tip === undefined) clock += x.originLatencyMs;
           x.duringGate?.();
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
@@ -6109,34 +6118,72 @@ describe("the engine runs reviews", () => {
       });
     });
 
-    it("reads origin's tip once for a tick with many runs in review", async () => {
-      await toReview();
-      const EXTRA = 11;
-      for (let i = 0; i < EXTRA; i++) {
+    /** Adds `n` more runs to RUN's, each in review on its own PR. */
+    const manyInReview = async (n: number): Promise<string[]> => {
+      const ids = [RUN];
+      for (let i = 0; i < n - 1; i++) {
         const id = `guido-1:extra-${i}`;
         const branch = `feature/${100 + i}-extra`;
         const ticket = `${REPO}#${100 + i}`;
         const sha = (i + 1).toString(16).padStart(40, "a");
-        const loop = { ...loopOf(), prNumber: 100 + i };
-        store.upsertRun(run({ id, seq: 10 + i, ticket, branch, loop }));
-        store.setRunLoop(id, loop);
+        const pr = (ci: "pending" | "passing") =>
+          store.upsertPullRequests(
+            REPO,
+            [prRow({ number: 100 + i, branch, ticket, headSha: sha, ci })],
+            clock,
+          );
+        store.upsertRun(run({ id, seq: 10 + i, ticket, branch }));
         store.addRunCommit({ runId: id, repoId: REPO, branch, sha, at: clock });
         store.setRunPush({ runId: id, sha, at: clock });
         store.addEvidence(id, "Changed the thing", clock);
-        store.upsertPullRequests(
-          REPO,
-          [prRow({ number: 100 + i, branch, ticket, headSha: sha, ci: "passing" })],
-          clock,
-        );
+        pr("pending");
+        await h.engine.reconcileRun(id);
+        pr("passing");
+        await h.engine.reconcileRun(id);
+        ids.push(id);
       }
       h.gateReads.length = 0;
       h.gateTips.length = 0;
       h.tipReads = 0;
+      return ids;
+    };
+
+    it("reads origin's tip once for a tick with many runs in review", async () => {
+      await toReview();
+      await manyInReview(12);
       await h.engine.tick();
       // every run was gated; none read origin itself
-      expect(h.gateReads.length).toBeGreaterThanOrEqual(EXTRA);
+      expect(h.gateReads.length).toBeGreaterThanOrEqual(12);
       expect(h.tipReads).toBe(1);
-      expect(h.gateTips.filter((t) => t !== undefined).length).toBeGreaterThanOrEqual(EXTRA);
+      expect(h.gateTips.filter((t) => t !== undefined).length).toBeGreaterThanOrEqual(12);
+    });
+
+    it("finishes a tick with 12 runs in review inside the interval when each origin read takes 5s", async () => {
+      await toReview();
+      await manyInReview(12);
+      // 12 serial reads would take a minute; one shared read takes 5s
+      h.originLatencyMs = 5000;
+      await h.engine.tick();
+      const tick = tickLogOf(store).recent().at(-1);
+      expect(tick?.durationMs).toBeLessThan(ENGINE_TICK_MS);
+      expect(tick?.overranOn).toBeNull();
+    });
+
+    it("shares one failed origin read across 12 runs in review and drops their old gates", async () => {
+      await toReview();
+      const ids = await manyInReview(12);
+      await h.engine.tick();
+      expect(ids.every((id) => store.run(id)?.loop?.gate != null)).toBe(true);
+      h.gateReads.length = 0;
+      h.tipReads = 0;
+      h.tipError = "git failed: origin is down";
+      h.originLatencyMs = 5000;
+      const before = clock;
+      await h.engine.tick();
+      expect(h.tipReads).toBe(1);
+      expect(h.gateReads).toEqual([]);
+      expect(clock - before).toBeLessThan(ENGINE_TICK_MS);
+      expect(ids.filter((id) => store.run(id)?.loop?.gate != null)).toEqual([]);
     });
 
     it("reads origin's tip every pass but reuses the rest while sha and tip are unchanged", async () => {
