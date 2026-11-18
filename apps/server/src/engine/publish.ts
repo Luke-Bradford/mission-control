@@ -817,8 +817,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return out;
   }
 
-  /** `run:sha` of heads `isDescendant` could not fetch. */
-  const unfetchable = new Set<string>();
+  /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
+  const unfetchable = new Map<string, number>();
+  const FETCH_RETRY_MS = 30_000;
   return {
     async push(run) {
       const r = await pushRun(deps, run.id);
@@ -1204,14 +1205,20 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
       const result = await inGit(run, async (g) => {
         // a commit someone else pushed is not in the clone yet
-        // (one that could not be fetched is not asked for again for this run)
+        // (one that could not be fetched is asked for again after a short pause, not every poll)
         const key = `${run.id}:${head}`;
-        if (!(await have(g, head)) && !unfetchable.has(key)) {
+        const nowMs = (deps.now ?? Date.now)();
+        const failedAt = unfetchable.get(key);
+        if (
+          !(await have(g, head)) &&
+          (failedAt === undefined || nowMs - failedAt >= FETCH_RETRY_MS)
+        ) {
           const got = await g(["fetch", "--no-tags", "origin", head]).then(
             () => true,
             () => false,
           );
-          if (!got) unfetchable.add(key);
+          if (got) unfetchable.delete(key);
+          else unfetchable.set(key, nowMs);
         }
         return {
           ok: true as const,

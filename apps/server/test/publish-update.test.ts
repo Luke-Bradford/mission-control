@@ -87,7 +87,7 @@ const run = (over: Partial<Run> = {}): Run => ({
   ...over,
 });
 
-const publisher = () =>
+const publisher = (now: () => number = () => START) =>
   createPublisher({
     config: config(),
     store,
@@ -97,7 +97,7 @@ const publisher = () =>
     dbPath: join(dir, "mc.sqlite"),
     knownSecrets: async () => [],
     checks: async () => [],
-    now: () => START,
+    now,
   } satisfies McToolsDeps);
 
 /** Main moves with `edit`; the branch (in its own worktree) has one commit editing apps/a.ts. */
@@ -265,8 +265,8 @@ describe("isDescendant (real git)", () => {
   });
 });
 
-describe("isDescendant fetch memory (real git)", () => {
-  it("does not fetch a head again for the same run once the fetch failed", async () => {
+describe("isDescendant fetch retry (real git)", () => {
+  it("asks again after a pause when the first fetch failed, and then follows the head", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     store.upsertRun(run());
     const other = join(dir, "other2");
@@ -277,14 +277,17 @@ describe("isDescendant fetch memory (real git)", () => {
     write(other, "docs/c.md", "doc\nlater\n");
     git(other, "commit", "-q", "-am", "later");
     const head = git(other, "rev-parse", "HEAD");
-    const p = publisher();
+    let t = START;
+    const p = publisher(() => t);
     // not on origin yet: the fetch fails
     expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
     git(other, "push", "-q", "origin", "later");
-    // on origin now, but this run's failed fetch of it is remembered
+    // on origin now, but the pause after the failed fetch has not passed
+    t += 1000;
     expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
-    // another run asks afresh
-    expect(await p.isDescendant({ ...run(), id: "other-run" }, mainSha, head)).toBe(true);
+    // after the pause it is fetched and found
+    t += 60_000;
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(true);
   });
 });
 
