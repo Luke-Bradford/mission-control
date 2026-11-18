@@ -801,6 +801,22 @@ describe("state step", () => {
       );
       expect(still.loop.phase).toBe("parked");
     });
+
+    it("a ci-pending park wakes when CI fails: the first failure is re-run, a repeat goes to the seat", () => {
+      const parked = reconcile(inCi(runningFor(75, 62))).loop;
+      const failing = { pr: pr({ ci: "failing" }) };
+      const first = reconcile(inCi(failing, { phase: "parked", parked: parked.parked }));
+      expect(first.loop.phase).toBe("ci");
+      expect(first.loop.parked).toBeNull();
+      expect(first.actions).toContainEqual({ kind: "rerun-ci", sha: SHA });
+      const again = reconcile(
+        inCi(failing, { phase: "parked", parked: parked.parked, rerun: reran() }),
+      );
+      expect(again.loop.phase).toBe("working");
+      expect(again.loop.parked).toBeNull();
+      expect(again.loop.ciFailedSha).toBe(SHA);
+      expect(events(again.actions)).toEqual(["CI failed on aaaaaaa"]);
+    });
   });
 
   it("14: no CI reported within ten minutes of the push parks", () => {
