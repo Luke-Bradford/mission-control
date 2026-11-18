@@ -509,16 +509,21 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   retrospective's 24 hours; null before the first.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
-- Only a retry-loop alarm wakes FLIGHT, once, through the `waste_alarm` signal: the dealer will not
-  deal the parked ticket until FLIGHT resolves the alarm or its cause ends. The signal is not in the
-  wake-at-once list (see Batching). No other alarm wakes FLIGHT: a review-rounds hold parks the
-  run, and that park's Needs-you item wakes it; a restart storm lifts when the hour's count falls
-  back; the rest hold nothing. Open alarms are served by `GET /api/waste` (a clearance wait from 24
+- An alarm about one ticket going round wakes FLIGHT, once, through the `waste_alarm` signal: a
+  retry loop (the dealer will not deal the parked ticket until FLIGHT resolves the alarm or its
+  cause ends), failed review rounds at the limit, and runs per ticket. The wake comes at the
+  watch's next pass, not in a batch, unless FLIGHT's recent wakes for signals were mostly no-ops
+  (see Batching). The other alarms wake nobody: clearance waiting, cost without output,
+  coordination overhead and ticket churn are stored only; a review-rounds hold parks the run, and
+  that park's Needs-you item wakes FLIGHT; a restart storm lifts when the hour's count falls
+  back. Open alarms are served by `GET /api/waste` (a clearance wait from 24
   hours; before that it is only stored). An alarm is not a question: it never reaches Needs you.
 - FLIGHT lifts a retry-loop park with `resolve_waste_alarm` (the alarm id is the signal's key, and a
   basis, recorded in Decided without you). The alarm stays closed until its cause grows past the
-  level it had. FLIGHT is given no id for the other alarms; a review-rounds hold is lifted by
-  settling the park.
+  level it had. The signal for failed review rounds and for runs per ticket also carries its
+  alarm's id, but those alarms hold nothing: they close when the PR or the ticket moves on, and
+  resolving one only makes the next failed round or run raise a new alarm. A review-rounds hold is
+  lifted by settling the park.
 - A held start is not a fault: the engine keeps the card or the review queued and raises no
   question. Reviews of an external PR are never held by the rounds check.
 - A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
