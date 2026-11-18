@@ -10,6 +10,7 @@ import {
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
+  type RepoRulesView,
   UP_TO_DATE_MAIN,
   UPDATE_UNAVAILABLE,
   type VersionInfo,
@@ -49,6 +50,36 @@ import {
   SESSION_CONFIG,
   seatRow,
 } from "./fixtures.ts";
+
+const repoRules = (planSignoff: "every" | "larger" | "never"): RepoRulesView =>
+  ({
+    base: "b".repeat(64),
+    rules: Object.fromEntries(
+      [
+        "pick_from",
+        "needs",
+        "areas",
+        "promote_backlog",
+        "plan_signoff",
+        "protected",
+        "hard_rules",
+        "hard_rules_by",
+        "commands.writer",
+        "commands.review",
+        "full_suite",
+        "required_checks",
+        "checks",
+        "uat.labels",
+        "uat.paths",
+        "always_ask",
+        "autonomy",
+        "flight_powers",
+      ].map((key) => [
+        key,
+        { value: key === "plan_signoff" ? planSignoff : "", source: "default" },
+      ]),
+    ),
+  }) as RepoRulesView;
 
 const CFG: ConfigView = {
   ...CONFIG,
@@ -1467,20 +1498,15 @@ describe("Setup › Repos & seats cards", () => {
   });
 
   it("shows each repo's plan sign-off setting and saves a change to it", async () => {
-    const withSetting = {
-      ...CREW_CONFIG,
-      repos: CREW_CONFIG.repos.map((r) =>
-        r.id === "shop-app" ? { ...r, planSignOff: "always" } : r,
-      ),
-    };
     load({
-      "/api/config": withSetting,
+      "/api/repos/shop-app/rules": repoRules("every"),
       "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+      "POST /api/repos/shop-app/rules": () => ({ status: 200, body: {} }),
     });
     at("repos");
     const card = expandCard(await screen.findByLabelText("shop-app"));
-    const select = within(card).getByLabelText("Plan sign-off") as HTMLSelectElement;
-    expect(select.value).toBe("always");
+    const select = (await within(card).findByLabelText("Plan sign-off")) as HTMLSelectElement;
+    expect(select.value).toBe("every");
     expect([...select.options].map((o) => o.textContent)).toEqual([
       "Every ticket",
       "Larger work only",
@@ -1489,12 +1515,16 @@ describe("Setup › Repos & seats cards", () => {
     fireEvent.change(select, { target: { value: "never" } });
     fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
     await waitFor(() => {
-      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
-      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ planSignOff: "never" });
+      const call = fetchFn.mock.calls.find(
+        ([path, init]) => path === "/api/repos/shop-app/rules" && init?.method === "POST",
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        rules: { plan_signoff: "never" },
+      });
     });
   });
 
-  it("does not show or save plan sign-off until the server supplies that setting", async () => {
+  it("does not save plan sign-off until the repo rules load", async () => {
     load({
       "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
     });
