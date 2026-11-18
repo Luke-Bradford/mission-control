@@ -342,13 +342,17 @@
    enough room for its controls and activity stream. */
 @container agent-page (min-width: 1001px) and (max-width: 1300px) {
   .control-shell {
-    grid-template-columns: 240px minmax(0, 1fr) 220px;
+    grid-template-columns: 240px minmax(0, 1fr) 320px;
   }
   .control-main {
     gap: var(--sp-2);
+    overflow-y: auto;
   }
   .control-main > .instruments {
     padding-block: var(--sp-1);
+  }
+  #page-agent.control-room #streamP #stream {
+    flex: 0 0 240px;
   }
 }
 
