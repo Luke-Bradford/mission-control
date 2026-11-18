@@ -236,7 +236,8 @@ describeRendered("Planner page", () => {
                 (item) => !!item && item.getBoundingClientRect().bottom <= window.innerHeight,
               ),
               beforeDecision: headings.every(
-                (item) => !!item && !!approveBox && item.getBoundingClientRect().top < approveBox.top,
+                (item) =>
+                  !!item && !!approveBox && item.getBoundingClientRect().top < approveBox.top,
               ),
             };
           }, null);

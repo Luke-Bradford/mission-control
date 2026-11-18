@@ -437,7 +437,7 @@ describeRendered("Needs you page", () => {
                 const r = a.getBoundingClientRect();
                 const sharesRow =
                   !!status && r.bottom > status.top + 1 && r.top < status.bottom - 1;
-                return r.right > box.right + 1 || (sharesRow && r.right > status!.left + 1);
+                return r.right > box.right + 1 || (sharesRow && r.right > (status?.left ?? 0) + 1);
               })
               .map((a) => a.textContent),
             separation: [...tabs.querySelectorAll("a")].every((a, index, all) => {
