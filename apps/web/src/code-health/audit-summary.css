@@ -3,7 +3,7 @@
 .code-health.as-fit {
   --as-side: clamp(440px, 34vw, 600px);
   --as-out-max: 160px;
-  --as-h-max: 104px;
+  --as-h-max: 184px;
   --as-plot: 64px;
 }
 @media (min-width: 2200px) {
@@ -39,6 +39,13 @@
   }
   .code-health.as-fit .ch-tabs {
     padding-bottom: var(--sp-1);
+  }
+  /* Title, sub and actions share one line, as in the prototype, instead of stacking. */
+  .code-health.as-fit .panel > .ph {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--sp-1) var(--sp-3);
+    padding: var(--sp-2) var(--sp-4);
   }
   .code-health.as-fit #ch-panel {
     flex: 1 1 auto;
@@ -299,6 +306,9 @@
 .as-meas .as-l {
   display: block;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .as-meas .as-v {
   display: flex;
@@ -550,6 +560,31 @@
 }
 .as-meas .as-unit {
   display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A figure reads on one line: its label, then unit and window muted beside it. */
+.as-hrow .as-fmeta {
+  display: inline;
+  margin-left: var(--sp-2);
+}
+.as-hrow .as-fmeta.as-fdef {
+  display: block;
+  margin-left: 0;
+}
+.as-days > summary {
+  cursor: pointer;
+  padding: 0 var(--sp-4);
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+}
+.as-days > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 /* Merged-PR chart: a count scale beside the bars, and each day's count in a keyboard-reachable list. */

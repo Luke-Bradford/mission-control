@@ -70,7 +70,10 @@ function stateText(row: CodeHealthRecommendation): { word: string; date: string 
     case "accepted":
       return { word: "Accepted", date: `Review ${day(s.reviewAt)}` };
     case "snoozed":
-      return { word: "Snoozed", date: `Until ${day(s.until)}` };
+      return {
+        word: "Snoozed",
+        date: s.until <= Date.now() ? `Snooze ended ${day(s.until)}` : `Until ${day(s.until)}`,
+      };
     case "dismissed":
       return { word: "Dismissed", date: "No review date" };
     default:
@@ -215,7 +218,8 @@ function RecRow({
         </div>
       </td>
       <td>
-        {row.state.kind === "proposed" ? (
+        {row.state.kind === "proposed" ||
+        (row.state.kind === "snoozed" && row.state.until <= Date.now()) ? (
           <div className="as-acts">
             {(["accept", "dismiss", "snooze"] as const).map((kind) => (
               <button
@@ -357,18 +361,21 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
           </div>
         </div>
       </div>
-      <ScrollRegion
-        className="as-daylist"
-        label={`Merged PRs per day, count by day, over ${days.length} days`}
-      >
-        <ul>
-          {days.map((d, i) => (
-            <li key={d.day}>
-              {d.day.slice(5)} <b className="as-dn">{totals[i]}</b>
-            </li>
-          ))}
-        </ul>
-      </ScrollRegion>
+      <details className="as-days">
+        <summary>Count for each day</summary>
+        <ScrollRegion
+          className="as-daylist"
+          label={`Merged PRs per day, count by day, over ${days.length} days`}
+        >
+          <ul>
+            {days.map((d, i) => (
+              <li key={d.day}>
+                {d.day.slice(5)} <b className="as-dn">{totals[i]}</b>
+              </li>
+            ))}
+          </ul>
+        </ScrollRegion>
+      </details>
     </>
   );
 }
@@ -465,7 +472,7 @@ export function AuditSummary({
     <>
       <p className="as-verdict" data-tone={tone}>
         <span className="as-tone">
-          {tone === "ok" ? "Healthy" : tone === "warn" ? "Needs attention" : "Unknown"}
+          {tone === "ok" ? "Steady" : tone === "warn" ? "Needs attention" : "Unknown"}
         </span>
         <b>{overview.verdict.text}</b>
       </p>

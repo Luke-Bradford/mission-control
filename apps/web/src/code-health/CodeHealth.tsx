@@ -57,6 +57,7 @@ export function CodeHealth() {
     title: string;
     refs: CodeHealthEvidenceRef[];
     coverage?: CodeHealthView["coverage"];
+    gap?: string;
   }>();
   const [action, setAction] = useState<{ row: CodeHealthRecommendation; kind: Action }>(),
     [notice, setNotice] = useState("");
@@ -116,11 +117,20 @@ export function CodeHealth() {
           wanted.id !== undefined && full.data.tab === "overview"
             ? full.data.recommendations.find((r) => r.id === wanted.id)
             : undefined;
-      setEvidence({
-        title: wanted.title,
-        refs: wanted.id === undefined ? [] : (row?.evidence ?? []),
-        coverage: full.coverage,
-      });
+      // The full read carries evidence for only the top few rows; say so for any other row.
+      setEvidence(
+        wanted.id !== undefined && !row
+          ? {
+              title: wanted.title,
+              refs: [],
+              gap: "This row's evidence is not in the current read. Its source and why are shown on the row.",
+            }
+          : {
+              title: wanted.title,
+              refs: wanted.id === undefined ? [] : (row?.evidence ?? []),
+              coverage: full.coverage,
+            },
+      );
       setWanted(undefined);
     } else if (fullRes.error) {
       setNotice(`Evidence could not be read: ${fullRes.error.message} Refresh and try again.`);

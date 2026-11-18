@@ -49,7 +49,8 @@ function fullRead(over: CodeHealthOverview): CodeHealthView {
     evidence: [ref],
     data: {
       tab: "overview",
-      recommendations: over.rows.map((r) => ({ ...r, evidence: [ref] })),
+      // The server's full read carries evidence for only the top three rows.
+      recommendations: over.rows.slice(0, 3).map((r) => ({ ...r, evidence: [ref] })),
       review: {
         reviewedPrs: 0,
         rounds: [
@@ -589,6 +590,7 @@ it("shows a count scale and each day's merged count, reachable by keyboard, cros
   setup();
   render(<CodeHealth />);
   await ready();
+  fireEvent.click(screen.getByText("Count for each day"));
   const region = screen.getByRole("region", {
     name: /Merged PRs per day, count by day, over 14 days/,
   });
@@ -625,4 +627,39 @@ it("sorts landing files by findings with a visible cue, and shows a figure's def
   fireEvent.click(how);
   expect(how.getAttribute("aria-expanded")).toBe("true");
   expect(document.querySelector(".as-fdef")?.textContent).toMatch(/\w/);
+});
+
+it("words the verdict chip for what is measured, never as Healthy", async () => {
+  setup(overviewFixture({ tone: "ok" }));
+  render(<CodeHealth />);
+  await ready();
+  const chip = document.querySelector(".as-tone");
+  expect(chip?.textContent).toBe("Steady");
+  expect(document.body.textContent).not.toMatch(/Healthy/);
+});
+
+it("lets an operator decide again on a row whose snooze has ended", async () => {
+  setup(
+    overviewFixture({
+      rows: 2,
+      rowOver: (n) => (n === 2 ? { state: { kind: "snoozed", until: Date.UTC(2026, 9, 1) } } : {}),
+    }),
+  );
+  render(<CodeHealth />);
+  await ready();
+  const row = document.querySelectorAll("tr.as-rec")[1] as HTMLElement;
+  expect(row.textContent).toContain("Snooze ended 1 Oct 2026");
+  for (const name of ["Accept", "Dismiss", "Snooze"])
+    expect((within(row).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("says plainly when a row beyond the top three has no evidence in the read", async () => {
+  setup(overviewFixture({ rows: 5 }));
+  render(<CodeHealth />);
+  await ready();
+  fireEvent.click(rowButtons()[3]);
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  const dialog = await screen.findByRole("dialog", { name: "Recommendation evidence" });
+  expect(within(dialog).getByText(/This row's evidence is not in the current read/)).toBeTruthy();
+  expect(within(dialog).queryByText(/Requested/)).toBeNull();
 });

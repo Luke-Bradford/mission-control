@@ -22,20 +22,20 @@ export function overviewRow(
     rule: n % 2 ? "repeated-rounds" : "recurring-correction",
     ruleVersion: 1,
     evidenceFingerprint: `fixture-${n}`,
-    title: `Change number ${n}: settle the shared cause once`,
+    title: `Change number ${n}: settle the shared cause of repeated review rounds once`,
     observation: `Only ${n} of 67 merged PRs carry a hub review, so review figures stop early.`,
     uncertainty: `Uncertainty ${n}: this measures records, not whether a review happened.`,
     proposal: `Proposal ${n}: record every merged review in the hub`,
     rankingReason: "Blocks the evidence first, then measured size.",
     measure: {
       current: 3 + n,
-      unit: "% of merged PRs",
-      window: "30d",
+      unit: "review rounds",
+      window: "over recorded PR",
       sourceAt: OVERVIEW_NOW,
       coverage: "Merge records cover the whole window.",
     },
     target: {
-      metric: "Merged PRs with a hub review",
+      metric: "maximum reported review round for this PR",
       direction: "increase",
       baseline: null,
       value: 95,
@@ -87,6 +87,7 @@ export function overviewFixture(
     /** A 300-character file path, longer than the schema's usual ones. */
     longPath?: boolean;
     past?: number;
+    tone?: "ok" | "warn" | "unknown";
     waste?: boolean;
   } = {},
 ): CodeHealthOverview {
@@ -116,6 +117,13 @@ export function overviewFixture(
     state: "unknown",
     comparison: null,
   });
+  const touch = figure({
+    id: "touch",
+    label: "Findings per touch",
+    value: 1.4,
+    unit: "findings per touch",
+    comparison: { label: "Previous 30d", value: 1.2, from: 0, until: 1 },
+  });
   const detail = figure({
     id: "past",
     label: "What past recommendations achieved",
@@ -131,7 +139,7 @@ export function overviewFixture(
     sourceRevision: "rev-1",
     summaryRevision: "sum-1",
     verdict: {
-      tone: "warn",
+      tone: options.tone ?? "warn",
       text: "Reviews almost stopped being recorded on 1 Nov, so the trend ends there.",
       figureIds: ["hub-review"],
     },
@@ -139,7 +147,7 @@ export function overviewFixture(
       const n = i + 1;
       return overviewRow(n, { repoId: repo, ...options.rowOver?.(n) });
     }),
-    figures: [merged, hub, rework, cost],
+    figures: [merged, hub, rework, cost, touch],
     outside: {
       state: options.outside === undefined ? "not-collected" : "available",
       items: Array.from({ length: options.outside ?? 0 }, (_, i) => ({

@@ -77,6 +77,11 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
           client: d.clientWidth,
         })),
       }),
+      figures: [...document.querySelectorAll(".as-hrow")].length,
+      figuresVisible: [...document.querySelectorAll(".as-hrow")].filter((r) => {
+        const l = r.closest(".as-scroll");
+        return !!l && rect(r).top >= rect(l).top && rect(r).bottom <= rect(l).bottom + 1;
+      }).length,
       landingRows: [...document.querySelectorAll(".as-files tr.as-frow")].filter((r) => {
         const l = r.closest(".as-scroll");
         return !!l && rect(r).top >= rect(l).top && rect(r).bottom <= rect(l).bottom;
@@ -118,6 +123,8 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.visibleRows).toBeGreaterThanOrEqual(5);
             expect(m.firstOpen).toBe(true);
             expect(m.landingRows).toBeGreaterThanOrEqual(2);
+            expect(m.figures).toBe(5);
+            expect(m.figuresVisible, "every figure is fully visible").toBe(5);
             expect(m.detailInside, m.detailDebug).toBe(true);
             expect(m.pageScrolls).toBe(false);
             expect(m.sideways).toBe(false);
