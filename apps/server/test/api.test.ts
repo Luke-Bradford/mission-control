@@ -8804,6 +8804,39 @@ describe("the first loop's engine", () => {
       },
     );
 
+    it("ties an option picked for a set-aside run's question to the message that run gets", async () => {
+      parkedRun("parked", "shop-app#9");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q = passed("parked", "Which provider?");
+      const key = `ask:${q}`;
+      // an older brief: its option carries no id, so the pick travels with the reply
+      store.addBrief({
+        key,
+        context: "The seat asks which provider to use.",
+        recommendation: "Stripe.",
+        options: [{ label: "Stripe", answer: "Use Stripe." }],
+        basis: "read the ticket",
+        at: NOW,
+      });
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, {
+        text: "Use Stripe.",
+        question: q,
+        itemKey: key,
+        choice: { briefAt: NOW, option: 0 },
+      });
+      expect(r.statusCode).toBe(200);
+      expect(store.comms(0, "parked")).toEqual([
+        expect.objectContaining({ to: "guido-1", text: "Use Stripe." }),
+      ]);
+      const stored = store.latestChoice(key);
+      expect(stored).toMatchObject({ label: "Stripe", target: "guido-1", targetKind: "seat" });
+      expect(store.commsRun(stored?.messageId ?? "")?.id).toBe("parked");
+      expect(store.openQuestions()).toEqual([]);
+      expect(reconciled).toEqual(["parked"]);
+      await a.close();
+    });
+
     it("a plain message closes no question, and a reply that names one closes only that one", async () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
       const q1 = store.addQuestion({ agentId: "guido-1", runId: "next", text: "One?", at: NOW });

@@ -3683,6 +3683,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
+                mergedPullRequestBranches: store.mergedPullRequestBranches(info.repo.id),
+                openPullRequestBranches: store
+                  .pullRequests(info.repo.id)
+                  .filter((pr) => pr.state === "open")
+                  .map((pr) => pr.branch),
                 ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),

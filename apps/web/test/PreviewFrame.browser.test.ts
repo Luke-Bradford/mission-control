@@ -8,7 +8,6 @@ const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
 
 const KEY = "decision:layout";
-const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: [] };
 const PREVIEW = {
   ticket: 1453,
   repoId: "shop-app",
@@ -43,8 +42,7 @@ function api() {
     "/api/notifications": { open: [], handledToday: [] },
     "/api/design-previews": [PREVIEW],
     "/api/design-previews/1453/open": PREVIEW,
-    [`/api/attention/${encodeURIComponent(KEY)}/discussion`]: discussion,
-    [`/api/attention/${encodeURIComponent(KEY)}/discussion?id=d1`]: discussion,
+    "/api/comms/flight": { messages: [] },
   };
 }
 

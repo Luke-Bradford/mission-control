@@ -129,6 +129,8 @@ function routes(
     "/api/settings/away": DEFAULT_AWAY,
     "/api/machine": { latest: null },
     "/api/limits": [],
+    // the FLIGHT thread beside the question reads the stored conversation
+    "/api/comms/flight": { messages: [] },
     ...more,
   });
   const inner = fn.getMockImplementation() as (i: string, init?: RequestInit) => Promise<Response>;
