@@ -170,7 +170,11 @@ function PlanRow({
           {plan.title ?? plan.ref}
         </span>
         <span className="uat-age plan-history-status">
-          {history ? statusWord(plan) : plan.state === "awaiting-signoff" ? `Size ${plan.sizeEstimate ?? "—"}` : statusWord(plan)}
+          {history
+            ? statusWord(plan)
+            : plan.state === "awaiting-signoff"
+              ? `Size ${plan.sizeEstimate ?? "—"}`
+              : statusWord(plan)}
         </span>
         <span className="uat-queue-meta">{plan.ref}</span>
       </a>
@@ -198,7 +202,9 @@ function Detail({ plan, repo, enabled }: { plan: TicketPlan; repo: string; enabl
             </p>
           )}
           <PlanParts plan={plan} />
-          {plan.state === "awaiting-signoff" && <Decide plan={plan} repo={repo} disabled={!enabled} />}
+          {plan.state === "awaiting-signoff" && (
+            <Decide plan={plan} repo={repo} disabled={!enabled} />
+          )}
         </div>
       </Panel>
     </div>

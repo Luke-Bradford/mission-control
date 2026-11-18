@@ -19,7 +19,11 @@ export function SignedOffPlan({
   if (!plan || ("state" in plan && plan.state !== "signed-off")) return null;
   const panelClass = className ? `plan-beside ${className}` : "plan-beside";
   return (
-    <Panel title="Signed-off plan" sub={`${plan.ref} · size ${plan.sizeEstimate ?? "—"}`} className={panelClass}>
+    <Panel
+      title="Signed-off plan"
+      sub={`${plan.ref} · size ${plan.sizeEstimate ?? "—"}`}
+      className={panelClass}
+    >
       <div className="pb plan-beside-grid">
         <section aria-label="What was proposed">
           <h3>Proposed</h3>

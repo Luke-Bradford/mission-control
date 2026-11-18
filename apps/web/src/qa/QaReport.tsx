@@ -1,7 +1,7 @@
 import { type QaImageRef, type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
 import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiQaReportImage } from "../api.ts";
-import { hub, RESOURCES, useResource } from "../data.ts";
+import { hub, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -185,7 +185,7 @@ export function CurrentQaReport({
   pr,
   head,
   awaiting,
-  ticket,
+  ticket: _ticket,
   children,
 }: {
   /** Retained for callers while reports carry their signed-off plan directly. */

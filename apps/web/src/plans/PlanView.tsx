@@ -26,11 +26,7 @@ export function PlanPictures({ plan }: { plan: DisplayPlan }) {
 }
 
 const Text = ({ text }: { text: string | null }) =>
-  !text?.trim() ? (
-    <p className="muted">Nothing written.</p>
-  ) : (
-    <p className="plan-text">{text}</p>
-  );
+  !text?.trim() ? <p className="muted">Nothing written.</p> : <p className="plan-text">{text}</p>;
 
 /** The five parts of a plan, in the order the operator reads them. Text is shown as text. */
 export function PlanParts({ plan }: { plan: DisplayPlan }) {

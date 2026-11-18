@@ -7,8 +7,8 @@ import {
   type NewRepo,
   PLAN_SIGNOFFS,
   type PlanSignoff,
-  type RepoRulesView,
   type RepoPreview,
+  type RepoRulesView,
   type SeatInput,
 } from "@mc/core";
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";

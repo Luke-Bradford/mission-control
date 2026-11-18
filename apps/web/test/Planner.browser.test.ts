@@ -40,7 +40,11 @@ const waiting = {
   title: "Retry failed payment webhooks",
   mockups: [picture("a", "Retry queue in the admin screen"), picture("b", "Empty queue")],
   state: "awaiting-signoff",
-  marked: true, note: null, requestedAt: 1, plannedAt: 1, decidedAt: null,
+  marked: true,
+  note: null,
+  requestedAt: 1,
+  plannedAt: 1,
+  decidedAt: null,
 };
 const sentBack = {
   ...base,
@@ -48,7 +52,10 @@ const sentBack = {
   ref: "shop-app#104",
   title: "Fix the address form on narrow screens",
   mockups: [],
-  state: "sent-back", marked: true, requestedAt: 1, plannedAt: 1,
+  state: "sent-back",
+  marked: true,
+  requestedAt: 1,
+  plannedAt: 1,
   note: "Keep the postcode lookup on narrow screens.",
   decidedAt: 1_700_000_000_000,
 };
