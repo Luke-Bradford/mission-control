@@ -1610,16 +1610,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
     // the PR a stopped run opened: no run holds it now, so a new run picks it up on its branch
-    const ownPr = (p: { number: number; branch: string }): boolean =>
+    const ownPr = (p: { number: number }): boolean =>
       store
         .runsOnTicket(repo.id, ref)
-        .some(
-          (r) =>
-            r.endedAt !== null &&
-            r.reviewId == null &&
-            r.branch === p.branch &&
-            (r.loop?.prNumber === p.number || r.loop?.prNumber === null),
-        );
+        .some((r) => r.endedAt !== null && r.reviewId == null && r.loop?.prNumber === p.number);
     const openPr = store
       .pullRequests(repo.id)
       .find((p) => p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(issue)));
