@@ -3717,13 +3717,71 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         const sha = loop.ciFailedSha;
         const pr = findPr(run, loop);
-        if (
-          sha === null ||
-          store.runPush(run.id)?.sha !== sha ||
-          pr?.state !== "open" ||
-          pr.headSha !== sha
-        ) {
+        if (sha === null || store.runPush(run.id)?.sha !== sha || pr?.state !== "open") {
           return not("the ruled commit is no longer its open PR's head");
+        }
+        const head = pr.headSha;
+        if (head === null) return not("the ruled commit is no longer its open PR's head");
+        if (head !== sha) {
+          const repo = config.repos.find((r) => r.id === run.repoId);
+          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          const short = head.slice(0, 7);
+          if (verdict.failing.length > 0)
+            return not(
+              `checks on the PR's new head ${short} failed: ${verdict.failing.join(", ")}`,
+            );
+          const pending = [...verdict.pending, ...verdict.missing];
+          if (pending.length > 0 || pr.ci === "pending")
+            return not(
+              `checks on the PR's new head ${short} are still pending${pending.length > 0 ? `: ${pending.join(", ")}` : ""}`,
+            );
+          if (pr.ci !== "passing" || verdict.ci === "failing")
+            return not("the ruled commit is no longer its open PR's head");
+
+          const at = now();
+          store.addRunCommit({
+            runId,
+            repoId: run.repoId,
+            branch: run.branch ?? pr.branch,
+            sha: head,
+            at,
+          });
+          store.setRunPush({ runId, sha: head, at });
+          store.setRunLoop(run.id, {
+            ...loop,
+            epoch: loop.epoch + 1,
+            phase: "review",
+            parked: null,
+            pushFor: head,
+            ciFails: 0,
+            ciFailedSha: null,
+            gate: null,
+            touches: null,
+            flightClearedSha: null,
+            reviewWaivedSha: null,
+            carry: null,
+            awaitingFlight: null,
+            adopted: true,
+            transient: 0,
+            lastRefusal: null,
+            unparkedAt: at,
+            rulingRerun: null,
+          });
+          store.addLoopEvent(
+            `${run.id}:${loop.epoch}:ruling-head-moved:${sha}:${head}`,
+            run.id,
+            `${CI_PASSED_EVENT_PREFIX}${head.slice(0, 7)} after PR head moved from ${sha.slice(0, 7)}; FLIGHT accepted the ruling`,
+            at,
+          );
+          await send(
+            run.id,
+            `ruling-head-moved:${run.id}:${head}`,
+            `CI is green on ${head.slice(0, 7)} after the PR head moved from ${sha.slice(0, 7)}. Review is queued on the new head. Sync your worktree before another rework round.`,
+          );
+          bus.emit("agents");
+          deps.pollGithub?.();
+          await pass(run.id);
+          return { kind: "accepted", sha: head };
         }
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const at = now();

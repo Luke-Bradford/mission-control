@@ -2900,6 +2900,73 @@ describe("FLIGHT settles a ruling", () => {
     expect(h.rulingReruns).toEqual([]);
   });
 
+  it("accepts a ruling when a moved PR head has green CI and queues review on that head", async () => {
+    await ruled();
+    config.crew?.sessions[0]?.seats.push({
+      id: RETRO,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    setPr({
+      ci: "passing",
+      headSha: SHA_B,
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+      ],
+    });
+
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA_B });
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf()).toMatchObject({
+      phase: "review",
+      ciFailedSha: null,
+      parked: null,
+    });
+    expect(store.reviewsOfRun(RUN)).toContainEqual(expect.objectContaining({ sha: SHA_B }));
+    expect(loopTexts()).toContain(reviewQueuedText(SHA_B, "RETRO-1"));
+    expect(loopTexts()).toContain(
+      `CI passed on ${SHA_B.slice(0, 7)} after PR head moved from ${SHA.slice(0, 7)}; FLIGHT accepted the ruling`,
+    );
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("Sync your worktree before another rework round."),
+      }),
+    );
+  });
+
+  it.each([
+    ["pending", "pending", "server", "still pending: server"],
+    ["failing", "failing", "server", "failed: server"],
+  ] as const)(
+    "refuses a ruling when a moved PR head has %s checks",
+    async (ci, state, name, message) => {
+      await ruled();
+      setPr({
+        ci,
+        headSha: SHA_B,
+        checks: [{ name, kind: "check", state, conclusion: state, attempt: 1, url: null }],
+      });
+
+      expect(await accept()).toEqual({
+        kind: "not",
+        text:
+          state === "failing"
+            ? `checks on the PR's new head ${SHA_B.slice(0, 7)} ${message}`
+            : `checks on the PR's new head ${SHA_B.slice(0, 7)} are ${message}`,
+      });
+    },
+  );
+
   it("refuses a rerun gh would not start, leaving no re-run recorded", async () => {
     await ruled();
     h.rerunResults = [{ ok: false, text: "no failed Actions run", transient: false }];
