@@ -664,9 +664,44 @@ describe("ciExcerpt", () => {
       "list",
       "--repo=o/mc",
       `--commit=${SHA}`,
-      "--json=databaseId,name,conclusion",
+      "--json=databaseId,name,conclusion,status,attempt",
     ]);
     expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--log-failed"]);
+  });
+
+  it("reads the failed earlier attempt while a re-run is going, and names the attempt", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 2 },
+          { databaseId: 12, name: "lint", conclusion: "success", status: "completed", attempt: 1 },
+        ]),
+      }),
+      () => ({ code: 0, stdout: "boom\n" }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toBe("test (attempt 1, which failed; a re-run is going):\nboom");
+    expect(ghCalls[1]).toEqual([
+      "run",
+      "view",
+      "--repo=o/mc",
+      "11",
+      "--attempt=1",
+      "--log-failed",
+    ]);
+  });
+
+  it("says no failed run for a first attempt that is still running", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 1 },
+        ]),
+      }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
   });
 
   it("strips colour codes and control characters, and caps the size", async () => {
