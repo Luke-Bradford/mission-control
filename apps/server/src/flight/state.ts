@@ -5,7 +5,6 @@
  */
 import { createHash } from "node:crypto";
 import {
-  ATTENTION_KINDS,
   type AttentionItem,
   areaLabelsFor,
   areaLabelsOf,
@@ -23,22 +22,22 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IMMEDIATE_REASONS,
+  FLIGHT_IMMEDIATE_SIGNALS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
-  FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MEMORY_HEADING,
-  FLIGHT_MEMORY_KINDS,
   FLIGHT_MEMORY_RECALL_MAX,
-  FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_METRICS_DAY_MS,
   FLIGHT_MOVED_LISTED,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
+  FLIGHT_PRS_SHOWN_SETTING,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -57,14 +56,11 @@ import {
   type FlightBriefView,
   type FlightDecision,
   type FlightIdleSeats,
-  type FlightMemoryKind,
   type FlightMemoryNote,
-  type FlightMemoryTitle,
   type FlightMovedPointer,
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
-  type FlightSignal,
   type FlightState,
   type FlightView,
   type FlightWake,
@@ -142,7 +138,7 @@ import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
 import { crewSeatIds, flightSeat } from "./seat.ts";
-import { flightSignals, flightWaits } from "./signals.ts";
+import { flightSignals } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
 interface TeamsDigestState {
@@ -179,10 +175,7 @@ export function operatorItems(
     hubLogin,
   ).filter(
     (i) =>
-      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) &&
-      i.key !== FLIGHT_NOT_TRIAGING_KEY &&
-      // what FLIGHT left undecided is the operator's to read, never FLIGHT's to triage
-      i.key !== `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`,
+      (i.owner === OWNER_OPERATOR || i.owner === OWNER_FLIGHT) && i.key !== FLIGHT_NOT_TRIAGING_KEY,
   );
 }
 
@@ -344,8 +337,10 @@ export function recordWakeReasons(
   at: number,
   causes: string[],
   wakeId?: string,
+  rode: string[] = [],
+  immediate: string[] = [],
 ): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId, rode, immediate);
 }
 
 /** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
@@ -670,7 +665,17 @@ export function flightArrivalSource(
 /** Per store, the PRs already listed as merged or closed (`repo#number:state`): each is listed once. */
 const shownByStore = new WeakMap<Store, Set<string>>();
 const shownPrs = (store: Store): Set<string> => {
-  const set = shownByStore.get(store) ?? new Set<string>();
+  const cached = shownByStore.get(store);
+  if (cached !== undefined) return cached;
+  let saved: unknown = [];
+  try {
+    saved = JSON.parse(store.getSetting(FLIGHT_PRS_SHOWN_SETTING) ?? "[]");
+  } catch {
+    // A damaged old setting must not stop a PR from being delivered again.
+  }
+  const set = new Set(
+    Array.isArray(saved) ? saved.filter((key): key is string => typeof key === "string") : [],
+  );
   shownByStore.set(store, set);
   return set;
 };
@@ -680,12 +685,20 @@ const shownKey = (p: { repoId: string; number: number; state: string }): string 
 /** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
+  let changed = false;
   for (const h of s.holds) {
     if (h.prState !== "open") store.markHoldTold(h.ref, h.prState);
   }
   for (const p of s.prs) {
-    if (p.state !== "open") shown.add(shownKey({ repoId: s.repo, number: p.pr, state: p.state }));
+    if (p.state !== "open") {
+      const key = shownKey({ repoId: s.repo, number: p.pr, state: p.state });
+      if (!shown.has(key)) {
+        shown.add(key);
+        changed = true;
+      }
+    }
   }
+  if (changed) store.setSetting(FLIGHT_PRS_SHOWN_SETTING, JSON.stringify([...shown].sort()));
 }
 
 /** The facts a delivered state leaves behind: the PRs that will leave the list are not counted. */
@@ -734,17 +747,8 @@ export function markItemsShown(store: Store, s: FlightState): void {
   }
 }
 
-/** The wake fact for a queued review an idle review seat has not started; also FLIGHT's `wait_on` target for it. */
-export const REVIEW_FAULT_FACT = "idle-reviewers";
-/** The wait targets that hold it: the fact, and the wake reason's label (`reviews idle-reviewers`). */
-export const REVIEW_FAULT_TARGETS = [REVIEW_FAULT_FACT, `reviews ${REVIEW_FAULT_FACT}`];
-
-/** Whether a recorded wait still holds `target` (a seat id or a ticket ref) back. */
-const waitingOn = (waits: Record<string, { until: number }>, target: string, now: number) =>
-  Object.entries(waits).some(
-    ([name, w]) => w.until > now && name.toLowerCase() === target.toLowerCase(),
-  );
-
+/** The wake fact for a queued review an idle review seat has not started. */
+const REVIEW_FAULT_FACT = "idle-reviewers";
 /** What `wakeFacts` reads beyond the digest: where a Ready ticket could start, and which items are new. */
 function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): FlightWakeInputs {
   return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
@@ -771,7 +775,6 @@ function wakeInputs(i: {
   flightId: string | null;
   now: number;
 }): FlightWakeInputs {
-  const waits = flightWaits(i.store);
   const rules = i.areas === undefined ? null : { areas: i.areas };
   const fits = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
     if (rules === null || Object.keys(rules.areas).length === 0) return true;
@@ -784,18 +787,14 @@ function wakeInputs(i: {
   };
   const pace = i.pace;
   const ready = i.tickets.filter(
-    (t) =>
-      t.ready &&
-      !waitingOn(waits, t.ref, i.now) &&
-      (pace === undefined || paceRefusal(pace, t.ref, t.labels) === null),
+    (t) => t.ready && (pace === undefined || paceRefusal(pace, t.ref, t.labels) === null),
   );
   const fit: Record<string, string[]> = {};
   for (const seat of i.seats) {
-    if (seat.loop !== "build" || waitingOn(waits, seat.id, i.now)) continue;
+    if (seat.loop !== "build") continue;
     fit[seat.id] = ready.filter((t) => fits(seat, t)).map((t) => t.ref);
   }
   const seen = seenItems(i.store);
-  const reviewsWaited = REVIEW_FAULT_TARGETS.some((target) => waitingOn(waits, target, i.now));
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(i.store, x))
     .map(itemFactId);
@@ -809,10 +808,8 @@ function wakeInputs(i: {
           .flatMap((from) => i.store.owedCommsFrom(from, flightId, i.now - FLIGHT_OWED_MS))
           .sort((a, b) => Number(a) - Number(b));
   // a seat left idle by the slow pace is the operator's wish, not a fault to wake FLIGHT about
-  const idle = i.pace ? undefined : idleSeats(i, waits, rules, fit);
-  return idle === undefined
-    ? { fit, fresh, operator, owed, reviewsWaited }
-    : { fit, fresh, operator, owed, reviewsWaited, idle };
+  const idle = i.pace ? undefined : idleSeats(i, rules, fit);
+  return idle === undefined ? { fit, fresh, operator, owed } : { fit, fresh, operator, owed, idle };
 }
 
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
@@ -832,20 +829,18 @@ const readIdleSince = (store: Store): Record<string, number> => {
 };
 
 /**
- * The free build seats that have open tickets near their area (Backlog, Refinement or Ready) and no
- * FLIGHT wait on them or the ticket, read from the board with no FLIGHT tokens. A ticket is near a
+ * The free build seats that have open tickets near their area (Backlog, Refinement or Ready), read from the board with no FLIGHT tokens. A ticket is near a
  * seat when its one area label is the seat's, or it has none or several (it needs triage). Each
  * seat's spell is timed on its own.
  */
 function idleSeats(
   i: Parameters<typeof wakeInputs>[0],
-  waits: Record<string, { until: number }>,
   rules: { areas: Record<string, string[]> } | null,
   fit: Record<string, string[]>,
 ): FlightIdleSeats | undefined {
   // a ticket held behind an open PR is waiting by FLIGHT's own choice, not open work for a seat
   const held = new Set(i.store.activeHolds().map((h) => h.ref));
-  const open = i.allTickets.filter((t) => !held.has(t.ref) && !waitingOn(waits, t.ref, i.now));
+  const open = i.allTickets.filter((t) => !held.has(t.ref));
   const near = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
     if (rules === null || Object.keys(rules.areas).length === 0) return true;
     if (claimedByOther(t, i.hubLogin)) return false;
@@ -853,7 +848,7 @@ function idleSeats(
     return label.length !== 1 || areaLabelsFor(rules, seat.area).includes(label[0] ?? "");
   };
   const seats = i.seats
-    .filter((x) => x.loop === "build" && x.free && !waitingOn(waits, x.id, i.now))
+    .filter((x) => x.loop === "build" && x.free)
     .map((x) => ({ id: x.id, near: open.filter((t) => near(x, t)) }))
     .filter((x) => x.near.length > 0);
   if (seats.length === 0) return undefined;
@@ -894,9 +889,7 @@ export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: n
 /** The log line for the seats idle past a 30-minute period: each one's time, and why nothing started. */
 export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seats"]): string {
   const why =
-    idle.ready.length > 0
-      ? `Ready ${idle.ready.join(", ")} not started`
-      : "no Ready ticket fits; FLIGHT has promoted none and logged no wait";
+    idle.ready.length > 0 ? `Ready ${idle.ready.join(", ")} not started` : "no Ready ticket fits";
   const triage =
     idle.untriaged.length > 0 ? ` (${idle.untriaged.length} with no board status)` : "";
   const named = seats.map((x) => `${x.id} ${Math.floor(x.ms / 60_000)} min`).join(", ");
@@ -1177,7 +1170,7 @@ export function flightState(i: {
   const prs = store
     .pullRequests(session.repoId)
     .filter(
-      // a merge no longer wakes FLIGHT, so an unshown one waits a day for the next wake to carry it
+      // an unshown merge stays available until its immediate wake is delivered
       (p) =>
         p.state === "open" ||
         (!shown.has(shownKey(p)) && now - p.updatedAt < FLIGHT_METRICS_DAY_MS),
@@ -1548,7 +1541,6 @@ export function flightState(i: {
 
 export interface FlightWakeSnapshot {
   linked: Map<string, string>;
-  memory: Map<string, string>;
   signals: Map<string, string>;
   brief: Map<string, string>;
   headlineHash: string;
@@ -1556,20 +1548,23 @@ export interface FlightWakeSnapshot {
   recent: Map<string, string>;
   prs: Map<string, string>;
   seats: Map<string, string>;
-  ledger: Map<string, string>;
   tickets: Map<string, string>;
+  prFlow: Map<string, string>;
+  mergeQueue: Map<string, string>;
 }
 
 const entryHash = (entry: unknown): string =>
   createHash("sha256").update(JSON.stringify(entry)).digest("hex");
 
-/** Prepare a wake without advancing the snapshot: only a delivered wake or tool read does that. */
+/**
+ * Prepare a wake without advancing the snapshot: only a delivered wake or tool read does that.
+ * The ledger and the memory titles are not sent: a wake carries their counts, and `mc ledger`,
+ * `mc recall` and `mc flight_state` read them on request.
+ */
 export function flightWake(
   state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
-  fullRead = false,
-  now = Date.now(),
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
   const {
     brief,
@@ -1578,9 +1573,12 @@ export function flightWake(
     prs,
     seats,
     ledger,
+    ledgerMore,
     tickets,
     signals,
     memory = [],
+    prFlow: flow,
+    mergeQueue,
     wake: _wake,
     ...rest
   } = state;
@@ -1596,7 +1594,6 @@ export function flightWake(
     (previous?.briefVersion ?? 0) + (changedHeadline || changedNotes.length > 0 ? 1 : 0);
   const snapshot: FlightWakeSnapshot = {
     linked: new Map(previous?.linked),
-    memory: new Map(),
     signals: new Map(),
     brief: briefHashes,
     headlineHash,
@@ -1604,11 +1601,12 @@ export function flightWake(
     recent: new Map(),
     prs: new Map(),
     seats: new Map(),
-    ledger: new Map(),
     tickets: new Map(),
+    prFlow: new Map(),
+    mergeQueue: new Map(),
   };
   const changed = <T>(
-    list: "recent" | "prs" | "seats" | "ledger" | "tickets" | "signals" | "memory",
+    list: "recent" | "prs" | "seats" | "tickets" | "signals" | "prFlow" | "mergeQueue",
     entries: T[],
     key: (entry: T) => string,
     // Poll times and age counters stay in sent entries, but do not make an entry new.
@@ -1629,37 +1627,9 @@ export function flightWake(
   // Delivery receipts survive a session handover; the per-session snapshot does not. A told
   // episode must not become new again on the first wake. Changed reasons have a new key or
   // are untold by the producer. Do not announce removals for entries never delivered.
-  const wakeSignals = signals.filter(
-    (signal) =>
-      !signal.told && (signal.kind !== "wait_over" || now - signal.since <= 24 * FLIGHT_HOUR_MS),
-  );
+  const wakeSignals = signals.filter((signal) => !signal.told);
   const signalChanges = changed("signals", wakeSignals, (s) => `${s.kind}:${s.key}`);
   signalChanges.unchanged += signals.length - wakeSignals.length;
-  const memoryChanges = changed("memory", memory, (n) => `${n.kind}:${n.topic}`);
-  const titles = Object.fromEntries(
-    FLIGHT_MEMORY_KINDS.map((kind) => {
-      const changes = memoryChanges.entries.filter((n) => n.kind === kind);
-      const entries = changes.slice(0, FLIGHT_MEMORY_TITLES_MAX);
-      // Omitted titles have not been delivered; keep them eligible for the next wake.
-      for (const note of fullRead ? [] : changes.slice(FLIGHT_MEMORY_TITLES_MAX)) {
-        const key = `${kind}:${note.topic}`;
-        const prior = previous?.memory.get(key);
-        if (prior === undefined) snapshot.memory.delete(key);
-        else snapshot.memory.set(key, prior);
-      }
-      return [
-        kind,
-        {
-          entries,
-          more: changes.length - entries.length,
-          unchanged: memory.filter((n) => n.kind === kind).length - changes.length,
-          removed: memoryChanges.removed
-            .filter((key) => key.startsWith(`${kind}:`))
-            .map((key) => key.slice(kind.length + 1)),
-        },
-      ];
-    }),
-  ) as Record<FlightMemoryKind, FlightWakeList<FlightMemoryTitle> & { more: number }>;
   const linkedHash = ({ updatedAt: _updatedAt, ...note }: FlightMemoryNote): string =>
     entryHash(note);
   const linkedChanges = linkedMemory(notes, state).filter(
@@ -1667,6 +1637,7 @@ export function flightWake(
   );
   const linked = linkedChanges.slice(0, FLIGHT_MEMORY_RECALL_MAX);
   for (const note of linked) snapshot.linked.set(note.topic.toLowerCase(), linkedHash(note));
+  const overdueFacts = prFlowFacts(flow);
   const ticketChanges = changed("tickets", tickets.slice(0, FLIGHT_TICKETS_LISTED), (t) => t.ref);
   return {
     snapshot,
@@ -1674,7 +1645,7 @@ export function flightWake(
       ...rest,
       memory: {
         heading: FLIGHT_MEMORY_HEADING,
-        titles,
+        notes: memory.length,
         linked,
         linkedMore: linkedChanges.length - linked.length,
       },
@@ -1695,7 +1666,24 @@ export function flightWake(
         (s) => s.id,
         ({ idleMin: _idleMin, ...seat }) => seat,
       ),
-      ledger: changed("ledger", ledger, (e) => e.key),
+      ledgerOpen: ledger.length + ledgerMore,
+      prFlow: {
+        unowned: flow?.unowned ?? 0,
+        ...changed(
+          "prFlow",
+          (flow?.rows ?? []).map((row) => {
+            // a deadline passing changes no field of the row: the row carries what is overdue
+            const overdue = overdueFacts
+              .filter((fact) => fact.startsWith(`${row.pr}:`))
+              .map((fact) => fact.split(":")[1] ?? "");
+            return overdue.length > 0 ? { ...row, overdue } : row;
+          }),
+          (r) => String(r.pr),
+          // the last action moves with every CI run and every decision of FLIGHT's own
+          ({ lastAction: _a, lastActor: _b, lastActionAt: _c, ...row }) => row,
+        ),
+      },
+      mergeQueue: changed("mergeQueue", mergeQueue ?? [], (p) => String(p.pr)),
       tickets: {
         ...ticketChanges,
         entries: ticketChanges.entries.map((t) =>
@@ -1707,26 +1695,6 @@ export function flightWake(
       facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
     },
   };
-}
-
-/**
- * What `flight_state` shows of the signals by default: a wait that ended over a day ago folds into one
- * summary line with a count. Every other signal stays whole. `full` in the tool call lists everything (#1632).
- */
-export function compactSignals(signals: FlightSignal[], now: number): FlightSignal[] {
-  const expired = (s: FlightSignal): boolean =>
-    s.kind === "wait_over" && now - s.since > 24 * FLIGHT_HOUR_MS;
-  const folded = signals.filter(expired);
-  if (folded.length === 0) return signals;
-  return [
-    ...signals.filter((s) => !expired(s)),
-    {
-      kind: "wait_over",
-      key: "expired",
-      since: Math.min(...folded.map((s) => s.since)),
-      evidence: `${folded.length} expired waits left out; call flight_state with full: true to list them`,
-    },
-  ];
 }
 
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
@@ -1753,8 +1721,8 @@ export function wakeFacts(
   // a review just queued waits for its seat to start it; only one that has stood still is a fault
   // The engine re-routes a queued review to the seat `reviewerOf` picks, so an idle seat with no queue
   // of its own gets one without FLIGHT. The fault is an idle seat whose own queued review has stood
-  // still; a seat at its quota stop is not idle. A wait on it holds the fact.
-  const reviewFault = s.wake?.reviewsWaited !== true && reviewFaultStands(s.reviewQueue);
+  // still; a seat at its quota stop is not idle.
+  const reviewFault = reviewFaultStands(s.reviewQueue);
   return JSON.stringify({
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
@@ -1772,7 +1740,7 @@ export function wakeFacts(
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: startable.sort(),
-    // seats idle with tickets open: one fact per idle spell, until one starts or FLIGHT logs a wait
+    // seats idle with tickets open: one fact per idle spell, until one starts
     idle: idleFacts(s.wake?.idle),
     // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [
@@ -1793,7 +1761,7 @@ export function wakeFacts(
         .sort() ?? [],
     // CI, review and merge steps are digest-only; merge_stalled says when a ready PR has stood still
     prs: s.prs
-      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null)
+      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null || p.state === "merged")
       .map(
         (p) =>
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
@@ -1819,7 +1787,7 @@ export const itemFactId = (x: { kind: string; key: string; text: string }): stri
 
 /**
  * The free build seats that have a Ready ticket to take, and those tickets. A seat or ticket with
- * no fit, or one FLIGHT waits on, is not a reason to wake: nothing could start there.
+ * no fit is not a reason to wake: nothing could start there.
  */
 const startableFor = (s: FlightState): { free: string[]; startable: string[] } => {
   const fit = s.wake?.fit;
@@ -1880,274 +1848,74 @@ export function pending(
   );
 }
 
-/** One thing a wake woke FLIGHT for: its fact id, a label, and what a decision on it would name. */
-export interface WakeReason {
-  id: string;
-  label: string;
-  targets: string[];
-}
-
 type Facts = Record<string, unknown[]>;
-/** Reasons that stay open until FLIGHT decides, because nothing in the state shows them settled. */
-const decisionOnly = (id: string): boolean =>
-  id.startsWith("triage:") || id.startsWith('signals:"seat_call:');
-/** A fact that is only a name for what a decision names, not a target. */
-const NOT_A_TARGET = new Set(["true", "false", "open", "merged", "closed", "null"]);
-
-/** Words that name a kind of fact, not the thing it is about: never a target of their own. */
-const GENERIC = new Set<string>([
-  "report",
-  "watch",
-  "loop",
-  "ask",
-  "note",
-  "controller",
-  ...ATTENTION_KINDS,
-]);
-
-/**
- * What a decision on this fact would name. A signal's kind and its times are not targets (two
- * signals of one kind share them); a park's kind is not either. What is left is the seat, run, ref,
- * question or item key the fact is about.
- */
-const factTargets = (category: string, item: unknown): string[] => {
-  const first = Array.isArray(item) ? item[0] : item;
-  // a question's decision may name it as its item key, ask:<id>
-  if (typeof first !== "string")
-    return category === "q" ? [String(first), `ask:${first}`] : [String(first)];
-  if (category === "prFlow") {
-    const pr = first.split(":")[0];
-    return pr && /^\d+$/.test(pr) ? [pr, `#${pr}`] : [];
-  }
-  let parts = first.split(":");
-  if (category === "signals") parts = parts.slice(1);
-  if (category === "parked") parts = parts.slice(0, -1);
-  const whole = parts.join(":");
-  return [whole, ...parts].filter(
-    (t, i, all) =>
-      t !== "" &&
-      !NOT_A_TARGET.has(t) &&
-      !GENERIC.has(t) &&
-      !/^\d{10,}$/.test(t) &&
-      all.indexOf(t) === i,
-  );
-};
-
-/** The words of a decision's text, lower-cased, trailing punctuation off: a target matches a whole word. */
-const wordsOf = (text: string): Set<string> =>
-  new Set(
-    text
-      .toLowerCase()
-      .split(/[\s,;()"'`]+/)
-      .map((w) => w.replace(/[.:]+$/, ""))
-      .filter((w) => w !== "")
-      // #12 and repo#12 both name 12, kept as "#12"
-      .flatMap((w) => (w.includes("#") ? [w, w.slice(w.lastIndexOf("#"))] : [w])),
-  );
-
-/** The facts of a wake that need a decision: a PR entry counts when FLIGHT has something to do on it. */
-const accountable = (category: string, item: unknown): boolean => {
-  // Guidance changes wake FLIGHT but do not demand a fabricated decision when nothing changes.
-  if (category === "t" || category === "instructions" || category === "operator") return false;
-  // an owed reply is answered with a Comms reply, not a logged decision
-  if (category === "owed") return false;
-  if (category === "prs") {
-    const [, , ready, state, awaiting, away] = String(item).split(":");
-    return (ready === "true" && state === "open") || !!awaiting || !!away;
-  }
-  if (category === "parked") {
-    const kind = String(item).split(":").at(-1) ?? "";
-    return flightParkKind(kind);
-  }
-  return true;
-};
-
-/** What a wake newly lists, as reasons: the facts in `current` that `previous` did not have. */
-/** The tickets of the item a fact is about: the item itself, or the item an item_stale signal names. */
-const itemTickets = (
-  category: string,
-  item: unknown,
-  itemRefs: readonly { key: string; ticket: string | null }[],
-): string[] => {
-  const stale = typeof item === "string" && item.startsWith("item_stale:");
-  const key = stale ? item.slice("item_stale:".length) : item;
-  if (category !== "items" && !(category === "signals" && stale)) return [];
-  return itemRefs.flatMap((x) =>
-    (stale ? x.key.replace(/:\d+$/, "") : x.key) === key
-      ? // a stale signal's key drops the item key's last part: a wait on the full key handles it
-        [...(x.ticket === null ? [] : [x.ticket]), ...(stale ? [x.key] : [])]
-      : [],
-  );
-};
-
-export function wakeReasons(
-  previous: string,
-  current: string,
-  itemRefs: readonly { key: string; ticket: string | null }[] = [],
-): WakeReason[] {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
-  return Object.entries(after).flatMap(([category, items]) => {
-    const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
-    return items
-      .filter((item) => !old.has(JSON.stringify(item)) && accountable(category, item))
-      .map((item) => ({
-        id: `${category}:${JSON.stringify(item)}`,
-        label: `${category} ${typeof item === "string" ? item : JSON.stringify(item)}`.slice(
-          0,
-          200,
-        ),
-        // an item's ticket is a target too: a brief or wait on the ticket handles the item
-        targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
-      }));
-  });
-}
-
-/**
- * A wake reason in words for the operator, from its fact: a PR, ticket, seat or item named, and the
- * time where the fact has one. Never the raw `kind:key:epoch` id.
- */
-export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
-  const at = (ms: number): string => {
-    const day = new Intl.DateTimeFormat("en-GB", {
-      day: "numeric",
-      month: "short",
-      timeZone,
-    }).format(ms);
-    return `${day} ${clockHm(ms, timeZone)}`;
-  };
-  const times = (text: string): string => text.replace(/\d{13}/g, (ms) => at(Number(ms)));
-  const spaced = (text: string): string => text.replace(/[_-]+/g, " ");
-  const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
-  const category = split?.[1] ?? "";
-  let item: unknown = split?.[2];
-  try {
-    item = JSON.parse(split?.[2] ?? "null");
-  } catch {
-    // a fact id that is not JSON keeps its text
-  }
-  const text = typeof item === "string" ? item : JSON.stringify(item);
-  const [a = "", b = "", c = "", d = "", e = ""] = typeof item === "string" ? item.split(":") : [];
-  const since = (part: string): string =>
-    /^\d{13}$/.test(part) ? ` since ${at(Number(part))}` : "";
-  switch (category) {
-    case "q":
-      return `question ${text}`;
-    case "prFlow": {
-      const [pr = "", what = "", ...rest] = (typeof item === "string" ? item : "").split(":");
-      const when = since(rest.at(-1) ?? "");
-      if (what === "unowned") return `PR #${pr} has had no owner${when}`;
-      if (what === "waiting") return `PR #${pr} has waited on the ${rest[0] ?? "operator"}${when}`;
-      return `PR #${pr} has stood at the ${rest[0] ?? "same"} step${when}`;
-    }
-    case "triage":
-      return b === "missed"
-        ? `FLIGHT missed ${a}`
-        : `${a} waits for FLIGHT's triage (${spaced(b)})`;
-    case "parked":
-      return `${a} is parked on ${b} (${spaced(c)})`;
-    case "stopped":
-      return `${text} is stopped`;
-    case "idle":
-      return `${a} idle ${b}`;
-    case "free":
-      return `seat ${text} is free`;
-    case "t":
-      return `ticket ${text} is ready to start`;
-    case "reviews":
-      return "review seats are idle with a review queued";
-    case "holdsInForce":
-      return `${spaced(text)} hold is in force`;
-    case "owed":
-      return `you owe the operator an answer to Comms message ${text}`;
-    case "breaker":
-      return `the runaway breaker is tripped (${spaced(text)})`;
-    case "prs":
-      return `PR #${b} (${a}) waits on FLIGHT${e ? ` to ${spaced(e)}` : ""}`;
-    case "planned": {
-      const [, dueAt, , target, label] = Array.isArray(item) ? item : [];
-      return `${label ?? "a planned check"} on ${target ?? "its target"}, due ${typeof dueAt === "number" ? at(dueAt) : "now"}`;
-    }
-    case "items": {
-      if (a === "pr") return times(text.replace(/^pr:/, "").replace(/^([^:]+):/, ""));
-      if (a === "comms-open") return `Comms message ${b} waits for an answer`;
-      if (a === "esc") return `issue ${b} waits for an answer`;
-      if (a === "stall") return `${b} stalled${since(e)}`;
-      return `${spaced(a)} ${times([b, c, d, e].filter((x) => x !== "").join(" "))}`.trim();
-    }
-    case "signals": {
-      const target = times(text.slice(a.length + 1));
-      return target === "" ? spaced(a) : `${spaced(a)} on ${target}`;
-    }
-    default:
-      return times(`${category} ${text}`);
-  }
-}
-
-/** The plain noun phrase a wake reason counts under in the wake-left alert. */
-function leftWakeGroup(reason: WakeReason): readonly [string, string] {
-  const { category, item } = ((): { category: string; item: string } => {
-    const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
-    return { category: split?.[1] ?? "", item: split?.[2] ?? "" };
-  })();
-  if (category === "prFlow" || category === "prs" || item.startsWith('"pr:'))
-    return ["pull request waiting for a next step", "pull requests waiting for a next step"];
-  if (category === "q" || item.startsWith('"comms-open:') || item.startsWith('"esc:'))
-    return ["question waiting for an answer", "questions waiting for an answer"];
-  if (category === "free") return ["free seat", "free seats"];
-  if (category === "t") return ["ticket ready to start", "tickets ready to start"];
-  if (category === "parked" || category === "stopped" || category === "idle")
-    return ["seat that needs a look", "seats that need a look"];
-  if (category === "triage") return ["item waiting for FLIGHT", "items waiting for FLIGHT"];
-  if (category === "reviews" || category === "release")
-    return ["review or release step waiting", "review or release steps waiting"];
-  if (category === "breaker" || category === "holdsInForce")
-    return ["safety stop or hold in force", "safety stops or holds in force"];
-  if (category === "planned") return ["planned check that is due", "planned checks that are due"];
-  if (category === "signals") return ["signal from the crew", "signals from the crew"];
-  if (item.startsWith('"stall:')) return ["seat that needs a look", "seats that need a look"];
-  return ["other thing to look at", "other things to look at"];
-}
-
-/**
- * The wake-left alert in plain words: how many things FLIGHT was woken about and left undecided,
- * when it was woken, and a count by kind. Never a PR, ticket or seat id, or a raw key.
- */
-export function leftWakeText(
-  left: readonly WakeReason[],
-  wokeAt: number,
-  timeZone: string,
-): string {
-  const groups = new Map<string, { one: string; many: string; n: number }>();
-  for (const r of left) {
-    const [one, many] = leftWakeGroup(r);
-    const g = groups.get(one) ?? { one, many, n: 0 };
-    g.n += 1;
-    groups.set(one, g);
-  }
-  const parts = [...groups.values()].map((g) => `${g.n} ${g.n === 1 ? g.one : g.many}`);
-  const things = left.length === 1 ? "1 thing" : `${left.length} things`;
-  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided; it will not be woken again for them: ${parts.join(", ")}.`;
-}
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
 const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
 
 /** Fact categories that are routine pipeline steps: they wait for the batch window. */
-const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set([
-  "free",
-  "t",
-  "release",
-  "reviews",
-  "prFlow",
-]);
+const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set(["t", "reviews", "prFlow"]);
+
+/** Whether one added fact must wake FLIGHT immediately even when its category was learned. */
+export function immediateFact(category: string, item: unknown): boolean {
+  if (FLIGHT_IMMEDIATE_REASONS.includes(category)) return true;
+  const fact = String(item);
+  if (category === "signals") return FLIGHT_IMMEDIATE_SIGNALS.includes(fact.split(":", 1)[0] ?? "");
+  if (category === "items") return !fact.startsWith("pr:");
+  if (category === "prs") {
+    const parts = fact.split(":");
+    return (
+      (parts[2] === "true" && parts[3] === "open") ||
+      parts[3] === "merged" ||
+      Boolean(parts.slice(5).join(":"))
+    );
+  }
+  return false;
+}
+
+/** Changed learned categories whose additions can ride with another immediate reason. */
+export function batchedCategories(
+  previous: string,
+  current: string,
+  batched: ReadonlySet<string>,
+): string[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((category) => {
+      if (!batched.has(category)) return false;
+      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+      const added = (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
+      return added.length > 0 && added.every((v) => !immediateFact(category, v));
+    })
+    .sort();
+}
+
+/** Changed categories with an added immediate fact: a wake they cause could not have been batched. */
+export function immediateCategories(previous: string, current: string): string[] {
+  const before = JSON.parse(previous || "{}") as Facts;
+  const after = JSON.parse(current) as Facts;
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
+    .filter((category) => {
+      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
+      return (after[category] ?? []).some(
+        (v) => !old.has(JSON.stringify(v)) && immediateFact(category, v),
+      );
+    })
+    .sort();
+}
 
 /**
  * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
- * moving. An operator message, question, blocker, park, signal, plan, instruction or the breaker is
- * never routine, so those wake FLIGHT at once. False when nothing changed.
+ * moving. An operator message, question, blocker, park, plan, instruction or the breaker is never
+ * routine, so those wake FLIGHT at once; so does a signal, unless its kind is not immediate and
+ * signals are a learned category. False when nothing changed.
  */
-export function routineOnly(previous: string, current: string): boolean {
+export function routineOnly(
+  previous: string,
+  current: string,
+  batched: ReadonlySet<string> = new Set(),
+): boolean {
   const before = JSON.parse(previous || "{}") as Facts;
   const after = JSON.parse(current) as Facts;
   let changed = false;
@@ -2159,13 +1927,19 @@ export function routineOnly(previous: string, current: string): boolean {
     if (added.length === 0 && removed.length === 0) continue;
     // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
     // breaker's lift is, as a lift alone wakes FLIGHT
-    if (added.length === 0 && !LIFTS_WAKE.has(category) && !ROUTINE_CATEGORIES.has(category))
+    if (
+      added.length === 0 &&
+      !LIFTS_WAKE.has(category) &&
+      !ROUTINE_CATEGORIES.has(category) &&
+      !batched.has(category)
+    )
       continue;
     changed = true;
     if (category === "items") {
       // a PR's own steps are routine; any other item (a message, a blocker) is not
-      if (!added.every((v) => String(JSON.parse(v)).startsWith("pr:"))) return false;
-    } else if (!ROUTINE_CATEGORIES.has(category)) return false;
+      if (!added.every((v) => !immediateFact(category, JSON.parse(v)))) return false;
+    } else if (added.some((v) => immediateFact(category, JSON.parse(v)))) return false;
+    else if (!ROUTINE_CATEGORIES.has(category) && !batched.has(category)) return false;
   }
   return changed;
 }
@@ -2189,48 +1963,4 @@ export function onlySettled(previous: string, current: string): boolean {
     }
   }
   return removed;
-}
-
-/** The ids of the reasons still open in this state; a delivered signal stays open while it holds. */
-export function openReasonIds(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-): Set<string> {
-  const facts = JSON.parse(wakeFacts(s)) as Facts;
-  facts.signals = s.signals.filter((x) => x.kind !== "seat_call").map((x) => `${x.kind}:${x.key}`);
-  return new Set(
-    Object.entries(facts).flatMap(([category, items]) =>
-      items.map((item) => `${category}:${JSON.stringify(item)}`),
-    ),
-  );
-}
-
-/**
- * The reasons of a wake that FLIGHT left alone: not settled in the state, and with no decision since
- * the wake that names one of their targets (a ref, seat, run, question, or the target in its text).
- */
-export function unhandledReasons(
-  store: Store,
-  reasons: readonly WakeReason[],
-  wokeAt: number,
-  open: ReadonlySet<string>,
-): WakeReason[] {
-  const decisions = store.flightDecisions(wokeAt, 500);
-  const words = decisions.map((d) => wordsOf(`${d.about} ${d.decision}`));
-  return reasons.filter((r) => {
-    if (!decisionOnly(r.id) && !open.has(r.id)) return false;
-    return !decisions.some((d, i) =>
-      r.targets.some(
-        (t) =>
-          // a wait names its target whole, before ": waiting on"; a key with spaces is no word
-          (d.kind === "wait" &&
-            d.about.toLowerCase().startsWith(`${t.toLowerCase()}: waiting on`)) ||
-          d.ref === t ||
-          d.seatId === t ||
-          d.targetRunId === t ||
-          (d.questionId !== null && String(d.questionId) === t) ||
-          (t.length >= 2 && words[i]?.has(t.toLowerCase()) === true) ||
-          (/^\d+$/.test(t) && words[i]?.has(`#${t}`) === true),
-      ),
-    );
-  });
 }

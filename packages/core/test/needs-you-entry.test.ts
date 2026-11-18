@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLIGHT_LEFT_NOTE_KEY, FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
+import { FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
 import { guardAckKey } from "../src/guard.ts";
 import {
   BRIEF_TITLE_MAX,
@@ -64,10 +64,6 @@ describe("needsYouEntryFaults", () => {
     );
     // another approval (a loop's mvp-ready escalation) needs FLIGHT's brief like anything else
     expect(needsYouAlert({ key: "esc:shop#9", kind: "approval" })).toBe(false);
-  });
-
-  it("keeps unfinished-wake reminders outside the operator's own alerts", () => {
-    expect(needsYouAlert({ key: `note:${FLIGHT_LEFT_NOTE_KEY}`, kind: "blocked" })).toBe(false);
   });
 
   it("treats an old brief with no `for` as the operator's", () => {

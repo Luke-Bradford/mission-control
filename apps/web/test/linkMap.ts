@@ -292,9 +292,15 @@ export const LINK_MAP: Record<
     ),
     rules: [
       rule(
-        /^(Accounts|Repos & seats|Loops|Roles|Sources|Safety|Sessions)$/,
+        /^(Accounts|Repos & seats|Loops|Roles & guards|Sources|Safety|Sessions)$/,
         /^\/setup\/\w+$/,
         "A Setup tab.",
+      ),
+      rule(/^\d+ seats?$/, /^\/setup\/sessions$/, "A role's seats open Setup sessions."),
+      rule(
+        /^Edit [\w-]+ on Sessions$/,
+        /^\/setup\/sessions\?edit=[\w%-]+$/,
+        "A seat's Edit link opens its form on Setup sessions.",
       ),
       rule(
         /^[a-z]+-\d+.*(whole checkout|read-only)/,
@@ -385,6 +391,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/qa/TicketQaReports.tsx": "page: permanent report",
   "src/qa/frees.tsx": "page: ticket, FLIGHT chains",
   "src/router.ts": "the router itself",
+  "src/setup/Roles.tsx": "page: Setup sessions (a role's seats, a seat's form)",
   "src/setup/Sessions.tsx": "page: seat",
   "src/shell/AwayDigest.tsx": "page: its item; pane",
   "src/shell/DemoSwitch.tsx": "page: the same page, Demo on or off",
@@ -397,5 +404,6 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/telemetry/CrewTab.tsx": "page: Agents, a seat's Agent page, Needs you, Overview",
   "src/telemetry/Kpis.tsx": "page: the KPI's source",
   "src/telemetry/QualityTab.tsx": "page: the Guard drawer, a ticket page, the Audit page",
+  "src/telemetry/ThroughputTab.tsx": "page: the Board, a ticket's page",
   "src/telemetry/Stat.tsx": "page: Needs you, Board, Overview, another Telemetry tab",
 };

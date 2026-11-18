@@ -387,7 +387,6 @@ describe("the tabs", () => {
   it("shows a short coming note, never an empty chart, on each tab not built yet", async () => {
     for (const [tab, name] of [
       ["cost", "Cost and tokens is coming"],
-      ["throughput", "Throughput is coming"],
       ["machine", "Machine is coming"],
     ] as const) {
       await open(`?tab=${tab}`);
@@ -399,7 +398,6 @@ describe("the tabs", () => {
   it("keeps each earlier panel on the tab that will take it", async () => {
     const expected: Record<string, string[]> = {
       cost: ["tTok", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"],
-      throughput: ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"],
       // built: its panels are the Quality tab's own, and the earlier two are gone
       quality: [],
       machine: ["tMach", "tLock"],
@@ -410,7 +408,20 @@ describe("the tabs", () => {
       for (const id of all)
         expect(document.getElementById(id) !== null, `${tab}: ${id}`).toBe(ids.includes(id));
       // moved to the Crew tab, or to the seat's Agent page
-      for (const id of ["tCrewState", "tUtil", "tLat", "tSubs", "tCapcom", "tTurn"])
+      for (const id of [
+        "tCrewState",
+        "tUtil",
+        "tLat",
+        "tSubs",
+        "tCapcom",
+        "tTurn",
+        // moved to the Throughput tab, which draws its own (the forecast is dropped)
+        "tThru",
+        "tCycle",
+        "tFlow",
+        "tCycleControl",
+        "tForecast",
+      ])
         expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
       cleanup();
     }

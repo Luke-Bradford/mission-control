@@ -1,0 +1,326 @@
+/* Setup › Roles & guards (mockups/setup-roles-guards) */
+.rg-page {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  min-width: 0;
+}
+
+.rg-cols {
+  display: grid;
+  gap: var(--sp-3);
+  align-items: start;
+  min-width: 0;
+}
+
+@media (min-width: 1600px) {
+  .rg-cols {
+    grid-template-columns: minmax(760px, 1100px) minmax(380px, 520px);
+    justify-content: start;
+  }
+}
+
+.rg-page .panel {
+  min-width: 0;
+}
+
+.rg-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.rg-group {
+  padding: var(--sp-3) var(--sp-4) var(--sp-1);
+}
+
+.rg-group + .rg-group {
+  border-top: 1px solid var(--line);
+}
+
+.rg-group h3 {
+  margin: 0;
+  font: 400 var(--fs-micro) / var(--lh-s) var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-2);
+}
+
+.rg-row {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 124px 56px;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: center;
+  min-height: var(--table-row);
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rg-group .rg-row:last-child {
+  border-bottom: 0;
+}
+
+.rg-name {
+  display: grid;
+  min-width: 0;
+}
+
+.rg-name .mono {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  overflow-wrap: anywhere;
+}
+
+.rg-name small {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+
+.rg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  align-items: center;
+  min-width: 0;
+}
+
+.rg-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  background: var(--surface-2);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+}
+
+.rg-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* a chip its column cuts short is a button: pressed, it wraps to show the whole value */
+button.rg-chip {
+  text-align: left;
+}
+
+.rg-chip.open {
+  padding-block: var(--sp-1);
+}
+
+.rg-chip.open > span {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rg-chip.repo {
+  border-style: dashed;
+  color: var(--think);
+}
+
+.rg-none,
+.rg-reason {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+
+.rg-reason {
+  flex-basis: 100%;
+}
+
+.rg-more {
+  min-height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-s);
+}
+
+.rg-src {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+  white-space: nowrap;
+  color: var(--fg-2);
+}
+
+.rg-src.set-here {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.rg-src.repo-file {
+  color: var(--think);
+  border-color: var(--think);
+}
+
+.rg-src.built-in {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.rg-lockbody {
+  min-width: 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.rg-guard-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 56px;
+  gap: var(--sp-3);
+  align-items: center;
+  min-height: var(--table-row);
+  padding: var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.rg-rule {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.rg-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rg-line {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.rg-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.rg-table th,
+.rg-table td {
+  text-align: left;
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.rg-table th {
+  font: 400 var(--fs-micro) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
+  text-transform: uppercase;
+}
+
+.rg-table td:first-child,
+.rg-table th:first-child {
+  padding-left: var(--sp-4);
+}
+
+.rg-table td:last-child,
+.rg-table th:last-child {
+  padding-right: var(--sp-4);
+}
+
+/* the Seats link and the Read prompt button sit in the middle of their row */
+.rg-table td.rg-mid {
+  vertical-align: middle;
+}
+
+.rg-purpose {
+  max-width: 520px;
+}
+
+.rg-seats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.rg-seats li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 24px;
+}
+
+.rg-seats .mono {
+  font-size: var(--fs-s);
+  overflow-wrap: anywhere;
+}
+
+.rg-seats a,
+.rg-table a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.rg-planned {
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.rg-planned summary {
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  cursor: pointer;
+}
+
+/* the open/close arrow */
+.rg-planned summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  color: var(--fg-2);
+}
+
+.rg-planned[open] summary::before {
+  content: "▾";
+}
+
+.rg-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  width: min(420px, 100vw);
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  padding: var(--sp-4);
+  overflow: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--line-2);
+}
+
+.rg-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.rg-drawer ul {
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+@media (max-width: 1199px) {
+  .rg-row {
+    grid-template-columns: 160px minmax(0, 1fr) 112px 56px;
+  }
+}

@@ -1,7 +1,8 @@
 /**
  * Waste alarms: hub code over recorded runs, check runs and reviews. Each check is scoped to one
- * ticket, run or seat. An alarm never becomes a Needs-you item: FLIGHT is woken once per alarm
- * (the `waste_alarm` signal), and Audit shows it.
+ * ticket, run or seat. An alarm never becomes a Needs-you item. Only an alarm that parks a ticket
+ * wakes FLIGHT (the `waste_alarm` signal); the rest are stored, and GET /api/waste serves the
+ * open ones.
  */
 import {
   FLIGHT_ACTIVITY_DAYS,
@@ -148,7 +149,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
       seatId: null,
       runId: null,
       level: failed.length + resumed.reduce((n, x) => n + x.n, 0),
-      evidence: `${ticket} is parked: ${parts.join("; ")}. FLIGHT takes the next ticket.`,
+      evidence: `${ticket} is parked: ${parts.join("; ")}. It stays parked until FLIGHT resolves this alarm.`,
     });
   }
 
@@ -563,7 +564,7 @@ export function wasteReport(config: CcConfig, store: Store, now: number): WasteR
   return {
     at: now,
     spend: WASTE_WINDOWS.map((w) => spendFor(config, store, w, now)),
-    // a clearance wait shows here from a day; before that it only wakes FLIGHT
+    // a clearance wait shows here from a day; before that it is only recorded
     alarms: openWasteAlarms(store).filter(
       (a) =>
         a.check !== "clearance-waiting" || a.level * HOUR_MS >= WASTE_THRESHOLDS.clearanceAuditMs,
@@ -651,7 +652,6 @@ function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[
   const days: FlightDay[] = Array.from({ length: FLIGHT_ACTIVITY_DAYS }, (_, i) => ({
     since: since + i * 24 * HOUR_MS,
     wakes: 0,
-    waits: 0,
     flightTokens: 0,
     totalTokens: 0,
     tokenShare: null,
@@ -663,10 +663,6 @@ function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[
   for (const w of store.flightWakes(since)) {
     const d = bucket(w.at);
     if (d !== undefined) d.wakes += 1;
-  }
-  for (const at of store.flightWaitTimes(since)) {
-    const d = bucket(at);
-    if (d !== undefined) d.waits += 1;
   }
   for (const r of store.waste.runsSince(since)) {
     const d = bucket(r.startedAt);

@@ -600,52 +600,26 @@ describe("the read route's report", () => {
 });
 
 describe("FLIGHT's activity per day on the read route", () => {
-  const wait = (at: number) =>
-    store.addFlightDecision({
-      at,
-      kind: "wait",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: "mc#1: waiting on CI",
-      decision: "waiting",
-      basis: "b",
-    });
   const tokens = (n: number) => ({ input: n, output: 0, cacheRead: 0, cacheCreate: 0 });
 
-  it("counts wakes, waits and FLIGHT's share of tokens in each 24-hour bucket", () => {
+  it("counts wakes and FLIGHT's share of tokens in each 24-hour bucket", () => {
     store.upsertRun(run("flight-1", { startedAt: NOW - 2 * HOUR, tokens: tokens(300) }));
     store.upsertRun(run("guido-1", { startedAt: NOW - 3 * HOUR, tokens: tokens(700) }));
     store.upsertRun(run("flight-1", { startedAt: NOW - 30 * HOUR, tokens: tokens(100) }));
     for (const at of [NOW - HOUR, NOW - 2 * HOUR, NOW - 3 * HOUR, NOW - 30 * HOUR])
       store.addFlightWake("r1", at, ["q"]);
-    for (const at of [NOW - HOUR, NOW - 30 * HOUR, NOW - 31 * HOUR]) wait(at);
-    // a decision that is not a wait is not counted
-    store.addFlightDecision({
-      at: NOW - HOUR,
-      kind: "note",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: "a",
-      decision: "d",
-      basis: "b",
-    });
     const days = wasteReport(config, store, NOW).flight;
     expect(days).toHaveLength(14);
     expect(days.at(-1)?.since).toBe(NOW - DAY);
     expect(days.at(-1)).toMatchObject({
       wakes: 3,
-      waits: 1,
       flightTokens: 300,
       totalTokens: 1000,
     });
     expect(days.at(-1)?.tokenShare).toBeCloseTo(0.3);
-    expect(days.at(-2)).toMatchObject({ wakes: 1, waits: 2, flightTokens: 100, totalTokens: 100 });
+    expect(days.at(-2)).toMatchObject({ wakes: 1, flightTokens: 100, totalTokens: 100 });
     expect(days.at(-2)?.tokenShare).toBe(1);
-    expect(days[0]).toMatchObject({ wakes: 0, waits: 0, totalTokens: 0, tokenShare: null });
+    expect(days[0]).toMatchObject({ wakes: 0, totalTokens: 0, tokenShare: null });
   });
 });
 
@@ -700,9 +674,13 @@ describe("an external PR's reviews", () => {
 });
 
 describe("the waste_alarm FLIGHT signal", () => {
-  it("is raised once for an open alarm and stays told across ticks", () => {
-    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));
+  it("is raised once for an alarm that parks a ticket and stays told across ticks", () => {
+    for (let i = 0; i < 2; i++)
+      store.upsertRun(
+        run("guido-1", { ticket: "mc#1596", startedAt: NOW - (i + 1) * HOUR, status: "failed" }),
+      );
     syncWasteAlarms(config, store, NOW);
+    expect(ticketParked(store, "mc#1596")).not.toBeNull();
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const read = (at: number) =>
@@ -718,13 +696,17 @@ describe("the waste_alarm FLIGHT signal", () => {
     expect(next[0]?.told).toBe(true);
   });
 
-  it("does not wake FLIGHT for an unchanged rerun the hook already refused", () => {
+  it("does not wake FLIGHT for an alarm that parks no ticket", () => {
     const r = run("guido-1", { ticket: "mc#1596" });
     store.upsertRun(r);
     for (let i = 0; i < 3; i++)
       store.addRerunRefusal(r.id, "pnpm -s lint", "abc1234def", NOW - i * MIN);
+    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-2", { startedAt: NOW - i * MIN }));
     syncWasteAlarms(config, store, NOW);
-    expect(openWasteAlarms(store).map((a) => a.check)).toContain("unchanged-rerun");
+    const open = openWasteAlarms(store).map((a) => a.check);
+    expect(open).toContain("unchanged-rerun");
+    expect(open).toContain("restart-storm");
+    expect(open).not.toContain("retry-loop");
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const signals = flightSignals({ config, store, session, seats: [], now: NOW }).signals;

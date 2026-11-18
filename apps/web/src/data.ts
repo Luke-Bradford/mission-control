@@ -315,6 +315,11 @@ export const RESOURCES = {
   }),
   repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
+  /** One repo's rules with where each value comes from (Setup › Roles & guards). */
+  repoRules: (id: string): ResourceRef => ({
+    path: `/api/repos/${enc(id)}/rules`,
+    topic: "config",
+  }),
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },
   // Run-derived: refetched when runs change.

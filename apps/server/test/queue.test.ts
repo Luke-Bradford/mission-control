@@ -1143,6 +1143,16 @@ describe("takeNext", () => {
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-aside");
   });
 
+  it("a stale wake flag on the run the seat is on does not hold up the seat's next ticket", () => {
+    // the hub restarted after waking the run and before it cleared its aside: the run is on its seat
+    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
+    store.upsertRun(run({ id: "r-on-seat", agentId: SERVER, ticket: `${REPO}#9`, loop: aside }));
+    seatRow("running", "r-on-seat");
+    expect(wakeDueAsideRun(store, SERVER)).toBeUndefined();
+    store.upsertRun(run({ id: "r-next", agentId: SERVER, ticket: `${REPO}#10`, loop: NEW_LOOP }));
+    expect(reworkDueBesides(store, store.run("r-next") as Run)).toBe(false);
+  });
+
   it("rework first: two reworks come back oldest first, and a run displaced mid-build after both", () => {
     const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
     const at = (n: number) => NOW - n * 60_000;

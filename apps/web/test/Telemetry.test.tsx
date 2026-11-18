@@ -478,30 +478,23 @@ describe("KPI tiles", () => {
     expect(screen.getByText("61.2k").classList.contains("kpi-change")).toBe(!reduced);
   });
 
-  it("Commits shows today’s count with commits per run in its title", async () => {
-    const a = await loaded(
-      tel({ today: { ...tel().today, commits: 7 }, quality: Q }),
-      undefined,
-      undefined,
-      "throughput",
-    );
-    expect(kpi(a.container, "Commits")).toEqual({
-      value: "7",
-      detail: "today",
-      title: "2.0 per run, last 14 days",
-      nt: false,
-    });
+  it("Commits per run shows the hub's average on Throughput, and — when no run finished", async () => {
+    const stat = (): string | undefined =>
+      (
+        screen
+          .getByText("Commits per run", { selector: ".stat-label" })
+          .closest(".stat") as HTMLElement
+      ).querySelector(".stat-value")?.textContent ?? undefined;
+    const a = await loaded(tel({ quality: Q }), undefined, undefined, "throughput");
+    expect(stat()).toBe("2.0");
     a.unmount();
-    const b = await loaded(
-      tel({ today: { ...tel().today, commits: 0 }, quality: { ...Q, commitsPerRun: null } }),
+    await loaded(
+      tel({ quality: { ...Q, commitsPerRun: null } }),
       undefined,
       undefined,
       "throughput",
     );
-    expect(kpi(b.container, "Commits")).toMatchObject({
-      value: "0",
-      title: "No finished crew runs in the last 14 days.",
-    });
+    expect(stat()).toBe("—");
   });
 
   it("a tile with no data source says not tracked yet", async () => {
@@ -600,7 +593,7 @@ describe("Flow of work", () => {
   it("throughput: 14 bars, the last in the accent", async () => {
     const data = tel();
     await loaded(data, undefined, undefined, "throughput");
-    const svg = within(panel("tThru")).getByRole("img");
+    const svg = within(panel("tMerged")).getByRole("img");
     expect(svg.getAttribute("aria-label")).toBe(
       `PRs merged per day: ${data.throughput
         .map((day) => `${narrowDay(day.day)} ${day.merged}`)
@@ -611,31 +604,28 @@ describe("Flow of work", () => {
     expect(bars[bars.length - 1]?.getAttribute("fill")).toBe("var(--accent)");
     expect(svg.querySelectorAll("rect.hit")).toHaveLength(14);
     fireEvent.pointerEnter(svg.querySelectorAll("rect.hit")[13] as Element);
-    expect(panel("tThru").querySelector(".tip")?.textContent).toBe("Sat 17 Oct: 4 merged");
+    expect(panel("tMerged").querySelector(".tip")?.textContent).toBe("Sat 17 Oct: 4 merged");
   });
 
-  it("cycle time: a row per size, — where none, and the measurement note", async () => {
+  it("cycle time: a row per size, p85 only from five tickets, and the left-out note", async () => {
     await loaded(undefined, undefined, undefined, "throughput");
-    const p = panel("tCycle");
-    screen.getByText("Ready to Done, p50 and p85 hours by size · last 14 days");
-    expect([...p.querySelectorAll(".hrow")].map((r) => r.textContent)).toEqual([
-      // p85 only from five tickets
-      "XS6.0 h4 tickets",
-      "S35 hp85 50 h · 11 tickets",
-      "M70 h1 ticket",
-      "L—0 tickets",
-      "XL—0 tickets",
-      "no size72 h2 tickets",
+    const p = panel("tCycleSize");
+    screen.getByText("p50 to p85, hours · last 14 days");
+    expect(
+      [...p.querySelectorAll("li")].map((r) => [
+        r.querySelector(".lb")?.textContent,
+        r.querySelector(".crew-cell-value")?.textContent,
+      ]),
+    ).toEqual([
+      ["XS · 4 tickets", "p50 6.0 h"],
+      ["S · 11 tickets", "35 h–50 h"],
+      ["M · 1 ticket", "p50 70 h"],
+      ["L · 0 tickets", "no tickets"],
+      ["XL · 0 tickets", "no tickets"],
+      ["no size · 2 tickets", "p50 72 h"],
     ]);
-    // the registry's cycle time over all sizes, with its window in the label
-    await waitFor(() =>
-      expect(p.querySelector(".tcycle-all")?.textContent).toBe(
-        "Cycle time p50 · 14d 1.2 h p85 30 h · 8 tickets · 1 left out",
-      ),
-    );
-    within(p).getByText(
-      "Measured from the board: when a ticket entered Ready to when it reached Done. Sizes cover every repo; the p50 line above follows the header's session filter. 7 done tickets left out because they have no Ready entry or their timestamps are out of order.",
-    );
+    expect(p.querySelectorAll(".rng")).toHaveLength(1);
+    expect(p.querySelector(".pnote")?.textContent).toContain("7 done tickets left out");
   });
 
   it("cycle time: a row with 0 tickets draws no bar, and does not set the scale", async () => {
@@ -653,10 +643,10 @@ describe("Flow of work", () => {
       undefined,
       "throughput",
     );
-    const widths = [...panel("tCycle").querySelectorAll<HTMLElement>(".hrow .track i")].map(
-      (i) => i.style.width,
-    );
-    expect(widths).toEqual(["100%", "0%"]);
+    const rows = [...panel("tCycleSize").querySelectorAll("li")];
+    expect(rows[0]?.querySelectorAll(".tr b")).toHaveLength(1);
+    expect(rows[1]?.querySelectorAll(".tr b, .tr .rng")).toHaveLength(0);
+    expect(panel("tCycleSize").querySelector(".pnote")?.textContent).toContain("0 to 2 hours");
   });
 
   it("quality: CI green on first push rounded; the rest — with their reasons", async () => {
@@ -1202,10 +1192,8 @@ describe("empty and failing telemetry", () => {
   it("every panel on Throughput, Quality and Machine shows its empty state", async () => {
     stub(EMPTY, { ...CFG, loops: [] });
     await show("throughput");
-    await within(panel("tThru")).findByText("No days to show yet.");
-    expect([...panel("tCycle").querySelectorAll(".hrow")].map((r) => r.textContent)).toContain(
-      "XS—0 tickets",
-    );
+    await within(panel("tMerged")).findByText("No days to show yet.");
+    within(panel("tCycleSize")).getByText("No tickets finished in the last 14 days.");
     cleanup();
     await show("quality");
     expect(quality()[0]).toEqual(["CI first push", "—", "% of merged PRs"]);
@@ -1227,7 +1215,6 @@ describe("empty and failing telemetry", () => {
 
   it.each([
     ["crew", ["tCrewState"]],
-    ["throughput", ["tFlow", "tCycleControl", "tForecast"]],
     ["cost", ["tCostMerged"]],
   ] as const)("does not invent v2 history from aggregate telemetry on %s", async (tab, ids) => {
     await loaded(undefined, undefined, undefined, tab);
@@ -1287,7 +1274,7 @@ describe("engine telemetry", () => {
 
   it("shows commits on Throughput and loop-step spend on Cost", async () => {
     const a = await loaded(ENGINE(), undefined, undefined, "throughput");
-    expect(kpi(a.container, "Commits").value).toBe("7");
+    expect(statValue("Commits per run")).toBe("2.0");
     a.unmount();
     await loaded(ENGINE());
     expect([...panel("tStepBars").querySelectorAll(".hrow")].map((x) => x.textContent)).toEqual([
