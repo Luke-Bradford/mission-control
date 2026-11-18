@@ -804,8 +804,14 @@ describe("Agents", () => {
       readStyles()
         .match(new RegExp(`\\.share\\.${cls}\\s*\\{([^}]*)\\}`))?.[1]
         ?.trim();
-    expect(shape("unknown")).toBeTruthy();
-    expect(shape("unknown")).not.toBe(shape("parked"));
+    const fill = (cls: string) =>
+      shape(cls)
+        ?.match(/background:([^;]*);/)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim();
+    expect(fill("unknown")).toBeTruthy();
+    expect(fill("unknown")).not.toBe(fill("parked"));
+    expect(fill("unknown")).not.toMatch(/radial-gradient/);
   });
 
   it("tool latency and subagents tables", async () => {
