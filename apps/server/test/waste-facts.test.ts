@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { PullRequestView, Run, RunLoop } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { flightSignals } from "../src/flight/signals.ts";
+import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
 import { flightState } from "../src/flight/state.ts";
 import {
   openWasteAlarms,
@@ -156,7 +156,7 @@ describe("failed review rounds", () => {
     expect(state.prs.find((p) => p.pr === 7)?.reviewRounds).toBe(2);
   });
 
-  it("does not wake FLIGHT for the alarm", () => {
+  it("wakes FLIGHT once for the alarm, with the evidence", () => {
     store.upsertPullRequests("mc", [pr(7)], NOW);
     store.upsertRun(author());
     reported("r1", 7, 1, 2);
@@ -167,7 +167,18 @@ describe("failed review rounds", () => {
         (s) => s.kind === "waste_alarm",
       );
     expect(openWasteAlarms(store).map((a) => a.check)).toContain("failed-review-rounds");
-    expect(read(NOW)).toEqual([]);
+    const first = read(NOW);
+    expect(first).toHaveLength(1);
+    expect(first[0]?.told).toBe(false);
+    expect(first[0]?.evidence).toContain("has failed 2 review rounds");
+    markFlightSignalsShown(store, { repo: "mc", signals: first, triage: [] } as never, NOW);
+    // a third failed round raises the same alarm's level: the same signal, already told
+    reported("r1", 7, 3, 1);
+    syncWasteAlarms(config, store, NOW + MIN);
+    const next = read(NOW + MIN);
+    expect(next.map((s) => s.key)).toEqual(first.map((s) => s.key));
+    expect(next[0]?.told).toBe(true);
+    expect(next[0]?.evidence).toContain("has failed 3 review rounds");
   });
 });
 

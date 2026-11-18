@@ -407,6 +407,8 @@ describe("the check recorder", () => {
     const r = recorder();
     expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
     expect(await r.lockedBy("r1", "ls")).toBeNull();
+    // the related-tests run takes the lock by name, though the repo no longer lists it as a check
+    expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
     // refused while another seat held the lock: it began but never ended, so no failed row
     await r.begin(KEY, TYPES);
     expect(rows).toEqual([]);
@@ -515,6 +517,31 @@ describe("why the recorder dropped a check call", () => {
     await r.end(KEY, true);
     expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
     expect(rows).toEqual([]);
+  });
+
+  it("replaces a Codex check whose session disappeared with a fresh run in the same turn", async () => {
+    const r = recorder();
+    const joined = `${LINT} && ${TYPES}`;
+    await r.begin(KEY, joined, [{ runId: "r1", toolUseId: "codex-item-1" }]);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    expect(r.lost("r1", LINT)).toBe(true);
+    expect(r.pending("r1")).toEqual([]);
+    expect(reasons(r)).toEqual([
+      ["session-lost", LINT, HEAD],
+      ["session-lost", TYPES, HEAD],
+    ]);
+
+    const fresh = { runId: "r1", toolUseId: "codex-item-2" };
+    await r.begin(fresh, joined, [{ runId: "r1", toolUseId: "codex-item-3" }]);
+
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    await r.end({ runId: "r1", toolUseId: "codex-item-3" }, true, 0);
+
+    expect(rows).toMatchObject([
+      { command: LINT, headSha: HEAD, ok: true, exitCode: 0 },
+      { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
+    ]);
+    expect(r.pending("r1")).toEqual([]);
   });
 
   describe("an unchanged rerun", () => {

@@ -34,8 +34,6 @@ export const PALETTE_RECENT_KEY = "mc-palette-recent";
 
 /** The footer's build-status toggle. */
 export const BUILD_STATUS_KEY = "mc-build-status";
-/** PR heads the operator checked locally in this browser. */
-export const QA_CHECKED_HEADS_KEY = "mc-qa-checked-heads";
 
 /** The tab's Demo choice, in sessionStorage: per tab, kept over a reload, copied to a popout. */
 export const DEMO_KEY = "mc-demo";

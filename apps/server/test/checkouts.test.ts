@@ -338,6 +338,15 @@ describe("prepareCheckout", () => {
     expect(git(back.path, "symbolic-ref", "HEAD")).toBe("refs/heads/feature/pr-head");
   });
 
+  it("uses an explicit handoff branch despite other ticket branches", async () => {
+    git(clone, "branch", BRANCH);
+    git(clone, "branch", "feature/42-ended-stage");
+
+    expect(
+      await prepareCheckout({ ...input(), handoff: { branch: BRANCH, worktree: null } }),
+    ).toMatchObject({ branch: BRANCH, created: true });
+  });
+
   it("refuses to move a seat's worktree with unpushed work onto the PR's ref", async () => {
     const old = await prepareCheckout(input());
     commit(old.path, { "pr.txt": "pr\n" }, "pr");
@@ -1639,6 +1648,34 @@ describe("prepareCheckout", () => {
 });
 
 describe("ticket checkout recovery", () => {
+  it("starts a fresh stage branch when the ticket branch's PR has merged", async () => {
+    git(clone, "branch", BRANCH);
+
+    expect(
+      await prepareCheckout({ ...input(), mergedPullRequestBranches: [BRANCH] }),
+    ).toMatchObject({ branch: `${BRANCH}-stage-2`, created: true });
+  });
+
+  it("reuses a ticket branch with an open PR", async () => {
+    git(clone, "branch", BRANCH);
+
+    expect(await prepareCheckout({ ...input(), openPullRequestBranches: [BRANCH] })).toMatchObject({
+      branch: BRANCH,
+      created: true,
+    });
+  });
+
+  it("reuses an open PR branch over an ended local ticket branch", async () => {
+    const open = "feature/42-stage-2";
+    git(clone, "branch", BRANCH);
+    git(clone, "branch", open);
+
+    expect(await prepareCheckout({ ...input(), openPullRequestBranches: [open] })).toMatchObject({
+      branch: open,
+      created: true,
+    });
+  });
+
   it("keeps the ticket's branch after a title change, its worktree there or not", async () => {
     await prepareCheckout(input());
     const renamed = { ...input(), title: "A new name" };

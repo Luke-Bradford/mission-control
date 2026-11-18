@@ -11,7 +11,7 @@ import "./ItemPanel.css";
 
 /**
  * A 540px fly-out for one thing that needs the operator. Every item uses the same brief sections;
- * escalations retain their GitHub reply link. Item discussion uses its own persisted history.
+ * escalations retain their GitHub reply link. The FLIGHT thread beside the question is the one stored conversation.
  * The body is `ItemDetail`, which the Needs you page shows at full width.
  */
 export function ItemPanel() {

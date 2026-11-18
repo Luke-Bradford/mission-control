@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as crewModule from "../src/crew.ts";
 import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
-import { activityLive, activityValues } from "../src/overview/agentActivity.ts";
 import { laneTokens } from "../src/overview/CrewLane.tsx";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
 import { nextAgent, setSelectedAgent } from "../src/shell/selection.ts";
@@ -887,20 +886,6 @@ it("advances the one-hour lane with the panel clock", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   vi.setSystemTime(NOW);
   const end = Math.floor(NOW / MIN) * MIN;
-  // The helpers behind the retired 30-minute sparkline still read the same window.
-  expect(
-    activityValues(
-      digest([
-        [end - 29 * MIN, 7],
-        [end, 90],
-      ]),
-      NOW,
-    )[0],
-  ).toBe(7);
-  expect(activityLive(digest([[end, 90]]), end + 59_999)).toBe(true);
-  expect(activityLive(digest([[end, 90]]), end + MIN)).toBe(false);
-  expect(activityLive(digest([]), NOW)).toBe(false);
-
   stub([seatRow({ id: "live", digest: digest([[end, 90]]), lastOutputAt: null })], true, []);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("live");
