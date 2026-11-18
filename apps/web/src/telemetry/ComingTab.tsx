@@ -1,16 +1,14 @@
 import type { Telemetry } from "@mc/core";
 import { useMemo } from "react";
 import type { TelemetryTab } from "../router.ts";
-import { AgentsGroup } from "./AgentsGroup.tsx";
 import { CapacityGroup } from "./CapacityGroup.tsx";
-import { CostGroup } from "./CostGroup.tsx";
 import type { Scope } from "./common.ts";
 import { FlowOfWork } from "./FlowOfWork.tsx";
 import { InstrumentCharts } from "./InstrumentCharts.tsx";
 import { Kpis } from "./Kpis.tsx";
 import { VisiblePanels } from "./TPanel.tsx";
 
-type UnbuiltTab = Exclude<TelemetryTab, "crew" | "throughput" | "quality">;
+type UnbuiltTab = Exclude<TelemetryTab, "crew" | "cost" | "throughput" | "quality">;
 
 interface Coming {
   /** What the finished tab will hold, in one sentence. */
@@ -23,17 +21,11 @@ interface Coming {
 
 /**
  * Where each panel of the earlier page lives until its tab is built, so no telemetry disappears.
- * tCrewState, tUtil, tLat, tSubs and tCapcom moved to the Crew tab; tQual, tQualityTrend and the Guard
- * tile to the Quality tab; tTurn to the seat's Agent page; tThru, tCycle, tFlow and tCycleControl to
- * the Throughput tab (tForecast is dropped).
+ * tCrewState, tUtil, tLat, tSubs and tCapcom moved to the Crew tab; tTurn to the seat's Agent page;
+ * the cost, token and quota panels to the Cost and tokens tab; tQual, tQualityTrend and the Guard tile
+ * to the Quality tab; tThru, tCycle, tFlow and tCycleControl to the Throughput tab (tForecast is dropped).
  */
 export const COMING: Record<UnbuiltTab, Coming> = {
-  cost: {
-    holds:
-      "Spend per hour by step, cost by ticket, tokens per minute, quota used, and the totals and cost-by-ticket tables.",
-    panels: ["tTok", "quotaP", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"],
-    tiles: ["tokens"],
-  },
   machine: {
     holds:
       "CPU and memory with test-lock bands, memory pressure and swap, agent and test-run memory, and the test lock table.",
@@ -45,10 +37,8 @@ export const COMING: Record<UnbuiltTab, Coming> = {
 /** Which group of the earlier page holds which panels. */
 const GROUP_PANELS = {
   flow: ["tThru", "tCycle", "tQual", "tCapcom"],
-  charts: ["tCrewState", "tFlow", "tCycleControl", "tQualityTrend", "tCostMerged", "tForecast"],
-  agents: ["tTok"],
-  capacity: ["quotaP", "machP", "tQuota", "tMach", "tLock"],
-  cost: ["tTicketBars", "tStepBars", "tTotals"],
+  charts: ["tCrewState", "tFlow", "tCycleControl", "tQualityTrend", "tForecast"],
+  capacity: ["machP", "tMach", "tLock"],
 } as const;
 
 /** A tab that is not built yet: a short note on what is coming, then the panels it will replace. */
@@ -90,9 +80,7 @@ export function ComingTab({
         {has("charts") && (
           <InstrumentCharts scope={scope} series={t?.series} ticketCosts={t?.tokensByTicket} />
         )}
-        {has("agents") && <AgentsGroup t={t} scope={scope} />}
         {has("capacity") && <CapacityGroup t={t} scope={scope} />}
-        {has("cost") && <CostGroup t={t} scope={scope} />}
       </div>
     </VisiblePanels.Provider>
   );

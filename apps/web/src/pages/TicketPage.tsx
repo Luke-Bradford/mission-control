@@ -1,4 +1,4 @@
-import type { ItemDiscussion, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
+import type { ItemThread, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -29,7 +29,7 @@ const dash = "—";
 /** What was said on a question: read-only, fetched when opened. Replying happens on Needs you. */
 function QuestionConversation({ itemKey, tz }: { itemKey: string; tz: ReturnType<typeof useTz> }) {
   const [open, setOpen] = useState(false);
-  const res = useResource<ItemDiscussion>(open ? RESOURCES.discussion(itemKey) : null);
+  const res = useResource<ItemThread>(open ? RESOURCES.itemThread(itemKey) : null);
   const messages = res.data?.messages;
   return (
     <details className="tk-convo" onToggle={(e) => setOpen(e.currentTarget.open)}>
@@ -47,7 +47,7 @@ function QuestionConversation({ itemKey, tz }: { itemKey: string; tz: ReturnType
               <span className="tk-when">
                 {tz ? `${dayMonth(m.at, tz)} ${hhmm(m.at, tz)}` : dash}
               </span>
-              <strong>{m.role === "operator" ? "YOU" : "FLIGHT"}</strong>
+              <strong>{m.operator ? "YOU" : "FLIGHT"}</strong>
               <p className="tk-text">
                 <MentionText text={m.text} />
               </p>

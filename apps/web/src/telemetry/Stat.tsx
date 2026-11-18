@@ -105,6 +105,7 @@ export function Stat({
       <div className="stat-def" id={def} role="tooltip">
         {s.reason ? `${s.reason} ` : ""}
         {s.definition}
+        {s.detail && <span> {s.detail}</span>}
       </div>
     </div>
   );

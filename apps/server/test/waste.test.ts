@@ -195,6 +195,76 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     expect(ticketParked(store, TICKET)).not.toBeNull();
   });
 
+  describe("the restarted-after-park alarm", () => {
+    const restarted = () =>
+      openWasteAlarms(store).filter(
+        (a) => a.check === "ticket-churn" && a.subject.endsWith(":restarted"),
+      );
+    const decide = (at: number, kind: "re-plan" | "note", about: string) =>
+      store.addFlightDecision({
+        at,
+        kind,
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        about,
+        decision: "d",
+        basis: "b",
+      });
+    const parked = () => {
+      replay();
+      syncWasteAlarms(config, store, NOW);
+    };
+
+    it("opens when the ticket restarts with no re-plan logged", () => {
+      parked();
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      decide(NOW + MIN, "note", `${TICKET} revived`);
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("stays quiet when a re-plan for the ticket came after the alarm and before the run", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toEqual([]);
+    });
+
+    it("opens when the re-plan has the same timestamp as the restart", () => {
+      parked();
+      decide(NOW + 2 * MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("ignores a re-plan for another ticket, one before the alarm, or one after the run", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", "mc#15960 re-planned");
+      decide(NOW - HOUR, "re-plan", `${TICKET} re-planned`);
+      decide(NOW + 5 * MIN, "re-plan", `${TICKET} re-planned`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 6 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("opens again for a second restart after the revived run ends", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", `${TICKET} re-planned`);
+      store.upsertRun(
+        run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN, endedAt: NOW + 10 * MIN }),
+      );
+      syncWasteAlarms(config, store, NOW + 11 * MIN);
+      expect(restarted()).toEqual([]);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 20 * MIN }));
+      syncWasteAlarms(config, store, NOW + 21 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+  });
+
   it("counts three carry-on resumes without a report", () => {
     const r = run("guido-1", { ticket: "mc#7" });
     store.upsertRun(r);
