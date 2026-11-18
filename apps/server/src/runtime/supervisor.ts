@@ -4726,7 +4726,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
     closeRunItems(info, run?.id ?? null);
     if (open) emit({ kind: "run-ended", seatId, runId: run.id, endedBy: "operator" });
-    if (run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
+    if (run !== null) void dropScratch(info, run.id, run.seq, row.worktree);
   }
 
   /** Interrupts a turn in flight, then closes the process; the exit handler records the end. */
