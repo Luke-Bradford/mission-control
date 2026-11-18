@@ -58,6 +58,12 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
  * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
+/**
+ * The related-tests run, as a repo's `checks` list spells it. It loads the Mac like a suite, so it
+ * takes the test lock whether or not the repo still lists it as a check.
+ */
+export const RELATED_CHECK = "pnpm -s test:related";
+
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
   const ran = splitCommands(command).map(lockForm);
   for (const check of checks) {
@@ -194,7 +200,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   return {
     async lockedBy(runId, command) {
       try {
-        return lockedCheck(command, await d.checks(runId));
+        const checks = await d.checks(runId);
+        return lockedCheck(
+          command,
+          checks.includes(RELATED_CHECK) ? checks : [...checks, RELATED_CHECK],
+        );
       } catch (e) {
         d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
         return null;

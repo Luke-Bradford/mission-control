@@ -410,8 +410,7 @@ describe("rolePrompt", () => {
     expect(prompt).not.toContain("apps/server/src/guard/**");
     // everything else the seat is told stays
     // the push gate's commands stay: they are the only part of the block a seat runs
-    for (const c of ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test:related"])
-      expect(prompt).toContain(c);
+    for (const c of ["pnpm -s lint", "pnpm -s typecheck"]) expect(prompt).toContain(c);
     for (const kept of [
       "## Source of truth",
       "docs/direction.md",
