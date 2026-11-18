@@ -165,11 +165,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import {
-  restartHold,
-  reviewsHeld,
-  settleReviewRounds,
-} from "../spend/waste.ts";
+import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
@@ -3361,8 +3357,7 @@ export function createEngine(deps: EngineDeps): Engine {
           opts?.action === "accept" ||
           opts?.action === "second_review";
         // only a rework of a run parked at the cap grants a review past it
-        const grant =
-          opts?.action === "rework" && (kind === "review" || kind === "review-ruling");
+        const grant = opts?.action === "rework" && (kind === "review" || kind === "review-ruling");
         if (by === "FLIGHT" && reopens) {
           const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
           if (settleReviewRounds(store, run, at, basis, grant))
