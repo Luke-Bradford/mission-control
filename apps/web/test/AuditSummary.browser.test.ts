@@ -156,12 +156,16 @@ describeRendered("Audit first screen in a real browser", () => {
           if (options.rows === 50) expect(m.listScrolls).toBe(true);
           if ("longPath" in options) {
             expect(m.landingRows, "two landing rows fit").toBeGreaterThanOrEqual(2);
-            const p = await page.evaluate(() => {
+            const p = await page.evaluate(async () => {
               const b = document.querySelector<HTMLButtonElement>(".as-files button.as-pathbtn");
               if (!b) return null;
               const cut = b.scrollWidth > b.clientWidth;
               b.focus();
               b.click();
+              // React applies the state change on a later frame.
+              await new Promise<void>((done) =>
+                requestAnimationFrame(() => requestAnimationFrame(() => done())),
+              );
               const r = b.getBoundingClientRect();
               const list = b.closest(".as-scroll");
               return {

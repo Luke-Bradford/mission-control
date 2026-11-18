@@ -373,6 +373,29 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
   );
 }
 
+/** What a figure counts, where it comes from and how much it covers: a button, so the keyboard can read it. */
+function FigureDef({ f }: { f: CodeHealthFigure }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="as-defbtn"
+        aria-expanded={open}
+        aria-label={`${open ? "Hide" : "Show"} how ${f.label} is measured`}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {open ? "hide" : "how"}
+      </button>
+      {open && (
+        <span className="as-sub as-fmeta as-fdef">
+          {f.source}. {f.coverage}
+        </span>
+      )}
+    </>
+  );
+}
+
 /** A file path on one line; Enter or Space shows all of it, wrapped, for keyboard and touch users. */
 function FilePath({ path }: { path: string }) {
   const [open, setOpen] = useState(false);
@@ -623,8 +646,9 @@ export function AuditSummary({
                 <tbody>
                   {overview.figures.map((f) => (
                     <tr key={f.id} className="as-hrow">
-                      <td title={`${f.source}. ${f.coverage}`}>
+                      <td>
                         {f.label}
+                        <FigureDef f={f} />
                         <span className="as-sub as-fmeta">
                           {f.unit} · {f.window.label}
                         </span>
@@ -671,24 +695,30 @@ export function AuditSummary({
                   <thead>
                     <tr>
                       <th>File</th>
-                      <th className="as-r">Findings</th>
+                      <th className="as-r" aria-sort="descending">
+                        Findings <span aria-hidden="true">▼</span>
+                      </th>
                       <th className="as-r">Touches</th>
                       <th className="as-r">Per touch</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {overview.landing.files.map((f) => (
-                      <tr key={f.path} className="as-frow">
-                        <td className="as-path">
-                          <FilePath path={f.path} />
-                        </td>
-                        <td className="as-r">{f.findings}</td>
-                        <td className="as-r">{f.touches}</td>
-                        <td className="as-r">
-                          {f.ratio.value === null ? "—" : num(Math.round(f.ratio.value * 10) / 10)}
-                        </td>
-                      </tr>
-                    ))}
+                    {[...overview.landing.files]
+                      .sort((a, b) => b.findings - a.findings)
+                      .map((f) => (
+                        <tr key={f.path} className="as-frow">
+                          <td className="as-path">
+                            <FilePath path={f.path} />
+                          </td>
+                          <td className="as-r">{f.findings}</td>
+                          <td className="as-r">{f.touches}</td>
+                          <td className="as-r">
+                            {f.ratio.value === null
+                              ? "—"
+                              : num(Math.round(f.ratio.value * 10) / 10)}
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </ScrollRegion>

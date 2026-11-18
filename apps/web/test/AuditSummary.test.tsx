@@ -610,3 +610,19 @@ it("shows a file path in full when its button is pressed", async () => {
   expect(b.getAttribute("aria-expanded")).toBe("true");
   expect(b.textContent).toBe("apps/server/src/very/long/path/to/a/file-number-0.ts");
 });
+
+it("sorts landing files by findings with a visible cue, and shows a figure's definition by keyboard", async () => {
+  setup();
+  render(<CodeHealth />);
+  await ready();
+  const th = screen.getByRole("columnheader", { name: /Findings/ });
+  expect(th.getAttribute("aria-sort")).toBe("descending");
+  expect(th.textContent).toContain("▼");
+  const how = screen.getAllByRole("button", { name: /^Show how .* is measured$/ })[0];
+  how.focus();
+  expect(document.activeElement).toBe(how);
+  expect(how.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(how);
+  expect(how.getAttribute("aria-expanded")).toBe("true");
+  expect(document.querySelector(".as-fdef")?.textContent).toMatch(/\w/);
+});
