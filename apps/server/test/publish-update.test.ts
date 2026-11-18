@@ -192,7 +192,10 @@ describe("fastForward (real git)", () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     store.upsertRun(run());
     const sha = outsidePush();
-    expect(await publisher().fastForward(run(), worktree, sha)).toEqual({ ok: true });
+    expect(await publisher().fastForward(run(), worktree, sha)).toEqual({
+      ok: true,
+      commits: 1,
+    });
     expect(git(worktree, "rev-parse", "HEAD")).toBe(sha);
     expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
   });

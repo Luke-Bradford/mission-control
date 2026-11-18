@@ -31,6 +31,7 @@ import {
   awayTicketType,
   BLOCKING_SEVERITIES,
   blockedNoteKey,
+  branchMovedText,
   CI_FAILED_EVENT_PREFIX,
   CI_FAILED_TEXT,
   CI_PASSED_EVENT_PREFIX,
@@ -713,6 +714,13 @@ export function createEngine(deps: EngineDeps): Engine {
       return;
     }
     delete loop.branchMoved;
+    // the seat hears of it on its next turn (a line already waiting for it, such as an answer, goes first)
+    if (loop.pendingLine == null) {
+      loop.pendingLine = {
+        key: `${run.id}:${held.epoch}:branch-moved:${held.sha}`,
+        text: branchMovedText(held.sha, moved.commits ?? 1),
+      };
+    }
     store.addLoopEvent(
       `${run.id}:${held.epoch}:moved:${held.sha}`,
       run.id,

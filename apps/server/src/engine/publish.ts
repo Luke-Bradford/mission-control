@@ -112,7 +112,7 @@ export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/chec
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 /** A fast-forward's answer; `installNote` is a refusal or failure of the install that followed it. */
 export type FastForwardResult =
-  | { ok: true; installNote?: string }
+  | { ok: true; installNote?: string; commits?: number }
   | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
   | {
@@ -197,7 +197,7 @@ export interface Publisher {
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /**
    * Whether the pushes that took the run's branch from `ancestor` to `head` were all made by one of
-   * `logins` (none: the account gh acts as), read from GitHub's push activity for the branch. False
+   * `logins` or the account gh acts as, read from GitHub's push activity for the branch. False
    * when the read fails or the chain of pushes is not whole.
    */
   pushesFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
@@ -1262,9 +1262,6 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const nowMs = (deps.now ?? Date.now)();
       const known = pushChains.get(key);
       if (known !== undefined && (known.ok || nowMs - known.at < FETCH_RETRY_MS)) return known.ok;
-      // with no aliases configured, the operator is the account gh acts as
-      const allowed = (logins.length > 0 ? logins : await ghLogin()).map((l) => l.toLowerCase());
-      if (allowed.length === 0) return false;
       const listed = await ghJson(
         [
           "api",
@@ -1273,6 +1270,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         "activity",
       );
       if (isRefusal(listed) || !Array.isArray(listed)) return false;
+      // the account gh acts as is always the operator's, whatever aliases are configured
+      const allowed = [...logins, ...(await ghLogin())].map((l) => l.toLowerCase());
+      if (allowed.length === 0) return false;
       type Push = { before?: unknown; after?: unknown; actor?: { login?: unknown } | null };
       const pushes = listed as Push[];
       // Who pushed is GitHub's own record; a commit's committer or author is whatever its maker
@@ -1690,7 +1690,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           } catch (e) {
             installNote = `dependencies may have changed; install not run: ${errText(e)}`;
           }
-          return { ok: true, ...(installNote ? { installNote } : {}) };
+          const counted = Number((await g(["rev-list", "--count", `${before}..${sha}`])).trim());
+          return {
+            ok: true,
+            ...(Number.isSafeInteger(counted) ? { commits: counted } : {}),
+            ...(installNote ? { installNote } : {}),
+          };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);

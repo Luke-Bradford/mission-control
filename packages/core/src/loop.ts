@@ -442,6 +442,9 @@ export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;
 export const reviewCarriedText = (from: string, to: string): string =>
   `review of ${from.slice(0, 7)} carried to ${to.slice(0, 7)} (main merged, PR diff unchanged)`;
+/** The line a seat gets once the hub has moved its worktree onto a head someone pushed on top. */
+export const branchMovedText = (sha: string, n: number): string =>
+  `Your branch moved to ${sha.slice(0, 7)} (${n} ${n === 1 ? "commit" : "commits"} pushed on top); files may have changed, re-read before editing.`;
 export const mainConflictText = (mainSha: string, n: number): string =>
   `merging main ${mainSha.slice(0, 7)} conflicted in ${n} ${n === 1 ? "file" : "files"}`;
 /** The Activity row for a park. */
@@ -743,8 +746,11 @@ export type LoopAction =
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
-  /** Records the PR's head, a descendant of the push, as the run's push, and tells the seat. */
-  /** `from` is the push the head sits on: the engine adopts only while that is still the run's push. */
+  /**
+   * Records the PR's head, a descendant of the push, as the run's push; the hub moves the seat's
+   * worktree and the seat's next line says its branch moved. `from` is the push the head sits on:
+   * the engine adopts only while that is still the run's push.
+   */
   | { kind: "adopt-head"; sha: string; from: string }
   /** `mark`: the `cardFor` the move sets when it is not the phase's (rework is a state of review). */
   | { kind: "move-card"; column: MoveColumn; mark?: string }
@@ -1358,7 +1364,13 @@ function stateStep(s: LoopSnapshot): Step {
       ) {
         return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha, from: pushed.sha }] };
       }
-      if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
+      // a head that came after the push has its own window, from when it was first seen
+      const newHead = pr?.headSha != null && pr.headSha !== pushed?.sha;
+      const waitingSince =
+        loop.pushStartedAt !== null && newHead && loop.headSeenSha === pr?.headSha
+          ? Math.max(loop.pushStartedAt, loop.headSeenAt ?? 0)
+          : loop.pushStartedAt;
+      if (waitingSince !== null && now - waitingSince > NO_CI_AFTER_MS) {
         return park(
           loop,
           STUCK_PARK,
@@ -2001,7 +2013,16 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
  * One pass of the first loop: the run's next loop state and the actions that make the world
  * match it. Anything a crashed or dropped pass left undone comes out again on the next pass.
  */
-export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
+/** In ci, notes the PR head the loop sees and when it first saw it; a changed head restarts that. */
+function watchHead(s: LoopSnapshot): LoopSnapshot {
+  const sha = s.pr?.headSha ?? null;
+  if (s.loop.phase !== "ci" || sha === null || s.loop.headSeenSha === sha) return s;
+  const at = s.loop.headSeenSha === undefined ? (s.loop.pushStartedAt ?? s.now) : s.now;
+  return { ...s, loop: { ...s.loop, headSeenSha: sha, headSeenAt: at } };
+}
+
+export function reconcile(input: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
+  const s = watchHead(input);
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
   const { parked, touches, aside, gate, merging, mainMerge, carry, rerun, rulingRerun } = step.loop;

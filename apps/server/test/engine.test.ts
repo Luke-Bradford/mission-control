@@ -422,7 +422,7 @@ interface Harness {
   fastForwards: { runId: string; worktree: string; sha: string }[];
   fastForwardResult: FastForwardResult;
   /** The logins that pushed the commits between the push and the PR head (pushesFrom reads them). */
-  commitLogins: string[];
+  pusherLogins: string[];
   endedRuns: string[];
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
@@ -497,7 +497,7 @@ function harness(): Harness {
     asideOn: false,
     fastForwards: [],
     fastForwardResult: { ok: true },
-    commitLogins: ["op-login"],
+    pusherLogins: ["op-login"],
     endedRuns: [],
     endBlocked: false,
     asides: [],
@@ -534,7 +534,7 @@ function harness(): Harness {
         },
         // like the real one: no configured logins means the account gh acts as
         pushesFrom: async (_run, _ancestor, _head, logins) =>
-          x.commitLogins.every((login) =>
+          x.pusherLogins.every((login) =>
             (logins.length > 0 ? logins : ["op-login"]).includes(login),
           ),
         runEnded: (runId) => {
@@ -1721,8 +1721,14 @@ describe("refusals", () => {
     expect(h.fastForwards).toEqual([{ runId: RUN, worktree: join(dir, "wt"), sha: SHA_B }]);
     expect(loopOf().branchMoved).toBeUndefined();
     expect(loopTexts()).toContain(`the worktree is on ${SHA_B.slice(0, 7)} now`);
-    // the seat is not sent a line: it could not act on one, and it would resume a quiet seat
-    expect(h.sent.filter((m) => m.key.startsWith("branch-moved:"))).toEqual([]);
+    // the seat's next line says its branch moved
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    const told = h.sent.filter((m) => m.key.includes(":branch-moved:"));
+    expect(told).toHaveLength(1);
+    expect(told[0]?.text).toBe(
+      `Your branch moved to ${SHA_B.slice(0, 7)} (1 commit pushed on top); files may have changed, re-read before editing.`,
+    );
     // someone else's commit: the merge gate must not count it as the hub's
     expect(store.runCommits(RUN)).toContain(SHA_B);
     expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(false);
@@ -1739,7 +1745,7 @@ describe("refusals", () => {
     expect(store.runPush(RUN)?.sha).toBe(SHA_B);
     expect(loopOf().branchMoved).toMatchObject({ sha: SHA_B, why: "diverged" });
     expect(h.sent.filter((m) => m.text.includes("--ff-only"))).toEqual([]);
-    expect(h.sent.filter((m) => m.key.startsWith("branch-moved:"))).toEqual([]);
+    expect(h.sent.filter((m) => m.key.includes(":branch-moved:"))).toEqual([]);
     // a later idle pass tries again, and does not adopt a second time
     const tries = h.fastForwards.length;
     h.fastForwardResult = { ok: true };
@@ -1818,7 +1824,7 @@ describe("refusals", () => {
     expect(loopOf().phase).toBe("ci");
   });
 
-  it("with no github_logins configured, adopts a head made by the account gh acts as", async () => {
+  it("with no github_logins configured, adopts a head pushed by the account gh acts as", async () => {
     config.operator.githubLogins = [];
     h.descends = true;
     setPr({ ci: "pending", headSha: SHA_B });
@@ -1865,9 +1871,9 @@ describe("refusals", () => {
     expect(h.reruns.length).toBeGreaterThan(0);
   });
 
-  it("takes only commits the operator's accounts wrote; others park as stuck", async () => {
+  it("follows only pushes by the operator's accounts; a foreign pusher parks as stuck", async () => {
     h.descends = true;
-    h.commitLogins = ["op-login", "someone-else"];
+    h.pusherLogins = ["op-login", "someone-else"];
     setPr({ ci: "pending", headSha: SHA_B });
     report();
     await h.engine.reconcileRun(RUN);
@@ -2032,6 +2038,26 @@ describe("refusals", () => {
     expect(loopOf().branchMoved).toBeUndefined();
     // the publisher is told the run has ended
     expect(h.endedRuns).toContain(RUN);
+  });
+
+  it("a head added on top long after the push gets its own window: the first no is not a park, the next pass adopts it", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA });
+    report();
+    await h.engine.reconcileRun(RUN);
+    // twelve minutes on, still on the seat's push; then someone pushes on top
+    clock += 12 * MIN;
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "pending", headSha: SHA_B });
+    h.pusherLogins = ["stranger"]; // GitHub's push activity has not caught up
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().parked).toBeNull();
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    h.pusherLogins = ["op-login"];
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().parked).toBeNull();
   });
 
   it("goes from CI into review on the adopted head", async () => {

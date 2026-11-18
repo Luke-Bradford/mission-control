@@ -506,6 +506,25 @@ describe("state step", () => {
     expect(r.loop.phase).toBe("done");
   });
 
+  it("8: a head first seen long after the push has its own window and does not park at once", () => {
+    const old = {
+      pushStartedAt: NOW - NO_CI_AFTER_MS - 1,
+      headSeenSha: SHA,
+      headSeenAt: NOW - 1000,
+    };
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }) }, old));
+    expect(r.loop.parked ?? null).toBeNull();
+    expect(r.loop).toMatchObject({ headSeenSha: SHA2, headSeenAt: NOW });
+    // seen for a whole window, still not adoptable: it parks
+    const spent = reconcile(
+      inCi(
+        { pr: pr({ headSha: SHA2 }) },
+        { ...old, headSeenSha: SHA2, headSeenAt: NOW - NO_CI_AFTER_MS - 1 },
+      ),
+    );
+    expect(spent.loop.parked?.kind).toBe("stuck");
+  });
+
   it("8: a PR head that does not descend from the push still parks as stuck", () => {
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
     for (const prDescends of [false, undefined]) {

@@ -3245,6 +3245,11 @@ describe("pushesFrom", () => {
     expect(await from(answering([push(A, B, "stranger")], [], "op"), [])).toBe(false);
   });
 
+  it("always trusts the account gh acts as, whatever logins are configured", async () => {
+    expect(await from(answering([push(A, B, "op")], [], "op"), ["someone-else"])).toBe(true);
+    expect(await from(answering([push(A, B, "stranger")], [], "op"), ["someone-else"])).toBe(false);
+  });
+
   it("is false with a failed read or no way to read the gh account", async () => {
     expect(await from(async () => ({ code: 1, stdout: "", stderr: "boom" }))).toBe(false);
     const noUser: GhRunner = async (args) =>
@@ -3278,10 +3283,11 @@ describe("pushesFrom", () => {
     const p = createPublisher(deps({ gh: answering([push(A, B, "op")], seen) }));
     expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
     expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
-    expect(seen).toHaveLength(1);
+    const reads = () => seen.filter((a) => a.includes("activity")).length;
+    expect(reads()).toBe(1);
     p.runEnded(run().id);
     expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
-    expect(seen).toHaveLength(2);
+    expect(reads()).toBe(2);
     let fail = true;
     const q = createPublisher(
       deps({

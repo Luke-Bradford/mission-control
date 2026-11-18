@@ -190,6 +190,13 @@ export interface RunLoop {
   reportedEvidenceId: number;
   prNumber: number | null;
   pushStartedAt: number | null;
+  /**
+   * The PR head the loop last saw in `ci`, and when it first saw it (a run with no record: from the
+   * push). A head that changes starts the window for it afresh, so a commit added on top long
+   * after the push gets its own grace.
+   */
+  headSeenSha?: string;
+  headSeenAt?: number;
   /** The commit `pushStartedAt` was started for: a new commit in `ci` starts the clock again. */
   pushFor: string | null;
   /** When the operator last un-parked the run; the CI clocks run from the later of this and the push. */
