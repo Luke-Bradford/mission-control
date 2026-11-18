@@ -224,6 +224,47 @@ describe("fastForward (real git)", () => {
   });
 });
 
+describe("isDescendant (real git)", () => {
+  /** A commit another clone pushed to origin on `branch`, started at `from`; its sha. */
+  function pushedElsewhere(branch: string, from: string): string {
+    git(worktree, "push", "-q", "origin", BRANCH);
+    const other = join(dir, "other");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", "-B", branch, from);
+    write(other, "docs/c.md", `doc\n${branch}\n`);
+    git(other, "commit", "-q", "-am", "elsewhere");
+    git(other, "push", "-q", "origin", branch);
+    return git(other, "rev-parse", "HEAD");
+  }
+  const has = (sha: string): boolean => {
+    try {
+      git(clone, "cat-file", "-e", `${sha}^{commit}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("fetches a head the clone has not seen, then finds it on top of the push", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const head = pushedElsewhere(BRANCH, tip);
+    expect(has(head)).toBe(false);
+    expect(await publisher().isDescendant(run(), tip, head)).toBe(true);
+    expect(has(head)).toBe(true);
+  });
+
+  it("is false for an unseen head that does not descend from the push", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const head = pushedElsewhere("unrelated", mainSha);
+    expect(has(head)).toBe(false);
+    expect(await publisher().isDescendant(run(), tip, head)).toBe(false);
+  });
+});
+
 describe("updateBranch (real git)", () => {
   it("does not make a pointless merge when main contains the working branch tip", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
