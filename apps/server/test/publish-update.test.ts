@@ -306,6 +306,29 @@ describe("isDescendant fetch retry (real git)", () => {
   });
 });
 
+describe("runEnded (real git)", () => {
+  it("lets go of a failed fetch when the run ends, so a later one asks at once", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const other = join(dir, "other3");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", "-B", "later", mainSha);
+    write(other, "docs/c.md", "doc\nlater\n");
+    git(other, "commit", "-q", "-am", "later");
+    const head = git(other, "rev-parse", "HEAD");
+    const t = START;
+    const p = publisher(() => t);
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    git(other, "push", "-q", "origin", "later");
+    // inside the pause the failure is remembered; once the run has ended it is not
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    p.runEnded(run().id);
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(true);
+  });
+});
+
 describe("updateBranch (real git)", () => {
   it("does not make a pointless merge when main contains the working branch tip", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));

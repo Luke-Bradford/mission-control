@@ -2547,8 +2547,8 @@ export class Store {
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
          assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
-         base)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         base, is_cross_repository)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2558,7 +2558,8 @@ export class Store {
          assignees = excluded.assignees, checks = excluded.checks,
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
          additions = excluded.additions, deletions = excluded.deletions,
-         changed_files = excluded.changed_files, base = excluded.base, stale = 0`,
+         changed_files = excluded.changed_files, base = excluded.base,
+         is_cross_repository = excluded.is_cross_repository, stale = 0`,
     );
     const deleteFiles = this.db.prepare("DELETE FROM pr_files WHERE repo_id = ? AND pr_number = ?");
     const addFile = this.db.prepare(
@@ -2676,6 +2677,7 @@ export class Store {
         p.deletions ?? null,
         p.changedFiles ?? null,
         p.base ?? null,
+        p.isCrossRepository == null ? null : p.isCrossRepository ? 1 : 0,
       );
       if (p.mergedAt !== null) {
         const { files: _files, escapedDefects: _defects, ...record } = p;
@@ -3650,6 +3652,7 @@ export class Store {
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
       closingIssues: JSON.parse(r.closing_issues as string) as number[],
+      ...(r.is_cross_repository == null ? {} : { isCrossRepository: r.is_cross_repository === 1 }),
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
       ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
@@ -6275,8 +6278,8 @@ export class Store {
 
   /**
    * The run takes someone else's commit on top of its push as its own push, in one transaction:
-   * the commit (followed, so the merge gate still sees it as outside), the push, a loop event and
-   * a FLIGHT decision (that commit skipped the hard-rule park). Once per run and sha.
+   * the commit (followed, so the merge gate still treats it as from outside the run), the push, a
+   * loop event and a FLIGHT decision that records the hub took it in. Once per run and sha.
    */
   adoptFollowedHead(a: {
     runId: string;

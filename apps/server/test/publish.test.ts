@@ -3192,63 +3192,88 @@ describe("fileMinorFindings", () => {
   });
 });
 
-describe("commitsFrom", () => {
+describe("pushesFrom", () => {
   const A = "a".repeat(40);
+  const M = "c".repeat(40);
   const B = "b".repeat(40);
-  const commit = (author: string | null, committer: string | null, verified = false) => ({
-    author: author === null ? null : { login: author },
-    committer: committer === null ? null : { login: committer },
-    commit: { verification: { verified } },
+  const push = (before: string, after: string, actor: string | null) => ({
+    before,
+    after,
+    activity_type: "push",
+    actor: actor === null ? null : { login: actor },
   });
-  /** Answers the compare with `body`, and `gh api user` with `me`. */
+  /** Answers the activity read with `body`, and `gh api user` with `me`. */
   const answering =
-    (body: object, seen: string[] = [], me = "op"): GhRunner =>
+    (body: unknown, seen: string[] = [], me = "op"): GhRunner =>
     async (args) => {
       seen.push(args.join(" "));
       const out = args[1] === "user" ? { login: me } : body;
       return { code: 0, stdout: JSON.stringify(out), stderr: "" };
     };
   const from = (gh: GhRunner, logins = ["op"]) =>
-    createPublisher(deps({ gh })).commitsFrom(run(), A, B, logins);
-  const compare = (...commits: object[]) => ({ total_commits: commits.length, commits });
+    createPublisher(deps({ gh })).pushesFrom(run(), A, B, logins);
 
-  it("is true when every commit was committed by one of the logins, in any case", async () => {
+  it("is true when every push from the run's push to the head was by an allowed login, in any case", async () => {
     const seen: string[] = [];
-    const gh = answering(compare(commit("op", "op"), commit("x", "OP")), seen);
+    const gh = answering([push(M, B, "OP"), push(A, M, "op")], seen);
     expect(await from(gh)).toBe(true);
-    expect(seen[0]).toContain(`compare/${A}...${B}`);
+    expect(seen[0]).toContain("activity_type=push");
+    expect(seen[0]).toContain(encodeURIComponent(`refs/heads/${BRANCH}`));
   });
 
-  it("takes a verified GitHub web-flow commit by an allowed author", async () => {
-    expect(await from(answering(compare(commit("op", "web-flow", true))))).toBe(true);
-    expect(await from(answering(compare(commit("op", "web-flow", false))))).toBe(false);
-    expect(await from(answering(compare(commit("stranger", "web-flow", true))))).toBe(false);
+  it("is false when the committer login is the right one but the pusher is a foreign account", async () => {
+    // the activity record names who pushed; a commit's committer is whatever its maker wrote
+    expect(await from(answering([push(A, B, "stranger")]))).toBe(false);
+    expect(await from(answering([push(M, B, "op"), push(A, M, "stranger")]))).toBe(false);
+    expect(await from(answering([push(A, B, null)]))).toBe(false);
   });
 
-  it("is false for an allowed author with a foreign committer: the author is only metadata", async () => {
-    expect(await from(answering(compare(commit("op", "stranger"))))).toBe(false);
-    expect(await from(answering(compare(commit("op", "op"), commit("op", null))))).toBe(false);
+  it("takes a push by an allowed account, whoever wrote the commits", async () => {
+    expect(await from(answering([push(A, B, "op")]))).toBe(true);
+  });
+
+  it("is false when the chain of pushes does not reach the run's push", async () => {
+    expect(await from(answering([push(M, B, "op")]))).toBe(false);
+    expect(await from(answering([]))).toBe(false);
+    expect(await from(answering([push(B, A, "op")]))).toBe(false);
   });
 
   it("with no logins configured, trusts the account gh acts as", async () => {
     const seen: string[] = [];
-    const gh = answering(compare(commit("op", "op")), seen, "op");
-    expect(await from(gh, [])).toBe(true);
+    expect(await from(answering([push(A, B, "op")], seen, "op"), [])).toBe(true);
     expect(seen.some((a) => a.includes("api user"))).toBe(true);
-    expect(await from(answering(compare(commit("op", "stranger")), [], "op"), [])).toBe(false);
+    expect(await from(answering([push(A, B, "stranger")], [], "op"), [])).toBe(false);
   });
 
-  it("is false with an empty range, a failed read or a cut-short list", async () => {
-    expect(await from(answering(compare()))).toBe(false);
-    expect(await from(answering({ total_commits: 300, commits: [commit("op", "op")] }))).toBe(
-      false,
-    );
+  it("is false with a failed read or no way to read the gh account", async () => {
     expect(await from(async () => ({ code: 1, stdout: "", stderr: "boom" }))).toBe(false);
-    // no logins and no way to read the gh account
     const noUser: GhRunner = async (args) =>
       args[1] === "user"
         ? { code: 1, stdout: "", stderr: "no" }
-        : { code: 0, stdout: JSON.stringify(compare(commit("op", "op"))), stderr: "" };
+        : { code: 0, stdout: JSON.stringify([push(A, B, "op")]), stderr: "" };
     expect(await from(noUser, [])).toBe(false);
+  });
+
+  it("reads the activity once for a run, push and head, keeps nothing for a failed read, and lets go when the run ends", async () => {
+    const seen: string[] = [];
+    const p = createPublisher(deps({ gh: answering([push(A, B, "op")], seen) }));
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+    expect(seen).toHaveLength(1);
+    p.runEnded(run().id);
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+    expect(seen).toHaveLength(2);
+    let fail = true;
+    const q = createPublisher(
+      deps({
+        gh: async (args) =>
+          fail
+            ? { code: 1, stdout: "", stderr: "boom" }
+            : { code: 0, stdout: JSON.stringify([push(A, B, "op")]), stderr: args.join(" ") },
+      }),
+    );
+    expect(await q.pushesFrom(run(), A, B, ["op"])).toBe(false);
+    fail = false;
+    expect(await q.pushesFrom(run(), A, B, ["op"])).toBe(true);
   });
 });

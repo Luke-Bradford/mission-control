@@ -744,7 +744,8 @@ export type LoopAction =
   | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
   /** Records the PR's head, a descendant of the push, as the run's push, and tells the seat. */
-  | { kind: "adopt-head"; sha: string }
+  /** `from` is the push the head sits on: the engine adopts only while that is still the run's push. */
+  | { kind: "adopt-head"; sha: string; from: string }
   /** `mark`: the `cardFor` the move sets when it is not the phase's (rework is a state of review). */
   | { kind: "move-card"; column: MoveColumn; mark?: string }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
@@ -1355,7 +1356,7 @@ function stateStep(s: LoopSnapshot): Step {
           loop.pushStartedAt === null ||
           now - loop.pushStartedAt <= NO_CI_AFTER_MS)
       ) {
-        return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha }] };
+        return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha, from: pushed.sha }] };
       }
       if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
         return park(

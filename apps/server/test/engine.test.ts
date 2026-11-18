@@ -288,6 +288,7 @@ const prRow = (over: Partial<PullRequestView> = {}): PullRequestView => ({
   mergedAt: null,
   headSha: SHA,
   mergeable: "MERGEABLE",
+  isCrossRepository: false,
   checks: [
     {
       name: "mc/review",
@@ -420,8 +421,9 @@ interface Harness {
   /** The fastForward calls, and what it answers. */
   fastForwards: { runId: string; worktree: string; sha: string }[];
   fastForwardResult: FastForwardResult;
-  /** The logins that wrote the commits between the push and the PR head (commitsFrom reads them). */
+  /** The logins that pushed the commits between the push and the PR head (pushesFrom reads them). */
   commitLogins: string[];
+  endedRuns: string[];
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
 }
@@ -496,6 +498,7 @@ function harness(): Harness {
     fastForwards: [],
     fastForwardResult: { ok: true },
     commitLogins: ["op-login"],
+    endedRuns: [],
     endBlocked: false,
     asides: [],
     wakes: [],
@@ -530,10 +533,13 @@ function harness(): Harness {
           return x.descends ?? ancestor === head;
         },
         // like the real one: no configured logins means the account gh acts as
-        commitsFrom: async (_run, _ancestor, _head, logins) =>
+        pushesFrom: async (_run, _ancestor, _head, logins) =>
           x.commitLogins.every((login) =>
             (logins.length > 0 ? logins : ["op-login"]).includes(login),
           ),
+        runEnded: (runId) => {
+          x.endedRuns.push(runId);
+        },
         async push(r) {
           x.pushes.push(r.id);
           if (x.pushHang) return new Promise<PublishResult>(() => {});
@@ -1919,6 +1925,113 @@ describe("refusals", () => {
     // the hub's own call, not a seat's or FLIGHT's
     expect(logged[0]?.seatId).toBeNull();
     expect(logged[0]?.basis).toContain("merge gate still counts it as outside");
+  });
+
+  it.each([true, null])(
+    "never adopts the head of a PR with isCrossRepository %s",
+    async (isCrossRepository) => {
+      h.descends = true;
+      setPr({ ci: "pending", headSha: SHA_B, isCrossRepository });
+      report();
+      await h.engine.reconcileRun(RUN);
+      clock += NO_CI_AFTER_MS + 1000;
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+      expect(store.runPush(RUN)?.sha).toBe(SHA);
+      expect(h.fastForwards).toEqual([]);
+    },
+  );
+
+  it("never adopts the head of a PR other than the one the loop recorded", async () => {
+    h.descends = true;
+    // a PR on the run's branch that is not the run's recorded one (#99)
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    setLoop({ prNumber: 99 });
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+  });
+
+  it("adopts nothing when the run's push changes while the descent is read, though no commit was made", async () => {
+    const SHA_C = "c".repeat(40);
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.duringDescendant = () => {
+      h.duringDescendant = undefined;
+      store.setRunPush({ runId: RUN, sha: SHA_C, at: clock });
+    };
+    await h.engine.reconcileRun(RUN);
+    expect(store.followedCommits(RUN).size).toBe(0);
+    expect(h.fastForwards).toEqual([]);
+  });
+
+  it.each(["runPush", "newestRunCommit"] as const)(
+    "the action reads %s again on its own",
+    async (which) => {
+      const SHA_C = "c".repeat(40);
+      {
+        h.descends = true;
+        setPr({ ci: "pending", headSha: SHA_B });
+        report();
+        // The first recheck (after the descent read) sees the truth; the action's own read, the
+        // second one after it, sees a change.
+        let armed = false;
+        let reads = 0;
+        h.duringDescendant = () => {
+          armed = true;
+        };
+        const real = store[which].bind(store);
+        const spy = vi.spyOn(store, which).mockImplementation(((id: string) => {
+          const got = real(id);
+          if (!armed || got === null) return got;
+          reads++;
+          return reads >= 2 ? { ...got, sha: SHA_C } : got;
+        }) as never);
+        await h.engine.reconcileRun(RUN);
+        spy.mockRestore();
+        expect(reads).toBeGreaterThanOrEqual(2);
+        expect(store.followedCommits(RUN).size).toBe(0);
+        expect(h.fastForwards).toEqual([]);
+      }
+    },
+  );
+
+  it("drops a held worktree move once the loop's epoch changes, the push staying the same", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    setLoop({ epoch: loopOf().epoch + 1 });
+    const tries = h.fastForwards.length;
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(h.fastForwards).toHaveLength(tries);
+  });
+
+  it("a PR merged while the worktree move is refused takes the run to done", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "passing", headSha: SHA_B, state: "merged", mergedAt: clock });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("done");
+    expect(loopOf().branchMoved).toBeUndefined();
+    // the publisher is told the run has ended
+    expect(h.endedRuns).toContain(RUN);
   });
 
   it("goes from CI into review on the adopted head", async () => {

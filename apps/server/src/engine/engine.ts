@@ -1610,7 +1610,12 @@ export function createEngine(deps: EngineDeps): Engine {
       case "adopt-head": {
         const prior = store.runPush(run.id);
         // read again: the seat may have committed or pushed since the loop planned this
-        if (prior === null || store.newestRunCommit(run.id)?.sha !== prior.sha) return;
+        if (
+          prior === null ||
+          prior.sha !== a.from ||
+          store.newestRunCommit(run.id)?.sha !== prior.sha
+        )
+          return;
         // the hub cannot move a worktree while its seat is in a turn: the adoption waits until the
         // seat is idle (the loop plans this again next pass)
         if (!worktreeMovable(run)) return;
@@ -1683,6 +1688,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       case "end-run":
         await supervisor.endRunByEngine(run.id);
+        publisher.runEnded(run.id);
         return;
       case "take-next": {
         // not while the seat holds another run (a merged PR found after the run was stopped)
@@ -2243,7 +2249,11 @@ export function createEngine(deps: EngineDeps): Engine {
     // a worktree move for an older epoch or push is moot: the seat has moved on
     if (
       input.branchMoved !== undefined &&
-      (input.branchMoved.epoch !== input.epoch || pushed?.sha !== input.branchMoved.sha)
+      (input.branchMoved.epoch !== input.epoch ||
+        pushed?.sha !== input.branchMoved.sha ||
+        // a PR that ended while the move was held needs no worktree for it
+        pr?.state === "merged" ||
+        pr?.state === "closed")
     )
       delete input.branchMoved;
     const flightPowers = flightPowersOf(config, run.repoId);
@@ -2355,6 +2365,11 @@ export function createEngine(deps: EngineDeps): Engine {
       run.endedAt === null &&
       pushed !== null &&
       pr?.state === "open" &&
+      // only a PR the run had recorded before this pass (not one just found by its branch name),
+      // and never one from a fork
+      stored.prNumber !== null &&
+      pr.number === stored.prNumber &&
+      pr.isCrossRepository === false &&
       pr.headSha !== null &&
       pr.headSha !== pushed.sha &&
       snap.headCommit === pushed.sha &&
@@ -2362,7 +2377,7 @@ export function createEngine(deps: EngineDeps): Engine {
       !store.branchCommits(run.repoId, run.branch ?? "").has(pr.headSha) &&
       (await publisher.isDescendant(run, pushed.sha, pr.headSha)) &&
       // only the operator's own commits are taken into a seat's worktree; anyone else's park as stuck
-      (await publisher.commitsFrom(run, pushed.sha, pr.headSha, config.operator.githubLogins ?? []))
+      (await publisher.pushesFrom(run, pushed.sha, pr.headSha, config.operator.githubLogins ?? []))
     ) {
       // the fetch can take a while: a commit or push the seat made meanwhile is not this push,
       // and the snapshot is stale; the next pass reads it again
@@ -2385,7 +2400,12 @@ export function createEngine(deps: EngineDeps): Engine {
     const cur = step.loop;
     // The seat is still on the old head: nothing may send to it, wake it or resume it, or its next
     // commit lands there. Only the park for a move the hub cannot make goes ahead.
-    if (run.endedAt === null && input.branchMoved !== undefined && cur.phase !== "parked") {
+    if (
+      run.endedAt === null &&
+      input.branchMoved !== undefined &&
+      cur.phase !== "parked" &&
+      cur.phase !== "done"
+    ) {
       saveLoop(runId, input, stored, at);
       return;
     }

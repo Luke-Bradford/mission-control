@@ -196,11 +196,13 @@ export interface Publisher {
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /**
-   * Whether every commit in `ancestor..head` was made by one of `logins` (none: the account gh
-   * acts as): committed by one, or made on GitHub with a verified signature by one. Read from
-   * GitHub's compare; false when the read fails, the range is empty, or the list is cut short.
+   * Whether the pushes that took the run's branch from `ancestor` to `head` were all made by one of
+   * `logins` (none: the account gh acts as), read from GitHub's push activity for the branch. False
+   * when the read fails or the chain of pushes is not whole.
    */
-  commitsFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
+  pushesFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
+  /** A run has ended: what the publisher kept for it is let go. */
+  runEnded(runId: string): void;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
   /** Opens the run's draft PR, or finds the one it already opened. */
@@ -830,6 +832,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
   const unfetchable = new Map<string, number>();
   const FETCH_RETRY_MS = 30_000;
+  /** `run:push:head` to whether the pushes between them were all by an allowed account. */
+  const pushChains = new Map<string, boolean>();
   /** The login gh acts as, once read. */
   let ghUser: string | undefined;
   async function ghLogin(): Promise<string[]> {
@@ -1247,46 +1251,58 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return result.ok && result.descends;
     },
 
-    async commitsFrom(run, ancestor, head, logins) {
+    async pushesFrom(run, ancestor, head, logins) {
       const repo = repoOf(run);
-      if (repo === undefined || !SHA.test(ancestor) || !SHA.test(head)) return false;
-      const compare = await ghJson(
-        ["api", `repos/${repo}/compare/${ancestor}...${head}`],
-        "compare",
-      );
-      if (isRefusal(compare) || !Array.isArray(compare.commits) || compare.commits.length === 0)
+      const branch = ownBranch(run);
+      if (repo === undefined || branch === null || !SHA.test(ancestor) || !SHA.test(head))
         return false;
-      // GitHub lists at most 250 commits: a longer range is not read whole
-      if (
-        typeof compare.total_commits === "number" &&
-        compare.total_commits > compare.commits.length
-      )
-        return false;
+      // the answer for a push and head does not change; a failed read is not kept
+      const key = `${run.id}:${ancestor}:${head}`;
+      const known = pushChains.get(key);
+      if (known !== undefined) return known;
       // with no aliases configured, the operator is the account gh acts as
       const allowed = (logins.length > 0 ? logins : await ghLogin()).map((l) => l.toLowerCase());
       if (allowed.length === 0) return false;
-      const loginOf = (who: unknown): string | null => {
-        const login = (who as { login?: unknown } | null)?.login;
-        return typeof login === "string" ? login.toLowerCase() : null;
-      };
-      type CompareCommit = {
-        author?: unknown;
-        committer?: unknown;
-        commit?: { verification?: { verified?: unknown } };
-      };
-      // The commit's maker is its committer: the author is only a name and email anyone can write.
-      // A commit made on GitHub is committed by `web-flow`; GitHub signs it, so its author counts.
-      return (compare.commits as CompareCommit[]).every((c) => {
-        const committer = loginOf(c.committer);
-        if (committer !== null && allowed.includes(committer)) return true;
-        const author = loginOf(c.author);
-        return (
-          committer === "web-flow" &&
-          c.commit?.verification?.verified === true &&
-          author !== null &&
-          allowed.includes(author)
-        );
-      });
+      const listed = await ghJson(
+        [
+          "api",
+          `repos/${repo}/activity?ref=${encodeURIComponent(`refs/heads/${branch}`)}&activity_type=push&per_page=100`,
+        ],
+        "activity",
+      );
+      if (isRefusal(listed) || !Array.isArray(listed)) return false;
+      type Push = { before?: unknown; after?: unknown; actor?: { login?: unknown } | null };
+      const pushes = listed as Push[];
+      // Who pushed is GitHub's own record; a commit's committer or author is whatever its maker
+      // wrote. The head follows the push only when every push from the run's own to the head was
+      // made by an allowed account.
+      let tip = head;
+      let ok = false;
+      for (let hops = 0; hops <= pushes.length; hops++) {
+        if (tip === ancestor) {
+          ok = true;
+          break;
+        }
+        const push = pushes.find((p) => p.after === tip);
+        const actor = push?.actor?.login;
+        if (
+          push === undefined ||
+          typeof actor !== "string" ||
+          !allowed.includes(actor.toLowerCase()) ||
+          typeof push.before !== "string"
+        )
+          break;
+        tip = push.before;
+      }
+      pushChains.set(key, ok);
+      return ok;
+    },
+
+    runEnded(runId) {
+      const prefix = `${runId}:`;
+      for (const key of [...unfetchable.keys()])
+        if (key.startsWith(prefix)) unfetchable.delete(key);
+      for (const key of [...pushChains.keys()]) if (key.startsWith(prefix)) pushChains.delete(key);
     },
 
     async reviewPr(run, number) {

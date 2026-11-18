@@ -573,6 +573,8 @@ export interface PullRequestView {
   headSha: string | null;
   /** UNKNOWN: GitHub has not computed it yet, so poll again. When it was read is the row's `read_at`. */
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
+  /** The PR's head branch is in a fork; null when GitHub gave none or the row was stored before it. */
+  isCrossRepository?: boolean | null;
   /** The PR author's login; absent or null when GitHub gave none or the row was stored before it. */
   author?: string | null;
   /** Logins assigned to the PR; absent means none. */

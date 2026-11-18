@@ -73,6 +73,8 @@ class Migrations {
       undefined
     )
       this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
+    // Whether a PR comes from a fork: a run never follows a fork's head (#2099).
+    this.addColumn("pull_requests", "is_cross_repository", "INTEGER");
     // A commit a run only follows, such as someone else's on top of its push (#2099).
     this.addColumn("run_commits", "followed", "INTEGER NOT NULL DEFAULT 0");
     // Token audit call times (#1646): audits stored before this have none until re-read.

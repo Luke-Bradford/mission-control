@@ -1195,6 +1195,7 @@ describe("Store", () => {
       headSha: "0123abc",
       mergeCommitSha: "merge-sha",
       mergeable: "MERGEABLE" as const,
+      isCrossRepository: false,
       author: "octo",
       assignees: ["a", "b"],
       checks: [],
