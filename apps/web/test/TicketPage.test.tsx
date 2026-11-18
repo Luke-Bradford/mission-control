@@ -486,6 +486,11 @@ describe("questions on the ticket", () => {
     fireEvent.click(within(p).getByText("Conversation"));
     expect(await within(p).findByText("Which one?")).toBeTruthy();
     expect(within(p).getByText("The LRU one.")).toBeTruthy();
+    const rows = within(
+      within(p).getByRole("list", { name: "Conversation on this question" }),
+    ).getAllByRole("listitem");
+    expect(within(rows[0] as HTMLElement).getByText("YOU")).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText("FLIGHT")).toBeTruthy();
     expect(within(p).queryByRole("textbox")).toBeNull();
   });
 
