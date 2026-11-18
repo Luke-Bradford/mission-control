@@ -221,7 +221,7 @@ export function CurrentQaReport({
           </button>
         </p>
       ) : report ? (
-        <QaReportRead report={report} currentHead={head} awaiting={awaiting} ticket={ticket} />
+        <QaReportRead report={report} currentHead={head} awaiting={awaiting} />
       ) : (
         <p className="uat-banner" role="status">
           {resource.loading
