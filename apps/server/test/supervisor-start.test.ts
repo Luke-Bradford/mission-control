@@ -2190,7 +2190,7 @@ describe("endRun", () => {
     await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     const worktree = store.seatSession("guido-1")?.worktree as string;
-    onBoard(boardCard(42, { closed: true }));
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
     await sup.endRun("guido-1");
     await until(() => expect(existsSync(worktree)).toBe(false));
   });
