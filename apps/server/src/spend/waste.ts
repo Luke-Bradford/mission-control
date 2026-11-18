@@ -346,11 +346,26 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     "WHERE check_id = 'retry-loop' AND opened_at >= ?",
     now - 7 * 24 * HOUR_MS,
   );
+  const rePlans = parkedBefore.length
+    ? store.flightDecisions(now - 7 * 24 * HOUR_MS, -1).filter((d) => d.kind === "re-plan")
+    : [];
   for (const a of parkedBefore) {
     if (a.ticket === null) continue;
-    const startedAfter = (byTicket.get(a.ticket) ?? []).filter(
-      (r) => r.startedAt > a.openedAt && developer(r),
-    );
+    const ticket = a.ticket;
+    const developerRuns = (byTicket.get(ticket) ?? []).filter(developer);
+    // A deliberate revive: FLIGHT logged a re-plan for the ticket after the alarm opened and after
+    // the run before this one began, and before this run started. A later restart is not covered.
+    const aboutTicket = (about: string): boolean => {
+      for (let i = about.indexOf(ticket); i >= 0; i = about.indexOf(ticket, i + 1))
+        if (!/\d/.test(about[i + ticket.length] ?? "")) return true;
+      return false;
+    };
+    const revived = (r: Run): boolean => {
+      const before = developerRuns.filter((x) => x.startedAt < r.startedAt);
+      const from = Math.max(a.openedAt, ...before.map((x) => x.startedAt));
+      return rePlans.some((d) => d.at > from && d.at < r.startedAt && aboutTicket(d.about));
+    };
+    const startedAfter = developerRuns.filter((r) => r.startedAt > a.openedAt && !revived(r));
     if (startedAfter.length === 0 || done(a.ticket)) continue;
     out.push({
       check: "ticket-churn",
