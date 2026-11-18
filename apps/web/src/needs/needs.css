@@ -233,10 +233,6 @@
   min-height: 0;
 }
 
-.flight-thread-about {
-  margin: var(--sp-2) var(--sp-3) 0;
-}
-
 .needs-side .flight-thread-log {
   flex: 1 0 280px;
   min-height: 280px;

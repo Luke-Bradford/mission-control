@@ -4,6 +4,9 @@
   min-height: 0;
   flex-direction: column;
 }
+.flight-thread-about {
+  margin: var(--sp-2) var(--sp-3) 0;
+}
 .flight-thread-log {
   flex: 1;
   min-height: 0;
