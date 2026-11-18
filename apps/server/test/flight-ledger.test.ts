@@ -662,6 +662,7 @@ describe("retrospective measures", () => {
           "/telemetry",
           "/audit",
           "/setup",
+          "/planner",
           "/agent/flight-1",
           "/agent/guido-1",
         ],
