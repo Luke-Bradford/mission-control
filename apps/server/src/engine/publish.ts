@@ -196,7 +196,8 @@ export interface Publisher {
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /**
-   * Whether every commit in `ancestor..head` was authored or committed by one of `logins`, from
+   * Whether every commit in `ancestor..head` was made by one of `logins` (none: the account gh
+   * acts as): committed by one, or made on GitHub with a verified signature by one. Read from
    * GitHub's compare; false when the read fails, the range is empty, or the list is cut short.
    */
   commitsFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
@@ -829,6 +830,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
   const unfetchable = new Map<string, number>();
   const FETCH_RETRY_MS = 30_000;
+  /** The login gh acts as, once read. */
+  let ghUser: string | undefined;
+  async function ghLogin(): Promise<string[]> {
+    if (ghUser === undefined) {
+      const me = await ghJson(["api", "user"], "user");
+      if (!isRefusal(me) && typeof me.login === "string") ghUser = me.login;
+    }
+    return ghUser === undefined ? [] : [ghUser];
+  }
   return {
     async push(run) {
       const r = await pushRun(deps, run.id);
@@ -1252,14 +1262,31 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         compare.total_commits > compare.commits.length
       )
         return false;
-      const loginOf = (who: unknown): unknown => (who as { login?: unknown } | null)?.login;
-      // a merge made on GitHub is committed by its web flow: the author's login is the one that counts
-      return (compare.commits as { author?: unknown; committer?: unknown }[]).every(
-        (c) =>
-          (typeof loginOf(c.author) === "string" && logins.includes(loginOf(c.author) as string)) ||
-          (typeof loginOf(c.committer) === "string" &&
-            logins.includes(loginOf(c.committer) as string)),
-      );
+      // with no aliases configured, the operator is the account gh acts as
+      const allowed = (logins.length > 0 ? logins : await ghLogin()).map((l) => l.toLowerCase());
+      if (allowed.length === 0) return false;
+      const loginOf = (who: unknown): string | null => {
+        const login = (who as { login?: unknown } | null)?.login;
+        return typeof login === "string" ? login.toLowerCase() : null;
+      };
+      type CompareCommit = {
+        author?: unknown;
+        committer?: unknown;
+        commit?: { verification?: { verified?: unknown } };
+      };
+      // The commit's maker is its committer: the author is only a name and email anyone can write.
+      // A commit made on GitHub is committed by `web-flow`; GitHub signs it, so its author counts.
+      return (compare.commits as CompareCommit[]).every((c) => {
+        const committer = loginOf(c.committer);
+        if (committer !== null && allowed.includes(committer)) return true;
+        const author = loginOf(c.author);
+        return (
+          committer === "web-flow" &&
+          c.commit?.verification?.verified === true &&
+          author !== null &&
+          allowed.includes(author)
+        );
+      });
     },
 
     async reviewPr(run, number) {

@@ -2301,6 +2301,14 @@ export function createEngine(deps: EngineDeps): Engine {
     const mergeAllowed =
       config.repos.find((r) => r.id === repoId)?.autonomy === "merge" &&
       rules?.hardRulesSet === true;
+    // the worktree moves before anything else is planned for the run
+    if (run.endedAt === null && input.branchMoved !== undefined) {
+      try {
+        await followAdoptedHead(run, input, at);
+      } catch (e) {
+        log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     const snap = snapshot(run, input, at, mergeAllowed);
     // a commit on top of the seat's push (a main merge, a doc edit): the PR head follows the push
     if (
@@ -2337,6 +2345,12 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
+    // The seat is still on the old head: nothing may send to it, wake it or resume it, or its next
+    // commit lands there. Only the park for a move the hub cannot make goes ahead.
+    if (run.endedAt === null && input.branchMoved !== undefined && cur.phase !== "parked") {
+      saveLoop(runId, input, stored, at);
+      return;
+    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -2364,13 +2378,6 @@ export function createEngine(deps: EngineDeps): Engine {
     // The run's card is not the ended run's to move once another run has the ticket.
     const newer = run.endedAt !== null && store.hasNewerRunOnTicket(run);
     const out: Outcome = { again: false, parked: false };
-    if (run.endedAt === null && cur.branchMoved !== undefined) {
-      try {
-        await followAdoptedHead(run, cur, at);
-      } catch (e) {
-        log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
     for (const a of step.actions) {
       if (out.parked) break;
       // a note that was cleared because it is no longer wanted is not raised again

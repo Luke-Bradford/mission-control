@@ -528,8 +528,11 @@ function harness(): Harness {
           x.duringDescendant?.(ancestor, head);
           return x.descends ?? ancestor === head;
         },
+        // like the real one: no configured logins means the account gh acts as
         commitsFrom: async (_run, _ancestor, _head, logins) =>
-          x.commitLogins.every((login) => logins.includes(login)),
+          x.commitLogins.every((login) =>
+            (logins.length > 0 ? logins : ["op-login"]).includes(login),
+          ),
         async push(r) {
           x.pushes.push(r.id);
           if (x.pushHang) return new Promise<PublishResult>(() => {});
@@ -1804,6 +1807,53 @@ describe("refusals", () => {
     }
     expect(store.runPush(RUN)?.sha).toBe(SHA_B);
     expect(loopOf().phase).toBe("ci");
+  });
+
+  it("with no github_logins configured, adopts a head made by the account gh acts as", async () => {
+    config.operator.githubLogins = [];
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().parked).toBeNull();
+  });
+
+  it("sends the seat nothing while the worktree move is refused: a CI failure waits for the move", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    const sentBefore = h.sent.length;
+    const wakesBefore = h.wakes.length;
+    for (let i = 0; i < 3; i++) {
+      clock += ENGINE_TICK_MS;
+      setPr({ ci: "failing", headSha: SHA_B });
+      await h.engine.reconcileRun(RUN);
+    }
+    expect(h.sent).toHaveLength(sentBefore);
+    expect(h.wakes).toHaveLength(wakesBefore);
+    expect(h.excerpts).toEqual([]);
+    expect(h.reruns).toEqual([]);
+    // once the hub can move the worktree, the work goes on
+    h.fastForwardResult = { ok: true };
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "failing", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved).toBeUndefined();
+    // the failed check is acted on now: re-run once, as for any first failure
+    for (let i = 0; i < 2; i++) {
+      clock += ENGINE_TICK_MS;
+      setPr({ ci: "failing", headSha: SHA_B });
+      await h.engine.reconcileRun(RUN);
+    }
+    expect(h.reruns.length).toBeGreaterThan(0);
   });
 
   it("takes only commits the operator's accounts wrote; others park as stuck", async () => {

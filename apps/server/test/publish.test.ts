@@ -3195,48 +3195,60 @@ describe("fileMinorFindings", () => {
 describe("commitsFrom", () => {
   const A = "a".repeat(40);
   const B = "b".repeat(40);
-  const commit = (author: string | null, committer: string | null) => ({
+  const commit = (author: string | null, committer: string | null, verified = false) => ({
     author: author === null ? null : { login: author },
     committer: committer === null ? null : { login: committer },
+    commit: { verification: { verified } },
   });
-  const compareReturning =
-    (body: object, seen: string[] = []): GhRunner =>
+  /** Answers the compare with `body`, and `gh api user` with `me`. */
+  const answering =
+    (body: object, seen: string[] = [], me = "op"): GhRunner =>
     async (args) => {
       seen.push(args.join(" "));
-      return { code: 0, stdout: JSON.stringify(body), stderr: "" };
+      const out = args[1] === "user" ? { login: me } : body;
+      return { code: 0, stdout: JSON.stringify(out), stderr: "" };
     };
   const from = (gh: GhRunner, logins = ["op"]) =>
     createPublisher(deps({ gh })).commitsFrom(run(), A, B, logins);
+  const compare = (...commits: object[]) => ({ total_commits: commits.length, commits });
 
-  it("is true when every commit was authored or committed by one of the logins", async () => {
+  it("is true when every commit was committed by one of the logins, in any case", async () => {
     const seen: string[] = [];
-    const gh = compareReturning(
-      {
-        total_commits: 2,
-        commits: [commit("op", "op"), commit("op", "web-flow")],
-      },
-      seen,
-    );
+    const gh = answering(compare(commit("op", "op"), commit("x", "OP")), seen);
     expect(await from(gh)).toBe(true);
     expect(seen[0]).toContain(`compare/${A}...${B}`);
   });
 
-  it("is false when a commit was written by neither", async () => {
-    const gh = compareReturning({
-      total_commits: 2,
-      commits: [commit("op", "op"), commit("stranger", "web-flow")],
-    });
-    expect(await from(gh)).toBe(false);
-    expect(await from(compareReturning({ total_commits: 1, commits: [commit(null, null)] }))).toBe(
-      false,
-    );
+  it("takes a verified GitHub web-flow commit by an allowed author", async () => {
+    expect(await from(answering(compare(commit("op", "web-flow", true))))).toBe(true);
+    expect(await from(answering(compare(commit("op", "web-flow", false))))).toBe(false);
+    expect(await from(answering(compare(commit("stranger", "web-flow", true))))).toBe(false);
   });
 
-  it("is false with no logins, an empty range, a failed read or a cut-short list", async () => {
-    const ok = { total_commits: 1, commits: [commit("op", "op")] };
-    expect(await from(compareReturning(ok), [])).toBe(false);
-    expect(await from(compareReturning({ total_commits: 0, commits: [] }))).toBe(false);
-    expect(await from(compareReturning({ total_commits: 300, commits: ok.commits }))).toBe(false);
+  it("is false for an allowed author with a foreign committer: the author is only metadata", async () => {
+    expect(await from(answering(compare(commit("op", "stranger"))))).toBe(false);
+    expect(await from(answering(compare(commit("op", "op"), commit("op", null))))).toBe(false);
+  });
+
+  it("with no logins configured, trusts the account gh acts as", async () => {
+    const seen: string[] = [];
+    const gh = answering(compare(commit("op", "op")), seen, "op");
+    expect(await from(gh, [])).toBe(true);
+    expect(seen.some((a) => a.includes("api user"))).toBe(true);
+    expect(await from(answering(compare(commit("op", "stranger")), [], "op"), [])).toBe(false);
+  });
+
+  it("is false with an empty range, a failed read or a cut-short list", async () => {
+    expect(await from(answering(compare()))).toBe(false);
+    expect(await from(answering({ total_commits: 300, commits: [commit("op", "op")] }))).toBe(
+      false,
+    );
     expect(await from(async () => ({ code: 1, stdout: "", stderr: "boom" }))).toBe(false);
+    // no logins and no way to read the gh account
+    const noUser: GhRunner = async (args) =>
+      args[1] === "user"
+        ? { code: 1, stdout: "", stderr: "no" }
+        : { code: 0, stdout: JSON.stringify(compare(commit("op", "op"))), stderr: "" };
+    expect(await from(noUser, [])).toBe(false);
   });
 });
