@@ -1671,16 +1671,19 @@ export async function prepareCheckout(
   runInstall: InstallRunner = execFileP,
 ): Promise<Checkout> {
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
-  const ticket = await ticketBranch(
-    inClone,
-    i.issue,
-    i.mergedPullRequestBranches,
-    i.openPullRequestBranches,
-  );
+  const ticket =
+    i.handoff === undefined
+      ? await ticketBranch(
+          inClone,
+          i.issue,
+          i.mergedPullRequestBranches,
+          i.openPullRequestBranches,
+        )
+      : null;
   const branch =
     i.handoff?.branch ??
-    ticket.branch ??
-    (ticket.branches.size === 0
+    ticket?.branch ??
+    (ticket === null || ticket.branches.size === 0
       ? branchFor(i.issue, i.title)
       : freshTicketBranch(i.issue, i.title, ticket.branches));
   // a worktree made before sessions had folders is reused where it is

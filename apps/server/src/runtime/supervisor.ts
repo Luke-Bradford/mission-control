@@ -3684,10 +3684,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
-                mergedPullRequestBranches: store
-                  .pullRequests(info.repo.id)
-                  .filter((pr) => pr.state === "merged")
-                  .map((pr) => pr.branch),
+                mergedPullRequestBranches: store.mergedPullRequestBranches(info.repo.id),
                 openPullRequestBranches: store
                   .pullRequests(info.repo.id)
                   .filter((pr) => pr.state === "open")

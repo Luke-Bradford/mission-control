@@ -338,6 +338,15 @@ describe("prepareCheckout", () => {
     expect(git(back.path, "symbolic-ref", "HEAD")).toBe("refs/heads/feature/pr-head");
   });
 
+  it("uses an explicit handoff branch despite other ticket branches", async () => {
+    git(clone, "branch", BRANCH);
+    git(clone, "branch", "feature/42-ended-stage");
+
+    expect(
+      await prepareCheckout({ ...input(), handoff: { branch: BRANCH, worktree: null } }),
+    ).toMatchObject({ branch: BRANCH, created: true });
+  });
+
   it("refuses to move a seat's worktree with unpushed work onto the PR's ref", async () => {
     const old = await prepareCheckout(input());
     commit(old.path, { "pr.txt": "pr\n" }, "pr");
