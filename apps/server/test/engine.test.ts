@@ -1463,7 +1463,7 @@ describe("CI and review", () => {
     expect(loopOf().phase).toBe("review");
   });
 
-  it("a slow job is judged by its own p90 from merged PRs, and parks only past twice that", async () => {
+  it("a slow job stays in CI until it reports", async () => {
     const web = (over: Partial<PrCheck> = {}): PrCheck => ({
       name: "web",
       kind: "check",
@@ -1505,7 +1505,7 @@ describe("CI and review", () => {
       running();
       await h.engine.tick();
     }
-    expect(loopOf().parked?.reason).toMatch(/CI pending for 60 minutes .*pending: web/);
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null });
   });
 
   it("a failing check is named in the CI failed event", async () => {
@@ -1686,7 +1686,7 @@ describe("refusals", () => {
     expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
   });
 
-  it("a checks hand-off restarts the push clock; with no progress after a full window the park names the checks", async () => {
+  it("a checks hand-off restarts the push clock; no progress stays in CI", async () => {
     const text = pushChecksText("a".repeat(40), [{ command: "pnpm -s lint", state: "missing" }]);
     const refusal = { ok: false, text, transient: false } as const;
     h.pushResults = Array.from({ length: 8 }, () => refusal);
@@ -1701,8 +1701,8 @@ describe("refusals", () => {
     expect(loopOf().phase).not.toBe("parked");
     clock += 2000;
     await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
-    expect(loopOf().parked?.reason).toContain(text);
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null });
+    expect(h.sent.some((message) => message.text === text)).toBe(true);
   });
 
   it("a PR head on top of the seat's push becomes the run's push, and the seat's worktree follows", async () => {
@@ -1891,7 +1891,7 @@ describe("refusals", () => {
     expect(h.reruns.length).toBeGreaterThan(0);
   });
 
-  it("follows only pushes by the operator's accounts; a foreign pusher parks as stuck", async () => {
+  it("follows only pushes by the operator's accounts; a foreign pusher stays in CI", async () => {
     h.descends = true;
     h.pusherLogins = ["op-login", "someone-else"];
     setPr({ ci: "pending", headSha: SHA_B });
@@ -1899,7 +1899,7 @@ describe("refusals", () => {
     await h.engine.reconcileRun(RUN);
     clock += NO_CI_AFTER_MS + 1000;
     await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null });
     expect(store.runPush(RUN)?.sha).toBe(SHA);
     expect(h.fastForwards).toEqual([]);
   });
@@ -1962,7 +1962,7 @@ describe("refusals", () => {
       await h.engine.reconcileRun(RUN);
       clock += NO_CI_AFTER_MS + 1000;
       await h.engine.reconcileRun(RUN);
-      expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+      expect(loopOf()).toMatchObject({ phase: "ci", parked: null });
       expect(store.runPush(RUN)?.sha).toBe(SHA);
       expect(h.fastForwards).toEqual([]);
     },
@@ -2094,14 +2094,14 @@ describe("refusals", () => {
     expect(loopOf()).toMatchObject({ phase: "review", parked: null });
   });
 
-  it("parks as stuck when the PR head does not descend from the push", async () => {
+  it("stays in CI when the PR head does not descend from the push", async () => {
     h.descends = false;
     setPr({ ci: "pending", headSha: SHA_B });
     report();
     await h.engine.reconcileRun(RUN);
     clock += NO_CI_AFTER_MS + 1000;
     await h.engine.reconcileRun(RUN);
-    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null });
     expect(store.runPush(RUN)?.sha).toBe(SHA);
     expect(h.fastForwards).toEqual([]);
   });
@@ -2286,7 +2286,7 @@ describe("refusals", () => {
     expect(h.prs).toHaveLength(1);
   });
 
-  it("when the PR step keeps finding the tip wrong, the stuck park says so", async () => {
+  it("when the PR step keeps finding the tip wrong, it keeps the refusal in CI", async () => {
     report();
     store.setRunPush({ runId: RUN, sha: SHA, at: clock });
     setLoop({ phase: "ci", reportedEvidenceId: 1, pushFor: SHA, pushStartedAt: clock });
@@ -2299,10 +2299,7 @@ describe("refusals", () => {
     expect(loopOf().lastRefusal).toBe(TIP_MOVED);
     clock += 11 * MIN;
     await h.engine.reconcileRun(RUN);
-    expect(loopOf().parked).toMatchObject({
-      kind: "stuck",
-      reason: expect.stringContaining(`after 10 minutes (${TIP_MOVED})`),
-    });
+    expect(loopOf()).toMatchObject({ phase: "ci", parked: null, lastRefusal: TIP_MOVED });
   });
 
   it("stops looking again after four passes", async () => {
