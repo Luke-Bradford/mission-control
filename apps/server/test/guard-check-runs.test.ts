@@ -519,19 +519,26 @@ describe("why the recorder dropped a check call", () => {
 
   it("replaces a Codex check whose session disappeared with a fresh run in the same turn", async () => {
     const r = recorder();
-    await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "codex-item-1" }]);
-    expect(r.pending("r1")).toEqual([LINT]);
+    const joined = `${LINT} && ${TYPES}`;
+    await r.begin(KEY, joined, [{ runId: "r1", toolUseId: "codex-item-1" }]);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
     expect(r.lost("r1", LINT)).toBe(true);
     expect(r.pending("r1")).toEqual([]);
-    expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
+    expect(reasons(r)).toEqual([
+      ["session-lost", LINT, HEAD],
+      ["session-lost", TYPES, HEAD],
+    ]);
 
     const fresh = { runId: "r1", toolUseId: "codex-item-2" };
-    await r.begin(fresh, LINT, [{ runId: "r1", toolUseId: "codex-item-3" }]);
+    await r.begin(fresh, joined, [{ runId: "r1", toolUseId: "codex-item-3" }]);
 
-    expect(r.pending("r1")).toEqual([LINT]);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
     await r.end({ runId: "r1", toolUseId: "codex-item-3" }, true, 0);
 
-    expect(rows).toMatchObject([{ command: LINT, headSha: HEAD, ok: true, exitCode: 0 }]);
+    expect(rows).toMatchObject([
+      { command: LINT, headSha: HEAD, ok: true, exitCode: 0 },
+      { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
+    ]);
     expect(r.pending("r1")).toEqual([]);
   });
 

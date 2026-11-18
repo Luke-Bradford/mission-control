@@ -3051,18 +3051,35 @@ describe("push and draft_pr", () => {
 
       it("pushes after a fresh Codex check replaces a disappeared session", async () => {
         const sha = await commitOk("apps/a.ts", "a2\n");
+        store.setRunLoop(RUN, { ...NEW_LOOP, phase: "working" });
         const checks = createCheckRecorder({
           store,
           checks: async () => [LINT, TYPES],
           state: async () => ({ head: head(), clean: true }),
         });
-        await checks.begin({ runId: RUN, toolUseId: "lost-cell" }, LINT);
-        await checks.begin({ runId: RUN, toolUseId: "fresh-cell" }, LINT);
-        await checks.end({ runId: RUN, toolUseId: "fresh-cell" }, true, 0);
-        await checks.begin({ runId: RUN, toolUseId: "types" }, TYPES);
-        await checks.end({ runId: RUN, toolUseId: "types" }, true, 0);
+        const t = gated({
+          checkDrops: (runId) => checks.drops(runId),
+          lostCheck: (runId, command) => checks.lost(runId, command),
+          pendingChecks: (runId) => checks.pending(runId),
+        });
+        const joined = `${LINT} && ${TYPES}`;
+        await checks.begin({ runId: RUN, toolUseId: "lost-cell" }, joined);
 
-        expect(await push(gated({ checkDrops: (runId) => checks.drops(runId) }))).toEqual({
+        const lost = await tool("report_evidence", t).call(CTX, {
+          note: "The check session disappeared.",
+          lostCheck: LINT,
+        });
+        expect(lost.isError).toBe(true);
+        expect(lost.text).toContain(`Run ${LINT}, ${TYPES} again`);
+        expect(checks.pending(RUN)).toEqual([]);
+
+        await checks.begin({ runId: RUN, toolUseId: "fresh-cell" }, joined);
+        await checks.end({ runId: RUN, toolUseId: "fresh-cell" }, true, 0);
+        expect(
+          await tool("report_evidence", t).call(CTX, { note: "The replacement check passed." }),
+        ).toEqual({ text: EVIDENCE_RECORDED });
+
+        expect(await push(t)).toEqual({
           text: `Pushed ${sha.slice(0, 7)} to ${BRANCH}.`,
         });
         expect(remoteTip()).toBe(sha);

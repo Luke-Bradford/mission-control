@@ -344,7 +344,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     lost(runId, command) {
       const calls = new Set<StartedCall>();
       for (const [id, call] of started) {
-        if (call.runId !== runId || call.command !== command) continue;
+        if (call.runId !== runId || !call.matched.includes(command)) continue;
         started.delete(id);
         calls.add(call);
       }
