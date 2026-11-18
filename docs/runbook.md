@@ -1623,7 +1623,7 @@ named pause or attributes an unknown grant to FLIGHT.
 
 | Tool | What it does |
 |---|---|
-| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat; also sends a merge-hold park back to its builder, the hold staying in force), or `second_review` |
 | `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. |
 | `resolve_waste_alarm` | Close a retry-loop alarm's hold, so the parked ticket is dealt again, with a recorded basis. See Waste alarms. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
