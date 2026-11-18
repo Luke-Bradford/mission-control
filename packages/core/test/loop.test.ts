@@ -288,11 +288,15 @@ describe("state step", () => {
     expect(r.loop.parked?.ended).toBe(true);
   });
 
-  it("3: parked stays parked", () => {
-    const l = { phase: "parked" as const, parked: { kind: "ci", reason: "r", ended: false } };
+  it("3: an old non-decision park stops on upgrade, while a review park waits", () => {
+    const l = { phase: "parked" as const, parked: { kind: "stuck", reason: "r", ended: false } };
     const r = reconcile(snap({ evidence: { id: 9, at: 1, ruling: false }, headCommit: SHA }, l));
-    expect(r.loop).toEqual({ ...NEW_LOOP, ...l });
-    expect(events(r.actions)).toEqual([]);
+    expect(r.loop.parked?.ended).toBe(true);
+    expect(r.actions.map((action) => action.kind)).toEqual(
+      expect.arrayContaining(["end-run", "take-next"]),
+    );
+    const review = { phase: "parked" as const, parked: { kind: "review", reason: "r", ended: false } };
+    expect(reconcile(snap({}, review)).loop).toEqual({ ...NEW_LOOP, ...review });
   });
 
   it("4: a closed PR parks", () => {

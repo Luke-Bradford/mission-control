@@ -170,7 +170,15 @@ describe("ticketBrief continuation", () => {
 
     expect(brief).toContain("## Continue the earlier run");
     expect(brief).toContain("Required next action: Add boundary validation.");
+    expect(brief).toMatch(/<pasted_content id="[^"]+">/);
     expect(ticketBrief(input)).not.toContain("Continue the earlier run");
+  });
+
+  it("wraps a bounded continuation without enlarging it", () => {
+    const continuation = "a".repeat(1500);
+    const brief = ticketBrief({ ...input, continuation });
+    expect(brief).toContain(continuation);
+    expect(brief).toMatch(/<pasted_content id="[^"]+">\na{1500}\n<\/pasted_content/);
   });
 });
 
