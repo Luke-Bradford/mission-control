@@ -196,4 +196,58 @@ describeRendered("Planner page", () => {
       }
     }
   }
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    it(
+      `shows every decision input before Approve at 1280x720, ${colorScheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1280,
+          height: 720,
+          colorScheme,
+          search: `?path=${encodeURIComponent("/planner")}`,
+          api: { ...desktopFixture().api, "/api/plans": { pending: [waiting], history: [] } },
+          assets: ASSETS,
+        });
+        try {
+          await page.boxes(".needs-frame img");
+          const sequence = await page.evaluate(() => {
+            const heading = (text: string) =>
+              [...document.querySelectorAll(".plan-parts h3")].find((h) =>
+                h.textContent?.includes(text),
+              );
+            const approve = [...document.querySelectorAll("button")].find(
+              (button) => button.textContent === "Approve",
+            );
+            const headings = [
+              "What the ticket asks for",
+              "What is proposed",
+              "Mockups and pictures",
+              "Size estimate",
+              "Complications and risks",
+            ].map(heading);
+            const approveBox = approve?.getBoundingClientRect();
+            return {
+              images: [...document.querySelectorAll<HTMLImageElement>(".needs-frame img")].every(
+                (image) => image.getBoundingClientRect().width > 150,
+              ),
+              allVisible: headings.every(
+                (item) => !!item && item.getBoundingClientRect().bottom <= window.innerHeight,
+              ),
+              beforeDecision: headings.every(
+                (item) => !!item && !!approveBox && item.getBoundingClientRect().top < approveBox.top,
+              ),
+            };
+          }, null);
+          expect(sequence.images).toBe(true);
+          expect(sequence.allVisible).toBe(true);
+          expect(sequence.beforeDecision).toBe(true);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
 });

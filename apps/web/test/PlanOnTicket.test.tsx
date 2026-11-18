@@ -254,6 +254,11 @@ describe("the signed-off plan beside what was built", () => {
         pending: [],
         history: [plan({ repoId: "mission-control", ticket: "mission-control#2037" })],
       },
+      "/api/repos/mission-control/prs/1011": {
+        repoId: "mission-control",
+        number: 1011,
+        ticket: null,
+      },
     });
     render(<QaReportRead report={report} archived />);
     expect(await screen.findByRole("region", { name: "Signed-off plan" })).toBeTruthy();
@@ -303,6 +308,25 @@ describe("the signed-off plan beside what was built", () => {
       /Could not find this report's ticket/,
     );
     expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("uses the retained PR ticket instead of a mismatched branch guess", async () => {
+    const report = { ...qaReportFixture(), branch: "feature/2037-planner-tab" };
+    serve({
+      "/api/plans?repoId=mission-control": signed,
+      [PR]: prRow("mission-control#3349"),
+    });
+    render(<QaReportRead report={report} archived />);
+    await screen.findByRole("article");
+    expect(screen.queryByRole("region", { name: "Signed-off plan" })).toBeNull();
+  });
+
+  it("does not fall back to a branch guess when the retained PR read fails", async () => {
+    const report = { ...qaReportFixture(), branch: "feature/2037-planner-tab" };
+    serve({ [PR]: () => ({ status: 503, body: { error: "PR lookup offline" } }) });
+    render(<QaReportRead report={report} archived />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("alert").textContent).toMatch(/Could not find this report/);
   });
 
   it("puts the report's result screenshots in the Built column, beside the mockups", async () => {

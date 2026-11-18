@@ -196,12 +196,15 @@ function usePlanTicket(r: QaReport, ticket: string | null | undefined) {
   const pr = useResource<PullRequestView>(
     known === null ? RESOURCES.pr(r.repoId, r.prNumber) : null,
   );
-  const number =
-    known ?? (pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null) ?? branchTicket(r.branch);
+  // A saved report must not borrow a plan from a ticket-shaped branch while the retained PR is
+  // still authoritative. In particular, a stale branch can name a different ticket than the PR.
+  const retained = pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null;
+  const fallback = !pr.loading && !pr.error && pr.data ? branchTicket(r.branch) : null;
+  const number = known ?? retained ?? fallback;
   return {
     number,
-    loading: number === null && pr.loading,
-    error: number === null ? (pr.error ?? null) : null,
+    loading: known === null && pr.loading,
+    error: known === null && pr.error ? pr.error : null,
     retry: () => hub.refetch(RESOURCES.pr(r.repoId, r.prNumber).path),
   };
 }

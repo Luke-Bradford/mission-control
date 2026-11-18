@@ -778,9 +778,21 @@ select {
   .brand {
     letter-spacing: 0.04em;
   }
+  .top > .spacer {
+    display: none;
+  }
+  .tabs {
+    gap: 2px;
+  }
+  /* Keep page tabs as separate controls. Status controls take the second row rather than
+     squeezing labels together now that Planner is the tenth tab. */
+  .top-status {
+    width: 100%;
+    margin-left: 0;
+  }
   .tabs a {
-    padding-inline: 0;
-    letter-spacing: 0;
+    padding-inline: var(--sp-1);
+    letter-spacing: 0.02em;
   }
 }
 
