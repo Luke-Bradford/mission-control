@@ -15,30 +15,33 @@ import "./qa-readiness.css";
 
 const NO_PLANS: Plan[] = [];
 const PLANNER_PATH = "/planner";
-const HISTORY_PATH = `${PLANNER_PATH}?view=history`;
 export const SEND_BACK_NOTE_REQUIRED = "Say what to change before sending the plan back.";
 
-const plannerPath = (history: boolean, plan?: string): string => {
+/** Preserve the operator's repo scope while switching Planner views or plans. */
+const plannerPath = (repo: string, history: boolean, plan?: string): string => {
   const q = new URLSearchParams();
+  if (repo) q.set("repo", repo);
   if (history) q.set("view", "history");
   if (plan) q.set("plan", plan);
   const qs = q.toString();
   return PLANNER_PATH + (qs ? `?${qs}` : "");
 };
 
-function PlannerNavigation({ history }: { history: boolean }) {
+function PlannerNavigation({ history, repo }: { history: boolean; repo: string }) {
+  const waitingPath = plannerPath(repo, false);
+  const historyPath = plannerPath(repo, true);
   return (
     <nav className="qa-navigation" aria-label="Planner views">
       <a
-        href={PLANNER_PATH}
-        onClick={(e) => followLink(e, PLANNER_PATH)}
+        href={waitingPath}
+        onClick={(e) => followLink(e, waitingPath)}
         aria-current={!history ? "page" : undefined}
       >
         To plan and sign off
       </a>
       <a
-        href={HISTORY_PATH}
-        onClick={(e) => followLink(e, HISTORY_PATH)}
+        href={historyPath}
+        onClick={(e) => followLink(e, historyPath)}
         aria-current={history ? "page" : undefined}
       >
         History
@@ -131,8 +134,18 @@ const statusTone = (p: Plan) => (p.status === "approved" ? "ok" : "warn");
 const statusWord = (p: Plan) =>
   p.status === "approved" ? "Approved" : p.status === "sent-back" ? "Sent back" : "Waiting";
 
-function PlanRow({ plan, selected, history }: { plan: Plan; selected: boolean; history: boolean }) {
-  const to = plannerPath(history, plan.id);
+function PlanRow({
+  plan,
+  selected,
+  history,
+  repo,
+}: {
+  plan: Plan;
+  selected: boolean;
+  history: boolean;
+  repo: string;
+}) {
+  const to = plannerPath(repo, history, plan.id);
   return (
     <li>
       <a
@@ -196,7 +209,7 @@ export function Planner() {
   const title = history ? "History" : "To plan and sign off";
   return (
     <>
-      <PlannerNavigation history={history} />
+      <PlannerNavigation history={history} repo={repo} />
       <section id="page-planner" className="uat-page">
         <header className="uat-title">
           <h1>Planner</h1>
@@ -250,6 +263,7 @@ export function Planner() {
                       plan={p}
                       selected={selected?.id === p.id}
                       history={history}
+                      repo={repo}
                     />
                   ))}
                 </ul>

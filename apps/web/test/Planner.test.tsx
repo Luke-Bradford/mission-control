@@ -77,6 +77,21 @@ describe("Planner tab", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Planner" })).toBeTruthy();
   });
 
+  it("keeps the repo filter when changing Planner views or selecting a plan", async () => {
+    view = { pending: [plan()], history: [plan({ id: "p2", status: "approved", decidedAt: NOW })] };
+    window.history.replaceState({}, "", "/planner?repo=mc");
+    load({ "/api/plans?repoId=mc": () => ({ status: 200, body: view }) });
+    render(<Planner />);
+    const nav = screen.getByRole("navigation", { name: "Planner views" });
+    const history = within(nav).getByRole("link", { name: "History" });
+    const row = await screen.findByRole("link", { name: /Retry webhooks/ });
+    expect(history.getAttribute("href")).toBe("/planner?repo=mc&view=history");
+    expect(row.getAttribute("href")).toBe("/planner?repo=mc&plan=p1");
+    fireEvent.click(history);
+    expect(await screen.findByRole("list", { name: "Decided plans" })).toBeTruthy();
+    expect(fetcher.mock.calls.some(([path]) => path === "/api/plans?repoId=mc")).toBe(true);
+  });
+
   it("shows the five parts of a plan, with its picture on the page", async () => {
     load();
     render(<Planner />);
