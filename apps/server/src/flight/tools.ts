@@ -537,15 +537,9 @@ const MAX_ISSUE = 2 ** 31 - 1;
 const issueNumber = z.number().int().min(1).max(MAX_ISSUE);
 const basisArg = text(FLIGHT_BASIS_MAX);
 
-const DiscussionReplyArgs = z.strictObject({
-  id: z.string().uuid(),
-  replyTo: z.string().min(1).max(100),
-  messageId: z.string().min(1).max(100),
-});
 const LogDecisionArgs = z.strictObject({
   kind: z.enum(["note", "re-plan"]).optional(),
   orderId: z.number().int().positive().optional(),
-  discussion: DiscussionReplyArgs.optional(),
   seat: z.string().regex(SEAT_ID).optional(),
   about: text(FLIGHT_ABOUT_ARG_MAX),
   decision: text(FLIGHT_DECISION_MAX),
@@ -1234,23 +1228,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function logDecision(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, LogDecisionArgs, args);
     if (!c.ok) return c.result;
-    const { seat, about, decision, basis, discussion } = c.args;
-    if (discussion && (c.args.kind === "re-plan" || c.args.orderId !== undefined))
-      return fail("A discussion reply cannot be a re-plan decision.");
-    if (discussion) {
-      if (
-        !store.replyDiscussion(
-          discussion.id,
-          discussion.replyTo,
-          discussion.messageId,
-          decision,
-          now(),
-        )
-      )
-        return fail("Unknown discussion question or conflicting reply.");
-      bus.emit("attention");
-      return { text: FLIGHT_NOTED };
-    }
+    const { seat, about, decision, basis } = c.args;
     if (seat !== undefined) {
       const mine = flightSeat(config)?.session.seats.some((s) => s.id === seat) === true;
       if (!mine) return { text: notInSessionText(seat), isError: true };
@@ -4581,13 +4559,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ...instructionTools,
     {
       name: MC_TOOL_NAMES.logDecision,
-      description: `Use kind re-plan with orderId to name the saved global order that changed your plan; ordinary calls default to note. For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming a test file added by the diff, plus its results on both commits. A new reproducing test is required; fixture files do not count. flight_state supplies awayBugDecision.about and testPaths for waiting PRs. Record a decision with its basis. To reply to an item discussion, supply discussion from flight_state (id, replyTo and a stable messageId), with decision as the reply text. This only adds chat; it never answers or approves the item.`,
+      description: `Use kind re-plan with orderId to name the saved global order that changed your plan; ordinary calls default to note. For away-mode bugs, record about "${awayBugDecisionAbout("<repo>#<issue>", "<base-sha>", "<head-sha>")}", decision "${AWAY_BUG_VERIFIED}", and basis naming a test file added by the diff, plus its results on both commits. A new reproducing test is required; fixture files do not count. flight_state supplies awayBugDecision.about and testPaths for waiting PRs. Record a decision with its basis.`,
       inputSchema: {
         type: "object",
         properties: {
           kind: { type: "string", enum: ["note", "re-plan"] },
           orderId: { type: "integer", minimum: 1 },
-          discussion: z.toJSONSchema(DiscussionReplyArgs),
           seat: {
             type: "string",
             description: "The seat the decision is about, if one (e.g. guido-1).",
