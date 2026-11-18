@@ -137,7 +137,7 @@ describe("restart storm (7 November replay)", () => {
     const starts = WASTE_THRESHOLDS.restartStormStarts + 1;
     for (let i = 0; i < starts; i++)
       store.upsertRun(
-        run("retro-1", { startedAt: NOW - i * MIN, status: "ok", reviewId: `rv${i}` }),
+        run("retro-1", { startedAt: NOW - i * MIN, status: "ok", reviewId: 100 + i }),
       );
     syncWasteAlarms(config, store, NOW);
     expect(openWasteAlarms(store)).toEqual([]);
@@ -146,7 +146,7 @@ describe("restart storm (7 November replay)", () => {
       store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN, status: "failed" }));
     for (let i = 0; i < starts; i++)
       store.upsertRun(
-        run("retro-2", { startedAt: NOW - i * MIN, status: "failed", reviewId: `rf${i}` }),
+        run("retro-2", { startedAt: NOW - i * MIN, status: "failed", reviewId: 200 + i }),
       );
     syncWasteAlarms(config, store, NOW);
     expect(restartHold(store, "guido-1")).not.toBeNull();
