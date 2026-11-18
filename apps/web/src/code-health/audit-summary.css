@@ -578,13 +578,28 @@
   text-overflow: ellipsis;
 }
 /* A figure reads on one line: its label, then unit and window muted beside it. */
-.as-hrow .as-fmeta {
-  display: inline;
-  margin-left: var(--sp-2);
+.as-fl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
 }
-.as-hrow .as-fmeta.as-fdef {
+.as-flab {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-fl .as-fmeta {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-hrow .as-fdef {
   display: block;
-  margin-left: 0;
 }
 .as-days > summary {
   cursor: pointer;

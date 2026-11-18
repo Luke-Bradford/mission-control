@@ -398,26 +398,40 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
   );
 }
 
-/** What a figure counts, where it comes from and how much it covers: a button, so the keyboard can read it. */
-function FigureDef({ f }: { f: CodeHealthFigure }) {
+/** One figure on one line; its button shows the unit, window, source and coverage in full. */
+function FigureRow({ f }: { f: CodeHealthFigure }) {
   const [open, setOpen] = useState(false);
   return (
-    <>
-      <button
-        type="button"
-        className="as-defbtn"
-        aria-expanded={open}
-        aria-label={`${open ? "Hide" : "Show"} how ${f.label} is measured`}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? "hide" : "how"}
-      </button>
-      {open && (
-        <span className="as-sub as-fmeta as-fdef">
-          {f.source}. {f.coverage}
-        </span>
-      )}
-    </>
+    <tr className="as-hrow">
+      <td>
+        <div className="as-fl">
+          <span className="as-flab">{f.label}</span>
+          <button
+            type="button"
+            className="as-defbtn"
+            aria-expanded={open}
+            aria-label={`${open ? "Hide" : "Show"} how ${f.label} is measured`}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? "hide" : "how"}
+          </button>
+          <span className="as-sub as-fmeta" title={`${f.unit} · ${f.window.label}`}>
+            {f.unit} · {f.window.label}
+          </span>
+        </div>
+        {open && (
+          <span className="as-sub as-fdef">
+            {f.unit} · {f.window.label}. {f.source}. {f.coverage}
+          </span>
+        )}
+      </td>
+      <td className="as-r as-m">{figureValue({ ...f, value: f.comparison?.value ?? null })}</td>
+      <td className="as-r">{figureValue(f)}</td>
+      <td>
+        {f.state !== "available" && <span className="as-fstate">{FIGURE_STATE[f.state]} · </span>}
+        {change(f)}
+      </td>
+    </tr>
   );
 }
 
@@ -650,25 +664,7 @@ export function AuditSummary({
                 </thead>
                 <tbody>
                   {overview.figures.map((f) => (
-                    <tr key={f.id} className="as-hrow">
-                      <td>
-                        {f.label}
-                        <FigureDef f={f} />
-                        <span className="as-sub as-fmeta">
-                          {f.unit} · {f.window.label}
-                        </span>
-                      </td>
-                      <td className="as-r as-m">
-                        {figureValue({ ...f, value: f.comparison?.value ?? null })}
-                      </td>
-                      <td className="as-r">{figureValue(f)}</td>
-                      <td>
-                        {f.state !== "available" && (
-                          <span className="as-fstate">{FIGURE_STATE[f.state]} · </span>
-                        )}
-                        {change(f)}
-                      </td>
-                    </tr>
+                    <FigureRow key={f.id} f={f} />
                   ))}
                 </tbody>
               </table>
