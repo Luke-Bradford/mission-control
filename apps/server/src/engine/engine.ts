@@ -1582,10 +1582,16 @@ export function createEngine(deps: EngineDeps): Engine {
           `PR head ${a.sha.slice(0, 7)} is on top of the push ${prior?.sha.slice(0, 7) ?? ""}; CI follows it`,
           at,
         );
+        // a seat cannot fetch for itself: the hub moves its worktree
+        const worktree = worktreeOf(run, cur);
+        const moved = worktree === null ? null : await publisher.fastForward(run, worktree, a.sha);
+        const base = `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push${prior === null ? "" : ` ${prior.sha.slice(0, 7)}`}.`;
         await send(
           run.id,
           `branch-moved:${run.id}:${a.sha}`,
-          `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push${prior === null ? "" : ` ${prior.sha.slice(0, 7)}`}. Fast-forward your worktree (git pull --ff-only) before you commit again.`,
+          moved?.ok === true
+            ? `${base} Your worktree is on it now; nothing to do.`
+            : `${base} Fast-forward your worktree to it (git merge --ff-only ${a.sha.slice(0, 7)}) before you commit again${moved === null ? "" : `; the hub could not (${moved.text})`}.`,
         );
         out.again = true;
         return;
@@ -2264,6 +2270,8 @@ export function createEngine(deps: EngineDeps): Engine {
       pr.headSha !== null &&
       pr.headSha !== pushed.sha &&
       snap.headCommit === pushed.sha &&
+      // a head the run made itself is a poll that lags behind, not a push on top
+      !store.runCommits(run.id).includes(pr.headSha) &&
       (await publisher.isDescendant(run, pushed.sha, pr.headSha))
     ) {
       snap.prDescends = true;

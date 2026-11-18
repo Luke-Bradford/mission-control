@@ -261,6 +261,12 @@ export interface Publisher {
    * a refusal when the worktree cannot be read.
    */
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
+  /**
+   * Fast-forwards `worktree` to `sha`, a commit someone else pushed on top of the run's push
+   * (fetching it when needed). A worktree that is not behind `sha` on the same line, or that
+   * the move would overwrite, is left as it is and refused.
+   */
+  fastForward(run: Run, worktree: string, sha: string): Promise<PublishResult>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
   markDraft(run: Run): Promise<PublishResult>;
@@ -1540,6 +1546,31 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             if (e[0] === "R" || e[0] === "C") i++;
           }
           return paths;
+        });
+      } catch (e) {
+        return transient(`git failed: ${errText(e)}`);
+      }
+    },
+
+    async fastForward(run, worktree, sha) {
+      if (!SHA.test(sha)) return final("not a commit sha");
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return final(MERGE_NO_SEAT);
+      const git = deps.git ?? crewGit;
+      const checkout = place.session.checkout;
+      try {
+        return await deps.inClone(checkout, async (): Promise<PublishResult> => {
+          const common = await realpath(join(checkout, ".git"));
+          const gitDir = await adminDirOf(common, worktree);
+          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+          const g: G = (a) => git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+          if (!(await have(g, sha))) await g(["fetch", "--no-tags", "origin", sha]);
+          if (!(await have(g, sha))) return final("the new commit could not be fetched");
+          if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {
+            return final("the branch has diverged from the PR's head; it was not changed");
+          }
+          await g(["merge", "--ff-only", "--quiet", sha]);
+          return { ok: true };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);

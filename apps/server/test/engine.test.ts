@@ -568,6 +568,9 @@ function harness(): Harness {
         async worktreeChanges() {
           return x.changes;
         },
+        async fastForward() {
+          return { ok: true };
+        },
         async hardRuleTouches(run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
           x.duringTouches?.(run.id);
@@ -1679,6 +1682,19 @@ describe("refusals", () => {
     await h.engine.reconcileRun(RUN);
     expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
     expect(loopOf().parked?.reason).toContain(text);
+  });
+
+  it("a PR head on top of the seat's push becomes the run's push, and the seat is told", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().parked).toBeNull();
+    expect(loopOf().phase).toBe("ci");
+    expect(sentKeys()).toContain(`branch-moved:${RUN}:${SHA_B}`);
   });
 
   it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
