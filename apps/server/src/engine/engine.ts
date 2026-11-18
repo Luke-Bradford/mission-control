@@ -1646,12 +1646,18 @@ export function createEngine(deps: EngineDeps): Engine {
           out.parked = true;
           return;
         }
+        // a settle starts a new epoch. Only the epoch a FLIGHT rework grant covers counts the rounds
+        // across epochs (the granted review is the next round, and a fail past it parks again);
+        // every other epoch counts its own
+        const settled =
+          cur.flightReworkGrantEpoch !== undefined && cur.epoch >= cur.flightReworkGrantEpoch;
         const round =
           1 +
           store
             .reviewsOfRun(run.id)
-            .filter((r) => r.epoch === cur.epoch && r.state === "reported" && r.blocking > 0)
-            .length;
+            .filter(
+              (r) => (settled || r.epoch === cur.epoch) && r.state === "reported" && r.blocking > 0,
+            ).length;
         const id = store.requestReview({
           authorRunId: run.id,
           repoId: run.repoId,
@@ -2100,6 +2106,15 @@ export function createEngine(deps: EngineDeps): Engine {
     if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId, run.id)) return;
     const at = now();
     const input: RunLoop = { ...stored };
+    // a rework grant is used up once a review in its epoch or after passes; a blocking one keeps it
+    const grantEpoch = input.flightReworkGrantEpoch;
+    if (
+      grantEpoch !== undefined &&
+      store
+        .reviewsOfRun(runId)
+        .some((r) => r.epoch >= grantEpoch && r.state === "reported" && r.blocking === 0)
+    )
+      delete input.flightReworkGrantEpoch;
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     // a web PR's head needs its screenshot pairs; asking is cheap once they exist
@@ -2130,6 +2145,29 @@ export function createEngine(deps: EngineDeps): Engine {
       input.awayBugDecision = null;
       saveLoop(runId, input, stored, at);
       deps.pollGithub?.();
+      return;
+    }
+    // a merge hold on a run waiting on FLIGHT's clearance parks it at once, so FLIGHT's settle
+    // (rework) has a park to apply to; the release returns it to the review it left
+    if (
+      run.endedAt === null &&
+      input.mergeHold &&
+      input.awaitingFlight != null &&
+      input.phase === "review"
+    ) {
+      const hold = input.mergeHold;
+      const reason = mergeHoldParkText(hold.by, hold.reason);
+      input.mergeHold = { ...hold, from: input.phase };
+      input.phase = "parked";
+      input.awaitingFlight = null;
+      input.parked = { kind: MERGE_HOLD_PARK, reason, ended: false };
+      store.addLoopEvent(
+        `${run.id}:${input.epoch}:parked:merge-hold:${hold.at}`,
+        run.id,
+        parkedEventText(reason),
+        at,
+      );
+      saveLoop(runId, input, stored, at);
       return;
     }
     const pushed = store.runPush(run.id);
@@ -3221,6 +3259,14 @@ export function createEngine(deps: EngineDeps): Engine {
           lastRefusal: null,
           unparkedAt: at,
         };
+        // a grant lasts until a review park is settled again, whatever else starts a new epoch meanwhile
+        // (a CI lift, a main sync). A review-failed park keeps it: its review never ran, so the
+        // granted review is still owed. FLIGHT's rework sets it again below.
+        if (
+          (kind === "review" || kind === "review-ruling") &&
+          !(by === "FLIGHT" && opts?.action === "rework")
+        )
+          delete next.flightReworkGrantEpoch;
         if (kind === "budget") {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
@@ -3259,6 +3305,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.flightClearedSha = null;
           next.phase = opts.action === "rereview" ? "review" : "working";
           if (opts.action === "rework") {
+            // at the review-round cap the grant is for the next epoch's review, of the seat's fix
+            if (kind === "review" || kind === "review-ruling")
+              next.flightReworkGrantEpoch = next.epoch;
             if (pushed)
               next.flightReworks = {
                 ...loop.flightReworks,
@@ -3315,14 +3364,19 @@ export function createEngine(deps: EngineDeps): Engine {
         if (next.aside) next.aside = { ...next.aside, wake: true };
         checkBriefDispatch();
         // a settle that sends the change back to review is FLIGHT's decision on the round cap: it
-        // closes the run's review-rounds hold, or the review would be held and dropped at once
+        // closes the run's review-rounds hold, or the review would be held and dropped at once. A
+        // rework grants the review of the seat's next push: the hold closes at the live round, so
+        // that one round runs and a fail past it parks again.
         const reopens =
           opts?.action === "rereview" ||
+          (opts?.action === "rework" && (kind === "review" || kind === "review-ruling")) ||
           opts?.action === "accept" ||
           opts?.action === "second_review";
+        // only a rework of a run parked at the cap grants a review past it
+        const grant = opts?.action === "rework" && (kind === "review" || kind === "review-ruling");
         if (by === "FLIGHT" && reopens) {
           const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
-          if (settleReviewRounds(store, run, at, basis))
+          if (settleReviewRounds(store, run, at, basis, grant))
             store.addLoopEvent(
               `${run.id}:review-rounds-resolved:${next.epoch}`,
               run.id,
@@ -3547,6 +3601,8 @@ export function createEngine(deps: EngineDeps): Engine {
           at,
         );
         bus.emit("agents");
+        // a run waiting on FLIGHT's clearance parks on the hold in this pass
+        await withoutBriefDispatch(() => pass(runId));
         return { ok: true };
       });
     },

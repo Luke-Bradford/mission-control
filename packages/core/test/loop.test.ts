@@ -750,6 +750,32 @@ describe("state step", () => {
       expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
     });
 
+    describe("a job still in GitHub's queue behind a busy runner pool", () => {
+      const busy = (started: Record<string, number>) =>
+        inCi({
+          pushed: { sha: SHA, at: NOW - 12 * min },
+          ciP90Ms: { web: 3 * min, server: 30 * min },
+          pr: pr({
+            checks: {
+              failing: [],
+              pending: ["web", "server"],
+              missing: [],
+              startedAt: started,
+            },
+          }),
+        });
+
+      it("does not park a job that has not started, 12 minutes after the push", () => {
+        const r = reconcile(busy({}));
+        expect(r.loop.parked).toBeNull();
+      });
+
+      it("still parks a job that is running past twice its p90", () => {
+        const r = reconcile(busy({ web: NOW - 11 * min }));
+        expect(r.loop.parked?.reason).toBe("CI pending for 10 minutes on aaaaaaa (pending: web)");
+      });
+    });
+
     describe("a short gate job waiting on a slow one", () => {
       const gate = (m: number, checks: { pending: string[]; missing: string[] }) =>
         inCi({
@@ -2271,6 +2297,44 @@ describe("review decisions", () => {
     const r = reconcile(s);
     expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
     expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a rework granted at the cap limits the review from its epoch on, even after a new epoch starts", () => {
+    const granted = inReview(
+      withReview([fact({ id: 4, epoch: 3, blocking: 1 })], [finding]),
+      {},
+      { epoch: 3, flightReworkGrantEpoch: 3 },
+    );
+    const parked = reconcile(granted);
+    expect(parked.loop.parked).toMatchObject({ kind: "review" });
+    expect(sends(parked.actions)).toEqual([]);
+    // a sync or CI ruling started epoch 4 before the review: the grant still holds
+    const later = inReview(
+      withReview([fact({ id: 4, epoch: 4, blocking: 1 })], [finding]),
+      {},
+      { epoch: 4, flightReworkGrantEpoch: 3 },
+    );
+    const r = reconcile(later);
+    expect(r.loop.parked).toMatchObject({ kind: "review" });
+    expect(sends(r.actions)).toEqual([]);
+    // no grant: the full limit
+    const none = inReview(
+      withReview([fact({ id: 4, epoch: 4, blocking: 1 })], [finding]),
+      {},
+      { epoch: 4 },
+    );
+    expect(reconcile(none).loop.parked ?? null).toBeNull();
+  });
+
+  it("a rework granted on one head does not limit the review of another head in a later epoch", () => {
+    const s = inReview(
+      withReview([fact({ id: 4, epoch: 2, blocking: 1 })], [finding]),
+      {},
+      { epoch: 2, flightReworks: { ["f".repeat(40)]: 1 } },
+    );
+    const r = reconcile(s);
+    expect(r.loop.parked ?? null).toBeNull();
+    expect(sends(r.actions)).toEqual(["fix:r1:2:4"]);
   });
 
   it("a profile's round limit above 3 sends the third fix line instead of parking", () => {

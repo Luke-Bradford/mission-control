@@ -39,6 +39,8 @@ const SCAN_DAYS = 7;
 /** Tickets named in an alarm's evidence, before "and N more". */
 const NAMED = 10;
 
+const REVIEW_ROUNDS_CHECK: WasteCheck = "review-rounds";
+
 interface AgentInfo {
   loop: string;
   vendor: string;
@@ -196,7 +198,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     if (r.rounds <= t.reviewRounds) continue;
     if (r.prState === null && r.ticket !== null && done(r.ticket)) continue;
     out.push({
-      check: "review-rounds",
+      check: REVIEW_ROUNDS_CHECK,
       subject: r.runId,
       repoId: r.repoId,
       ticket: r.ticket,
@@ -450,30 +452,52 @@ export const ticketParked = (store: Store, ticket: string): string | null =>
 export function reviewsHeld(store: Store, authorRunId: string): boolean {
   const rounds = store.waste.maxRound(authorRunId);
   if (rounds <= WASTE_THRESHOLDS.reviewRounds) return false;
-  const resolved = store.waste
+  return rounds > resolvedReviewRound(store, authorRunId);
+}
+
+/** The highest review round FLIGHT has settled for this author run, or -1 when it has settled none. */
+export const resolvedReviewRound = (store: Store, authorRunId: string): number =>
+  store.waste
     .alarms(
-      "WHERE check_id = 'review-rounds' AND subject = ? AND resolved_at IS NOT NULL",
+      "WHERE check_id = ? AND subject = ? AND resolved_at IS NOT NULL",
+      REVIEW_ROUNDS_CHECK,
       authorRunId,
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
-  return rounds > resolved;
-}
 
 /**
- * FLIGHT's settle closes this run's review-rounds hold at the live round, not at whatever level the
- * scan last wrote (or before it wrote one), so reviews start again. False when no hold stands.
+ * The round the next review of this author run gets in the epoch a rework grant covers: blocking
+ * reviews count across epochs. It counts the run's reported blocking reviews whatever their PR's
+ * state, while `maxRound` (the live round the hold scan uses) reads open PRs only; a grant takes the
+ * larger, so a closed PR's rounds still count toward the cap the seat is under.
+ */
+export const nextReviewRound = (store: Store, authorRunId: string): number =>
+  1 +
+  store.reviewsOfRun(authorRunId).filter((r) => r.state === "reported" && r.blocking > 0).length;
+
+/**
+ * FLIGHT's settle that sends a review closes this run's review-rounds hold at the round that review
+ * will get, not at whatever level the scan last wrote, so that review runs. A standing hold (the live
+ * round is past the cap and unresolved) is closed by any settle. Only a `grant` (a rework of a run
+ * parked at the cap) goes past that: its review is the next round across epochs, which is no hold
+ * yet. False when nothing would hold the review.
  */
 export function settleReviewRounds(
   store: Store,
   run: { id: string; agentId: string; ticket: string | null; repoId?: string | null },
   at: number,
   basis: string,
+  grant: boolean,
 ): boolean {
-  if (!reviewsHeld(store, run.id)) return false;
-  const rounds = store.waste.maxRound(run.id);
+  const rounds = grant
+    ? Math.max(store.waste.maxRound(run.id), nextReviewRound(store, run.id))
+    : store.waste.maxRound(run.id);
+  if (rounds <= WASTE_THRESHOLDS.reviewRounds || rounds <= resolvedReviewRound(store, run.id))
+    return false;
   const evidence = `${run.ticket ?? run.id} is on review round ${rounds}; FLIGHT settled the park.`;
   const open = store.waste.alarms(
-    "WHERE check_id = 'review-rounds' AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",
+    "WHERE check_id = ? AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",
+    REVIEW_ROUNDS_CHECK,
     run.id,
   )[0];
   let id = open?.id;
@@ -481,7 +505,7 @@ export function settleReviewRounds(
   else
     id = store.waste.insertAlarm(
       {
-        check: "review-rounds",
+        check: REVIEW_ROUNDS_CHECK,
         subject: run.id,
         repoId: run.repoId ?? "",
         ticket: run.ticket,
