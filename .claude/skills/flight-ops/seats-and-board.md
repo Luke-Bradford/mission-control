@@ -16,8 +16,8 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 ## Dependencies
 
 - Read every `Depends on` reference, and hold the ticket until that work has merged. A closed issue doesn't prove it merged.
-- Hold a Ready or Refinement ticket behind an unmerged PR with `mc promote { issue, to: "Backlog", waits_on: <PR number>, basis }`. Leave a Backlog ticket where it is.
-- The hub wakes you when that PR merges or closes. When it merged, promote the held ticket again in that wake. When it closed unmerged, re-plan the ticket or keep it in Backlog.
+- Move a Ready or Refinement ticket that waits on an unmerged PR back with `mc promote { issue, to: "Backlog", basis }`, and give it a `Depends on` line. Leave a Backlog ticket where it is.
+- When that PR merges, promote the waiting ticket again in that wake. When it closed unmerged, re-plan the ticket or keep it in Backlog.
 - How to write a `Depends on` line: `tickets.md`.
 
 ## Lanes

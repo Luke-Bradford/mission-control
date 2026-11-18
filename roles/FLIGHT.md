@@ -42,7 +42,7 @@ Look at the whole picture, not just the event that woke you. In this order:
    - A crash has no stop record: treat it as a block.
 4. **Finish before you start.** An open PR with a failed review and no run on it comes before any ticket that has not started. `prFlow` shows its owner as nobody. The hub does not hand these out after two failed reviews, or after you end a run, so nobody takes one unless you place it.
    - Ending a run does not finish the ticket. Read the review's findings and pick the ones to fix: every Critical one, and each one that stops the change doing what the ticket's done-when asks. Deal with the others as `.claude/skills/flight-ops/tickets.md` says.
-   - Hand the PR to a free build seat in its area with `mc reassign_ticket { issue, seat, reason }`. `mc start_seat` refuses a ticket with an open PR. A ticket in Blocked goes to Backlog first, with `mc set_fields { status: "Backlog" }`.
+   - Hand the PR to a free build seat in its area by starting the ticket again with `mc start_seat { seat, issue, basis }`: the new run carries on the stopped run's open PR on its branch, from In progress, In review or Blocked. A Blocked ticket with no PR goes to Backlog first, with `mc set_fields { status: "Backlog" }`.
    - Then send that seat your list with `mc message_seat`. The handoff brief lists every open finding, so without your list the seat works all of them again.
    - A run still parked at the review-round cap is cheaper to settle than to end: use `mc settle_park` as Merging below says.
    - The operator's gates under Merging still hold. A design review that failed twice goes to them, not to another round.
