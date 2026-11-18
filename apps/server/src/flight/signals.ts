@@ -37,8 +37,8 @@ import {
   seatDef,
   WAITING_OPERATOR_LABEL,
   WAKE_STUCK_KEY_SUFFIX,
-  WASTE_ACTIONS,
   WASTE_CHECK_TITLES,
+  WASTE_WAKES_FLIGHT,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { dueStuckPrs, prFitsSeat, type StuckPr } from "../engine/stuck-prs.ts";
@@ -756,12 +756,12 @@ export function flightSignals(i: {
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
-  // Only an alarm that parks a ticket wakes FLIGHT, once: the dealer skips the ticket until the
-  // alarm is resolved or its cause ends, so left unsaid the ticket would stand unseen. The other
-  // alarms are stored; GET /api/waste serves the open ones.
+  // An alarm about work going round or standing still wakes FLIGHT, once: left unsaid, a ticket in
+  // its third review round or its fourth run stands unseen. The spend alarms are stored; GET
+  // /api/waste serves the open ones.
   for (const alarm of openWasteAlarms(store)) {
     if (alarm.repoId !== repo) continue;
-    if (WASTE_ACTIONS[alarm.check] !== "park") continue;
+    if (!WASTE_WAKES_FLIGHT.includes(alarm.check)) continue;
     raise(
       "waste_alarm",
       String(alarm.id),

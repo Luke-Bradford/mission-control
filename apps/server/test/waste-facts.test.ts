@@ -156,7 +156,7 @@ describe("failed review rounds", () => {
     expect(state.prs.find((p) => p.pr === 7)?.reviewRounds).toBe(2);
   });
 
-  it("does not wake FLIGHT for the alarm", () => {
+  it("wakes FLIGHT once for the alarm, with the evidence", () => {
     store.upsertPullRequests("mc", [pr(7)], NOW);
     store.upsertRun(author());
     reported("r1", 7, 1, 2);
@@ -167,7 +167,11 @@ describe("failed review rounds", () => {
         (s) => s.kind === "waste_alarm",
       );
     expect(openWasteAlarms(store).map((a) => a.check)).toContain("failed-review-rounds");
-    expect(read(NOW)).toEqual([]);
+    const first = read(NOW);
+    expect(first).toHaveLength(1);
+    expect(first[0]?.evidence).toContain("has failed 2 review rounds");
+    // the same alarm is the same signal on a later read: it does not wake FLIGHT again
+    expect(read(NOW + MIN).map((s) => s.key)).toEqual(first.map((s) => s.key));
   });
 });
 
@@ -206,12 +210,12 @@ describe("clearance waiting", () => {
     expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toEqual([]);
   });
 
-  it("does not wake FLIGHT while the wait stands", () => {
+  it("wakes FLIGHT for the wait once it is an alarm", () => {
     hold(NOW - 3 * HOUR);
     syncWasteAlarms(config, store, NOW);
     syncWasteAlarms(config, store, NOW + HOUR);
     const signals = flightSignals({ config, store, session, seats: [], now: NOW + HOUR }).signals;
-    expect(signals.filter((s) => s.kind === "waste_alarm")).toEqual([]);
+    expect(signals.filter((s) => s.kind === "waste_alarm")).toHaveLength(1);
   });
 
   it("raises one alarm for each head: a new head restarts the two hours", () => {

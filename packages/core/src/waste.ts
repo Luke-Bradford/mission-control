@@ -103,6 +103,19 @@ export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
   "clearance-waiting": "alarm",
 };
 
+/**
+ * The alarms that wake FLIGHT, once each: work that is going round or standing still, which a
+ * person would otherwise find only by reading the log. The spend alarms (cost, coordination,
+ * churn) are stored and served by GET /api/waste; they do not wake it. A review-rounds hold is
+ * not here: it parks the run, and the park wakes FLIGHT.
+ */
+export const WASTE_WAKES_FLIGHT: readonly WasteCheck[] = [
+  "retry-loop",
+  "failed-review-rounds",
+  "runs-per-ticket",
+  "clearance-waiting",
+];
+
 /** One waste alarm as the hub keeps it. */
 export interface WasteAlarm {
   id: number;
