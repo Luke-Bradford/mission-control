@@ -69,6 +69,22 @@ it("hands a stopped author's dirty worktree and recorded context to another seat
   expect(userLines().at(-1)).toContain("Handoff from guido-1");
 });
 
+it("hands a held PR's merge hold to the seat that takes the ticket over, in a distinct run", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const hold = { by: "CAPCOM" as const, reason: "reproduced bug", at: 10 };
+  const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP, mergeHold: hold } });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await sup.endRun("guido-1");
+  const second = await sup.startRun("guido-2", 42, { loop: NEW_LOOP });
+  expect(second.runId).not.toBe(first.runId);
+  expect(store.receivedHandoff(second.runId)?.runId).toBe(first.runId);
+  expect(store.run(second.runId)?.loop?.mergeHold).toMatchObject({
+    by: "CAPCOM",
+    reason: "reproduced bug",
+  });
+});
+
 it("preserves a removed crew author's aside and lets another configured seat adopt it", async () => {
   const { sup, cfg } = make({ extraSeat });
   sup.start();

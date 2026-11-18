@@ -5004,17 +5004,51 @@ describe("the engine runs reviews", () => {
       });
 
       it("a hold follows the PR to the seat that takes the ticket over, and that run cannot merge", async () => {
+        await toReview();
         await h.engine.holdMerge(RUN, "CAPCOM", "reproduced bug");
-        const held = need(loopOf().mergeHold);
-        // the next run starts from a fresh loop and inherits the hold, as a reassign does
-        const source = { ...need(loopOf()), mergeHold: held };
-        setLoop({ ...need(inheritedHandoffLoop(source, { ...source, mergeHold: null })) });
-        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
-        await gateOpen();
-        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        const source = need(store.run(RUN)?.loop);
+        // the author ends; another seat takes the ticket over on the same branch and PR, in a
+        // distinct run whose loop starts fresh and inherits the hold, as the supervisor starts it
+        store.setRunEnded(RUN, clock, "ok", "engine");
+        seats().push({
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          area: ["apps/**"],
+        });
+        store.upsertRun(run({ id: RUN2, agentId: "guido-2", branch: BRANCH }));
+        seatIdle(RUN2, "guido-2");
+        store.addRunCommit({ runId: RUN2, repoId: REPO, branch: BRANCH, sha: SHA, at: clock });
+        store.setRunPush({ runId: RUN2, sha: SHA, at: clock });
+        store.addEvidence(RUN2, "Fixed it", clock);
+        store.setRunLoop(
+          RUN2,
+          need(
+            inheritedHandoffLoop(source, {
+              ...NEW_LOOP,
+              phase: "ci",
+              prNumber: 12,
+              reportedEvidenceId: 1,
+              pushFor: SHA,
+              pushStartedAt: clock,
+            }),
+          ),
+        );
+        const heldLoop = () => need(store.run(RUN2)?.loop);
+        expect(heldLoop().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
+        setPr({ ci: "passing" });
+        await h.engine.reconcileRun(RUN2);
+        await h.engine.reconcileRun(RUN2);
+        const review = need(store.reviewsOfRun(RUN2)[0]);
+        reported(review.id, []);
+        await vi.waitFor(() => expect(heldLoop().parked?.kind).toBe(MERGE_HOLD_PARK));
         expect(h.steps).not.toContain("merge");
-        expect((await h.engine.releaseMergeHold(RUN, "FLIGHT")).ok).toBe(false);
+        expect((await h.engine.releaseMergeHold(RUN2, "FLIGHT")).ok).toBe(false);
+        expect(heldLoop().mergeHold?.by).toBe("CAPCOM");
         expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN2, "CAPCOM")).toEqual({ ok: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
       });
 
       it("FLIGHT cannot release a hold the operator set; the operator can", async () => {
