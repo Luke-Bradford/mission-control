@@ -54,6 +54,10 @@ export function ticketPlan(
   return plan === null ? null : withTitle(store, plan);
 }
 
+/** Whether the ticket's card is closed in the board copy: a closed ticket has no plan left to decide. */
+const closedTicket = (store: Store, plan: TicketPlan): boolean =>
+  store.board(plan.repoId).find((i) => i.issueNumber === plan.issue)?.closed === true;
+
 /** The Planner tab: what waits for a plan or sign-off, and what was signed off. */
 export function plansView(store: Store, config: CcConfig): PlansView {
   const known = new Set(config.repos.map((r) => r.id));
@@ -61,7 +65,7 @@ export function plansView(store: Store, config: CcConfig): PlansView {
   return {
     waiting: store.plans
       .inStates(["awaiting-plan", "sent-back", "awaiting-signoff"])
-      .filter(keep)
+      .filter((p) => keep(p) && !closedTicket(store, p))
       .map((p) => withTitle(store, p)),
     history: store.plans
       .signedOff()
@@ -153,7 +157,8 @@ async function approveOne(
   const plan = deps.store.plans.get(repoId, issue);
   if (plan === null || !deps.config.repos.some((r) => r.id === repoId))
     return { ok: false, status: 404, error: PLAN_NO_SUCH };
-  if (plan.state !== "awaiting-signoff") return { ok: false, status: 409, error: PLAN_NOT_WAITING };
+  if (plan.state !== "awaiting-signoff" || closedTicket(deps.store, plan))
+    return { ok: false, status: 409, error: PLAN_NOT_WAITING };
   const rules = await rulesOf(deps, repoId);
   if (rules === null)
     return {
@@ -221,7 +226,7 @@ export function sendBackPlan(
     const plan = deps.store.plans.get(repoId, issue);
     if (plan === null || !deps.config.repos.some((r) => r.id === repoId))
       return { ok: false, status: 404, error: PLAN_NO_SUCH };
-    if (!deps.store.plans.sendBack(repoId, issue, note))
+    if (closedTicket(deps.store, plan) || !deps.store.plans.sendBack(repoId, issue, note))
       return { ok: false, status: 409, error: PLAN_NOT_WAITING };
     const back = deps.store.plans.get(repoId, issue) as TicketPlan;
     tellFlight(deps, back, planSentBackComms(back.ref, note));

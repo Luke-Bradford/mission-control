@@ -3030,6 +3030,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       }
       if (issueJson.state !== "OPEN") return { text: MC_PLAN_ISSUE_CLOSED, isError: true };
       let body = String(issueJson.body ?? "");
+      let tail = "";
       if (PLAN_HEADING_LINE.test(body)) {
         // a plan the operator sent back is written again, in place of the old one
         if (
@@ -3037,9 +3038,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           !["sent-back", "awaiting-plan"].includes(store.plans.get(run.repoId, issue)?.state ?? "")
         )
           return { text: MC_PLAN_ALREADY, isError: true };
-        body = body.slice(0, body.search(PLAN_HEADING_LINE)).trimEnd();
+        // only the old plan section goes: later sections (the operator's notes) stay after the new plan
+        const at = body.search(PLAN_HEADING_LINE);
+        const after = body.slice(at).replace(PLAN_HEADING_LINE, "");
+        const nextHeading = after.search(/^## /m);
+        tail = nextHeading === -1 ? "" : after.slice(nextHeading).trim();
+        body = body.slice(0, at).trimEnd();
       }
-      if (unclosedMarkdown(body)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
+      if (unclosedMarkdown(`${body}\n${tail}`)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
 
       const tests = planTestCount(plan);
       if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
@@ -3063,6 +3069,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         body.trim() === "" ? "" : `${body.trimEnd()}\n\n`,
         `${PLAN_HEADING}\n\n${plan.trim()}\n\n`,
         `${planByLine(call)}\n`,
+        tail === "" ? "" : `\n${tail}\n`,
       ].join("");
       if (Array.from(next).length > TICKET_BODY_MAX) {
         const room = TICKET_BODY_MAX - (Array.from(next).length - Array.from(plan.trim()).length);

@@ -114,9 +114,25 @@ async function release(
             })
           : { ok: true as const, changed: false };
         if (held) {
-          // a ticket held for plan sign-off stays Blocked, and its release is tried again, so it
-          // moves once the plan is signed off
-          failed = true;
+          const state = store.plans.get(repo.id, issue)?.state;
+          if (state === "awaiting-signoff") {
+            // a plan waiting for the operator: the card stays Blocked and its release is tried
+            // again, so it moves once the plan is signed off
+            failed = true;
+          } else {
+            // no plan yet (or one sent back): the card goes to Backlog, where FLIGHT can send it to
+            // the planner and start one; Blocked would leave it with no way to get a plan
+            const back = await d.move({
+              runId: releaseMoveRunId(released.ref),
+              repoId: repo.id,
+              issue,
+              column: "Backlog",
+            });
+            if (back.ok) {
+              patchReleased(store, repo.id, released.ref, released.at, { moved: true });
+              if (back.changed) d.pollGithub?.();
+            } else failed = true;
+          }
         } else if (moved.ok) {
           patchReleased(store, repo.id, released.ref, released.at, { moved: true });
           if (moved.changed) d.pollGithub?.();

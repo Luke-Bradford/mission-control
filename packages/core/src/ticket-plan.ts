@@ -126,7 +126,9 @@ export const planPartsText = (missing: readonly string[]): string =>
 
 /** send_to_planner's refusal: only a ticket that is not yet pickable can be held for a plan. */
 export const planSendColumnText = (ref: string, where: string): string =>
-  `Not sent: ${ref} is ${where}, and a seat can pick it up. Move it back to Backlog with promote { to: "Backlog" } first, then send it to the planner.`;
+  where === "Ready"
+    ? `Not sent: ${ref} is Ready, and a seat can pick it up. Move it back to Backlog with promote { to: "Backlog" } first, then send it to the planner.`
+    : `Not sent: ${ref} is ${where}, and only a card in Backlog or Refinement can be sent to the planner.`;
 
 /** FLIGHT's note that a plan was signed off but its card was left where it is. */
 export const planApprovedNotMovedComms = (ref: string, why: string): string =>

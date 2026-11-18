@@ -129,6 +129,29 @@ describe("the Planner tab's data", () => {
     await a.close();
   });
 
+  it("a closed ticket leaves the waiting list and its plan can no longer be decided", async () => {
+    store.plans.request("shop-app", 7, NOW);
+    store.plans.file("shop-app", 8, parts(), true, NOW);
+    store.replaceBoard("shop-app", [
+      { ...card(7), closed: true },
+      { ...card(8, "Backlog"), closed: true },
+    ]);
+    const a = app();
+    expect((await a.inject("/api/plans")).json().waiting).toEqual([]);
+    for (const action of ["approve", "send-back"])
+      expect(
+        (
+          await a.inject({
+            method: "POST",
+            url: `/api/plans/shop-app/8/${action}`,
+            payload: { note: "n" },
+          })
+        ).statusCode,
+      ).toBe(409);
+    expect(moves).toEqual([]);
+    await a.close();
+  });
+
   it("is empty with no plans, and shows a plan sent back with its note", async () => {
     const a = app();
     expect((await a.inject("/api/plans")).json()).toEqual({ waiting: [], history: [] });

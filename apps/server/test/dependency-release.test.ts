@@ -224,9 +224,21 @@ describe("release on merge", () => {
       await release(T0);
       merge1015(T0 + 5 * MIN);
       await release(T0 + 6 * MIN);
-      expect(moves).toHaveLength(moves_ ? 1 : 0);
+      // a held card with no plan yet goes to Backlog, where it can be sent to the planner
+      expect(moves.map((m) => m.column)).toEqual([moves_ ? "Ready" : "Backlog"]);
     },
   );
+
+  it("a held dependent with no plan goes to Backlog once, and is not moved again", async () => {
+    rulesNow = { ...RULES, planSignoff: "every" };
+    seed();
+    await release(T0);
+    merge1015(T0 + 5 * MIN);
+    await release(T0 + 6 * MIN);
+    expect(moves).toEqual([{ runId: "dep:mc#1139", repoId: REPO, issue: 1139, column: "Backlog" }]);
+    await release(T0 + 6 * MIN + RELEASE_RETRY_MS + 1);
+    expect(moves).toHaveLength(1);
+  });
 
   it("moves a held dependent once its plan is signed off", async () => {
     rulesNow = { ...RULES, planSignoff: "every" };
