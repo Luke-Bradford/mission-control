@@ -209,3 +209,35 @@ export function landingAggregate(
     newest: rows.reduce<number | null>((a, row) => Math.max(a ?? 0, Number(row.newest)), null),
   };
 }
+
+/** Over every file, for PRs merged in the window: distinct finding lineages and file touches (merged PR, changed path pairs). */
+export function landingTotals(
+  db: Db,
+  repoId: string,
+  from: number,
+  until: number,
+): { findings: number; touches: number; newest: number | null } {
+  const found = db
+    .prepare(
+      `SELECT COUNT(*) AS findings, MAX(ended_at) AS newest FROM (
+         SELECT v.pr_number, f.file, f.category, f.summary, f.fix, MAX(v.ended_at) AS ended_at
+         FROM review_findings f JOIN reviews v ON v.id = f.review_id
+         JOIN code_health_merged_reviews m ON m.repo_id = v.repo_id AND m.pr_number = v.pr_number
+         WHERE v.repo_id = ? AND v.state = 'reported' AND m.merged_at >= ? AND m.merged_at < ?
+         GROUP BY v.pr_number, f.file, f.category, f.summary, f.fix
+       )`,
+    )
+    .get(repoId, from, until);
+  const touched = db
+    .prepare(
+      `SELECT COUNT(*) AS touches FROM pr_files t JOIN code_health_merged_reviews m
+         ON m.repo_id = t.repo_id AND m.pr_number = t.pr_number
+       WHERE t.repo_id = ? AND m.merged_at >= ? AND m.merged_at < ?`,
+    )
+    .get(repoId, from, until);
+  return {
+    findings: Number(found?.findings ?? 0),
+    touches: Number(touched?.touches ?? 0),
+    newest: found?.newest == null ? null : Number(found.newest),
+  };
+}

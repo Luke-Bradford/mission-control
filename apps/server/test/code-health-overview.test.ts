@@ -296,6 +296,40 @@ describe("Audit first-screen summary", () => {
     expect(gone?.ratio.state).toBe("unknown");
   });
 
+  it("supplies the overall findings per touch over all files, with the previous window, and no data when empty", async () => {
+    expect((await overview()).figures.find((f) => f.id === "findings-per-touch")).toMatchObject({
+      value: null,
+      state: "unknown",
+      numerator: 0,
+      denominator: 0,
+    });
+    const r1 = review(1, 1),
+      r2 = review(2, 1),
+      r3 = review(3, 1);
+    merged(1, NOW - DAY, r1);
+    merged(2, NOW - 2 * DAY, r2);
+    merged(3, NOW - 40 * DAY, r3);
+    touch(1, "src/a.ts");
+    touch(1, "src/b.ts");
+    touch(2, "src/a.ts");
+    touch(3, "src/a.ts");
+    finding(r1, "src/a.ts", "x");
+    finding(r2, "src/b.ts", "y");
+    finding(r3, "src/a.ts", "z");
+    const view = await overview();
+    const figure = view.figures.find((f) => f.id === "findings-per-touch");
+    expect(figure).toMatchObject({
+      value: 2 / 3,
+      numerator: 2,
+      denominator: 3,
+      unit: "findings per touch",
+      state: "available",
+    });
+    expect(figure?.comparison).toMatchObject({ value: 1, label: "Previous 30d" });
+    expect(figure).toHaveProperty("source");
+    expect(figure).toHaveProperty("coverage");
+  });
+
   it("leaves an open PR's findings out of findings per touch", async () => {
     merged(1, NOW - DAY, review(1, 1));
     touch(1, "src/a.ts");
