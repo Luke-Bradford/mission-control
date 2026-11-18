@@ -3,7 +3,7 @@
 .code-health.as-fit {
   --as-side: clamp(440px, 34vw, 600px);
   --as-out-max: 160px;
-  --as-plot: 52px;
+  --as-plot: 44px;
 }
 @media (min-width: 2200px) {
   .code-health.as-fit {
@@ -96,11 +96,11 @@
     flex: none;
   }
   .as-pastrows {
-    max-height: 56px;
+    max-height: 48px;
   }
   /* Always leave room for the header and a few file rows. */
   .as-files .as-grow {
-    min-height: 96px;
+    min-height: 120px;
   }
 }
 
@@ -494,7 +494,7 @@
 .as-cell {
   flex: 1 1 0;
   min-width: 0;
-  padding: var(--sp-1) var(--sp-2);
+  padding: 2px var(--sp-2);
   border-left: 1px solid var(--line);
 }
 .as-cap {
@@ -578,7 +578,7 @@
   padding: 0 var(--sp-4);
   font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
-  min-height: 24px;
+  min-height: 20px;
   display: flex;
   align-items: center;
 }
@@ -640,7 +640,7 @@
   text-overflow: ellipsis;
 }
 .as-files .as-frow > td {
-  padding-block: var(--sp-1);
+  padding-block: 2px;
 }
 .as-pathbtn {
   all: unset;
