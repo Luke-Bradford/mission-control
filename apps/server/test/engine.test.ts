@@ -3021,6 +3021,49 @@ describe("FLIGHT settles a ruling", () => {
     });
   });
 
+  it("accepts a ruling whose same head went green on its own, with no re-run asked for", async () => {
+    await ruled();
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 2,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
+    expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, parked: null });
+    expect(h.rulingReruns).toEqual([]);
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining("your ruling is accepted") }),
+    );
+  });
+
+  it("answers pending, and asks for no re-run, while the same head's checks run", async () => {
+    await ruled();
+    setPr({
+      ci: "pending",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "pending",
+          conclusion: "PENDING",
+          attempt: 2,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA });
+    expect(h.rulingReruns).toEqual([]);
+    expect(loopOf().phase).toBe("parked");
+  });
+
   it("refuses a rerun gh would not start, leaving no re-run recorded", async () => {
     await ruled();
     h.rerunResults = [{ ok: false, text: "no failed Actions run", transient: false }];
