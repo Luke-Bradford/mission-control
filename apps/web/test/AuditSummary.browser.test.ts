@@ -101,9 +101,15 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
         const past = document.querySelector(".as-past");
         if (!past) return false;
         const p = rect(past);
+        // A row scrolled out of its list is clipped, not painted: only the part inside the list counts.
         return [...document.querySelectorAll(".as-files tr.as-frow")].some((r) => {
-          const b = rect(r);
-          return b.bottom > p.top && b.top < p.bottom;
+          const l = r.closest(".as-scroll");
+          if (!l) return false;
+          const b = rect(r),
+            box = rect(l),
+            top = Math.max(b.top, box.top),
+            bottom = Math.min(b.bottom, box.bottom);
+          return bottom > top && bottom > p.top && top < p.bottom;
         });
       })(),
       plotHeight: document.querySelector(".as-plot svg")?.getBoundingClientRect().height ?? 0,
