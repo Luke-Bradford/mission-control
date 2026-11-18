@@ -77,7 +77,6 @@ import {
   hasPlanSection,
   inferTicket,
   isObj,
-  isProtectedPath,
   isResumeLineKey,
   LOOPBACK_HOST,
   MC_TMP_DIR_NAME,
@@ -95,7 +94,7 @@ import {
   type Profile,
   type ProfileOverride,
   pathGrantProblem,
-  pathInArea,
+  pathsNeedingGrant,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -931,7 +930,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
   const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
-  const FLIGHT_RUNTIME_PROFILE = "controller-v2";
+  const FLIGHT_RUNTIME_PROFILE = "controller-v3";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
     createHash("sha256")
       .update(JSON.stringify(Object.entries(env ?? {}).sort()))
@@ -3559,10 +3558,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const grants: string[] = [];
       if (def.mode === "writer" && !planner) {
         const extra = info.repo.protectedFiles ?? [];
-        for (const p of ticketPathGrants(ticket.body)) {
+        for (const p of pathsNeedingGrant(info.seat.area, ticketPathGrants(ticket.body), extra)) {
           const why = pathGrantProblem(p, extra);
           if (why !== null) throw new SupervisorError(422, grantUngrantableText(p, why));
-          if (!pathInArea(info.seat.area, p) || isProtectedPath(p, extra)) grants.push(p);
+          grants.push(p);
         }
         const approved = approvedPaths(store, ref);
         const unapproved = grants.filter((p) => !approved.includes(p));
@@ -3602,6 +3601,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
+                mergedPullRequestBranches: store.mergedPullRequestBranches(info.repo.id),
+                openPullRequestBranches: store
+                  .pullRequests(info.repo.id)
+                  .filter((pr) => pr.state === "open")
+                  .map((pr) => pr.branch),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),
                   markPending: (path) => store.markCheckoutPending(path, now()),

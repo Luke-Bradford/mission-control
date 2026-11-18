@@ -323,6 +323,8 @@ function make(
     nodeNote?: string;
     scratchRetro?: boolean;
     retroLightModel?: string;
+    /** The area GUIDO-1 may write, in place of apps/**. */
+    guidoArea?: string[];
     extraSeat?: CrewSeatConfig;
     /** A second, seatless session "other". */
     secondSession?: boolean;
@@ -346,6 +348,8 @@ function make(
   const cfg = config();
   if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
   if (over.repo && cfg.repos[0]) Object.assign(cfg.repos[0], over.repo);
+  const guido = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1");
+  if (over.guidoArea !== undefined && guido) guido.area = over.guidoArea;
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
   if (over.node !== undefined && cfg.crew) cfg.crew.node = over.node;
   if (over.nodeNote !== undefined && cfg.crew) cfg.crew.nodeNote = over.nodeNote;

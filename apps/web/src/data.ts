@@ -310,6 +310,11 @@ export const RESOURCES = {
   }),
   repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
+  /** One repo's rules with where each value comes from (Setup › Roles & guards). */
+  repoRules: (id: string): ResourceRef => ({
+    path: `/api/repos/${enc(id)}/rules`,
+    topic: "config",
+  }),
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },
   // Run-derived: refetched when runs change.
@@ -433,7 +438,7 @@ export const ACTIONS = {
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
-  /** Body `{ text, interrupt? }`. */
+  /** Body `{ text, interrupt?, question?, itemKey?, choice? }`; `choice` is a picked option: `{ briefAt, option }`. */
   seatMessage: (seatId: string) => `/api/seats/${enc(seatId)}/message`,
   /** Body `{}`. */
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,

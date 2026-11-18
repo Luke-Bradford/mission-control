@@ -2454,6 +2454,21 @@ describe("Store", () => {
       expect(titles()).toEqual([[2, "t2"]]);
     });
 
+    it("keeps merged branch history after the live PR cache expires", () => {
+      store.upsertPullRequests(
+        "r1",
+        [
+          pr(1, { branch: "feature/42-x", state: "merged", mergedAt: 50 }),
+          pr(3, { branch: "feature/43-open" }),
+        ],
+        100,
+      );
+      store.sweepPullRequests("r1", [pr(2)], 101);
+      expect(store.pullRequests("r1").map((p) => p.number)).toEqual([2]);
+      expect(store.mergedPullRequestBranches("r1")).toEqual(["feature/42-x"]);
+      expect(store.mergedPullRequestBranches("other")).toEqual([]);
+    });
+
     it("is not a change when only the read time moves", () => {
       store.upsertPullRequests("r1", [pr(1)], 100);
       expect(store.upsertPullRequests("r1", [pr(1)], 200)).toBe(false);

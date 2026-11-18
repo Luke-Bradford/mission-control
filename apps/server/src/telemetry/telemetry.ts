@@ -545,7 +545,12 @@ export function telemetry(
       const overlaps = (intervals: Interval[]) =>
         intervals.some(([start, end]) => start < b && end > a);
       const recordedAt = events[eventIndex - 1]?.at ?? -Infinity;
-      const supported = active.some(([start, end]) => start <= recordedAt && start < b && end > a);
+      // A crew seat records every state change, so its last event still holds while any run is
+      // active, even a run (a resume, a later attempt) that began after that event. A loop's
+      // ordinary transitions are not recorded, so its event must predate the run it supports.
+      const supported = active.some(
+        ([start, end]) => (agent.kind === "crew" || start <= recordedAt) && start < b && end > a,
+      );
       const carried = state !== null && state !== "idle" && !supported ? "idle" : state;
       const category =
         overlaps(blocked) ||

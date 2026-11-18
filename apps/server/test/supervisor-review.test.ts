@@ -499,7 +499,7 @@ describe("startWatch", () => {
     expect(start.cwd).toBe(wt);
     const argv = start.argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe("opus");
-    for (const flag of ["--tools", "--disallowedTools", "--restricted", "--permission-mode"])
+    for (const flag of ["--disallowedTools", "--restricted", "--permission-mode"])
       expect(argv).not.toContain(flag);
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(defined(argv[argv.indexOf("--settings") + 1]));
