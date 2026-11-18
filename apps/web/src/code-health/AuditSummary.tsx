@@ -38,6 +38,14 @@ const FIGURE_STATE: Record<CodeHealthFigure["state"], string> = {
   "not-collected": "not collected",
   "not-available": "not available",
 };
+/** Where a proposal comes from, named for the reader; unknown rules read as Repo. */
+const FROM: Record<string, string> = {
+  "recurring-correction": "Reviews",
+  "repeated-rounds": "Reviews",
+  collection: "Records",
+  "risk-and-tests": "Tests",
+};
+
 const STEPS = ["Proposed", "Accepted", "Work linked", "Measured"] as const;
 
 export const num = (value: number | null | undefined): string =>
@@ -90,19 +98,26 @@ function who(row: CodeHealthRecommendation): { tier: Who; head: string; sub: str
 
 function Measure({ row }: { row: CodeHealthRecommendation }) {
   const now = row.measure ? row.measure.current : null,
-    target = row.target.value ?? null;
+    target = row.target.value ?? null,
+    context = row.measure
+      ? `${row.measure.unit} · over ${row.measure.window}`
+      : "unit not recorded · no measure yet";
   return (
     <div className="as-meas">
-      <span className="as-l">{row.target.metric}</span>
+      <span className="as-l" title={`${row.target.metric}: ${context}`}>
+        {context}
+      </span>
       <span className="as-v">
+        <span
+          className="as-dot"
+          role="img"
+          aria-label={now === null ? "Not measured yet" : "Measured now"}
+        >
+          {now === null ? "○" : "●"}
+        </span>
         <span>{now === null ? "— unknown" : num(now)}</span>
         <span aria-hidden="true">→</span>
         <span>{target === null ? "target not set" : num(target)}</span>
-      </span>
-      <span className="as-unit">
-        {row.measure
-          ? `${row.measure.unit} · over ${row.measure.window}`
-          : "unit not recorded · no measure yet"}
       </span>
     </div>
   );
@@ -142,10 +157,14 @@ function Detail({
                 ? "; no accepted baseline yet."
                 : `; accepted baseline ${num(row.target.baseline)}.`}
             </p>
-            {row.measure && <p>{row.measure.coverage}</p>}
+            {row.measure && (
+              <p>
+                {row.measure.unit}, over {row.measure.window}. {row.measure.coverage}
+              </p>
+            )}
           </div>
           <div>
-            <h3>State path</h3>
+            <h3>Path</h3>
             <ol className="as-steps">
               {STEPS.map((name, i) => (
                 <li key={name} aria-current={i === step ? "step" : undefined}>
@@ -190,6 +209,7 @@ function RecRow({
   return (
     <tr className={open ? "as-rec as-open" : "as-rec"} data-who={decides.tier}>
       <td className="as-n">{n}</td>
+      <td className="as-from">{FROM[row.rule] ?? "Repo"}</td>
       <td>
         <button
           type="button"
@@ -251,6 +271,7 @@ function WasteRow({ row, n }: { row: CodeHealthWasteAlarmRow; n: number }) {
   return (
     <tr className="as-rec as-waste">
       <td className="as-n">{n}</td>
+      <td className="as-from">Alarm</td>
       <td>
         <div className="as-rt-static">{row.title}</div>
         <div className="as-why">
@@ -540,7 +561,7 @@ export function AuditSummary({
   );
   const openId = open === undefined ? shown[0]?.id : open;
   const alarms = overview.wasteAlarms?.rows ?? [];
-  const COLS = 5;
+  const COLS = 6;
   const outside = overview.outside;
   return (
     <div className="as-cols">
@@ -585,6 +606,7 @@ export function AuditSummary({
               <table>
                 <colgroup>
                   <col className="as-c-n" />
+                  <col className="as-c-from" />
                   <col />
                   <col className="as-c-meas" />
                   <col className="as-c-dec" />
@@ -593,6 +615,7 @@ export function AuditSummary({
                 <thead>
                   <tr>
                     <th>#</th>
+                    <th>From</th>
                     <th>What to change, and why</th>
                     <th>Measure · now → target</th>
                     <th>Decides · state</th>

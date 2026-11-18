@@ -240,20 +240,23 @@
   color: var(--muted);
 }
 .as-c-n {
-  width: 40px;
+  width: 36px;
+}
+.as-c-from {
+  width: 72px;
 }
 .as-c-meas {
-  width: 200px;
+  width: 220px;
 }
 .as-c-dec {
-  width: 160px;
+  width: 136px;
 }
 .as-c-act {
-  width: 176px;
+  width: 204px;
 }
 @container (min-width: 2000px) {
   .as-c-meas {
-    width: 280px;
+    width: 300px;
   }
   .as-c-dec {
     width: 200px;
@@ -733,4 +736,45 @@
 .as-scroll tr.as-hrow,
 .as-scroll tr.as-prow {
   height: auto;
+}
+
+/* Do next rows: 49 px tall, centred, at most two lines per cell, with a dot before the measure. */
+.as-scroll tr.as-rec {
+  height: 49px;
+}
+.as-scroll .as-rec > td {
+  vertical-align: middle;
+}
+.as-from {
+  color: var(--fg-2);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+.as-scroll .as-rec .as-dec div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-scroll .as-rec .as-rt {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-scroll .as-open .as-rt {
+  white-space: normal;
+  overflow: visible;
+}
+.as-meas .as-v {
+  flex-wrap: nowrap;
+  align-items: baseline;
+}
+.as-dot {
+  color: var(--accent);
+}
+.as-acts .as-btn {
+  padding: 0 var(--sp-3);
+  white-space: nowrap;
+}
+.code-health.as-fit th {
+  text-transform: none;
+  letter-spacing: normal;
 }
