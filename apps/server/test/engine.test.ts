@@ -105,10 +105,10 @@ import {
   UAT_PARK,
   uatParkText,
   uatSendBackText,
+  type WasteCheck,
   wakeFailedText,
   wakeStuckKey,
   wakeStuckText,
-  type WasteCheck,
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
