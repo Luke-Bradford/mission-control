@@ -777,6 +777,32 @@ describe("state step", () => {
       expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
     });
 
+    describe("a job still in GitHub's queue behind a busy runner pool", () => {
+      const busy = (started: Record<string, number>) =>
+        inCi({
+          pushed: { sha: SHA, at: NOW - 12 * min },
+          ciP90Ms: { web: 3 * min, server: 30 * min },
+          pr: pr({
+            checks: {
+              failing: [],
+              pending: ["web", "server"],
+              missing: [],
+              startedAt: started,
+            },
+          }),
+        });
+
+      it("does not park a job that has not started, 12 minutes after the push", () => {
+        const r = reconcile(busy({}));
+        expect(r.loop.parked).toBeNull();
+      });
+
+      it("still parks a job that is running past twice its p90", () => {
+        const r = reconcile(busy({ web: NOW - 11 * min }));
+        expect(r.loop.parked?.reason).toBe("CI pending for 10 minutes on aaaaaaa (pending: web)");
+      });
+    });
+
     describe("a short gate job waiting on a slow one", () => {
       const gate = (m: number, checks: { pending: string[]; missing: string[] }) =>
         inCi({
