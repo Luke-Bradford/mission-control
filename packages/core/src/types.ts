@@ -192,6 +192,8 @@ export interface RunLoop {
   ciFailedSha: string | null;
   /** The failed sha whose excerpt was claimed. */
   relayedSha: string | null;
+  /** The "your branch moved on" line the seat has not yet taken, kept until it is sent (or already sent). */
+  branchMoved?: { key: string; text: string };
   transient: number;
   lastRefusal: string | null;
   epoch: number;

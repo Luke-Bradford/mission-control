@@ -1722,6 +1722,29 @@ describe("refusals", () => {
     expect(line?.text).toContain("the hub could not (diverged)");
   });
 
+  it("a branch-moved line the busy seat could not take is held, and delivered next pass without adopting again", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.busy = true;
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    const key = `branch-moved:${RUN}:${SHA_B}`;
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(h.sent.some((m) => m.key === key)).toBe(false);
+    expect(loopOf().branchMoved?.key).toBe(key);
+    h.busy = false;
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(h.sent.filter((m) => m.key === key)).toHaveLength(1);
+    expect(h.sent.find((m) => m.key === key)?.text).toContain("Fast-forward your worktree");
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(h.fastForwards).toHaveLength(1);
+    expect(store.runCommits(RUN).filter((c) => c === SHA_B)).toHaveLength(1);
+  });
+
   it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
     setPr({ ci: "passing", headSha: SHA_B });
     report();

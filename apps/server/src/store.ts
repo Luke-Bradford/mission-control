@@ -5723,11 +5723,11 @@ export class Store {
     this.seatQ.setSeatTurnStarted(seatId, at);
   }
 
-  /** Commits since `since`, per agent, joined to their runs. */
+  /** Commits the crew authored since `since` (followed ones left out), per agent, joined to their runs. */
   commitsSince(since: number): { agentId: AgentId; n: number }[] {
     const rows = this.db
       .prepare(`SELECT r.agent_id, COUNT(*) AS n FROM run_commits c
-      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? GROUP BY r.agent_id ORDER BY r.agent_id`)
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? AND c.followed = 0 GROUP BY r.agent_id ORDER BY r.agent_id`)
       .all(since) as Row[];
     return rows.map((r) => ({ agentId: r.agent_id as string, n: r.n as number }));
   }
@@ -6158,7 +6158,7 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT c.run_id, c.repo_id, c.sha, c.at FROM run_commits c
-         WHERE c.at >= ? AND c.at <= ? AND c.id = (
+         WHERE c.at >= ? AND c.at <= ? AND c.followed = 0 AND c.id = (
            SELECT first.id FROM run_commits first
            WHERE first.repo_id = c.repo_id AND first.sha = c.sha ORDER BY first.at, first.id LIMIT 1
          ) ORDER BY c.at, c.id`,
@@ -6176,7 +6176,9 @@ export class Store {
   commitsOnBranch(repoId: RepoId, branch: string): { sha: string; at: number }[] {
     return (
       this.db
-        .prepare("SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? ORDER BY at, id")
+        .prepare(
+          "SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? AND followed = 0 ORDER BY at, id",
+        )
         .all(repoId, branch) as { sha: string; at: number }[]
     ).map((r) => ({ sha: r.sha, at: r.at }));
   }
@@ -6208,7 +6210,7 @@ export class Store {
   ): { runId: string; agentId: AgentId; sha: string; at: number; ticket: string | null }[] {
     const rows = this.db
       .prepare(`SELECT c.run_id, r.agent_id, c.sha, c.at, r.ticket FROM run_commits c
-      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? ORDER BY c.at, c.id`)
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? AND c.followed = 0 ORDER BY c.at, c.id`)
       .all(since) as Row[];
     return rows.map((r) => ({
       runId: r.run_id as string,

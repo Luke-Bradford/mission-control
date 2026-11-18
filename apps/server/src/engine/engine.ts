@@ -680,6 +680,14 @@ export function createEngine(deps: EngineDeps): Engine {
     return sent;
   }
 
+  /** Sends the held branch-moved line; it is kept, and tried again next pass, until the seat has it. */
+  async function deliverBranchMoved(run: Run, loop: RunLoop): Promise<void> {
+    const held = loop.branchMoved;
+    if (held === undefined) return;
+    const sent = await send(run.id, held.key, held.text);
+    if (sent === "sent" || sent === "dup") delete loop.branchMoved;
+  }
+
   /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
   function onChainResult<T>(runId: string, fallback: T, fn: () => Promise<T>): Promise<T> {
     let result = fallback;
@@ -1588,13 +1596,14 @@ export function createEngine(deps: EngineDeps): Engine {
         const worktree = worktreeOf(run, cur);
         const moved = worktree === null ? null : await publisher.fastForward(run, worktree, a.sha);
         const base = `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push${prior === null ? "" : ` ${prior.sha.slice(0, 7)}`}.`;
-        await send(
-          run.id,
-          `branch-moved:${run.id}:${a.sha}`,
-          moved?.ok === true
-            ? `${base} Your worktree is on it now; nothing to do.`
-            : `${base} Fast-forward your worktree to it (git merge --ff-only ${a.sha.slice(0, 7)}) before you commit again${moved === null ? "" : `; the hub could not (${moved.text})`}.`,
-        );
+        cur.branchMoved = {
+          key: `branch-moved:${run.id}:${a.sha}`,
+          text:
+            moved?.ok === true
+              ? `${base} Your worktree is on it now; nothing to do.`
+              : `${base} Fast-forward your worktree to it (git merge --ff-only ${a.sha.slice(0, 7)}) before you commit again${moved === null ? "" : `; the hub could not (${moved.text})`}.`,
+        };
+        await deliverBranchMoved(run, cur);
         out.again = true;
         return;
       }
@@ -2315,6 +2324,13 @@ export function createEngine(deps: EngineDeps): Engine {
     // The run's card is not the ended run's to move once another run has the ticket.
     const newer = run.endedAt !== null && store.hasNewerRunOnTicket(run);
     const out: Outcome = { again: false, parked: false };
+    if (run.endedAt === null && cur.branchMoved !== undefined) {
+      try {
+        await deliverBranchMoved(run, cur);
+      } catch (e) {
+        log(`${runId}: branch-moved failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     for (const a of step.actions) {
       if (out.parked) break;
       // a note that was cleared because it is no longer wanted is not raised again

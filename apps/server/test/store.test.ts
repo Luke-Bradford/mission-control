@@ -3312,6 +3312,33 @@ describe("liveSeatRuns and branchCommitSpan", () => {
     expect(store.branchCommitSpan("repo", "feature/1-x")).toEqual({ first: "sha1", last: "sha3" });
     expect(store.branchCommitSpan("repo", "feature/2-y")).toBeNull();
   });
+
+  describe("a followed commit (someone else's, on top of the run's push)", () => {
+    const add = (sha: string, at: number, followed: boolean) =>
+      store.addRunCommit({ runId: "r1", repoId: "repo", branch: "feature/1-x", sha, at, followed });
+    beforeEach(() => {
+      store.upsertRun(run({ id: "r1", agentId: "a" }));
+      add("own", 10, false);
+      add("theirs", 20, true);
+    });
+
+    it("is left out of the authored-commit queries and metrics", () => {
+      expect(store.commitsSince(0)).toEqual([{ agentId: "a", n: 1 }]);
+      expect(store.telemetryCommits(0, 100).map((c) => c.sha)).toEqual(["own"]);
+      expect(store.commitsOnBranch("repo", "feature/1-x").map((c) => c.sha)).toEqual(["own"]);
+      expect(store.runCommitsSince(0).map((c) => c.sha)).toEqual(["own"]);
+    });
+
+    it("still counts as the run's newest commit, its commits, and the branch's last", () => {
+      expect(store.newestRunCommit("r1")).toEqual({ sha: "theirs", at: 20 });
+      expect(store.runCommits("r1")).toEqual(["own", "theirs"]);
+      expect(store.followedCommits("r1")).toEqual(new Set(["theirs"]));
+      expect(store.branchCommitSpan("repo", "feature/1-x")).toEqual({
+        first: "own",
+        last: "theirs",
+      });
+    });
+  });
 });
 
 describe("passQuestion", () => {
