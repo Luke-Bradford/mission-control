@@ -27,6 +27,15 @@ describe("checksRun", () => {
     expect(checksRun(`${LINT} && ${TYPES} && pnpm -s test:related`, CHECKS)).toEqual([LINT, TYPES]);
   });
 
+  it("matches nothing when related tests are not last", () => {
+    expect(checksRun(`pnpm -s test:related && ${LINT}`, CHECKS)).toEqual([]);
+  });
+
+  it("keeps related tests as a configured check when it runs alone", () => {
+    const related = "pnpm -s test:related";
+    expect(checksRun(related, [LINT, related])).toEqual([related]);
+  });
+
   it.each([
     ["an exit before it", `exit 0 && ${LINT}`],
     ["a shell function shadowing the runner", `pnpm() ( true ) && ${LINT}`],
@@ -333,9 +342,17 @@ describe("the check recorder", () => {
     await r.begin(KEY, command);
     await r.end(KEY, false, 1);
     expect(rows).toMatchObject([
-      { command: LINT, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
-      { command: TYPES, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: false, exitCode: null },
+      { command: TYPES, invokedCommand: command, headSha: HEAD, ok: false, exitCode: null },
     ]);
+  });
+
+  it("records nothing when related tests precede a configured check", async () => {
+    const r = recorder();
+    const command = `pnpm -s test:related && ${LINT}`;
+    await r.begin(KEY, command);
+    await r.end(KEY, false, 1);
+    expect(rows).toEqual([]);
   });
 
   it.each([
@@ -649,6 +666,21 @@ describe("why the recorder dropped a check call", () => {
       await r.end(KEY, false, 1);
       expect(await r.rerun?.("r1", LINT)).toMatch(/Not run/);
       expect(refused).toEqual([LINT]);
+    });
+
+    it("allows configured checks to run again after related tests fail twice", async () => {
+      const { r, refused } = withRerun();
+      const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
+      await r.begin(KEY, command);
+      await r.end(KEY, false, 1);
+      await r.begin({ runId: "r1", toolUseId: "t2" }, command);
+      await r.end({ runId: "r1", toolUseId: "t2" }, false, 1);
+      expect(await r.rerun?.("r1", LINT)).toBeNull();
+      expect(refused).toEqual([]);
+
+      await r.begin({ runId: "r1", toolUseId: "t3" }, LINT);
+      await r.end({ runId: "r1", toolUseId: "t3" }, true, 0);
+      expect(rows.at(-1)).toMatchObject({ command: LINT, ok: true, exitCode: 0 });
     });
 
     it("is not refused after a call the Bash timeout killed: it may run again with a longer one", async () => {

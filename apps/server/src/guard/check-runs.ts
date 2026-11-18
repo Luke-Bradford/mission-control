@@ -25,11 +25,11 @@ export { plainCall };
 
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
- * EVERY trimmed segment is a configured check or the related-tests run. The latter is allowed as
- * a companion to the configured checks, but is not itself recorded as one. Anything else in the
- * chain (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees or whether
- * it runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break counts for
- * nothing too.
+ * EVERY trimmed segment is a configured check, with `pnpm -s test:related` allowed only at the
+ * end. The latter is a companion to the configured checks, not itself a recorded check. Anything
+ * else in the chain (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees
+ * or whether it runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break
+ * counts for nothing too.
  */
 /** The related-tests run, as a repo's `checks` list spells it. */
 export const RELATED_CHECK = "pnpm -s test:related";
@@ -37,8 +37,15 @@ export const RELATED_CHECK = "pnpm -s test:related";
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
   const segments = command.split("&&").map((s) => s.trim());
-  if (segments.some((s) => !checks.includes(s) && s !== RELATED_CHECK)) return [];
-  return checks.filter((c) => segments.includes(c));
+  const relatedAtEnd = segments.length > 1 && segments.at(-1) === RELATED_CHECK;
+  const checkSegments = relatedAtEnd ? segments.slice(0, -1) : segments;
+  if (checkSegments.some((s) => !checks.includes(s))) return [];
+  return checks.filter((c) => checkSegments.includes(c));
+}
+
+function hasRelatedTestsCompanion(command: string): boolean {
+  const segments = command.split("&&");
+  return segments.length > 1 && segments.at(-1)?.trim() === RELATED_CHECK;
 }
 
 /** A leading `cd <path>` joined to the rest by `&&` or `;`; the path is bare, or in single or double quotes. */
@@ -167,6 +174,8 @@ interface StartedCall {
   head: string;
   startedAt: number;
   timeoutMs: number;
+  /** The related-tests companion is last, so its failure must not exhaust a check retry. */
+  relatedTests: boolean;
 }
 
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
@@ -283,6 +292,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
             CHECK_BASH_TIMEOUT_MS,
           ),
+          relatedTests: hasRelatedTestsCompanion(command),
         };
         // A new Codex call with the same command replaces an earlier one that never delivered a
         // completion. Its exec cell no longer exists, so keeping the old receipt pending would
@@ -329,7 +339,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             invokedCommand: call.command,
             headSha: call.head,
             ok,
-            exitCode,
+            // The shell only returns one status. When related tests are last, a failure could be
+            // theirs, so it cannot be evidence that a configured check failed or consume its retry.
+            exitCode: !ok && call.relatedTests ? null : exitCode,
             at: now(),
           });
         }
