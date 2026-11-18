@@ -79,7 +79,7 @@ const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
-const PLAN_TOPICS: readonly Topic[] = ["boards", "flight"];
+const PLAN_TOPICS: readonly Topic[] = ["boards", "plans"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 type PageDocument = {
@@ -443,10 +443,14 @@ export const ACTIONS = {
   /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
   onboardRepo: "/api/repos/onboard",
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
-  approvePlan: (id: string) => `/api/plans/${enc(id)}/approve`,
+  approvePlan: (repoId: string, issue: number | string) =>
+    `/api/plans/${enc(repoId)}/${issue}/approve`,
   /** Body `{ note }`. */
-  sendBackPlan: (id: string) => `/api/plans/${enc(id)}/send-back`,
+  sendBackPlan: (repoId: string, issue: number | string) =>
+    `/api/plans/${enc(repoId)}/${issue}/send-back`,
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
+  /** Body `{ base, rules }`; saves the editable repo rules. */
+  repoRules: (repoId: string) => `/api/repos/${enc(repoId)}/rules`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => RESOURCES.boardSetup(repoId).path,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */

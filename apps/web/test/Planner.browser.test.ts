@@ -10,7 +10,7 @@ const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "planner-shots");
 
 // Mockups are full-size PNGs: a 1x1 picture would hide how far they push the decision down.
-const picturePath = (c: string) => `/api/attention-material-assets/${c.repeat(64)}`;
+const picturePath = (c: string) => `/api/plan-assets/${c.repeat(64)}`;
 const MOCKUPS: readonly (readonly [string, number])[] = [
   ["a", 185],
   ["b", 295],
@@ -19,53 +19,56 @@ const ASSETS = Object.fromEntries(
   MOCKUPS.map(([c, hue]) => [picturePath(c), { contentType: "image/png", body: mockPng(hue) }]),
 );
 const picture = (c: string, caption: string) => ({
+  id: c.repeat(64),
   url: picturePath(c),
   caption,
+  mediaType: "image/png" as const,
 });
 const base = {
   repoId: "shop-app",
   asks: "Failed payment webhooks are dropped, so paid orders stay unpaid.\nRetry them.",
-  proposed:
+  proposal:
     "Queue each failed webhook and retry with backoff: five tries over an hour. Show the queue in the admin screen so a person can see what is stuck.",
-  size: "M",
+  sizeEstimate: "M",
   risks:
     "A retry could double-charge when the first call did land. The plan checks the payment id first.",
 };
 const waiting = {
   ...base,
-  id: "p1",
-  ticket: "shop-app#102",
+  issue: 102,
+  ref: "shop-app#102",
   title: "Retry failed payment webhooks",
-  pictures: [picture("a", "Retry queue in the admin screen"), picture("b", "Empty queue")],
-  status: "pending",
+  mockups: [picture("a", "Retry queue in the admin screen"), picture("b", "Empty queue")],
+  state: "awaiting-signoff",
+  marked: true, note: null, requestedAt: 1, plannedAt: 1, decidedAt: null,
 };
 const sentBack = {
   ...base,
-  id: "p2",
-  ticket: "shop-app#104",
+  issue: 104,
+  ref: "shop-app#104",
   title: "Fix the address form on narrow screens",
-  pictures: [],
-  status: "sent-back",
+  mockups: [],
+  state: "sent-back", marked: true, requestedAt: 1, plannedAt: 1,
   note: "Keep the postcode lookup on narrow screens.",
   decidedAt: 1_700_000_000_000,
 };
 const LONG = `${"A schema-length sentence about the plan. ".repeat(200)}${"x".repeat(400)}`;
 const many = {
-  pending: Array.from({ length: 50 }, (_, i) => ({
+  waiting: Array.from({ length: 50 }, (_, i) => ({
     ...waiting,
-    id: `m${i}`,
-    ticket: `shop-app#${200 + i}`,
+    issue: 200 + i,
+    ref: `shop-app#${200 + i}`,
     title: i === 0 ? `${"Very long title ".repeat(20)}end` : `Plan number ${i}`,
   })),
   history: [],
 };
 const STATES = {
-  waiting: { pending: [waiting], history: [] },
-  "sent back": { pending: [], history: [sentBack] },
-  empty: { pending: [], history: [] },
+  waiting: { waiting: [waiting], history: [] },
+  "sent back": { waiting: [sentBack], history: [] },
+  empty: { waiting: [], history: [] },
   "50 waiting": many,
   "long text": {
-    pending: [{ ...waiting, asks: LONG, proposed: LONG, risks: LONG }],
+    waiting: [{ ...waiting, asks: LONG, proposal: LONG, risks: LONG }],
     history: [],
   },
 } as const;

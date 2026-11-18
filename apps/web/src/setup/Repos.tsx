@@ -5,6 +5,9 @@ import {
   errorText,
   type MapSnapshot,
   type NewRepo,
+  PLAN_SIGNOFFS,
+  type PlanSignoff,
+  type RepoRulesView,
   type RepoPreview,
   type SeatInput,
 } from "@mc/core";
@@ -24,19 +27,12 @@ import { callSign } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
 import { OwnershipLens } from "../lenses/lenses.tsx";
-import {
-  DEFAULT_PLAN_SIGN_OFF,
-  PLAN_SIGN_OFF_LABELS,
-  PLAN_SIGN_OFFS,
-  type PlanSignOff,
-} from "../plans/types.ts";
 import { useReturnFocus } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
 import { CALL_SIGN, CALL_SIGN_HINT } from "./Sessions.tsx";
 
-/** `planSignOff` is the server's plan sign-off setting; a server that has none leaves it out. */
-type Repo = ConfigView["repos"][number] & { planSignOff?: PlanSignOff };
+type Repo = ConfigView["repos"][number];
 type Session = NonNullable<ConfigView["crew"]>["sessions"][number];
 type Guidance = NonNullable<Repo["guidance"]>;
 const EMPTY_GUIDANCE: Guidance = {
@@ -46,6 +42,11 @@ const EMPTY_GUIDANCE: Guidance = {
   labelMode: "any",
   avoid: [],
   direction: "",
+};
+const PLAN_SIGNOFF_LABELS: Record<PlanSignoff, string> = {
+  every: "Every ticket",
+  larger: "Larger work only",
+  never: "Never",
 };
 
 /** Configuration only: cards do not make board, queue, or live-seat reads. */
@@ -132,24 +133,28 @@ function RepoCard({
   const [open, setOpen] = useState(false);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
-  const [planSignOff, setPlanSignOff] = useState<PlanSignOff>(
-    repo.planSignOff ?? DEFAULT_PLAN_SIGN_OFF,
-  );
+  const rules = useResource<RepoRulesView>(RESOURCES.repoRules(repo.id));
+  const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    setPlanSignOff(repo.planSignOff ?? DEFAULT_PLAN_SIGN_OFF);
+    setPlanSignOff((rules.data?.rules.plan_signoff.value as PlanSignoff | undefined) ?? "never");
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
     setAccount(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
-  }, [repo, config.accounts]);
+  }, [repo, config.accounts, rules.data]);
   const save = async () => {
     setSaving(true);
     try {
       const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
         defaultAccountId: account || null,
         guidance,
-        // The control is negotiated by the config read, so older servers keep accepting this body.
-        ...(repo.planSignOff !== undefined ? { planSignOff } : {}),
       });
+      if (rules.data) {
+        await apiPost(ACTIONS.repoRules(repo.id), {
+          base: rules.data.base,
+          rules: { plan_signoff: planSignOff },
+        });
+        hub.refetch(RESOURCES.repoRules(repo.id).path);
+      }
       toast(`Saved ${repo.id}. Backup: ${result.backup}.`);
       hub.refetch(RESOURCES.config.path);
     } catch (error) {
@@ -193,16 +198,16 @@ function RepoCard({
                 ))}
               </select>
             </label>
-            {repo.planSignOff !== undefined && (
+            {rules.data && (
               <label>
                 Plan sign-off
                 <select
                   value={planSignOff}
-                  onChange={(e) => setPlanSignOff(e.target.value as PlanSignOff)}
+                  onChange={(e) => setPlanSignOff(e.target.value as PlanSignoff)}
                 >
-                  {PLAN_SIGN_OFFS.map((v) => (
+                  {PLAN_SIGNOFFS.map((v) => (
                     <option key={v} value={v}>
-                      {PLAN_SIGN_OFF_LABELS[v]}
+                      {PLAN_SIGNOFF_LABELS[v]}
                     </option>
                   ))}
                 </select>

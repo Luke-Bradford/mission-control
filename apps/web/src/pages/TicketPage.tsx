@@ -383,7 +383,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
           </div>
         </Panel>
         <div className={`tk-main${questions.length > 0 ? " has-questions" : ""}`}>
-          <SignedOffPlan repoId={repoId} number={number} built={<TicketPlanResult prs={qaPrs} />} />
+          <SignedOffPlan plan={t.plan} built={<TicketPlanResult prs={qaPrs} />} />
           {questions.length > 0 && (
             <Panel id="questionsP" title="Questions" sub="newest first" className="tk-questions">
               <div className="pb scroll">

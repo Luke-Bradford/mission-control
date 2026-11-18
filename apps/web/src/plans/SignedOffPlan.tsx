@@ -1,93 +1,30 @@
+import type { QaPlan, TicketPlan } from "@mc/core";
 import type { ReactNode } from "react";
-import { hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { PlanPictures } from "./PlanView.tsx";
-import { type PlansView, ticketNumberOf } from "./types.ts";
 import "./plans.css";
 
-/** The newest approved plan and its read state for one ticket. */
-export function useSignedOffPlan(repoId: string, number: number | null) {
-  const res = useResource<PlansView>(number === null ? null : RESOURCES.plans(repoId));
-  const plan = res.data?.history
-    .filter(
-      (p) => p.status === "approved" && p.repoId === repoId && ticketNumberOf(p.ticket) === number,
-    )
-    .sort((a, b) => (b.decidedAt ?? 0) - (a.decidedAt ?? 0))[0];
-  return { plan, ...res };
-}
-
 /**
- * The plan the operator signed off, beside what was built: the proposal against the result, the
- * mockups above the screenshots. Nothing shows for a ticket with no signed-off plan.
+ * The signed-off plan retained with a ticket or QA report, beside the result it describes.
  */
 export function SignedOffPlan({
-  repoId,
-  number,
+  plan,
   built,
   className,
-  ticketLookup,
 }: {
-  repoId: string;
-  number: number | null;
-  /** What was built, in the words of the page it sits on. */
+  plan: TicketPlan | QaPlan | null | undefined;
   built: ReactNode;
   className?: string;
-  /** The archived report's retained-PR lookup, when it is the only ticket source. */
-  ticketLookup?: { loading: boolean; error: Error | null; retry: () => void };
 }) {
-  const { plan, loading, error } = useSignedOffPlan(repoId, number);
+  if (!plan || ("state" in plan && plan.state !== "signed-off")) return null;
   const panelClass = className ? `plan-beside ${className}` : "plan-beside";
-  if (number === null && ticketLookup?.loading)
-    return (
-      <Panel title="Signed-off plan" className={panelClass}>
-        <p className="pb" role="status">
-          Finding this report's ticket…
-        </p>
-      </Panel>
-    );
-  if (number === null && ticketLookup?.error)
-    return (
-      <Panel title="Signed-off plan" className={panelClass}>
-        <p className="pb crit-t" role="alert">
-          Could not find this report's ticket. {ticketLookup.error.message}{" "}
-          <button type="button" onClick={ticketLookup.retry}>
-            Try again
-          </button>
-        </p>
-      </Panel>
-    );
-  if (number === null) return null;
-  if (loading && !plan)
-    return (
-      <Panel title="Signed-off plan" className={panelClass}>
-        <p className="pb" role="status">
-          Loading the signed-off plan…
-        </p>
-      </Panel>
-    );
-  if (error)
-    return (
-      <Panel title="Signed-off plan" className={panelClass}>
-        <p className="pb crit-t" role="alert">
-          Could not load the signed-off plan. {error.message}{" "}
-          <button type="button" onClick={() => hub.refetch(RESOURCES.plans(repoId).path)}>
-            Try again
-          </button>
-        </p>
-      </Panel>
-    );
-  if (!plan) return null;
   return (
-    <Panel
-      title="Signed-off plan"
-      sub={`${plan.ticket} · size ${plan.size}`}
-      className={panelClass}
-    >
+    <Panel title="Signed-off plan" sub={`${plan.ref} · size ${plan.sizeEstimate ?? "—"}`} className={panelClass}>
       <div className="pb plan-beside-grid">
         <section aria-label="What was proposed">
           <h3>Proposed</h3>
-          <p className="plan-text">{plan.proposed}</p>
-          {plan.risks.trim() !== "" && (
+          <p className="plan-text">{plan.proposal ?? "Nothing written."}</p>
+          {plan.risks && (
             <>
               <h3>Risks the plan named</h3>
               <p className="plan-text">{plan.risks}</p>

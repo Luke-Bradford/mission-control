@@ -1,4 +1,4 @@
-import { type PullRequestView, type QaImageRef, type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
+import { type QaImageRef, type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
 import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiQaReportImage } from "../api.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -6,7 +6,6 @@ import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
-import { ticketNumberOf } from "../plans/types.ts";
 import { NOTHING_TO_SEE } from "./nothingToSee.ts";
 import "./qa-report.css";
 
@@ -180,35 +179,6 @@ export function QaReportArchive({
   );
 }
 
-/** The ticket a branch is for, when it is named like `feature/2037-planner-tab`. */
-const branchTicket = (branch: string | undefined): number | null => {
-  const m = /^[a-z]+\/([1-9]\d*)-/.exec(branch ?? "");
-  return m ? Number(m[1]) : null;
-};
-
-/**
- * The ticket number a report's signed-off plan is looked up by: the PR's ticket when the caller
- * knows it, else its retained PR row (a report saved without a branch still finds its plan), else
- * the one a conventional branch name carries.
- */
-function usePlanTicket(r: QaReport, ticket: string | null | undefined) {
-  const known = ticket ? ticketNumberOf(ticket) : null;
-  const pr = useResource<PullRequestView>(
-    known === null ? RESOURCES.pr(r.repoId, r.prNumber) : null,
-  );
-  // A saved report must not borrow a plan from a ticket-shaped branch while the retained PR is
-  // still authoritative. In particular, a stale branch can name a different ticket than the PR.
-  const retained = pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null;
-  const fallback = !pr.loading && !pr.error && pr.data ? branchTicket(r.branch) : null;
-  const number = known ?? retained ?? fallback;
-  return {
-    number,
-    loading: known === null && pr.loading,
-    error: known === null && pr.error ? pr.error : null,
-    retry: () => hub.refetch(RESOURCES.pr(r.repoId, r.prNumber).path),
-  };
-}
-
 /** The selected head is mandatory: an older approval never fills a new head's evidence gap. */
 export function CurrentQaReport({
   repo,
@@ -218,11 +188,12 @@ export function CurrentQaReport({
   ticket,
   children,
 }: {
+  /** Retained for callers while reports carry their signed-off plan directly. */
+  ticket?: string | null;
   repo: string;
   pr: number;
   head: string | null;
   /** The PR's ticket as `repo#number`, when known. */
-  ticket?: string | null;
   /** Whether the PR waits for the operator's acceptance; the gaps list is for that decision only. */
   awaiting: boolean;
   children?: ReactNode;
@@ -523,13 +494,10 @@ export const QaReportRead = memo(function QaReportRead({
               ? "Evidence incomplete"
               : "QA passed · recorded scope";
   const checks = new Map(r.coverage.map((c) => [c.check, c]));
-  const planTicket = usePlanTicket(r, ticket);
   return (
     <article className="qa-report" aria-label={`QA report for PR #${r.prNumber}`}>
       <SignedOffPlan
-        repoId={r.repoId}
-        number={planTicket.number}
-        ticketLookup={planTicket}
+        plan={r.plan}
         built={
           <>
             <p>{r.summary}</p>
