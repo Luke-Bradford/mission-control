@@ -340,7 +340,7 @@
 
 /* At narrow desktop widths the control room keeps all three columns, but gives the active seat
    enough room for its controls and activity stream. */
-@container agent-page (min-width: 800px) and (max-width: 1300px) {
+@container agent-page (min-width: 800px) and (max-width: 1100px) {
   .control-shell {
     grid-template-columns: 220px minmax(0, 1fr) 320px;
   }
