@@ -756,8 +756,8 @@ export function flightSignals(i: {
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
-  // An alarm about work going round or standing still wakes FLIGHT, once: left unsaid, a ticket in
-  // its third review round or its fourth run stands unseen. The spend alarms are stored; GET
+  // An alarm about one ticket going round wakes FLIGHT, once: left unsaid, a ticket in its third
+  // review round or its fourth run stands unseen. The spend alarms are stored; GET
   // /api/waste serves the open ones.
   for (const alarm of openWasteAlarms(store)) {
     if (alarm.repoId !== repo) continue;
