@@ -3,12 +3,29 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { NEW_LOOP } from "@mc/core";
 import { expect, it } from "vitest";
+import { ChangeBus } from "../src/bus.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import { syncWasteAlarms, ticketParked } from "../src/spend/waste.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
-import { clone, git, make, prep, store, until, userLines } from "./supervisor-harness.ts";
+import {
+  boardCard,
+  clone,
+  git,
+  make,
+  prep,
+  START_RULES,
+  store,
+  until,
+  userLines,
+} from "./supervisor-harness.ts";
 
 skipTestsIf(await blockedHere("crew-run"));
+
+const need = <T>(v: T | null | undefined): T => {
+  if (v == null) throw new Error("missing");
+  return v;
+};
 
 const extraSeat = {
   id: "guido-2",
@@ -83,6 +100,75 @@ it("hands a held PR's merge hold to the seat that takes the ticket over, in a di
     by: "CAPCOM",
     reason: "reproduced bug",
   });
+});
+
+it("reassign_ticket starts the next seat on a held PR through the real supervisor, and the hold comes with it", async () => {
+  const { sup, cfg, fetchTicket } = make({ extraSeat });
+  sup.start();
+  const session = cfg.crew?.sessions[0];
+  if (!session) throw new Error("missing session");
+  session.seats.push({
+    id: "flight-1",
+    role: "FLIGHT",
+    accountId: "claude-main",
+    model: "haiku",
+    area: [],
+  });
+  const hold = { by: "CAPCOM" as const, reason: "reproduced bug", at: 10 };
+  const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP, mergeHold: hold } });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  await sup.endRun("guido-1");
+  const flightRun = "flight-1:r";
+  store.upsertRun({
+    ...need(store.run(first.runId)),
+    id: flightRun,
+    agentId: "flight-1",
+    endedAt: null,
+    branch: null,
+    ticket: null,
+    loop: undefined,
+  });
+  store.setSeatSession({
+    seatId: "flight-1",
+    runId: flightRun,
+    cliSessionId: "c",
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: 0,
+  });
+  const tools = createFlightTools({
+    config: cfg,
+    store,
+    bus: new ChangeBus(),
+    supervisor: sup,
+    login: "me",
+    engine: { status: () => ({ on: true, note: null }) } as never,
+    rules: async () => START_RULES,
+    fetchTicket,
+    board: {
+      move: async () => ({ ok: true, changed: true }),
+      read: async () => ({ ...boardCard(42), status: "In review" }),
+    },
+    gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+    dbPath: ":memory:",
+    knownSecrets: async () => [],
+  });
+  const reassign = tools.find((t) => t.name === "reassign_ticket");
+  const r = await need(reassign).call(
+    { seatId: "flight-1", runId: flightRun },
+    {
+      issue: 42,
+      seat: "guido-2",
+      reason: "Fix the reproduced bug",
+      basis: "The PR is held for a bug",
+    },
+  );
+  expect(r.isError).toBeUndefined();
+  const second = need(store.runsOnTicket("mc", "mc#42").find((x) => x.agentId === "guido-2"));
+  expect(second.id).not.toBe(first.runId);
+  expect(store.receivedHandoff(second.id)?.runId).toBe(first.runId);
+  expect(second.loop?.mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
 });
 
 it("preserves a removed crew author's aside and lets another configured seat adopt it", async () => {
