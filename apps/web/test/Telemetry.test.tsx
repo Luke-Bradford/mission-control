@@ -330,13 +330,10 @@ describe("Telemetry refetch", () => {
 describe("Telemetry toolbar", () => {
   it("names the tab it shows and, on an unbuilt tab, says what is coming over the current panels", async () => {
     await loaded(undefined, undefined, undefined, "quality");
-    expect(screen.getByRole("tab", { name: "Quality" }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
+    expect(screen.getByRole("tab", { name: "Quality" }).getAttribute("aria-selected")).toBe("true");
     screen.getByRole("heading", { level: 2, name: "Quality is coming" });
     // the current panels stay under the note, so nothing disappears meanwhile
-    for (const id of ["tQual", "tQualityTrend"])
-      expect(panel(id)).toBeTruthy();
+    for (const id of ["tQual", "tQualityTrend"]) expect(panel(id)).toBeTruthy();
   });
 
   it("asks for 24h by default and the picked range on a switch", async () => {
