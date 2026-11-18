@@ -177,7 +177,7 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run/handoffs.ts";
+import { inheritedHandoffLoop, recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -2113,6 +2113,54 @@ describe("start_seat", () => {
         .isError,
     ).toBeUndefined();
     expect(startCalls).toHaveLength(1);
+  });
+  it("reassigns a held PR's ticket: the new run starts under the engine and the hold comes with it", async () => {
+    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+    engineOn = true;
+    board(sc(7, { status: "In review" }));
+    const hold = { by: "CAPCOM" as const, reason: "reproduced bug", at: NOW - 5 };
+    const old = run("old", "guido-cx", {
+      ticket: "mc#7",
+      branch: "feature/7-old",
+      endedAt: NOW - 1000,
+      loop: { ...NEW_LOOP, prNumber: 9, mergeHold: hold },
+    });
+    store.upsertRun(old);
+    recordRunHandoff(store, old, null);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR",
+          url: "u",
+          branch: "feature/7-old",
+          ticket: "mc#7",
+          state: "open" as const,
+          isDraft: false,
+          review: null,
+          ci: "pending" as const,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    expect(
+      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the bug" })).isError,
+    ).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+    const [seatId, issue, opts] = need(startCalls[0]) as [string, number, { loop?: RunLoop }];
+    expect([seatId, issue]).toEqual(["guido-1", 7]);
+    // the supervisor builds the new run's loop from the ended run's loop in just this way
+    expect(inheritedHandoffLoop(old.loop, opts.loop)?.mergeHold).toMatchObject({
+      by: "CAPCOM",
+      reason: "reproduced bug",
+    });
   });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
