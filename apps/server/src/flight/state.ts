@@ -1764,9 +1764,7 @@ const stoppedSeats = (s: FlightState): string[] =>
 const flightParkKind = (kind: string): boolean => kind === RULING_PARK || kind === "review-failed";
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park it may settle. */
-export function pending(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-): boolean {
+export function pending(s: FlightState & TeamsDigestState): boolean {
   return (
     s.retrospective !== undefined ||
     s.signals.some((s) => !s.told) ||
