@@ -258,7 +258,9 @@ describeRendered("Accountable QA report", () => {
       // the report (and its signed-off-plan comparison) never mounts.
       const api: Record<string, unknown> = qaReportApi(1);
       const queue = api["/api/qa/queue"] as { prs: Array<{ ticket: string }> };
-      queue.prs[0]!.ticket = "mission-control#2037";
+      const queued = queue.prs[0];
+      if (!queued) throw new Error("The QA fixture needs a selected PR.");
+      queued.ticket = "mission-control#2037";
       api[`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${report.headSha}`] = {
         reports: [report],
       };
