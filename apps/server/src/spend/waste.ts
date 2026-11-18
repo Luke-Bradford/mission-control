@@ -465,7 +465,12 @@ export const resolvedReviewRound = (store: Store, authorRunId: string): number =
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
 
-/** The round the next review of this author run gets in the epoch a rework grant covers: blocking reviews count across epochs. */
+/**
+ * The round the next review of this author run gets in the epoch a rework grant covers: blocking
+ * reviews count across epochs. It counts the run's reported blocking reviews whatever their PR's
+ * state, while `maxRound` (the live round the hold scan uses) reads open PRs only; a grant takes the
+ * larger, so a closed PR's rounds still count toward the cap the seat is under.
+ */
 export const nextReviewRound = (store: Store, authorRunId: string): number =>
   1 +
   store.reviewsOfRun(authorRunId).filter((r) => r.state === "reported" && r.blocking > 0).length;

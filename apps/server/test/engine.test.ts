@@ -108,6 +108,7 @@ import {
   wakeFailedText,
   wakeStuckKey,
   wakeStuckText,
+  type WasteCheck,
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
@@ -861,6 +862,8 @@ afterEach(() => {
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+const REVIEW_ROUNDS: WasteCheck = "review-rounds";
 
 describe("controller PR scratch reviews", () => {
   it("starts a review without an author run and supersedes it when the head changes", async () => {
@@ -6827,7 +6830,7 @@ describe("the engine runs reviews", () => {
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
         expect(
-          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+          store.waste.alarms("WHERE check_id = ? AND subject = ?", REVIEW_ROUNDS, RUN)[0],
         ).toMatchObject({ basis: "the floor review looks wrong", level: 3 });
         await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
         await h.engine.tick();
@@ -6953,7 +6956,7 @@ describe("the engine runs reviews", () => {
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
         expect(
-          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+          store.waste.alarms("WHERE check_id = ? AND subject = ?", REVIEW_ROUNDS, RUN)[0],
         ).toMatchObject({ basis: "the findings are fixed", level: 3 });
         await h.engine.tick();
         await h.engine.reconcileRun(RUN);
@@ -6970,7 +6973,8 @@ describe("the engine runs reviews", () => {
         const third = await heldAtLimit();
         syncWasteAlarms(config, store, clock);
         const open = store.waste.alarms(
-          "WHERE check_id = 'review-rounds' AND subject = ? AND resolved_at IS NULL",
+          "WHERE check_id = ? AND subject = ? AND resolved_at IS NULL",
+          REVIEW_ROUNDS,
           RUN,
         )[0];
         expect(open).toMatchObject({ level: 3 });
@@ -7038,7 +7042,7 @@ describe("the engine runs reviews", () => {
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
         expect(
-          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+          store.waste.alarms("WHERE check_id = ? AND subject = ?", REVIEW_ROUNDS, RUN)[0],
         ).toMatchObject({ basis: "the findings are minor", level: 3 });
         expect(loopOf().phase).not.toBe("parked");
       });
@@ -7170,6 +7174,78 @@ describe("the engine runs reviews", () => {
         expect(loopOf().phase).not.toBe("parked");
       });
 
+      it("a granted review that fails to start keeps the grant: a rereview's blocking review parks at the cap", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        // the granted review crashes twice: the run parks as review-failed
+        for (const attempt of [1, 2]) {
+          const row = need(
+            await vi.waitFor(() => {
+              const r = reviewRows().find(
+                (x) => x.sha === SHA_D && x.attempt === attempt && x.state === "running",
+              );
+              expect(r).toBeDefined();
+              return r;
+            }),
+          );
+          crash(need(row.runId));
+        }
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe("review-failed"));
+        expect(loopOf().flightReworkGrantEpoch).toBeDefined();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review-failed"], action: "rereview" })).toBe(
+          true,
+        );
+        expect(loopOf().flightReworkGrantEpoch).toBeDefined();
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const again = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        const sentBefore = h.sent.length;
+        reported(again.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        // still the granted round counted across epochs: a plain review park, no fix line
+        expect(loopOf().parked?.kind).toBe("review");
+        expect(h.sent).toHaveLength(sentBefore);
+      });
+
+      it("a review park lifted by something other than FLIGHT's rework drops the grant", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        const granted = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        reported(granted.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe("review"));
+        expect(loopOf().flightReworkGrantEpoch).toBeDefined();
+        // the operator sends it back for rework from the HUD
+        await h.engine.onOperatorMessage(RUN);
+        expect(loopOf().flightReworkGrantEpoch).toBeUndefined();
+        await push(SHA_E);
+        const next = reviewRows().filter((r) => r.sha === SHA_E && r.state !== "superseded");
+        expect(next).toHaveLength(1);
+        expect(next[0]).toMatchObject({ round: 1, state: "running" });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+      });
+
       it("a rereview after the granted round fails runs the review of that head", async () => {
         await grantedThenFailed();
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rereview" })).toBe(true);
@@ -7241,7 +7317,7 @@ describe("the engine runs reviews", () => {
       it("a rework from a review park below the cap leaves no review-rounds alarm", async () => {
         await parkedForRework();
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
-        expect(store.waste.alarms("WHERE check_id = 'review-rounds'")).toEqual([]);
+        expect(store.waste.alarms("WHERE check_id = ?", REVIEW_ROUNDS)).toEqual([]);
       });
 
       it("accept is refused when the last review failed the design check", async () => {

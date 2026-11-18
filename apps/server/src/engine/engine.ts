@@ -3262,11 +3262,12 @@ export function createEngine(deps: EngineDeps): Engine {
           lastRefusal: null,
           unparkedAt: at,
         };
-        // a grant lasts until FLIGHT decides again, whatever else starts a new epoch meanwhile
+        // a grant lasts until a review park is settled again, whatever else starts a new epoch meanwhile
+        // (a CI lift, a main sync). A review-failed park keeps it: its review never ran, so the
+        // granted review is still owed. FLIGHT's rework sets it again below.
         if (
-          opts?.action === "rereview" ||
-          opts?.action === "accept" ||
-          opts?.action === "second_review"
+          (kind === "review" || kind === "review-ruling") &&
+          !(by === "FLIGHT" && opts?.action === "rework")
         )
           delete next.flightReworkGrantEpoch;
         if (kind === "budget") {
@@ -3371,7 +3372,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // that one round runs and a fail past it parks again.
         const reopens =
           opts?.action === "rereview" ||
-          opts?.action === "rework" ||
+          (opts?.action === "rework" && (kind === "review" || kind === "review-ruling")) ||
           opts?.action === "accept" ||
           opts?.action === "second_review";
         // only a rework of a run parked at the cap grants a review past it

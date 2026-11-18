@@ -1,4 +1,4 @@
-import { NEW_LOOP, type Run, type RunHandoff, type RunLoop } from "@mc/core";
+import { MERGE_HOLD_PARK, NEW_LOOP, type Run, type RunHandoff, type RunLoop } from "@mc/core";
 import { cleanText } from "../repo/clean.ts";
 import { handoffCheckoutStatus } from "../runtime/checkouts.ts";
 import type { Store } from "../store.ts";
@@ -52,7 +52,7 @@ export function recordRunHandoff(
   const left = [
     safe(run.loop?.parked?.reason ?? `Unfinished at ${phase}`),
     // a merge hold stands until it is released: the next author must know why, and not re-push
-    ...(hold
+    ...(hold && run.loop?.parked?.kind !== MERGE_HOLD_PARK
       ? [safe(`${hold.by} holds the merge: ${hold.reason}. Do not push the head again unchanged.`)]
       : []),
     ...store
