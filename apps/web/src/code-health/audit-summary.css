@@ -2,6 +2,7 @@
    Two columns need a page 1400 px wide; narrower, the columns stack and the page scrolls. */
 .code-health.as-fit {
   --as-side: clamp(440px, 34vw, 600px);
+  --as-panel-head: 40px;
   --as-out-max: 160px;
   --as-plot: 44px;
 }
@@ -75,14 +76,25 @@
     display: flex;
     flex-direction: column;
   }
-  .as-do,
-  .as-files {
+  .as-do {
     flex: 1 1 auto;
   }
   .as-outside,
-  .as-build,
   .as-past {
     flex: none;
+  }
+  /* The files panel never gives up its header and two rows: when the page is short, How we build
+     gives way (its health table scrolls) instead of the panels overlapping. */
+  .as-files {
+    flex: 1 0 auto;
+    min-height: calc(var(--as-panel-head) + 120px);
+  }
+  .as-build {
+    flex: 0 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
   .as-scroll {
     max-height: none;
@@ -93,7 +105,8 @@
   /* All five figures show: the health table takes its natural height and the files list gives way. */
   .as-hscroll {
     max-height: none;
-    flex: none;
+    flex: 1 1 auto;
+    min-height: 64px;
   }
   .as-pastrows {
     max-height: 48px;

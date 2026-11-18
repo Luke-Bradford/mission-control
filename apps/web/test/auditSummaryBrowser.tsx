@@ -11,6 +11,7 @@ import "../src/hud.css";
 import { createRoot } from "react-dom/client";
 import { CodeHealth } from "../src/code-health/CodeHealth.tsx";
 import { streamStatus } from "../src/data.ts";
+import { Footer } from "../src/shell/Footer.tsx";
 
 streamStatus.set({ connected: true, reconnecting: false, lastMessageAt: Date.now() });
 const root = document.getElementById("root");
@@ -20,6 +21,9 @@ const style = document.createElement("style");
 style.textContent =
   "html,body,#root{height:100%;margin:0;overflow:hidden}.frame{height:100%;display:flex;flex-direction:column}.frame-head{flex:none;height:49px;border-bottom:1px solid var(--line)}.frame-body{flex:1;min-height:0;display:flex}.frame-body main{flex:1;min-width:0;min-height:0;padding:12px}.frame-dock{flex:none;width:380px;border-left:1px solid var(--line)}";
 document.head.append(style);
+// A test drops the connection after the first read, so the page shows its disconnected notice.
+(globalThis as { __streamDown?: () => void }).__streamDown = () =>
+  streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: Date.now() });
 createRoot(root).render(
   <div className="frame">
     <header className="frame-head" />
@@ -29,5 +33,6 @@ createRoot(root).render(
       </main>
       <aside className="frame-dock" />
     </div>
+    <Footer />
   </div>,
 );

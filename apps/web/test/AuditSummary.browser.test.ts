@@ -86,6 +86,15 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
         const l = r.closest(".as-scroll");
         return !!l && rect(r).top >= rect(l).top && rect(r).bottom <= rect(l).bottom;
       }).length,
+      landingOverlapsPast: (() => {
+        const past = document.querySelector(".as-past");
+        if (!past) return false;
+        const p = rect(past);
+        return [...document.querySelectorAll(".as-files tr.as-frow")].some((r) => {
+          const b = rect(r);
+          return b.bottom > p.top && b.top < p.bottom;
+        });
+      })(),
       listScrolls: list ? list.scrollHeight > list.clientHeight : false,
       small: [
         ...document.querySelectorAll(".as-cols button, .as-cols select, .as-cols a[href]"),
@@ -198,6 +207,42 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(reachable).toHaveLength(options.rows);
             expect(reachable.every(Boolean)).toBe(true);
           }
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
+  // The real shell has a footer bar, and a notice appears when the page is disconnected: the files
+  // list must keep a header and two rows, and no panel may paint over another.
+  for (const [width, height] of [
+    [1920, 940],
+    [2560, 1145],
+  ])
+    it(
+      `keeps two landing rows and no overlap with the footer bar and a disconnected notice at ${width}x${height}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/auditSummaryBrowser.html",
+          width,
+          height,
+          colorScheme: "dark",
+          api: api(),
+        });
+        try {
+          await page.boxes(".as-rec");
+          await page.evaluate(() => {
+            (globalThis as { __streamDown?: () => void }).__streamDown?.();
+            return new Promise<number>((done) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => done(0))),
+            );
+          }, undefined);
+          const m = await measure(page);
+          expect(m.landingRows, "two landing rows fit").toBeGreaterThanOrEqual(2);
+          expect(m.landingOverlapsPast, "landing rows do not overlap past results").toBe(false);
+          expect(m.pageScrolls).toBe(false);
+          expect(m.panelsInside).toBe(true);
         } finally {
           await page.close();
         }
