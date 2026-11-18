@@ -379,7 +379,6 @@ import {
 import { waitReader } from "../queue/dependencies.ts";
 import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { cleanText } from "../repo/clean.ts";
-import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
