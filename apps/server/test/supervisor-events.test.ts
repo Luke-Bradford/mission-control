@@ -541,6 +541,36 @@ describe("supervisor events (Plan 7a)", () => {
       expect(store.run(runId)?.noReport).toBeDefined();
     });
 
+    it("a stopped ticket carries on in another seat: files kept, the old seat's pointer cleared", async () => {
+      const m = make({
+        extraSeat: {
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          effort: "high",
+          area: ["apps/**"],
+        },
+      });
+      m.sup.start();
+      const first = await m.sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const wt = join(root, "mc-crew", "guido-1-42");
+      writeFileSync(join(wt, "wip.txt"), "wip\n");
+      store.setRunLoop(first.runId, { ...NEW_LOOP, phase: "ci", prNumber: 9 });
+      await m.sup.endRunByEngine(first.runId);
+      expect(store.seatSession("guido-1")?.worktree).toBe(wt);
+      const next = await m.sup.startRun("guido-2", 42);
+      await until(() => expect(seatState("guido-2")).toBe("idle"));
+      expect(next.branch).toBe(first.branch);
+      expect(store.seatSession("guido-2")?.worktree).toBe(wt);
+      expect(store.seatSession("guido-1")?.worktree).toBeNull();
+      expect(readFileSync(join(wt, "wip.txt"), "utf8")).toBe("wip\n");
+      // the same branch means the earlier run's PR is the one the new run continues (publish.test.ts)
+      expect(store.run(next.runId)?.branch).toBe(store.run(first.runId)?.branch);
+      await m.sup.stopAll();
+    });
+
     it("ends the run ok, endedBy engine, leaves the seat idle and preserves unfinished work", async () => {
       const { sup, seen, runId } = await idleRun();
       const wt = join(root, "mc-crew", "guido-1-42");
