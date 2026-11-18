@@ -360,7 +360,8 @@ export function telemetry(
     commitsPerRun:
       commitRuns.length === 0
         ? null
-        : commitRuns.reduce((sum, r) => sum + store.runCommits(r.id).length, 0) / commitRuns.length,
+        : commitRuns.reduce((sum, r) => sum + store.authoredCommitCount(r.id), 0) /
+          commitRuns.length,
   };
 
   // Daily counts over the same window as the ticket series, whatever range was asked for.

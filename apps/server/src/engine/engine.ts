@@ -31,6 +31,7 @@ import {
   awayTicketType,
   BLOCKING_SEVERITIES,
   blockedNoteKey,
+  branchMovedText,
   CI_FAILED_EVENT_PREFIX,
   CI_FAILED_TEXT,
   CI_PASSED_EVENT_PREFIX,
@@ -678,6 +679,55 @@ export function createEngine(deps: EngineDeps): Engine {
       }
     }
     return sent;
+  }
+
+  /**
+   * The hub may move a run's worktree: its seat is not in a turn and not starting one (a run off
+   * its seat has no turn to race). A seat with no live session counts as idle.
+   */
+  function worktreeMovable(run: Run): boolean {
+    if (supervisor.seat(run.agentId)?.runId !== run.id) return true;
+    return (
+      !(supervisor.seatFacts(run.agentId)?.inTurn ?? false) &&
+      !supervisor.busy().some((b) => b.seatId === run.agentId)
+    );
+  }
+
+  /**
+   * Moves the run's worktree onto the head it adopted. A refusal is kept (the pass after tries
+   * again, and the loop parks the run once the window is spent); the seat is never asked to do it,
+   * as its guard denies the merge.
+   */
+  async function followAdoptedHead(run: Run, loop: RunLoop, at: number): Promise<void> {
+    const held = loop.branchMoved;
+    if (held === undefined) return;
+    const worktree = worktreeOf(run, loop);
+    // a run with no worktree of its own has none to move
+    if (worktree === null) {
+      delete loop.branchMoved;
+      return;
+    }
+    if (!worktreeMovable(run)) return;
+    const moved = await publisher.fastForward(run, worktree, held.sha);
+    if (!moved.ok) {
+      loop.branchMoved = { ...held, why: moved.text };
+      return;
+    }
+    delete loop.branchMoved;
+    // The seat hears of it on its next turn. A line already waiting for it (an answer, a fix)
+    // goes first and carries the notice after it, as one line; a waiting line already sent is moot.
+    const notice = branchMovedText(held.sha, moved.commits ?? 1);
+    const waiting = loop.pendingLine;
+    loop.pendingLine =
+      waiting != null && !(waiting.key in store.claimedKeys(run.id))
+        ? { key: waiting.key, text: `${waiting.text}\n\n${notice}` }
+        : { key: `${run.id}:${held.epoch}:branch-moved:${held.sha}`, text: notice };
+    store.addLoopEvent(
+      `${run.id}:${held.epoch}:moved:${held.sha}`,
+      run.id,
+      `the worktree is on ${held.sha.slice(0, 7)} now${moved.installNote === undefined ? "" : `; ${moved.installNote}`}`,
+      at,
+    );
   }
 
   /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
@@ -1522,7 +1572,12 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "send": {
-        const sent = await send(run.id, a.key, a.text);
+        // the waiting line may have taken the branch-moved notice earlier in this pass
+        const sent = await send(
+          run.id,
+          a.key,
+          a.key === cur.pendingLine?.key ? cur.pendingLine.text : a.text,
+        );
         if (sent === "sent" && a.key.startsWith("fix:")) {
           const id = Number(a.key.slice(a.key.lastIndexOf(":") + 1));
           const review = store.review(id);
@@ -1564,6 +1619,36 @@ export function createEngine(deps: EngineDeps): Engine {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
         }
+        return;
+      }
+      case "adopt-head": {
+        const prior = store.runPush(run.id);
+        // read again: the seat may have committed or pushed since the loop planned this
+        if (
+          prior === null ||
+          prior.sha !== a.from ||
+          store.newestRunCommit(run.id)?.sha !== prior.sha
+        )
+          return;
+        // the hub cannot move a worktree while its seat is in a turn: the adoption waits until the
+        // seat is idle (the loop plans this again next pass)
+        if (!worktreeMovable(run)) return;
+        // the move is on the loop first: a crash after the writes below still moves the worktree
+        cur.branchMoved = { sha: a.sha, epoch: cur.epoch, since: at };
+        saveLoop(run.id, cur, store.run(run.id)?.loop, at);
+        store.adoptFollowedHead({
+          runId: run.id,
+          repoId: run.repoId,
+          branch: run.branch ?? findPr(run, cur)?.branch ?? "",
+          sha: a.sha,
+          at,
+          ticket: run.ticket,
+          eventKey: `${run.id}:${cur.epoch}:followed:${a.sha}`,
+          eventText: `PR head ${a.sha.slice(0, 7)} is on top of the push ${prior.sha.slice(0, 7)}; CI follows it`,
+        });
+        // a seat cannot fetch for itself: the hub moves its worktree
+        await followAdoptedHead(run, cur, at);
+        out.again = true;
         return;
       }
       case "rerun-ci": {
@@ -1617,6 +1702,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       case "end-run":
         await supervisor.endRunByEngine(run.id);
+        publisher.runEnded(run.id);
         return;
       case "take-next": {
         // not while the seat holds another run (a merged PR found after the run was stopped)
@@ -1645,12 +1731,18 @@ export function createEngine(deps: EngineDeps): Engine {
           out.parked = true;
           return;
         }
+        // a settle starts a new epoch. Only the epoch a FLIGHT rework grant covers counts the rounds
+        // across epochs (the granted review is the next round, and a fail past it parks again);
+        // every other epoch counts its own
+        const settled =
+          cur.flightReworkGrantEpoch !== undefined && cur.epoch >= cur.flightReworkGrantEpoch;
         const round =
           1 +
           store
             .reviewsOfRun(run.id)
-            .filter((r) => r.epoch === cur.epoch && r.state === "reported" && r.blocking > 0)
-            .length;
+            .filter(
+              (r) => (settled || r.epoch === cur.epoch) && r.state === "reported" && r.blocking > 0,
+            ).length;
         const id = store.requestReview({
           authorRunId: run.id,
           repoId: run.repoId,
@@ -2103,6 +2195,15 @@ export function createEngine(deps: EngineDeps): Engine {
     if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId, run.id)) return;
     const at = now();
     const input: RunLoop = { ...stored };
+    // a rework grant is used up once a review in its epoch or after passes; a blocking one keeps it
+    const grantEpoch = input.flightReworkGrantEpoch;
+    if (
+      grantEpoch !== undefined &&
+      store
+        .reviewsOfRun(runId)
+        .some((r) => r.epoch >= grantEpoch && r.state === "reported" && r.blocking === 0)
+    )
+      delete input.flightReworkGrantEpoch;
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     // a web PR's head needs its screenshot pairs; asking is cheap once they exist
@@ -2135,7 +2236,40 @@ export function createEngine(deps: EngineDeps): Engine {
       deps.pollGithub?.();
       return;
     }
+    // a merge hold on a run waiting on FLIGHT's clearance parks it at once, so FLIGHT's settle
+    // (rework) has a park to apply to; the release returns it to the review it left
+    if (
+      run.endedAt === null &&
+      input.mergeHold &&
+      input.awaitingFlight != null &&
+      input.phase === "review"
+    ) {
+      const hold = input.mergeHold;
+      const reason = mergeHoldParkText(hold.by, hold.reason);
+      input.mergeHold = { ...hold, from: input.phase };
+      input.phase = "parked";
+      input.awaitingFlight = null;
+      input.parked = { kind: MERGE_HOLD_PARK, reason, ended: false };
+      store.addLoopEvent(
+        `${run.id}:${input.epoch}:parked:merge-hold:${hold.at}`,
+        run.id,
+        parkedEventText(reason),
+        at,
+      );
+      saveLoop(runId, input, stored, at);
+      return;
+    }
     const pushed = store.runPush(run.id);
+    // a worktree move for an older epoch or push is moot: the seat has moved on
+    if (
+      input.branchMoved !== undefined &&
+      (input.branchMoved.epoch !== input.epoch ||
+        pushed?.sha !== input.branchMoved.sha ||
+        // a PR that ended while the move was held needs no worktree for it
+        pr?.state === "merged" ||
+        pr?.state === "closed")
+    )
+      delete input.branchMoved;
     const flightPowers = flightPowersOf(config, run.repoId);
     if (
       input.flightClearedSha &&
@@ -2229,7 +2363,45 @@ export function createEngine(deps: EngineDeps): Engine {
     const mergeAllowed =
       config.repos.find((r) => r.id === repoId)?.autonomy === "merge" &&
       rules?.hardRulesSet === true;
+    // the worktree moves before anything else is planned for the run
+    if (run.endedAt === null && input.branchMoved !== undefined) {
+      try {
+        await followAdoptedHead(run, input, at);
+      } catch (e) {
+        log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     const snap = snapshot(run, input, at, mergeAllowed);
+    // a commit on top of the seat's push (a main merge, a doc edit): the PR head follows the push
+    if (
+      snap !== null &&
+      input.phase === "ci" &&
+      run.endedAt === null &&
+      pushed !== null &&
+      pr?.state === "open" &&
+      // only a PR the run had recorded before this pass (not one just found by its branch name),
+      // and never one from a fork
+      stored.prNumber !== null &&
+      pr.number === stored.prNumber &&
+      pr.isCrossRepository === false &&
+      pr.headSha !== null &&
+      pr.headSha !== pushed.sha &&
+      snap.headCommit === pushed.sha &&
+      // a head the branch's runs made themselves is a poll that lags behind, not a push on top
+      !store.branchCommits(run.repoId, run.branch ?? "").has(pr.headSha) &&
+      (await publisher.isDescendant(run, pushed.sha, pr.headSha)) &&
+      // only the operator's own commits are taken into a seat's worktree; anyone else's park as stuck
+      (await publisher.pushesFrom(run, pushed.sha, pr.headSha, config.operator.githubLogins ?? []))
+    ) {
+      // the fetch can take a while: a commit or push the seat made meanwhile is not this push,
+      // and the snapshot is stale; the next pass reads it again
+      if (
+        store.newestRunCommit(run.id)?.sha !== pushed.sha ||
+        store.runPush(run.id)?.sha !== pushed.sha
+      )
+        return;
+      snap.prDescends = true;
+    }
     if (snap === null) {
       // a run the loop cannot read is never woken: a stale flag must not hold up a younger rework
       if (input.aside?.wake) {
@@ -2240,6 +2412,17 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
+    // The seat is still on the old head: nothing may send to it, wake it or resume it, or its next
+    // commit lands there. Only the park for a move the hub cannot make goes ahead.
+    if (
+      run.endedAt === null &&
+      input.branchMoved !== undefined &&
+      cur.phase !== "parked" &&
+      cur.phase !== "done"
+    ) {
+      saveLoop(runId, input, stored, at);
+      return;
+    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -3224,6 +3407,14 @@ export function createEngine(deps: EngineDeps): Engine {
           lastRefusal: null,
           unparkedAt: at,
         };
+        // a grant lasts until a review park is settled again, whatever else starts a new epoch meanwhile
+        // (a CI lift, a main sync). A review-failed park keeps it: its review never ran, so the
+        // granted review is still owed. FLIGHT's rework sets it again below.
+        if (
+          (kind === "review" || kind === "review-ruling") &&
+          !(by === "FLIGHT" && opts?.action === "rework")
+        )
+          delete next.flightReworkGrantEpoch;
         if (kind === "budget") {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
@@ -3262,6 +3453,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.flightClearedSha = null;
           next.phase = opts.action === "rereview" ? "review" : "working";
           if (opts.action === "rework") {
+            // at the review-round cap the grant is for the next epoch's review, of the seat's fix
+            if (kind === "review" || kind === "review-ruling")
+              next.flightReworkGrantEpoch = next.epoch;
             if (pushed)
               next.flightReworks = {
                 ...loop.flightReworks,
@@ -3318,14 +3512,19 @@ export function createEngine(deps: EngineDeps): Engine {
         if (next.aside) next.aside = { ...next.aside, wake: true };
         checkBriefDispatch();
         // a settle that sends the change back to review is FLIGHT's decision on the round cap: it
-        // closes the run's review-rounds hold, or the review would be held and dropped at once
+        // closes the run's review-rounds hold, or the review would be held and dropped at once. A
+        // rework grants the review of the seat's next push: the hold closes at the live round, so
+        // that one round runs and a fail past it parks again.
         const reopens =
           opts?.action === "rereview" ||
+          (opts?.action === "rework" && (kind === "review" || kind === "review-ruling")) ||
           opts?.action === "accept" ||
           opts?.action === "second_review";
+        // only a rework of a run parked at the cap grants a review past it
+        const grant = opts?.action === "rework" && (kind === "review" || kind === "review-ruling");
         if (by === "FLIGHT" && reopens) {
           const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
-          if (settleReviewRounds(store, run, at, basis))
+          if (settleReviewRounds(store, run, at, basis, grant))
             store.addLoopEvent(
               `${run.id}:review-rounds-resolved:${next.epoch}`,
               run.id,
@@ -3550,6 +3749,8 @@ export function createEngine(deps: EngineDeps): Engine {
           at,
         );
         bus.emit("agents");
+        // a run waiting on FLIGHT's clearance parks on the hold in this pass
+        await withoutBriefDispatch(() => pass(runId));
         return { ok: true };
       });
     },

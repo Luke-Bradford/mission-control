@@ -39,6 +39,7 @@ export const EVERYWHERE: LinkRule[] = [
   rule(/^Agents$/, /^\/agent$/, "Header tab."),
   rule(/^Comms$/, /^\/comms$/, "Header tab."),
   rule(/^QA$/, /^\/qa$/, "Header tab."),
+  rule(/^Planner$/, /^\/planner$/, "Header tab."),
   rule(/^Telemetry$/, /^\/telemetry$/, "Header tab."),
   rule(/^Audit$/, /^\/audit$/, "Header tab."),
   rule(/^Open FLIGHT's full view$/, /^\/flight$/, "The dock's summary leads to the FLIGHT page."),
@@ -105,7 +106,7 @@ export const LINK_MAP: Record<
     rules: [
       rule(/^FLIGHT chat$/, /^\/comms$/, "FLIGHT's conversation in Comms."),
       rule(
-        /^(Decision|Question|Plan|Escalation)/,
+        /^(Decision|Question|Plan(?!ner)|Escalation)/,
         /^\/needs-you\/[^/]+$/,
         "A waiting item opens beside the list, with its context, pictures, recommendation and options.",
       ),
@@ -240,6 +241,18 @@ export const LINK_MAP: Record<
         "A saved native review.",
       ),
       rule(/^Open saved report for /, /^\/qa\?repo=[\w-]+&pr=\d+&report=\w+$/, "A saved report."),
+    ],
+  },
+  planner: {
+    routes: ["/planner", "/planner?view=history"],
+    rules: [
+      rule(/^To plan and sign off$/, /^\/planner$/, "The plans waiting for a decision."),
+      rule(/^History$/, /^\/planner\?view=history$/, "Past plans."),
+      rule(
+        /[\w-]+#\d+$/,
+        /^\/planner(\?view=history&|\?)plan=[\w-]+$/,
+        "A plan in the list opens beside it.",
+      ),
     ],
   },
   telemetry: {
@@ -380,6 +393,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Flight.tsx": "page: legacy hash to Needs you",
   "src/pages/LegacyAudit.tsx": "page: seat, trace, board",
   "src/pages/Needs.tsx": "page: first item",
+  "src/pages/Planner.tsx": "page: the plan list; the Planner views",
   "src/pages/QaReadiness.tsx": "page: QA, Audit; external: preview",
   "src/pages/Setup.tsx": "page: Setup tabs",
   "src/pages/TicketPage.tsx": "page: back to Board",

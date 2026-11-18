@@ -408,13 +408,14 @@ describeRendered("Needs you page", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it(
-    "every nav tab is fully visible at 1280 with a two-digit Needs you count",
-    async () => {
+  it.each(["light", "dark"] as const)(
+    "every nav tab is fully visible and separate at 1280 with a two-digit Needs you count, %s",
+    async (colorScheme) => {
       const page = await renderAt({
         page: "test/needsBrowser.html",
         width: 1280,
         height: 900,
+        colorScheme,
         api: api(6, 2, 34),
         assets: ASSETS,
       });
@@ -434,14 +435,45 @@ describeRendered("Needs you page", () => {
             outside: [...tabs.querySelectorAll("a")]
               .filter((a) => {
                 const r = a.getBoundingClientRect();
-                return r.right > box.right + 1 || (status && r.right > status.left + 1);
+                const sharesRow =
+                  !!status && r.bottom > status.top + 1 && r.top < status.bottom - 1;
+                return r.right > box.right + 1 || (sharesRow && r.right > (status?.left ?? 0) + 1);
               })
               .map((a) => a.textContent),
+            separation: [...tabs.querySelectorAll("a")].every((a, index, all) => {
+              if (index === 0) return a.getBoundingClientRect().height >= 24;
+              const previous = all[index - 1].getBoundingClientRect();
+              const current = a.getBoundingClientRect();
+              return current.height >= 24 && current.left - previous.right >= 2;
+            }),
           };
         }, undefined);
         expect(clipped.scrolls, "the tabs need no sideways scroll").toBe(false);
         expect(clipped.outside, "no tab sits under the status readout").toEqual([]);
-        if (SHOTS) await page.screenshot(join(SHOTS, "needs-1280x900-nav.png"));
+        expect(clipped.separation, "each page tab keeps a visible gap and target size").toBe(true);
+        const session = await page.evaluate(() => {
+          const select = document.querySelector<HTMLSelectElement>("#sess");
+          return {
+            label: select?.selectedOptions[0]?.textContent,
+            fits: !!select && select.scrollWidth <= select.clientWidth + 1,
+            painted:
+              !!select &&
+              (() => {
+                const style = getComputedStyle(select);
+                const canvas = document.createElement("canvas");
+                const context = canvas.getContext("2d");
+                if (!context) return false;
+                context.font = `${style.fontSize} ${style.fontFamily}`;
+                return select.clientWidth >= context.measureText("All sessions").width + 32;
+              })(),
+            height: select?.getBoundingClientRect().height ?? 0,
+          };
+        }, undefined);
+        expect(session.label).toBe("All sessions");
+        expect(session.fits, "the session label is clipped").toBe(true);
+        expect(session.painted, "the complete session label has room to paint").toBe(true);
+        expect(session.height, "the session picker is a usable control").toBeGreaterThanOrEqual(24);
+        if (SHOTS) await page.screenshot(join(SHOTS, `needs-1280x900-nav-${colorScheme}.png`));
       } finally {
         await page.close();
       }

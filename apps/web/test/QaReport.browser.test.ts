@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
+import { mockPng } from "./materialsFixture.ts";
 import { qaReportApi, qaReportAssets, qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
@@ -237,6 +238,113 @@ describeRendered("Accountable QA report", () => {
         await stale.evaluate(() => document.querySelectorAll("article.qa-report").length, null),
       ).toBe(0);
       await stale.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps signed-off mockups and two retained result screenshots inside their panel at 1920x940",
+    async () => {
+      const report = qaReportFixture();
+      const wide = (name: string) => `https://evidence.example/${name}.svg`;
+      const mockup = `/api/plan-assets/${"a".repeat(64)}`;
+      report.plan = {
+        ref: "mission-control#2037",
+        asks: "Show plans for sign-off.",
+        proposal: "Add the Planner tab and compare its mockups with QA evidence.",
+        mockups: [
+          {
+            id: "a".repeat(64),
+            url: mockup,
+            caption: "Planner mockup at 1600×1000",
+            mediaType: "image/png",
+          },
+        ],
+        sizeEstimate: "M",
+        risks: "The retained image needs a bounded preview.",
+        decidedAt: 1,
+      };
+      report.visual.pairs = [
+        ...report.visual.pairs,
+        { ...report.visual.pairs[0], label: "Planner · 1920×940 · dark" },
+      ];
+      for (const [index, pair] of report.visual.pairs.entries()) {
+        pair.after.url = wide(`after-${index}`);
+        pair.before.url = wide(`before-${index}`);
+      }
+      // Keep the report in the current QA queue. With an empty queue no detail is selected, so
+      // the report (and its signed-off-plan comparison) never mounts.
+      const api: Record<string, unknown> = qaReportApi(1);
+      const queue = api["/api/qa/queue"] as { prs: Array<{ ticket: string }> };
+      const queued = queue.prs[0];
+      if (!queued) throw new Error("The QA fixture needs a selected PR.");
+      queued.ticket = "mission-control#2037";
+      api[`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${report.headSha}`] = {
+        reports: [report],
+      };
+      const asset = (fill: string) => ({
+        contentType: "image/svg+xml",
+        body: `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000"><rect width="1600" height="1000" fill="${fill}"/></svg>`,
+      });
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width: 1920,
+        height: 940,
+        api,
+        assets: {
+          ...qaReportAssets(),
+          [mockup]: { contentType: "image/png", body: mockPng(190) },
+          [wide("after-0")]: asset("#789"),
+          [wide("before-0")]: asset("#987"),
+          [wide("after-1")]: asset("#678"),
+          [wide("before-1")]: asset("#876"),
+        },
+      });
+      try {
+        await page.boxes(".plan-beside .needs-frame img");
+        await page.boxes(".plan-built-shots img");
+        await page.evaluate(() => document.querySelector(".plan-beside")?.scrollIntoView(), null);
+        expect(
+          await page.evaluate(async () => {
+            const images = [
+              ...document.querySelectorAll<HTMLImageElement>(
+                ".plan-beside .needs-frame img, .plan-built-shots img",
+              ),
+            ];
+            const start = performance.now();
+            while (
+              images.some((img) => !img.complete || img.naturalWidth < 1600) &&
+              performance.now() - start < 2000
+            )
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            const bounded = (img: HTMLImageElement) => {
+              const section = img.closest("section");
+              const image = img.getBoundingClientRect();
+              const bounds = section?.getBoundingClientRect();
+              return (
+                img.naturalWidth === 1600 &&
+                img.naturalHeight === 1000 &&
+                image.width > 150 &&
+                image.height > 100 &&
+                image.height <= window.innerHeight * 0.3 + 1 &&
+                !!bounds &&
+                image.right <= bounds.right + 0.5
+              );
+            };
+            return (
+              document.documentElement.scrollWidth <= window.innerWidth &&
+              images.length === 3 &&
+              images.every(bounded)
+            );
+          }, null),
+        ).toBe(true);
+        expect(
+          await page.reachable(".plan-beside .needs-picture button, .plan-built-shots a"),
+        ).not.toContain(false);
+        await page.screenshot(join(SHOTS, "qa-plan-built-1920x940-light.png"));
+      } finally {
+        await page.close();
+      }
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

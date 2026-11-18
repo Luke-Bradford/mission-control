@@ -179,6 +179,32 @@ it("inherits only source-owned commits that are on the preserved branch", async 
   expect(git(clone, "rev-parse", first.branch)).toBe(sha);
 });
 
+it("keeps a followed outside commit outside the branch's own commits across a handoff", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const path = store.seatSession("guido-1")?.worktree;
+  if (!path) throw new Error("missing checkout");
+  const shas: string[] = [];
+  for (const name of ["mine.txt", "outside.txt"]) {
+    writeFileSync(join(path, name), name);
+    git(path, "add", name);
+    git(path, "commit", "-m", name);
+    shas.push(git(path, "rev-parse", "HEAD"));
+  }
+  const [mine, outside] = shas as [string, string];
+  const base = { runId: first.runId, repoId: "mc", branch: first.branch, at: 1 };
+  store.addRunCommit({ ...base, sha: mine });
+  store.addRunCommit({ ...base, sha: outside, followed: true });
+  await sup.endRun("guido-1");
+  const second = await sup.startRun("guido-2", 42);
+  expect(store.runCommits(second.runId)).toEqual([mine, outside]);
+  expect(store.branchCommits("mc", second.branch).has(mine)).toBe(true);
+  expect(store.branchCommits("mc", second.branch).has(outside)).toBe(false);
+  expect(store.followedCommits(second.runId)).toEqual(new Set([outside]));
+});
+
 it("starts the returned seat on the open PR's own ref, not the ended run's local branch", async () => {
   const { sup } = make({ extraSeat });
   sup.start();

@@ -3191,3 +3191,114 @@ describe("fileMinorFindings", () => {
     expect(ghCalls).toEqual([]);
   });
 });
+
+describe("pushesFrom", () => {
+  const A = "a".repeat(40);
+  const M = "c".repeat(40);
+  const B = "b".repeat(40);
+  const push = (before: string, after: string, actor: string | null) => ({
+    before,
+    after,
+    activity_type: "push",
+    actor: actor === null ? null : { login: actor },
+  });
+  /** Answers the activity read with `body`, and `gh api user` with `me`. */
+  const answering =
+    (body: unknown, seen: string[] = [], me = "op"): GhRunner =>
+    async (args) => {
+      seen.push(args.join(" "));
+      const out = args[1] === "user" ? { login: me } : body;
+      return { code: 0, stdout: JSON.stringify(out), stderr: "" };
+    };
+  const from = (gh: GhRunner, logins = ["op"]) =>
+    createPublisher(deps({ gh })).pushesFrom(run(), A, B, logins);
+
+  it("is true when every push from the run's push to the head was by an allowed login, in any case", async () => {
+    const seen: string[] = [];
+    const gh = answering([push(M, B, "OP"), push(A, M, "op")], seen);
+    expect(await from(gh)).toBe(true);
+    expect(seen[0]).toContain("activity_type=push");
+    expect(seen[0]).toContain(encodeURIComponent(`refs/heads/${BRANCH}`));
+  });
+
+  it("is false when the committer login is the right one but the pusher is a foreign account", async () => {
+    // the activity record names who pushed; a commit's committer is whatever its maker wrote
+    expect(await from(answering([push(A, B, "stranger")]))).toBe(false);
+    expect(await from(answering([push(M, B, "op"), push(A, M, "stranger")]))).toBe(false);
+    expect(await from(answering([push(A, B, null)]))).toBe(false);
+  });
+
+  it("takes a push by an allowed account, whoever wrote the commits", async () => {
+    expect(await from(answering([push(A, B, "op")]))).toBe(true);
+  });
+
+  it("is false when the chain of pushes does not reach the run's push", async () => {
+    expect(await from(answering([push(M, B, "op")]))).toBe(false);
+    expect(await from(answering([]))).toBe(false);
+    expect(await from(answering([push(B, A, "op")]))).toBe(false);
+  });
+
+  it("with no logins configured, trusts the account gh acts as", async () => {
+    const seen: string[] = [];
+    expect(await from(answering([push(A, B, "op")], seen, "op"), [])).toBe(true);
+    expect(seen.some((a) => a.includes("api user"))).toBe(true);
+    expect(await from(answering([push(A, B, "stranger")], [], "op"), [])).toBe(false);
+  });
+
+  it("always trusts the account gh acts as, whatever logins are configured", async () => {
+    expect(await from(answering([push(A, B, "op")], [], "op"), ["someone-else"])).toBe(true);
+    expect(await from(answering([push(A, B, "stranger")], [], "op"), ["someone-else"])).toBe(false);
+  });
+
+  it("is false with a failed read or no way to read the gh account", async () => {
+    expect(await from(async () => ({ code: 1, stdout: "", stderr: "boom" }))).toBe(false);
+    const noUser: GhRunner = async (args) =>
+      args[1] === "user"
+        ? { code: 1, stdout: "", stderr: "no" }
+        : { code: 0, stdout: JSON.stringify([push(A, B, "op")]), stderr: "" };
+    expect(await from(noUser, [])).toBe(false);
+  });
+
+  it("asks again after a pause when the first read did not yet show the push", async () => {
+    let t = 1_000_000;
+    let body: unknown[] = [];
+    const p = createPublisher(
+      deps({
+        now: () => t,
+        gh: async () => ({ code: 0, stdout: JSON.stringify(body), stderr: "" }),
+      }),
+    );
+    // GitHub's activity has not caught up with the PR yet
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(false);
+    body = [push(A, B, "op")];
+    // inside the pause the no is kept; after it the chain is read again and proven
+    t += 1000;
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(false);
+    t += 60_000;
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+  });
+
+  it("reads the activity once for a run, push and head, keeps nothing for a failed read, and lets go when the run ends", async () => {
+    const seen: string[] = [];
+    const p = createPublisher(deps({ gh: answering([push(A, B, "op")], seen) }));
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+    const reads = () => seen.filter((a) => a.includes("activity")).length;
+    expect(reads()).toBe(1);
+    p.runEnded(run().id);
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+    expect(reads()).toBe(2);
+    let fail = true;
+    const q = createPublisher(
+      deps({
+        gh: async (args) =>
+          fail
+            ? { code: 1, stdout: "", stderr: "boom" }
+            : { code: 0, stdout: JSON.stringify([push(A, B, "op")]), stderr: args.join(" ") },
+      }),
+    );
+    expect(await q.pushesFrom(run(), A, B, ["op"])).toBe(false);
+    fail = false;
+    expect(await q.pushesFrom(run(), A, B, ["op"])).toBe(true);
+  });
+});

@@ -180,10 +180,23 @@ export interface RunLoop {
   >;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
+  /**
+   * The epoch a FLIGHT rework at the review-round cap granted a review in: the seat's fix is a new
+   * head, so the grant is by epoch. It holds from that epoch on, whatever starts a new epoch, until
+   * FLIGHT settles with rereview, accept or second_review; its review is limited to one blocking outcome.
+   */
+  flightReworkGrantEpoch?: number;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;
   pushStartedAt: number | null;
+  /**
+   * The PR head the loop last saw in `ci`, and when it first saw it (a run with no record: from the
+   * push). A head that changes starts the window for it afresh, so a commit added on top long
+   * after the push gets its own grace.
+   */
+  headSeenSha?: string;
+  headSeenAt?: number;
   /** The commit `pushStartedAt` was started for: a new commit in `ci` starts the clock again. */
   pushFor: string | null;
   /** When the operator last un-parked the run; the CI clocks run from the later of this and the push. */
@@ -192,6 +205,12 @@ export interface RunLoop {
   ciFailedSha: string | null;
   /** The failed sha whose excerpt was claimed. */
   relayedSha: string | null;
+  /**
+   * A commit on top of the seat's push was adopted as the run's push (`sha`), and the hub has not yet
+   * moved the seat's worktree onto it. It is tried on each pass where the seat is idle, and dropped
+   * once it works, or when the epoch or the push changes. `why` is the last refusal.
+   */
+  branchMoved?: { sha: string; epoch: number; since: number; why?: string };
   transient: number;
   lastRefusal: string | null;
   epoch: number;
@@ -561,6 +580,8 @@ export interface PullRequestView {
   headSha: string | null;
   /** UNKNOWN: GitHub has not computed it yet, so poll again. When it was read is the row's `read_at`. */
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
+  /** The PR's head branch is in a fork; null when GitHub gave none or the row was stored before it. */
+  isCrossRepository?: boolean | null;
   /** The PR author's login; absent or null when GitHub gave none or the row was stored before it. */
   author?: string | null;
   /** Logins assigned to the PR; absent means none. */

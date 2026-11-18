@@ -43,7 +43,7 @@ export function useSource(route: PictureRoute, attempt: number): Source {
   return source;
 }
 
-function Picture({ label, route }: { label: string; route: PictureRoute }) {
+export function Picture({ label, route }: { label: string; route: PictureRoute }) {
   const [attempt, setAttempt] = useState(0);
   const [broken, setBroken] = useState(false);
   const [actual, setActual] = useState(false);

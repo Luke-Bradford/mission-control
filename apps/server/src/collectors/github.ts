@@ -218,7 +218,7 @@ export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CH
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
-        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName baseRefName mergeable additions deletions changedFiles
+        number title url state isDraft reviewDecision createdAt updatedAt mergedAt headRefName baseRefName isCrossRepository mergeable additions deletions changedFiles
         mergeCommit { oid }
         files(first: ${PR_FILES_MAX}) { pageInfo { hasNextPage endCursor } nodes { path changeType } }
         author { login }
@@ -1090,7 +1090,12 @@ export function parseChecks(rollup: unknown): PrCheck[] {
         conclusion: str(n.conclusion, "") || str(n.status, ""),
         attempt: typeof attempt === "number" ? attempt : null,
         url: str(n.detailsUrl, "") || null,
-        ...(Number.isFinite(Date.parse(str(n.startedAt, "")))
+        // GitHub dates a queued run from its creation, so only a run that has begun has a start.
+        ...(n.status !== "QUEUED" &&
+        n.status !== "WAITING" &&
+        n.status !== "PENDING" &&
+        n.status !== "REQUESTED" &&
+        Number.isFinite(Date.parse(str(n.startedAt, "")))
           ? { startedAt: Date.parse(str(n.startedAt, "")) }
           : {}),
         ...(Number.isFinite(Date.parse(str(n.completedAt, "")))
@@ -1162,6 +1167,7 @@ function mapPr(
     mergeCommitSha: str(path(n, "mergeCommit", "oid"), "") || null,
     headSha: typeof headOid === "string" && headOid !== "" ? headOid : null,
     mergeable: lookup(MERGEABLE, n.mergeable),
+    isCrossRepository: typeof n.isCrossRepository === "boolean" ? n.isCrossRepository : null,
     author: str(path(n, "author", "login"), "") || null,
     assignees: logins(n.assignees),
     additions: typeof n.additions === "number" ? n.additions : null,

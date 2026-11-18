@@ -105,6 +105,7 @@ import {
   UAT_PARK,
   uatParkText,
   uatSendBackText,
+  type WasteCheck,
   wakeFailedText,
   wakeStuckKey,
   wakeStuckText,
@@ -125,6 +126,7 @@ import {
   TIP_MOVED,
 } from "../src/engine/engine.ts";
 import type {
+  FastForwardResult,
   GateFacts,
   GateResult,
   OpenPrResult,
@@ -186,7 +188,7 @@ let h: Harness;
 
 function makeConfig(): CcConfig {
   return {
-    operator: { id: "op", timezone: "Europe/London" },
+    operator: { id: "op", timezone: "Europe/London", githubLogins: ["op-login"] },
     accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
     repos: [
       {
@@ -286,6 +288,7 @@ const prRow = (over: Partial<PullRequestView> = {}): PullRequestView => ({
   mergedAt: null,
   headSha: SHA,
   mergeable: "MERGEABLE",
+  isCrossRepository: false,
   checks: [
     {
       name: "mc/review",
@@ -415,6 +418,12 @@ interface Harness {
   rerunStates: RerunStateResult[];
   /** What worktreeChanges answers (a path list, or a refusal). */
   changes: string[] | { ok: false; text: string; transient: boolean };
+  /** The fastForward calls, and what it answers. */
+  fastForwards: { runId: string; worktree: string; sha: string }[];
+  fastForwardResult: FastForwardResult;
+  /** The logins that pushed the commits between the push and the PR head (pushesFrom reads them). */
+  pusherLogins: string[];
+  endedRuns: string[];
   rules: EngineDeps["rules"];
   make: (over?: Partial<EngineDeps>) => Engine;
 }
@@ -486,6 +495,10 @@ function harness(): Harness {
     statusResults: [],
     statusThrows: null,
     asideOn: false,
+    fastForwards: [],
+    fastForwardResult: { ok: true },
+    pusherLogins: ["op-login"],
+    endedRuns: [],
     endBlocked: false,
     asides: [],
     wakes: [],
@@ -518,6 +531,14 @@ function harness(): Harness {
         isDescendant: async (_run, ancestor, head) => {
           x.duringDescendant?.(ancestor, head);
           return x.descends ?? ancestor === head;
+        },
+        // like the real one: no configured logins means the account gh acts as
+        pushesFrom: async (_run, _ancestor, _head, logins) =>
+          x.pusherLogins.every((login) =>
+            (logins.length > 0 ? logins : ["op-login"]).includes(login),
+          ),
+        runEnded: (runId) => {
+          x.endedRuns.push(runId);
         },
         async push(r) {
           x.pushes.push(r.id);
@@ -567,6 +588,10 @@ function harness(): Harness {
         },
         async worktreeChanges() {
           return x.changes;
+        },
+        async fastForward(r, worktree, sha) {
+          x.fastForwards.push({ runId: r.id, worktree, sha });
+          return x.fastForwardResult;
         },
         async hardRuleTouches(run, _sha, rules) {
           x.hardRuleLists.push([...rules]);
@@ -861,6 +886,8 @@ afterEach(() => {
   store.close();
   rmSync(dir, { recursive: true, force: true });
 });
+
+const REVIEW_ROUNDS: WasteCheck = "review-rounds";
 
 describe("controller PR scratch reviews", () => {
   it("starts a review without an author run and supersedes it when the head changes", async () => {
@@ -1679,6 +1706,407 @@ describe("refusals", () => {
     await h.engine.reconcileRun(RUN);
     expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
     expect(loopOf().parked?.reason).toContain(text);
+  });
+
+  it("a PR head on top of the seat's push becomes the run's push, and the seat's worktree follows", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().parked).toBeNull();
+    expect(loopOf().phase).toBe("ci");
+    expect(h.fastForwards).toEqual([{ runId: RUN, worktree: join(dir, "wt"), sha: SHA_B }]);
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(loopTexts()).toContain(`the worktree is on ${SHA_B.slice(0, 7)} now`);
+    // the seat's next line says its branch moved
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    const told = h.sent.filter((m) => m.key.includes(":branch-moved:"));
+    expect(told).toHaveLength(1);
+    expect(told[0]?.text).toBe(
+      `Your branch moved to ${SHA_B.slice(0, 7)} (1 commit pushed on top); files may have changed, re-read before editing.`,
+    );
+    // someone else's commit: the merge gate must not count it as the hub's
+    expect(store.runCommits(RUN)).toContain(SHA_B);
+    expect(store.branchCommits(REPO, BRANCH).has(SHA_B)).toBe(false);
+  });
+
+  it("a line already waiting for the seat goes first and carries the branch-moved notice after it", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA });
+    report();
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("ci");
+    // an answer is waiting for the seat when someone pushes on top
+    setLoop({ pendingLine: { key: `${RUN}:answer:1`, text: "The answer to your question." } });
+    setPr({ ci: "pending", headSha: SHA_B });
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    const told = h.sent.filter((m) => m.text.includes("Your branch moved"));
+    expect(told).toHaveLength(1);
+    expect(told[0]?.key).toBe(`${RUN}:answer:1`);
+    expect(told[0]?.text).toBe(
+      `The answer to your question.\n\nYour branch moved to ${SHA_B.slice(0, 7)} (1 commit pushed on top); files may have changed, re-read before editing.`,
+    );
+    expect(loopOf().pendingLine ?? null).toBeNull();
+  });
+
+  it("keeps the worktree move held when the hub cannot do it, never asks the seat to merge, and tries again", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().branchMoved).toMatchObject({ sha: SHA_B, why: "diverged" });
+    expect(h.sent.filter((m) => m.text.includes("--ff-only"))).toEqual([]);
+    expect(h.sent.filter((m) => m.key.includes(":branch-moved:"))).toEqual([]);
+    // a later idle pass tries again, and does not adopt a second time
+    const tries = h.fastForwards.length;
+    h.fastForwardResult = { ok: true };
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(h.fastForwards).toHaveLength(tries + 1);
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(loopOf().parked).toBeNull();
+    expect(store.runCommits(RUN).filter((c) => c === SHA_B)).toHaveLength(1);
+  });
+
+  it("parks with a readable reason when the hub still cannot move the worktree after the window", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    setPr({ ci: "pending", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(loopOf().parked?.reason).toContain("could not move");
+    expect(loopOf().parked?.reason).toContain("diverged");
+    expect(loopOf().branchMoved).toBeUndefined();
+  });
+
+  it("drops a held worktree move once the run's push changes", async () => {
+    const SHA_C = "c".repeat(40);
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    store.setRunPush({ runId: RUN, sha: SHA_C, at: clock });
+    const tries = h.fastForwards.length;
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(h.fastForwards).toHaveLength(tries);
+  });
+
+  it("holds the move while the seat is starting a turn, then makes it once it is free", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.busyList = [{ seatId: SEAT, state: "running" }];
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+    h.busyList = [];
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(h.fastForwards).toHaveLength(1);
+  });
+
+  it("a seat with no live session is idle: the head is adopted, and the run is never stuck in CI", async () => {
+    h.descends = true;
+    h.facts = null;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    for (let i = 0; i < 3; i++) {
+      clock += NO_CI_AFTER_MS;
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf().parked?.kind).not.toBe("stuck");
+    }
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().phase).toBe("ci");
+  });
+
+  it("with no github_logins configured, adopts a head pushed by the account gh acts as", async () => {
+    config.operator.githubLogins = [];
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().parked).toBeNull();
+  });
+
+  it("sends the seat nothing while the worktree move is refused: a CI failure waits for the move", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    const sentBefore = h.sent.length;
+    const wakesBefore = h.wakes.length;
+    for (let i = 0; i < 3; i++) {
+      clock += ENGINE_TICK_MS;
+      setPr({ ci: "failing", headSha: SHA_B });
+      await h.engine.reconcileRun(RUN);
+    }
+    expect(h.sent).toHaveLength(sentBefore);
+    expect(h.wakes).toHaveLength(wakesBefore);
+    expect(h.excerpts).toEqual([]);
+    expect(h.reruns).toEqual([]);
+    // once the hub can move the worktree, the work goes on
+    h.fastForwardResult = { ok: true };
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "failing", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved).toBeUndefined();
+    // the failed check is acted on now: re-run once, as for any first failure
+    for (let i = 0; i < 2; i++) {
+      clock += ENGINE_TICK_MS;
+      setPr({ ci: "failing", headSha: SHA_B });
+      await h.engine.reconcileRun(RUN);
+    }
+    expect(h.reruns.length).toBeGreaterThan(0);
+  });
+
+  it("follows only pushes by the operator's accounts; a foreign pusher parks as stuck", async () => {
+    h.descends = true;
+    h.pusherLogins = ["op-login", "someone-else"];
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+  });
+
+  it("a seat commit made while the descent is checked is not lost: nothing is adopted that pass", async () => {
+    const SHA_C = "c".repeat(40);
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.duringDescendant = () => {
+      h.duringDescendant = undefined;
+      store.addRunCommit({ runId: RUN, repoId: REPO, branch: BRANCH, sha: SHA_C, at: clock });
+    };
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(store.followedCommits(RUN).size).toBe(0);
+    expect(h.fastForwards).toEqual([]);
+    expect(loopOf().parked).toBeNull();
+  });
+
+  it("holds the adoption while the seat is in a turn, then makes it once it is idle", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+    expect(loopOf().parked).toBeNull();
+    h.facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(h.fastForwards).toHaveLength(1);
+  });
+
+  it("logs each adoption as a FLIGHT decision", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    const logged = store.flightDecisions(0, 50).filter((d) => d.about === "followed commit");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.targetRunId).toBe(RUN);
+    // the hub's own call, not a seat's or FLIGHT's
+    expect(logged[0]?.seatId).toBeNull();
+    expect(logged[0]?.basis).toContain("merge gate still counts it as outside");
+  });
+
+  it.each([true, null])(
+    "never adopts the head of a PR with isCrossRepository %s",
+    async (isCrossRepository) => {
+      h.descends = true;
+      setPr({ ci: "pending", headSha: SHA_B, isCrossRepository });
+      report();
+      await h.engine.reconcileRun(RUN);
+      clock += NO_CI_AFTER_MS + 1000;
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+      expect(store.runPush(RUN)?.sha).toBe(SHA);
+      expect(h.fastForwards).toEqual([]);
+    },
+  );
+
+  it("never adopts the head of a PR other than the one the loop recorded", async () => {
+    h.descends = true;
+    // a PR on the run's branch that is not the run's recorded one (#99)
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    setLoop({ prNumber: 99 });
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
+  });
+
+  it("adopts nothing when the run's push changes while the descent is read, though no commit was made", async () => {
+    const SHA_C = "c".repeat(40);
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    h.duringDescendant = () => {
+      h.duringDescendant = undefined;
+      store.setRunPush({ runId: RUN, sha: SHA_C, at: clock });
+    };
+    await h.engine.reconcileRun(RUN);
+    expect(store.followedCommits(RUN).size).toBe(0);
+    expect(h.fastForwards).toEqual([]);
+  });
+
+  it.each(["runPush", "newestRunCommit"] as const)(
+    "the action reads %s again on its own",
+    async (which) => {
+      const SHA_C = "c".repeat(40);
+      {
+        h.descends = true;
+        setPr({ ci: "pending", headSha: SHA_B });
+        report();
+        // The first recheck (after the descent read) sees the truth; the action's own read, the
+        // second one after it, sees a change.
+        let armed = false;
+        let reads = 0;
+        h.duringDescendant = () => {
+          armed = true;
+        };
+        const real = store[which].bind(store);
+        const spy = vi.spyOn(store, which).mockImplementation(((id: string) => {
+          const got = real(id);
+          if (!armed || got === null) return got;
+          reads++;
+          return reads >= 2 ? { ...got, sha: SHA_C } : got;
+        }) as never);
+        await h.engine.reconcileRun(RUN);
+        spy.mockRestore();
+        expect(reads).toBeGreaterThanOrEqual(2);
+        expect(store.followedCommits(RUN).size).toBe(0);
+        expect(h.fastForwards).toEqual([]);
+      }
+    },
+  );
+
+  it("drops a held worktree move once the loop's epoch changes, the push staying the same", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    setLoop({ epoch: loopOf().epoch + 1 });
+    const tries = h.fastForwards.length;
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved).toBeUndefined();
+    expect(h.fastForwards).toHaveLength(tries);
+  });
+
+  it("a PR merged while the worktree move is refused takes the run to done", async () => {
+    h.descends = true;
+    h.fastForwardResult = { ok: false, text: "diverged", transient: false };
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().branchMoved?.sha).toBe(SHA_B);
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "passing", headSha: SHA_B, state: "merged", mergedAt: clock });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("done");
+    expect(loopOf().branchMoved).toBeUndefined();
+    // the publisher is told the run has ended
+    expect(h.endedRuns).toContain(RUN);
+  });
+
+  it("a head added on top long after the push gets its own window: the first no is not a park, the next pass adopts it", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA });
+    report();
+    await h.engine.reconcileRun(RUN);
+    // twelve minutes on, still on the seat's push; then someone pushes on top
+    clock += 12 * MIN;
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "pending", headSha: SHA_B });
+    h.pusherLogins = ["stranger"]; // GitHub's push activity has not caught up
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().parked).toBeNull();
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    h.pusherLogins = ["op-login"];
+    clock += ENGINE_TICK_MS;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf().parked).toBeNull();
+  });
+
+  it("goes from CI into review on the adopted head", async () => {
+    h.descends = true;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    clock += ENGINE_TICK_MS;
+    setPr({ ci: "passing", headSha: SHA_B });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "review", parked: null });
+  });
+
+  it("parks as stuck when the PR head does not descend from the push", async () => {
+    h.descends = false;
+    setPr({ ci: "pending", headSha: SHA_B });
+    report();
+    await h.engine.reconcileRun(RUN);
+    clock += NO_CI_AFTER_MS + 1000;
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "stuck" } });
+    expect(store.runPush(RUN)?.sha).toBe(SHA);
+    expect(h.fastForwards).toEqual([]);
   });
 
   it("a run stopped on push-not-shown is in CI after one pass once its PR row carries the pushed head", async () => {
@@ -6366,6 +6794,52 @@ describe("the engine runs reviews", () => {
       expect(h.steps).toContain("merge");
     });
 
+    it("a merge hold on a run waiting on FLIGHT's clearance parks it, so FLIGHT's rework applies", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      expect(await h.engine.holdMerge(RUN, "FLIGHT", "design not approved")).toEqual({ ok: true });
+      expect(loopOf()).toMatchObject({
+        phase: "parked",
+        parked: { kind: MERGE_HOLD_PARK },
+        mergeHold: { by: "FLIGHT", from: "review" },
+      });
+      expect(loopOf().awaitingFlight ?? null).toBeNull();
+      const sentBefore = h.sent.length;
+      expect(await operate(RUN, "FLIGHT", { kinds: [MERGE_HOLD_PARK], action: "rework" })).toBe(
+        true,
+      );
+      expect(loopOf().phase).toBe("working");
+      // the fix message reached the seat, and the hold still stands for its holder to release
+      expect(h.sent).toHaveLength(sentBefore + 1);
+      expect(h.sent.at(-1)?.text).toContain("design not approved");
+      expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT" });
+      expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
+      expect(loopOf().mergeHold ?? null).toBeNull();
+    });
+
+    it("a run that already waits on FLIGHT when it is held parks on the hold, and a release returns it to review", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      // the hold is already on the loop (inherited at a handoff, or set in ci) when the pass runs
+      setLoop({ mergeHold: { by: "FLIGHT", reason: "design not approved", at: clock } });
+      await h.engine.reconcileRun(RUN);
+      expect(loopOf()).toMatchObject({
+        phase: "parked",
+        parked: { kind: MERGE_HOLD_PARK },
+        mergeHold: { by: "FLIGHT", from: "review" },
+      });
+      expect(loopTexts().some((t) => t.includes("design not approved"))).toBe(true);
+      expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
+      expect(loopOf().mergeHold ?? null).toBeNull();
+      expect(loopOf().phase).toBe("review");
+    });
+
     it("a stored pending controller check on the head is passed by FLIGHT's clearance", async () => {
       flightSeatConfig();
       h.touches = ["apps/server/src/api.ts"];
@@ -6781,7 +7255,7 @@ describe("the engine runs reviews", () => {
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
         expect(
-          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+          store.waste.alarms("WHERE check_id = ? AND subject = ?", REVIEW_ROUNDS, RUN)[0],
         ).toMatchObject({ basis: "the floor review looks wrong", level: 3 });
         await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
         await h.engine.tick();
@@ -6907,7 +7381,7 @@ describe("the engine runs reviews", () => {
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
         expect(
-          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+          store.waste.alarms("WHERE check_id = ? AND subject = ?", REVIEW_ROUNDS, RUN)[0],
         ).toMatchObject({ basis: "the findings are fixed", level: 3 });
         await h.engine.tick();
         await h.engine.reconcileRun(RUN);
@@ -6924,7 +7398,8 @@ describe("the engine runs reviews", () => {
         const third = await heldAtLimit();
         syncWasteAlarms(config, store, clock);
         const open = store.waste.alarms(
-          "WHERE check_id = 'review-rounds' AND subject = ? AND resolved_at IS NULL",
+          "WHERE check_id = ? AND subject = ? AND resolved_at IS NULL",
+          REVIEW_ROUNDS,
           RUN,
         )[0];
         expect(open).toMatchObject({ level: 3 });
@@ -6992,7 +7467,7 @@ describe("the engine runs reviews", () => {
         ).toEqual({ lifted: true });
         expect(reviewsHeld(store, RUN)).toBe(false);
         expect(
-          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+          store.waste.alarms("WHERE check_id = ? AND subject = ?", REVIEW_ROUNDS, RUN)[0],
         ).toMatchObject({ basis: "the findings are minor", level: 3 });
         expect(loopOf().phase).not.toBe("parked");
       });
@@ -7002,6 +7477,272 @@ describe("the engine runs reviews", () => {
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
         expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
         expect(h.sent.at(-1)?.text).toContain("Important");
+      });
+
+      // rounds 1 and 2 fail and the push after them is held at the cap; FLIGHT's rework grants round 3,
+      // that review fails, and the run parks for FLIGHT again
+      const SHA_D = "d".repeat(40);
+      const SHA_E = "e".repeat(40);
+      const push = async (sha: string) => {
+        clock += 1000;
+        report("Fixed it", sha);
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", headSha: sha });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+      };
+      const grantedThenFailed = async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        const two = need(reviewRows().find((r) => r.round === 2));
+        reported(two.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(reviewsHeld(store, RUN)).toBe(true);
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        await push(SHA_D);
+        const granted = reviewRows().filter((r) => r.sha === SHA_D && r.state !== "superseded");
+        expect(granted).toHaveLength(1);
+        expect(granted[0]).toMatchObject({ round: 3, state: "running" });
+        expect(loopOf().phase).not.toBe("parked");
+        const sentBefore = h.sent.length;
+        reported(need(granted[0]).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        // it parks as a plain review park: no fix line goes to the seat, and no round-4 review exists
+        expect(loopOf().parked?.kind).toBe("review");
+        expect(h.sent).toHaveLength(sentBefore);
+        expect(reviewRows().some((r) => r.round >= 4)).toBe(false);
+      };
+
+      it("rework grants one more round: the next push's review runs, and a fail parks at the cap again", async () => {
+        await grantedThenFailed();
+      });
+
+      it("a grant survives a new epoch started by something other than FLIGHT", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        // a main sync or CI ruling starts another epoch before the fix is pushed
+        setLoop({ epoch: loopOf().epoch + 1 });
+        await push(SHA_D);
+        const granted = reviewRows().filter((r) => r.sha === SHA_D && r.state !== "superseded");
+        expect(granted).toHaveLength(1);
+        expect(granted[0]).toMatchObject({ round: 3, state: "running" });
+        const sentBefore = h.sent.length;
+        reported(need(granted[0]).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(loopOf().parked?.kind).toBe("review");
+        expect(h.sent).toHaveLength(sentBefore);
+      });
+
+      it("a grant is used up once its review passes: a later epoch's blocking review gets a fix line", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        const granted = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        // held so the passing review does not merge the change
+        setLoop({ mergeHold: { by: "CAPCOM", reason: "keep open", at: clock } });
+        reported(granted.id, []);
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().flightReworkGrantEpoch).toBeUndefined();
+        // a later epoch: the seat pushes again and that review fails
+        setLoop({
+          epoch: loopOf().epoch + 1,
+          phase: "working",
+          parked: null,
+          mergeHold: null,
+        });
+        await push(SHA_E);
+        const later = need(reviewRows().find((r) => r.sha === SHA_E && r.state === "running"));
+        expect(later.round).toBe(1);
+        const sentBefore = h.sent.length;
+        reported(later.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(sentBefore));
+        expect(h.sent.at(-1)?.text).toContain("Important");
+        expect(loopOf().parked?.kind).not.toBe("review");
+      });
+
+      it("a second rework after the granted round fails grants the next review again", async () => {
+        await grantedThenFailed();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_E);
+        const next = reviewRows().filter((r) => r.sha === SHA_E && r.state !== "superseded");
+        expect(next).toHaveLength(1);
+        expect(next[0]).toMatchObject({ round: 4, state: "running" });
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("a granted review that fails to start keeps the grant: a rereview's blocking review parks at the cap", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        // the granted review crashes twice: the run parks as review-failed
+        for (const attempt of [1, 2]) {
+          const row = need(
+            await vi.waitFor(() => {
+              const r = reviewRows().find(
+                (x) => x.sha === SHA_D && x.attempt === attempt && x.state === "running",
+              );
+              expect(r).toBeDefined();
+              return r;
+            }),
+          );
+          crash(need(row.runId));
+        }
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe("review-failed"));
+        expect(loopOf().flightReworkGrantEpoch).toBeDefined();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review-failed"], action: "rereview" })).toBe(
+          true,
+        );
+        expect(loopOf().flightReworkGrantEpoch).toBeDefined();
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const again = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        const sentBefore = h.sent.length;
+        reported(again.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        // still the granted round counted across epochs: a plain review park, no fix line
+        expect(loopOf().parked?.kind).toBe("review");
+        expect(h.sent).toHaveLength(sentBefore);
+      });
+
+      it("a review park lifted by something other than FLIGHT's rework drops the grant", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        const granted = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        reported(granted.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe("review"));
+        expect(loopOf().flightReworkGrantEpoch).toBeDefined();
+        // the operator sends it back for rework from the HUD
+        await h.engine.onOperatorMessage(RUN);
+        expect(loopOf().flightReworkGrantEpoch).toBeUndefined();
+        await push(SHA_E);
+        const next = reviewRows().filter((r) => r.sha === SHA_E && r.state !== "superseded");
+        expect(next).toHaveLength(1);
+        expect(next[0]).toMatchObject({ round: 1, state: "running" });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+      });
+
+      it("a rereview after the granted round fails runs the review of that head", async () => {
+        await grantedThenFailed();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rereview" })).toBe(true);
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const next = reviewRows().filter((r) => r.sha === SHA_D && r.state === "running");
+        expect(next).toHaveLength(1);
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("a second_review after the granted round fails runs the second review", async () => {
+        config.accounts.push({ id: "claude-2", vendor: "claude", alertAt: 80, stopAt: 95 });
+        seats().push({ ...retroSeat(), id: "retro-2", accountId: "claude-2" });
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await grantedThenFailed();
+        expect(
+          await operate(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "second_review",
+            note: "the floor review looks wrong",
+          }),
+        ).toBe(true);
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const next = reviewRows().filter((r) => r.sha === SHA_D && r.state === "running");
+        expect(next.map((r) => r.seatId)).toEqual(["retro-2"]);
+        expect(next[0]?.state).toBe("running");
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      // a rereview or second_review is no grant: its epoch counts its own rounds, so after its review
+      // fails the seat's fix is reviewed, not held at a round counted across the old epochs
+      const failedThenFixed = async () => {
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const rerun = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        reported(rerun.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(loopOf().phase).not.toBe("parked"));
+        await push(SHA_E);
+        const fix = reviewRows().filter((r) => r.sha === SHA_E && r.state !== "superseded");
+        expect(fix).toHaveLength(1);
+        expect(fix[0]).toMatchObject({ state: "running" });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(loopOf().phase).not.toBe("parked");
+      };
+
+      it("after a rereview's review fails, the seat's fix is reviewed", async () => {
+        await grantedThenFailed();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rereview" })).toBe(true);
+        await failedThenFixed();
+      });
+
+      it("after a second_review's review fails, the seat's fix is reviewed", async () => {
+        config.accounts.push({ id: "claude-2", vendor: "claude", alertAt: 80, stopAt: 95 });
+        seats().push({ ...retroSeat(), id: "retro-2", accountId: "claude-2" });
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await grantedThenFailed();
+        expect(
+          await operate(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "second_review",
+            note: "the floor review looks wrong",
+          }),
+        ).toBe(true);
+        await failedThenFixed();
+      });
+
+      it("a rework from a review park below the cap leaves no review-rounds alarm", async () => {
+        await parkedForRework();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(store.waste.alarms("WHERE check_id = ?", REVIEW_ROUNDS)).toEqual([]);
       });
 
       it("accept is refused when the last review failed the design check", async () => {
