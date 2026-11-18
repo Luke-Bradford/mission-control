@@ -461,7 +461,7 @@ export const QaReportRead = memo(function QaReportRead({
   currentHead,
   archived = false,
   awaiting = true,
-  ticket,
+  ticket: _ticket,
 }: {
   ticket?: string | null;
   report: QaReport;
