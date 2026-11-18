@@ -1948,31 +1948,77 @@ describe("crew seats", () => {
       });
     });
 
-    it("a set-aside run's open blocked and waiting notes do not hide the seat's live work", () => {
-      ran();
-      store.upsertRun(
-        run({
-          id: "parked",
-          agentId: "GUIDO-1",
-          startedAt: at("2026-10-15T07:00:00Z"),
-          endedAt: at("2026-10-15T09:00:00Z"),
-        }),
-      );
-      for (const [kind, key] of [
-        ["blocked", "hold:parked"],
-        ["review", "review:parked"],
-      ] as const) {
+    describe("a run set aside (never ended, off the seat)", () => {
+      const note = (kind: "blocked" | "review", runId: string) =>
         store.raiseNote({
-          key,
+          key: `${kind}:${runId}`,
           kind,
-          runId: "parked",
+          runId,
           seatId: "GUIDO-1",
           repoId: "shop-app",
           text: kind,
           at: at("2026-10-15T09:00:00Z"),
         });
-      }
-      expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0 });
+      const setAside = (over: Partial<Run> = {}) =>
+        store.upsertRun(
+          run({
+            id: "aside",
+            agentId: "GUIDO-1",
+            startedAt: at("2026-10-15T07:00:00Z"),
+            endedAt: null,
+            loop: { aside: { worktree: "/w/p", wake: false } } as Run["loop"],
+            ...over,
+          }),
+        );
+      const between = () =>
+        store.upsertRun(
+          run({
+            id: "between",
+            agentId: "GUIDO-1",
+            startedAt: at("2026-10-15T10:00:00Z"),
+            endedAt: at("2026-10-15T12:00:00Z"),
+          }),
+        );
+
+      it("does not hide the seat's live work or the idle hours before it", () => {
+        setAside();
+        between();
+        note("blocked", "aside");
+        note("review", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0, idle: 75 });
+      });
+
+      it("is not current even when no run followed it", () => {
+        setAside();
+        note("blocked", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0 });
+      });
+
+      it("a note on a not-aside run left open is still cut off when the seat starts another run", () => {
+        setAside({ loop: null });
+        between();
+        note("blocked", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, blocked: 0 });
+      });
+
+      it("agrees with the chart's running share for the same seat and day", () => {
+        setAside();
+        between();
+        note("blocked", "aside");
+        ran();
+        const t = tel("24h", NOON);
+        const dayStart = at("2026-10-16T23:00:00Z");
+        const running = t.series.stateSpans
+          .filter((x) => x.agentId === "GUIDO-1" && x.state === "running")
+          .reduce((sum, x) => sum + Math.max(0, x.endedAt - Math.max(x.startedAt, dayStart)), 0);
+        const share = (running / (NOON - dayStart)) * 100;
+        const u = t.utilisation.find((x) => x.agentId === "GUIDO-1");
+        expect(u?.working).toBeCloseTo(share);
+        expect(u?.blocked).toBe(0);
+      });
     });
 
     it("a run's blocked note still counts while that run is the seat's latest", () => {

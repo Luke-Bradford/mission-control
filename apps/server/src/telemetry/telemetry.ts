@@ -500,17 +500,20 @@ export function telemetry(
       .filter((l) => l.seatId === agent.id)
       .map((l): Interval => [Math.max(dayStart, l.queuedAt), Math.min(now, l.startedAt)]);
     // A note speaks for the seat only while its own run is the seat's current one: from that
-    // run's start until it ends or the seat starts another. A set-aside run's note stays open
-    // for days and must not hide the seat's live state.
-    const seatRunStarts = runs.filter((r) => r.agentId === agent.id).map((r) => r.startedAt);
+    // run's start until it ends or the seat starts another. A set-aside run is off the seat, so
+    // its note, open for days, must not hide the seat's live state.
     const noteIntervals = (kinds: string[]): Interval[] =>
       store.telemetryNoteEpisodes(agent.id, dayStart, now, kinds).flatMap((e): Interval[] => {
         const owner = e.runId === null ? null : store.run(e.runId);
         if (owner === null) return [e.interval];
-        const next = Math.min(...seatRunStarts.filter((s) => s > owner.startedAt), Infinity);
+        if (owner.loop?.aside) return [];
         const clipped: Interval = [
           Math.max(e.interval[0], owner.startedAt),
-          Math.min(e.interval[1], next, owner.endedAt ?? Infinity),
+          Math.min(
+            e.interval[1],
+            store.nextRunStart(agent.id, owner.startedAt) ?? Infinity,
+            owner.endedAt ?? Infinity,
+          ),
         ];
         return clipped[0] < clipped[1] ? [clipped] : [];
       });
