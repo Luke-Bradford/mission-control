@@ -23,6 +23,9 @@ import { NOT_PLAIN, plainCall } from "./plain-call.ts";
 
 export { plainCall };
 
+/** The related-tests run, as a repo's `checks` list spells it. */
+export const RELATED_CHECK = "pnpm -s test:related";
+
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
  * EVERY trimmed segment is a configured check. When it is not configured, `pnpm -s test:related`
@@ -31,9 +34,6 @@ export { plainCall };
  * runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break counts for
  * nothing too.
  */
-/** The related-tests run, as a repo's `checks` list spells it. */
-export const RELATED_CHECK = "pnpm -s test:related";
-
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
   const segments = command.split("&&").map((s) => s.trim());
@@ -70,10 +70,6 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
  * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
  * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
- */
-/**
- * The related-tests run, as a repo's `checks` list spells it. It loads the Mac like a suite, so it
- * takes the test lock whether or not the repo still lists it as a check.
  */
 export function lockedCheck(command: string, checks: readonly string[]): string | null {
   const ran = splitCommands(command).map(lockForm);
