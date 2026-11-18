@@ -20,7 +20,6 @@ export const EVIDENCE_PAGE_PATHS = {
   setup_roles: "/setup/roles",
   setup_sources: "/setup/sources",
   setup_access: "/setup/access",
-  planner: "/planner",
 } as const;
 export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
 export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
