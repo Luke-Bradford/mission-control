@@ -3680,11 +3680,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? null
           : (() => {
               const evidence = store.evidenceNotes(priorRun.id).at(-1)?.note;
-              const findings = store
-                .reviewsOfRun(priorRun.id)
-                .flatMap((review) => store.findingsOf(review.id))
-                .filter((finding) => finding.resolution === null)
-                .slice(0, 10);
+              const review =
+                priorRun.loop?.prNumber === null || priorRun.loop?.prNumber === undefined
+                  ? undefined
+                  : store
+                      .reviewsOfPr(info.repo.id, priorRun.loop.prNumber)
+                      .findLast((candidate) => candidate.state === "reported");
+              const severityRank: Record<string, number> = { Critical: 0, Important: 1 };
+              const findings =
+                review === undefined
+                  ? []
+                  : store
+                      .findingsOf(review.id)
+                      .filter((finding) => finding.state === "open" && finding.resolution == null)
+                      .sort(
+                        (left, right) =>
+                          (severityRank[left.severity] ?? 2) - (severityRank[right.severity] ?? 2),
+                      )
+                      .slice(0, 10);
               if (priorRun.summary === null && evidence === undefined && findings.length === 0)
                 return null;
               return [
@@ -3742,6 +3755,23 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       store.upsertRun(run);
+      if (priorRun !== undefined && checkout.branch) {
+        const cloneGit = await cloneGitDir(info.session.checkout);
+        for (const { sha, at } of store.commitsOnBranch(info.repo.id, checkout.branch)) {
+          const isAncestor = await inClone(checkout.path, async () =>
+            crewGit(
+              checkout.path,
+              ["merge-base", "--is-ancestor", sha, "HEAD"],
+              cloneGit,
+              { gitDir: checkout.gitDir },
+            )
+              .then(() => true)
+              .catch(() => false),
+          );
+          if (isAncestor)
+            store.addRunCommit({ runId, repoId: info.repo.id, branch: checkout.branch, sha, at });
+        }
+      }
       // the worktree may be one another seat left when its run stopped: that seat no longer holds it
       if (!planner && !readOnly) {
         const seatIds = (crew?.sessions ?? []).flatMap((x) => x.seats.map((m) => m.id));
