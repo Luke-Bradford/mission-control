@@ -144,8 +144,10 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
         ...document.querySelectorAll(".as-hrow"),
         ...document.querySelectorAll(".as-frow"),
       ].map((r) => Math.round(rect(r).height)),
-      headCase: getComputedStyle(document.querySelector(".as-do thead th") as Element)
-        .textTransform,
+      headCase: (() => {
+        const th = document.querySelector(".as-do thead th");
+        return th ? getComputedStyle(th).textTransform : "none";
+      })(),
       heads: [...document.querySelectorAll(".as-do thead th")].map((h) => h.textContent),
       stageCells: document.querySelectorAll(".as-past .as-cell").length,
       dayLabels: [...document.querySelectorAll(".as-axis span")].filter((e) => e.textContent)

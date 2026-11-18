@@ -767,6 +767,9 @@
 }
 .as-dot {
   color: var(--accent);
+  /* A fallback font for the dot glyph must not stretch its row. */
+  display: inline-block;
+  line-height: 1;
 }
 .as-acts .as-btn {
   padding: 0 var(--sp-3);
@@ -791,6 +794,7 @@
 }
 .as-dotcell {
   text-align: center;
+  line-height: 1;
 }
 .as-hot {
   color: var(--warn);
