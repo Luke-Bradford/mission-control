@@ -79,7 +79,7 @@ const repoRules = (planSignoff: "every" | "larger" | "never"): RepoRulesView =>
         { value: key === "plan_signoff" ? planSignoff : "", source: "default" },
       ]),
     ),
-  }) as RepoRulesView;
+  }) as unknown as RepoRulesView;
 
 const CFG: ConfigView = {
   ...CONFIG,
