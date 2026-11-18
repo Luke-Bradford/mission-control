@@ -3079,6 +3079,7 @@ describe("push and draft_pr", () => {
 
         await checks.begin({ runId: RUN, toolUseId: "fresh-cell" }, joined);
         await checks.end({ runId: RUN, toolUseId: "fresh-cell" }, true, 0);
+        expect(checks.drops(RUN)).toEqual([]);
         expect(
           await tool("report_evidence", t).call(CTX, { note: "The replacement check passed." }),
         ).toEqual({ text: EVIDENCE_RECORDED });
