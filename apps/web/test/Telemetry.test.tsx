@@ -779,7 +779,39 @@ describe("Agents", () => {
       "Waiting",
       "Parked or stalled",
       "Idle",
+      "Unknown",
     ]);
+  });
+
+  it("legend names every shape the bar draws, and Unknown differs from Parked", async () => {
+    await loaded(
+      tel({
+        utilisation: [
+          { agentId: "shop-app-ta", working: 20, waiting: 10, blocked: 5, idle: 15, unknown: 50 },
+        ],
+      }),
+      undefined,
+      undefined,
+      "crew",
+    );
+    const drawn = [...panel("tUtil").querySelectorAll(".bar .share")].map((i) => i.classList[1]);
+    expect(drawn).toContain("unknown");
+    const legend = [...panel("tUtil").querySelectorAll(".readout .crew-sw")].map(
+      (i) => i.classList[2],
+    );
+    for (const cls of drawn) expect(legend).toContain(cls);
+    const shape = (cls: string) =>
+      readStyles()
+        .match(new RegExp(`\\.share\\.${cls}\\s*\\{([^}]*)\\}`))?.[1]
+        ?.trim();
+    const fill = (cls: string) =>
+      shape(cls)
+        ?.match(/background:([^;]*);/)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim();
+    expect(fill("unknown")).toBeTruthy();
+    expect(fill("unknown")).not.toBe(fill("parked"));
+    expect(fill("unknown")).not.toMatch(/radial-gradient/);
   });
 
   it("tool latency and subagents tables", async () => {

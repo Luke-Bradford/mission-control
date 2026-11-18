@@ -116,7 +116,10 @@ export function crewTelemetry(rowsMany = 1): Telemetry {
       const working = 38 + ((s * 13) % 40);
       const waiting = 4 + ((s * 5) % 12);
       const blocked = (s * 3) % 8;
-      return { agentId, working, waiting, blocked, idle: 100 - working - waiting - blocked };
+      const rest = 100 - working - waiting - blocked;
+      // seats that have parked time also have unaccounted time, so a bar draws both slices
+      const unknown = blocked > 0 ? Math.min(8, rest) : 0;
+      return { agentId, working, waiting, blocked, idle: rest - unknown, unknown };
     }),
     turnUsage: [],
     toolLatency: toolRows,
