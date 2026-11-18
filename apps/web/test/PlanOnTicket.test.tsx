@@ -214,6 +214,21 @@ describe("the signed-off plan beside what was built", () => {
     expect(screen.queryByRole("region", { name: "Signed-off plan" })).toBeNull();
   });
 
+  it("names a retained PR lookup that is still loading", async () => {
+    serve({ [PR]: () => new Promise(() => {}) });
+    render(<QaReportRead report={qaReportFixture()} archived />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("status").textContent).toMatch(/Finding this report's ticket/);
+  });
+
+  it("explains a failed retained PR lookup", async () => {
+    serve({ [PR]: () => ({ status: 503, body: { error: "PR lookup offline" } }) });
+    render(<QaReportRead report={qaReportFixture()} archived />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByRole("alert").textContent).toMatch(/Could not find this report's ticket/);
+    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
   it("puts the report's result screenshots in the Built column, beside the mockups", async () => {
     const report = qaReportFixture();
     serve({ "/api/plans?repoId=mission-control": signed });

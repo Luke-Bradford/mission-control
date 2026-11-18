@@ -191,14 +191,19 @@ const branchTicket = (branch: string | undefined): number | null => {
  * knows it, else its retained PR row (a report saved without a branch still finds its plan), else
  * the one a conventional branch name carries.
  */
-function usePlanTicket(r: QaReport, ticket: string | null | undefined): number | null {
+function usePlanTicket(r: QaReport, ticket: string | null | undefined) {
   const known = ticket ? ticketNumberOf(ticket) : null;
   const pr = useResource<PullRequestView>(
     known === null ? RESOURCES.pr(r.repoId, r.prNumber) : null,
   );
-  return (
+  const number =
     known ?? (pr.data?.ticket ? ticketNumberOf(pr.data.ticket) : null) ?? branchTicket(r.branch)
-  );
+  return {
+    number,
+    loading: number === null && pr.loading,
+    error: number === null ? (pr.error ?? null) : null,
+    retry: () => hub.refetch(RESOURCES.pr(r.repoId, r.prNumber).path),
+  };
 }
 
 /** The selected head is mandatory: an older approval never fills a new head's evidence gap. */
@@ -520,7 +525,8 @@ export const QaReportRead = memo(function QaReportRead({
     <article className="qa-report" aria-label={`QA report for PR #${r.prNumber}`}>
       <SignedOffPlan
         repoId={r.repoId}
-        number={planTicket}
+        number={planTicket.number}
+        ticketLookup={planTicket}
         built={
           <>
             <p>{r.summary}</p>

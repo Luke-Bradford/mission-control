@@ -25,21 +25,41 @@ export function SignedOffPlan({
   number,
   built,
   className,
+  ticketLookup,
 }: {
   repoId: string;
   number: number | null;
   /** What was built, in the words of the page it sits on. */
   built: ReactNode;
   className?: string;
+  /** The archived report's retained-PR lookup, when it is the only ticket source. */
+  ticketLookup?: { loading: boolean; error: Error | null; retry: () => void };
 }) {
   const { plan, loading, error } = useSignedOffPlan(repoId, number);
+  const panelClass = className ? `plan-beside ${className}` : "plan-beside";
+  if (number === null && ticketLookup?.loading)
+    return (
+      <Panel title="Signed-off plan" className={panelClass}>
+        <p className="pb" role="status">
+          Finding this report's ticket…
+        </p>
+      </Panel>
+    );
+  if (number === null && ticketLookup?.error)
+    return (
+      <Panel title="Signed-off plan" className={panelClass}>
+        <p className="pb crit-t" role="alert">
+          Could not find this report's ticket. {ticketLookup.error.message}{" "}
+          <button type="button" onClick={ticketLookup.retry}>
+            Try again
+          </button>
+        </p>
+      </Panel>
+    );
   if (number === null) return null;
   if (loading && !plan)
     return (
-      <Panel
-        title="Signed-off plan"
-        className={className ? `plan-beside ${className}` : "plan-beside"}
-      >
+      <Panel title="Signed-off plan" className={panelClass}>
         <p className="pb" role="status">
           Loading the signed-off plan…
         </p>
@@ -47,10 +67,7 @@ export function SignedOffPlan({
     );
   if (error)
     return (
-      <Panel
-        title="Signed-off plan"
-        className={className ? `plan-beside ${className}` : "plan-beside"}
-      >
+      <Panel title="Signed-off plan" className={panelClass}>
         <p className="pb crit-t" role="alert">
           Could not load the signed-off plan. {error.message}{" "}
           <button type="button" onClick={() => hub.refetch(RESOURCES.plans(repoId).path)}>
@@ -64,7 +81,7 @@ export function SignedOffPlan({
     <Panel
       title="Signed-off plan"
       sub={`${plan.ticket} · size ${plan.size}`}
-      className={className ? `plan-beside ${className}` : "plan-beside"}
+      className={panelClass}
     >
       <div className="pb plan-beside-grid">
         <section aria-label="What was proposed">
