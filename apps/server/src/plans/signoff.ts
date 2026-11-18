@@ -121,10 +121,18 @@ async function approveOne(
   if (plan.state !== "awaiting-signoff") return { ok: false, status: 409, error: PLAN_NOT_WAITING };
   const held = planHolds(await settingOf(deps, repoId), plan);
   let moved = false;
-  if (held && deps.move !== undefined) {
+  if (held) {
     const card = deps.store.board(repoId).find((i) => i.issueNumber === issue);
     const column = card === undefined ? null : hudColumnOf(card);
-    if (column === "Backlog" || column === "Refinement") {
+    // the cached card may be missing or stale, so the board mover (idempotent, and it reads GitHub)
+    // confirms Ready; a card already further along is left where it is
+    if (column === null || column === "Backlog" || column === "Refinement" || column === "Ready") {
+      if (deps.move === undefined)
+        return {
+          ok: false,
+          status: 502,
+          error: "The board cannot be written from this hub, so the plan is not signed off yet.",
+        };
       const result = await deps.move({
         runId: `plan:${plan.ref}`,
         repoId,
@@ -135,7 +143,7 @@ async function approveOne(
         return {
           ok: false,
           status: 502,
-          error: `The card could not be moved to Ready (${result.reason}), so the plan is not signed off yet. Try again.`,
+          error: `The card could not be confirmed in Ready (${result.reason}), so the plan is not signed off yet. Try again.`,
         };
       moved = result.changed;
     }

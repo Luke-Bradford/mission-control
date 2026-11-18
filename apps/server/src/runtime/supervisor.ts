@@ -4485,9 +4485,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
-      const { scratch, inputs, repoDocs, references, screenshots } = await inClone(
-        checkout,
-        async () => {
+      const { scratch, inputs, repoDocs, references, screenshots, signedPlan, planMockupFiles } =
+        await inClone(checkout, async () => {
           const s = await prepareScratch({
             checkout,
             worktreesRoot: crew?.worktrees ?? "",
@@ -4525,10 +4524,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                   "screenshot evidence is not ready for this review head",
                 );
             }
+            // review must not start without the signed-off mockups it has to compare
+            const signedPlan = signedOffQaPlan(store.plans.get(info.repo.id, issue));
+            const planMockupFiles =
+              signedPlan === null
+                ? []
+                : await stageReviewMockups(store.path, s.path, signedPlan.mockups).catch((e) => {
+                    throw new SupervisorError(
+                      409,
+                      `the signed-off mockups cannot be staged: ${errText(e)}`,
+                      { cause: e },
+                    );
+                  });
             return {
               scratch: s,
               inputs,
               screenshots,
+              signedPlan,
+              planMockupFiles,
               repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
               references: await repoReferenceIndex(checkout, s.baseSha),
             };
@@ -4536,8 +4549,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
             throw e;
           }
-        },
-      );
+        });
       try {
         if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
         if (external && !(await readSubject())) throw notWanted;
@@ -4623,11 +4635,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         (edges) => reviewReach(edges, changedPaths),
         () => null,
       );
-      const signedPlan = signedOffQaPlan(store.plans.get(info.repo.id, issue));
-      const planMockupFiles =
-        signedPlan === null
-          ? []
-          : await stageReviewMockups(store.path, scratch.path, signedPlan.mockups).catch(() => []);
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,

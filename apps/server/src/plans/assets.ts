@@ -1,7 +1,7 @@
 /** The pictures a plan carries: read from the planner's checkout, kept by content hash, served by id. */
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { PLAN_MOCKUP_BYTES_MAX, type PlanMockup } from "@mc/core";
 import { storedMediaType } from "../attention/attention-materials.ts";
@@ -104,21 +104,34 @@ const EXT: Record<PlanMockup["mediaType"], string> = {
   "image/webp": "webp",
 };
 
-/** Copies each mockup into the review's scratch copy, so the reviewer can open it; returns the paths. */
+/**
+ * Copies each mockup into the review's scratch copy, all or none; returns the paths. A mockup whose
+ * kept picture is missing or unreadable, or a copy that fails, throws: a review must not start
+ * without material it has to compare.
+ */
 export async function stageReviewMockups(
   dbPath: string,
   scratchPath: string,
   mockups: readonly PlanMockup[],
 ): Promise<{ path: string; caption: string }[]> {
-  const staged: { path: string; caption: string }[] = [];
-  if (mockups.length === 0) return staged;
-  await mkdir(join(scratchPath, REVIEW_MOCKUP_DIR), { recursive: true });
-  for (const [n, m] of mockups.entries()) {
+  if (mockups.length === 0) return [];
+  const files = mockups.map((m, n) => {
     const asset = readPlanAsset(dbPath, m.id);
-    if (asset === null) continue;
-    const path = `${REVIEW_MOCKUP_DIR}/${n + 1}-${m.id.slice(0, 8)}.${EXT[asset.mediaType]}`;
-    await writeFile(join(scratchPath, path), asset.bytes, { flag: "w", mode: 0o600 });
-    staged.push({ path, caption: m.caption });
+    if (asset === null) throw new Error(`the kept picture for "${m.caption}" is missing`);
+    return {
+      asset,
+      caption: m.caption,
+      name: `${n + 1}-${m.id.slice(0, 8)}.${EXT[asset.mediaType]}`,
+    };
+  });
+  await mkdir(join(scratchPath, ".mc-review"), { recursive: true });
+  const stage = await mkdtemp(join(scratchPath, ".mc-review", ".plan-mockups-"));
+  try {
+    for (const f of files)
+      await writeFile(join(stage, f.name), f.asset.bytes, { flag: "wx", mode: 0o600 });
+    await rename(stage, join(scratchPath, REVIEW_MOCKUP_DIR));
+  } finally {
+    await rm(stage, { recursive: true, force: true });
   }
-  return staged;
+  return files.map((f) => ({ path: `${REVIEW_MOCKUP_DIR}/${f.name}`, caption: f.caption }));
 }

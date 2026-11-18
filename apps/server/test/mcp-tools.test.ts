@@ -6171,11 +6171,20 @@ describe("report_plan", () => {
       },
     );
 
-    it("a repo that holds nothing, with no ticket sent, still takes a plan with only the plan", async () => {
+    it("never: a bare plan is written to the ticket but stays off the Planner tab", async () => {
       withRules("never");
       expect(await tool("report_plan", pt).call(FAO_CTX, { plan: PLAN })).toEqual({
         text: MC_PLAN_WRITTEN,
       });
+      expect(store.plans.get("mc", 7)).toBeNull();
+    });
+
+    it("never: a plan that gives any part for the tab must give all three", async () => {
+      withRules("never");
+      const r = await tool("report_plan", pt).call(FAO_CTX, { plan: PLAN, summary: "s" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("size_estimate, risks");
+      expect(store.plans.get("mc", 7)).toBeNull();
     });
 
     it("every holds a new row", async () => {

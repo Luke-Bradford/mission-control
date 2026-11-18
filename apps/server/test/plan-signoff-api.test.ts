@@ -1,5 +1,5 @@
 import "./temp-home.ts";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type BoardItem, DEFAULT_REPO_RULES, type PlanSignoff } from "@mc/core";
@@ -144,6 +144,23 @@ describe("the Planner tab's data", () => {
 });
 
 describe("the reviewer's copy of the mockups", () => {
+  it("stageReviewMockups refuses, and stages nothing, when a kept picture is missing", async () => {
+    writeFileSync(join(dir, "pic.png"), PNG);
+    const kept = await keepMockups({
+      worktree: dir,
+      dbPath: store.path,
+      inputs: [{ path: "pic.png", caption: "The tab" }],
+      known: [],
+    });
+    if (!kept.ok) throw new Error(kept.text);
+    const gone = { id: "f".repeat(64), caption: "Gone", mediaType: "image/png" as const, url: "u" };
+    const scratch = join(dir, "scratch-2");
+    await expect(stageReviewMockups(store.path, scratch, [...kept.mockups, gone])).rejects.toThrow(
+      /missing/,
+    );
+    expect(existsSync(join(scratch, ".mc-review/plan-mockups"))).toBe(false);
+  });
+
   it("stageReviewMockups puts each signed-off picture in the scratch copy by path", async () => {
     writeFileSync(join(dir, "pic.png"), PNG);
     const kept = await keepMockups({
@@ -253,12 +270,43 @@ describe("sign-off", () => {
     await a.close();
   });
 
-  it("a card already past Backlog is not moved back", async () => {
+  it("a card further along than Ready is not moved back", async () => {
+    store.replaceBoard("shop-app", [card(7), card(8, "In progress")]);
     store.plans.file("shop-app", 8, parts(), true, NOW);
     const a = app();
     await a.inject({ method: "POST", url: "/api/plans/shop-app/8/approve", payload: {} });
     expect(moves).toEqual([]);
     expect(store.plans.get("shop-app", 8)?.state).toBe("signed-off");
+    await a.close();
+  });
+
+  it("a card missing from the cached board is confirmed live before the plan is signed off", async () => {
+    store.plans.file("shop-app", 12, parts(), true, NOW);
+    moveResult = { ok: false, reason: "card not on the project" };
+    const a = app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/12/approve",
+      payload: {},
+    });
+    expect(res.statusCode).toBe(502);
+    expect(moves).toHaveLength(1);
+    expect(store.plans.get("shop-app", 12)?.state).toBe("awaiting-signoff");
+    await a.close();
+  });
+
+  it("a cached Ready card is still confirmed by the mover, which may find it elsewhere", async () => {
+    store.plans.file("shop-app", 8, parts(), true, NOW);
+    moveResult = { ok: false, reason: "card is in Backlog" };
+    const a = app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/8/approve",
+      payload: {},
+    });
+    expect(res.statusCode).toBe(502);
+    expect(moves).toHaveLength(1);
+    expect(store.plans.get("shop-app", 8)?.state).toBe("awaiting-signoff");
     await a.close();
   });
 

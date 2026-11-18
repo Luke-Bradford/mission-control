@@ -2921,11 +2921,18 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: planTextText(evidenceProblemText(problem)), isError: true };
     }
 
-    // a plan the operator will sign off (a ticket FLIGHT sent, or a repo that holds tickets) is whole
-    if (loop === "plan") {
-      const held =
-        ["awaiting-plan", "sent-back"].includes(store.plans.get(run.repoId, issue)?.state ?? "") ||
-        (await planSignoffOf(run.repoId)) !== "never";
+    // A planner report that goes on the Planner tab is whole: the operator reads all five parts.
+    // It goes there when FLIGHT sent the ticket, the repo holds tickets, or the planner gives any
+    // of the parts; a bare plan in a repo that holds nothing stays off the tab.
+    const toTab =
+      loop === "plan" &&
+      (["awaiting-plan", "sent-back"].includes(store.plans.get(run.repoId, issue)?.state ?? "") ||
+        (await planSignoffOf(run.repoId)) !== "never" ||
+        parsed.data.summary !== undefined ||
+        parsed.data.size_estimate !== undefined ||
+        parsed.data.risks !== undefined ||
+        (parsed.data.mockups?.length ?? 0) > 0);
+    if (toTab) {
       const lacking = (
         [
           ["summary", parsed.data.summary],
@@ -2935,7 +2942,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       )
         .filter(([, v]) => v === undefined)
         .map(([k]) => k);
-      if (held && lacking.length > 0) return { text: planPartsText(lacking), isError: true };
+      if (lacking.length > 0) return { text: planPartsText(lacking), isError: true };
     }
     const kept =
       loop === "plan"
@@ -3030,7 +3037,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const at = now();
     if (loop === "plan" && override !== undefined)
       store.setProfileOverride(run.repoId, issue, override, at);
-    if (loop === "plan") {
+    if (toTab) {
       // a ticket FLIGHT sent keeps its hold; otherwise only `every` holds a ticket
       const held =
         store.plans.get(run.repoId, issue)?.required ??
