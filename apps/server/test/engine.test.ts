@@ -7037,12 +7037,10 @@ describe("the engine runs reviews", () => {
         expect(granted[0]).toMatchObject({ round: 3, state: "running" });
         expect(loopOf().phase).not.toBe("parked");
 
-        // that round fails: the next push's review is past the cap, held, and the run parks again
+        // that round fails: the run parks for FLIGHT at once, with no further fix cycle
         reported(need(granted[0]).id, [finding("Important")]);
         await h.engine.reconcileRun(RUN);
-        await push("e".repeat(40));
         await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
-        expect(reviewsHeld(store, RUN)).toBe(true);
       });
 
       it("accept is refused when the last review failed the design check", async () => {
