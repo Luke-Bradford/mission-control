@@ -155,6 +155,7 @@ import {
   costAggregate,
   installOverview,
   landingAggregate,
+  landingTotals,
   mergedAggregate,
   mergedObserved,
   readOverviewRow,
@@ -695,6 +696,9 @@ export class Store {
   }
   codeHealthCostAggregate(repoId: string, from: number, until: number) {
     return costAggregate(this.db, repoId, from, until);
+  }
+  codeHealthLandingTotals(repoId: string, from: number, until: number) {
+    return landingTotals(this.db, repoId, from, until);
   }
   codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
     return landingAggregate(this.db, repoId, from, until, limit);

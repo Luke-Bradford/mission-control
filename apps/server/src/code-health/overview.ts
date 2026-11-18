@@ -152,6 +152,26 @@ export function buildOverview(input: {
     until,
     CODE_HEALTH_OVERVIEW_FILES_MAX,
   );
+  const all = store.codeHealthLandingTotals(repoId, from, until);
+  const allBefore = store.codeHealthLandingTotals(repoId, prev.from, prev.until);
+  const perTouch = (t: { findings: number; touches: number }) =>
+    t.touches === 0 ? null : t.findings / t.touches;
+  const findingsPerTouch = figure({
+    id: "findings-per-touch",
+    label: "Findings per touch",
+    value: perTouch(all),
+    unit: "findings per touch",
+    numerator: all.findings,
+    denominator: all.touches,
+    before: perTouch(allBefore),
+    source: "Distinct review findings, over file touches of merged PRs, across all files",
+    coverage:
+      all.touches === 0
+        ? "No merged PR in this window has a changed-file list, so the ratio is undefined, not zero."
+        : "A touch is one merged PR changing one file. Every file in the window is counted, not only the top landing files.",
+    updatedAt: all.newest,
+    note: "A finding repeated across review rounds of one PR counts once.",
+  });
   const files = landing.rows.map((row) => ({
     ...row,
     ratio: figure({
@@ -240,7 +260,7 @@ export function buildOverview(input: {
     sourceRevision,
     verdict,
     rows,
-    figures: [merged, hubReview, rework, costFigure],
+    figures: [merged, hubReview, rework, costFigure, findingsPerTouch],
     // Nothing from outside the repo (releases, advisories, docs) is collected or stored yet.
     outside: {
       state: "not-collected",
