@@ -4,7 +4,7 @@
   --as-side: clamp(440px, 34vw, 600px);
   --as-panel-head: 40px;
   --as-out-max: 160px;
-  --as-plot: 36px;
+  --as-plot: 32px;
 }
 @media (min-width: 2200px) {
   .code-health.as-fit {
@@ -507,6 +507,10 @@
 .as-cell {
   flex: 1 1 0;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-2);
   padding: var(--sp-1) var(--sp-2);
   border-left: 1px solid var(--line);
 }
@@ -516,7 +520,7 @@
   color: var(--muted);
 }
 .as-fig {
-  display: block;
+  display: inline;
   font: 600 var(--fs-panel) / var(--lh-panel) var(--mono);
 }
 .as-sub {

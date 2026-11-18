@@ -300,7 +300,13 @@ const figureValue = (f: CodeHealthFigure | undefined): string =>
         ? `$${f.value.toFixed(2)}`
         : num(f.value);
 
-function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay"] }) {
+function MergedChart({
+  days,
+  showDays,
+}: {
+  days: CodeHealthOverview["build"]["mergedPerDay"];
+  showDays: boolean;
+}) {
   const totals = days.map((d) => d.noHubReview + d.round1 + d.round2 + d.round3Plus),
     max = Math.max(1, ...totals),
     W = 560,
@@ -379,8 +385,7 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
           </div>
         </div>
       </div>
-      <details className="as-days">
-        <summary>Count for each day</summary>
+      {showDays && (
         <ScrollRegion
           className="as-daylist"
           label={`Merged PRs per day, count by day, over ${days.length} days`}
@@ -393,7 +398,7 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
             ))}
           </ul>
         </ScrollRegion>
-      </details>
+      )}
     </>
   );
 }
@@ -485,7 +490,8 @@ export function AuditSummary({
   onHistory: () => void;
 }) {
   const [filter, setFilter] = useState<Who>("all"),
-    [open, setOpen] = useState<string | null | undefined>(undefined);
+    [open, setOpen] = useState<string | null | undefined>(undefined),
+    [showDays, setShowDays] = useState(false);
   const rows = overview.rows,
     counts: Record<Who, number> = {
       all: rows.length,
@@ -644,8 +650,18 @@ export function AuditSummary({
             className="as-build"
             title="How we build"
             sub="Merged PRs a day, by highest review round"
+            actions={
+              <button
+                type="button"
+                className="as-defbtn"
+                aria-expanded={showDays}
+                onClick={() => setShowDays((v) => !v)}
+              >
+                Count for each day
+              </button>
+            }
           >
-            <MergedChart days={overview.build.mergedPerDay} />
+            <MergedChart days={overview.build.mergedPerDay} showDays={showDays} />
             <ScrollRegion className="as-scroll as-hscroll" label="Health measures">
               <table>
                 <colgroup>
