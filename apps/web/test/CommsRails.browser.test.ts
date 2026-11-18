@@ -521,7 +521,12 @@ describeRendered("Comms chart, rendered", () => {
           w.__churn = 0;
           if (!base) throw new Error("no chart");
           new MutationObserver((records) => {
-            for (const r of records) w.__churn += r.addedNodes.length + r.removedNodes.length;
+            const count = (node: Node) =>
+              node.nodeType === Node.ELEMENT_NODE
+                ? 1 + (node as Element).querySelectorAll("*").length
+                : 0;
+            for (const r of records)
+              for (const node of [...r.addedNodes, ...r.removedNodes]) w.__churn += count(node);
           }).observe(base, { childList: true, subtree: true });
         }, null);
         // Send a fixed number of batches to exercise the same work on every runner. A message must
