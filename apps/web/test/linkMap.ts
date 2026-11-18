@@ -250,6 +250,11 @@ export const LINK_MAP: Record<
       rule(/^Waiting on you: /, /^\/needs-you$/, "Seat questions are on the Needs you list."),
       rule(/^Seats running: /, /^\/$/, "Running seats are on the Overview."),
       rule(/^Merged: /, /^\/board$/, "Merged PRs are the Board's merged stage."),
+      rule(
+        /^(Review rounds per PR|RETRO findings per PR|PRs sent back): /,
+        /^\/audit$/,
+        "Review figures are on the Audit page.",
+      ),
       rule(/^Tightest quota: /, /^\/telemetry\?tab=cost$/, "Quota used is on the Cost tab."),
       rule(/^Machine: /, /^\/telemetry\?tab=machine$/, "CPU and memory are on the Machine tab."),
       rule(
@@ -396,6 +401,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Telemetry.tsx": "page: the same page, another tab or view",
   "src/telemetry/CrewTab.tsx": "page: Agents, a seat's Agent page, Needs you, Overview",
   "src/telemetry/Kpis.tsx": "page: the KPI's source",
+  "src/telemetry/QualityTab.tsx": "page: the Guard drawer, a ticket page, the Audit page",
   "src/telemetry/ThroughputTab.tsx": "page: the Board, a ticket's page",
   "src/telemetry/Stat.tsx": "page: Needs you, Board, Overview, another Telemetry tab",
 };

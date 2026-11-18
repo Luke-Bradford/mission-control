@@ -385,10 +385,7 @@ describe("the tabs", () => {
   });
 
   it("shows a short coming note, never an empty chart, on each tab not built yet", async () => {
-    for (const [tab, name] of [
-      ["quality", "Quality is coming"],
-      ["machine", "Machine is coming"],
-    ] as const) {
+    for (const [tab, name] of [["machine", "Machine is coming"]] as const) {
       await open(`?tab=${tab}`);
       screen.getByRole("heading", { level: 2, name });
       cleanup();
@@ -398,10 +395,11 @@ describe("the tabs", () => {
   it("keeps each earlier panel on the tab that will take it", async () => {
     const expected: Record<string, string[]> = {
       cost: ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"],
-      quality: ["tQual", "tQualityTrend"],
+      // built: its panels are the Quality tab's own, and the earlier two are gone
+      quality: [],
       machine: ["tMach", "tLock"],
     };
-    const all = Object.values(expected).flat();
+    const all = [...Object.values(expected).flat(), "tQual", "tQualityTrend"];
     for (const [tab, ids] of Object.entries(expected)) {
       await open(`?tab=${tab}`);
       for (const id of all)

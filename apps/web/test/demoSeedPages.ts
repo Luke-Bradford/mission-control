@@ -641,6 +641,23 @@ function setupApi(): Record<string, unknown> {
       quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
     },
     "/api/guard/hits?days=7": { hits: [], counts: {} },
+    "/api/guard/hits?days=14": { hits: [], counts: { "git-write": 7, network: 3 } },
+    "/api/qa/flow?days=14": {
+      days: 14,
+      since: NOW - 14 * 24 * HOUR,
+      escapedDefects: [
+        {
+          repoId: DEMO_REPO,
+          issueNumber: 112,
+          prNumber: 104,
+          via: "file",
+          filedAt: NOW - 24 * HOUR,
+          mergedAt: NOW - 72 * HOUR,
+          seat: "dev-1",
+          model: null,
+        },
+      ],
+    },
     "/api/test-lock/history": { runs: [], today: { runs: 0, waitMs: 0 }, usualMs: {} },
     "/api/repos/profiles": [],
     "/api/update/log": {

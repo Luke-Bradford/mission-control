@@ -17,7 +17,6 @@ import {
   accountStoppedText,
   answeredText,
   answerMessageText,
-  areaLabelsOf,
   askerRunEndedText,
   awayBugDecisionAbout,
   type BoardItem,
@@ -81,7 +80,6 @@ import {
   DEFAULT_PROFILES,
   DRAFT_BAD_TARGET,
   DRAFT_REPLY_DESCRIPTION,
-  dependsOn,
   draftedReplyText,
   duplicateLabelText,
   duplicateTitleText,
@@ -191,16 +189,11 @@ import {
   METRIC_IDS,
   mcToolHitText,
   messageAboutText,
-  missingNeedsText,
   modeOfSeat,
   movedDecision,
   movedText,
   moveFailedText,
-  moveHasRunText,
-  moveNoAreaText,
   moveNotOnBoardText,
-  moveTwoAreasText,
-  moveWaitsOnText,
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
@@ -221,6 +214,7 @@ import {
   OWNER_OPERATOR,
   openPrText,
   PASSED_DECISION,
+  PLAN_SEND_REFUSED,
   PLAN_SIZES,
   PRIORITIES,
   PROFILE_NAME,
@@ -236,7 +230,11 @@ import {
   pathGrantProblem,
   pauseWithout,
   planAlreadyText,
+  planHolds,
+  planNeedsSignoffText,
   plannerStartedDecision,
+  planSendColumnText,
+  planSentText,
   planUnclosedText,
   promoteDraftText,
   promoteOffText,
@@ -303,7 +301,6 @@ import {
   WAITING_OPERATOR_LABEL,
   WITHDRAW_NOT_YOURS,
   WITHDRAW_SEAT_QUESTION,
-  waitingOperatorPromoteText,
   waitingOperatorStartText,
   withControllerCheckItem,
   withdrawnText,
@@ -402,6 +399,7 @@ import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { recordExternalMerge } from "./merged-line.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
+import { prototypeBlock, readyBlock, readyEarlyBlock } from "./ready-checks.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -860,6 +858,7 @@ const BoardPromoteArgs = z.strictObject({
   basis: basisArg,
 });
 const PromoteArgs = z.union([BoardPromoteArgs, QueuePromotionArgs]);
+const SendToPlannerArgs = z.strictObject({ issue: issueNumber, basis: basisArg });
 const SCOPED_LABEL = /^(?:area|lane):[A-Za-z0-9._-]+$/;
 const CreateTicketArgs = z.strictObject({
   title: text(FLIGHT_TICKET_TITLE_MAX).refine((s) => !/[\r\n]/.test(s), "must be one line"),
@@ -1675,12 +1674,23 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       waits: waitReader(store, repo.id)(card),
     });
     if (refusal !== null) return fail(refusal);
+    // a developer is not started on a ticket the repo holds for the operator's plan sign-off
+    if (!planner) {
+      const held = store.plans.get(repo.id, issue);
+      if (planHolds(rules.planSignoff, held))
+        return fail(planNeedsSignoffText(ref, held?.state ?? null));
+    }
     if (planner) {
-      if (hasPlanSection(body)) return fail(planAlreadyText(ref));
+      // a plan the operator sent back, or one a ticket sent to the Planner tab still waits for, is
+      // written again; a ticket sent to the Planner tab is planned at any size
+      const sent = store.plans.get(repo.id, issue);
+      const replan = sent?.state === "sent-back" || sent?.state === "awaiting-plan";
+      if (hasPlanSection(body) && !replan) return fail(planAlreadyText(ref));
       if (unclosedMarkdown(body)) return fail(planUnclosedText(ref));
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
-      if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
+      if (!PLAN_SIZES.includes(card.size) && (sent === null || sent.state === "signed-off"))
+        return fail(smallNoPlanText(ref, card.size));
     } else if (
       !carriesOn &&
       column !== "Ready" &&
@@ -2102,35 +2112,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ? column === "Ready" || column === "Refinement"
         : column === "Backlog" || (column === "Refinement" && to === "Ready");
     if (!allowed) return fail(moveWrongColumnText(ref, column));
-    // the operator set it aside with a question: it moves when they answer or move the card
-    if (to !== "Backlog" && card.labels.includes(WAITING_OPERATOR_LABEL))
-      return fail(waitingOperatorPromoteText(ref));
-    if (store.activeTickets().has(ref)) return fail(moveHasRunText(ref));
+    // Covers active runs and operator pauses before moving a card into the startable queue.
+    const early = readyEarlyBlock(store, ref, card, to === "Backlog");
+    if (early !== null) return fail(early);
     if (to === "Ready") {
+      const plan = store.plans.get(repo.id, issue);
+      if (planHolds(rules.planSignoff, plan))
+        return fail(planNeedsSignoffText(ref, plan?.state ?? null));
       let body: string;
       try {
         const ticket = await deps.fetchTicket(repo, issue);
         body = ticket?.body ?? "";
-        const prototypeProblem =
-          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
-        if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
+        const prototypeProblem = prototypeBlock(ref, ticket, repo.github);
+        if (prototypeProblem !== null) return fail(prototypeProblem);
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }
-      const missing = rules.needs.filter((n) =>
-        n === "done_when" ? !hasDoneWhenSection(body) : card.size === null,
-      );
-      if (missing.length > 0) return fail(missingNeedsText(ref, missing));
-      const areas = areaLabelsOf(rules, card);
-      if (areas.length >= 2) return fail(moveTwoAreasText(ref, areas));
-      if (areas.length === 0) return fail(moveNoAreaText(ref));
-      const waits = new Map(card.blockedBy.filter((b) => !b.closed).map((b) => [b.ref, b.ref]));
-      for (const n of dependsOn(body)) {
-        const dep = board.find((i) => i.issueNumber === n);
-        if (dep === undefined || !dep.closed) waits.set(`${repo.id}#${n}`, `${repo.id}#${n}`);
-      }
-      for (const w of waitReader(store, repo.id)(card)) waits.set(w.ref, w.text);
-      if (waits.size > 0) return fail(moveWaitsOnText(ref, [...waits.values()]));
+      const blocked = readyBlock({ store, repoId: repo.id, ref, card, body, rules });
+      if (blocked !== null) return fail(blocked);
     }
     if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
     const result = await deps.board.move({
@@ -2207,6 +2206,35 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return evidenceProblemText(problem);
     }
     return null;
+  }
+
+  /** Puts a ticket on the Planner tab: held until the operator signs its plan off. */
+  async function sendToPlanner(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, SendToPlannerArgs, args);
+    if (!c.ok) return c.result;
+    const repo = repoOf();
+    if (repo === undefined) return fail(PROMOTE_NO_RULES);
+    const { issue, basis } = c.args;
+    const ref = `${repo.id}#${issue}`;
+    const card = store.board(repo.id).find((i) => i.issueNumber === issue);
+    if (card === undefined) return fail(moveNotOnBoardText(ref));
+    if (store.plans.get(repo.id, issue)?.state === "signed-off") return fail(PLAN_SEND_REFUSED);
+    // a card in Ready is already pickable: it must leave Ready before it can be held for a plan
+    const where = hudColumnOf(card);
+    if (card.closed || (where !== "Backlog" && where !== "Refinement"))
+      return fail(planSendColumnText(ref, card.closed ? "closed" : where));
+    const at = now();
+    store.plans.request(repo.id, issue, at);
+    record(at, {
+      kind: "promote",
+      ref,
+      about: `${ref}: ${card.title}`,
+      decision: "Sent to the Planner tab",
+      basis,
+    });
+    bus.emit("plans");
+    bus.emit("flight");
+    return { text: planSentText(ref) };
   }
 
   async function createTicket(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -2735,9 +2763,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     markPointersShown(store, config, state, now());
     deps.seen?.(ctx.runId, state);
     const { wake: _wake, ...shown } = state;
+    // the repo's plan sign-off setting, and the plans waiting on the planner or the operator
+    const rules = repo ? await deps.rules(repo.id) : null;
+    const planSignoff =
+      rules === null || rules instanceof RepoRulesError ? "never" : (rules.planSignoff ?? "never");
+    const plans = store.plans
+      .inStates(["awaiting-plan", "sent-back", "awaiting-signoff"])
+      .filter((p) => p.repoId === repo?.id)
+      .map((p) => ({ ref: p.ref, state: p.state, held: planHolds(planSignoff, p) }));
     return {
       text: JSON.stringify({
         ...shown,
+        // left out while the repo holds nothing and no plan waits
+        ...(planSignoff === "never" && plans.length === 0 ? {} : { planSignoff, plans }),
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
@@ -4603,6 +4641,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       grantable: ["read-only"],
       call: (ctx, args) =>
         queued(ticketQueue, repoOf()?.id ?? "", async () => breakerRefusal() ?? promote(ctx, args)),
+    },
+    {
+      name: MC_TOOL_NAMES.sendToPlanner,
+      description: `Put a ticket on the operator's Planner tab. It is held out of Ready until the operator signs its plan off, whatever its size; use it when the repo's plan_signoff is "every" (every ticket) or "larger" (epics, major page changes and design shifts, or any other ticket you judge worth the operator's look). Then start a planner on it. Under "never" nothing is held, but you may still send a ticket so the operator sees its plan. promote to Ready refuses a held ticket until the plan is signed off.`,
+      inputSchema: objectSchema({ issue: ISSUE_SCHEMA, basis: BASIS_SCHEMA }, ["issue", "basis"]),
+      modes: [],
+      grantable: ["read-only"],
+      call: (ctx, args) =>
+        queued(
+          ticketQueue,
+          repoOf()?.id ?? "",
+          async () => breakerRefusal() ?? sendToPlanner(ctx, args),
+        ),
     },
     {
       name: MC_TOOL_NAMES.endRun,

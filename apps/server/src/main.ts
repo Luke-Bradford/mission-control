@@ -704,6 +704,7 @@ export async function main(): Promise<void> {
   };
   const mcDeps: McToolsDeps = {
     qaReports,
+    rules: engineRules,
     qaReportBaseUrl: `http://${HOST}:${port}`,
     config,
     store,
@@ -1105,6 +1106,8 @@ export async function main(): Promise<void> {
     prEvidence: evidenceStore,
     reviewShots,
     queueReorder,
+    ticketMove: engineBoard.move,
+    ticketRead: engineBoard.read,
     mapRing,
     warmMap: true,
     operatorToken,
