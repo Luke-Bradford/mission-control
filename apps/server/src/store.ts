@@ -6190,6 +6190,14 @@ export class Store {
     return rows.map((r) => r.sha);
   }
 
+  /** The run's commits that someone else made and the run only follows (see `addRunCommit`). */
+  followedCommits(runId: string): Set<string> {
+    const rows = this.db
+      .prepare("SELECT sha FROM run_commits WHERE run_id = ? AND followed = 1")
+      .all(runId) as { sha: string }[];
+    return new Set(rows.map((r) => r.sha));
+  }
+
   /** The commits the commit tool made at or after `since`, oldest first, with their run's agent and ticket. */
   runCommitsSince(
     since: number,
