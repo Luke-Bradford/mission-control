@@ -722,6 +722,79 @@ describe("supervisor events (Plan 7a)", () => {
         awaitingFlight: "c".repeat(40),
       });
     });
+
+    it("carries on the last review's open findings and reachable commits", async () => {
+      const first = await idleRun({ loop: LOOP });
+      const worktree = store.seatSession("guido-1")?.worktree;
+      if (worktree === null || worktree === undefined) throw new Error("missing worktree");
+      writeFileSync(join(worktree, "continued.txt"), "continued\n");
+      git(worktree, "add", "continued.txt");
+      git(worktree, "commit", "-qm", "continued work");
+      const head = git(worktree, "rev-parse", "HEAD");
+      await first.sup.endRun("guido-1", { hold: true });
+      const prior = store.run(first.runId);
+      if (prior === null) throw new Error("missing prior run");
+      store.upsertRun({
+        ...prior,
+        summary: "Earlier summary",
+        loop: { ...LOOP, prNumber: 9 },
+      });
+      store.addEvidence(first.runId, "Earlier evidence", 2);
+      store.addRunCommit({ runId: first.runId, repoId: "mc", branch: BRANCH, sha: head, at: 2 });
+      store.addRunCommit({
+        runId: first.runId,
+        repoId: "mc",
+        branch: BRANCH,
+        sha: "f".repeat(40),
+        at: 3,
+      });
+      const review = store.requestReview({
+        authorRunId: first.runId,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: head,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 4,
+      });
+      if (review === null) throw new Error("missing review");
+      store.setReviewState(review, ["queued"], "running", { runId: "retro:review", at: 4 });
+      const finding = (severity: "Critical" | "Important" | "Minor", file: string) => ({
+        severity,
+        file,
+        line: 1,
+        summary: `${file} summary`,
+        scenario: "test",
+        fix: `${file} fix`,
+      });
+      const findings = [
+        finding("Important", "important.ts"),
+        finding("Critical", "critical.ts"),
+        finding("Minor", "minor.ts"),
+        finding("Important", "resolved.ts"),
+        ...Array.from({ length: 10 }, (_, n) => finding("Important", `extra-${n}.ts`)),
+      ];
+      store.recordFindings(review, "retro:review", {
+        verdict: { spec: "fail", quality: "pass" },
+        summary: "findings",
+        findings,
+        resolutions: [{ findingRef: { reviewId: review, pos: 3 }, outcome: "fixed" }],
+        at: 5,
+      });
+
+      const { runId } = await first.sup.startRun("guido-1", 42, { loop: LOOP });
+      await until(() => expect(userLines()).toHaveLength(2));
+      const brief = userLines()[1] as string;
+      expect(brief).toContain("## Continue the earlier run");
+      expect(brief.indexOf("critical.ts")).toBeLessThan(brief.indexOf("important.ts"));
+      expect(brief).not.toContain("minor.ts");
+      expect(brief).not.toContain("resolved.ts");
+      expect(brief).not.toContain("extra-9.ts");
+      expect(store.runCommits(runId)).toContain(head);
+      expect(store.runCommits(runId)).not.toContain("f".repeat(40));
+    });
   });
 
   describe("send", () => {

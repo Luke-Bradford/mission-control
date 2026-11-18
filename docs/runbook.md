@@ -1485,8 +1485,8 @@ message does not lift this park. A new push keeps the hold.
 A hold stops only the merge. To fix a defect in a held PR, FLIGHT sends the run parked as `merge-hold`
 back to its builder with `mc settle_park { runId, action: "rework", note: <fix list> }`: the run
 returns to working, the hold stays in force, and after the fix, CI and review it parks at `merge-hold`
-again until the holder releases it. `mc reassign_ticket` on a held PR's ticket (after its run ended)
-gives the new run the same hold. Releasing stays with whoever set it.
+again until the holder releases it. When a held PR's run has ended, start the ticket again; the new
+run carries the same hold. Releasing stays with whoever set it.
 
 FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
 as a decision. FLIGHT may release only its own hold: one set here is released only here. The operator
