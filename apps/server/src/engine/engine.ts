@@ -1389,7 +1389,7 @@ export function createEngine(deps: EngineDeps): Engine {
         step === undefined ? r.text : mergeStepFailedText(MERGE_STEP_WORDS[step], r.text);
       out.parked = true;
       cur.phase = "parked";
-      cur.parked = { kind: step === undefined ? "refused" : "merge-step", reason, ended: false };
+      cur.parked = { kind: step === undefined ? "refused" : "merge-step", reason, ended: step === undefined };
       store.addLoopEvent(
         `${run.id}:${cur.epoch}:parked:${cur.reportedEvidenceId}`,
         run.id,

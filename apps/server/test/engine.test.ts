@@ -1602,12 +1602,14 @@ describe("refusals", () => {
     await h.engine.reconcileRun(RUN);
     expect(loopOf()).toMatchObject({
       phase: "parked",
-      parked: { kind: "refused", reason: "Push refused: the branch moved.", ended: false },
+      parked: { kind: "refused", reason: "Push refused: the branch moved.", ended: true },
     });
     expect(h.moves.map((m) => m.column)).toEqual(["In progress", "Blocked"]);
     expect(noteKeys()).toEqual([`blocked:${RUN}:0`]);
     expect(store.notes()[0]?.text).toContain("Push refused: the branch moved.");
     expect(h.prs).toEqual([]);
+    await h.engine.reconcileRun(RUN);
+    expect(store.run(RUN)?.endedAt).not.toBeNull();
   });
 
   it("a push refused for its checks goes to the seat as a hand-off, once, and does not park the run", async () => {
@@ -3308,9 +3310,17 @@ describe("what the operator sees", () => {
   });
 
   it("a parked run is a Blocked item", async () => {
-    h.pushResults = [{ ok: false, text: "Push refused.", transient: false }];
     report();
-    await h.engine.reconcileRun(RUN);
+    setLoop({ phase: "parked", parked: { kind: "ruling", reason: "Push refused.", ended: false } });
+    store.raiseNote({
+      key: `blocked:${RUN}:0`,
+      kind: "blocked",
+      runId: RUN,
+      seatId: store.run(RUN)?.agentId ?? null,
+      repoId: REPO,
+      text: "Push refused.",
+      at: clock,
+    });
     const blocked = attentionItems(config, store, clock).filter((i) => i.kind === "blocked");
     expect(blocked.map((i) => i.text)).toEqual([expect.stringContaining("Push refused.")]);
   });

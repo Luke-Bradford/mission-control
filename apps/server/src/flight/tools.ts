@@ -1632,14 +1632,27 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
-    if (!FLIGHT_STARTABLE.includes(column)) return fail(wrongColumnText(ref, column));
-    // the operator set it aside with a question: starting it would undo that
-    if (card.labels.includes(WAITING_OPERATOR_LABEL)) return fail(waitingOperatorStartText(ref));
-    // the previous run's PR: a ticket is not started again while one is open on it
+    // the PR a stopped run opened: no run holds it now, so a new run picks it up on its branch
+    const ownPr = (p: { number: number }): boolean =>
+      store
+        .runsOnTicket(repo.id, ref)
+        .some((r) => r.endedAt !== null && r.reviewId == null && r.loop?.prNumber === p.number);
     const openPr = store
       .pullRequests(repo.id)
       .find((p) => p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(issue)));
-    if (openPr !== undefined) return fail(openPrText(ref, openPr.number));
+    const carriesOn =
+      openPr !== undefined &&
+      ownPr(openPr) &&
+      store.runsOnTicket(repo.id, ref).every((r) => r.endedAt !== null);
+    if (
+      !FLIGHT_STARTABLE.includes(column) &&
+      !(carriesOn && ["In progress", "In review", "Blocked"].includes(column))
+    )
+      return fail(wrongColumnText(ref, column));
+    // the operator set it aside with a question: starting it would undo that
+    if (card.labels.includes(WAITING_OPERATOR_LABEL)) return fail(waitingOperatorStartText(ref));
+    // the previous run's PR: a ticket is not started again while one is open on it
+    if (openPr !== undefined && !carriesOn) return fail(openPrText(ref, openPr.number));
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return fail(START_NO_RULES);
     let body: string;
@@ -1689,7 +1702,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
       if (!PLAN_SIZES.includes(card.size)) return fail(smallNoPlanText(ref, card.size));
-    } else if (column !== "Ready" && !card.labels.includes(READY_LABEL) && !hasPlanSection(body)) {
+    } else if (
+      !carriesOn &&
+      column !== "Ready" &&
+      !card.labels.includes(READY_LABEL) &&
+      !hasPlanSection(body)
+    ) {
       return fail(notReadyText(ref));
     }
     // Files outside the area: the approval is a logged decision, made before the start. The run
