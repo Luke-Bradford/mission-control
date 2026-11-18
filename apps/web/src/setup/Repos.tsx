@@ -138,7 +138,7 @@ function RepoCard({
   const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    setPlanSignOff((rules.data?.rules.plan_signoff.value as PlanSignoff | undefined) ?? "never");
+    setPlanSignOff((rules.data?.rules.plan_signoff?.value as PlanSignoff | undefined) ?? "never");
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
     setAccount(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
   }, [repo, config.accounts, rules.data]);
@@ -149,7 +149,7 @@ function RepoCard({
         defaultAccountId: account || null,
         guidance,
       });
-      if (rules.data) {
+      if (rules.data?.rules.plan_signoff) {
         await apiPost(ACTIONS.repoRules(repo.id), {
           base: rules.data.base,
           rules: { plan_signoff: planSignOff },
@@ -199,7 +199,7 @@ function RepoCard({
                 ))}
               </select>
             </label>
-            {rules.data && (
+            {rules.data?.rules.plan_signoff && (
               <label>
                 Plan sign-off
                 <select
