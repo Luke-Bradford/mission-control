@@ -581,7 +581,7 @@ it("shows each figure's own window, unit and state in the table, not in a hover 
   const text = (name: string) => within(table).getByText(name).closest("tr")?.textContent ?? "";
   expect(text("Alpha")).toContain("merged PRs · 7d");
   expect(text("Beta")).toContain("90d");
-  expect(text("Gamma")).toContain("USD, median of priced PRs · 30d");
+  expect(text("Gamma")).toContain("USD · 30d");
   expect(text("Gamma")).toContain("partial");
   expect(text("Gamma")).toContain("—");
 });

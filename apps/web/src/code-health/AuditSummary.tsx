@@ -407,7 +407,10 @@ function MergedChart({
 /** The short unit beside a label: only where neither the label nor the value already says it. */
 function shortUnit(f: CodeHealthFigure): string {
   const carried = f.value !== null && (f.unit.startsWith("%") || f.unit.startsWith("USD"));
-  return carried || f.label.toLowerCase().includes(f.unit.toLowerCase()) ? "" : f.unit;
+  // A long unit such as "USD, median of priced PRs" keeps its first part here; the rest is in 'how'.
+  return carried || f.label.toLowerCase().includes(f.unit.toLowerCase())
+    ? ""
+    : f.unit.split(",")[0];
 }
 
 function FigureRow({ f, showWindow }: { f: CodeHealthFigure; showWindow: boolean }) {
