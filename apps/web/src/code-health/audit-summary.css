@@ -167,6 +167,9 @@
 .as-scroll {
   overflow: auto;
   min-height: 0;
+  /* Spoken-only text inside a list is positioned against the list, so a long open row cannot
+     push it below the page and make the page scroll. */
+  position: relative;
 }
 .as-grow {
   flex: 1 1 auto;
