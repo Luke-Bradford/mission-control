@@ -12,7 +12,7 @@
 #page-telemetry[data-tab="cost"],
 #page-telemetry[data-tab="throughput"] {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(var(--crew-min, 520px), 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: visible;
 }
 
@@ -280,7 +280,7 @@
 /* Cost and tokens: four chart panels in two rows, or the tables, which scroll inside their panels. */
 .tabpanel .grid[data-n="4"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(220px, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
 .tabpanel .grid.cost-tables {
@@ -306,7 +306,7 @@
 /* Throughput: four charts in a 2x2, or the one table across the width. */
 .tabpanel .grid[data-view="charts"][data-n="4"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(2, minmax(256px, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
 /* Throughput plots fill the panel body; the legend stays below the measured plot. */
@@ -320,6 +320,21 @@
 .tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb > .chart {
   flex: 1 1 auto;
   min-height: 120px;
+}
+
+/* In a short desktop work area, answer the time-sensitive token and quota questions first. */
+@media (min-width: 1200px) and (max-height: 760px) {
+  #page-telemetry[data-tab="cost"] .grid[data-n="4"] #tTok {
+    order: -2;
+  }
+
+  #page-telemetry[data-tab="cost"] .grid[data-n="4"] #tQuotaUsed {
+    order: -1;
+  }
+
+  #page-telemetry[data-tab="cost"] .grid[data-n="4"] > .panel > .pb > .chart {
+    min-height: 0;
+  }
 }
 
 .tabpanel .grid[data-view="table"][data-n="1"] {
@@ -768,7 +783,9 @@
 }
 
 #page-telemetry.refetching .kpis,
-#page-telemetry.refetching .tgrid {
+#page-telemetry.refetching .tgrid,
+#page-telemetry.refetching .summary,
+#page-telemetry.refetching .tabpanel .grid {
   opacity: 0.6;
 }
 
@@ -971,14 +988,11 @@
   position: relative;
 }
 
-.ticket-label:focus-visible::after,
-.ticket-label:hover::after {
-  content: attr(data-tip);
-  position: absolute;
-  z-index: 6;
-  left: 0;
-  top: 100%;
-  max-width: min(480px, 60vw);
+.ticket-title-tooltip {
+  position: fixed;
+  z-index: 20;
+  width: max-content;
+  max-width: min(480px, calc(100vw - 16px));
   padding: var(--sp-1) var(--sp-2);
   background: var(--surface-2);
   border: 1px solid var(--line-2);

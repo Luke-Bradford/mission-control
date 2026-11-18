@@ -316,8 +316,13 @@ describe("Telemetry refetch", () => {
     );
     await waitFor(() => expect(page.classList.contains("refetching")).toBe(true));
     expect(screen.getByText("61.2k")).toBeTruthy();
+    expect(screen.getByRole("tabpanel").getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("region", { name: "Cost and tokens summary" }).className).toContain(
+      "refetching",
+    );
     release();
     await waitFor(() => expect(page.classList.contains("refetching")).toBe(false));
+    expect(screen.getByRole("tabpanel").getAttribute("aria-busy")).toBe("false");
     expect(screen.getByText("61.2k")).toBeTruthy();
   });
 });
@@ -1211,7 +1216,7 @@ describe("empty and failing telemetry", () => {
 
   it("every panel on Throughput, Quality and Machine shows its empty state", async () => {
     stub(EMPTY, { ...CFG, loops: [] });
-    await show("throughput");
+    await show("quality");
     await within(panel("tMerged")).findByText("No days to show yet.");
     within(panel("tCycleSize")).getByText("No tickets finished in the last 14 days.");
     cleanup();
@@ -1740,5 +1745,9 @@ describe("Cost and tokens tab", () => {
     const label = panel("tTicketBars").querySelector(".ticket-label") as HTMLElement;
     expect(label.tabIndex).toBe(0);
     expect(label.dataset.tip).toBe("shop-app#3349 · Quote cache warmup");
+    fireEvent.focus(label);
+    expect(document.body.querySelector("[data-ticket-title-tooltip]")?.textContent).toBe(
+      "shop-app#3349 · Quote cache warmup",
+    );
   });
 });

@@ -32,6 +32,28 @@ const apiWithMissingCosts = () => {
   return { ...api(), "/api/telemetry?range=24h": data };
 };
 
+const apiWithLongTicketTitle = () => {
+  const base = api();
+  const config = base["/api/config"] as { repos: { id: string }[] };
+  return {
+    ...base,
+    "/api/config": {
+      ...config,
+      repos: [...config.repos, { id: "mission-control" }],
+    },
+    "/api/boards/mission-control": [
+      {
+        repoId: "mission-control",
+        issueNumber: 1900,
+        title: "A complete ranked ticket title stays readable when the chart label is clipped",
+        status: "In Progress",
+        state: "open",
+        labels: [],
+      },
+    ],
+  };
+};
+
 const PANELS = ["#tStepBars", "#tTicketBars", "#tTok", "#tQuotaUsed"];
 
 /** What a person sees: whether the page scrolls, and where each panel sits. */
@@ -142,6 +164,92 @@ describeRendered("Telemetry, Cost and tokens tab, in a browser", () => {
         if (evidence) {
           mkdirSync(evidence, { recursive: true });
           await page.screenshot(join(evidence, "telemetry-cost-coverage-focus-1600x1000-dark.png"));
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  for (const interaction of ["hover", "focus"] as const) {
+    it(
+      `shows a complete ranked ticket title inside the viewport on ${interaction}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1600,
+          height: 700,
+          colorScheme: "dark",
+          api: apiWithLongTicketTitle(),
+          search: "?path=/telemetry%3Ftab%3Dcost",
+        });
+        try {
+          await ready(page);
+          const title = await page.evaluate(async (kind) => {
+            const label = document.querySelector<HTMLElement>(".ticket-label");
+            if (kind === "focus") label?.focus();
+            else label?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const tip = document.querySelector<HTMLElement>("[data-ticket-title-tooltip]");
+            const box = tip?.getBoundingClientRect();
+            return {
+              text: tip?.textContent ?? "",
+              visible: Boolean(box && box.width > 0 && box.height > 0),
+              inside: Boolean(
+                box &&
+                  box.left >= 0 &&
+                  box.top >= 0 &&
+                  box.right <= innerWidth &&
+                  box.bottom <= innerHeight,
+              ),
+            };
+          }, interaction);
+          expect(title.visible).toBe(true);
+          expect(title.inside).toBe(true);
+          expect(title.text).toContain("A complete ranked ticket title stays readable");
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
+  it(
+    "keeps token throughput and quota readings in a short viewport",
+    async () => {
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1600,
+        height: 700,
+        colorScheme: "dark",
+        api: api(),
+        search: "?path=/telemetry%3Ftab%3Dcost",
+      });
+      try {
+        await ready(page);
+        const short = await page.evaluate(() => {
+          const visible = (selector: string) => {
+            const r = document.querySelector(selector)?.getBoundingClientRect();
+            return Boolean(r && r.top >= 0 && r.bottom <= innerHeight);
+          };
+          return {
+            pageScroll: document.documentElement.scrollHeight - innerHeight,
+            mainScroll:
+              (document.querySelector("main") as HTMLElement).scrollHeight -
+              (document.querySelector("main") as HTMLElement).clientHeight,
+            tokenChart: visible("#tTok [role=img]"),
+            quotaMeter: visible("#tQuotaUsed .quota-row"),
+          };
+        }, undefined);
+        expect(short.pageScroll).toBeLessThanOrEqual(0);
+        expect(short.mainScroll).toBeLessThanOrEqual(0);
+        expect(short.tokenChart).toBe(true);
+        expect(short.quotaMeter).toBe(true);
+        if (evidence) {
+          mkdirSync(evidence, { recursive: true });
+          await page.screenshot(join(evidence, "telemetry-cost-1600x700-dark.png"));
         }
       } finally {
         await page.close();

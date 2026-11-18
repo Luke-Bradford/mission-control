@@ -282,14 +282,16 @@ export function Telemetry() {
         {tab === "crew" && (
           <CrewSummaryRow t={t} crew={crew} scope={scope} onNeedsRoute={setRuns} />
         )}
-        {tab === "cost" && <CostSummaryRow t={t} scope={scope} onNeedsRoute={setRuns} />}
+        {tab === "cost" && (
+          <CostSummaryRow t={t} scope={scope} onNeedsRoute={setRuns} refreshing={refetching} />
+        )}
         {tab === "throughput" && <ThroughputSummaryRow t={t} onNeedsRoute={setRuns} />}
         <section
           id={TAB_PANEL_ID}
           className="tabpanel"
           role="tabpanel"
           aria-labelledby={tabId(tab)}
-          aria-busy={t === undefined && res.error === null}
+          aria-busy={refetching || (t === undefined && res.error === null)}
         >
           {!def.built && res.error && !res.data && (
             <p className="s crit-t">Could not load telemetry: {res.error.message}</p>

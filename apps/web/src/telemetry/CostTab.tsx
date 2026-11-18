@@ -6,7 +6,8 @@ import {
   TELEMETRY_RANGES,
   type Telemetry,
 } from "@mc/core";
-import { useState } from "react";
+import { useId, useState } from "react";
+import { createPortal } from "react-dom";
 import { ticketRef } from "../board/cards.ts";
 import { useNow, useTz } from "../clock.ts";
 import { RESOURCES, useResource, useResources } from "../data.ts";
@@ -177,15 +178,66 @@ export function CostSummaryRow(props: {
   t: Telemetry | undefined;
   scope: Scope;
   onNeedsRoute: (s: StatSpec) => void;
+  refreshing?: boolean;
 }) {
   return (
-    <section className="summary" aria-label="Cost and tokens summary">
+    <section
+      className={`summary${props.refreshing ? " refetching" : ""}`}
+      aria-label="Cost and tokens summary"
+      aria-busy={props.refreshing || undefined}
+    >
       <div className="scope">
         <b>Last {props.scope.range}</b>
         <span>Range {props.scope.range}</span>
       </div>
       <CostSummary {...props} />
     </section>
+  );
+}
+
+/** A ticket title disclosure mounted above chart scroll containers, for hover and keyboard focus. */
+function TicketLabel({ ticket, title }: { ticket: string; title?: string }) {
+  const [open, setOpen] = useState(false);
+  const [point, setPoint] = useState({ left: 8, top: 8 });
+  const tip = useId();
+  const full = `${ticket}${title ? ` · ${title}` : ""}`;
+  const show = (target: HTMLElement) => {
+    const box = target.getBoundingClientRect();
+    setPoint({
+      left: Math.max(8, Math.min(box.left, window.innerWidth - 488)),
+      top: Math.max(8, Math.min(box.bottom + 4, window.innerHeight - 72)),
+    });
+    setOpen(true);
+  };
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: focus and hover disclose the full title, not an action
+    <span
+      className="ticket-label"
+      data-tip={full}
+      aria-describedby={open ? tip : undefined}
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the full title, as hover does
+      tabIndex={0}
+      onFocus={(event) => show(event.currentTarget)}
+      onBlur={() => setOpen(false)}
+      onMouseEnter={(event) => show(event.currentTarget)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <TicketRef ticket={ticket} />
+      {title && <span className="ticket-bar-title">{title}</span>}
+      {open &&
+        createPortal(
+          <span
+            id={tip}
+            className="ticket-title-tooltip"
+            data-ticket-title-tooltip="true"
+            role="tooltip"
+            style={point}
+          >
+            {full}
+          </span>,
+          document.body,
+        )}
+    </span>
   );
 }
 
@@ -294,17 +346,7 @@ function CostByTicket({ t, scope }: { t: Telemetry | undefined; scope: Scope }) 
               return (
                 <HBar
                   key={r.ticket}
-                  label={
-                    <span
-                      className="ticket-label"
-                      data-tip={full}
-                      // biome-ignore lint/a11y/noNoninteractiveTabindex: focus shows the full title, as hover does
-                      tabIndex={0}
-                    >
-                      <TicketRef ticket={r.ticket} />
-                      {title && <span className="ticket-bar-title">{title}</span>}
-                    </span>
-                  }
+                  label={<TicketLabel ticket={r.ticket} title={title} />}
                   pct={((r.costUsd ?? 0) / most) * 100}
                   value={cost(r.costUsd)}
                   extra={`${kTokens(r.tokens)} tok`}
