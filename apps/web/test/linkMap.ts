@@ -315,8 +315,6 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/App.tsx": "page: header tabs, skip link, legacy redirects",
   "src/agent/IdentityBand.tsx": "page: Setup sessions, the ticket",
   "src/agent/Instruments.tsx": "page: Audit rows of the seat",
-  "src/agent/Overview.tsx": "page: ticket, QA, Board, trace, seat",
-  "src/agent/Picker.tsx": "page: another seat",
   "src/agent/RightColumn.tsx": "page: trace, Setup, next move",
   "src/agent/RunTrace.tsx": "page: back to the seat",
   "src/agent/RunsPanel.tsx": "page: trace, hand-off run",
