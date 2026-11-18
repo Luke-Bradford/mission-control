@@ -1,5 +1,31 @@
 # Mission Control runbook
 
+## Stage size measurement
+
+Stage 2 of the light-harness work compares the last merged main commit, `6d4cea7`, with
+`cdf4ac9`. Non-test TypeScript and TSX lines under `apps` and `packages` changed from
+192,811 to 191,760. Run this from the repository root once for each ref:
+
+```sh
+git ls-tree -r --name-only <ref> -- apps packages \
+  | rg '\.(ts|tsx)$' \
+  | rg -v '(^|/)[^/]+\.(test|spec)\.(ts|tsx)$' \
+  | while IFS= read -r file; do git show "<ref>:$file"; done \
+  | wc -l
+```
+
+Distinct `CREATE TABLE` names under `apps/server/src` changed from 112 to 109. Run this
+from the repository root once for each ref:
+
+```sh
+git ls-tree -r --name-only <ref> -- apps/server/src \
+  | while IFS= read -r file; do git show "<ref>:$file"; done \
+  | rg '^CREATE TABLE' \
+  | sed -E 's/^CREATE TABLE( IF NOT EXISTS)? ([^ (]+).*/\2/' \
+  | sort -u \
+  | wc -l
+```
+
 ## Code-health reads
 
 `GET /api/code-health?repo=<id>&window=30d&tab=overview` requires the operator token.
