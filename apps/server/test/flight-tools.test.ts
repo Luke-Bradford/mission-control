@@ -7773,7 +7773,7 @@ describe("superuser housekeeping", () => {
         "r-pr",
         "FLIGHT",
         {
-          kinds: ["review", "review-ruling"],
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
           action: "rework",
           basis: "Checked the current state",
           note: "Fix the validation branch and add its regression test.",
