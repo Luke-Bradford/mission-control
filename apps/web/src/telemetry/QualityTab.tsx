@@ -6,6 +6,8 @@ import {
   type QaFlowView,
   type Telemetry,
 } from "@mc/core";
+import { useRef } from "react";
+import { ListScrollCue } from "../agent/ListScrollCue.tsx";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, type Resource, useResource } from "../data.ts";
 import { dayMonth, percent, plural } from "../fmt.ts";
@@ -15,12 +17,17 @@ import { PAGE_PATHS, ticketPath } from "../router.ts";
 import { DASH } from "./common.ts";
 import { DailyRateChart } from "./DailyRateChart.tsx";
 import { GUARD_DRAWER_HREF } from "./guardCopy.ts";
-import { collectedFrom, ROLLING_DAYS, rollingRate } from "./quality.ts";
+import {
+  collectedFrom,
+  type DailyCount,
+  ROLLING_DAYS,
+  readQuality14,
+  rollingRate,
+} from "./quality.ts";
 import { Cell, Stat, type StatSpec } from "./Stat.tsx";
 
-/** The longest range the server serves: the daily series the tab plots, until a 14-day one exists. */
+/** Quality's daily counts are fixed to the same fourteen-day window as its summary. */
 export const QUALITY_RANGE = "7d";
-const DAILY_DAYS = 7;
 const WINDOW = `${FLOW_DAYS}d`;
 
 export const QUALITY_SUMMARY_COUNT = 6;
@@ -138,38 +145,45 @@ function RatePanel({
   id,
   title,
   barName,
-  series,
+  measure,
   t,
   review,
 }: {
   id: string;
   title: string;
   barName: string;
-  series: "ciGreenFirstPushPct" | "firstPassReviewPct";
+  measure: "ci" | "firstPass";
   t: Telemetry | undefined;
   review: boolean;
 }) {
   const tz = useTz() ?? "UTC";
-  const points = t?.series?.quality ?? [];
-  const values = points.map((p) => p[series]);
-  const plot = plotOf(
-    values,
-    points.map((p) => p.at),
-    tz,
-  );
-  const sub = `% of ${review ? "reviewed" : "merged"} PRs · last ${DAILY_DAYS} days`;
-  if (!plot)
+  const points = readQuality14(t?.quality14);
+  const values =
+    points?.map((p) =>
+      p[measure]?.pass === undefined
+        ? null
+        : ((p[measure] as DailyCount).pass / (p[measure] as DailyCount).total) * 100,
+    ) ?? [];
+  const plot = plotOf(values, points?.map((p) => p.at) ?? [], tz);
+  const sub = `% of ${review ? "reviewed" : "merged"} PRs · last ${FLOW_DAYS} days`;
+  if (!plot || !points)
     return (
       <Panel id={id} title={title} sub={sub}>
         <p className="pb s muted">
-          {t
-            ? `No ${review ? "reviewed" : "merged"} PRs with a result in the last ${DAILY_DAYS} days.`
-            : "Loading…"}
+          {t ? "Daily quality is not collected for this window." : "Loading…"}
         </p>
       </Panel>
     );
-  const rolled = rollingRate(values).slice(plot.from);
-  const days = points.slice(plot.from).map((p) => ({ at: p.at, v: p[series] }));
+  const counts = points.map((p) => p[measure]);
+  const rolled = rollingRate(counts).slice(plot.from);
+  const days = points.slice(plot.from).map((p) => {
+    const count = p[measure];
+    return {
+      at: p.at,
+      v: count ? (count.pass / count.total) * 100 : null,
+      detail: count ? `${count.pass} of ${count.total} PRs` : null,
+    };
+  });
   return (
     <Panel id={id} title={title} sub={sub}>
       <div className="pbody qchart">
@@ -186,9 +200,8 @@ function RatePanel({
         />
       </div>
       <p className="pnote">
-        Bars are each day's rate; the line is the {ROLLING_DAYS}-day rolling rate. Days with no PRs
-        are gaps.{plot.note ? ` ${plot.note}` : ""} Daily counts and the full {FLOW_DAYS}-day span
-        come later.
+        Bars are each day's rate; the line pools the trailing {ROLLING_DAYS} days. Days with no PRs
+        are gaps.{plot.note ? ` ${plot.note}` : ""}
       </p>
     </Panel>
   );
@@ -196,20 +209,16 @@ function RatePanel({
 
 function RoundsPanel({ t }: { t: Telemetry | undefined }) {
   const tz = useTz() ?? "UTC";
-  const points = t?.series?.quality ?? [];
-  const values = points.map((p) => p.reviewRoundsPerPr);
-  const plot = plotOf(
-    values,
-    points.map((p) => p.at),
-    tz,
-  );
-  const sub = `rounds, up to 4 · last ${DAILY_DAYS} days`;
+  const points = readQuality14(t?.quality14);
+  const values = points?.map((p) => (p.rounds ? p.rounds.pass / p.rounds.total : null)) ?? [];
+  const plot = plotOf(values, points?.map((p) => p.at) ?? [], tz);
+  const sub = `rounds, up to 4 · last ${FLOW_DAYS} days`;
   const gap = <> Test attempts: not collected yet.</>;
-  if (!plot)
+  if (!plot || !points)
     return (
       <Panel id="qRounds" title="Rounds per PR" sub={sub}>
         <p className="pb s muted">
-          {t ? `No reviewed PRs in the last ${DAILY_DAYS} days.` : "Loading…"}
+          {t ? "Daily review quality is not collected for this window." : "Loading…"}
         </p>
         <p className="pnote">{gap}</p>
       </Panel>
@@ -220,7 +229,11 @@ function RoundsPanel({ t }: { t: Telemetry | undefined }) {
       <div className="pbody qchart">
         <DailyRateChart
           label="Review rounds per PR"
-          days={points.slice(plot.from).map((p) => ({ at: p.at, v: p.reviewRoundsPerPr }))}
+          days={points.slice(plot.from).map((p) => ({
+            at: p.at,
+            v: p.rounds ? p.rounds.pass / p.rounds.total : null,
+            detail: p.rounds ? `${p.rounds.total} reviewed PRs` : null,
+          }))}
           barName="Rounds per PR"
           max={Math.ceil(peak)}
           ticks={[0, Math.ceil(peak) / 2, Math.ceil(peak)]}
@@ -259,6 +272,7 @@ function ResourceState<T>({ res, path, what }: { res: Resource<T>; path: string;
 }
 
 function GuardPanel({ res }: { res: Resource<GuardHitsView> }) {
+  const list = useRef<HTMLDivElement>(null);
   const hits = res.data;
   const rows = hits
     ? (Object.keys(GUARD_RULES) as GuardRule[])
@@ -279,7 +293,7 @@ function GuardPanel({ res }: { res: Resource<GuardHitsView> }) {
       ) : (
         // Every rule can have a count, so the list scrolls inside its panel; each count is a link, so
         // the keyboard reaches every row and scrolls it into view.
-        <div className="pb qlist">
+        <div className="pb qlist" ref={list}>
           {rows.map((r) => (
             <HBar
               key={r.rule}
@@ -298,6 +312,7 @@ function GuardPanel({ res }: { res: Resource<GuardHitsView> }) {
           ))}
         </div>
       )}
+      <ListScrollCue region={list} label="rules" count={rows.length} />
       <p className="pnote">
         A block is a guard rule stopping an action; it is not a failure of the seat.
       </p>
@@ -379,7 +394,7 @@ export function QualityPanels({
         id="qCi"
         title="CI green first push"
         barName="Green on first push"
-        series="ciGreenFirstPushPct"
+        measure="ci"
         t={t}
         review={false}
       />
@@ -387,7 +402,7 @@ export function QualityPanels({
         id="qFirstPass"
         title="First-pass review"
         barName="No blocking finding"
-        series="firstPassReviewPct"
+        measure="firstPass"
         t={t}
         review
       />

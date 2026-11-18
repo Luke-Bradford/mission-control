@@ -6,12 +6,12 @@ import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, METRICS_VIEW, NOW } from "./fixtures.ts";
 
 const DAY = 86_400_000;
-const START = NOW - 6 * DAY;
+const START = NOW - 13 * DAY;
 
-/** Seven days; the first two have no PRs, then CI 100, 50, no PRs, 100, 100. */
-const CI = [null, null, 100, 50, null, 100, 100];
-const FIRST = [null, null, null, 0, 100, null, 100];
-const ROUNDS = [null, null, null, 2, 1.5, null, 1];
+/** Fourteen days; the first two have no PRs, then CI 100, 50, no PRs, 100, 100. */
+const CI = [null, null, 100, 50, null, 100, 100, 100, 50, 100, 100, 50, 100, 100];
+const FIRST = [null, null, null, 0, 100, null, 100, 100, 0, 100, 100, 0, 100, 100];
+const ROUNDS = [null, null, null, 2, 1.5, null, 1, 1, 2, 1, 1, 2, 1, 1];
 
 function tel(): TelemetryData {
   return {
@@ -51,13 +51,16 @@ function tel(): TelemetryData {
       quota: [],
       tickets: [],
       annotations: [],
-      quality: CI.map((ci, i) => ({
-        at: START + i * DAY,
-        ciGreenFirstPushPct: ci,
-        firstPassReviewPct: FIRST[i] ?? null,
-        reviewRoundsPerPr: ROUNDS[i] ?? null,
-      })),
+      quality: [],
     },
+    quality14: CI.map((ci, i) => ({
+      day: new Date(START + i * DAY).toISOString().slice(0, 10),
+      ciPrs: ci === null ? 0 : i === 3 ? 100 : 10,
+      ciGreenPrs: ci === null ? 0 : i === 3 ? 50 : ci === 50 ? 5 : 10,
+      reviewedPrs: FIRST[i] === null ? 0 : 10,
+      firstPassPrs: FIRST[i] === null ? 0 : (FIRST[i] as number) / 10,
+      roundsSum: ROUNDS[i] === null ? 0 : (ROUNDS[i] as number) * 10,
+    })),
   } as unknown as TelemetryData;
 }
 
@@ -137,9 +140,9 @@ describe("Telemetry, Quality tab", () => {
   it("starts the plot at the first collected day, names the earlier days, and leaves gaps empty", async () => {
     open();
     await waitLoaded();
-    // days 3 to 7 of 7: five slots, bars on four of them
-    expect(document.querySelectorAll("#qCi g[data-day]")).toHaveLength(5);
-    expect(document.querySelectorAll("#qCi .bar")).toHaveLength(4);
+    // days 3 to 14: twelve slots, with one gap day inside the plot
+    expect(document.querySelectorAll("#qCi g[data-day]")).toHaveLength(12);
+    expect(document.querySelectorAll("#qCi .bar")).toHaveLength(11);
     expect(document.getElementById("qCi")?.textContent).toMatch(/Not collected before \d+ \w+\./);
     expect(document.querySelector("#qCi path.rolling")).not.toBeNull();
   });
@@ -159,13 +162,25 @@ describe("Telemetry, Quality tab", () => {
     const tip = document.querySelector("#qCi .tip") as HTMLElement;
     expect(within(tip).getByText("Green on first push").textContent).toContain("");
     expect(tip.textContent).toContain("50%");
-    // the mean of the daily rates so far: 100 and 50
-    expect(tip.textContent).toContain("75%");
+    // pooled: 10/10 and 50/100 = 60/110
+    expect(tip.textContent).toContain("55%");
+    expect(tip.textContent).toContain("50 of 100 PRs");
     fireEvent.pointerEnter(slots[2]?.querySelector(".hit") as Element);
     expect(document.querySelector("#qCi .tip")?.textContent).toContain("No data");
     fireEvent.pointerLeave(slots[2]?.querySelector(".hit") as Element);
     fireEvent.focus(document.querySelector("#qCi svg") as Element);
     expect(document.querySelector("#qCi .tip")?.textContent).toContain("100%");
+    expect(document.querySelector("#qCi .tip")?.textContent).toContain("10 of 10 PRs");
+  });
+
+  it("states that daily quality is not collected when quality14 is absent", async () => {
+    const data = tel();
+    delete (data as { quality14?: unknown }).quality14;
+    open("", { "/api/telemetry?range=7d": data });
+    await waitFor(() =>
+      expect(document.getElementById("qCi")?.textContent).toContain("not collected"),
+    );
+    expect(document.querySelector("#qCi .bar")).toBeNull();
   });
 
   it("ranks guard blocks by rule and says test attempts are not collected", async () => {
@@ -177,6 +192,9 @@ describe("Telemetry, Quality tab", () => {
     expect(rows[1]).toContain("network");
     expect(document.getElementById("qRounds")?.textContent).toContain(
       "Test attempts: not collected yet.",
+    );
+    expect(document.querySelector("#qGuard .agent-list-scroll-cue")?.hasAttribute("hidden")).toBe(
+      true,
     );
   });
 

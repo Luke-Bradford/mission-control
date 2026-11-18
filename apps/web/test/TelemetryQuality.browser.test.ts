@@ -18,9 +18,9 @@ const { renderAt } = browserSession();
 const evidence = process.env.MC_QA_EVIDENCE_DIR;
 const DAY = 86_400_000;
 
-/** Seven days from a first collected day on the third, with a gap day inside the plot. */
-const CI = [null, null, 100, 50, null, 100, 90];
-const REVIEW = [null, null, null, 0, 100, null, 100];
+/** Fourteen days from a first collected day on the third, with a gap day inside the plot. */
+const CI = [null, null, 100, 50, null, 100, 90, 100, 50, 100, 100, 50, 100, 90];
+const REVIEW = [null, null, null, 0, 100, null, 100, 100, 0, 100, 100, 0, 100, 100];
 
 function api() {
   const data = crewTelemetry();
@@ -28,13 +28,16 @@ function api() {
     ...data,
     series: {
       ...(data.series as NonNullable<typeof data.series>),
-      quality: CI.map((ci, i) => ({
-        at: NOW - (6 - i) * DAY,
-        ciGreenFirstPushPct: ci,
-        firstPassReviewPct: REVIEW[i] ?? null,
-        reviewRoundsPerPr: REVIEW[i] === null ? null : 1 + (i % 3) * 0.5,
-      })),
+      quality: [],
     },
+    quality14: CI.map((ci, i) => ({
+      day: new Date(NOW - (13 - i) * DAY).toISOString().slice(0, 10),
+      ciPrs: ci === null ? 0 : 10,
+      ciGreenPrs: ci === null ? 0 : ci === 50 ? 5 : ci === 90 ? 9 : 10,
+      reviewedPrs: REVIEW[i] === null ? 0 : 10,
+      firstPassPrs: REVIEW[i] === null ? 0 : (REVIEW[i] as number) / 10,
+      roundsSum: REVIEW[i] === null ? 0 : 10 + (i % 3) * 5,
+    })),
     quality: {
       ciGreenFirstPushPct: 88,
       prs: 16,
@@ -117,6 +120,8 @@ describeRendered("Telemetry, Quality tab, in a browser", () => {
                 })(),
                 bars: document.querySelectorAll("#qCi .bar").length,
                 lines: document.querySelectorAll("#qCi path.rolling").length,
+                cue: !(document.querySelector("#qGuard .agent-list-scroll-cue") as HTMLElement)
+                  .hidden,
               };
             }, undefined);
             expect(page.errors()).toEqual([]);
@@ -128,7 +133,9 @@ describeRendered("Telemetry, Quality tab, in a browser", () => {
             expect(g.guard.links).toBe(g.guard.rows);
             expect(g.guard.lastBottom).toBeLessThanOrEqual(g.guard.listBottom + 1);
             expect(g.guard.listBottom).toBeLessThanOrEqual(g.guard.noteTop + 1);
-            expect(g.bars).toBe(4);
+            // At 1600 the bounded list cues its scroll; the wide layout gives all 13 rows room.
+            expect(g.cue).toBe(width === 1600);
+            expect(g.bars).toBe(11);
             expect(g.lines).toBe(1);
             if (evidence) {
               mkdirSync(evidence, { recursive: true });

@@ -8,6 +8,8 @@ export interface DailyPoint {
   at: number;
   /** The day's value; null when nothing was observed that day (a gap, never zero). */
   v: number | null;
+  /** The count behind a day's bar, for the hover and keyboard tip. */
+  detail?: string | null;
 }
 
 const BAR_MAX = 28;
@@ -128,6 +130,7 @@ export function DailyRateChart({
               ? [{ key: "none", name: "No data", value: "—" }]
               : [
                   { key: "bar", name: barName, value: format(hit.v) },
+                  ...(hit.detail ? [{ key: "count", name: "PRs", value: hit.detail }] : []),
                   ...(rolling?.[sel] != null
                     ? [
                         {

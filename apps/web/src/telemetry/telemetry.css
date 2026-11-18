@@ -310,6 +310,12 @@
 .tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard > .pb.qlist {
   display: block;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#qGuard .agent-list-scroll-cue {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
 }
 
 .tabpanel .grid[data-view="table"][data-n="1"] {
@@ -320,6 +326,19 @@
   flex: 1 1 0;
   min-width: 0;
   position: relative;
+}
+
+/* At wide desktop sizes, the three compact daily charts share the first row. The ranked list takes
+   the useful residual height across the second row instead of leaving four oversized panels empty. */
+@media (min-width: 2200px) and (min-height: 1100px) {
+  .tabpanel .grid[data-view="charts"][data-n="4"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(250px, 0.72fr) minmax(360px, 1.28fr);
+  }
+
+  .tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard {
+    grid-column: 1 / -1;
+  }
 }
 
 .tabpanel .grid > .panel {
