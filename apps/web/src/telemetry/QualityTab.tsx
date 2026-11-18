@@ -277,7 +277,9 @@ function GuardPanel({ res }: { res: Resource<GuardHitsView> }) {
       ) : rows.length === 0 ? (
         <p className="pb s muted">Nothing blocked in the last {FLOW_DAYS} days.</p>
       ) : (
-        <div className="pb">
+        // Every rule can have a count, so the list scrolls inside its panel; each count is a link, so
+        // the keyboard reaches every row and scrolls it into view.
+        <div className="pb qlist">
           {rows.map((r) => (
             <HBar
               key={r.rule}

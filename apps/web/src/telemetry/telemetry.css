@@ -306,6 +306,12 @@
   min-height: 120px;
 }
 
+/* The ranked Guard list keeps its rows: it scrolls inside the panel and the note stays below it. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard > .pb.qlist {
+  display: block;
+  overflow-y: auto;
+}
+
 .tabpanel .grid[data-view="table"][data-n="1"] {
   grid-template-columns: minmax(0, 1fr);
 }
