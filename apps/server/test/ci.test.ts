@@ -18,18 +18,21 @@ describe("CI", () => {
     for (const job of ["validate", "server", "server-process", "web-core"]) {
       expect(workflow).toContain(`needs.${job}.result`);
     }
-    expect(workflow).toContain(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression.
-      "node apps/server/src/ci-vitest.ts --project server --shard=${{ matrix.shard }}/2",
-    );
-    expect(workflow).toMatch(
-      /server:\n {4}runs-on: ubuntu-latest\n {4}strategy:\n {6}matrix:\n {8}shard: \[1, 2\]/,
-    );
-    expect(workflow).toContain(
-      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression.
-      "node apps/server/src/ci-vitest.ts --project server-process --shard=${{ matrix.shard }}/2",
-    );
-    expect(workflow).toContain("pnpm exec vitest run --project web --project core");
+    // every sharded job lists as many shards as its command divides by, so no test file is skipped
+    const shards = (job: string) => {
+      const body = workflow.slice(workflow.indexOf(`\n  ${job}:\n`));
+      const list = /shard: \[([\d, ]+)\]/.exec(body)?.[1].split(",").map(Number) ?? [];
+      const of = Number(/--shard=\$\{\{ matrix\.shard \}\}\/(\d+)/.exec(body)?.[1]);
+      return { list, of };
+    };
+    for (const job of ["server", "server-process", "web-core"]) {
+      const { list, of } = shards(job);
+      expect(list, job).toEqual(Array.from({ length: of }, (_, i) => i + 1));
+      expect(of, job).toBeGreaterThan(1);
+    }
+    expect(workflow).toContain("ci-vitest.ts --project server --shard=");
+    expect(workflow).toContain("ci-vitest.ts --project server-process --shard=");
+    expect(workflow).toContain("vitest run --project web --project core --shard=");
   });
 
   it("assigns server and core tests to separate projects", () => {
