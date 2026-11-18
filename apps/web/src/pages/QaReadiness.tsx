@@ -401,7 +401,13 @@ function Detail({
           </ExternalLink>
         </div>
       </Panel>
-      <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha} awaiting={awaiting}>
+      <CurrentQaReport
+        repo={pr.repoId}
+        pr={pr.number}
+        head={pr.headSha}
+        awaiting={awaiting}
+        ticket={pr.ticket}
+      >
         <Pairs
           pr={pr}
           manifest={pairs}

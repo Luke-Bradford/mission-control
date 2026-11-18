@@ -58,6 +58,7 @@ it("every router page has a map entry with a route to visit", () => {
       "flight",
       "needs",
       "overview",
+      "planner",
       "qa",
       "setup",
       "telemetry",

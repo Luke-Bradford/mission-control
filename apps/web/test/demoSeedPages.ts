@@ -739,6 +739,12 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
       reports: [],
     };
+    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+    out[`/api/repos/${DEMO_REPO}/prs/${pr.number}`] = {
+      repoId: DEMO_REPO,
+      number: pr.number,
+      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+    };
   }
   return out;
 }
@@ -932,6 +938,11 @@ export function demoPageAnswers(
     const path = `/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${report.prNumber}`;
     history[path] = { reports: [report] };
     history[`${path}&headSha=${report.headSha}`] = { reports: [report] };
+    history[`/api/repos/${DEMO_REPO}/prs/${report.prNumber}`] = {
+      repoId: DEMO_REPO,
+      number: report.prNumber,
+      ticket: null,
+    };
   }
   return {
     ...health,
@@ -948,6 +959,8 @@ export function demoPageAnswers(
     ...qaPrApi(tickets),
     ...ticketItems(tickets),
     "/api/qa/queue": qaQueue(tickets),
+    "/api/plans": plansView(),
+    [`/api/plans?repoId=${DEMO_REPO}`]: plansView(),
     "/api/dependencies": [],
     "/api/audit?range=7d": auditView(),
     "/api/audit?range=24h": auditView(),
@@ -959,10 +972,78 @@ export function demoPageAnswers(
     "/api/boards/site-builder": [],
     [`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`]: openPrs(tickets),
     [`/api/repos/${DEMO_REPO}/prs`]: openPrs(tickets),
+    [`/api/repos/${DEMO_REPO}/prs?shape=summary`]: openPrs(tickets),
+    "/api/repos/site-builder/prs?shape=summary": [],
     [`/api/repos/${DEMO_REPO}/map`]: mapSnapshot(
       SEAT_IDS.filter((id) => id !== "flight-1"),
       tickets,
     ),
+  };
+}
+
+const planPicture = (c: string, caption: string) => ({
+  id: c.repeat(64),
+  url: `/api/plan-assets/${c.repeat(64)}`,
+  caption,
+  mediaType: "image/png" as const,
+});
+
+/** Plans to sign off: one waiting, one sent back, one approved (the Retry ticket's). */
+function plansView() {
+  const at = Date.now() - 3 * 3_600_000;
+  const base = {
+    repoId: DEMO_REPO,
+    marked: true,
+    requestedAt: at,
+    plannedAt: at,
+    note: null,
+    mockups: [] as ReturnType<typeof planPicture>[],
+  };
+  return {
+    waiting: [
+      {
+        ...base,
+        issue: 201,
+        ref: `${DEMO_REPO}#201`,
+        title: "Audit the coupon rules",
+        state: "awaiting-signoff",
+        asks: "List every coupon rule, say which overlap, and flag any that can stack to a free order.",
+        proposal:
+          "Read the coupon rules, add a table of overlaps to the audit page, and a test that no stack goes below zero.",
+        mockups: [planPicture("a", "Audit table with overlaps marked")],
+        sizeEstimate: "M",
+        risks: "Old coupons have no owner, so some overlaps may be on purpose.",
+        decidedAt: null,
+      },
+    ],
+    history: [
+      {
+        ...base,
+        issue: 104,
+        ref: `${DEMO_REPO}#104`,
+        title: "Fix the address form on narrow screens",
+        state: "sent-back",
+        asks: "The address form overflows below 360px.",
+        proposal: "Rebuild the form as one column.",
+        sizeEstimate: "S",
+        risks: "None known.",
+        note: "Keep the postcode lookup on narrow screens.",
+        decidedAt: at,
+      },
+      {
+        ...base,
+        issue: 102,
+        ref: `${DEMO_REPO}#102`,
+        title: "Retry failed payment webhooks",
+        state: "signed-off",
+        asks: "Failed payment webhooks are dropped; retry them.",
+        proposal: "Queue each failed webhook and retry with backoff, five tries over an hour.",
+        mockups: [planPicture("b", "Retry queue in the admin screen")],
+        sizeEstimate: "M",
+        risks: "A retry could double-charge if the first call did land.",
+        decidedAt: at - 86_400_000,
+      },
+    ],
   };
 }
 

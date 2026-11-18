@@ -769,6 +769,33 @@ select {
   }
 }
 
+/* Ten tabs (Planner is the tenth): status may use the second row at narrow desktop widths, but its
+   controls retain enough room for their selected text. */
+@media (min-width: 1280px) and (max-width: 1599px) {
+  #sess {
+    min-width: 104px;
+  }
+  .brand {
+    letter-spacing: 0.04em;
+  }
+  .top > .spacer {
+    display: none;
+  }
+  .tabs {
+    gap: var(--sp-1);
+  }
+  /* Keep page tabs as separate controls. Status controls take the second row rather than
+     squeezing labels together now that Planner is the tenth tab. */
+  .top-status {
+    width: 100%;
+    margin-left: 0;
+  }
+  .tabs a {
+    padding-inline: var(--sp-1);
+    letter-spacing: 0.02em;
+  }
+}
+
 .iconbtn {
   position: relative;
   padding: var(--sp-1) var(--sp-2);

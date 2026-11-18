@@ -5,6 +5,7 @@ import { hub, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
 import { NOTHING_TO_SEE } from "./nothingToSee.ts";
 import "./qa-report.css";
 
@@ -184,11 +185,15 @@ export function CurrentQaReport({
   pr,
   head,
   awaiting,
+  ticket: _ticket,
   children,
 }: {
+  /** Retained for callers while reports carry their signed-off plan directly. */
+  ticket?: string | null;
   repo: string;
   pr: number;
   head: string | null;
+  /** The PR's ticket as `repo#number`, when known. */
   /** Whether the PR waits for the operator's acceptance; the gaps list is for that decision only. */
   awaiting: boolean;
   children?: ReactNode;
@@ -243,7 +248,7 @@ export function CurrentQaReport({
   );
 }
 
-function Image({ image, label }: { image: QaImageRef; label: string }) {
+export function QaReportImage({ image, label }: { image: QaImageRef; label: string }) {
   const target = qaEvidenceUrl(image.url);
   const assetId = target?.match(/^\/api\/qa-report-assets\/([0-9a-f]{64})$/)?.[1];
   const figure = useRef<HTMLElement>(null);
@@ -420,13 +425,45 @@ function Image({ image, label }: { image: QaImageRef; label: string }) {
   );
 }
 
+/** The retained result evidence used beside a signed-off proposal on QA and ticket pages. */
+export function QaBuiltEvidence({ report }: { report: QaReport }) {
+  const [showAll, setShowAll] = useState(false);
+  const pairs = showAll ? report.visual.pairs : report.visual.pairs.slice(0, 4);
+  if (report.visual.applicability === "not_applicable")
+    return <p className="muted">Screenshots are not applicable to this change.</p>;
+  if (report.visual.pairs.length === 0)
+    return <p className="muted">No retained screenshots of the result in this report.</p>;
+  return (
+    <>
+      <div className="plan-built-shots">
+        {pairs.map((pair) => (
+          <QaReportImage
+            key={JSON.stringify(pair.after)}
+            image={pair.after}
+            label={`Built · ${pair.label}`}
+          />
+        ))}
+      </div>
+      {report.visual.pairs.length > 4 && (
+        <button type="button" className="quiet" onClick={() => setShowAll(!showAll)}>
+          {showAll
+            ? "Show fewer screenshots"
+            : `Show all ${report.visual.pairs.length} screenshots`}
+        </button>
+      )}
+    </>
+  );
+}
+
 /** Immutable evidence and its gaps; live merge/deployment authority remains outside this report. */
 export const QaReportRead = memo(function QaReportRead({
   report: r,
   currentHead,
   archived = false,
   awaiting = true,
+  ticket: _ticket,
 }: {
+  ticket?: string | null;
   report: QaReport;
   currentHead?: string | null;
   awaiting?: boolean;
@@ -459,6 +496,15 @@ export const QaReportRead = memo(function QaReportRead({
   const checks = new Map(r.coverage.map((c) => [c.check, c]));
   return (
     <article className="qa-report" aria-label={`QA report for PR #${r.prNumber}`}>
+      <SignedOffPlan
+        plan={r.plan}
+        built={
+          <>
+            <p>{r.summary}</p>
+            <QaBuiltEvidence report={r} />
+          </>
+        }
+      />
       <Panel title="QA report" sub={`${r.repoId} · PR #${r.prNumber}`}>
         <div className="pb uat-stack">
           <header className="qa-report-heading">
@@ -654,13 +700,13 @@ export const QaReportRead = memo(function QaReportRead({
             <section className="uat-pair" key={JSON.stringify(pair)}>
               <h3>{pair.label}</h3>
               <div className="uat-shots">
-                <Image image={pair.before} label={`Before · ${pair.label}`} />
-                <Image image={pair.after} label={`After · ${pair.label}`} />
+                <QaReportImage image={pair.before} label={`Before · ${pair.label}`} />
+                <QaReportImage image={pair.after} label={`After · ${pair.label}`} />
               </div>
               {pair.diff && (
                 <details>
                   <summary>Pixel diff · {pair.label}</summary>
-                  <Image image={pair.diff} label={`Pixel diff · ${pair.label}`} />
+                  <QaReportImage image={pair.diff} label={`Pixel diff · ${pair.label}`} />
                 </details>
               )}
             </section>
@@ -670,7 +716,7 @@ export const QaReportRead = memo(function QaReportRead({
               <summary>Additional QA browser captures ({r.visual.screenshots.length})</summary>
               <div className="uat-shots">
                 {r.visual.screenshots.map((s) => (
-                  <Image key={JSON.stringify(s)} image={s} label={s.label} />
+                  <QaReportImage key={JSON.stringify(s)} image={s} label={s.label} />
                 ))}
               </div>
             </details>

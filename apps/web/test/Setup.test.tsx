@@ -10,6 +10,7 @@ import {
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
+  type RepoRulesView,
   UP_TO_DATE_MAIN,
   UPDATE_UNAVAILABLE,
   type VersionInfo,
@@ -49,6 +50,36 @@ import {
   SESSION_CONFIG,
   seatRow,
 } from "./fixtures.ts";
+
+const repoRules = (planSignoff: "every" | "larger" | "never"): RepoRulesView =>
+  ({
+    base: "b".repeat(64),
+    rules: Object.fromEntries(
+      [
+        "pick_from",
+        "needs",
+        "areas",
+        "promote_backlog",
+        "plan_signoff",
+        "protected",
+        "hard_rules",
+        "hard_rules_by",
+        "commands.writer",
+        "commands.review",
+        "full_suite",
+        "required_checks",
+        "checks",
+        "uat.labels",
+        "uat.paths",
+        "always_ask",
+        "autonomy",
+        "flight_powers",
+      ].map((key) => [
+        key,
+        { value: key === "plan_signoff" ? planSignoff : "", source: "default" },
+      ]),
+    ),
+  }) as unknown as RepoRulesView;
 
 const CFG: ConfigView = {
   ...CONFIG,
@@ -1463,6 +1494,79 @@ describe("Setup › Repos & seats cards", () => {
         defaultAccountId: "codex-main",
         guidance: { priority: ["P1"], labelMode: "any" },
       });
+    });
+  });
+
+  it("shows each repo's plan sign-off setting and saves a change to it", async () => {
+    const writes: string[] = [];
+    load({
+      "/api/repos/shop-app/rules": repoRules("every"),
+      "POST /api/repos/shop-app/setup": () => {
+        writes.push("setup");
+        return { status: 200, body: { backup: "c.bak" } };
+      },
+      "POST /api/repos/shop-app/rules": () => {
+        writes.push("rules");
+        return { status: 200, body: {} };
+      },
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    const select = (await within(card).findByLabelText("Plan sign-off")) as HTMLSelectElement;
+    expect(select.value).toBe("every");
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "Every ticket",
+      "Larger work only",
+      "Never",
+    ]);
+    fireEvent.change(select, { target: { value: "never" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(
+        ([path, init]) => path === "/api/repos/shop-app/rules" && init?.method === "POST",
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        rules: { plan_signoff: "never" },
+      });
+      expect(writes).toEqual(["rules", "setup"]);
+    });
+  });
+
+  it("does not write plan rules when the setting is unchanged", async () => {
+    load({
+      "/api/repos/shop-app/rules": repoRules("every"),
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    await within(card).findByLabelText("Plan sign-off");
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() =>
+      expect(
+        fetchFn.mock.calls.some(
+          ([path, init]) => path === "/api/repos/shop-app/setup" && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      fetchFn.mock.calls.some(
+        ([path, init]) => path === "/api/repos/shop-app/rules" && init?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not save plan sign-off until the repo rules load", async () => {
+    load({
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    expect(within(card).queryByLabelText("Plan sign-off")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call?.[1]?.body))).not.toHaveProperty("planSignOff");
     });
   });
 
