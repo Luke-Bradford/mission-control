@@ -1669,7 +1669,11 @@ export async function prepareCheckout(
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
   // the ticket's branch may sit in a managed worktree another seat left behind when its run
   // stopped: this run carries on there, with its uncommitted files
-  const ticketWorktrees = await managedWorktreesOf(inClone, ticket?.branches ?? new Set(), i.worktreesRoot);
+  const ticketWorktrees = await managedWorktreesOf(
+    inClone,
+    ticket?.branches ?? new Set(),
+    i.worktreesRoot,
+  );
   for (const worktree of ticketWorktrees) {
     if (worktree.branch === branch) continue;
     const blocked = await stoppedTicketWorktreeBlock(
