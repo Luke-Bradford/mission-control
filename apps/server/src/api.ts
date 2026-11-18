@@ -500,6 +500,7 @@ export const STUDIO_PAUSE_ERROR = "pause for studio-loop arrives with cutover";
 export const HEARTBEAT_MS = 25_000;
 export const LOOP_WRITES_DISABLED = "loop writes are disabled on this server";
 export const CONFIG_WRITES_UNAVAILABLE = "config writes are not available on this server";
+export const CONFIG_FILE_UNAVAILABLE = "this server has no config.yaml to read";
 export const CONFIG_WRITE_FAILED = "could not write config.yaml";
 /** The check route's answer to a failure outside the updater's own (502) errors. */
 export const CHECK_FAILED = "could not check for updates";
@@ -616,6 +617,11 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /**
+   * The config.yaml the server loaded, for routes that only read it. A preview on the live file
+   * has this and no `configPath`: it shows that file's rules and can never write them.
+   */
+  configReadPath?: string;
   /** Trusted embedded hosts may override the path used to validate crew path containment. */
   configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
@@ -3510,8 +3516,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
       // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
-        const configPath = deps.configPath;
-        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        // A read needs no writable config: a preview shows the rules of the file it loaded.
+        const configPath = deps.configPath ?? deps.configReadPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_FILE_UNAVAILABLE });
         try {
           // Every value comes from the same config.yaml bytes the version is taken from, so the
           // page can never save a version it did not show.
