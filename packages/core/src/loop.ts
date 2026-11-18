@@ -126,19 +126,6 @@ export const EVIDENCE_RULING_PREFIX = "Ruling:";
 export const CI_TRIES = 3;
 /** The push or PR is refused this many times before the run parks. */
 export const REFUSAL_TRIES = 3;
-/** A CI job with no recorded history may stay pending this long on a pushed sha. */
-export const CI_PENDING_MAX_MS = 30 * 60_000;
-/** A job with history parks once it is pending this many times its recent p90... */
-export const CI_PENDING_P90_FACTOR = 2;
-/** ...but never sooner than this. */
-export const CI_PENDING_MIN_MS = 10 * 60_000;
-
-/** How long a running job may stay pending: twice its recent p90, else the fixed default. */
-export function ciPendingLimitMs(p90Ms: number | undefined): number {
-  return p90Ms === undefined || !(p90Ms > 0)
-    ? CI_PENDING_MAX_MS
-    : Math.max(CI_PENDING_MIN_MS, Math.round(p90Ms * CI_PENDING_P90_FACTOR));
-}
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
 /** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
@@ -775,10 +762,6 @@ interface Step {
 
 const sha7 = (sha: string): string => sha.slice(0, 7);
 
-/** ` for <sha7>` for a text about a sha, or nothing when there is none. */
-const forSha = (sha: string | null | undefined): string =>
-  sha === null || sha === undefined ? "" : ` for ${sha7(sha)}`;
-
 const minutes = (ms: number): number => Math.round(ms / 60_000);
 
 /**
@@ -786,48 +769,6 @@ const minutes = (ms: number): number => Math.round(ms / 60_000);
  * p90, else the fixed default), with the limit of the first; null when none has. A pending CI
  * that names no check is judged by the fixed default from `since`.
  */
-function ciOverdue(
-  s: LoopSnapshot,
-  checks: NonNullable<LoopSnapshot["pr"]>["checks"],
-  since: number,
-  now: number,
-): { pending: string[]; missing: string[]; limitMs: number } | null {
-  if (!checks || checks.pending.length + checks.missing.length === 0) {
-    return now - since > CI_PENDING_MAX_MS
-      ? { pending: [], missing: [], limitMs: CI_PENDING_MAX_MS }
-      : null;
-  }
-  const unstarted = Math.max(
-    CI_PENDING_MAX_MS,
-    ...Object.values(s.ciP90Ms ?? {}).map((p90) => ciPendingLimitMs(p90)),
-  );
-  const over = (name: string) => {
-    const startedAt = checks.startedAt?.[name];
-    const limit = startedAt === undefined ? unstarted : ciPendingLimitMs(s.ciP90Ms?.[name]);
-    return now - Math.max(since, startedAt ?? 0) > limit ? limit : null;
-  };
-  const pending = checks.pending.filter((n) => over(n) !== null);
-  const missing = checks.missing.filter((n) => over(n) !== null);
-  const first = [...pending, ...missing][0];
-  return first === undefined ? null : { pending, missing, limitMs: over(first) as number };
-}
-
-/** Which fact kept a pushed run from reaching CI: the first of push, newest commit, PR, PR head. */
-function missingWhy(
-  headCommit: string | null,
-  pushed: LoopSnapshot["pushed"],
-  pr: LoopSnapshot["pr"],
-): string {
-  if (pushed === null) return "no push is recorded for the run";
-  if (headCommit === null)
-    return `no commit is recorded for the run, but ${sha7(pushed.sha)} is pushed`;
-  if (pushed.sha !== headCommit) {
-    return `the push is ${sha7(pushed.sha)}, not the newest commit ${sha7(headCommit)}`;
-  }
-  if (pr === null) return "no PR of the run has been read from GitHub";
-  return `PR #${pr.number} has ${pr.headSha === null ? "no head" : `head ${sha7(pr.headSha)}`}, not ${sha7(pushed.sha)}`;
-}
-
 const READY = "Ready" satisfies MoveColumn;
 const IN_PROGRESS = "In progress" satisfies MoveColumn;
 const IN_REVIEW = "In review" satisfies MoveColumn;
@@ -857,16 +798,12 @@ const isDecisionPark = (kind: string | undefined): boolean =>
   kind === "review-ruling" ||
   kind === "review-failed";
 
-/** Parks the hub can settle from later GitHub state, without a new seat run. */
-const isLivePark = (kind: string | undefined): boolean =>
-  isDecisionPark(kind) || kind === "ci-pending" || kind === STUCK_PARK;
-
 /**
  * A run that cannot go on stops: it ends with the reason on its card and timeline, and its seat
  * takes the next ticket. A live park waits for later GitHub state or a decision.
  */
 const park = (loop: RunLoop, kind: string, reason: string): Step =>
-  isLivePark(kind)
+  isDecisionPark(kind)
     ? {
         loop: { ...loop, phase: "parked", parked: { kind, reason, ended: false } },
         actions: [{ kind: "event", text: parkedEventText(reason) }],
@@ -1161,42 +1098,13 @@ function stateStep(s: LoopSnapshot): Step {
     if (
       loop.parked !== null &&
       !loop.parked.ended &&
-      !isLivePark(loop.parked.kind) &&
+      !isDecisionPark(loop.parked.kind) &&
       loop.parked.kind !== "ci"
     ) {
       return {
         loop: { ...loop, parked: { ...loop.parked, ended: true } },
         actions: [{ kind: "end-run" }, { kind: "take-next" }],
       };
-    }
-    if (
-      loop.parked?.kind === "ci-pending" &&
-      !loop.parked.ended &&
-      pushed !== null &&
-      headCommit === pushed.sha &&
-      pr?.state === "open" &&
-      pr.headSha === pushed.sha
-    ) {
-      if (pr.ci === "passing") {
-        const passed = ciPassed(loop, pushed.sha);
-        return {
-          loop: { ...loop, phase: "review", parked: null, ciFails: 0, rerun: passed.rerun },
-          actions: passed.actions,
-        };
-      }
-      if (pr.ci === "failing") {
-        return { loop: { ...loop, phase: "ci", parked: null, unparkedAt: now }, actions: [] };
-      }
-    }
-    if (
-      loop.parked?.kind === STUCK_PARK &&
-      !loop.parked.ended &&
-      pushed !== null &&
-      headCommit === pushed.sha &&
-      pr?.state === "open" &&
-      pr.headSha === pushed.sha
-    ) {
-      return { loop: { ...loop, phase: "ci", parked: null, unparkedAt: now }, actions: [] };
     }
     // a stop whose run is still live (the hub went down between saving the stop and ending the run)
     // ends it now
@@ -1359,19 +1267,6 @@ function stateStep(s: LoopSnapshot): Step {
       ) {
         return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha, from: pushed.sha }] };
       }
-      // a head that came after the push has its own window, from when it was first seen
-      const newHead = pr?.headSha != null && pr.headSha !== pushed?.sha;
-      const waitingSince =
-        loop.pushStartedAt !== null && newHead && loop.headSeenSha === pr?.headSha
-          ? Math.max(loop.pushStartedAt, loop.headSeenAt ?? 0)
-          : loop.pushStartedAt;
-      if (waitingSince !== null && now - waitingSince > NO_CI_AFTER_MS) {
-        return park(
-          loop,
-          STUCK_PARK,
-          `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
-        );
-      }
       return unchanged(loop);
     }
     const short = sha7(pushed.sha);
@@ -1379,7 +1274,7 @@ function stateStep(s: LoopSnapshot): Step {
       // a merge workspace merges main into the branch instead (see branchUpdateDue), for as long
       // as CI may stay pending
       const waitedFrom = Math.max(pushed.at, loop.unparkedAt ?? 0);
-      if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
+      if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= NO_CI_AFTER_MS) {
         return unchanged(loop);
       }
       // the seat merges main itself, once per pushed sha; a seat already told, or a merge of main
@@ -1433,30 +1328,6 @@ function stateStep(s: LoopSnapshot): Step {
         loop: { ...failed, phase: "working" },
         actions: [{ kind: "event", text: `${CI_FAILED_EVENT_PREFIX}${short}${named}` }],
       };
-    }
-    // a run the operator un-parked is judged from the un-park, not from a push made before it;
-    // a re-run is also judged from when it was asked for
-    const since = Math.max(
-      pushed.at,
-      loop.unparkedAt ?? 0,
-      loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
-    );
-    const overdue = pr.ci === "pending" ? ciOverdue(s, pr.checks, since, now) : null;
-    if (overdue !== null) {
-      const parts = [
-        overdue.pending.length ? `pending: ${overdue.pending.join(", ")}` : "",
-        overdue.missing.length ? `missing: ${overdue.missing.join(", ")}` : "",
-      ].filter((p) => p !== "");
-      return park(
-        loop,
-        "ci-pending",
-        `CI pending for ${minutes(overdue.limitMs)} minutes on ${short}${
-          parts.length > 0 ? ` (${parts.join("; ")})` : ""
-        }`,
-      );
-    }
-    if (pr.ci === null && pr.polledAt - since > NO_CI_AFTER_MS) {
-      return park(loop, "no-ci", `no CI reported for ${short}`);
     }
     return unchanged(loop);
   }

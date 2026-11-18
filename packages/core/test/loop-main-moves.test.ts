@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
-  CI_PENDING_MAX_MS,
   conflictKey,
   conflictText,
   evidenceCanUnpark,
@@ -309,9 +308,9 @@ describe("main moves", () => {
     const s = behind(
       {
         pr: pr({ mergeable: "CONFLICTING" }),
-        pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 },
+        pushed: { sha: SHA, at: NOW - 30 * 60_000 - 1 },
       },
-      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - CI_PENDING_MAX_MS - 1, gate: null },
+      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - 30 * 60_000 - 1, gate: null },
     );
     const r = reconcile(s);
     expect(r.loop.parked).toBeNull();
