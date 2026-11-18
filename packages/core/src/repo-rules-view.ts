@@ -17,6 +17,7 @@ export const REPO_RULE_EDITABLE_KEYS = [
   "needs",
   "areas",
   "promote_backlog",
+  "plan_signoff",
   "protected",
   "hard_rules",
   "hard_rules_by",
@@ -44,6 +45,7 @@ export interface RepoRulesView {
     needs: RepoRuleView<string[]>;
     areas: RepoRuleView<Record<string, string[]>>;
     promote_backlog: RepoRuleView<boolean>;
+    plan_signoff: RepoRuleView<string>;
     protected: RepoRuleView<string[]>;
     hard_rules: RepoRuleView<string[]>;
     hard_rules_by: RepoRuleView<string>;

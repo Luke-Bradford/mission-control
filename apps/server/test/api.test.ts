@@ -1741,6 +1741,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
   ["GET", "/api/tickets/shop-app/7"],
+  ["GET", "/api/plans"],
+  ["GET", "/api/plan-assets/:id"],
+  ["POST", "/api/plans/shop-app/7/approve", {}],
+  ["POST", "/api/plans/shop-app/7/send-back", { note: "Smaller." }],
   ["GET", "/api/tickets/shop-app/7/set-aside"],
   ["POST", "/api/tickets/shop-app/7/set-aside/3/answer", { text: "x" }],
   ["POST", "/api/boards/shop-app/setup"],
@@ -1860,8 +1864,6 @@ const API_ROUTES: [string, string, object?][] = [
     "/api/attention/example/choice",
     { briefId: 1, sourceRevision: "a".repeat(64), optionId: "apply", requestId: "route-inventory" },
   ],
-  ["GET", "/api/attention/example/discussion"],
-  ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/notifications"],
@@ -2161,6 +2163,7 @@ describe("Setup Roles & guards", () => {
     needs: ["done_when", "size"],
     areas: { server: ["apps/server/**"] },
     promote_backlog: true,
+    plan_signoff: "larger",
     protected: [".github/**"],
     hard_rules: ["roles/**"],
     hard_rules_by: "operator",
@@ -2181,6 +2184,7 @@ describe("Setup Roles & guards", () => {
     "needs",
     "areas",
     "promote_backlog",
+    "plan_signoff",
     "protected",
     "hard_rules",
     "hard_rules_by",
@@ -2218,7 +2222,7 @@ describe("Setup Roles & guards", () => {
     git("update-ref", "refs/remotes/origin/main", "HEAD");
   };
 
-  it("reads all 17 keys with defaults, then saves every editable rule with a backup, without GitHub", async () => {
+  it("reads all 18 keys with defaults, then saves every editable rule with a backup, without GitHub", async () => {
     const first = await view();
     expect(Object.keys(first.rules)).toEqual(KEYS);
     expect(first.rules.pick_from).toMatchObject({ value: ["Ready"], source: "default" });
@@ -2236,7 +2240,7 @@ describe("Setup Roles & guards", () => {
     expect(refreshed).toBe(0);
     expect(gqlCalls).toEqual([]);
     const reread = await view();
-    for (const key of KEYS.slice(0, 15)) expect(reread.rules[key]?.source).toBe("set-here");
+    for (const key of KEYS.slice(0, 16)) expect(reread.rules[key]?.source).toBe("set-here");
     expect(reread.rules["commands.review"]?.value).toEqual(["pnpm -s test"]);
     expect(reread.rules.areas?.value).toEqual({ server: ["apps/server/**"] });
     // the live config took the owned fields only
@@ -2914,6 +2918,7 @@ describe("local access", () => {
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (/^\/api\/attention\/unknown\/choo?[si]/.test(url)) continue; // needs an open question; choose.test.ts covers it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
+      if (url.startsWith("/api/plan-assets/")) continue; // needs a kept picture; plan-signoff-api.test.ts covers it
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.includes("/set-aside/")) continue; // needs the Needs-you wiring; needs-you-answer.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
@@ -2984,10 +2989,6 @@ describe("local access", () => {
         });
         continue;
       }
-      if (url.endsWith("/discussion")) {
-        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
-        continue;
-      }
       if (
         url.endsWith("/dismiss") ||
         url.endsWith("/handled") ||
@@ -2996,6 +2997,11 @@ describe("local access", () => {
         url.endsWith("/hold/release")
       ) {
         // the fixture has no such note: unknown is a 404, not a refusal
+        expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
+      if (url.startsWith("/api/plans/") && method === "POST") {
+        // the fixture has no such plan: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
         continue;
       }
@@ -3366,6 +3372,7 @@ describe("local access", () => {
               /\/tickets\/:repoId\/7\/set-aside(\/3\/answer)?$/,
               (_m, a) => `/tickets/:repoId/:number/set-aside${a ? "/:id/answer" : ""}`,
             )
+            .replace(/\/plans\/:repoId\/7\//, "/plans/:repoId/:issue/")
             .replace(/\/prs\/4$/, "/prs/:number")
             .replace(
               /\/prs\/:repoId\/12\/(uat|controller-check|merge-hold|review-request)$/,
@@ -3375,7 +3382,6 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/(not-now|drop)$/, "/attention/:key/$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
-            .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
             .replace(/\/attention\/[^/]+\/materials$/, "/attention/:key/materials")
             .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(

@@ -760,6 +760,32 @@ describe("state step", () => {
       expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
     });
 
+    describe("a job still in GitHub's queue behind a busy runner pool", () => {
+      const busy = (started: Record<string, number>) =>
+        inCi({
+          pushed: { sha: SHA, at: NOW - 12 * min },
+          ciP90Ms: { web: 3 * min, server: 30 * min },
+          pr: pr({
+            checks: {
+              failing: [],
+              pending: ["web", "server"],
+              missing: [],
+              startedAt: started,
+            },
+          }),
+        });
+
+      it("does not park a job that has not started, 12 minutes after the push", () => {
+        const r = reconcile(busy({}));
+        expect(r.loop.parked).toBeNull();
+      });
+
+      it("still parks a job that is running past twice its p90", () => {
+        const r = reconcile(busy({ web: NOW - 11 * min }));
+        expect(r.loop.parked?.reason).toBe("CI pending for 10 minutes on aaaaaaa (pending: web)");
+      });
+    });
+
     describe("a short gate job waiting on a slow one", () => {
       const gate = (m: number, checks: { pending: string[]; missing: string[] }) =>
         inCi({
@@ -800,6 +826,22 @@ describe("state step", () => {
         inCi({ pr: pr({ ci: "pending" }) }, { phase: "parked", parked: parked.parked }),
       );
       expect(still.loop.phase).toBe("parked");
+    });
+
+    it("a ci-pending park wakes when CI fails: the first failure is re-run, a repeat goes to the seat", () => {
+      const parked = reconcile(inCi(runningFor(75, 62))).loop;
+      const failing = { pr: pr({ ci: "failing" }) };
+      const first = reconcile(inCi(failing, { phase: "parked", parked: parked.parked }));
+      expect(first.loop.phase).toBe("ci");
+      expect(first.loop.parked).toBeNull();
+      expect(first.actions).toContainEqual({ kind: "rerun-ci", sha: SHA });
+      const again = reconcile(
+        inCi(failing, { phase: "parked", parked: parked.parked, rerun: reran() }),
+      );
+      expect(again.loop.phase).toBe("working");
+      expect(again.loop.parked).toBeNull();
+      expect(again.loop.ciFailedSha).toBe(SHA);
+      expect(events(again.actions)).toEqual(["CI failed on aaaaaaa"]);
     });
   });
 

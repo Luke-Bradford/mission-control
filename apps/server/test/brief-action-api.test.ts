@@ -1,5 +1,11 @@
-import { type AttentionBrief, type BriefAction, NEW_LOOP, OPERATOR_HEADER } from "@mc/core";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  type AttentionBrief,
+  type BriefAction,
+  COMMS_CAPCOM,
+  NEW_LOOP,
+  OPERATOR_HEADER,
+} from "@mc/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp } from "../src/api.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -422,6 +428,128 @@ it.each(["hold", "release"] as const)(
     else expect(releaseMergeHold).toHaveBeenCalledWith("target", "CAPCOM");
   },
 );
+describe("a held PR named by a Comms question", () => {
+  const holdRun = (prNumber: number) => {
+    store.upsertPullRequests(
+      "repo",
+      [
+        {
+          repoId: "repo",
+          number: prNumber,
+          title: "Held PR",
+          url: `https://example.test/${prNumber}`,
+          branch: "feature/1",
+          base: "main",
+          ticket: "repo#1",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: AT,
+          updatedAt: AT,
+          mergedAt: null,
+          headSha: SHA,
+          mergeable: "MERGEABLE",
+        },
+      ],
+      AT,
+    );
+    store.setRunLoop("target", {
+      ...NEW_LOOP,
+      phase: "parked",
+      prNumber,
+      parked: { kind: "merge-hold", reason: "Operator hold", ended: false },
+      mergeHold: { by: "CAPCOM", reason: "Fixture hold", at: AT },
+    });
+  };
+  const ask = (ticket: string) => {
+    store.addComms(
+      {
+        from: "FLIGHT-1",
+        to: COMMS_CAPCOM,
+        senderKind: "flight",
+        label: "question",
+        ticket,
+        text: "Release the merge hold?",
+        at: AT - 60_000,
+      },
+      undefined,
+    );
+    const item = attentionItems(config, store, AT).find(
+      (entry) => entry.ticket === ticket && entry.key !== KEY,
+    );
+    return required(item).key;
+  };
+  const release = (runId = "target", sha = SHA): BriefAction => ({
+    kind: "merge-hold",
+    target: { kind: "run", runId, sha },
+    action: "release",
+  });
+  it.each(["repo#7", "repo#1"])("releases the hold on the run of %s", async (ticket) => {
+    holdRun(7);
+    const key = ask(ticket);
+    const request = await brief(release(), key);
+    const releaseMergeHold = vi.fn(async () => ({ ok: true as const }));
+    const a = app({
+      engine: {
+        status: () => ({ on: true, note: null }),
+        onOperatorMessage: vi.fn(),
+        holdMerge: vi.fn(),
+        releaseMergeHold,
+      },
+    });
+    const response = await post(a, request, key);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(releaseMergeHold).toHaveBeenCalledWith("target", "CAPCOM");
+  });
+  it("refuses a run the item's PR or ticket does not name", async () => {
+    holdRun(7);
+    store.addRunCommit({ runId: "other", repoId: "repo", branch: "x", sha: SHA, at: AT });
+    store.upsertRun({ ...required(store.run("target")), id: "other", ticket: "repo#2" });
+    store.setRunLoop("other", { ...NEW_LOOP, prNumber: 9 });
+    const key = ask("repo#7");
+    await expect(brief(release("other"), key)).rejects.toThrow(
+      "The approval target is not this item's run",
+    );
+  });
+  it("refuses a controller-check on a run the item only names through its PR", async () => {
+    holdRun(7);
+    const key = ask("repo#7");
+    await expect(
+      brief(
+        {
+          kind: "controller-check",
+          target: { kind: "run", runId: "target", sha: SHA },
+          verdict: "pass",
+          evidence: "Fixture check.",
+        },
+        key,
+      ),
+    ).rejects.toThrow("The approval target is not this item's run");
+  });
+  it("refuses at dispatch when the head moved after the brief", async () => {
+    holdRun(7);
+    const key = ask("repo#7");
+    const request = await brief(release(), key);
+    store.upsertPullRequests(
+      "repo",
+      [{ ...required(store.pullRequest("repo", 7)), headSha: "b".repeat(40) }],
+      AT,
+    );
+    const releaseMergeHold = vi.fn(async () => ({ ok: true as const }));
+    const a = app({
+      engine: {
+        status: () => ({ on: true, note: null }),
+        onOperatorMessage: vi.fn(),
+        holdMerge: vi.fn(),
+        releaseMergeHold,
+      },
+    });
+    const response = await post(a, request, key);
+    expect(response.statusCode).not.toBe(200);
+    expect(releaseMergeHold).not.toHaveBeenCalled();
+  });
+});
 it("uses only explicit operator authority to recover the actual runaway breaker", async () => {
   store.setSetting("flight.runaway", JSON.stringify({ at: AT, reason: "Fixture loop" }));
   store.raiseNote({

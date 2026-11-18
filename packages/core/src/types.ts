@@ -907,7 +907,8 @@ export type Topic =
   | "settings"
   | "config"
   | "guard"
-  | "flight";
+  | "flight"
+  | "plans";
 
 /**
  * One machine reading. null = not measured yet (the first sample has no CPU delta) or failed with
@@ -1247,14 +1248,6 @@ export interface PersonBrief {
   related?: BriefReference[];
   decisionKey?: string;
   replies?: SuggestedReply[];
-}
-
-/** Correlates item chat without changing how messages are delivered or executed. */
-export interface ItemDiscussion {
-  id: string;
-  itemKey: string;
-  version: string;
-  messages: ItemChatMessage[];
 }
 
 export interface ItemChatMessage {

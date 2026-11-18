@@ -317,6 +317,54 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+describe("plan sign-off hold", () => {
+  const parts = { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] };
+  const withSetting = (planSignoff: "every" | "larger" | "never"): RepoRules => ({
+    ...RULES,
+    planSignoff,
+  });
+
+  it.each([
+    ["every", "no plan", null, [] as number[]],
+    ["every", "awaiting sign-off", "wait", []],
+    ["every", "signed off", "signed", [1]],
+    ["larger", "marked, awaiting plan", "marked", []],
+    ["larger", "unmarked", null, [1]],
+    ["never", "awaiting sign-off", "wait", [1]],
+  ] as const)("%s, %s: queued %j", async (setting, _name, plan, expected) => {
+    store.replaceBoard(REPO, [card(1)]);
+    rules = withSetting(setting);
+    if (plan === "marked") store.plans.request(REPO, 1, NOW);
+    if (plan === "wait") store.plans.file(REPO, 1, parts, false, NOW);
+    if (plan === "signed") {
+      store.plans.file(REPO, 1, parts, false, NOW);
+      store.plans.approve(REPO, 1, NOW);
+    }
+    await refill();
+    expect(issues(SERVER)).toEqual(expected);
+  });
+
+  it("a setting turned on after the card was queued stops the start", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    rules = withSetting("never");
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+    rules = withSetting("every");
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([]);
+  });
+
+  it("a plan sent to the tab after the card was queued stops the start", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    rules = withSetting("larger");
+    await refill();
+    store.plans.request(REPO, 1, NOW);
+    await take();
+    expect(started).toEqual([]);
+  });
+});
+
 describe("refillQueues", () => {
   it.each([false, true])(
     "away excludes an untyped ticket until off or expired (%s)",

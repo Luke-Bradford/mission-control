@@ -10,7 +10,8 @@
 /* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
 #page-telemetry[data-tab="crew"],
 #page-telemetry[data-tab="cost"],
-#page-telemetry[data-tab="throughput"] {
+#page-telemetry[data-tab="throughput"],
+#page-telemetry[data-tab="quality"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: visible;
@@ -303,7 +304,7 @@
   }
 }
 
-/* Throughput: four charts in a 2x2, or the one table across the width. */
+/* Throughput and Quality: four charts in a 2x2, or the one table across the width. */
 .tabpanel .grid[data-view="charts"][data-n="4"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -320,6 +321,18 @@
 .tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb > .chart {
   flex: 1 1 auto;
   min-height: 120px;
+}
+
+/* The ranked Guard list keeps its rows: it scrolls inside the panel and the note stays below it. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard > .pb.qlist {
+  display: block;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#qGuard .agent-list-scroll-cue {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
 }
 
 /* In a short desktop work area, answer the time-sensitive token and quota questions first. */
@@ -339,6 +352,25 @@
 
 .tabpanel .grid[data-view="table"][data-n="1"] {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.tabpanel .qchart > .chart {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+}
+
+/* At wide desktop sizes, the three compact daily charts share the first row. The ranked list takes
+   the useful residual height across the second row instead of leaving four oversized panels empty. */
+@media (min-width: 2200px) and (min-height: 1100px) {
+  .tabpanel .grid[data-view="charts"][data-n="4"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(250px, 0.72fr) minmax(360px, 1.28fr);
+  }
+
+  .tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard {
+    grid-column: 1 / -1;
+  }
 }
 
 .tabpanel .grid > .panel {
@@ -508,9 +540,13 @@
   border-radius: 0;
 }
 
+/* unknown: a dashed outline over a cross-hatch, so it never reads as dotted Parked */
+.crew-sw.st.unknown,
 .share.unknown {
-  background: none;
-  border: 1px dashed var(--line-2);
+  background:
+    repeating-linear-gradient(45deg, var(--fg-2) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(135deg, var(--fg-2) 0 1px, transparent 1px 4px);
+  border: 1px dashed var(--fg-2);
 }
 
 .readout {

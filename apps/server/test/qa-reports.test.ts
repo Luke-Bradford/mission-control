@@ -663,6 +663,84 @@ describe("durable QA report archive", () => {
     expect(store.qaReportForReview(next)?.prNumber).toBe(8);
   });
 
+  it("a native report carries a frozen copy of the ticket's signed-off plan", async () => {
+    store.upsertRun({
+      id: "author",
+      agentId: "guido-1",
+      repoId: "sample",
+      seq: 1,
+      startedAt: NOW - 500,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: "feature/12",
+      ticket: "sample#12",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    const reviewed = async (pr: number) => {
+      const id = store.requestReview({
+        authorRunId: "author",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: pr,
+        sha: SHA,
+        epoch: pr,
+        attempt: 1,
+        round: 1,
+        at: NOW - 100,
+      });
+      if (!id) throw new Error("review missing");
+      store.setReviewState(id, ["queued"], "running", { at: NOW - 50, runId: `retro:${pr}` });
+      const row = store.review(id);
+      if (!row) throw new Error("review missing");
+      return service().prepareNative(
+        row,
+        {
+          verdict: { spec: "pass", quality: "pass" } as const,
+          summary: "Native review complete.",
+          findings: [],
+          worksWell: ["It works."],
+          limitations: [],
+          followUps: [],
+        },
+        NOW,
+      );
+    };
+    // a plan nobody signed off is not shown as one
+    store.plans.file(
+      "sample",
+      12,
+      {
+        asks: "Show plans.",
+        proposal: "Add a tab.",
+        sizeEstimate: "M",
+        risks: "Big.",
+        mockups: [],
+      },
+      true,
+      NOW - 400,
+    );
+    expect((await reviewed(7)).plan).toBeUndefined();
+    store.plans.approve("sample", 12, NOW - 300);
+    const report = await reviewed(8);
+    expect(report.plan).toEqual({
+      ref: "sample#12",
+      asks: "Show plans.",
+      proposal: "Add a tab.",
+      sizeEstimate: "M",
+      risks: "Big.",
+      mockups: [],
+      decidedAt: NOW - 300,
+    });
+    expect(qaReportMarkdown(report)).toContain("## Signed-off plan");
+    expect(qaReportMarkdown(report)).toContain("Add a tab.");
+  });
+
   it("requires visual pairs for known native web changes despite a supplied N/A reason", async () => {
     const id = store.requestReview({
       authorRunId: "author",

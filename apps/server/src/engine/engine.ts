@@ -3832,6 +3832,52 @@ export function createEngine(deps: EngineDeps): Engine {
         const at = now();
         const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
         if (rerun === null) {
+          // the failure may already be cleared by a re-run from GitHub or a person
+          const repo = config.repos.find((r) => r.id === run.repoId);
+          const checks = (pr.checks ?? []).filter(
+            (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
+          );
+          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          const failingNow =
+            pr.ci === "failing" ||
+            verdict.ci === "failing" ||
+            checks.some((check) => check.state === "failing");
+          if (!failingNow) {
+            const stillPending =
+              pr.ci === "pending" ||
+              verdict.pending.length > 0 ||
+              verdict.missing.length > 0 ||
+              checks.some((check) => check.state === "pending");
+            if (stillPending) return { kind: "pending", sha };
+            if (pr.ci === "passing") {
+              store.setRunLoop(run.id, {
+                ...loop,
+                epoch: loop.epoch + 1,
+                phase: "review",
+                parked: null,
+                ciFails: 0,
+                ciFailedSha: null,
+                transient: 0,
+                lastRefusal: null,
+                unparkedAt: at,
+              });
+              store.addLoopEvent(
+                `${run.id}:${loop.epoch}:ruling-cleared:${sha}`,
+                run.id,
+                `${CI_PASSED_EVENT_PREFIX}${sha.slice(0, 7)} on a re-run; FLIGHT accepted the ruling`,
+                at,
+              );
+              await send(
+                run.id,
+                `ruling-cleared:${run.id}:${sha}`,
+                `CI is green on ${sha.slice(0, 7)} after a re-run, so your ruling is accepted. Review is queued.`,
+              );
+              bus.emit("agents");
+              deps.pollGithub?.();
+              await pass(run.id);
+              return { kind: "accepted", sha };
+            }
+          }
           const r = await publisher.rerunRuling(github, sha);
           if (!r.ok) return not(r.text);
           store.setRunLoop(run.id, {

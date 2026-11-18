@@ -70,7 +70,6 @@ import {
   type FlightWakeStatus,
   flightContextText,
   hudColumnOf,
-  type ItemDiscussion,
   idleLong,
   idlePeriod,
   inLane,
@@ -409,7 +408,7 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
  * Nothing re-wakes FLIGHT on a timer for pending work: a fact that has not changed stays silent.
  */
 export function nextWakeAt(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+  s: FlightState & TeamsDigestState,
   lastWakeAt: number,
   now: number,
   batchAt?: number,
@@ -916,9 +915,8 @@ export function flightState(i: {
   areas?: Record<string, string[]>;
   /** Files whose merge conflicts between open PRs (see flightConflicts); absent: none known. */
   conflicts?: readonly { file: string; prs: number[] }[];
-}): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
+}): FlightState & TeamsDigestState {
   const { config, store, busy, now } = i;
-  const discussions = store.pendingDiscussions();
   const tz = config.operator.timezone;
   const found = flightSeat(config);
   const trip = runawayTrip(store);
@@ -955,7 +953,6 @@ export function flightState(i: {
     }));
   if (found === null) {
     return {
-      discussions,
       signals: [],
       triage: [],
       blocked: [],
@@ -1486,7 +1483,6 @@ export function flightState(i: {
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
-    discussions,
     wake: withCovered(
       wakeInputs({
         pace: paceStartCheck(store, config, now),
@@ -1562,7 +1558,7 @@ const entryHash = (entry: unknown): string =>
  * `mc recall` and `mc flight_state` read them on request.
  */
 export function flightWake(
-  state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+  state: FlightState & TeamsDigestState,
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
@@ -1714,9 +1710,7 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
  * FLIGHT's judgement. Routine pipeline steps (CI, review and merge moving, a park the engine
  * clears) are in the digest but not here; a timed signal wakes FLIGHT when one stands still.
  */
-export function wakeFacts(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-): string {
+export function wakeFacts(s: FlightState & TeamsDigestState): string {
   const { free, startable } = startableFor(s);
   // a review just queued waits for its seat to start it; only one that has stood still is a fault
   // The engine re-routes a queued review to the seat `reviewerOf` picks, so an idle seat with no queue
@@ -1732,7 +1726,6 @@ export function wakeFacts(
       .map((s) => `${s.kind}:${s.key}`)
       .sort(),
     triage: s.triage.map((t) => `${t.ref}:${t.cause}`).sort(),
-    discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
     planned: (s.planned ?? [])
       .filter((p) => p.minutesFromNow <= 0)
       .map((p) => [p.id, p.dueAt, p.kind, p.target, p.label]),
@@ -1825,15 +1818,12 @@ const flightParkKind = (kind: string): boolean =>
     (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind));
 
 /** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
-export function pending(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-): boolean {
+export function pending(s: FlightState & TeamsDigestState): boolean {
   return (
     s.retrospective !== undefined ||
     s.signals.some((s) => !s.told) ||
     s.triage.length > 0 ||
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
-    (s.discussions?.length ?? 0) > 0 ||
     (s.teamsDigest?.matches.length ?? 0) > 0 ||
     s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
     s.questions.length > 0 ||
@@ -1925,7 +1915,7 @@ export function routineOnly(
     const added = [...now].filter((v) => !old.has(v));
     const removed = [...old].filter((v) => !now.has(v));
     if (added.length === 0 && removed.length === 0) continue;
-    // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
+    // settling a question or a park is FLIGHT's own work, not a new reason; only the
     // breaker's lift is, as a lift alone wakes FLIGHT
     if (
       added.length === 0 &&
