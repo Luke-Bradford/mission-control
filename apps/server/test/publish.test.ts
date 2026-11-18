@@ -3254,6 +3254,25 @@ describe("pushesFrom", () => {
     expect(await from(noUser, [])).toBe(false);
   });
 
+  it("asks again after a pause when the first read did not yet show the push", async () => {
+    let t = 1_000_000;
+    let body: unknown[] = [];
+    const p = createPublisher(
+      deps({
+        now: () => t,
+        gh: async () => ({ code: 0, stdout: JSON.stringify(body), stderr: "" }),
+      }),
+    );
+    // GitHub's activity has not caught up with the PR yet
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(false);
+    body = [push(A, B, "op")];
+    // inside the pause the no is kept; after it the chain is read again and proven
+    t += 1000;
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(false);
+    t += 60_000;
+    expect(await p.pushesFrom(run(), A, B, ["op"])).toBe(true);
+  });
+
   it("reads the activity once for a run, push and head, keeps nothing for a failed read, and lets go when the run ends", async () => {
     const seen: string[] = [];
     const p = createPublisher(deps({ gh: answering([push(A, B, "op")], seen) }));

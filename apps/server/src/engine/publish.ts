@@ -833,7 +833,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   const unfetchable = new Map<string, number>();
   const FETCH_RETRY_MS = 30_000;
   /** `run:push:head` to whether the pushes between them were all by an allowed account. */
-  const pushChains = new Map<string, boolean>();
+  const pushChains = new Map<string, { ok: boolean; at: number }>();
   /** The login gh acts as, once read. */
   let ghUser: string | undefined;
   async function ghLogin(): Promise<string[]> {
@@ -1256,10 +1256,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const branch = ownBranch(run);
       if (repo === undefined || branch === null || !SHA.test(ancestor) || !SHA.test(head))
         return false;
-      // the answer for a push and head does not change; a failed read is not kept
+      // A proven chain does not change. A "no" may be GitHub's activity lagging behind the PR
+      // poll, so it is kept only for a short pause and then read again; a failed read is not kept.
       const key = `${run.id}:${ancestor}:${head}`;
+      const nowMs = (deps.now ?? Date.now)();
       const known = pushChains.get(key);
-      if (known !== undefined) return known;
+      if (known !== undefined && (known.ok || nowMs - known.at < FETCH_RETRY_MS)) return known.ok;
       // with no aliases configured, the operator is the account gh acts as
       const allowed = (logins.length > 0 ? logins : await ghLogin()).map((l) => l.toLowerCase());
       if (allowed.length === 0) return false;
@@ -1294,7 +1296,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           break;
         tip = push.before;
       }
-      pushChains.set(key, ok);
+      pushChains.set(key, { ok, at: nowMs });
       return ok;
     },
 
