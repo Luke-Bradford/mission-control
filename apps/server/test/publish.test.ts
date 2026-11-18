@@ -682,14 +682,7 @@ describe("ciExcerpt", () => {
     ];
     const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
     expect(out).toBe("test (attempt 1, which failed; a re-run is going):\nboom");
-    expect(ghCalls[1]).toEqual([
-      "run",
-      "view",
-      "--repo=o/mc",
-      "11",
-      "--attempt=1",
-      "--log-failed",
-    ]);
+    expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
   });
 
   it("says no failed run for a first attempt that is still running", async () => {
