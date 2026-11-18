@@ -295,7 +295,10 @@ describe("state step", () => {
     expect(r.actions.map((action) => action.kind)).toEqual(
       expect.arrayContaining(["end-run", "take-next"]),
     );
-    const review = { phase: "parked" as const, parked: { kind: "review", reason: "r", ended: false } };
+    const review = {
+      phase: "parked" as const,
+      parked: { kind: "review", reason: "r", ended: false },
+    };
     expect(reconcile(snap({}, review)).loop).toEqual({ ...NEW_LOOP, ...review });
   });
 
