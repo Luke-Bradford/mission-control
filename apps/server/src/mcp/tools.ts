@@ -2631,7 +2631,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         };
       }
 
-      const newest = store.newestRunCommit(currentRun.id);
+      const newest = store.newestAuthoredCommit(currentRun.id);
       const reported = store.latestEvidence(currentRun.id);
       const fresh =
         newest !== null &&

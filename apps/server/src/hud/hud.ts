@@ -840,7 +840,7 @@ function buildCrew(
         work:
           agent.kind === "crew" && latest
             ? {
-                commits: store.runCommits(latest.id).length,
+                commits: store.authoredCommitCount(latest.id),
                 denials: store.guardHitCount(latest.id),
               }
             : null,

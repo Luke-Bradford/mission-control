@@ -3790,6 +3790,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       store.upsertRun(run);
       handoffWorktrees.set(runId, checkout.path);
       if (handoff && !readOnly && !planner) {
+        // a commit someone else made stays outside the hub's own after any number of handoffs
+        const followed = store.followedCommits(handoff.runId);
         for (const sha of handoffCommits)
           store.addRunCommit({
             runId,
@@ -3797,6 +3799,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             branch: checkout.branch,
             sha,
             at: startedAt,
+            followed: followed.has(sha),
           });
         const old = store.seatSession(handoff.fromSeat);
         if (
