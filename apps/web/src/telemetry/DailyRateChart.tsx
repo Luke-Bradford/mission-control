@@ -25,6 +25,7 @@ export function DailyRateChart({
   rolling,
   rollingName,
   barName,
+  gapText,
   max,
   ticks,
   format,
@@ -36,6 +37,8 @@ export function DailyRateChart({
   rolling?: (number | null)[];
   rollingName?: string;
   barName: string;
+  /** What this measure means when its day has no observations. */
+  gapText: string;
   max: number;
   ticks: number[];
   format: (v: number) => string;
@@ -66,7 +69,7 @@ export function DailyRateChart({
     pen = true;
   });
   const aria = `${label}: ${days
-    .map((d, i) => `${dayText(i)} ${d.v === null ? "no data" : format(d.v)}`)
+    .map((d, i) => `${dayText(i)} ${d.v === null ? gapText : format(d.v)}`)
     .join(", ")}`;
   const hit = sel === null ? null : (days[sel] ?? null);
   return (
@@ -127,7 +130,7 @@ export function DailyRateChart({
           title={dayText(sel)}
           rows={
             hit.v === null
-              ? [{ key: "none", name: "No data", value: "—" }]
+              ? [{ key: "none", name: gapText, value: "—" }]
               : [
                   { key: "bar", name: barName, value: format(hit.v) },
                   ...(hit.detail ? [{ key: "count", name: "PRs", value: hit.detail }] : []),

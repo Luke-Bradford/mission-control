@@ -95,6 +95,26 @@ function open(
           seat: "dev-1",
           model: null,
         },
+        {
+          repoId: "shop-app",
+          issueNumber: 42,
+          prNumber: 31,
+          via: "commit",
+          filedAt: NOW - DAY,
+          mergedAt: NOW - 3 * DAY,
+          seat: "dev-1",
+          model: null,
+        },
+        {
+          repoId: "shop-app",
+          issueNumber: 43,
+          prNumber: 32,
+          via: "pr",
+          filedAt: NOW - DAY,
+          mergedAt: NOW - 3 * DAY,
+          seat: "dev-1",
+          model: null,
+        },
       ],
     },
   };
@@ -166,7 +186,8 @@ describe("Telemetry, Quality tab", () => {
     expect(tip.textContent).toContain("55%");
     expect(tip.textContent).toContain("50 of 100 PRs");
     fireEvent.pointerEnter(slots[2]?.querySelector(".hit") as Element);
-    expect(document.querySelector("#qCi .tip")?.textContent).toContain("No data");
+    expect(document.querySelector("#qCi .tip")?.textContent).toContain("No merged PRs that day");
+    expect(document.querySelector("#qCi .tip")?.textContent).not.toContain("No data");
     fireEvent.pointerLeave(slots[2]?.querySelector(".hit") as Element);
     fireEvent.focus(document.querySelector("#qCi svg") as Element);
     expect(document.querySelector("#qCi .tip")?.textContent).toContain("100%");
@@ -226,6 +247,13 @@ describe("Telemetry, Quality tab", () => {
     expect(screen.getByRole("link", { name: "shop-app#41" }).getAttribute("href")).toBe(
       "/tickets/shop-app/41",
     );
+    const table = screen.getByRole("table", { name: "Escaped defects" });
+    expect(within(table).getByText("How it was linked")).toBeTruthy();
+    expect(within(table).getByText("Names the PR")).toBeTruthy();
+    expect(within(table).getByText("Names a commit of the PR")).toBeTruthy();
+    expect(within(table).getByText("Touches a file only this PR changed")).toBeTruthy();
+    for (const via of ["pr", "commit", "file"])
+      expect(within(table).queryByText(new RegExp(`^${via}$`))).toBeNull();
   });
 
   it("gives each missing summary figure its reason, on focus and in its name", async () => {

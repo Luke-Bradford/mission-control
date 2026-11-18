@@ -1,6 +1,7 @@
 import {
   FLOW_DAYS,
   GUARD_RULES,
+  type DefectVia,
   type GuardHitsView,
   type GuardRule,
   type QaFlowView,
@@ -31,6 +32,15 @@ export const QUALITY_RANGE = "7d";
 const WINDOW = `${FLOW_DAYS}d`;
 /** Quality rows name server-local calendar days, represented at UTC midnight for formatting. */
 const QUALITY_DAY_TZ = "UTC";
+const GAP_TEXT = {
+  ci: "No merged PRs that day",
+  firstPass: "No reviewed PRs that day",
+} as const;
+const DEFECT_LINK_TEXT: Record<DefectVia, string> = {
+  pr: "Names the PR",
+  commit: "Names a commit of the PR",
+  file: "Touches a file only this PR changed",
+};
 
 export const QUALITY_SUMMARY_COUNT = 6;
 
@@ -194,6 +204,7 @@ function RatePanel({
           rolling={rolled}
           rollingName={`${ROLLING_DAYS}-day rolling rate`}
           barName={barName}
+          gapText={GAP_TEXT[measure]}
           max={100}
           ticks={[0, 50, 100]}
           format={(v) => percent(v)}
@@ -235,6 +246,7 @@ function RoundsPanel({ t }: { t: Telemetry | undefined }) {
             detail: p.rounds ? `${p.rounds.total} reviewed PRs` : null,
           }))}
           barName="Rounds per PR"
+          gapText="No reviewed PRs that day"
           max={Math.ceil(peak)}
           ticks={[0, Math.ceil(peak) / 2, Math.ceil(peak)]}
           format={(v) => v.toFixed(1)}
@@ -341,7 +353,7 @@ function EscapedTable({ res }: { res: Resource<QaFlowView> }) {
               <tr>
                 <th>Defect</th>
                 <th>Merged PR</th>
-                <th>How found</th>
+                <th>How it was linked</th>
                 <th>Seat</th>
                 <th>Model</th>
                 <th>Found</th>
@@ -356,7 +368,7 @@ function EscapedTable({ res }: { res: Resource<QaFlowView> }) {
                     </a>
                   </td>
                   <td>#{r.prNumber}</td>
-                  <td>{r.via}</td>
+                  <td>{DEFECT_LINK_TEXT[r.via]}</td>
                   <td>{r.seat ?? DASH}</td>
                   <td>{r.model ?? DASH}</td>
                   <td>{dayMonth(r.filedAt, tz)}</td>
