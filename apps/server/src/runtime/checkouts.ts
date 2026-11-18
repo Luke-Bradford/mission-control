@@ -1584,24 +1584,63 @@ export async function installAfterSync(
   }
 }
 
-/** The worktree under the crew root that has `branch` checked out, else null. */
-async function managedWorktreeOf(
+/** Managed worktrees under the crew root for the supplied ticket branches. */
+async function managedWorktreesOf(
   inClone: (args: string[], timeoutMs?: number) => Promise<string>,
-  branch: string,
+  branches: ReadonlySet<string>,
   worktreesRoot: string,
-): Promise<string | null> {
+): Promise<{ path: string; branch: string }[]> {
   const root = await realpath(worktreesRoot).catch(() => null);
-  if (root === null) return null;
+  if (root === null) return [];
   const listed = await inClone(["worktree", "list", "--porcelain"]).catch(() => "");
+  const worktrees: { path: string; branch: string }[] = [];
   for (const block of listed.split("\n\n")) {
     const lines = block.split("\n");
-    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
-    const found = lines.find((l) => l.startsWith("worktree "))?.slice(9);
-    if (found === undefined) continue;
-    const actual = await realpath(found).catch(() => null);
-    if (actual !== null && actual !== root && isInside(actual, root)) return found;
+    const ref = lines.find((line) => line.startsWith("branch refs/heads/"))?.slice(18);
+    if (ref === undefined || !branches.has(ref)) continue;
+    const worktreePath = lines.find((l) => l.startsWith("worktree "))?.slice(9);
+    if (worktreePath === undefined) continue;
+    const actual = await realpath(worktreePath).catch(() => null);
+    if (actual !== null && actual !== root && isInside(actual, root)) {
+      worktrees.push({ path: worktreePath, branch: ref });
+    }
   }
-  return null;
+  return worktrees;
+}
+
+/** A stopped ticket branch must not be discarded when an open PR selects another branch. */
+async function stoppedTicketWorktreeBlock(
+  path: string,
+  branch: string,
+  targetBranch: string,
+  common: string,
+  baseSha: string,
+): Promise<string | null> {
+  const gitDir = await adminDirOf(common, path);
+  if (gitDir === null) return `the stopped ticket worktree for ${branch} is no longer a worktree`;
+  const git = (args: string[]) =>
+    crewGit(path, args, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+  const status = await git([
+    "--no-optional-locks",
+    "-c",
+    "core.quotePath=true",
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  if (status.trim() !== "")
+    return `the stopped ticket worktree for ${branch} has uncommitted changes; continue it or clean it before starting ${targetBranch}`;
+  const head = (await git(["rev-parse", "--verify", "HEAD"])).trim();
+  const reachesBase = await git(["merge-base", "--is-ancestor", head, baseSha]).then(
+    () => true,
+    (e: unknown) => {
+      if ((e as { code?: unknown } | null)?.code === 1) return false;
+      throw e;
+    },
+  );
+  return reachesBase
+    ? null
+    : `the stopped ticket worktree for ${branch} has commits not in the default branch; continue it before starting ${targetBranch}`;
 }
 
 /**
@@ -1630,7 +1669,19 @@ export async function prepareCheckout(
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
   // the ticket's branch may sit in a managed worktree another seat left behind when its run
   // stopped: this run carries on there, with its uncommitted files
-  const path = (await managedWorktreeOf(inClone, branch, i.worktreesRoot)) ?? own;
+  const ticketWorktrees = await managedWorktreesOf(inClone, ticket?.branches ?? new Set(), i.worktreesRoot);
+  for (const worktree of ticketWorktrees) {
+    if (worktree.branch === branch) continue;
+    const blocked = await stoppedTicketWorktreeBlock(
+      worktree.path,
+      worktree.branch,
+      branch,
+      common,
+      baseSha,
+    );
+    if (blocked !== null) throw new CheckoutError("worktree", blocked);
+  }
+  const path = ticketWorktrees.find((worktree) => worktree.branch === branch)?.path ?? own;
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 

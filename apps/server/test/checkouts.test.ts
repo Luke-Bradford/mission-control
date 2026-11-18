@@ -303,6 +303,28 @@ describe("prepareCheckout", () => {
     expect(readFileSync(join(next.path, "wip.txt"), "utf8")).toBe("unfinished\n");
   });
 
+  it("refuses to replace a stopped ticket's dirty worktree with a different open PR branch", async () => {
+    const first = await prepareCheckout(input());
+    commit(first.path, { "pushed.txt": "on the stopped branch\n" });
+    git(first.path, "push", "-q", "origin", first.branch);
+    writeFileSync(join(first.path, "wip.txt"), "keep this work\n");
+    const prBranch = "feature/42-pr-head";
+    git(seed, "checkout", "-q", "-b", prBranch);
+    commit(seed, { "pr.txt": "open PR head\n" });
+    git(seed, "push", "-q", "origin", prBranch);
+
+    const e = await fail(
+      prepareCheckout({
+        ...input(),
+        seatId: "inco",
+        openPullRequestBranches: [prBranch],
+      }),
+    );
+
+    expect(e.message).toContain("stopped ticket worktree");
+    expect(readFileSync(join(first.path, "wip.txt"), "utf8")).toBe("keep this work\n");
+  });
+
   it.each([false, true])("refuses helper config on reuse=%s", async (reuse) => {
     if (reuse) await prepareCheckout(input());
     git(clone, "config", "diff.x.textconv", "sentinel-helper");
