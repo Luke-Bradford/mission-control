@@ -494,7 +494,7 @@
 .as-cell {
   flex: 1 1 0;
   min-width: 0;
-  padding: 2px var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
   border-left: 1px solid var(--line);
 }
 .as-cap {
@@ -640,7 +640,7 @@
   text-overflow: ellipsis;
 }
 .as-files .as-frow > td {
-  padding-block: 2px;
+  padding-block: var(--sp-1);
 }
 .as-pathbtn {
   all: unset;
@@ -688,4 +688,10 @@
 .as-scroll .as-hrow > td,
 .as-scroll .as-prow > td {
   padding-block: var(--sp-1);
+}
+/* The HUD gives every table row a minimum height; these compact rows size to their content. */
+.as-scroll tr.as-frow,
+.as-scroll tr.as-hrow,
+.as-scroll tr.as-prow {
+  height: auto;
 }
