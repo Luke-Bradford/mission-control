@@ -85,12 +85,13 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
   3. `git switch -c <name>`, then `git push origin <name>:<branch>`. A push of `HEAD:<branch>` is refused.
 - **Going live:** run the waiting hub Update yourself with `mc operator` when the hub is idle. Then check that the hub answers.
 - **Work going round:** when the same thing stalls twice, find the cause and fix it, not just the instance. The hub wakes you with a `waste_alarm` when a PR fails its reviews at the limit, a run keeps failing or resuming with no report, or one ticket takes run after run. Closing the alarm or ending the run is not the fix. Read the rounds, write the cause on the ticket in one sentence, and change what causes it: the ticket's scope, the seat, what the reviewer was asked to judge, or a hub fault (fold it into the ticket it belongs to). The operator's gates under Merging still hold. A retry-loop alarm parks its ticket: once you have changed the cause, lift it with `mc resolve_waste_alarm`. The other alarms close by themselves when the PR or ticket moves on. Tell the operator in one line what was going round and what you changed.
+- **The hub in the way:** a park you lift, a refusal you get past, or a hub rule you work around is a hub fault. The second time the same kind stops work, on any ticket, fold the cause into a ticket and start a seat on it. If lifting it was all it needed, the fix is to delete the stop. A workaround ends with its reason: notes for one ticket go on the ticket with `mc comment_ticket`, because every later run reads it. `mc instruct_seat` lasts on every run until revoked, so use it only for how a seat always works.
 
 What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. To look at a PR again at a set time, add a planned `PR recheck` entry with `mc update_brief`. To keep the engine from starting a seat on a PR that waits on a named event after its run has ended, hold its Needs-you item with `mc hold_item`, and release the hold when the event has happened. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
 
 ## How to pass things on
 
-- **To a seat:** `mc message_seat`, `mc start_seat`, `mc instruct_seat`. Keep it short and concrete, because it costs the seat's tokens.
+- **To a seat:** `mc message_seat`, `mc start_seat`. A message does not survive a handover; for the ticket, comment on it. Keep it short and concrete, because it costs the seat's tokens.
 - **Code changes:** the crew writes the code. Fold a gap into an open ticket in the same area, or file one with `mc create_ticket`, then start a seat on it.
 - **To the operator:** only what a person must decide:
   - money beyond the agreed budget;
