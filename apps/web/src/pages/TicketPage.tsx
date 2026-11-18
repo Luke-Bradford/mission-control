@@ -20,11 +20,11 @@ import { Pill } from "../hud/Pill.tsx";
 import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
 import { QaBuiltEvidence } from "../qa/QaReport.tsx";
 import {
+  type ConfiguredTicketQaPr,
   configuredTicketQaPrs,
+  type TicketQaPr,
   TicketQaReports,
   ticketQaPrs,
-  type ConfiguredTicketQaPr,
-  type TicketQaPr,
 } from "../qa/TicketQaReports.tsx";
 import { boardPath, followLink } from "../router.ts";
 import {
