@@ -233,6 +233,14 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
       expect(restarted()).toEqual([]);
     });
 
+    it("opens when the re-plan has the same timestamp as the restart", () => {
+      parked();
+      decide(NOW + 2 * MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
     it("ignores a re-plan for another ticket, one before the alarm, or one after the run", () => {
       parked();
       decide(NOW + MIN, "re-plan", "mc#15960 re-planned");

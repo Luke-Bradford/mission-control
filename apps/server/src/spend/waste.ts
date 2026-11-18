@@ -363,7 +363,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     const revived = (r: Run): boolean => {
       const before = developerRuns.filter((x) => x.startedAt < r.startedAt);
       const from = Math.max(a.openedAt, ...before.map((x) => x.startedAt));
-      return rePlans.some((d) => d.at > from && d.at <= r.startedAt && aboutTicket(d.about));
+      return rePlans.some((d) => d.at > from && d.at < r.startedAt && aboutTicket(d.about));
     };
     const startedAfter = developerRuns.filter((r) => r.startedAt > a.openedAt && !revived(r));
     if (startedAfter.length === 0 || done(a.ticket)) continue;
