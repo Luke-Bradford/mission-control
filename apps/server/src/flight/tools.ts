@@ -388,7 +388,6 @@ import {
 import { waitReader } from "../queue/dependencies.ts";
 import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { cleanText } from "../repo/clean.ts";
-import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import { handoffTarget } from "../run/handoffs.ts";
 import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
@@ -409,7 +408,7 @@ import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { recordExternalMerge } from "./merged-line.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
-import { readyBlock, readyEarlyBlock } from "./ready-checks.ts";
+import { prototypeBlock, readyBlock, readyEarlyBlock } from "./ready-checks.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -2252,9 +2251,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       try {
         const ticket = await deps.fetchTicket(repo, issue);
         body = ticket?.body ?? "";
-        const prototypeProblem =
-          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
-        if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
+        const prototypeProblem = prototypeBlock(ref, ticket, repo.github);
+        if (prototypeProblem !== null) return fail(prototypeProblem);
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }

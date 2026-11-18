@@ -2085,13 +2085,13 @@ for the planner, with the operator's `note`) and `signed-off`.
 - `GET /api/plan-assets/:id` returns a kept picture (the operator token is needed, as for other
   pictures). Ids are content hashes, so a picture never changes.
 - `POST /api/plans/:repoId/:issue/approve` (send `{}`) signs the plan off. For a ticket the repo
-  holds, a card in Backlog or Refinement is confirmed in Ready first (the board mover is idempotent and reads GitHub, so a missing or
-  stale cached card is caught; a card already past Ready is left), and only then is the plan marked
+  holds, the card is read live from the board (a card that cannot be read answers `502`, and the cache is
+  refreshed from the live card), then a card in Backlog or Refinement is moved to Ready (a card already past Ready is left), and only then is the plan marked
   signed off. A failed move answers `502` and the plan stays waiting, so it can be approved again. Approve and send back run one at a time
   per ticket, so only one decision stands and the other answers `409`; if the repo's rules cannot be
   read, approve answers `502` and the plan stays waiting. Before moving a card out of Backlog or
   Refinement, approve runs the checks `promote` runs (set-aside label, a run on the ticket, needs,
-  area, open waits); a card that fails them is signed off but left where it is, the answer's
+  area, open waits, a prototype link outside the repo), on the live card and ticket; a card that fails them is signed off but left where it is, the answer's
   `moveError` names the wait, and FLIGHT is told it can promote once the wait clears. A plan that
   holds nothing is recorded and the card stays. `409` when the plan is not waiting for sign-off.
 - `POST /api/plans/:repoId/:issue/send-back` with `{ note }` returns the ticket to the planner with

@@ -15,7 +15,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
-import { readyBlock, readyEarlyBlock } from "../flight/ready-checks.ts";
+import { prototypeBlock, readyBlock, readyEarlyBlock } from "../flight/ready-checks.ts";
 import { flightSeat } from "../flight/seat.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import type { Store } from "../store.ts";
@@ -29,6 +29,8 @@ export interface SignoffDeps {
   /** Moves a card on the board; absent: approval signs off and leaves the card. */
   move?: (m: Move) => Promise<MoveResult>;
   /** Reads the ticket's body, for the checks a card passes before Ready. */
+  /** One card read fresh from the board: approval moves a card only on its live state. */
+  readCard?: (repoId: string, issue: number) => Promise<BoardItem | null>;
   fetchTicket?: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
 }
 
@@ -136,17 +138,19 @@ async function notReadyWhy(
   const early = readyEarlyBlock(deps.store, ref, card);
   if (early !== null) return early;
   const repo = deps.config.repos.find((r) => r.id === repoId);
-  let body: string | null = null;
+  let ticket: TicketView | null = null;
   try {
-    body =
+    ticket =
       repo === undefined || deps.fetchTicket === undefined
         ? null
-        : ((await deps.fetchTicket(repo, card.issueNumber))?.body ?? null);
+        : await deps.fetchTicket(repo, card.issueNumber);
   } catch {
-    body = null;
+    ticket = null;
   }
-  if (body === null) return `${ref} could not be read to check it is ready.`;
-  return readyBlock({ store: deps.store, repoId, ref, card, body, rules });
+  if (ticket === null) return `${ref} could not be read to check it is ready.`;
+  const prototype = prototypeBlock(ref, ticket, repo?.github);
+  if (prototype !== null) return prototype;
+  return readyBlock({ store: deps.store, repoId, ref, card, body: ticket.body, rules });
 }
 
 async function approveOne(
@@ -170,15 +174,37 @@ async function approveOne(
   let moved = false;
   let moveError: string | null = null;
   if (held) {
-    const card = deps.store.board(repoId).find((i) => i.issueNumber === issue);
-    const column = card === undefined ? null : hudColumnOf(card);
-    // the cached card may be missing or stale, so the board mover (idempotent, and it reads GitHub)
-    // confirms Ready; a card already further along is left where it is
-    if (column === null || column === "Backlog" || column === "Refinement" || column === "Ready") {
+    // the card as it is now, not as the last poll saw it: a card that cannot be read live is not
+    // moved on the cache's word
+    const cached = deps.store.board(repoId).find((i) => i.issueNumber === issue);
+    let card: BoardItem | undefined = cached;
+    if (deps.readCard !== undefined) {
+      const fresh = await deps.readCard(repoId, issue).catch(() => null);
+      if (fresh === null)
+        return {
+          ok: false,
+          status: 502,
+          error:
+            "The card could not be read from the board, so the plan is not signed off yet. Try again.",
+        };
+      card = fresh;
+      if (JSON.stringify(fresh) !== JSON.stringify(cached)) {
+        const board = deps.store.board(repoId);
+        deps.store.replaceBoard(repoId, [...board.filter((i) => i.issueNumber !== issue), fresh]);
+      }
+    }
+    if (card === undefined)
+      return {
+        ok: false,
+        status: 502,
+        error: "The card is not on the board, so the plan is not signed off yet. Try again.",
+      };
+    const column = hudColumnOf(card);
+    // the board mover (idempotent) confirms Ready; a card already further along is left where it is
+    if (column === "Backlog" || column === "Refinement" || column === "Ready") {
       // a card leaving Backlog or Refinement passes the checks promote runs; one that fails them is
       // signed off but left where it is, for FLIGHT to promote once the wait clears
-      if (card !== undefined && column !== "Ready")
-        moveError = await notReadyWhy(deps, repoId, plan.ref, card, rules);
+      if (column !== "Ready") moveError = await notReadyWhy(deps, repoId, plan.ref, card, rules);
       if (moveError === null) {
         if (deps.move === undefined)
           return {

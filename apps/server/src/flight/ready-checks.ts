@@ -17,6 +17,7 @@ import {
   waitingOperatorPromoteText,
 } from "@mc/core";
 import { waitReader } from "../queue/dependencies.ts";
+import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import type { Store } from "../store.ts";
 
 /** The operator set it aside with a question, or a run has the ticket. */
@@ -58,4 +59,15 @@ export function readyBlock(i: {
   }
   for (const w of waitReader(store, repoId)(card)) waits.set(w.ref, w.text);
   return waits.size > 0 ? moveWaitsOnText(ref, [...waits.values()]) : null;
+}
+
+/** A prototype link the ticket carries that the repo cannot show (promote and approval alike), or null. */
+export function prototypeBlock(
+  ref: string,
+  ticket: { body: string; prototypeProblem?: string | null } | null,
+  github: string | undefined,
+): string | null {
+  const body = ticket?.body ?? "";
+  const problem = ticket?.prototypeProblem ?? prototypeLinkProblem(body, github);
+  return problem === null ? null : `Not moved: ${ref} ${problem}`;
 }

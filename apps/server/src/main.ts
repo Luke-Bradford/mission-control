@@ -1108,6 +1108,7 @@ export async function main(): Promise<void> {
     reviewShots,
     queueReorder,
     ticketMove: engineBoard.move,
+    ticketRead: engineBoard.read,
     mapRing,
     warmMap: true,
     operatorToken,

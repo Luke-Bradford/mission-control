@@ -558,6 +558,8 @@ export interface AppDeps {
   qaReports?: QaReportService;
   /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
   ticketMove?: SignoffDeps["move"];
+  /** Reads one card live from the board: approving a held plan checks the card as it is now. */
+  ticketRead?: SignoffDeps["readCard"];
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Shared bounded reader; the MCP read handler can use this same instance. */
@@ -4190,6 +4192,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         now,
         rules: deps.repoRules ?? (async () => DEFAULT_REPO_RULES),
         ...(deps.ticketMove === undefined ? {} : { move: deps.ticketMove }),
+        ...(deps.ticketRead === undefined ? {} : { readCard: deps.ticketRead }),
         ...(deps.needsYou === undefined ? {} : { fetchTicket: deps.needsYou.fetchTicket }),
       });
       const planIssue = (raw: string): number =>

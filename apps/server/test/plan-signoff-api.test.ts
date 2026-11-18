@@ -50,8 +50,11 @@ const card = (n: number, status = "Backlog"): BoardItem => ({
 
 const AREAS = { "area:server": ["apps/server/**"] };
 /** The ticket reads as complete: it has Done when. */
+let ticketBody: string;
 const readTicket = async (_repo: unknown, n: number) =>
-  ({ number: n, body: "Body\n\n## Done when\n\n- it works\n" }) as unknown as TicketView;
+  ({ number: n, body: ticketBody }) as unknown as TicketView;
+/** What the live board read returns by issue; undefined reads the cached board, null is a card it cannot find. */
+let live: Map<number, BoardItem | null>;
 
 const parts = (over: Record<string, unknown> = {}) => ({
   asks: "Show plans.",
@@ -72,6 +75,8 @@ beforeEach(() => {
   store = new Store(join(dir, "mc.sqlite"));
   setting = "every";
   rulesFail = false;
+  ticketBody = "Body\n\n## Done when\n\n- it works\n";
+  live = new Map();
   moves = [];
   moveResult = { ok: true, changed: true };
   emitted = [];
@@ -107,6 +112,10 @@ const app = () => {
       moves.push(m);
       return moveResult;
     },
+    ticketRead: async (_repoId, n) =>
+      live.has(n)
+        ? (live.get(n) ?? null)
+        : (store.board("shop-app").find((c) => c.issueNumber === n) ?? null),
     needsYou: needsYou(),
   });
 };
@@ -405,9 +414,8 @@ describe("sign-off", () => {
     await a.close();
   });
 
-  it("a card missing from the cached board is confirmed live before the plan is signed off", async () => {
+  it("a card the live board cannot find is not moved, and the plan stays waiting", async () => {
     store.plans.file("shop-app", 12, parts(), true, NOW);
-    moveResult = { ok: false, reason: "card not on the project" };
     const a = app();
     const res = await a.inject({
       method: "POST",
@@ -415,8 +423,66 @@ describe("sign-off", () => {
       payload: {},
     });
     expect(res.statusCode).toBe(502);
-    expect(moves).toHaveLength(1);
+    expect(moves).toEqual([]);
     expect(store.plans.get("shop-app", 12)?.state).toBe("awaiting-signoff");
+    await a.close();
+  });
+
+  it("a card that is only in the live board is checked like any other", async () => {
+    store.plans.file("shop-app", 12, parts(), true, NOW);
+    live.set(12, card(12));
+    const a = app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/12/approve",
+      payload: {},
+    });
+    expect(res.json()).toMatchObject({ moved: true, moveError: null });
+    expect(moves).toHaveLength(1);
+    await a.close();
+  });
+
+  it("the live card decides: a cached card that is fine but live has no area is signed off and left", async () => {
+    store.plans.file("shop-app", 7, parts(), true, NOW);
+    live.set(7, { ...card(7), labels: [] });
+    const a = app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/7/approve",
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ moved: false });
+    expect(res.json().moveError).toContain("area");
+    expect(moves).toEqual([]);
+    expect(store.plans.get("shop-app", 7)?.state).toBe("signed-off");
+    await a.close();
+  });
+
+  it("a card already further along live is not moved, whatever the cache says", async () => {
+    store.plans.file("shop-app", 7, parts(), true, NOW);
+    live.set(7, card(7, "In progress"));
+    const a = app();
+    await a.inject({ method: "POST", url: "/api/plans/shop-app/7/approve", payload: {} });
+    expect(moves).toEqual([]);
+    expect(store.plans.get("shop-app", 7)?.state).toBe("signed-off");
+    await a.close();
+  });
+
+  it("a ticket linking a prototype outside the repo is signed off but not moved", async () => {
+    store.plans.file("shop-app", 7, parts(), true, NOW);
+    ticketBody =
+      "Body\n\n## Done when\n\n- it works\n\nPrototype: [working copy](https://private.example/proto)\n";
+    const a = app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/7/approve",
+      payload: {},
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ moved: false });
+    expect(res.json().moveError).toMatch(/^Not moved: shop-app#7 /);
+    expect(moves).toEqual([]);
     await a.close();
   });
 
