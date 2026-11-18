@@ -766,6 +766,8 @@
 .as-meas .as-v {
   flex-wrap: nowrap;
   align-items: baseline;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .as-dot {
   color: var(--accent);

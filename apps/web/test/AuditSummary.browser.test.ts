@@ -26,10 +26,24 @@ function api(options: Options = {}) {
     files: options.files ?? CODE_HEALTH_OVERVIEW_FILES_MAX,
     outside: options.outside,
     longPath: options.longPath,
-    rowOver: (n) =>
-      options.long
+    rowOver: (n) => {
+      const text = options.long
         ? { title: `${long}${n}`, observation: `${long.repeat(3)}${n}`, uncertainty: long }
-        : {},
+        : {};
+      // Row 2 has no measure and no target: its Measure cell must still be at most two lines.
+      return n === 2
+        ? {
+            ...text,
+            measure: undefined,
+            target: {
+              metric: "maximum reported review round for this PR",
+              direction: "decrease" as const,
+              baseline: null,
+              value: null,
+            },
+          }
+        : text;
+    },
   });
   return { ...codeHealthBrowserApi(at), "/api/code-health/overview?repo=sample&window=30d": over };
 }
@@ -156,6 +170,12 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
       decClipped: [...document.querySelectorAll(".as-rec .as-dec div")]
         .filter((e) => e.scrollWidth > e.clientWidth)
         .map((e) => e.textContent),
+      measureLines: (() => {
+        const cell = document.querySelectorAll(".as-do tr.as-rec")[1]?.querySelector(".as-meas");
+        if (!cell) return 0;
+        const lh = Number.parseFloat(getComputedStyle(cell).lineHeight) || 16;
+        return Math.round(cell.getBoundingClientRect().height / lh);
+      })(),
       truncatedMeta: [...document.querySelectorAll(".as-hrow .as-fmeta")].filter(
         (e) => e.scrollWidth > e.clientWidth,
       ).length,
@@ -210,6 +230,9 @@ describeRendered("Audit first screen in a real browser", () => {
               expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.truncatedMeta, "no figure unit or window is cut off").toBe(0);
             expect(m.cutRow, "Do next ends on a whole row").toBe(0);
+            expect(m.measureLines, "row 2's Measure cell is at most two lines").toBeLessThanOrEqual(
+              2,
+            );
             expect(m.decClipped, "owner, state and review date are not clipped").toEqual([]);
             expect(m.verdictTop, "the verdict is the first line under the nav").toBeLessThan(90);
             expect(m.verdictBeside, "Repo and the window control sit on the verdict line").toBe(

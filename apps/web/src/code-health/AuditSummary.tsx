@@ -115,9 +115,25 @@ function Measure({ row }: { row: CodeHealthRecommendation }) {
         >
           {now === null ? "○" : "●"}
         </span>
-        <span>{now === null ? "— unknown" : num(now)}</span>
+        <span>
+          {now === null ? (
+            <>
+              —<span className="sr-only"> unknown</span>
+            </>
+          ) : (
+            num(now)
+          )}
+        </span>
         <span aria-hidden="true">→</span>
-        <span>{target === null ? "target not set" : num(target)}</span>
+        <span>
+          {target === null ? (
+            <>
+              no target<span className="sr-only"> set</span>
+            </>
+          ) : (
+            num(target)
+          )}
+        </span>
       </span>
     </div>
   );
