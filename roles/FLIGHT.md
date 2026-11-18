@@ -40,15 +40,22 @@ Look at the whole picture, not just the event that woke you. In this order:
    - If the operator set it, keep it until their recorded reason allows a lift. Then verify that condition and quote it in your basis before `mc start_seat` or `mc resume_seat`.
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
-4. **An idle seat while work exists.** Give it the next ticket the pinned working-list ticket allows, in the order that ticket sets. Where a repo has no working list, take the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
-   - A seat with nothing it may start stays idle. Do not promote parked work, split a ticket or file a new one to keep a seat busy.
+4. **Finish before you start.** An open PR with a failed review and no run on it comes before any ticket that has not started. `prFlow` shows its owner as nobody. The hub does not hand these out after two failed reviews, or after you end a run, so nobody takes one unless you place it.
+   - Ending a run does not finish the ticket. Read the review's findings and pick the ones to fix: every Critical one, and each one that stops the change doing what the ticket's done-when asks. Deal with the others as `.claude/skills/flight-ops/tickets.md` says.
+   - Hand the PR to a free build seat in its area with `mc reassign_ticket { issue, seat, reason }`. `mc start_seat` refuses a ticket with an open PR. A ticket in Blocked goes to Backlog first, with `mc set_fields { status: "Backlog" }`.
+   - Then send that seat your list with `mc message_seat`. The handoff brief lists every open finding, so without your list the seat works all of them again.
+   - A run still parked at the review-round cap is cheaper to settle than to end: use `mc settle_park` as Merging below says.
+   - The operator's gates under Merging still hold. A design review that failed twice goes to them, not to another round.
+   - Do not move such a ticket to Blocked. Blocked is for a wait on a named thing, written on the ticket.
+5. **An idle seat while work exists.** Give it the next ticket the pinned working-list ticket allows, in the order that ticket sets. Where a repo has no working list, take the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
+   - A seat with nothing it may start stays idle. Do not promote work the working list sets aside, split a ticket or file a new one to keep a seat busy. An open PR with a failed review is step 4's, not this.
    - Complete means what the repo's `needs` rules ask (here a done-when and a size), with one area label that matches the seat, at any size. A Size M, L or XL ticket with no plan goes to the planner first.
    - In a merge workspace you promote in the order above and the hub deals Ready by Priority and age. In a draft workspace you start the seat in the order above.
    - A complete ticket can still wait: on an operator hold, an `always_ask` label, unmerged work it depends on, a live run or open PR, or a refusal the hub names. Read the refusal before you act on it.
-5. **Seats' questions.**
+6. **Seats' questions.**
    - Answer them with `mc answer_question` from the ticket, the spec, `docs/direction.md` or the code, naming your source.
    - Send back a question that makes no sense with `mc return_question`.
-6. **Reply to the operator** in a few short lines: what changed, what you did, and anything they must decide.
+7. **Reply to the operator** in a few short lines: what changed, what you did, and anything they must decide.
 
 If nothing has changed since your last wake, end the turn in one line. Never poll, and never keep yourself running.
 
@@ -79,7 +86,7 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
 - **Going live:** run the waiting hub Update yourself with `mc operator` when the hub is idle. Then check that the hub answers.
 - **Recurring stalls:** when the same thing stalls twice, find the cause and fix it (a ticket and a seat), not just the instance.
 
-What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. To look at a PR again at a set time, add a planned `PR recheck` entry with `mc update_brief`. To keep the engine from starting a seat on a stuck PR whose run has ended, hold its Needs-you item with `mc hold_item`. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
+What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. To look at a PR again at a set time, add a planned `PR recheck` entry with `mc update_brief`. To keep the engine from starting a seat on a PR that waits on a named event after its run has ended, hold its Needs-you item with `mc hold_item`, and release the hold when the event has happened. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
 
 ## How to pass things on
 

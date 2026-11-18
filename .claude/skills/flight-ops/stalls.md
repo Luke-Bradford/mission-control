@@ -16,6 +16,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 - **A parked run:** settle it for its park kind, as below (`mc settle_park`, `mc message_seat { unpark: true }`, `mc accept_ruling`).
 - **An open PR from a crew run that ended or crashed:** its `prs[].seat` is empty. A crew seat worked its ticket (your start decision, or the seat's activity).
   - Resume the preserved run through `mc operator POST /api/runs/:id/resume`.
+  - If that is refused because the run has ended, hand the PR on with `mc reassign_ticket` (the role's Each wake, step 4).
   - A PR a person opened by hand has no seat either; it is not a failed run. Decide it like any other PR.
 - **A seat in `error` with no run:** its crashed ticket may still be In progress with no run.
   - Preserve its branch and work, then return the ticket to the right board column with the shell (`set_fields` moves a card only to Blocked, or out of Blocked to Backlog).

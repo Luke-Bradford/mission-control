@@ -149,7 +149,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
       seatId: null,
       runId: null,
       level: failed.length + resumed.reduce((n, x) => n + x.n, 0),
-      evidence: `${ticket} is parked: ${parts.join("; ")}. FLIGHT takes the next ticket.`,
+      evidence: `${ticket} is parked: ${parts.join("; ")}. It stays parked until FLIGHT resolves this alarm.`,
     });
   }
 
