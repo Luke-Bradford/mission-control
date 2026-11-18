@@ -2556,7 +2556,7 @@ describe("start_seat", () => {
           loop: { ...NEW_LOOP, prNumber: 9 },
         }),
       );
-      const r = await start() as { isError?: boolean };
+      const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
       expect(startCalls.length).toBe(1);
     });
