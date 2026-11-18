@@ -45,8 +45,8 @@ Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`,
 
 | The run says | Cause | Clear it |
 |---|---|---|
-| `have not all passed on this exact commit` | a check listed in the refusal is missing or failed on the head | the hub has already told the seat. If it hasn't acted, `mc message_seat` with the commands the refusal lists. When the seat says it ran them on the head, lift with `mc settle_park { action: "lift" }`. A parked run never pushes, so the engine retries the push only after the lift |
-| `PR #N has head <a>, not <b>` | the hub's copy of the PR is stale, or the push hasn't landed | check the head with `mc read_pr`. Once it shows `<b>`, `mc settle_park { action: "lift" }` |
+| `have not all passed on this exact commit` | a check listed in the refusal is missing or failed on the head | the hub has already told the seat, and the run waits in CI; it does not park. If the seat hasn't acted, `mc message_seat` with the commands the refusal lists. The engine retries the push once the seat reports them run on the head |
+| `PR #N has head <a>, not <b>` | the hub's copy of the PR is stale, or the push hasn't landed | the run waits in CI and moves on by itself once GitHub shows `<b>`. Check the head with `mc read_pr`; if the push never lands, `mc message_seat` the seat to push again |
 | `an earlier PR is open on this branch` | another seat's ended run opened the PR; a seat continues only its own | use `mc gh_write` to close a superseded PR after preserving its work, then return the ticket to its owner |
 | `could not create a worktree for <branch>` (a `start_seat` refusal) | an ended run's worktree still holds the branch | use `mc crew_tidy` on the ended run; preserve dirty work and the branch |
 | `conflicts with main` | main moved under the PR | `mc sync_main { runId }` while the run is in CI or review. If the run stopped, start the ticket again with `mc start_seat`: the new run carries on its branch and PR |
