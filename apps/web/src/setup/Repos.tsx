@@ -147,10 +147,8 @@ function RepoCard({
       const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
         defaultAccountId: account || null,
         guidance,
-        // Left out until it is set or changed, so a save never writes a setting nobody chose.
-        ...(repo.planSignOff !== undefined || planSignOff !== DEFAULT_PLAN_SIGN_OFF
-          ? { planSignOff }
-          : {}),
+        // The control is negotiated by the config read, so older servers keep accepting this body.
+        ...(repo.planSignOff !== undefined ? { planSignOff } : {}),
       });
       toast(`Saved ${repo.id}. Backup: ${result.backup}.`);
       hub.refetch(RESOURCES.config.path);
@@ -195,19 +193,21 @@ function RepoCard({
                 ))}
               </select>
             </label>
-            <label>
-              Plan sign-off
-              <select
-                value={planSignOff}
-                onChange={(e) => setPlanSignOff(e.target.value as PlanSignOff)}
-              >
-                {PLAN_SIGN_OFFS.map((v) => (
-                  <option key={v} value={v}>
-                    {PLAN_SIGN_OFF_LABELS[v]}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {repo.planSignOff !== undefined && (
+              <label>
+                Plan sign-off
+                <select
+                  value={planSignOff}
+                  onChange={(e) => setPlanSignOff(e.target.value as PlanSignOff)}
+                >
+                  {PLAN_SIGN_OFFS.map((v) => (
+                    <option key={v} value={v}>
+                      {PLAN_SIGN_OFF_LABELS[v]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               Checkout folder
               <input value={session?.checkout ?? ""} readOnly placeholder="Observed repo" />

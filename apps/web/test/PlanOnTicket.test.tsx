@@ -8,7 +8,7 @@ import type { Plan, PlansView } from "../src/plans/types.ts";
 import { QaReportRead } from "../src/qa/QaReport.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG } from "./fixtures.ts";
-import { qaReportFixture } from "./qaReportFixture.ts";
+import { qaReportFixture, ticketQaReportFixture } from "./qaReportFixture.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
@@ -68,7 +68,7 @@ const ticket = (): TicketHistory =>
   }) as unknown as TicketHistory;
 
 describe("the signed-off plan beside what was built", () => {
-  it("shows on the ticket page: the proposal against the outcome, with its mockup", async () => {
+  it("shows on the ticket page: the proposal against saved QA evidence, with its mockup", async () => {
     const view: PlansView = {
       pending: [],
       history: [
@@ -77,18 +77,39 @@ describe("the signed-off plan beside what was built", () => {
         plan({ id: "x", ticket: "shop-app#1" }),
       ],
     };
+    const report = ticketQaReportFixture();
+    const ticketWithPr = {
+      ...ticket(),
+      prs: [
+        {
+          number: 40,
+          url: "https://github.com/octo-org/shop-app/pull/40",
+          title: "Cache quotes",
+          state: "open",
+          isDraft: false,
+          branch: "feature/3349-cache-quotes",
+          headSha: "a".repeat(40),
+          createdAt: 1,
+          mergedAt: null,
+          rounds: [],
+          ci: [],
+        },
+      ],
+    } as TicketHistory;
     serve({
       "/api/config": CONFIG,
-      "/api/tickets/shop-app/3349": ticket(),
+      "/api/tickets/shop-app/3349": ticketWithPr,
       "/api/plans?repoId=shop-app": view,
+      "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [report] },
     });
     render(<TicketPage repoId="shop-app" number={3349} />);
     const panel = await screen.findByRole("region", { name: "Signed-off plan" });
     expect(within(panel).getByText("Cache the quote total.")).toBeTruthy();
     expect(within(panel).queryByText("Old idea")).toBeNull();
-    expect(within(panel).getByRole("region", { name: "What was built" }).textContent).toContain(
-      "Quotes load from the cache.",
-    );
+    const built = within(panel).getByRole("region", { name: "What was built" });
+    expect(built.textContent).toContain(report.summary);
+    expect(built.textContent).not.toContain("Quotes load from the cache.");
+    expect(await within(built).findByRole("img", { name: /Built · Overview/ })).toBeTruthy();
     expect(await within(panel).findByRole("img", { name: "Quote mockup" })).toBeTruthy();
   });
 
@@ -104,6 +125,36 @@ describe("the signed-off plan beside what was built", () => {
     render(<TicketPage repoId="shop-app" number={3349} />);
     await screen.findByRole("heading", { name: "Quote cache" });
     expect(screen.queryByRole("region", { name: "Signed-off plan" })).toBeNull();
+  });
+
+  it("says when a signed-off plan has no QA report to compare", async () => {
+    const ticketWithPr = {
+      ...ticket(),
+      prs: [
+        {
+          number: 40,
+          url: "https://github.com/octo-org/shop-app/pull/40",
+          title: "Cache quotes",
+          state: "open",
+          isDraft: false,
+          branch: "feature/3349-cache-quotes",
+          headSha: "a".repeat(40),
+          createdAt: 1,
+          mergedAt: null,
+          rounds: [],
+          ci: [],
+        },
+      ],
+    } as TicketHistory;
+    serve({
+      "/api/config": CONFIG,
+      "/api/tickets/shop-app/3349": ticketWithPr,
+      "/api/plans?repoId=shop-app": { pending: [], history: [plan({})] },
+      "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [] },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    expect(within(panel).getByText("No QA report yet: nothing built to compare.")).toBeTruthy();
   });
 
   it("shows on the QA report, against the report's own result", async () => {

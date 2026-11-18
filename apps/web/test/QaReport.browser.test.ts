@@ -240,4 +240,83 @@ describeRendered("Accountable QA report", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps signed-off mockups and two retained result screenshots inside their panel at 1920x940",
+    async () => {
+      const report = qaReportFixture();
+      const wide = (name: string) => `https://evidence.example/${name}.svg`;
+      report.visual.pairs = [
+        ...report.visual.pairs,
+        { ...report.visual.pairs[0], label: "Planner · 1920×940 · dark" },
+      ];
+      for (const [index, pair] of report.visual.pairs.entries()) {
+        pair.after.url = wide(`after-${index}`);
+        pair.before.url = wide(`before-${index}`);
+      }
+      const api: Record<string, unknown> = qaReportApi(0);
+      api[`/api/qa-reports?repoId=mission-control&prNumber=1011&headSha=${report.headSha}`] = {
+        reports: [report],
+      };
+      api["/api/plans?repoId=mission-control"] = {
+        pending: [],
+        history: [
+          {
+            id: "p1",
+            repoId: "mission-control",
+            ticket: "mission-control#2037",
+            title: "Planner tab",
+            asks: "Show plans for sign-off.",
+            proposed: "Add the Planner tab and compare its mockups with QA evidence.",
+            pictures: [],
+            size: "M",
+            risks: "The retained image needs a bounded preview.",
+            status: "approved",
+            decidedAt: 1,
+          },
+        ],
+      };
+      const asset = (fill: string) => ({
+        contentType: "image/svg+xml",
+        body: `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000"><rect width="1600" height="1000" fill="${fill}"/></svg>`,
+      });
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width: 1920,
+        height: 940,
+        api,
+        assets: {
+          ...qaReportAssets(),
+          [wide("after-0")]: asset("#789"),
+          [wide("before-0")]: asset("#987"),
+          [wide("after-1")]: asset("#678"),
+          [wide("before-1")]: asset("#876"),
+        },
+      });
+      try {
+        await page.boxes(".plan-built-shots img");
+        await page.evaluate(() => document.querySelector(".plan-beside")?.scrollIntoView(), null);
+        expect(
+          await page.evaluate(
+            () =>
+              document.documentElement.scrollWidth <= window.innerWidth &&
+              [...document.querySelectorAll<HTMLImageElement>(".plan-built-shots img")].every(
+                (img) => {
+                  const section = img.closest("section");
+                  return (
+                    !!section &&
+                    img.getBoundingClientRect().right <= section.getBoundingClientRect().right + 0.5
+                  );
+                },
+              ),
+            null,
+          ),
+        ).toBe(true);
+        await page.screenshot(join(SHOTS, "qa-plan-built-1920x940-light.png"));
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

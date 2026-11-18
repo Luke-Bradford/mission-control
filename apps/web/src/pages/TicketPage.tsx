@@ -1,4 +1,10 @@
-import type { ItemDiscussion, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
+import type {
+  ItemDiscussion,
+  QaReport,
+  TicketEvent,
+  TicketHistory,
+  TicketQuestion,
+} from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -11,6 +17,7 @@ import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { SignedOffPlan } from "../plans/SignedOffPlan.tsx";
+import { QaBuiltEvidence } from "../qa/QaReport.tsx";
 import { TicketQaReports } from "../qa/TicketQaReports.tsx";
 import { boardPath, followLink } from "../router.ts";
 import {
@@ -66,6 +73,33 @@ function Field({ label, value }: { label: string; value: string | null }) {
       <dt>{label}</dt>
       <dd>{value || dash}</dd>
     </div>
+  );
+}
+
+/** The newest retained QA result for this ticket's newest PR, for comparison with its plan. */
+function TicketPlanResult({ repoId, prs }: { repoId: string; prs: TicketHistory["prs"] }) {
+  const pr = [...prs].sort((a, b) => b.createdAt - a.createdAt)[0];
+  const resource = useResource<{ reports: QaReport[] }>(
+    pr
+      ? {
+          path: `/api/qa-reports?repoId=${encodeURIComponent(repoId)}&prNumber=${pr.number}`,
+          topic: ["agents", "boards"],
+        }
+      : null,
+  );
+  const report = resource.data?.reports
+    .filter((item) => item.repoId === repoId && item.prNumber === pr?.number)
+    .sort((a, b) => b.registeredAt - a.registeredAt)[0];
+  if (resource.error)
+    return <p className="muted">QA evidence could not be loaded to compare with this plan.</p>;
+  if (!pr || (!resource.loading && !report))
+    return <p className="muted">No QA report yet: nothing built to compare.</p>;
+  if (!report) return <p className="muted">Loading the QA result to compare with this plan…</p>;
+  return (
+    <>
+      <p>{report.summary}</p>
+      <QaBuiltEvidence report={report} />
+    </>
   );
 }
 
@@ -296,23 +330,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
           <SignedOffPlan
             repoId={repoId}
             number={number}
-            built={
-              <>
-                <p className="tk-text">{t.outcome ?? "The ticket has no outcome section."}</p>
-                <p className="muted">
-                  {`${t.doneWhen.filter((d) => d.checked).length} of ${t.doneWhen.length} done-when items checked`}
-                </p>
-                {t.prs.length > 0 && (
-                  <ul aria-label="Pull requests built">
-                    {t.prs.map((p) => (
-                      <li key={p.number}>
-                        <ExternalLink url={p.url}>{`PR #${p.number}`}</ExternalLink> {p.title}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            }
+            built={<TicketPlanResult repoId={repoId} prs={t.prs} />}
           />
           {questions.length > 0 && (
             <Panel id="questionsP" title="Questions" sub="newest first" className="tk-questions">

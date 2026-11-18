@@ -1494,6 +1494,21 @@ describe("Setup › Repos & seats cards", () => {
     });
   });
 
+  it("does not show or save plan sign-off until the server supplies that setting", async () => {
+    load({
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    expect(within(card).queryByLabelText("Plan sign-off")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call?.[1]?.body))).not.toHaveProperty("planSignOff");
+    });
+  });
+
   it("walks all add steps, then atomically onboards the repo and empty crew session", async () => {
     load({
       "POST /api/repos/preview": PREVIEW,
