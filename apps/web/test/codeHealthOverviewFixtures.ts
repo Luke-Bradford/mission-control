@@ -87,8 +87,6 @@ export function overviewFixture(
     /** A 300-character file path, longer than the schema's usual ones. */
     longPath?: boolean;
     past?: number;
-    /** Include the overall findings-per-touch figure, which the server does not send yet. */
-    touch?: boolean;
     tone?: "ok" | "warn" | "unknown";
     waste?: boolean;
   } = {},
@@ -149,8 +147,8 @@ export function overviewFixture(
       const n = i + 1;
       return overviewRow(n, { repoId: repo, ...options.rowOver?.(n) });
     }),
-    // The production builder sends these four; findings per touch is shown as not yet supplied.
-    figures: options.touch ? [merged, hub, rework, cost, touch] : [merged, hub, rework, cost],
+    // The same five figures, in the same order, as the stored overview builder.
+    figures: [merged, hub, rework, cost, touch],
     outside: {
       state: options.outside === undefined ? "not-collected" : "available",
       items: Array.from({ length: options.outside ?? 0 }, (_, i) => ({

@@ -664,20 +664,15 @@ it("says plainly when a row beyond the top three has no evidence in the read", a
   expect(within(dialog).queryByText(/Requested/)).toBeNull();
 });
 
-it("shows findings per touch as not yet supplied until the stored summary carries it", async () => {
+it("shows findings per touch from the stored summary's own figure, with no placeholder", async () => {
   setup();
-  render(<CodeHealth />);
-  await ready();
-  const row = [...document.querySelectorAll("tr.as-hrow")].find((r) =>
-    r.textContent?.includes("Findings per touch"),
-  ) as HTMLElement;
-  expect(row.textContent).toContain("not yet supplied");
-  cleanup();
-  setup(overviewFixture({ touch: true }));
   render(<CodeHealth />);
   await ready();
   const rows = [...document.querySelectorAll("tr.as-hrow")];
   expect(rows).toHaveLength(5);
+  const row = rows.find((r) => r.textContent?.includes("Findings per touch")) as HTMLElement;
+  expect(row.textContent).toContain("1.4");
+  expect(row.textContent).toContain("1.2");
   expect(document.body.textContent).not.toContain("not yet supplied · ");
-  expect(rows.some((r) => r.classList.contains("as-fmissing"))).toBe(false);
+  expect(document.querySelector(".as-fmissing")).toBeNull();
 });

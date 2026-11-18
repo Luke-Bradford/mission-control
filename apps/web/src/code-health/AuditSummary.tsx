@@ -282,9 +282,6 @@ function WasteRow({ row, n }: { row: CodeHealthWasteAlarmRow; n: number }) {
   );
 }
 
-/** The stored summary's overall findings-per-touch figure; until the server supplies it, the row says so. */
-const TOUCH_FIGURE_ID = "findings-per-touch";
-
 function change(f: CodeHealthFigure): string {
   const before = f.comparison?.value ?? null;
   if (f.value === null || before === null) return "no comparison";
@@ -675,17 +672,6 @@ export function AuditSummary({
                       </td>
                     </tr>
                   ))}
-                  {!overview.figures.some((f) => f.id === TOUCH_FIGURE_ID) && (
-                    <tr className="as-hrow as-fmissing">
-                      <td>
-                        Findings per touch
-                        <span className="as-sub as-fmeta">overall ratio</span>
-                      </td>
-                      <td className="as-r as-m">—</td>
-                      <td className="as-r">—</td>
-                      <td>not yet supplied</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </ScrollRegion>
