@@ -1656,6 +1656,24 @@ describe("collectGithub pull requests", () => {
     expect(by.get(12)).toMatchObject({ state: "closed", review: "requested", ci: "pending" });
   });
 
+  it("reads whether each PR comes from a fork and stores it", async () => {
+    const { gql, calls } = stub({
+      prPages: [
+        prPage([
+          pull(1, { isCrossRepository: false }),
+          pull(2, { isCrossRepository: true }),
+          pull(3, { isCrossRepository: "yes" }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(calls.find((c) => c.q.includes("query PullRequests"))?.q).toContain("isCrossRepository");
+    const by = new Map(prs().map((p) => [p.number, p]));
+    expect(by.get(1)?.isCrossRepository).toBe(false);
+    expect(by.get(2)?.isCrossRepository).toBe(true);
+    expect(by.get(3)?.isCrossRepository).toBeUndefined();
+  });
+
   it("stores the head commit's sha and the mergeable state, null when GitHub gives neither", async () => {
     const { gql } = stub({
       prPages: [

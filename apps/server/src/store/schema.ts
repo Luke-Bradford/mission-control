@@ -312,7 +312,8 @@ CREATE TABLE IF NOT EXISTS run_rereads (
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
-  branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, UNIQUE (run_id, sha)
+  branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, followed INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (run_id, sha)
 );
 CREATE TABLE IF NOT EXISTS commit_lines (
   sha TEXT PRIMARY KEY, additions INTEGER, deletions INTEGER

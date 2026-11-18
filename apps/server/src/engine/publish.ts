@@ -110,6 +110,10 @@ export const UPDATE_UP_TO_DATE = "the branch already contains main";
 export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
+/** A fast-forward's answer; `installNote` is a refusal or failure of the install that followed it. */
+export type FastForwardResult =
+  | { ok: true; installNote?: string; commits?: number }
+  | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
   | {
       ok: true;
@@ -191,6 +195,14 @@ export interface Publisher {
   ): Promise<{ ok: true; sha: string } | { ok: false; text: string; transient: boolean }>;
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
+  /**
+   * Whether the pushes that took the run's branch from `ancestor` to `head` were all made by one of
+   * `logins` or the account gh acts as, read from GitHub's push activity for the branch. False
+   * when the read fails or the chain of pushes is not whole.
+   */
+  pushesFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
+  /** A run has ended: what the publisher kept for it is let go. */
+  runEnded(runId: string): void;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
   /** Opens the run's draft PR, or finds the one it already opened. */
@@ -261,6 +273,12 @@ export interface Publisher {
    * a refusal when the worktree cannot be read.
    */
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
+  /**
+   * Fast-forwards `worktree` to `sha`, a commit someone else pushed on top of the run's push
+   * (fetching it when needed). A worktree that is not behind `sha` on the same line, or that
+   * the move would overwrite, is left as it is and refused.
+   */
+  fastForward(run: Run, worktree: string, sha: string): Promise<FastForwardResult>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
   markDraft(run: Run): Promise<PublishResult>;
@@ -811,6 +829,20 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return out;
   }
 
+  /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
+  const unfetchable = new Map<string, number>();
+  const FETCH_RETRY_MS = 30_000;
+  /** `run:push:head` to whether the pushes between them were all by an allowed account. */
+  const pushChains = new Map<string, { ok: boolean; at: number }>();
+  /** The login gh acts as, once read. */
+  let ghUser: string | undefined;
+  async function ghLogin(): Promise<string[]> {
+    if (ghUser === undefined) {
+      const me = await ghJson(["api", "user"], "user");
+      if (!isRefusal(me) && typeof me.login === "string") ghUser = me.login;
+    }
+    return ghUser === undefined ? [] : [ghUser];
+  }
   return {
     async push(run) {
       const r = await pushRun(deps, run.id);
@@ -1195,11 +1227,85 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async isDescendant(run, ancestor, head) {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
-      const result = await inGit(run, async (g) => ({
-        ok: true as const,
-        descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
-      }));
+      const result = await inGit(run, async (g) => {
+        // a commit someone else pushed is not in the clone yet
+        // (one that could not be fetched is asked for again after a short pause, not every poll)
+        const key = `${run.id}:${head}`;
+        const nowMs = (deps.now ?? Date.now)();
+        const failedAt = unfetchable.get(key);
+        if (
+          !(await have(g, head)) &&
+          (failedAt === undefined || nowMs - failedAt >= FETCH_RETRY_MS)
+        ) {
+          const got = await g(["fetch", "--no-tags", "origin", head]).then(
+            () => true,
+            () => false,
+          );
+          if (got) unfetchable.delete(key);
+          else unfetchable.set(key, nowMs);
+        }
+        return {
+          ok: true as const,
+          descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
+        };
+      });
       return result.ok && result.descends;
+    },
+
+    async pushesFrom(run, ancestor, head, logins) {
+      const repo = repoOf(run);
+      const branch = ownBranch(run);
+      if (repo === undefined || branch === null || !SHA.test(ancestor) || !SHA.test(head))
+        return false;
+      // A proven chain does not change. A "no" may be GitHub's activity lagging behind the PR
+      // poll, so it is kept only for a short pause and then read again; a failed read is not kept.
+      const key = `${run.id}:${ancestor}:${head}`;
+      const nowMs = (deps.now ?? Date.now)();
+      const known = pushChains.get(key);
+      if (known !== undefined && (known.ok || nowMs - known.at < FETCH_RETRY_MS)) return known.ok;
+      const listed = await ghJson(
+        [
+          "api",
+          `repos/${repo}/activity?ref=${encodeURIComponent(`refs/heads/${branch}`)}&activity_type=push&per_page=100`,
+        ],
+        "activity",
+      );
+      if (isRefusal(listed) || !Array.isArray(listed)) return false;
+      // the account gh acts as is always the operator's, whatever aliases are configured
+      const allowed = [...logins, ...(await ghLogin())].map((l) => l.toLowerCase());
+      if (allowed.length === 0) return false;
+      type Push = { before?: unknown; after?: unknown; actor?: { login?: unknown } | null };
+      const pushes = listed as Push[];
+      // Who pushed is GitHub's own record; a commit's committer or author is whatever its maker
+      // wrote. The head follows the push only when every push from the run's own to the head was
+      // made by an allowed account.
+      let tip = head;
+      let ok = false;
+      for (let hops = 0; hops <= pushes.length; hops++) {
+        if (tip === ancestor) {
+          ok = true;
+          break;
+        }
+        const push = pushes.find((p) => p.after === tip);
+        const actor = push?.actor?.login;
+        if (
+          push === undefined ||
+          typeof actor !== "string" ||
+          !allowed.includes(actor.toLowerCase()) ||
+          typeof push.before !== "string"
+        )
+          break;
+        tip = push.before;
+      }
+      pushChains.set(key, { ok, at: nowMs });
+      return ok;
+    },
+
+    runEnded(runId) {
+      const prefix = `${runId}:`;
+      for (const key of [...unfetchable.keys()])
+        if (key.startsWith(prefix)) unfetchable.delete(key);
+      for (const key of [...pushChains.keys()]) if (key.startsWith(prefix)) pushChains.delete(key);
     },
 
     async reviewPr(run, number) {
@@ -1535,6 +1641,62 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             if (e[0] === "R" || e[0] === "C") i++;
           }
           return paths;
+        });
+      } catch (e) {
+        return transient(`git failed: ${errText(e)}`);
+      }
+    },
+
+    async fastForward(run, worktree, sha) {
+      if (!SHA.test(sha)) return final("not a commit sha");
+      if (run.branch === null) return final(MERGE_NOT_RUN_BRANCH);
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return final(MERGE_NO_SEAT);
+      const git = deps.git ?? crewGit;
+      const checkout = place.session.checkout;
+      try {
+        return await deps.inClone(checkout, async (): Promise<PublishResult> => {
+          const common = await realpath(join(checkout, ".git"));
+          const gitDir = await adminDirOf(common, worktree);
+          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+          const g: G = (a) => git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+          // only the run's own branch moves; another branch, or a detached HEAD, is left alone
+          const head = await g(["symbolic-ref", "--quiet", "HEAD"]).then(
+            (s) => s.trim(),
+            () => null,
+          );
+          if (run.branch === null || head !== `refs/heads/${run.branch}`) {
+            return final(MERGE_NOT_RUN_BRANCH);
+          }
+          if (!(await have(g, sha))) await g(["fetch", "--no-tags", "origin", sha]);
+          if (!(await have(g, sha))) return final("the new commit could not be fetched");
+          if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {
+            return final("the branch has diverged from the PR's head; it was not changed");
+          }
+          const before = (await g(["rev-parse", "--verify", "HEAD"])).trim();
+          await g(["merge", "--ff-only", "--quiet", sha]);
+          // the moved-in commits may change the lockfile: the worktree's install follows them
+          const gc: G = (a) =>
+            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          let installNote: string | undefined;
+          try {
+            const { defaultBranch, mainSha } = await originNow(gc, null);
+            await fetchMain(gc, defaultBranch, mainSha);
+            installNote = await installAfterSync(
+              checkout,
+              { path: worktree, gitDir, branch: run.branch, baseSha: mainSha },
+              before,
+              deps.config.crew?.worktrees ?? "",
+            );
+          } catch (e) {
+            installNote = `dependencies may have changed; install not run: ${errText(e)}`;
+          }
+          const counted = Number((await g(["rev-list", "--count", `${before}..${sha}`])).trim());
+          return {
+            ok: true,
+            ...(Number.isSafeInteger(counted) ? { commits: counted } : {}),
+            ...(installNote ? { installNote } : {}),
+          };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);

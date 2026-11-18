@@ -2497,8 +2497,8 @@ export class Store {
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
          assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
-         base)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         base, is_cross_repository)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2508,7 +2508,8 @@ export class Store {
          assignees = excluded.assignees, checks = excluded.checks,
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
          additions = excluded.additions, deletions = excluded.deletions,
-         changed_files = excluded.changed_files, base = excluded.base, stale = 0`,
+         changed_files = excluded.changed_files, base = excluded.base,
+         is_cross_repository = excluded.is_cross_repository, stale = 0`,
     );
     const deleteFiles = this.db.prepare("DELETE FROM pr_files WHERE repo_id = ? AND pr_number = ?");
     const addFile = this.db.prepare(
@@ -2626,6 +2627,7 @@ export class Store {
         p.deletions ?? null,
         p.changedFiles ?? null,
         p.base ?? null,
+        p.isCrossRepository == null ? null : p.isCrossRepository ? 1 : 0,
       );
       if (p.mergedAt !== null) {
         const { files: _files, escapedDefects: _defects, ...record } = p;
@@ -3600,6 +3602,7 @@ export class Store {
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
       closingIssues: JSON.parse(r.closing_issues as string) as number[],
+      ...(r.is_cross_repository == null ? {} : { isCrossRepository: r.is_cross_repository === 1 }),
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
       ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
@@ -5562,7 +5565,7 @@ export class Store {
     const row = this.db
       .prepare("SELECT run_id, last_turn_ended_at FROM seat_sessions WHERE seat_id = ?")
       .get(seatId) as { run_id: string | null; last_turn_ended_at: number | null } | undefined;
-    const newest = row?.run_id ? this.newestRunCommit(row.run_id) : null;
+    const newest = row?.run_id ? this.newestAuthoredCommit(row.run_id) : null;
     const committed = newest !== null && newest.at > (row?.last_turn_ended_at ?? 0);
     this.db
       .prepare(
@@ -5576,11 +5579,11 @@ export class Store {
     this.seatQ.setSeatTurnStarted(seatId, at);
   }
 
-  /** Commits since `since`, per agent, joined to their runs. */
+  /** Commits the crew authored since `since` (followed ones left out), per agent, joined to their runs. */
   commitsSince(since: number): { agentId: AgentId; n: number }[] {
     const rows = this.db
       .prepare(`SELECT r.agent_id, COUNT(*) AS n FROM run_commits c
-      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? GROUP BY r.agent_id ORDER BY r.agent_id`)
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? AND c.followed = 0 GROUP BY r.agent_id ORDER BY r.agent_id`)
       .all(since) as Row[];
     return rows.map((r) => ({ agentId: r.agent_id as string, n: r.n as number }));
   }
@@ -5975,13 +5978,15 @@ export class Store {
     branch: string;
     sha: string;
     at: number;
+    /** Someone else's commit the run follows: not one Mission Control or the seat made. */
+    followed?: boolean;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO run_commits (run_id, repo_id, branch, sha, at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO run_commits (run_id, repo_id, branch, sha, at, followed) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(run_id, sha) DO NOTHING`,
       )
-      .run(c.runId, c.repoId, c.branch, c.sha, c.at);
+      .run(c.runId, c.repoId, c.branch, c.sha, c.at, c.followed === true ? 1 : 0);
   }
 
   commitLines(sha: string): { additions: number | null; deletions: number | null } | null {
@@ -6009,7 +6014,7 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT c.run_id, c.repo_id, c.sha, c.at FROM run_commits c
-         WHERE c.at >= ? AND c.at <= ? AND c.id = (
+         WHERE c.at >= ? AND c.at <= ? AND c.followed = 0 AND c.id = (
            SELECT first.id FROM run_commits first
            WHERE first.repo_id = c.repo_id AND first.sha = c.sha ORDER BY first.at, first.id LIMIT 1
          ) ORDER BY c.at, c.id`,
@@ -6027,7 +6032,9 @@ export class Store {
   commitsOnBranch(repoId: RepoId, branch: string): { sha: string; at: number }[] {
     return (
       this.db
-        .prepare("SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? ORDER BY at, id")
+        .prepare(
+          "SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? AND followed = 0 ORDER BY at, id",
+        )
         .all(repoId, branch) as { sha: string; at: number }[]
     ).map((r) => ({ sha: r.sha, at: r.at }));
   }
@@ -6045,13 +6052,29 @@ export class Store {
     return rows.map((r) => r.sha);
   }
 
+  /** How many commits the run itself made (followed ones left out). */
+  authoredCommitCount(runId: string): number {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM run_commits WHERE run_id = ? AND followed = 0")
+      .get(runId) as { n: number };
+    return r.n;
+  }
+
+  /** The run's commits that someone else made and the run only follows (see `addRunCommit`). */
+  followedCommits(runId: string): Set<string> {
+    const rows = this.db
+      .prepare("SELECT sha FROM run_commits WHERE run_id = ? AND followed = 1")
+      .all(runId) as { sha: string }[];
+    return new Set(rows.map((r) => r.sha));
+  }
+
   /** The commits the commit tool made at or after `since`, oldest first, with their run's agent and ticket. */
   runCommitsSince(
     since: number,
   ): { runId: string; agentId: AgentId; sha: string; at: number; ticket: string | null }[] {
     const rows = this.db
       .prepare(`SELECT c.run_id, r.agent_id, c.sha, c.at, r.ticket FROM run_commits c
-      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? ORDER BY c.at, c.id`)
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? AND c.followed = 0 ORDER BY c.at, c.id`)
       .all(since) as Row[];
     return rows.map((r) => ({
       runId: r.run_id as string,
@@ -6070,13 +6093,23 @@ export class Store {
     return r ? { sha: r.sha, at: r.at } : null;
   }
 
+  /** The run's newest commit that it made itself (followed ones left out), else null. */
+  newestAuthoredCommit(runId: string): { sha: string; at: number } | null {
+    const r = this.db
+      .prepare(
+        "SELECT sha, at FROM run_commits WHERE run_id = ? AND followed = 0 ORDER BY id DESC LIMIT 1",
+      )
+      .get(runId) as { sha: string; at: number } | undefined;
+    return r ? { sha: r.sha, at: r.at } : null;
+  }
+
   /**
    * Every commit any run made on `branch`: a later run on the same ticket reuses the branch, and
    * the earlier run's unpushed commits still count as the hub's.
    */
   branchCommits(repoId: RepoId, branch: string): Set<string> {
     const rows = this.db
-      .prepare("SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ?")
+      .prepare("SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ? AND followed = 0")
       .all(repoId, branch) as { sha: string }[];
     return new Set(rows.map((r) => r.sha));
   }
@@ -6094,6 +6127,48 @@ export class Store {
       )
       .get(repoId, branch) as { sha: string } | undefined;
     return first === undefined || last === undefined ? null : { first: first.sha, last: last.sha };
+  }
+
+  /**
+   * The run takes someone else's commit on top of its push as its own push, in one transaction:
+   * the commit (followed, so the merge gate still treats it as from outside the run), the push, a
+   * loop event and a FLIGHT decision that records the hub took it in. Once per run and sha.
+   */
+  adoptFollowedHead(a: {
+    runId: string;
+    repoId: RepoId;
+    branch: string;
+    sha: string;
+    at: number;
+    ticket: string | null;
+    eventKey: string;
+    eventText: string;
+  }): void {
+    this.transaction(() => {
+      this.addRunCommit({
+        runId: a.runId,
+        repoId: a.repoId,
+        branch: a.branch,
+        sha: a.sha,
+        at: a.at,
+        followed: true,
+      });
+      this.setRunPush({ runId: a.runId, sha: a.sha, at: a.at });
+      if (!this.addLoopEvent(a.eventKey, a.runId, a.eventText, a.at)) return;
+      this.addFlightDecision({
+        at: a.at,
+        kind: "settle",
+        // the hub's own call: no seat made it
+        seatId: null,
+        targetRunId: a.runId,
+        ref: a.ticket,
+        questionId: null,
+        about: "followed commit",
+        decision: a.eventText,
+        basis:
+          "The commit was taken as the run's push, so it does not park the run as stuck; the merge gate still counts it as outside the run's own commits.",
+      });
+    });
   }
 
   /** Records that a run's branch is on origin at `sha` (replacing an earlier push of the run). */
