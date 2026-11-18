@@ -268,6 +268,8 @@ describeRendered("The ticket page in a browser", () => {
               performance.now() - start < 2000
             )
               await new Promise((resolve) => setTimeout(resolve, 50));
+            const plan = document.querySelector(".plan-beside")?.getBoundingClientRect();
+            const timeline = document.querySelector(".tk-timeline")?.getBoundingClientRect();
             return (
               document.documentElement.scrollWidth <= window.innerWidth &&
               images.length === 3 &&
@@ -282,9 +284,14 @@ describeRendered("The ticket page in a browser", () => {
                   image.height > 100 &&
                   image.height <= window.innerHeight * 0.3 + 1 &&
                   !!bounds &&
-                  image.right <= bounds.right + 0.5
+                  image.right <= bounds.right + 0.5 &&
+                  !!plan &&
+                  image.bottom <= plan.bottom + 0.5
                 );
-              })
+              }) &&
+              !!plan &&
+              !!timeline &&
+              timeline.top >= plan.bottom
             );
           }, null),
         ).toBe(true);

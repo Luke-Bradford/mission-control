@@ -42,6 +42,11 @@
   min-height: 0;
 }
 
+/* A plan compares retained evidence. It grows with its bounded pictures so the Timeline follows it. */
+.tk-grid .plan-beside > .pb {
+  max-height: none;
+}
+
 .tk-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
