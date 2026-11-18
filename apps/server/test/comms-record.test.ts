@@ -413,7 +413,7 @@ describe("Comms record reads", () => {
     });
   });
 
-  it("links a ticket question to its stored discussion, without inventing one", async () => {
+  it("links a ticket question to its item thread, without inventing one", async () => {
     store.upsertRun(run("r"));
     const withConversation = store.addQuestion({
       agentId: "guido-1",
@@ -428,9 +428,13 @@ describe("Comms record reads", () => {
       at: 2,
     });
     const key = `ask:${withConversation}`;
-    const thread = store.ensureDiscussion(key, "question-version", {
-      text: "The first change.",
+    store.addComms({
       at: 3,
+      from: "operator",
+      to: "flight-1",
+      ticket: null,
+      text: "The first change.",
+      itemKey: key,
     });
     store.answerQuestion(withConversation, 4);
 
@@ -441,8 +445,7 @@ describe("Comms record reads", () => {
         expect.objectContaining({ id: withoutConversation, discussionKey: null }),
       ]),
     );
-    expect((await app.inject({ url: `/api/attention/${key}/discussion` })).json()).toMatchObject({
-      id: thread.id,
+    expect((await app.inject({ url: `/api/attention/${key}/thread` })).json()).toMatchObject({
       messages: [{ text: "The first change." }],
     });
 

@@ -499,14 +499,27 @@ export function telemetry(
     const lockWaits = lockRuns
       .filter((l) => l.seatId === agent.id)
       .map((l): Interval => [Math.max(dayStart, l.queuedAt), Math.min(now, l.startedAt)]);
-    const waits = [
-      ...lockWaits,
-      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["ready", "review"]),
-    ];
-    const blocked = [
-      ...questions,
-      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["blocked"]),
-    ];
+    // A note speaks for the seat only while its own run is the seat's current one: from that
+    // run's start until it ends or the seat starts another run after the note opened (a run
+    // woken from aside keeps its first start, so the note's own opening is the mark). A set-aside
+    // run is off the seat, so its note, open for days, must not hide the seat's live state.
+    const noteIntervals = (kinds: string[]): Interval[] =>
+      store.telemetryNoteEpisodes(agent.id, dayStart, now, kinds).flatMap((e): Interval[] => {
+        const owner = e.runId === null ? null : store.run(e.runId);
+        if (owner === null) return [e.interval];
+        if (owner.loop?.aside) return [];
+        const clipped: Interval = [
+          Math.max(e.interval[0], owner.startedAt),
+          Math.min(
+            e.interval[1],
+            store.nextRunStart(agent.id, Math.max(owner.startedAt, e.openedAt)) ?? Infinity,
+            owner.endedAt ?? Infinity,
+          ),
+        ];
+        return clipped[0] < clipped[1] ? [clipped] : [];
+      });
+    const waits = [...lockWaits, ...noteIntervals(["ready", "review"])];
+    const blocked = [...questions, ...noteIntervals(["blocked"])];
     // Ordinary loop transitions are not recorded. Bound carried state by run activity,
     // using the same foreground/background silence threshold as the HUD.
     const active = runs
@@ -545,7 +558,12 @@ export function telemetry(
       const overlaps = (intervals: Interval[]) =>
         intervals.some(([start, end]) => start < b && end > a);
       const recordedAt = events[eventIndex - 1]?.at ?? -Infinity;
-      const supported = active.some(([start, end]) => start <= recordedAt && start < b && end > a);
+      // A crew seat records every state change, so its last event still holds while any run is
+      // active, even a run (a resume, a later attempt) that began after that event. A loop's
+      // ordinary transitions are not recorded, so its event must predate the run it supports.
+      const supported = active.some(
+        ([start, end]) => (agent.kind === "crew" || start <= recordedAt) && start < b && end > a,
+      );
       const carried = state !== null && state !== "idle" && !supported ? "idle" : state;
       const category =
         overlaps(blocked) ||

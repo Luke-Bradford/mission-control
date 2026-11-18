@@ -161,6 +161,9 @@ const TIME_SHARES = [
   { key: "idle", label: "Idle", cls: "idle" },
 ] as const;
 
+/** Every shape the time bar can draw; Unknown is the share no state accounts for. */
+const TIME_LEGEND = [...TIME_SHARES, { key: "unknown", label: "Unknown", cls: "unknown" }] as const;
+
 function AgentTime({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
   const nameOf = useSeatName();
   const capcom = t?.capcom;
@@ -206,7 +209,7 @@ function AgentTime({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
           })}
         </ul>
         <ul className="readout" aria-label="Agent time shapes">
-          {TIME_SHARES.map((s) => (
+          {TIME_LEGEND.map((s) => (
             <li key={s.key}>
               <i className={`crew-sw st ${s.cls}`} aria-hidden="true" />
               <span className="nm">{s.label}</span>

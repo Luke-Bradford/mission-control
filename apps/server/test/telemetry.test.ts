@@ -1948,12 +1948,184 @@ describe("crew seats", () => {
       });
     });
 
+    describe("a run set aside (never ended, off the seat)", () => {
+      const note = (kind: "blocked" | "review", runId: string) =>
+        store.raiseNote({
+          key: `${kind}:${runId}`,
+          kind,
+          runId,
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: kind,
+          at: at("2026-10-15T09:00:00Z"),
+        });
+      const setAside = (over: Partial<Run> = {}) =>
+        store.upsertRun(
+          run({
+            id: "aside",
+            agentId: "GUIDO-1",
+            startedAt: at("2026-10-15T07:00:00Z"),
+            endedAt: null,
+            loop: { aside: { worktree: "/w/p", wake: false } } as Run["loop"],
+            ...over,
+          }),
+        );
+      const between = () =>
+        store.upsertRun(
+          run({
+            id: "between",
+            agentId: "GUIDO-1",
+            startedAt: at("2026-10-15T10:00:00Z"),
+            endedAt: at("2026-10-15T12:00:00Z"),
+          }),
+        );
+
+      it("does not hide the seat's live work or the idle hours before it", () => {
+        setAside();
+        between();
+        note("blocked", "aside");
+        note("review", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0, idle: 75 });
+      });
+
+      it("is not current even when no run followed it", () => {
+        setAside();
+        note("blocked", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0 });
+      });
+
+      it("a note on a not-aside run left open is still cut off when the seat starts another run", () => {
+        setAside({ loop: null });
+        between();
+        note("blocked", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, blocked: 0 });
+      });
+
+      it("a run woken from aside keeps the hold it raises after waking", () => {
+        ran();
+        setAside({ id: "woken", loop: null });
+        between();
+        store.raiseNote({
+          key: "hold:woken",
+          kind: "blocked",
+          runId: "woken",
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: "held",
+          at: at("2026-10-17T11:00:00Z"),
+        });
+        expect(seatShare()).toMatchObject({ working: 25, blocked: 25 });
+      });
+
+      it("agrees with the chart's running share for the same seat and day", () => {
+        setAside();
+        between();
+        note("blocked", "aside");
+        ran();
+        const t = tel("24h", NOON);
+        const dayStart = at("2026-10-16T23:00:00Z");
+        const running = (t.series?.stateSpans ?? [])
+          .filter((x) => x.agentId === "GUIDO-1" && x.state === "running")
+          .reduce((sum, x) => sum + Math.max(0, x.endedAt - Math.max(x.startedAt, dayStart)), 0);
+        const share = (running / (NOON - dayStart)) * 100;
+        const u = t.utilisation.find((x) => x.agentId === "GUIDO-1");
+        expect(u?.working).toBeCloseTo(share);
+        expect(u?.blocked).toBe(0);
+      });
+    });
+
+    it("a run's blocked note still counts while that run is the seat's latest", () => {
+      ran();
+      store.raiseNote({
+        key: "hold:c1",
+        kind: "blocked",
+        runId: "c1",
+        seatId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "held",
+        at: at("2026-10-17T09:00:00Z"),
+      });
+      expect(seatShare()?.blocked).toBeGreaterThan(0);
+    });
+
     it("an unanswered question blocks until now", () => {
       ask("GUIDO-1", "2026-10-17T13:00:00Z");
       expect(seatShare()).toMatchObject({ working: 0, waiting: 0, blocked: 12.5, unknown: 87.5 });
     });
   });
 
+  it("carries a state recorded before midnight over midnight while a run is active", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    // The seat went running yesterday, and its run has been active since.
+    store.addAgentEvent({
+      agentId: "GUIDO-1",
+      at: midnight - 5 * HOUR,
+      from: "idle",
+      to: "running",
+      text: "state",
+    });
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 5 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 100,
+      unknown: 0,
+    });
+  });
+  it("carries a pre-midnight state when the run started after the last state event", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    store.addAgentEvent({
+      agentId: "GUIDO-1",
+      at: midnight - 5 * HOUR,
+      from: "idle",
+      to: "running",
+      text: "state",
+    });
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 4 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 100,
+      unknown: 0,
+    });
+  });
+  it("still counts a seat with no recorded event at all as unknown", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 4 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 0,
+      unknown: 100,
+    });
+  });
   it("scopes to a seat by id or by its account", () => {
     store.upsertRun(
       run({

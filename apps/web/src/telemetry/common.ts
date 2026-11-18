@@ -22,6 +22,8 @@ export interface Scope {
   all: AgentInfo[];
   /** The agents the Agent and Account selects leave in view. */
   agents: AgentInfo[];
+  /** The Agent select; "" for all. */
+  agent?: string;
   /** The Account select; "" for all. */
   account: string;
   /** The Ticket select; "" for all. */

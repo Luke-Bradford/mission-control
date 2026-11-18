@@ -152,6 +152,7 @@ import type { Move } from "../src/github/board.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { activity } from "../src/hud/views.ts";
 import { externalReviewKey } from "../src/review/external.ts";
+import { inheritedHandoffLoop } from "../src/run/handoffs.ts";
 import {
   type SeatBusy,
   type SeatFacts,
@@ -330,6 +331,14 @@ interface Harness {
   gate: GateFacts | null;
   duringDescendant?: (ancestor: string, head: string) => void;
   gateReads: { sha: string; known: boolean }[];
+  /** How many times a pass asked the publisher for origin's tip. */
+  tipReads: number;
+  /** What one `ls-remote` costs: a tip read, or a gate read that has no shared tip, moves the clock by it. */
+  originLatencyMs: number;
+  /** A transient refusal for the tip read, as when origin is down. */
+  tipError: string | null;
+  /** The shared tip each gate read was handed. */
+  gateTips: (unknown | undefined)[];
   duringGate?: () => void;
   /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
   steps: string[];
@@ -437,6 +446,10 @@ function harness(): Harness {
       webChanged: false,
     },
     gateReads: [],
+    tipReads: 0,
+    originLatencyMs: 0,
+    tipError: null,
+    gateTips: [],
     steps: [],
     stepEnded: {},
     stepResults: {},
@@ -562,8 +575,16 @@ function harness(): Harness {
             rules.some((rule) => globMatches(rule, path, true)),
           );
         },
-        async gateFacts(_r, sha, known): Promise<GateResult> {
+        async originTip() {
+          x.tipReads++;
+          clock += x.originLatencyMs;
+          if (x.tipError !== null) return { ok: false as const, text: x.tipError, transient: true };
+          return { ok: true as const, defaultBranch: "main", mainSha: x.gate?.mainSha ?? x.tip };
+        },
+        async gateFacts(_r, sha, known, tip): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
+          x.gateTips.push(tip);
+          if (tip === undefined) clock += x.originLatencyMs;
           x.duringGate?.();
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
@@ -2900,6 +2921,149 @@ describe("FLIGHT settles a ruling", () => {
     expect(h.rulingReruns).toEqual([]);
   });
 
+  it("accepts a ruling when a moved PR head has green CI and queues review on that head", async () => {
+    await ruled();
+    config.crew?.sessions[0]?.seats.push({
+      id: RETRO,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    setPr({
+      ci: "passing",
+      headSha: SHA_B,
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+      ],
+    });
+
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA_B });
+    expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+    expect(loopOf()).toMatchObject({
+      phase: "review",
+      ciFailedSha: null,
+      parked: null,
+    });
+    expect(store.reviewsOfRun(RUN)).toContainEqual(expect.objectContaining({ sha: SHA_B }));
+    expect(loopTexts()).toContain(reviewQueuedText(SHA_B, "RETRO-1"));
+    expect(loopTexts()).toContain(
+      `CI passed on ${SHA_B.slice(0, 7)} after PR head moved from ${SHA.slice(0, 7)}; FLIGHT accepted the ruling`,
+    );
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({
+        text: expect.stringContaining("Sync your worktree before another rework round."),
+      }),
+    );
+  });
+
+  it.each([
+    ["pending", "pending", "server", "still pending: server"],
+    ["failing", "failing", "server", "failed: server"],
+  ] as const)(
+    "refuses a ruling when a moved PR head has %s checks",
+    async (ci, state, name, message) => {
+      await ruled();
+      setPr({
+        ci,
+        headSha: SHA_B,
+        checks: [{ name, kind: "check", state, conclusion: state, attempt: 1, url: null }],
+      });
+
+      expect(await accept()).toEqual({
+        kind: "not",
+        text:
+          state === "failing"
+            ? `checks on the PR's new head ${SHA_B.slice(0, 7)} ${message}`
+            : `checks on the PR's new head ${SHA_B.slice(0, 7)} are ${message}`,
+      });
+    },
+  );
+
+  it.each([
+    ["pending", "still pending: lint"],
+    ["failing", "failed: lint"],
+  ] as const)("refuses a moved head with a %s non-required check", async (state, message) => {
+    await ruled();
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing repo");
+    repo.requiredChecks = ["server"];
+    setPr({
+      ci: "passing",
+      headSha: SHA_B,
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+        { name: "lint", kind: "check", state, conclusion: state, attempt: 1, url: null },
+      ],
+    });
+
+    expect(await accept()).toEqual({
+      kind: "not",
+      text:
+        state === "failing"
+          ? `checks on the PR's new head ${SHA_B.slice(0, 7)} ${message}`
+          : `checks on the PR's new head ${SHA_B.slice(0, 7)} are ${message}`,
+    });
+  });
+
+  it("accepts a ruling whose same head went green on its own, with no re-run asked for", async () => {
+    await ruled();
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 2,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
+    expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, parked: null });
+    expect(h.rulingReruns).toEqual([]);
+    expect(h.sent).toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining("your ruling is accepted") }),
+    );
+  });
+
+  it("answers pending, and asks for no re-run, while the same head's checks run", async () => {
+    await ruled();
+    setPr({
+      ci: "pending",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "pending",
+          conclusion: "PENDING",
+          attempt: 2,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA });
+    expect(h.rulingReruns).toEqual([]);
+    expect(loopOf().phase).toBe("parked");
+  });
+
   it("refuses a rerun gh would not start, leaving no re-run recorded", async () => {
     await ruled();
     h.rerunResults = [{ ok: false, text: "no failed Actions run", transient: false }];
@@ -4952,6 +5116,104 @@ describe("the engine runs reviews", () => {
         expect(h.steps).not.toContain("merge");
       });
 
+      it("FLIGHT sends a held run back for rework; the hold stays and the run parks at it again", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await h.engine.holdMerge(RUN, "CAPCOM", "reproduced bug");
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        // a plain resume and other settles are still refused
+        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toEqual({
+          lifted: false,
+          reason: "use-merge-hold",
+        });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: [MERGE_HOLD_PARK],
+            action: "rereview",
+          }),
+        ).toEqual({ lifted: false, reason: "use-merge-hold" });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: [MERGE_HOLD_PARK],
+            action: "accept",
+          }),
+        ).toEqual({ lifted: false, reason: "use-merge-hold" });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: [MERGE_HOLD_PARK],
+            action: "rework",
+            note: "Handle the overlapping check runs.",
+          }),
+        ).toEqual({ lifted: true });
+        expect(loopOf()).toMatchObject({ phase: "working", parked: null });
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
+        expect(h.sent.at(-1)?.text).toContain("Handle the overlapping check runs.");
+        // FLIGHT still cannot release the operator's hold
+        expect((await h.engine.releaseMergeHold(RUN, "FLIGHT")).ok).toBe(false);
+        expect(loopOf().mergeHold?.by).toBe("CAPCOM");
+        // the builder fixes it; CI is green and the review is clean on the new head
+        report("Fixed the overlap", SHA_B);
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.reconcileRun(RUN);
+        const review = need(reviewRows().find((r) => r.sha === SHA_B));
+        reported(review.id, []);
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN, "CAPCOM")).toEqual({ ok: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
+      it("a hold follows the PR to the seat that takes the ticket over, and that run cannot merge", async () => {
+        await toReview();
+        await h.engine.holdMerge(RUN, "CAPCOM", "reproduced bug");
+        const source = need(store.run(RUN)?.loop);
+        // the author ends; another seat takes the ticket over on the same branch and PR, in a
+        // distinct run whose loop starts fresh and inherits the hold, as the supervisor starts it
+        store.setRunEnded(RUN, clock, "ok", "engine");
+        seats().push({
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          area: ["apps/**"],
+        });
+        store.upsertRun(run({ id: RUN2, agentId: "guido-2", branch: BRANCH }));
+        seatIdle(RUN2, "guido-2");
+        store.addRunCommit({ runId: RUN2, repoId: REPO, branch: BRANCH, sha: SHA, at: clock });
+        store.setRunPush({ runId: RUN2, sha: SHA, at: clock });
+        store.addEvidence(RUN2, "Fixed it", clock);
+        store.setRunLoop(
+          RUN2,
+          need(
+            inheritedHandoffLoop(source, {
+              ...NEW_LOOP,
+              phase: "ci",
+              prNumber: 12,
+              reportedEvidenceId: 1,
+              pushFor: SHA,
+              pushStartedAt: clock,
+            }),
+          ),
+        );
+        const heldLoop = () => need(store.run(RUN2)?.loop);
+        expect(heldLoop().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
+        setPr({ ci: "passing" });
+        await h.engine.reconcileRun(RUN2);
+        await h.engine.reconcileRun(RUN2);
+        const review = need(store.reviewsOfRun(RUN2)[0]);
+        reported(review.id, []);
+        await vi.waitFor(() => expect(heldLoop().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(h.steps).not.toContain("merge");
+        expect((await h.engine.releaseMergeHold(RUN2, "FLIGHT")).ok).toBe(false);
+        expect(heldLoop().mergeHold?.by).toBe("CAPCOM");
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN2, "CAPCOM")).toEqual({ ok: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
       it("FLIGHT cannot release a hold the operator set; the operator can", async () => {
         await toReview();
         await h.engine.holdMerge(RUN, "CAPCOM", "veto");
@@ -5996,6 +6258,74 @@ describe("the engine runs reviews", () => {
           reason: "merging main into the branch failed",
         });
       });
+    });
+
+    /** Adds `n` more runs to RUN's, each in review on its own PR. */
+    const manyInReview = async (n: number): Promise<string[]> => {
+      const ids = [RUN];
+      for (let i = 0; i < n - 1; i++) {
+        const id = `guido-1:extra-${i}`;
+        const branch = `feature/${100 + i}-extra`;
+        const ticket = `${REPO}#${100 + i}`;
+        const sha = (i + 1).toString(16).padStart(40, "a");
+        const pr = (ci: "pending" | "passing") =>
+          store.upsertPullRequests(
+            REPO,
+            [prRow({ number: 100 + i, branch, ticket, headSha: sha, ci })],
+            clock,
+          );
+        store.upsertRun(run({ id, seq: 10 + i, ticket, branch }));
+        store.addRunCommit({ runId: id, repoId: REPO, branch, sha, at: clock });
+        store.setRunPush({ runId: id, sha, at: clock });
+        store.addEvidence(id, "Changed the thing", clock);
+        pr("pending");
+        await h.engine.reconcileRun(id);
+        pr("passing");
+        await h.engine.reconcileRun(id);
+        ids.push(id);
+      }
+      h.gateReads.length = 0;
+      h.gateTips.length = 0;
+      h.tipReads = 0;
+      return ids;
+    };
+
+    it("reads origin's tip once for a tick with many runs in review", async () => {
+      await toReview();
+      await manyInReview(12);
+      await h.engine.tick();
+      // every run was gated; none read origin itself
+      expect(h.gateReads.length).toBeGreaterThanOrEqual(12);
+      expect(h.tipReads).toBe(1);
+      expect(h.gateTips.filter((t) => t !== undefined).length).toBeGreaterThanOrEqual(12);
+    });
+
+    it("finishes a tick with 12 runs in review inside the interval when each origin read takes 5s", async () => {
+      await toReview();
+      await manyInReview(12);
+      // 12 serial reads would take a minute; one shared read takes 5s
+      h.originLatencyMs = 5000;
+      await h.engine.tick();
+      const tick = tickLogOf(store).recent().at(-1);
+      expect(tick?.durationMs).toBeLessThan(ENGINE_TICK_MS);
+      expect(tick?.overranOn).toBeNull();
+    });
+
+    it("shares one failed origin read across 12 runs in review and drops their old gates", async () => {
+      await toReview();
+      const ids = await manyInReview(12);
+      await h.engine.tick();
+      expect(ids.every((id) => store.run(id)?.loop?.gate != null)).toBe(true);
+      h.gateReads.length = 0;
+      h.tipReads = 0;
+      h.tipError = "git failed: origin is down";
+      h.originLatencyMs = 5000;
+      const before = clock;
+      await h.engine.tick();
+      expect(h.tipReads).toBe(1);
+      expect(h.gateReads).toEqual([]);
+      expect(clock - before).toBeLessThan(ENGINE_TICK_MS);
+      expect(ids.filter((id) => store.run(id)?.loop?.gate != null)).toEqual([]);
     });
 
     it("reads origin's tip every pass but reuses the rest while sha and tip are unchanged", async () => {

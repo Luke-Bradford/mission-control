@@ -263,11 +263,51 @@ describe("openPr", () => {
     expect(tools.openDraftPr).not.toHaveBeenCalled();
   });
 
-  it("does not adopt an earlier PR recorded by another seat", async () => {
+  it("adopts a PR recorded by an ended run further back, after more than one handover", async () => {
+    const ended = (over: Partial<Run>) =>
+      run({ status: "ok", ...over, endedAt: (over.startedAt ?? START) + 400 });
+    store.upsertRun(
+      ended({
+        id: "rA",
+        agentId: "guido-1",
+        startedAt: START - 3_000,
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    store.upsertRun(ended({ id: "rB", agentId: "guido-2", startedAt: START - 1_000 }));
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run({ agentId: "guido-3" }), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: 29,
+    });
+    expect(tools.openDraftPr).not.toHaveBeenCalled();
+  });
+
+  it("does not adopt an earlier PR while another run on the ticket is live", async () => {
     store.upsertRun(
       run({
         id: "r0",
         agentId: "other-seat",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    store.upsertRun(run({ id: "r9", agentId: "third-seat", startedAt: START - 200 }));
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
+  });
+
+  it("does not adopt a PR recorded on another ticket", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        ticket: "mc#8",
         startedAt: START - 1_000,
         endedAt: START - 500,
         status: "ok",
@@ -624,9 +664,74 @@ describe("ciExcerpt", () => {
       "list",
       "--repo=o/mc",
       `--commit=${SHA}`,
-      "--json=databaseId,name,conclusion",
+      "--json=databaseId,name,conclusion,status,attempt",
     ]);
     expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--log-failed"]);
+  });
+
+  it("reads the failed earlier attempt while a re-run is going, and names the attempt", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 2 },
+          { databaseId: 12, name: "lint", conclusion: "success", status: "completed", attempt: 1 },
+        ]),
+      }),
+      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "failure" }) }),
+      () => ({ code: 0, stdout: "boom\n" }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toBe("test (attempt 1, which failed; a re-run is going):\nboom");
+    expect(ghCalls[1]).toEqual([
+      "run",
+      "view",
+      "--repo=o/mc",
+      "11",
+      "--attempt=1",
+      "--json=conclusion",
+    ]);
+    expect(ghCalls[2]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
+  });
+
+  it("says no failed run when a re-run started from a successful attempt", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 2 },
+        ]),
+      }),
+      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "success" }) }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
+    expect(ghCalls.some((c) => c.includes("--log-failed"))).toBe(false);
+  });
+
+  it("names the attempt of a completed failed run and reads that attempt", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "failure", status: "completed", attempt: 2 },
+        ]),
+      }),
+      () => ({ code: 0, stdout: "boom\n" }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe("test (attempt 2):\nboom");
+    expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=2", "--log-failed"]);
+  });
+
+  it("says no failed run for a first attempt that is still running", async () => {
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 1 },
+        ]),
+      }),
+    ];
+    expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
   });
 
   it("strips colour codes and control characters, and caps the size", async () => {
@@ -2250,6 +2355,26 @@ describe("merge steps", () => {
         facts: { mainSha: MAIN, containsMain: true, hubOnly: true, strays: [], webChanged: false },
       });
       expect(gitCalls).toHaveLength(1);
+    });
+
+    it("reads origin's tip once for a tick that shares it, not once per run", async () => {
+      gitAnswers = { "ls-remote": lsRemote() };
+      const p = withArea();
+      const tip = await p.originTip(R);
+      expect(tip).toEqual({ ok: true, defaultBranch: "main", mainSha: MAIN });
+      const known = {
+        sha: SHA,
+        mainSha: MAIN,
+        containsMain: true,
+        hubOnly: true,
+        strays: [],
+        webChanged: false,
+      };
+      if (!tip.ok) throw new Error("no tip");
+      for (let i = 0; i < 12; i++) {
+        expect(await p.gateFacts(R, SHA, known, tip)).toMatchObject({ ok: true });
+      }
+      expect(gitCalls.filter((a) => a[0] === "ls-remote")).toHaveLength(1);
     });
 
     it("refuses a sha that is not a sha without running git", async () => {

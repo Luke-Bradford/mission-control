@@ -13,6 +13,7 @@ import {
   crewDetailPath,
   crewSummaryPath,
   dockStreamPath,
+  FLOW_DAYS,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
   type MapPayload,
@@ -128,10 +129,6 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
-  discussion: (key: string, id = ""): ResourceRef => ({
-    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
-    topic: "attention",
-  }),
   /** One item's conversation: the messages sent from it and their replies, from Comms. */
   itemThread: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/thread`,
@@ -299,6 +296,10 @@ export const RESOURCES = {
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
+  /** Guard blocks over the Quality tab's fixed window. */
+  guardHitsFlow: { path: `/api/guard/hits?days=${FLOW_DAYS}`, topic: "guard" },
+  /** The QA board's flow figures (escaped defects) over the Quality tab's fixed window. */
+  qaFlow: { path: `/api/qa/flow?days=${FLOW_DAYS}`, topic: ["boards", "guard"] },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
   allAccountModels: { path: "/api/accounts/models", topic: "config" },
   accountModels: (id: string): ResourceRef => ({
@@ -443,7 +444,7 @@ export const ACTIONS = {
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
-  /** Body `{ text, interrupt? }`. */
+  /** Body `{ text, interrupt?, question?, itemKey?, choice? }`; `choice` is a picked option: `{ briefAt, option }`. */
   seatMessage: (seatId: string) => `/api/seats/${enc(seatId)}/message`,
   /** Body `{}`. */
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,

@@ -608,6 +608,8 @@ export function createEngine(deps: EngineDeps): Engine {
   const tickCache = new AsyncLocalStorage<{
     prs: Map<RepoId, ReturnType<Store["pullRequests"]>>;
     notes: ReturnType<Store["notes"]>;
+    /** origin's tip per crew clone: one `ls-remote` serves every run's gate read in the tick. */
+    tips: Map<string, ReturnType<Publisher["originTip"]>>;
   }>();
   const prsFor = (repoId: RepoId): ReturnType<Store["pullRequests"]> => {
     const cache = tickCache.getStore();
@@ -616,6 +618,23 @@ export function createEngine(deps: EngineDeps): Engine {
     const rows = store.pullRequests(repoId);
     cache?.prs.set(repoId, rows);
     return rows;
+  };
+  /**
+   * origin's tip for a run's gate read: shared by every pass of one tick (each would otherwise run
+   * its own `ls-remote`, one at a time in the clone's queue); null outside a tick, which reads its own.
+   */
+  const tickTip = (run: Run): ReturnType<Publisher["originTip"]> | null => {
+    const cache = tickCache.getStore();
+    if (cache === undefined) return null;
+    const key =
+      config.crew?.sessions.find((s) => s.seats.some((x) => x.id === run.agentId))?.checkout ??
+      run.repoId;
+    let tip = cache.tips.get(key);
+    if (tip === undefined) {
+      tip = publisher.originTip(run);
+      cache.tips.set(key, tip);
+    }
+    return tip;
   };
   let started = false;
   let unsubscribe: (() => void) | null = null;
@@ -2143,7 +2162,13 @@ export function createEngine(deps: EngineDeps): Engine {
           ? input.gate
           : null;
       if (known === null) input.gate = null;
-      const g = await publisher.gateFacts(run, pushed.sha, known);
+      const shared = await tickTip(run);
+      const g =
+        shared === null
+          ? await publisher.gateFacts(run, pushed.sha, known)
+          : shared.ok
+            ? await publisher.gateFacts(run, pushed.sha, known, shared)
+            : shared;
       if (g.ok) {
         input.gate = { sha: pushed.sha, ...g.facts, area };
         rules = await rulesFor(run.repoId, g.facts.mainSha);
@@ -3016,7 +3041,11 @@ export function createEngine(deps: EngineDeps): Engine {
         timer = setTimeout(noteOverrun, ENGINE_TICK_MS);
         timer.unref();
         const notes = await phase("load notes", () => store.notes());
-        const cache = { prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(), notes };
+        const cache = {
+          prs: new Map<RepoId, ReturnType<Store["pullRequests"]>>(),
+          notes,
+          tips: new Map<string, ReturnType<Publisher["originTip"]>>(),
+        };
         await tickCache.run(cache, async () => {
           const runs = await phase("list runs", loopRuns);
           await phase("wake pending work", () =>
@@ -3093,7 +3122,10 @@ export function createEngine(deps: EngineDeps): Engine {
         // only a recorded verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
-        if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
+        // only the release lifts a merge hold; FLIGHT's rework sends the held PR back to its builder
+        // and leaves the hold in force
+        if (kind === MERGE_HOLD_PARK && !(by === "FLIGHT" && opts?.action === "rework"))
+          return refuse("use-merge-hold");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
@@ -3126,7 +3158,8 @@ export function createEngine(deps: EngineDeps): Engine {
           } else if (
             kind !== "review" &&
             kind !== "review-ruling" &&
-            !(kind === "review-failed" && opts.action === "rereview")
+            !(kind === "review-failed" && opts.action === "rereview") &&
+            !(kind === MERGE_HOLD_PARK && opts.action === "rework")
           )
             return refuse("wrong-action");
           if (opts.action === "second_review") {
@@ -3717,18 +3750,134 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         const sha = loop.ciFailedSha;
         const pr = findPr(run, loop);
-        if (
-          sha === null ||
-          store.runPush(run.id)?.sha !== sha ||
-          pr?.state !== "open" ||
-          pr.headSha !== sha
-        ) {
+        if (sha === null || store.runPush(run.id)?.sha !== sha || pr?.state !== "open") {
           return not("the ruled commit is no longer its open PR's head");
+        }
+        const head = pr.headSha;
+        if (head === null) return not("the ruled commit is no longer its open PR's head");
+        if (head !== sha) {
+          const repo = config.repos.find((r) => r.id === run.repoId);
+          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          const short = head.slice(0, 7);
+          const checks = (pr.checks ?? []).filter(
+            (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
+          );
+          const failing = [
+            ...new Set(
+              checks.filter((check) => check.state === "failing").map((check) => check.name),
+            ),
+          ];
+          if (failing.length > 0)
+            return not(`checks on the PR's new head ${short} failed: ${failing.join(", ")}`);
+          const pending = [
+            ...new Set([
+              ...verdict.pending,
+              ...verdict.missing,
+              ...checks.filter((check) => check.state === "pending").map((check) => check.name),
+            ]),
+          ];
+          if (pending.length > 0 || pr.ci === "pending")
+            return not(
+              `checks on the PR's new head ${short} are still pending${pending.length > 0 ? `: ${pending.join(", ")}` : ""}`,
+            );
+          if (pr.ci !== "passing" || verdict.ci === "failing")
+            return not("the ruled commit is no longer its open PR's head");
+
+          const at = now();
+          store.addRunCommit({
+            runId,
+            repoId: run.repoId,
+            branch: run.branch ?? pr.branch,
+            sha: head,
+            at,
+          });
+          store.setRunPush({ runId, sha: head, at });
+          store.setRunLoop(run.id, {
+            ...loop,
+            epoch: loop.epoch + 1,
+            phase: "review",
+            parked: null,
+            pushFor: head,
+            ciFails: 0,
+            ciFailedSha: null,
+            gate: null,
+            touches: null,
+            flightClearedSha: null,
+            reviewWaivedSha: null,
+            carry: null,
+            awaitingFlight: null,
+            adopted: true,
+            transient: 0,
+            lastRefusal: null,
+            unparkedAt: at,
+            rulingRerun: null,
+          });
+          store.addLoopEvent(
+            `${run.id}:${loop.epoch}:ruling-head-moved:${sha}:${head}`,
+            run.id,
+            `${CI_PASSED_EVENT_PREFIX}${head.slice(0, 7)} after PR head moved from ${sha.slice(0, 7)}; FLIGHT accepted the ruling`,
+            at,
+          );
+          await send(
+            run.id,
+            `ruling-head-moved:${run.id}:${head}`,
+            `CI is green on ${head.slice(0, 7)} after the PR head moved from ${sha.slice(0, 7)}. Review is queued on the new head. Sync your worktree before another rework round.`,
+          );
+          bus.emit("agents");
+          deps.pollGithub?.();
+          await pass(run.id);
+          return { kind: "accepted", sha: head };
         }
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const at = now();
         const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
         if (rerun === null) {
+          // the failure may already be cleared by a re-run from GitHub or a person
+          const repo = config.repos.find((r) => r.id === run.repoId);
+          const checks = (pr.checks ?? []).filter(
+            (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
+          );
+          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
+          const failingNow =
+            pr.ci === "failing" ||
+            verdict.ci === "failing" ||
+            checks.some((check) => check.state === "failing");
+          if (!failingNow) {
+            const stillPending =
+              pr.ci === "pending" ||
+              verdict.pending.length > 0 ||
+              verdict.missing.length > 0 ||
+              checks.some((check) => check.state === "pending");
+            if (stillPending) return { kind: "pending", sha };
+            if (pr.ci === "passing") {
+              store.setRunLoop(run.id, {
+                ...loop,
+                epoch: loop.epoch + 1,
+                phase: "review",
+                parked: null,
+                ciFails: 0,
+                ciFailedSha: null,
+                transient: 0,
+                lastRefusal: null,
+                unparkedAt: at,
+              });
+              store.addLoopEvent(
+                `${run.id}:${loop.epoch}:ruling-cleared:${sha}`,
+                run.id,
+                `${CI_PASSED_EVENT_PREFIX}${sha.slice(0, 7)} on a re-run; FLIGHT accepted the ruling`,
+                at,
+              );
+              await send(
+                run.id,
+                `ruling-cleared:${run.id}:${sha}`,
+                `CI is green on ${sha.slice(0, 7)} after a re-run, so your ruling is accepted. Review is queued.`,
+              );
+              bus.emit("agents");
+              deps.pollGithub?.();
+              await pass(run.id);
+              return { kind: "accepted", sha };
+            }
+          }
           const r = await publisher.rerunRuling(github, sha);
           if (!r.ok) return not(r.text);
           store.setRunLoop(run.id, {

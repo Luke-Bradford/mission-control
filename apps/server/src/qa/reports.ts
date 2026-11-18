@@ -14,6 +14,7 @@ import {
   NEGATED_CLOSING_REFS_NOTE,
   prEvidenceAffectedPages,
   type QaImageRef,
+  type QaPlan,
   type QaReport,
   type QaTestReceipt,
   type QaVisualEvidence,
@@ -26,6 +27,7 @@ import {
   type ReviewRow,
   type ReviewVerdict,
   scanText,
+  signedOffQaPlan,
 } from "@mc/core";
 import { z } from "zod";
 import { parseChecks } from "../collectors/github.ts";
@@ -500,6 +502,10 @@ export function createQaReports(i: {
       const pr = i.store.pullRequest(review.repoId, review.prNumber);
       const run = i.store.run(review.runId ?? "");
       const checks = i.store.qaCheckReceipts(review.runId ?? "", review.sha);
+      // the plan the operator signed off for the author's ticket, kept beside what was built
+      const issue = /#(\d+)$/.exec(i.store.run(review.authorRunId ?? "")?.ticket ?? "")?.[1];
+      const plan =
+        issue === undefined ? null : signedOffQaPlan(i.store.plans.get(repo.id, Number(issue)));
       const tests: QaTestReceipt[] = [
         ...checks.map((check) => ({
           command: check.command,
@@ -554,6 +560,7 @@ export function createQaReports(i: {
           ],
           followUps: details.followUps ?? [],
           visual: nativeVisual(review, details.visualReason, known),
+          ...(plan === null ? {} : { plan }),
         },
         {
           limitations: details.limitations !== undefined,
@@ -933,6 +940,20 @@ export function createQaReports(i: {
   };
 }
 
+/** The signed-off plan, as Markdown beside the report: pictures link to the kept images. */
+function planMarkdown(plan: QaPlan): string[] {
+  return [
+    "## Signed-off plan",
+    "",
+    ...(plan.asks === null ? [] : [`Asked for: ${plan.asks}`, ""]),
+    plan.proposal ?? "",
+    ...(plan.sizeEstimate === null ? [] : ["", `Size estimate: ${plan.sizeEstimate}`]),
+    ...(plan.risks === null ? [] : ["", `Complications and risks: ${plan.risks}`]),
+    ...plan.mockups.flatMap((m) => ["", `![${m.caption}](${m.url})`]),
+    "",
+  ];
+}
+
 export function qaReportMarkdown(report: QaReport): string {
   const lines = [
     `# QA report: ${report.github} PR #${report.prNumber}`,
@@ -948,6 +969,7 @@ export function qaReportMarkdown(report: QaReport): string {
     "",
     report.summary,
     "",
+    ...(report.plan ? planMarkdown(report.plan) : []),
     "## Works well",
     ...report.worksWell.map((text) => `- ${text}`),
     "",

@@ -296,6 +296,67 @@ describe("Audit first-screen summary", () => {
     expect(gone?.ratio.state).toBe("unknown");
   });
 
+  it("supplies the overall findings per touch over all files, with the previous window, and no data when empty", async () => {
+    expect((await overview()).figures.find((f) => f.id === "findings-per-touch")).toMatchObject({
+      value: null,
+      state: "unknown",
+      numerator: 0,
+      denominator: 0,
+    });
+    const r1 = review(1, 1),
+      r2 = review(2, 1),
+      r3 = review(3, 1);
+    merged(1, NOW - DAY, r1);
+    merged(2, NOW - 2 * DAY, r2);
+    merged(3, NOW - 40 * DAY, r3);
+    touch(1, "src/a.ts");
+    touch(1, "src/b.ts");
+    touch(2, "src/a.ts");
+    touch(3, "src/a.ts");
+    finding(r1, "src/a.ts", "x");
+    finding(r2, "src/b.ts", "y");
+    finding(r3, "src/a.ts", "z");
+    const view = await overview();
+    const figure = view.figures.find((f) => f.id === "findings-per-touch");
+    expect(figure).toMatchObject({
+      value: 2 / 3,
+      numerator: 2,
+      denominator: 3,
+      unit: "findings per touch",
+      state: "available",
+    });
+    expect(figure?.comparison).toMatchObject({ value: 1, label: "Previous 30d" });
+    expect(figure).toHaveProperty("source");
+    expect(figure).toHaveProperty("coverage");
+  });
+
+  it("advances the findings-per-touch updated time when a later touch-only merge changes the denominator", async () => {
+    const r1 = review(1, 1);
+    merged(1, NOW - 3 * DAY, r1);
+    touch(1, "src/a.ts");
+    finding(r1, "src/a.ts", "x");
+    const first = (await overview()).figures.find((f) => f.id === "findings-per-touch");
+    merged(2, NOW - DAY / 2, null);
+    touch(2, "src/b.ts");
+    const next = (await overview()).figures.find((f) => f.id === "findings-per-touch");
+    expect(next?.denominator).toBe(2);
+    expect(next?.updatedAt).toBe(NOW - DAY / 2);
+    expect(next?.updatedAt).toBeGreaterThan(first?.updatedAt ?? 0);
+  });
+
+  it("rebuilds a stored overview of an older version that lacks the findings-per-touch figure", () => {
+    merged(1, NOW - DAY, review(1, 1));
+    const reader = new CodeHealthReader(store, config, () => at);
+    reader.overview("sample", "30d");
+    const row = db.prepare("SELECT body FROM code_health_overview").get() as { body: string };
+    const old = JSON.parse(row.body);
+    old.figures = old.figures.filter((f: { id: string }) => f.id !== "findings-per-touch");
+    db.prepare("UPDATE code_health_overview SET version = 2, body = ?").run(JSON.stringify(old));
+    const again = new CodeHealthReader(store, config, () => at).overview("sample", "30d");
+    expect(again.rebuilt).toBe(true);
+    expect(again.view.figures.map((f) => f.id)).toContain("findings-per-touch");
+  });
+
   it("leaves an open PR's findings out of findings per touch", async () => {
     merged(1, NOW - DAY, review(1, 1));
     touch(1, "src/a.ts");

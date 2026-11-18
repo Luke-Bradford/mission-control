@@ -280,7 +280,7 @@ async function loaded(
 describe("Telemetry refetch", () => {
   it("claims live only while the telemetry on screen is this range's and fresh", async () => {
     const { fetch } = await loaded();
-    expect(document.querySelectorAll(".kpi.live").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll(".nowc.live").length).toBeGreaterThan(0);
     const answer = fetch.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
     let release = () => {};
     const gate = new Promise<void>((r) => {
@@ -293,10 +293,9 @@ describe("Telemetry refetch", () => {
     fireEvent.click(
       within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "6h" }),
     );
-    await waitFor(() => expect(document.querySelectorAll(".kpi.live")).toHaveLength(0));
-    expect(document.querySelectorAll(".nowc.live")).toHaveLength(0);
+    await waitFor(() => expect(document.querySelectorAll(".nowc.live")).toHaveLength(0));
     await act(async () => release());
-    await waitFor(() => expect(document.querySelectorAll(".kpi.live").length).toBeGreaterThan(0));
+    await waitFor(() => expect(document.querySelectorAll(".nowc.live").length).toBeGreaterThan(0));
   });
 
   it("keeps the last range on screen, dimmed, while a new one loads", async () => {
@@ -317,22 +316,24 @@ describe("Telemetry refetch", () => {
     );
     await waitFor(() => expect(page.classList.contains("refetching")).toBe(true));
     expect(screen.getByText("61.2k")).toBeTruthy();
+    expect(screen.getByRole("tabpanel").getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByRole("region", { name: "Cost and tokens summary" }).className).toContain(
+      "refetching",
+    );
     release();
     await waitFor(() => expect(page.classList.contains("refetching")).toBe(false));
+    expect(screen.getByRole("tabpanel").getAttribute("aria-busy")).toBe("false");
     expect(screen.getByText("61.2k")).toBeTruthy();
   });
 });
 
 describe("Telemetry toolbar", () => {
   it("names the tab it shows and, on an unbuilt tab, says what is coming over the current panels", async () => {
-    await loaded();
-    expect(screen.getByRole("tab", { name: "Cost and tokens" }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
-    screen.getByRole("heading", { level: 2, name: "Cost and tokens is coming" });
+    await loaded(undefined, undefined, undefined, "machine");
+    expect(screen.getByRole("tab", { name: "Machine" }).getAttribute("aria-selected")).toBe("true");
+    screen.getByRole("heading", { level: 2, name: "Machine is coming" });
     // the current panels stay under the note, so nothing disappears meanwhile
-    for (const id of ["tTok", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"])
-      expect(panel(id)).toBeTruthy();
+    for (const id of ["machP", "tMach", "tLock"]) expect(panel(id)).toBeTruthy();
   });
 
   it("asks for 24h by default and the picked range on a switch", async () => {
@@ -439,12 +440,20 @@ const kpi = (container: HTMLElement, label: string) => {
   };
 };
 
+/** The Quality tab's summary row: label, value and unit of each figure. */
 const quality = () =>
-  [...panel("tQual").querySelectorAll(".stat2")].map((s) => [
-    s.querySelector("span")?.textContent,
-    s.querySelector("b")?.textContent,
-    s.querySelector("b")?.getAttribute("title"),
-  ]);
+  [
+    ...within(screen.getByRole("region", { name: "Quality summary" })).getAllByText(/./, {
+      selector: ".stat-label",
+    }),
+  ].map((l) => {
+    const stat = l.closest(".stat") as HTMLElement;
+    return [
+      l.textContent,
+      stat.querySelector(".stat-value")?.textContent,
+      stat.querySelector(".stat-unit")?.textContent,
+    ];
+  });
 
 describe("KPI tiles", () => {
   it.each([false, true])("animates changed live values only (reduced motion: %s)", (reduced) => {
@@ -503,13 +512,9 @@ describe("KPI tiles", () => {
     }
   });
 
-  it("the quality panel says which of its figures are not tracked yet", async () => {
+  it("the quality summary reads — for the figures the hub does not send", async () => {
     await loaded(undefined, undefined, undefined, "quality");
-    const notTracked = [...panel("tQual").querySelectorAll(".stat2 b")].filter(
-      (b) => b.textContent === NOT_TRACKED,
-    );
-    expect(notTracked).toHaveLength(5);
-    for (const b of notTracked) expect(b.classList.contains("nt")).toBe(true);
+    expect(quality().filter(([, v]) => v === "—")).toHaveLength(5);
   });
 
   it("computed tiles show today's numbers; the others show — with the phase that brings them", async () => {
@@ -647,18 +652,13 @@ describe("Flow of work", () => {
 
   it("quality: CI green on first push rounded; the rest — with their reasons", async () => {
     await loaded(undefined, undefined, undefined, "quality");
-    const stats = [...panel("tQual").querySelectorAll(".stat2")].map((s) => [
-      s.querySelector("span")?.textContent,
-      s.querySelector("b")?.textContent,
-      s.querySelector("b")?.getAttribute("title"),
-    ]);
-    expect(stats).toEqual([
-      ["verify passed first try", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["review rounds per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["RETRO findings per PR", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["median wait for a human review", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["PRs sent back by reviewers", NOT_TRACKED, NOT_TRACKED_TITLE],
-      ["CI green on first push", "94%", "16 merged PRs with a known first-push CI result"],
+    expect(quality()).toEqual([
+      ["CI first push", "94%", "% of merged PRs"],
+      ["First-pass review", "—", "% of reviewed PRs"],
+      ["Review rounds per PR", "—", "rounds"],
+      ["RETRO findings per PR", "—", "findings"],
+      ["Human review wait", "—", "min median"],
+      ["PRs sent back", "—", "PRs"],
     ]);
   });
 
@@ -666,8 +666,8 @@ describe("Flow of work", () => {
     const a = await loaded(tel({ quality: Q }), undefined, undefined, "quality");
     expect(quality()).toEqual(
       expect.arrayContaining([
-        ["review rounds per PR", "1.5", "2 merged PRs with a review"],
-        ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
+        ["Review rounds per PR", "1.5", "rounds"],
+        ["RETRO findings per PR", "0.8", "findings"],
       ]),
     );
     a.unmount();
@@ -684,11 +684,10 @@ describe("Flow of work", () => {
       undefined,
       "quality",
     );
-    const none = "No merged PRs with a review in the last 14 days.";
     expect(quality()).toEqual(
       expect.arrayContaining([
-        ["review rounds per PR", "—", none],
-        ["RETRO findings per PR", "—", none],
+        ["Review rounds per PR", "—", "rounds"],
+        ["RETRO findings per PR", "—", "findings"],
       ]),
     );
   });
@@ -707,7 +706,7 @@ describe("Agents", () => {
   it("tokens per minute: Live is the last 60 minutes, History the range; a series per agent", async () => {
     await loaded();
     const p = panel("tTok");
-    within(p).getByText("live · last 60 minutes, by agent");
+    within(p).getByText("live · last 60 minutes · top 3 seats and other");
     expect(p.querySelectorAll("path.area")).toHaveLength(3);
     expect([...p.querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "shop-app-ta",
@@ -715,7 +714,7 @@ describe("Agents", () => {
       "codex-ta",
     ]);
     fireEvent.click(within(p).getByRole("button", { name: "History" }));
-    within(p).getByText("history · last 24h, by agent");
+    within(p).getByText("history · last 24h · top 3 seats and other");
     expect(within(p).getByRole("img").getAttribute("aria-label")).toBe(
       "Tokens per minute, last 24h: shop-app-ta latest 1.2k, peak 1.2k; studio latest 300, peak 300; codex-ta latest 50, peak 50",
     );
@@ -729,6 +728,7 @@ describe("Agents", () => {
       "studio",
     ]);
     // studio has no totals row in range
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
     within(panel("tTotals")).getByText("No usage for this filter in the last 24h.");
   });
 
@@ -746,6 +746,8 @@ describe("Agents", () => {
     expect([...panel("tTok").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
       "codex-ta",
     ]);
+    expect(panel("tQuotaUsed").querySelectorAll("li.quota-row")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
     expect(panel("tQuota").querySelectorAll("path.line")).toHaveLength(1);
     expect([...panel("tQuota").querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual(
       ["codex-main 7d · 41%"],
@@ -777,7 +779,39 @@ describe("Agents", () => {
       "Waiting",
       "Parked or stalled",
       "Idle",
+      "Unknown",
     ]);
+  });
+
+  it("legend names every shape the bar draws, and Unknown differs from Parked", async () => {
+    await loaded(
+      tel({
+        utilisation: [
+          { agentId: "shop-app-ta", working: 20, waiting: 10, blocked: 5, idle: 15, unknown: 50 },
+        ],
+      }),
+      undefined,
+      undefined,
+      "crew",
+    );
+    const drawn = [...panel("tUtil").querySelectorAll(".bar .share")].map((i) => i.classList[1]);
+    expect(drawn).toContain("unknown");
+    const legend = [...panel("tUtil").querySelectorAll(".readout .crew-sw")].map(
+      (i) => i.classList[2],
+    );
+    for (const cls of drawn) expect(legend).toContain(cls);
+    const shape = (cls: string) =>
+      readStyles()
+        .match(new RegExp(`\\.share\\.${cls}\\s*\\{([^}]*)\\}`))?.[1]
+        ?.trim();
+    const fill = (cls: string) =>
+      shape(cls)
+        ?.match(/background:([^;]*);/)?.[1]
+        ?.replace(/\s+/g, " ")
+        .trim();
+    expect(fill("unknown")).toBeTruthy();
+    expect(fill("unknown")).not.toBe(fill("parked"));
+    expect(fill("unknown")).not.toMatch(/radial-gradient/);
   });
 
   it("tool latency and subagents tables", async () => {
@@ -813,7 +847,7 @@ describe("Agents", () => {
 
 describe("Capacity and cost", () => {
   it("quota: a line per account window, y to 110 %, the 100 % limit dashed", async () => {
-    await loaded();
+    await loaded(undefined, undefined, undefined, "cost", "table");
     const p = panel("tQuota");
     expect(p.querySelectorAll("path.line")).toHaveLength(2);
     expect(p.querySelector("line.limit")).not.toBeNull();
@@ -830,7 +864,7 @@ describe("Capacity and cost", () => {
   });
 
   it("quota tooltip only reports an account's API reading at the selected sample time", async () => {
-    await loaded();
+    await loaded(undefined, undefined, undefined, "cost", "table");
     const svg = within(panel("tQuota")).getByRole("img");
     fireEvent.keyDown(svg, { key: "Home" });
     const tip = panel("tQuota").querySelector(".tip") as HTMLElement;
@@ -852,6 +886,10 @@ describe("Capacity and cost", () => {
           },
         ],
       }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
     );
     expect(panel("tQuota").querySelector(".annotation")).toBeNull();
   });
@@ -878,6 +916,10 @@ describe("Capacity and cost", () => {
           ],
         },
       }),
+      undefined,
+      undefined,
+      "cost",
+      "table",
     );
     expect(panel("tQuota").querySelector(".annotation")?.textContent).toBe("");
     expect(panel("tQuota").querySelector("svg")?.getAttribute("aria-label")).toContain(
@@ -904,7 +946,7 @@ describe("Capacity and cost", () => {
       [RESOURCES.metrics().path]: METRICS_VIEW,
       [RESOURCES.limits.path]: [limit5h({ alertAt: 85, stopAt: 95 })],
     });
-    open("cost");
+    open("cost", "table");
     render(<Telemetry />);
     await screen.findByText("61.2k");
     const quota = panel("tQuota");
@@ -930,7 +972,7 @@ describe("Capacity and cost", () => {
         }),
       ],
     });
-    open("cost");
+    open("cost", "table");
     render(<Telemetry />);
     await screen.findByText("61.2k");
     const quota = panel("tQuota");
@@ -967,7 +1009,7 @@ describe("Capacity and cost", () => {
 
   it("loop-step spend is not tracked when the hub sends none", async () => {
     await loaded();
-    within(panel("tStepBars")).getByText(NOT_TRACKED);
+    within(panel("tStepBars")).getByText("Spend by step is not tracked yet.");
   });
 
   describe("machine readout", () => {
@@ -1030,10 +1072,12 @@ describe("Capacity and cost", () => {
 
   it("tokens by ticket and totals", async () => {
     await loaded();
+    // ranked by cost; a ticket with no reported cost shows a dash and sorts last
     expect([...panel("tTicketBars").querySelectorAll(".hrow")].map((r) => r.textContent)).toEqual([
-      "shop-app #3349220k~$1.20",
-      "site-builder #1255.0k—",
+      "shop-app #3349~$1.20220k tok",
+      "site-builder #12—55.0k tok",
     ]);
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
     const t = panel("tTotals");
     expect([...t.querySelectorAll("th")].map((h) => h.textContent)).toEqual([
       "Agent",
@@ -1080,6 +1124,7 @@ describe("Capacity and cost", () => {
     });
     open("cost");
     render(<Telemetry />);
+    await settled();
     await within(panel("tTicketBars")).findByText(items[11]?.title as string);
     const rows = panel("tTicketBars").querySelectorAll(".hrow");
     expect(rows).toHaveLength(12);
@@ -1088,7 +1133,7 @@ describe("Capacity and cost", () => {
         const title = rows[i]?.querySelector(".ticket-bar-title");
         expect(title?.textContent).toBe(item.title);
         expect(title?.previousElementSibling?.className).toBe("rref");
-        expect(title?.parentElement?.className).toBe("ellip");
+        expect(title?.parentElement?.className).toBe("ticket-label");
       });
     });
     expect(panel("tTicketBars").querySelector("img")).toBeNull();
@@ -1109,6 +1154,7 @@ describe("Capacity and cost", () => {
     });
     open("cost");
     render(<Telemetry />);
+    await settled();
     await within(panel("tTicketBars")).findByText(item.title);
     expect(panel("tTicketBars").querySelectorAll(".hrow")).toHaveLength(3);
     within(panel("tTicketBars")).getByText("site-builder");
@@ -1181,9 +1227,13 @@ describe("empty and failing telemetry", () => {
     stub(EMPTY, { ...CFG, loops: [] });
     await show("cost");
     within(panel("tTok")).getByText("No tokens in the last 60 minutes.");
-    within(panel("tQuota")).getByText("No quota readings in the last 24h.");
+    within(panel("tQuotaUsed")).getByText("No quota readings in the last 24h.");
     within(panel("tTicketBars")).getByText("No ticket work in the last 24h.");
+    cleanup();
+    await show("cost", "table");
+    within(panel("tQuota")).getByText("No quota readings in the last 24h.");
     within(panel("tTotals")).getByText("No usage for this filter in the last 24h.");
+    within(panel("tCostTable")).getByText("No ticket work in the last 24h.");
     // the cost tile is the registry's figure, not this page's
     const costTile = [...document.querySelectorAll(".kpi")].find(
       (k) => k.querySelector(".lbl")?.textContent === "Cost · today",
@@ -1198,10 +1248,9 @@ describe("empty and failing telemetry", () => {
     within(panel("tCycleSize")).getByText("No tickets finished in the last 14 days.");
     cleanup();
     await show("quality");
-    const ci = [...panel("tQual").querySelectorAll(".stat2")].at(-1);
-    expect(ci?.querySelector("b")?.textContent).toBe("—");
-    expect(ci?.querySelector("b")?.getAttribute("title")).toBe(
-      "No merged PRs with a known first-push CI result in the last 14 days.",
+    expect(quality()[0]).toEqual(["CI first push", "—", "% of merged PRs"]);
+    expect(document.getElementById("qCi")?.textContent).toContain(
+      "Daily quality is not collected for this window.",
     );
     cleanup();
     await show("machine");
@@ -1220,22 +1269,24 @@ describe("empty and failing telemetry", () => {
 
   it.each([
     ["crew", ["tCrewState"]],
-    ["quality", ["tQualityTrend"]],
     ["cost", ["tCostMerged"]],
   ] as const)("does not invent v2 history from aggregate telemetry on %s", async (tab, ids) => {
-    await loaded(undefined, undefined, undefined, tab);
+    await loaded(undefined, undefined, undefined, tab, tab === "cost" ? "table" : "charts");
     for (const id of ids) {
       expect(panel(id).textContent).toContain("data is not available for the last 24h yet.");
     }
   });
 
-  it("a failed fetch says so, on Crew and on a tab not built yet", async () => {
+  it("a failed fetch says so, on Crew and Cost and tokens and on a tab not built yet", async () => {
     stubFetch({ "/api/config": CFG });
     await show("crew");
     screen.getByText("Telemetry did not load.");
     screen.getByRole("button", { name: "Try again" });
     cleanup();
     await show("cost");
+    await screen.findByText("Telemetry did not load.");
+    cleanup();
+    await show("machine");
     await screen.findByText(/^Could not load telemetry:/);
   });
 });
@@ -1270,16 +1321,12 @@ describe("engine telemetry", () => {
     await loaded(ENGINE(), undefined, undefined, "quality");
     expect(quality()).toEqual(
       expect.arrayContaining([
-        ["RETRO findings per PR", "0.8", "2 merged PRs with a review"],
-        ["PRs sent back by reviewers", "2", "50% passed the first review round"],
-        [
-          "median wait for a human review",
-          "2m 00s",
-          "How long a finished PR waited for your review, median, last 14 days.",
-        ],
+        ["RETRO findings per PR", "0.8", "findings"],
+        ["PRs sent back", "2", "PRs"],
+        ["Human review wait", "2", "min median"],
       ]),
     );
-    expect(statValue("First-pass review")).toBe("50%");
+    expect(quality()).toContainEqual(["First-pass review", "50%", "% of reviewed PRs"]);
   });
 
   it("shows commits on Throughput and loop-step spend on Cost", async () => {
@@ -1288,9 +1335,9 @@ describe("engine telemetry", () => {
     a.unmount();
     await loaded(ENGINE());
     expect([...panel("tStepBars").querySelectorAll(".hrow")].map((x) => x.textContent)).toEqual([
-      "plan1.0k~$0.50 · 3 runs",
-      "build1.0k~$0.50 · 3 runs",
-      "review1.0k~$0.50 · 3 runs",
+      "plan~$0.501.0k · 3 runs",
+      "build~$0.501.0k · 3 runs",
+      "review~$0.501.0k · 3 runs",
     ]);
   });
 
@@ -1403,7 +1450,7 @@ describe("ticket scope", () => {
       [RESOURCES.telemetry("24h").path]: tel(),
       [RESOURCES.telemetry("24h", "", "", "mission-control#398").path]: EMPTY,
     });
-    open("cost");
+    open("cost", "table");
     render(<Telemetry />);
     const select = screen.getByLabelText("Ticket") as HTMLSelectElement;
     await waitFor(() =>
@@ -1445,10 +1492,11 @@ describe("ticket scope", () => {
     expect(document.activeElement).toBe(select);
     for (const row of data.tokensByTicket) {
       fireEvent.change(select, { target: { value: row.ticket } });
-      await within(panel("tTicketBars")).findByText("123");
+      await within(panel("tTicketBars")).findByText("123 tok");
       expect(panel("tTicketBars").querySelectorAll(".hrow")).toHaveLength(1);
-      within(panel("tTotals")).getByText("321");
     }
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    await within(panel("tTotals")).findByText("321");
     fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "studio" } });
     await within(panel("tTotals")).findByText("No usage for this filter in the last 24h.");
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "codex-main" } });
@@ -1461,7 +1509,8 @@ describe("ticket scope", () => {
     fireEvent.change(select, { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Account"), { target: { value: "" } });
     fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "" } });
-    await within(panel("tTicketBars")).findByText("220k");
+    fireEvent.click(screen.getByRole("button", { name: "Charts" }));
+    await within(panel("tTicketBars")).findByText("220k tok");
   });
 
   it("resets a ticket absent from a new range", async () => {
@@ -1484,7 +1533,7 @@ describe("ticket scope", () => {
 });
 
 it("keeps telemetry controls and wide tables usable on narrow screens", async () => {
-  await loaded();
+  await loaded(undefined, undefined, undefined, "cost", "table");
   const css = readStyles();
   expect(css.match(/\.toolbar \{([^}]*)\}/)?.[1]).toContain("flex-wrap: wrap");
   expect(css.match(/\.tw \{([^}]*)\}/)?.[1]).toContain("overflow-x: auto");
@@ -1524,7 +1573,202 @@ it("preserves unknown time on Crew and unavailable line and slowest details", as
         { ...(data.totals[0] as TelemetryData["totals"][number]), additions: 0, deletions: null },
       ],
     }),
+    undefined,
+    undefined,
+    "cost",
+    "table",
   );
   within(panel("tTotals")).getByText("+0");
   expect(panel("tTotals").querySelector(".del")?.textContent).toBe("—");
+});
+
+describe("Cost and tokens tab", () => {
+  const tile = (label: string) =>
+    within(screen.getByRole("region", { name: "Cost and tokens summary" }))
+      .getByText(label, { selector: ".stat-label" })
+      .closest(".stat") as HTMLElement;
+  const value = (label: string) => within(tile(label)).getByRole("button").textContent;
+  const link = (label: string) => within(tile(label)).getByRole("link").textContent;
+
+  it("shows the six summary figures, each with its unit and window", async () => {
+    await loaded(
+      tel({
+        tokensByTicket: [
+          { ticket: "shop-app#1", tokens: 1, costUsd: 1, totalCostUsd: 10 },
+          { ticket: "shop-app#2", tokens: 1, costUsd: 1, totalCostUsd: 20 },
+        ],
+      }),
+    );
+    const summary = screen.getByRole("region", { name: "Cost and tokens summary" });
+    expect([...summary.querySelectorAll(".stat-label")].map((l) => l.textContent)).toEqual([
+      "~Cost",
+      "Tokens",
+      "Cache hit",
+      "~Cost per merged ticket",
+      "Cost coverage",
+      "Tokens coverage",
+    ]);
+    expect(value("~Cost")).toBe("~$3.50");
+    expect(value("Tokens")).toBe("61.2k");
+    // 1.25M cache read of 1.31M input
+    expect(value("Cache hit")).toBe("95");
+    expect(link("~Cost per merged ticket")).toBe("~$15.00");
+    // one of the two usage rows reported no cost; both reported tokens
+    expect(value("Cost coverage")).toBe("50");
+    expect(value("Tokens coverage")).toBe("100");
+    expect(within(tile("Tokens")).getByText("in + out"));
+    expect(within(tile("Cost coverage")).getByText("% of usage rows"));
+  });
+
+  it("a figure nobody reported is a dash, never zero, and coverage says what is missing", async () => {
+    await loaded(tel({ today: { ...tel().today, costUsd: null, tokens: 0, cacheRead: 0 } }));
+    expect(value("~Cost")).toBe("—");
+    expect(value("Cache hit")).toBe("—");
+    expect(link("~Cost per merged ticket")).toBe("—");
+    const cover = tile("Cost coverage").querySelector(".stat-cmp")?.textContent ?? "";
+    expect(cover).toContain("codex-ta");
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    within(panel("tTotals")).getByText(/No cost reported for codex-ta; not counted as \$0\./);
+  });
+
+  it("shows the complete missing-cost explanation on keyboard focus", async () => {
+    const totals = tel().totals;
+    await loaded(
+      tel({
+        totals: [
+          ...totals,
+          { ...totals[0], model: "model-a", costUsd: null },
+          { ...totals[0], model: "model-b", costUsd: null },
+        ],
+      }),
+    );
+    const coverage = tile("Cost coverage");
+    fireEvent.focus(within(coverage).getByRole("button"));
+    const tip = within(coverage).getByRole("tooltip").textContent ?? "";
+    expect(tip).toContain("not counted as $0.");
+    expect(tip).toContain("model-a");
+  });
+
+  it("scales spend bars by reported cost, not token volume", async () => {
+    await loaded(
+      tel({
+        tokensByStep: [
+          { step: "plan", tokens: 1_000, costUsd: 10, runs: 1 },
+          { step: "build", tokens: 100, costUsd: 60, runs: 1 },
+          { step: "review", tokens: 10_000, costUsd: null, runs: 1 },
+        ],
+      }),
+    );
+    const rows = panel("tStepBars").querySelectorAll(".hrow");
+    expect(rows).toHaveLength(3);
+    expect(
+      [...rows].map((row) => (row.querySelector(".track i") as HTMLElement).style.width),
+    ).toEqual(["16.666666666666664%", "100%", "0%"]);
+  });
+
+  it.each([
+    ["Agent", "studio", ["tStepBars"]],
+    ["Account", "codex-main", ["tStepBars"]],
+    ["Ticket", "shop-app#3349", ["tStepBars", "tTok"]],
+  ])("marks crew-wide charts when the %s filter is active", async (label, choice, ids) => {
+    await loaded();
+    expect(screen.queryByText("Whole crew, not filtered")).toBeNull();
+    fireEvent.change(screen.getByLabelText(label), { target: { value: choice } });
+    await waitFor(() => {
+      for (const id of ids)
+        expect(panel(id).querySelector(".sub")?.textContent).toContain("Whole crew, not filtered");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    await waitFor(() =>
+      expect(panel("tStepTable").querySelector(".sub")?.textContent).toContain(
+        "Whole crew, not filtered",
+      ),
+    );
+  });
+
+  it("stacks tokens per minute as the top three seats and Other, summing to the total", async () => {
+    const more = ["a", "b", "c", "d"].map((id, i) => ({
+      agentId: id,
+      points: flat(LIVE_MINUTES, 10 * (i + 1)),
+    }));
+    const data = tel({ liveMinutes: [...tel().liveMinutes, ...more] });
+    stub(data, {
+      ...CFG,
+      loops: [
+        ...CFG.loops,
+        ...["a", "b", "c", "d"].map((id) => ({ ...LOOP, id, accountId: "claude-main" })),
+      ],
+    });
+    await show("cost");
+    const p = panel("tTok");
+    expect([...p.querySelectorAll(".legend span")].map((x) => x.textContent)).toEqual([
+      "shop-app-ta",
+      "studio",
+      "d",
+      "Other",
+    ]);
+    expect(p.querySelectorAll("path.area")).toHaveLength(4);
+    // the layers' latest values (900, 150, 40, and Other 20 + 10 + 20 + 30) add up to the seats' 1170
+    const label = within(p).getByRole("img").getAttribute("aria-label") ?? "";
+    expect(label).toContain("shop-app-ta latest 900");
+    expect(label).toContain("d latest 40");
+    expect(label).toContain("Other latest 80");
+  });
+
+  it("draws a meter per account window with the alert and stop ticks and a 24 h line", async () => {
+    stubFetch({
+      [RESOURCES.telemetry("24h").path]: tel(),
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.limits.path]: [limit5h({ used: 85, alertAt: 80, stopAt: 95 })],
+    });
+    await show("cost");
+    const rows = panel("tQuotaUsed").querySelectorAll("li.quota-row");
+    expect(rows).toHaveLength(2);
+    const first = rows[0] as HTMLElement;
+    expect(first.dataset.level).toBe("alert");
+    expect(first.querySelectorAll(".tick")).toHaveLength(2);
+    expect(first.querySelector(".tick.stop")).not.toBeNull();
+    expect(first.querySelector("[role=img]")?.getAttribute("aria-label")).toBe(
+      "claude-main 5h: 85% used; alert at 80%, stop at 95%",
+    );
+    expect(first.querySelector(".hist path")).not.toBeNull();
+  });
+
+  it("each toolbar filter reaches the request", async () => {
+    const fetch = stub();
+    await show("cost");
+    fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "studio" } });
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/telemetry?range=24h&agent=studio",
+        expect.anything(),
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("Account"), { target: { value: "codex-main" } });
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/telemetry?range=24h&agent=studio&account=codex-main",
+        expect.anything(),
+      ),
+    );
+    screen.getByLabelText("Ticket");
+  });
+
+  it("gives each ticket row its full title on focus, and ranks by cost", async () => {
+    const item = boardItem({ repoId: "shop-app", issueNumber: 3349, title: "Quote cache warmup" });
+    stubFetch({
+      [RESOURCES.config.path]: CFG,
+      [RESOURCES.telemetry("24h").path]: tel(),
+      [RESOURCES.boards("shop-app").path]: [item],
+    });
+    await show("cost");
+    await within(panel("tTicketBars")).findByText("Quote cache warmup");
+    const label = panel("tTicketBars").querySelector(".ticket-label") as HTMLElement;
+    expect(label.tabIndex).toBe(0);
+    expect(label.dataset.tip).toBe("shop-app#3349 · Quote cache warmup");
+    fireEvent.focus(label);
+    expect(document.body.querySelector("[data-ticket-title-tooltip]")?.textContent).toBe(
+      "shop-app#3349 · Quote cache warmup",
+    );
+  });
 });

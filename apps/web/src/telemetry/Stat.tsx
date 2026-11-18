@@ -21,6 +21,8 @@ export interface StatSpec {
   drill: Drill;
   /** A comparison or reason beside the window ("vs ~$41.00 7-day average"). */
   detail?: string;
+  /** Why there is no figure, when `value` is a dash: loading, not collected, or nothing to count. */
+  reason?: string;
   /** A registry figure (`METRICS` in mc/core): the value is the registry's and is marked as such. */
   metric?: MetricId;
   /** The Crew health tile only: its verdict. */
@@ -29,7 +31,7 @@ export interface StatSpec {
 
 /** The accessible name: everything the tile shows, and where the number goes. */
 const nameOf = (s: StatSpec): string =>
-  `${s.label}: ${s.value} ${s.unit}, ${s.window}. ${
+  `${s.label}: ${s.value} ${s.unit}, ${s.window}.${s.reason ? ` ${s.reason}` : ""} ${
     s.drill.kind === "link" ? "Opens" : "Needs a new route:"
   } ${s.drill.target}.${s.detail ? ` ${s.detail}.` : ""}`;
 
@@ -101,7 +103,9 @@ export function Stat({
         {s.detail && <span className="stat-cmp"> · {s.detail}</span>}
       </div>
       <div className="stat-def" id={def} role="tooltip">
+        {s.reason ? `${s.reason} ` : ""}
         {s.definition}
+        {s.detail && <span> {s.detail}</span>}
       </div>
     </div>
   );

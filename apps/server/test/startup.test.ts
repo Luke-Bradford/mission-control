@@ -322,7 +322,7 @@ describe("mixed hub startup", () => {
     await (await import("../src/main.ts")).main();
     expect(boot.deps?.configReadPath).toBe(join(dir, "config.yaml"));
     const read = (await get("/api/repos/mission-control/rules")).json<{ rules: object }>();
-    expect(Object.keys(read.rules)).toHaveLength(17);
+    expect(Object.keys(read.rules)).toHaveLength(18);
   });
 
   it("connects stream counts to scheduler client presence", async () => {

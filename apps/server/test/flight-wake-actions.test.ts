@@ -119,7 +119,7 @@ describe("FLIGHT wake actions", () => {
       ]),
     ).toEqual(["prs"]);
     expect(
-      noActionReasons(Array.from({ length: 10 }, () => wake(false, [], ["discussions"]))),
+      noActionReasons(Array.from({ length: 10 }, () => wake(false, [], ["instructions"]))),
     ).toEqual([]);
   });
 });

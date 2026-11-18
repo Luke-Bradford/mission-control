@@ -61,7 +61,6 @@ import {
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
-  DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   ENGINE_TICK_MS,
   effectiveHardRules,
@@ -114,6 +113,8 @@ import {
   OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
+  PLAN_NO_SUCH,
+  PLAN_NOTE_MAX,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
   type PrUatView,
@@ -219,7 +220,14 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
+import {
+  ChoiceRefused,
+  choiceReceipt,
+  chooseOption,
+  claimMessagePick,
+  MESSAGE_PICK_SENDERS,
+  type MessagePick,
+} from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
@@ -385,6 +393,15 @@ import {
   seatPlace,
 } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
+import { readPlanAsset } from "./plans/assets.ts";
+import {
+  approvePlan,
+  plansView,
+  type SignoffDeps,
+  type SignoffResult,
+  sendBackPlan,
+  ticketPlan,
+} from "./plans/signoff.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -538,6 +555,10 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
+  /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
+  ticketMove?: SignoffDeps["move"];
+  /** Reads one card live from the board: approving a held plan checks the card as it is now. */
+  ticketRead?: SignoffDeps["readCard"];
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Shared bounded reader; the MCP read handler can use this same instance. */
@@ -724,6 +745,17 @@ const MessageBody = z.strictObject({
   question: z.number().int().positive().optional(),
   /** The Needs-you item this reply is about: it shows in that item's conversation. */
   itemKey: z.string().min(1).max(200).optional(),
+  /**
+   * The text is an option of that item's brief, picked on the page: the brief the page showed and
+   * the option's place in it. The pick is stored with the message, so the FLIGHT conversation
+   * draws it as the choice. Used for an option the choose route does not take.
+   */
+  choice: z
+    .strictObject({
+      briefAt: z.number().int().nonnegative(),
+      option: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -4128,8 +4160,77 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? null
               : { at: questionCursor.at, id: Number(questionCursor.key.slice("question:".length)) },
         });
-        return history ?? reply.code(404).send({ error: "unknown issue" });
+        return history === null
+          ? reply.code(404).send({ error: "unknown issue" })
+          : { ...history, plan: ticketPlan(store, config, repo.id, n) };
       });
+
+      // Reader: docs/runbook.md#plan-sign-off (the Planner tab's lists: waiting, and signed off)
+      api.get("/plans", () => plansView(store, config));
+
+      // Reader: docs/runbook.md#plan-sign-off (a plan's pictures, kept by content hash)
+      api.get<{ Params: { id: string } }>("/plan-assets/:id", async (req, reply) => {
+        // Not a mutating route, so the operator-token hook skips it: check the token here.
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = readPlanAsset(deps.store.path, req.params.id);
+        if (asset === null) return reply.code(404).send({ error: "not found" });
+        return reply
+          .header("cache-control", "private, max-age=31536000, immutable")
+          .header("x-content-type-options", "nosniff")
+          .type(asset.mediaType)
+          .send(asset.bytes);
+      });
+
+      const planDeps = (): SignoffDeps => ({
+        store,
+        config,
+        now,
+        rules: deps.repoRules ?? (async () => DEFAULT_REPO_RULES),
+        ...(deps.ticketMove === undefined ? {} : { move: deps.ticketMove }),
+        ...(deps.ticketRead === undefined ? {} : { readCard: deps.ticketRead }),
+        ...(deps.needsYou === undefined ? {} : { fetchTicket: deps.needsYou.fetchTicket }),
+      });
+      const planIssue = (raw: string): number =>
+        /^[1-9]\d*$/.test(raw) && Number(raw) <= MAX_ISSUE_NUMBER ? Number(raw) : 0;
+      const planAnswer = (reply: FastifyReply, result: SignoffResult) => {
+        if (!result.ok) return reply.code(result.status).send({ error: result.error });
+        bus.emit("plans");
+        if (result.moved) bus.emit("boards");
+        return { plan: result.plan, moved: result.moved, moveError: result.moveError };
+      };
+
+      // Reader: docs/runbook.md#plan-sign-off (Approve on the Planner tab; a held ticket moves to Ready)
+      api.post<{ Params: { repoId: string; issue: string } }>(
+        "/plans/:repoId/:issue/approve",
+        async (req, reply) => {
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const issue = planIssue(req.params.issue);
+          if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
+          return planAnswer(reply, await approvePlan(planDeps(), req.params.repoId, issue));
+        },
+      );
+
+      // Reader: docs/runbook.md#plan-sign-off (Send back on the Planner tab, with the operator's note)
+      api.post<{ Params: { repoId: string; issue: string } }>(
+        "/plans/:repoId/:issue/send-back",
+        async (req, reply) => {
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const body = z
+            .strictObject({ note: z.string().trim().min(1).max(PLAN_NOTE_MAX) })
+            .safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          const issue = planIssue(req.params.issue);
+          if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
+          return planAnswer(
+            reply,
+            await sendBackPlan(planDeps(), req.params.repoId, issue, body.data.note),
+          );
+        },
+      );
 
       // Setup runs one at a time per repo, so a second tab pressing it waits and then finds the fields.
       const setupLocks = new Map<string, Promise<unknown>>();
@@ -4887,7 +4988,40 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             store.run(named.runId)?.loop?.aside != null
               ? named
               : undefined;
+          // A picked option is claimed before its text is sent, and tied to the stored message.
+          let pick: MessagePick | null | undefined;
+          if (b.choice !== undefined) {
+            // the operator token lets FLIGHT send a message here; it does not let FLIGHT pick
+            if (!MESSAGE_PICK_SENDERS.includes(sender.kind))
+              throw new SupervisorError(
+                403,
+                "FLIGHT cannot pick an option with a message. Send the text without `choice`.",
+              );
+            if (b.itemKey === undefined)
+              throw new SupervisorError(400, "A picked option names its item.");
+            try {
+              pick = claimMessagePick(
+                {
+                  store,
+                  now,
+                  sender,
+                  crew: commsCrew,
+                  flightId: flightSeat(config)?.seat.id ?? null,
+                },
+                currentChoiceItem(b.itemKey),
+                b.itemKey,
+                b.choice,
+                { to: id, text: b.text, question: b.question },
+              );
+            } catch (e) {
+              if (e instanceof ChoiceRefused) throw new SupervisorError(e.status, e.message);
+              throw e;
+            }
+            // the brief already has a pick: its message is stored, and nothing is sent twice
+            if (pick === null) return { ok: true };
+          }
           if (parked !== undefined) {
+            let stored = false;
             try {
               await answerAsideQuestion(
                 {
@@ -4903,8 +5037,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 parked.id,
                 sender.from,
                 b.text,
+                (messageId) => {
+                  stored = true;
+                  pick?.sent(messageId);
+                },
               );
             } catch (e) {
+              if (!stored) pick?.release();
               throw new SupervisorError(
                 e instanceof AsideAnswerChanged
                   ? 409
@@ -4926,6 +5065,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   .itemThreadNow(b.itemKey)
                   .filter((m) => m.from === id && m.to === sender.from)
                   .at(-1)?.id;
+          let stored = false;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4963,17 +5103,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            stored = true;
+            pick?.sent(sent.id);
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
             // a retry of the same text wakes the seat again
             if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
             // the reply names its question: that one closes, and no other
-            if (named !== null) {
-              store.answerQuestion(named.id, now());
-              bus.emit("attention");
-            }
+            if (named !== null) store.answerQuestion(named.id, now());
+            // a closed question leaves Needs you, and a pick shows on its item
+            if (named !== null || pick != null) bus.emit("attention");
             return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
+            // nothing was stored: let the operator pick again
+            if (!stored) pick?.release();
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
               400,
@@ -6711,8 +6854,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
 
-      const discussionSends = new Set<string>();
-      const currentDiscussionItem = (key: string) => {
+      const currentChoiceItem = (key: string) => {
         const item = attentionItems(
           config,
           store,
@@ -6724,16 +6866,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ).find((item) => item.key === key && (!item.acked || isOperatorItem(item)));
         return item ? { ...item, version: attentionVersion(item) } : undefined;
       };
-      const openDiscussion = (item: AttentionItem & { version: string }) => {
-        const brief = item.brief;
-        const recommended = brief?.recommendedOptionId
-          ? brief.options.find((o) => o.id === brief.recommendedOptionId)
-          : undefined;
-        const text = recommended?.description
-          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description.replace(/[.\s]+$/, "")}. What would help you decide? I can pull the Teams thread or the code.`
-          : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
-        return store.ensureDiscussion(item.key, item.version, { text, at: now() });
-      };
       // Reader: apps/web/src/data.ts (the item thread read)
       api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
         const key = req.params.key;
@@ -6741,80 +6873,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         // A note key is raised again later: only this run of the note owns the conversation.
         // Other item keys name one message, question or issue, so all of theirs is the item's.
         return itemThread(store.itemThreadNow(key));
-      });
-      // Reader: apps/web/src/shell/ItemPanel.tsx
-      api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
-        "/attention/:key/discussion",
-        async (req, reply) => {
-          const { key } = req.params;
-          if (req.query.id) {
-            const thread = store.discussion(key, req.query.id);
-            return thread ?? reply.code(404).send({ error: "Unknown discussion." });
-          }
-          const item = currentDiscussionItem(key);
-          if (!item?.version) {
-            const thread = store.discussionForItem(key);
-            return thread ?? reply.code(404).send({ error: "No current item." });
-          }
-          return openDiscussion({ ...item, version: item.version });
-        },
-      );
-      // Reader: apps/web/src/shell/ItemPanel.tsx
-      api.post<{ Params: { key: string } }>("/attention/:key/discussion", async (req, reply) => {
-        const body = z
-          .strictObject({
-            version: z.string().min(1).max(100),
-            messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
-            text: z.string().trim().min(1).max(DISCUSSION_TEXT_MAX),
-          })
-          .safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        const item = currentDiscussionItem(req.params.key);
-        if (!item || item.version !== body.data.version)
-          return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
-        // no FLIGHT seat is configured: nothing would ever pick the reply up
-        const flight = flightSeat(config);
-        if (!flight) return reply.code(409).send({ error: "This hub has no FLIGHT seat." });
-        const thread = openDiscussion({ ...item, version: body.data.version });
-        const { messageId, text } = body.data;
-        try {
-          store.askDiscussion(thread.id, messageId, text, now());
-        } catch {
-          return reply.code(409).send({ error: "Message id already used." });
-        }
-        if (store.discussionSent(thread.id, messageId))
-          return store.discussion(item.key, thread.id);
-        // The reply is stored whether or not FLIGHT is running: an unsent one is in FLIGHT's wake
-        // (pendingDiscussions) when it starts, so nothing here answers "FLIGHT is unavailable".
-        const flightOn = supervisor?.status().enabled === true;
-        if (!supervisor || !flightOn) return store.discussion(item.key, thread.id);
-        const sendKey = `${thread.id}:${messageId}`;
-        if (discussionSends.has(sendKey))
-          return reply.code(409).send({ error: "Message is being sent." });
-        discussionSends.add(sendKey);
-        try {
-          await supervisor.message(
-            flight.seat.id,
-            JSON.stringify({
-              kind: "item-discussion",
-              discussion: { id: thread.id, replyTo: messageId },
-              item,
-              question: text,
-              instruction:
-                "Reply using log_decision with discussion.id, discussion.replyTo and a stable discussion.messageId. Discussion is chat only; do not execute a choice.",
-            }),
-            { interrupt: false, questions: "none" },
-          );
-          store.markDiscussionSent(thread.id, messageId);
-          bus.emit("attention");
-          return store.discussion(item.key, thread.id);
-        } catch (e) {
-          // not pushed now (FLIGHT is down or between turns): it stays stored, and the wake carries it
-          captureError(reply, e);
-          return store.discussion(item.key, thread.id);
-        } finally {
-          discussionSends.delete(sendKey);
-        }
       });
 
       api.register(async (api) => {
@@ -6894,7 +6952,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                       deps.engine?.reconcileRun?.(runId) ?? Promise.resolve(),
                   }),
             },
-            currentDiscussionItem(key),
+            currentChoiceItem(key),
             key,
             body.data,
           );

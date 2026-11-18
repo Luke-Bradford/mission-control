@@ -135,6 +135,9 @@ import {
   otherAreaText,
   outsideAreaText,
   PLAN_HEADING,
+  PLAN_MOCKUPS_MAX,
+  PLAN_PART_MAX,
+  type PlanSignoff,
   PROFILE_NAME,
   PROFILE_PAIR_TEXT,
   PROFILE_REASON_MAX,
@@ -146,6 +149,7 @@ import {
   planFewTestsText,
   planMissingPathsText,
   planNoProfilesText,
+  planPartsText,
   planPaths,
   planTestCount,
   planTextText,
@@ -174,6 +178,7 @@ import {
   REVIEW_CHECK_RESULTS,
   REVIEW_FINDINGS_MAX,
   REVIEW_SUMMARY_MAX,
+  type RepoRules,
   type Run,
   readOnlyToolText,
   removedText,
@@ -207,9 +212,11 @@ import type { ProfilesError } from "../config/profiles.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
+import { RepoRulesError } from "../engine/rules.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
+import { keepMockups } from "../plans/assets.ts";
 import {
   PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,
@@ -282,6 +289,8 @@ export interface McToolsDeps {
   onFindings?: (seatId: string, runId: string) => void;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
+  /** The repo's rules as the engine reads them; `report_plan` reads `plan_signoff` from them. Absent: the config's. */
+  rules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void;
   /**
@@ -431,6 +440,14 @@ const PlanArgs = z
     plan: text(MC_PLAN_MAX),
     profile: z.string().regex(PROFILE_NAME).optional(),
     profile_reason: text(PROFILE_REASON_MAX).optional(),
+    // the parts the operator reads on the Planner tab, beside the plan itself
+    summary: text(PLAN_PART_MAX).optional(),
+    size_estimate: text(PLAN_PART_MAX).optional(),
+    risks: text(PLAN_PART_MAX).optional(),
+    mockups: z
+      .array(z.strictObject({ path: text(300), caption: text(200) }))
+      .max(PLAN_MOCKUPS_MAX)
+      .optional(),
   })
   .refine((a) => (a.profile === undefined) === (a.profile_reason === undefined), {
     message: PROFILE_PAIR_TEXT,
@@ -2852,6 +2869,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { text: `${FINDINGS_RECORDED}\nQA report: ${qaReport.permalink}` };
   }
 
+  /** The repo's plan sign-off setting, from its rules as the engine reads them. */
+  async function planSignoffOf(repoId: string): Promise<PlanSignoff> {
+    const rules = await deps.rules?.(repoId);
+    if (rules !== undefined && !(rules instanceof RepoRulesError))
+      return rules.planSignoff ?? "never";
+    return config.repos.find((r) => r.id === repoId)?.rules?.planSignoff ?? "never";
+  }
+
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = PlanArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -2911,6 +2936,76 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: planTextText(evidenceProblemText(problem)), isError: true };
     }
 
+    // A planner report that goes on the Planner tab is whole: the operator reads all five parts.
+    // It goes there when FLIGHT sent the ticket, the repo holds tickets, or the planner gives any
+    // of the parts; a bare plan in a repo that holds nothing stays off the tab.
+    const toTab =
+      loop === "plan" &&
+      (["awaiting-plan", "sent-back"].includes(store.plans.get(run.repoId, issue)?.state ?? "") ||
+        (await planSignoffOf(run.repoId)) !== "never" ||
+        parsed.data.summary !== undefined ||
+        parsed.data.size_estimate !== undefined ||
+        parsed.data.risks !== undefined ||
+        (parsed.data.mockups?.length ?? 0) > 0);
+    if (toTab) {
+      const lacking = (
+        [
+          ["summary", parsed.data.summary],
+          ["size_estimate", parsed.data.size_estimate],
+          ["risks", parsed.data.risks],
+        ] as const
+      )
+        .filter(([, v]) => v === undefined)
+        .map(([k]) => k);
+      if (lacking.length > 0) return { text: planPartsText(lacking), isError: true };
+    }
+    // every text the operator and reviewer will read is held to the same rules as the plan itself
+    const extra: { label: string; text: string }[] = [
+      ...(parsed.data.summary === undefined
+        ? []
+        : [{ label: "summary", text: parsed.data.summary }]),
+      ...(parsed.data.size_estimate === undefined
+        ? []
+        : [{ label: "size_estimate", text: parsed.data.size_estimate }]),
+      ...(parsed.data.risks === undefined ? [] : [{ label: "risks", text: parsed.data.risks }]),
+      ...(parsed.data.mockups ?? []).map((m, n) => ({
+        label: `mockup ${n + 1} caption`,
+        text: m.caption,
+      })),
+    ];
+    for (const part of extra) {
+      const bad = prTextProblem(part.text, {
+        repo,
+        issue,
+        known,
+        label: part.label,
+        unclosed: true,
+      });
+      if (bad === null) continue;
+      if (bad.problem === "secret") {
+        store.addGuardHit({
+          agentId: ctx.seatId,
+          runId: run.id,
+          rule: "secret",
+          text: mcToolHitText("secret", "report_plan"),
+          at: now(),
+        });
+        bus.emit("guard");
+      }
+      return { text: planTextText(evidenceProblemText(bad)), isError: true };
+    }
+
+    const kept =
+      loop === "plan"
+        ? await keepMockups({
+            worktree: live.worktree,
+            dbPath: deps.dbPath,
+            inputs: parsed.data.mockups ?? [],
+            known,
+          })
+        : ({ ok: true, mockups: [] } as const);
+    if (!kept.ok) return { text: kept.text, isError: true };
+
     const written = await queued(planQueue, `${run.repoId}#${issue}`, async (): Promise<Result> => {
       const cwd = crewDir(deps.dbPath);
       const failed = (what: string, r: { code: number | null; stderr: string }): Result => {
@@ -2934,13 +3029,28 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return failed("issue view", { code: viewed.code, stderr: "not an object" });
       }
       if (issueJson.state !== "OPEN") return { text: MC_PLAN_ISSUE_CLOSED, isError: true };
-      const body = String(issueJson.body ?? "");
-      if (PLAN_HEADING_LINE.test(body)) return { text: MC_PLAN_ALREADY, isError: true };
-      if (unclosedMarkdown(body)) return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
+      let body = String(issueJson.body ?? "");
+      let tail = "";
+      if (PLAN_HEADING_LINE.test(body)) {
+        // a plan the operator sent back is written again, in place of the old one
+        if (
+          loop !== "plan" ||
+          !["sent-back", "awaiting-plan"].includes(store.plans.get(run.repoId, issue)?.state ?? "")
+        )
+          return { text: MC_PLAN_ALREADY, isError: true };
+        // only the old plan section goes: later sections (the operator's notes) stay after the new plan
+        const at = body.search(PLAN_HEADING_LINE);
+        const after = body.slice(at).replace(PLAN_HEADING_LINE, "");
+        const nextHeading = after.search(/^## /m);
+        tail = nextHeading === -1 ? "" : after.slice(nextHeading).trim();
+        body = body.slice(0, at).trimEnd();
+      }
+      if (unclosedMarkdown(`${body}\n${tail}`))
+        return { text: MC_PLAN_BODY_UNCLOSED, isError: true };
 
       const tests = planTestCount(plan);
       if (tests === null) return { text: MC_PLAN_NO_TESTS, isError: true };
-      const doneWhen = doneWhenCount(body);
+      const doneWhen = doneWhenCount(`${body}\n\n${tail}`);
       if (tests < doneWhen) return { text: planFewTestsText(tests, doneWhen), isError: true };
       const unsafe = planUnsafePaths(plan);
       if (unsafe.length > 0) return { text: planUnsafePathsText(unsafe), isError: true };
@@ -2960,6 +3070,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         body.trim() === "" ? "" : `${body.trimEnd()}\n\n`,
         `${PLAN_HEADING}\n\n${plan.trim()}\n\n`,
         `${planByLine(call)}\n`,
+        tail === "" ? "" : `\n${tail}\n`,
       ].join("");
       if (Array.from(next).length > TICKET_BODY_MAX) {
         const room = TICKET_BODY_MAX - (Array.from(next).length - Array.from(plan.trim()).length);
@@ -2988,6 +3099,24 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const at = now();
     if (loop === "plan" && override !== undefined)
       store.setProfileOverride(run.repoId, issue, override, at);
+    if (toTab) {
+      // FLIGHT's mark for larger work is kept by the row; whether the ticket is held follows the
+      // repo's current setting (planHolds), so it is never stored here
+      store.plans.file(
+        run.repoId,
+        issue,
+        {
+          asks: parsed.data.summary ?? null,
+          proposal: plan.trim(),
+          sizeEstimate: parsed.data.size_estimate ?? null,
+          risks: parsed.data.risks ?? null,
+          mockups: [...kept.mockups],
+        },
+        false,
+        at,
+      );
+      bus.emit("plans");
+    }
     const planned = planWrittenText(run.ticket ?? run.id);
     store.addLoopEvent(`${run.id}:plan`, run.id, planned, at);
     const watcher = place.session.seats.find((s) => !s.retiring && seatDef(s).loop === "watch");

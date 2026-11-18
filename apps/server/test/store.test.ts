@@ -2472,6 +2472,21 @@ describe("Store", () => {
       expect(titles()).toEqual([[2, "t2"]]);
     });
 
+    it("keeps merged branch history after the live PR cache expires", () => {
+      store.upsertPullRequests(
+        "r1",
+        [
+          pr(1, { branch: "feature/42-x", state: "merged", mergedAt: 50 }),
+          pr(3, { branch: "feature/43-open" }),
+        ],
+        100,
+      );
+      store.sweepPullRequests("r1", [pr(2)], 101);
+      expect(store.pullRequests("r1").map((p) => p.number)).toEqual([2]);
+      expect(store.mergedPullRequestBranches("r1")).toEqual(["feature/42-x"]);
+      expect(store.mergedPullRequestBranches("other")).toEqual([]);
+    });
+
     it("is not a change when only the read time moves", () => {
       store.upsertPullRequests("r1", [pr(1)], 100);
       expect(store.upsertPullRequests("r1", [pr(1)], 200)).toBe(false);
@@ -3892,40 +3907,6 @@ describe("telemetry store aggregates", () => {
       basis: "test",
     });
     expect(store.operatorStops(100)).toBe(1);
-  });
-});
-
-describe("item discussions", () => {
-  it("keeps interleaved versions, retries and late replies across restart", () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    const b = store.ensureDiscussion("note:b", "v1");
-    store.askDiscussion(a.id, "ask-a", "Why?", 1);
-    store.askDiscussion(b.id, "ask-b", "Which?", 2);
-    store.markDiscussionSent(b.id, "ask-b");
-    store.askDiscussion(a.id, "ask-a", "Why?", 1);
-    store.addComms({ at: 3, from: "flight", to: "operator", ticket: null, text: "Global" });
-    const next = store.ensureDiscussion("note:a", "v2");
-    expect(next.messages).toEqual([]);
-    expect(store.replyDiscussion(a.id, "ask-a", "reply-a", "Evidence", 4)).toBe(true);
-    expect(store.replyDiscussion(b.id, "ask-a", "wrong", "Wrong", 5)).toBe(false);
-    store.close();
-    store = new Store(join(dir, "mc.sqlite"));
-    expect(store.discussion("note:a", a.id)?.messages.map((m) => m.text)).toEqual([
-      "Why?",
-      "Evidence",
-    ]);
-    expect(store.discussion("note:b", b.id)?.messages.map((m) => m.text)).toEqual(["Which?"]);
-    expect(store.discussion("note:a", b.id)).toBeNull();
-    expect(store.discussionSent(b.id, "ask-b")).toBe(true);
-    expect(store.replyDiscussion(a.id, "ask-a", "reply-a", "Evidence", 4)).toBe(true);
-    expect(store.discussion("note:a", a.id)?.messages).toHaveLength(2);
-    expect(() => store.askDiscussion(a.id, "ask-a", "Changed", 6)).toThrow();
-  });
-
-  it("bounds a thread without moving messages to another item", () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    for (let n = 0; n < 150; n++) store.askDiscussion(a.id, `ask-${n}`, "Question", n);
-    expect(store.discussion("note:a", a.id)?.messages).toHaveLength(100);
   });
 });
 

@@ -175,6 +175,12 @@ export interface ReviewPrSnapshot {
   mergeCommitSha: string | null;
 }
 
+/** origin's default branch and its tip, as one `ls-remote` read them. */
+export interface OriginTip {
+  defaultBranch: string;
+  mainSha: string;
+}
+
 export interface Publisher {
   /** An authoritative read, independent of the collector's snapshot. */
   reviewPr(run: Run, number: number): Promise<ReviewPrSnapshot | null>;
@@ -230,14 +236,20 @@ export interface Publisher {
     mergeCommitSha?: string,
     baseSha?: string,
   ): Promise<string[]>;
+  /** origin's default branch and tip now (one `ls-remote`), for a caller that shares it across runs. */
+  originTip(
+    run: Run,
+  ): Promise<({ ok: true } & OriginTip) | { ok: false; text: string; transient: boolean }>;
   /**
-   * The merge gate's reads for `sha`. origin's tip is read every call; when `known` is for the same
-   * sha and tip, it is returned without the rest of the reads.
+   * The merge gate's reads for `sha`. origin's tip is read every call unless `tip` (a read the
+   * caller shares) is given; when `known` is for the same sha and tip, it is returned without the
+   * rest of the reads.
    */
   gateFacts(
     run: Run,
     sha: string,
     known?: (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean }) | null,
+    tip?: OriginTip,
   ): Promise<GateResult>;
   /**
    * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
@@ -815,23 +827,24 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (open === null) return { ok: false, text: MC_PR_FAILED, transient: true };
       const mine = open.find((p) => p.createdAt >= run.startedAt);
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
-      // A restarted seat keeps its branch. It may therefore continue its own ended run's PR, and
-      // so may the seat that took that run over by handoff, but never adopts a PR merely because
-      // it happens to be open on that branch.
-      const receivedFrom = deps.store.receivedHandoff(run.id)?.runId;
-      const adopted = open.find((p) =>
-        deps.store
-          .runsOnTicket(run.repoId, run.ticket ?? "")
-          .some(
-            (earlier) =>
-              earlier.id !== run.id &&
-              (earlier.agentId === run.agentId || earlier.id === receivedFrom) &&
-              earlier.startedAt < run.startedAt &&
-              earlier.endedAt !== null &&
-              earlier.endedAt <= run.startedAt &&
-              earlier.loop?.prNumber === p.number,
-          ),
-      );
+      // A ticket passes from run to run (restart, reassignment, handover) and the branch stays. A
+      // run adopts the open PR an earlier ended run on the same ticket recorded, however many
+      // runs back, while no other run on the ticket is live (start_seat's rule). It never adopts a
+      // PR merely because it happens to be open on that branch.
+      const onTicket = deps.store.runsOnTicket(run.repoId, run.ticket ?? "");
+      const othersLive = onTicket.some((other) => other.id !== run.id && other.endedAt === null);
+      const adopted = othersLive
+        ? undefined
+        : open.find((p) =>
+            onTicket.some(
+              (earlier) =>
+                earlier.id !== run.id &&
+                earlier.startedAt < run.startedAt &&
+                earlier.endedAt !== null &&
+                earlier.endedAt <= run.startedAt &&
+                earlier.loop?.prNumber === p.number,
+            ),
+          );
       if (adopted !== undefined) return { ok: true, prNumber: adopted.number };
       // A PR opened outside any run (by the controller, or by a seat with no handoff) has no run
       // that recorded it. It is this run's when it is the only one open on the branch, it closes
@@ -982,33 +995,87 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     async ciExcerpt(repo, sha) {
       try {
         const listed = await deps.gh(
-          ["run", "list", `--repo=${repo}`, `--commit=${sha}`, "--json=databaseId,name,conclusion"],
+          [
+            "run",
+            "list",
+            `--repo=${repo}`,
+            `--commit=${sha}`,
+            "--json=databaseId,name,conclusion,status,attempt",
+          ],
           { cwd: cwd() },
         );
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
         const runs: unknown = JSON.parse(listed.stdout);
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
-        const failed = runs.flatMap((r: unknown) => {
-          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
-          return x?.conclusion === "failure" &&
-            typeof x.databaseId === "number" &&
-            Number.isSafeInteger(x.databaseId)
-            ? [{ id: x.databaseId, name: typeof x.name === "string" ? x.name : "CI" }]
-            : [];
-        });
+        const failed: { id: number; name: string; attempt: number | null; rerun: boolean }[] = [];
+        for (const r of runs) {
+          const x = r as {
+            databaseId?: unknown;
+            name?: unknown;
+            conclusion?: unknown;
+            status?: unknown;
+            attempt?: unknown;
+          } | null;
+          if (
+            x === null ||
+            typeof x.databaseId !== "number" ||
+            !Number.isSafeInteger(x.databaseId)
+          ) {
+            continue;
+          }
+          const name = typeof x.name === "string" ? x.name : "CI";
+          const attempt =
+            typeof x.attempt === "number" && Number.isSafeInteger(x.attempt) && x.attempt > 0
+              ? x.attempt
+              : null;
+          if (x.conclusion === "failure") {
+            failed.push({ id: x.databaseId, name, attempt, rerun: false });
+          } else if (x.status !== "completed" && attempt !== null && attempt > 1) {
+            // a run being re-run has no conclusion yet: the attempt before it may be the one that
+            // failed, but a re-run can also start from a green attempt
+            const before = await deps.gh(
+              [
+                "run",
+                "view",
+                `--repo=${repo}`,
+                String(x.databaseId),
+                `--attempt=${attempt - 1}`,
+                "--json=conclusion",
+              ],
+              { cwd: cwd() },
+            );
+            if (before.code !== 0) return CI_LOG_UNREADABLE;
+            const state: unknown = JSON.parse(before.stdout);
+            if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
+              failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
+            }
+          }
+        }
         if (failed.length === 0) return NO_FAILED_RUN;
         // bytes, not characters: what is left of CI_EXCERPT_MAX, separators and headers included
         let budget = CI_EXCERPT_MAX;
         const sections: string[] = [];
         for (const f of failed) {
-          const head = `${cleanLog(f.name).slice(0, RUN_NAME_MAX)}:\n`;
+          const name = cleanLog(f.name).slice(0, RUN_NAME_MAX);
+          const named =
+            f.attempt === null
+              ? name
+              : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
+          const head = `${named}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
           const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
           const room = share - byteLength(head);
           if (room <= 0) continue; // no room for a header with anything under it
           const viewed = await deps.gh(
-            ["run", "view", `--repo=${repo}`, String(f.id), "--log-failed"],
+            [
+              "run",
+              "view",
+              `--repo=${repo}`,
+              String(f.id),
+              ...(f.attempt === null ? [] : [`--attempt=${f.attempt}`]),
+              "--log-failed",
+            ],
             { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
           );
           if (viewed.code !== 0) return CI_LOG_UNREADABLE;
@@ -1209,10 +1276,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       });
     },
 
-    async gateFacts(run, sha, known) {
+    originTip(run) {
+      return inGit(run, async (g) => {
+        const { defaultBranch, mainSha } = await originNow(g, null);
+        return { ok: true, defaultBranch, mainSha };
+      });
+    },
+
+    async gateFacts(run, sha, known, tip) {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
-        const { defaultBranch, mainSha } = await originNow(g, null);
+        const { defaultBranch, mainSha } = tip ?? (await originNow(g, null));
         if (known?.sha === sha && known.mainSha === mainSha && known.webChanged !== undefined) {
           const { containsMain, hubOnly, strays, missionControlChanged, webChanged } = known;
           return {
