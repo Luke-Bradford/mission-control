@@ -782,7 +782,7 @@ select {
     display: none;
   }
   .tabs {
-    gap: 2px;
+    gap: var(--sp-1);
   }
   /* Keep page tabs as separate controls. Status controls take the second row rather than
      squeezing labels together now that Planner is the tenth tab. */
