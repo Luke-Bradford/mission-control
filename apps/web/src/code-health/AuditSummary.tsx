@@ -662,7 +662,9 @@ export function AuditSummary({
                   <tbody>
                     {overview.landing.files.map((f) => (
                       <tr key={f.path} className="as-frow">
-                        <td className="as-path">{f.path}</td>
+                        <td className="as-path" title={f.path}>
+                          {f.path}
+                        </td>
                         <td className="as-r">{f.findings}</td>
                         <td className="as-r">{f.touches}</td>
                         <td className="as-r">

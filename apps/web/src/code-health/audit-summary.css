@@ -93,7 +93,7 @@
   }
   /* Always leave room for the header and a few file rows. */
   .as-files .as-grow {
-    min-height: 112px;
+    min-height: 128px;
   }
 }
 
@@ -596,4 +596,14 @@
 .as-dn {
   color: var(--fg);
   font-weight: 500;
+}
+
+/* A file path stays on one line and shortens with an ellipsis, so every landing row is one row tall. */
+.as-files td.as-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.as-files .as-frow > td {
+  padding-block: var(--sp-1);
 }
