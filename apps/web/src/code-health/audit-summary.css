@@ -4,7 +4,7 @@
   --as-side: clamp(440px, 34vw, 600px);
   --as-panel-head: 40px;
   --as-out-max: 160px;
-  --as-plot: 44px;
+  --as-plot: 36px;
 }
 @media (min-width: 2200px) {
   .code-health.as-fit {
@@ -87,7 +87,7 @@
      gives way (its health table scrolls) instead of the panels overlapping. */
   .as-files {
     flex: 1 0 auto;
-    min-height: calc(var(--as-panel-head) + 120px);
+    min-height: calc(var(--as-panel-head) + 100px);
   }
   .as-build {
     flex: 0 1 auto;
@@ -109,11 +109,11 @@
     min-height: 64px;
   }
   .as-pastrows {
-    max-height: 48px;
+    max-height: 36px;
   }
   /* Always leave room for the header and a few file rows. */
   .as-files .as-grow {
-    min-height: 120px;
+    min-height: 100px;
   }
 }
 

@@ -357,6 +357,24 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
           </svg>
           <div className="as-axis">
             <span>{days[0]?.day}</span>
+            <span className="as-lg">
+              <span>
+                <i className="as-k0" />
+                no hub review
+              </span>
+              <span>
+                <i className="as-k1" />
+                round 1
+              </span>
+              <span>
+                <i className="as-k2" />
+                round 2
+              </span>
+              <span>
+                <i className="as-k3" />
+                round 3+
+              </span>
+            </span>
             <span>{days.at(-1)?.day}</span>
           </div>
         </div>
@@ -612,26 +630,6 @@ export function AuditSummary({
             className="as-build"
             title="How we build"
             sub="Merged PRs a day, by highest review round"
-            actions={
-              <span className="as-lg">
-                <span>
-                  <i className="as-k0" />
-                  no hub review
-                </span>
-                <span>
-                  <i className="as-k1" />
-                  round 1
-                </span>
-                <span>
-                  <i className="as-k2" />
-                  round 2
-                </span>
-                <span>
-                  <i className="as-k3" />
-                  round 3+
-                </span>
-              </span>
-            }
           >
             <MergedChart days={overview.build.mergedPerDay} />
             <ScrollRegion className="as-scroll as-hscroll" label="Health measures">
