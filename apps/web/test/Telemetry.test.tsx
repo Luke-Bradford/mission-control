@@ -1197,7 +1197,7 @@ describe("empty and failing telemetry", () => {
     cleanup();
     await show("quality");
     expect(quality()[0]).toEqual(["CI first push", "—", "% of merged PRs"]);
-    expect(document.getElementById("qCi")?.textContent).toContain("No merged PRs with a result");
+    expect(document.getElementById("qCi")?.textContent).toContain("Daily quality is not collected for this window.");
     cleanup();
     await show("machine");
     within(panel("tMach")).getByText("No machine samples in the last 24h.");
