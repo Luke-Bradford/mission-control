@@ -694,6 +694,11 @@ export interface LoopSnapshot {
     /** The state of `mc/review` on GitHub; null when not reported. Absent: not reported. */
     reviewStatus?: PrCheck["state"] | null;
   } | null;
+  /**
+   * In ci, the PR's head is a descendant of the pushed sha: someone else pushed on top of the seat's
+   * push. Read by the caller only when the two differ. Absent: false.
+   */
+  prDescends?: boolean;
   /** The recent p90 run time (ms) of each CI job in the repo, by check name; absent: no history. */
   ciP90Ms?: Record<string, number>;
   /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
@@ -738,6 +743,8 @@ export type LoopAction =
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
+  /** Records the PR's head, a descendant of the push, as the run's push, and tells the seat. */
+  | { kind: "adopt-head"; sha: string }
   /** `mark`: the `cardFor` the move sets when it is not the phase's (rework is a state of review). */
   | { kind: "move-card"; column: MoveColumn; mark?: string }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
@@ -1321,6 +1328,19 @@ function stateStep(s: LoopSnapshot): Step {
       return park(loop, "refused", loop.lastRefusal ?? "the push or PR was refused");
     }
     if (pushed === null || pr === null || pushed.sha !== headCommit || pr.headSha !== pushed.sha) {
+      // someone else's commit on top of the seat's push (a main merge, a doc edit): the PR head is
+      // the run's push now, and the seat is told its branch moved on
+      if (
+        pushed !== null &&
+        pr !== null &&
+        pr.state === "open" &&
+        pushed.sha === headCommit &&
+        pr.headSha !== null &&
+        pr.headSha !== pushed.sha &&
+        s.prDescends === true
+      ) {
+        return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha }] };
+      }
       if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
         return park(
           loop,

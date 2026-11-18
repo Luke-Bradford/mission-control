@@ -448,6 +448,23 @@ describe("state step", () => {
     }
   });
 
+  it("8: a PR head that descends from the push is adopted as the push, not parked as stuck", () => {
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true }, late));
+    expect(r.loop.phase).toBe("ci");
+    expect(r.loop.parked ?? null).toBeNull();
+    expect(r.actions).toEqual([{ kind: "adopt-head", sha: SHA2 }]);
+  });
+
+  it("8: a PR head that does not descend from the push still parks as stuck", () => {
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    for (const prDescends of [false, undefined]) {
+      const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends }, late));
+      expect(r.loop.parked?.kind).toBe("stuck");
+      expect(r.actions.some((a) => a.kind === "adopt-head")).toBe(false);
+    }
+  });
+
   it("8: a run stopped on push-not-shown is in CI again once the PR head is the pushed sha", () => {
     const stopped = reconcile(
       inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),

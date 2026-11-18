@@ -1566,6 +1566,30 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         return;
       }
+      case "adopt-head": {
+        const prior = store.runPush(run.id);
+        store.addRunCommit({
+          runId: run.id,
+          repoId: run.repoId,
+          branch: run.branch ?? findPr(run, cur)?.branch ?? "",
+          sha: a.sha,
+          at,
+        });
+        store.setRunPush({ runId: run.id, sha: a.sha, at });
+        store.addLoopEvent(
+          `${run.id}:${cur.epoch}:followed:${a.sha}`,
+          run.id,
+          `PR head ${a.sha.slice(0, 7)} is on top of the push ${prior?.sha.slice(0, 7) ?? ""}; CI follows it`,
+          at,
+        );
+        await send(
+          run.id,
+          `branch-moved:${run.id}:${a.sha}`,
+          `Your branch moved on: ${a.sha.slice(0, 7)} was added on top of your push${prior === null ? "" : ` ${prior.sha.slice(0, 7)}`}. Fast-forward your worktree (git pull --ff-only) before you commit again.`,
+        );
+        out.again = true;
+        return;
+      }
       case "rerun-ci": {
         // once per sha: the loop marked it before this ran, so a refusal is not tried again
         const runs = await publisher.rerunFailed(repo?.github ?? "", a.sha);
@@ -2230,6 +2254,20 @@ export function createEngine(deps: EngineDeps): Engine {
       config.repos.find((r) => r.id === repoId)?.autonomy === "merge" &&
       rules?.hardRulesSet === true;
     const snap = snapshot(run, input, at, mergeAllowed);
+    // a commit on top of the seat's push (a main merge, a doc edit): the PR head follows the push
+    if (
+      snap !== null &&
+      input.phase === "ci" &&
+      run.endedAt === null &&
+      pushed !== null &&
+      pr?.state === "open" &&
+      pr.headSha !== null &&
+      pr.headSha !== pushed.sha &&
+      snap.headCommit === pushed.sha &&
+      (await publisher.isDescendant(run, pushed.sha, pr.headSha))
+    ) {
+      snap.prDescends = true;
+    }
     if (snap === null) {
       // a run the loop cannot read is never woken: a stale flag must not hold up a younger rework
       if (input.aside?.wake) {

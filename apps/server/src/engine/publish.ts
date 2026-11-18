@@ -1194,10 +1194,16 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async isDescendant(run, ancestor, head) {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
-      const result = await inGit(run, async (g) => ({
-        ok: true as const,
-        descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
-      }));
+      const result = await inGit(run, async (g) => {
+        // a commit someone else pushed is not in the clone yet
+        if (!(await have(g, head))) {
+          await g(["fetch", "--no-tags", "origin", head]).catch(() => "");
+        }
+        return {
+          ok: true as const,
+          descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
+        };
+      });
       return result.ok && result.descends;
     },
 
