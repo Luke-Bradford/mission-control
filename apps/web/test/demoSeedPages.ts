@@ -722,6 +722,12 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
       reports: [],
     };
+    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+    out[`/api/repos/${DEMO_REPO}/prs/${pr.number}`] = {
+      repoId: DEMO_REPO,
+      number: pr.number,
+      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
+    };
   }
   return out;
 }
@@ -915,6 +921,11 @@ export function demoPageAnswers(
     const path = `/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${report.prNumber}`;
     history[path] = { reports: [report] };
     history[`${path}&headSha=${report.headSha}`] = { reports: [report] };
+    history[`/api/repos/${DEMO_REPO}/prs/${report.prNumber}`] = {
+      repoId: DEMO_REPO,
+      number: report.prNumber,
+      ticket: null,
+    };
   }
   return {
     ...health,
