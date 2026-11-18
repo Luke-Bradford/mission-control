@@ -95,6 +95,7 @@ import {
   MC_RUN_ENDED,
   MC_TICKET_READERS_ONLY,
   MC_TOOLS,
+  MERGE_HOLD_PARK,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsYouItems,
@@ -7432,7 +7433,7 @@ describe("superuser housekeeping", () => {
         "r-pr",
         "FLIGHT",
         {
-          kinds: ["review", "review-ruling"],
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
           action: "rework",
           basis: "Checked the current state",
           note: "Fix the validation branch and add its regression test.",
@@ -7452,6 +7453,37 @@ describe("superuser housekeeping", () => {
       text: "Settled r-pr: rework.",
     });
     expect(engineCalls).toHaveLength(5);
+  });
+  it("sends a merge-hold park back for rework, and no other settle touches it", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: MERGE_HOLD_PARK, reason: "merge held by CAPCOM: bug", ended: false },
+      mergeHold: { by: "CAPCOM", reason: "bug", at: NOW },
+    });
+    for (const action of ["accept", "rereview", "lift", "second_review"] as const) {
+      expect(await call("settle_park", { runId: "r-pr", action })).toEqual(
+        refused("This action cannot settle this park."),
+      );
+    }
+    expect(engineCalls).toEqual([]);
+    expect(
+      await call("settle_park", { runId: "r-pr", action: "rework", note: "Fix the overlap." }),
+    ).toEqual({ text: "Settled r-pr: rework." });
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
+          action: "rework",
+          basis: "Checked the current state",
+          note: "Fix the overlap.",
+        },
+      ],
+    ]);
   });
   it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
     elevated();

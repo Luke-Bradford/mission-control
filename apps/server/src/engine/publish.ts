@@ -827,22 +827,25 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (open === null) return { ok: false, text: MC_PR_FAILED, transient: true };
       const mine = open.find((p) => p.createdAt >= run.startedAt);
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
-      // A restarted ticket keeps its branch. Its new run, on any seat, continues the PR an earlier
-      // ended run on that branch opened, but never adopts a PR merely because it happens to be
-      // open on that branch.
-      const adopted = open.find((p) =>
-        deps.store
-          .runsOnTicket(run.repoId, run.ticket ?? "")
-          .some(
-            (earlier) =>
-              earlier.id !== run.id &&
-              earlier.branch === run.branch &&
-              earlier.startedAt < run.startedAt &&
-              earlier.endedAt !== null &&
-              earlier.endedAt <= run.startedAt &&
-              earlier.loop?.prNumber === p.number,
-          ),
-      );
+      // A ticket passes from run to run (restart, reassignment, handover) and the branch stays. A
+      // run adopts the open PR an earlier ended run on the same ticket recorded, however many
+      // runs back, while no other run on the ticket is live (start_seat's rule). It never adopts a
+      // PR merely because it happens to be open on that branch.
+      const onTicket = deps.store.runsOnTicket(run.repoId, run.ticket ?? "");
+      const othersLive = onTicket.some((other) => other.id !== run.id && other.endedAt === null);
+      const adopted = othersLive
+        ? undefined
+        : open.find((p) =>
+            onTicket.some(
+              (earlier) =>
+                earlier.id !== run.id &&
+                earlier.branch === run.branch &&
+                earlier.startedAt < run.startedAt &&
+                earlier.endedAt !== null &&
+                earlier.endedAt <= run.startedAt &&
+                earlier.loop?.prNumber === p.number,
+            ),
+          );
       if (adopted !== undefined) return { ok: true, prNumber: adopted.number };
       // A PR opened outside any run (by the controller, or by a seat with no run) has no run
       // that recorded it. It is this run's when it is the only one open on the branch, it closes

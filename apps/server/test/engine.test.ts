@@ -5065,6 +5065,56 @@ describe("the engine runs reviews", () => {
         expect(h.steps).not.toContain("merge");
       });
 
+      it("FLIGHT sends a held run back for rework; the hold stays and the run parks at it again", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await h.engine.holdMerge(RUN, "CAPCOM", "reproduced bug");
+        await gateOpen();
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        // a plain resume and other settles are still refused
+        expect(await h.engine.onOperatorMessage(RUN, "FLIGHT")).toEqual({
+          lifted: false,
+          reason: "use-merge-hold",
+        });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: [MERGE_HOLD_PARK],
+            action: "rereview",
+          }),
+        ).toEqual({ lifted: false, reason: "use-merge-hold" });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: [MERGE_HOLD_PARK],
+            action: "accept",
+          }),
+        ).toEqual({ lifted: false, reason: "use-merge-hold" });
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: [MERGE_HOLD_PARK],
+            action: "rework",
+            note: "Handle the overlapping check runs.",
+          }),
+        ).toEqual({ lifted: true });
+        expect(loopOf()).toMatchObject({ phase: "working", parked: null });
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
+        expect(h.sent.at(-1)?.text).toContain("Handle the overlapping check runs.");
+        // FLIGHT still cannot release the operator's hold
+        expect((await h.engine.releaseMergeHold(RUN, "FLIGHT")).ok).toBe(false);
+        expect(loopOf().mergeHold?.by).toBe("CAPCOM");
+        // the builder fixes it; CI is green and the review is clean on the new head
+        report("Fixed the overlap", SHA_B);
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.reconcileRun(RUN);
+        const review = need(reviewRows().find((r) => r.sha === SHA_B));
+        reported(review.id, []);
+        await vi.waitFor(() => expect(loopOf().parked?.kind).toBe(MERGE_HOLD_PARK));
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "reproduced bug" });
+        expect(h.steps).not.toContain("merge");
+        expect(await h.engine.releaseMergeHold(RUN, "CAPCOM")).toEqual({ ok: true });
+        await vi.waitFor(() => expect(h.steps).toContain("merge"));
+      });
+
       it("FLIGHT cannot release a hold the operator set; the operator can", async () => {
         await toReview();
         await h.engine.holdMerge(RUN, "CAPCOM", "veto");

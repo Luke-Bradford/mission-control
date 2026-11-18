@@ -3119,7 +3119,10 @@ export function createEngine(deps: EngineDeps): Engine {
         // only a recorded verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
-        if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
+        // only the release lifts a merge hold; FLIGHT's rework sends the held PR back to its builder
+        // and leaves the hold in force
+        if (kind === MERGE_HOLD_PARK && !(by === "FLIGHT" && opts?.action === "rework"))
+          return refuse("use-merge-hold");
         if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
         if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
@@ -3152,7 +3155,8 @@ export function createEngine(deps: EngineDeps): Engine {
           } else if (
             kind !== "review" &&
             kind !== "review-ruling" &&
-            !(kind === "review-failed" && opts.action === "rereview")
+            !(kind === "review-failed" && opts.action === "rereview") &&
+            !(kind === MERGE_HOLD_PARK && opts.action === "rework")
           )
             return refuse("wrong-action");
           if (opts.action === "second_review") {

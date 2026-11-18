@@ -187,6 +187,7 @@ import {
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   MC_TOOL_NAMES,
+  MERGE_HOLD_PARK,
   METRIC_IDS,
   mcToolHitText,
   messageAboutText,
@@ -4041,7 +4042,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             ? ["stuck", "gate"]
             : a.action === "rereview"
               ? ["review", "review-ruling", "review-failed"]
-              : ["review", "review-ruling"];
+              : a.action === "rework"
+                ? ["review", "review-ruling", MERGE_HOLD_PARK]
+                : ["review", "review-ruling"];
         if (!kinds.includes(run.loop.parked.kind))
           return fail("This action cannot settle this park.");
         const head = store.runPush(run.id)?.sha ?? run.loop.awaitingFlight ?? null;
