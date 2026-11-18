@@ -95,7 +95,7 @@ export function telemetryNoteEpisodes(
   since: number,
   now: number,
   kinds: string[],
-): { runId: string | null; interval: [number, number] }[] {
+): { runId: string | null; openedAt: number; interval: [number, number] }[] {
   const rows = db
     .prepare(
       `SELECT e.at, e.cleared_at, e.kind, n.run_id FROM attention_episodes e
@@ -107,6 +107,7 @@ export function telemetryNoteEpisodes(
     .filter((r) => kinds.includes(r.kind as string))
     .map((r) => ({
       runId: (r.run_id as string | null) ?? null,
+      openedAt: r.at as number,
       interval: [
         Math.max(since, r.at as number),
         Math.min(now, (r.cleared_at as number | null) ?? now),

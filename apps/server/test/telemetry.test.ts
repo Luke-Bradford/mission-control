@@ -2004,6 +2004,22 @@ describe("crew seats", () => {
         expect(seatShare()).toMatchObject({ working: 25, blocked: 0 });
       });
 
+      it("a run woken from aside keeps the hold it raises after waking", () => {
+        ran();
+        setAside({ id: "woken", loop: null });
+        between();
+        store.raiseNote({
+          key: "hold:woken",
+          kind: "blocked",
+          runId: "woken",
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: "held",
+          at: at("2026-10-17T11:00:00Z"),
+        });
+        expect(seatShare()).toMatchObject({ working: 25, blocked: 25 });
+      });
+
       it("agrees with the chart's running share for the same seat and day", () => {
         setAside();
         between();
