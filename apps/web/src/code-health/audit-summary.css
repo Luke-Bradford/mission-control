@@ -83,18 +83,14 @@
   .as-past {
     flex: none;
   }
-  /* The files panel never gives up its header and two rows: when the page is short, How we build
-     gives way (its health table scrolls) instead of the panels overlapping. */
+  /* How we build keeps its header, chart and five figures; the files list is the panel that gives
+     way, down to its header and two rows, and scrolls the rest. */
   .as-files {
-    flex: 1 0 auto;
+    flex: 1 1 0;
     min-height: calc(var(--as-panel-head) + 100px);
   }
   .as-build {
-    flex: 0 1 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+    flex: none;
   }
   .as-scroll {
     max-height: none;
@@ -105,14 +101,14 @@
   /* All five figures show: the health table takes its natural height and the files list gives way. */
   .as-hscroll {
     max-height: none;
-    flex: 1 1 auto;
-    min-height: 64px;
+    flex: none;
   }
   .as-pastrows {
     max-height: 36px;
   }
   /* Always leave room for the header and a few file rows. */
   .as-files .as-grow {
+    flex: 1 1 auto;
     min-height: 100px;
   }
 }

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { CODE_HEALTH_OVERVIEW_FILES_MAX } from "@mc/core";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { codeHealthBrowserApi } from "./codeHealthBrowserFixtures.ts";
@@ -21,7 +22,8 @@ function api(options: Options = {}) {
   const over = overviewFixture({
     rows: options.rows ?? 8,
     generatedAt: at,
-    files: options.files,
+    // The server sends up to ten landing files; the first screen is checked with all of them.
+    files: options.files ?? CODE_HEALTH_OVERVIEW_FILES_MAX,
     outside: options.outside,
     longPath: options.longPath,
     rowOver: (n) =>
@@ -104,6 +106,11 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
           return b.bottom > p.top && b.top < p.bottom;
         });
       })(),
+      plotHeight: document.querySelector(".as-plot svg")?.getBoundingClientRect().height ?? 0,
+      filesScroll: (() => {
+        const l = document.querySelector(".as-files .as-scroll");
+        return !!l && l.scrollHeight > l.clientHeight;
+      })(),
       listScrolls: list ? list.scrollHeight > list.clientHeight : false,
       small: [
         ...document.querySelectorAll(".as-cols button, .as-cols select, .as-cols a[href]"),
@@ -141,6 +148,8 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.visibleRows).toBeGreaterThanOrEqual(5);
             expect(m.firstOpen).toBe(true);
             expect(m.landingRows).toBeGreaterThanOrEqual(2);
+            expect(m.plotHeight, "the chart shows").toBeGreaterThan(0);
+            expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.figures).toBe(5);
             expect(m.figuresVisible, `every figure is fully visible: ${m.figuresDebug}`).toBe(5);
             expect(m.detailInside, m.detailDebug).toBe(true);
@@ -249,6 +258,9 @@ describeRendered("Audit first screen in a real browser", () => {
           }, undefined);
           const m = await measure(page);
           expect(m.landingRows, "two landing rows fit").toBeGreaterThanOrEqual(2);
+          expect(m.figuresVisible, m.figuresDebug).toBe(5);
+          expect(m.plotHeight, "the chart shows").toBeGreaterThan(0);
+          expect(m.filesScroll, "the files list scrolls").toBe(true);
           expect(m.landingOverlapsPast, "landing rows do not overlap past results").toBe(false);
           expect(m.pageScrolls).toBe(false);
           expect(m.panelsInside).toBe(true);
