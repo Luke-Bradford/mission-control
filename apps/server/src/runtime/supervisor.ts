@@ -2510,7 +2510,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const info = findSeat(row.seatId);
     if (info) closeRunItems(info, run?.id ?? null);
     if (open) emit({ kind: "run-ended", seatId: row.seatId, runId: run.id, endedBy: "exit" });
-    if (info && run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
+    if (info && run !== null) void dropScratch(info, run.id, run.seq, row.worktree);
   }
 
   const keepsWorktree = (run: Run): boolean => {

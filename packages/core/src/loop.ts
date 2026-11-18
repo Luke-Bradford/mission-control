@@ -1141,9 +1141,9 @@ function stateStep(s: LoopSnapshot): Step {
     };
   }
   if (loop.phase === "parked") {
-    // Old databases can still hold parks from before non-decision parks became stops. End those
-    // runs here so an upgrade cannot leave a seat held by a park nothing can lift.
-    if (loop.parked !== null && !loop.parked.ended && !isDecisionPark(loop.parked.kind)) {
+    // Old databases can still hold stuck parks from before they became stops. End those runs here
+    // so an upgrade cannot leave a seat held by a park nothing can lift.
+    if (!loop.parked?.ended && loop.parked?.kind === "stuck") {
       return {
         loop: { ...loop, parked: { ...loop.parked, ended: true } },
         actions: [{ kind: "end-run" }, { kind: "take-next" }],

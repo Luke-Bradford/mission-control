@@ -289,7 +289,7 @@ describe("state step", () => {
   });
 
   it("3: an old non-decision park stops on upgrade, while a review park waits", () => {
-    const l = { phase: "parked" as const, parked: { kind: "ci", reason: "r", ended: false } };
+    const l = { phase: "parked" as const, parked: { kind: "stuck", reason: "r", ended: false } };
     const r = reconcile(snap({ evidence: { id: 9, at: 1, ruling: false }, headCommit: SHA }, l));
     expect(r.loop.parked?.ended).toBe(true);
     expect(r.actions.map((action) => action.kind)).toEqual(
@@ -951,7 +951,7 @@ describe("desired-state step", () => {
   it("emits a note for each missing desired key and clears those no longer wanted", () => {
     const parked = {
       phase: "parked" as const,
-      parked: { kind: "review", reason: "boom", ended: false },
+      parked: { kind: "ci", reason: "boom", ended: false },
       cardFor: "parked:0",
     };
     const r = reconcile(snap({ openNotes: ["old"] }, parked));
@@ -965,7 +965,7 @@ describe("desired-state step", () => {
   it("a park's note key changes with the epoch", () => {
     const parked = {
       phase: "parked" as const,
-      parked: { kind: "review", reason: "boom", ended: false },
+      parked: { kind: "ci", reason: "boom", ended: false },
       cardFor: "parked:1",
       epoch: 1,
     };
@@ -1423,7 +1423,7 @@ describe("sequences", () => {
 });
 
 describe("review round", () => {
-  const PARKED = { kind: "review", reason: "r", ended: false };
+  const PARKED = { kind: "ci", reason: "r", ended: false };
   const ENDED = { kind: "ended", reason: "run ended (stopped)", ended: true };
   const touches = { sha: SHA, paths: ["a.yml"] };
   const limited = (s: LoopSnapshot): LoopSnapshot["seat"] =>
@@ -1914,7 +1914,7 @@ describe("amendments from the reviews of Task 5", () => {
 
   it("the returned loop shares no parked or touches object with the input", () => {
     const touches = { sha: SHA, paths: ["a.yml"], flightPowers: "superuser" as const };
-    const parked = { kind: "review", reason: "r", ended: false };
+    const parked = { kind: "ci", reason: "r", ended: false };
     const s = snap({}, { phase: "parked", parked, touches, cardFor: "parked:0" });
     const r = reconcile(s);
     expect(r.loop.parked).toEqual(parked);
