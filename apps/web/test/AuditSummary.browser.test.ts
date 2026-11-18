@@ -157,6 +157,7 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
         (e) => e.scrollWidth > e.clientWidth,
       ).length,
       plotHeight: document.querySelector(".as-plot svg")?.getBoundingClientRect().height ?? 0,
+      landingTotal: document.querySelectorAll(".as-files tr.as-frow").length,
       filesScroll: (() => {
         const l = document.querySelector(".as-files .as-scroll");
         return !!l && l.scrollHeight > l.clientHeight;
@@ -201,7 +202,9 @@ describeRendered("Audit first screen in a real browser", () => {
             expect(m.plotHeight, "the chart is a useful plot").toBeGreaterThanOrEqual(
               width < 2200 ? 64 : 100,
             );
-            expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
+            // Only rows that do not fit must scroll; with compact rows all ten may fit at 2560.
+            if (m.landingRows < m.landingTotal)
+              expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.truncatedMeta, "no figure unit or window is cut off").toBe(0);
             expect(m.cutRow, "Do next ends on a whole row").toBe(0);
             expect(m.verdictTop, "the verdict is the first line under the nav").toBeLessThan(90);
@@ -335,7 +338,8 @@ describeRendered("Audit first screen in a real browser", () => {
           expect(m.plotHeight, "the chart is a useful plot").toBeGreaterThanOrEqual(
             width < 2200 ? 64 : 100,
           );
-          expect(m.filesScroll, "the files list scrolls").toBe(true);
+          if (m.landingRows < m.landingTotal)
+            expect(m.filesScroll, "the files list scrolls").toBe(true);
           expect(m.landingOverlapsPast, "landing rows do not overlap past results").toBe(false);
           expect(m.pageScrolls).toBe(false);
           expect(m.panelsInside).toBe(true);
