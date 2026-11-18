@@ -1168,6 +1168,32 @@ function stateStep(s: LoopSnapshot): Step {
       actions: passed.actions,
     };
   }
+  // a pending-CI stop on a head whose CI has since failed goes back to the ci step, which hands the
+  // seat the failure the way it does for a run that was never parked
+  if (
+    loop.phase === "parked" &&
+    loop.parked?.kind === "ci-pending" &&
+    !loop.parked.ended &&
+    pr?.state === "open" &&
+    pr.ci === "failing" &&
+    headCommit !== null &&
+    pushed?.sha === headCommit &&
+    pr.headSha === headCommit
+  ) {
+    return stateStep({
+      ...s,
+      loop: {
+        ...loop,
+        phase: "ci",
+        parked: null,
+        pushStartedAt: now,
+        pushFor: headCommit,
+        unparkedAt: now,
+        transient: 0,
+        lastRefusal: null,
+      },
+    });
+  }
   if (loop.phase === "parked") return unchanged(loop);
   // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
   // in review or working with it still recorded: a ruling park resumes straight into review, and
