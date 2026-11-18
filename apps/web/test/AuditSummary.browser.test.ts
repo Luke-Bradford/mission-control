@@ -393,4 +393,44 @@ describeRendered("Audit first screen in a real browser", () => {
       },
       BROWSER_TEST_TIMEOUT_MS,
     );
+
+  // At the supported 1600 px width a figure label or its change words may be clipped in the table;
+  // the "how" disclosure must then show them in full, visibly.
+  for (const colorScheme of ["dark", "light"] as const)
+    it(
+      `shows a clipped figure label and its change in full under "how" at 1600x1000 in ${colorScheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/auditSummaryBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme,
+          api: api(),
+        });
+        try {
+          await page.boxes(".as-rec");
+          await page.click(".as-hrow .as-defbtn");
+          await page.evaluate(() => document.fonts.ready.then(() => 0), undefined);
+          const m = await page.evaluate(() => {
+            const row = document.querySelector(".as-hrow");
+            const def = row?.querySelector(".as-fdef") as HTMLElement | null;
+            const label = row?.querySelector(".as-flab")?.textContent ?? "";
+            const r = def?.getBoundingClientRect();
+            return {
+              label,
+              text: def?.textContent ?? "",
+              visible: !!r && r.width > 0 && r.height > 0 && r.right <= innerWidth,
+              clipped: !!def && def.scrollWidth > def.clientWidth + 1,
+            };
+          }, undefined);
+          expect(m.visible, "the disclosure is on screen").toBe(true);
+          expect(m.clipped, "the disclosure text is not clipped").toBe(false);
+          expect(m.text).toContain(`${m.label}:`);
+          expect(m.text).toMatch(/no comparison|no change|up|down/);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
 });

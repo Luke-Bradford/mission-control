@@ -624,9 +624,15 @@ it("sorts landing files by findings with a visible cue, and shows a figure's def
   how.focus();
   expect(document.activeElement).toBe(how);
   expect(how.getAttribute("aria-expanded")).toBe("false");
+  const label = how.getAttribute("aria-label")?.replace(/^Show how (.*) is measured$/, "$1") ?? "";
   fireEvent.click(how);
   expect(how.getAttribute("aria-expanded")).toBe("true");
-  expect(document.querySelector(".as-fdef")?.textContent).toMatch(/\w/);
+  const def = document.querySelector(".as-fdef")?.textContent ?? "";
+  expect(def).toMatch(/\w/);
+  // The full label and the change or state words are in the disclosure, not only in the clipped cells.
+  expect(label).not.toBe("");
+  expect(def).toContain(`${label}:`);
+  expect(def).toMatch(/no comparison|no change|up|down/);
 });
 
 it("leads the verdict in bold, with no badge, and speaks its tone", async () => {

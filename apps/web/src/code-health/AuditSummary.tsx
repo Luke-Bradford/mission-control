@@ -482,7 +482,8 @@ function FigureRow({ f, showWindow }: { f: CodeHealthFigure; showWindow: boolean
         </div>
         {open && (
           <span className="as-sub as-fdef">
-            {f.unit} · {f.window.label}. {f.source}. {f.coverage}
+            {f.label}: {[FIGURE_STATE[f.state], change(f)].filter(Boolean).join(" · ")}. {f.unit} ·{" "}
+            {f.window.label}. {f.source}. {f.coverage}
           </span>
         )}
       </td>
