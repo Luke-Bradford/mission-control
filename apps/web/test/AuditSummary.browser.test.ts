@@ -112,6 +112,9 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
           return bottom > top && bottom > p.top && top < p.bottom;
         });
       })(),
+      truncatedMeta: [...document.querySelectorAll(".as-hrow .as-fmeta")].filter(
+        (e) => e.scrollWidth > e.clientWidth,
+      ).length,
       plotHeight: document.querySelector(".as-plot svg")?.getBoundingClientRect().height ?? 0,
       filesScroll: (() => {
         const l = document.querySelector(".as-files .as-scroll");
@@ -158,6 +161,7 @@ describeRendered("Audit first screen in a real browser", () => {
               width < 2200 ? 64 : 100,
             );
             expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
+            expect(m.truncatedMeta, "no figure unit or window is cut off").toBe(0);
             expect(m.figures).toBe(5);
             expect(m.figuresVisible, `every figure is fully visible: ${m.figuresDebug}`).toBe(5);
             expect(m.detailInside, m.detailDebug).toBe(true);

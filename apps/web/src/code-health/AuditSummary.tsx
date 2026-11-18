@@ -404,7 +404,13 @@ function MergedChart({
 }
 
 /** One figure on one line; its button shows the unit, window, source and coverage in full. */
-function FigureRow({ f }: { f: CodeHealthFigure }) {
+/** The short unit beside a label: only where neither the label nor the value already says it. */
+function shortUnit(f: CodeHealthFigure): string {
+  const carried = f.value !== null && (f.unit.startsWith("%") || f.unit.startsWith("USD"));
+  return carried || f.label.toLowerCase().includes(f.unit.toLowerCase()) ? "" : f.unit;
+}
+
+function FigureRow({ f, showWindow }: { f: CodeHealthFigure; showWindow: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <tr className="as-hrow">
@@ -420,8 +426,8 @@ function FigureRow({ f }: { f: CodeHealthFigure }) {
           >
             {open ? "hide" : "how"}
           </button>
-          <span className="as-sub as-fmeta" title={`${f.unit} · ${f.window.label}`}>
-            {f.unit} · {f.window.label}
+          <span className="as-sub as-fmeta">
+            {[shortUnit(f), showWindow ? f.window.label : ""].filter(Boolean).join(" · ")}
           </span>
         </div>
         {open && (
@@ -493,6 +499,13 @@ export function AuditSummary({
     [open, setOpen] = useState<string | null | undefined>(undefined),
     [showDays, setShowDays] = useState(false),
     [showPast, setShowPast] = useState(false);
+  // When every figure covers one window (and one comparison window), the column heads say so once.
+  const nows = new Set(overview.figures.map((f) => f.window.label)),
+    befores = new Set(overview.figures.flatMap((f) => (f.comparison ? [f.comparison.label] : []))),
+    sharedWindow =
+      nows.size === 1 && befores.size <= 1
+        ? { now: [...nows][0], before: [...befores][0] as string | undefined }
+        : null;
   const rows = overview.rows,
     counts: Record<Who, number> = {
       all: rows.length,
@@ -667,21 +680,23 @@ export function AuditSummary({
               <table>
                 <colgroup>
                   <col />
-                  <col className="as-c-fig" />
-                  <col className="as-c-fig" />
-                  <col className="as-c-chg" />
+                  <col className="as-c-hwin" />
+                  <col className="as-c-hwin" />
+                  <col className="as-c-hchg" />
                 </colgroup>
                 <thead>
                   <tr>
                     <th>Measure</th>
-                    <th className="as-r">Before</th>
-                    <th className="as-r">Now</th>
+                    <th className="as-r">
+                      {sharedWindow ? (sharedWindow.before ?? "Before") : "Before"}
+                    </th>
+                    <th className="as-r">{sharedWindow ? sharedWindow.now : "Now"}</th>
                     <th>Change</th>
                   </tr>
                 </thead>
                 <tbody>
                   {overview.figures.map((f) => (
-                    <FigureRow key={f.id} f={f} />
+                    <FigureRow key={f.id} f={f} showWindow={!sharedWindow} />
                   ))}
                 </tbody>
               </table>

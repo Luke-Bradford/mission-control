@@ -580,7 +580,7 @@ it("shows each figure's own window, unit and state in the table, not in a hover 
   const table = screen.getByRole("region", { name: "Health measures" });
   const text = (name: string) => within(table).getByText(name).closest("tr")?.textContent ?? "";
   expect(text("Alpha")).toContain("merged PRs · 7d");
-  expect(text("Beta")).toContain("% of merged PRs · 90d");
+  expect(text("Beta")).toContain("90d");
   expect(text("Gamma")).toContain("USD, median of priced PRs · 30d");
   expect(text("Gamma")).toContain("partial");
   expect(text("Gamma")).toContain("—");
@@ -690,4 +690,17 @@ it("keeps every past result one press away", async () => {
   expect(screen.getByRole("button", { name: "Hide results" }).getAttribute("aria-expanded")).toBe(
     "true",
   );
+});
+
+it("names a window shared by every figure once, in the column heads", async () => {
+  setup();
+  render(<CodeHealth />);
+  await ready();
+  const table = screen.getByRole("region", { name: "Health measures" });
+  const heads = within(table)
+    .getAllByRole("columnheader")
+    .map((h) => h.textContent);
+  expect(heads).toContain("Previous 30d");
+  expect(heads).toContain("30d");
+  expect(within(table).queryAllByText(/·\s*30d/)).toHaveLength(0);
 });
