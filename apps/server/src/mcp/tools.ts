@@ -2944,6 +2944,42 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         .map(([k]) => k);
       if (lacking.length > 0) return { text: planPartsText(lacking), isError: true };
     }
+    // every text the operator and reviewer will read is held to the same rules as the plan itself
+    const extra: { label: string; text: string }[] = [
+      ...(parsed.data.summary === undefined
+        ? []
+        : [{ label: "summary", text: parsed.data.summary }]),
+      ...(parsed.data.size_estimate === undefined
+        ? []
+        : [{ label: "size_estimate", text: parsed.data.size_estimate }]),
+      ...(parsed.data.risks === undefined ? [] : [{ label: "risks", text: parsed.data.risks }]),
+      ...(parsed.data.mockups ?? []).map((m, n) => ({
+        label: `mockup ${n + 1} caption`,
+        text: m.caption,
+      })),
+    ];
+    for (const part of extra) {
+      const bad = prTextProblem(part.text, {
+        repo,
+        issue,
+        known,
+        label: part.label,
+        unclosed: true,
+      });
+      if (bad === null) continue;
+      if (bad.problem === "secret") {
+        store.addGuardHit({
+          agentId: ctx.seatId,
+          runId: run.id,
+          rule: "secret",
+          text: mcToolHitText("secret", "report_plan"),
+          at: now(),
+        });
+        bus.emit("guard");
+      }
+      return { text: planTextText(evidenceProblemText(bad)), isError: true };
+    }
+
     const kept =
       loop === "plan"
         ? await keepMockups({
@@ -3038,10 +3074,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (loop === "plan" && override !== undefined)
       store.setProfileOverride(run.repoId, issue, override, at);
     if (toTab) {
-      // a ticket FLIGHT sent keeps its hold; otherwise only `every` holds a ticket
-      const held =
-        store.plans.get(run.repoId, issue)?.required ??
-        (await planSignoffOf(run.repoId)) === "every";
+      // FLIGHT's mark for larger work is kept by the row; whether the ticket is held follows the
+      // repo's current setting (planHolds), so it is never stored here
       store.plans.file(
         run.repoId,
         issue,
@@ -3052,7 +3086,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           risks: parsed.data.risks ?? null,
           mockups: [...kept.mockups],
         },
-        held,
+        false,
         at,
       );
       bus.emit("plans");

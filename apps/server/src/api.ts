@@ -4206,7 +4206,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
           return planAnswer(
             reply,
-            sendBackPlan(planDeps(), req.params.repoId, issue, body.data.note),
+            await sendBackPlan(planDeps(), req.params.repoId, issue, body.data.note),
           );
         },
       );

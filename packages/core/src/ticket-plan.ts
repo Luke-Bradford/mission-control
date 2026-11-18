@@ -41,8 +41,12 @@ export interface TicketPlan {
   /** The ticket's title from the hub's board copy, when it is still on the board. */
   title: string | null;
   state: PlanState;
-  /** True: the ticket is held until this plan is signed off. False: shown to the operator only. */
-  required: boolean;
+  /**
+   * True when FLIGHT sent this ticket to the tab as larger work. Whether the ticket is held is worked
+   * out from the repo's current setting and this mark (`planHolds`): every holds all, larger holds the
+   * marked, never holds none.
+   */
+  marked: boolean;
   /** What the ticket asks for, in a few lines; null until the planner files the plan. */
   asks: string | null;
   /** What is proposed (the planner's plan text); null until filed. */
@@ -95,11 +99,11 @@ export const planSentBackComms = (ref: string, note: string): string =>
  */
 export function planHolds(
   setting: PlanSignoff | undefined,
-  plan: Pick<TicketPlan, "required" | "state"> | null,
+  plan: Pick<TicketPlan, "marked" | "state"> | null,
 ): boolean {
   if (plan?.state === "signed-off") return false;
   if (setting === "every") return true;
-  return setting === "larger" && plan?.required === true;
+  return setting === "larger" && plan?.marked === true;
 }
 
 /** The copy a QA report keeps: the signed-off plan, or null while it is not signed off. */

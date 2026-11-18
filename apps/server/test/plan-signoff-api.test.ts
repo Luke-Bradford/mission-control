@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { loadConfig } from "../src/config.ts";
+import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
 import { keepMockups, stageReviewMockups } from "../src/plans/assets.ts";
 import { Store } from "../src/store.ts";
@@ -18,6 +19,7 @@ const PNG = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), Buffe
 let dir: string;
 let store: Store;
 let setting: PlanSignoff;
+let rulesFail = false;
 let moves: Move[];
 let moveResult: MoveResult;
 let emitted: string[];
@@ -64,6 +66,7 @@ beforeEach(() => {
   );
   store = new Store(join(dir, "mc.sqlite"));
   setting = "every";
+  rulesFail = false;
   moves = [];
   moveResult = { ok: true, changed: true };
   emitted = [];
@@ -85,7 +88,8 @@ const app = () => {
     githubGql: async () => {
       throw new Error("no gh in tests");
     },
-    repoRules: async () => ({ ...DEFAULT_REPO_RULES, planSignoff: setting }),
+    repoRules: async () =>
+      rulesFail ? new RepoRulesError("no rules") : { ...DEFAULT_REPO_RULES, planSignoff: setting },
     ticketMove: async (m) => {
       moves.push(m);
       return moveResult;
@@ -253,6 +257,60 @@ describe("sign-off", () => {
     const codes = (await both).map((r) => r.statusCode).sort();
     expect(codes).toEqual([200, 409]);
     expect(moves).toHaveLength(1);
+    await a.close();
+  });
+
+  it("when the repo's rules cannot be read the plan stays waiting and FLIGHT is not told", async () => {
+    store.plans.file("shop-app", 7, parts(), false, NOW);
+    rulesFail = true;
+    const a = app();
+    const res = await a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/7/approve",
+      payload: {},
+    });
+    expect(res.statusCode).toBe(502);
+    expect(store.plans.get("shop-app", 7)?.state).toBe("awaiting-signoff");
+    expect(moves).toEqual([]);
+    expect(store.commsOnTicket("shop-app#7", "#7", [], 10)).toEqual([]);
+    await a.close();
+  });
+
+  it("an approve racing a send back: one wins, the other is refused, one decision stands", async () => {
+    store.plans.file("shop-app", 7, parts(), false, NOW);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const a = buildApp({
+      config: loadConfig(join(dir, "config.yaml")),
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      repoRules: async () => ({ ...DEFAULT_REPO_RULES, planSignoff: "every" }),
+      ticketMove: async (m) => {
+        moves.push(m);
+        await gate;
+        return { ok: true, changed: true };
+      },
+    });
+    const approve = a.inject({ method: "POST", url: "/api/plans/shop-app/7/approve", payload: {} });
+    await new Promise((r) => setTimeout(r, 50));
+    const back = a.inject({
+      method: "POST",
+      url: "/api/plans/shop-app/7/send-back",
+      payload: { note: "No." },
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    const codes = [(await approve).statusCode, (await back).statusCode];
+    expect(codes).toEqual([200, 409]);
+    expect(store.plans.get("shop-app", 7)).toMatchObject({ state: "signed-off", note: null });
+    const told = store
+      .comms(0)
+      .filter((c) => c.ticket === "shop-app#7")
+      .map((c) => c.text);
+    expect(told.some((t) => t.includes("sent the plan"))).toBe(false);
     await a.close();
   });
 

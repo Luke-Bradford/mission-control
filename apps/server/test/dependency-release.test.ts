@@ -103,6 +103,7 @@ let moves: Move[];
 let synced: string[];
 let syncResult: "merged" | "refused";
 let body: string;
+let rulesNow: RepoRules;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-dep-"));
@@ -111,6 +112,7 @@ beforeEach(() => {
   synced = [];
   syncResult = "merged";
   body = "## Done when\n- x\n";
+  rulesNow = RULES;
 });
 afterEach(() => {
   store.close();
@@ -150,7 +152,7 @@ const release = (now: number) =>
       synced.push(id);
       return { kind: syncResult };
     },
-    rules: async () => RULES,
+    rules: async () => rulesNow,
     fetchTicket: async (_repo, n) => ({ number: n, body }) as TicketView,
     prsFor: (repoId) => store.pullRequests(repoId),
     log: () => {},
@@ -206,6 +208,41 @@ describe("release on merge", () => {
     await release(T0 + 7 * MIN);
     expect(moves).toHaveLength(1);
     expect(synced).toHaveLength(1);
+  });
+
+  it.each([
+    { setting: "every", marked: false, moves: false },
+    { setting: "larger", marked: true, moves: false },
+    { setting: "larger", marked: false, moves: true },
+    { setting: "never", marked: true, moves: true },
+  ] as const)(
+    "plan sign-off $setting (FLIGHT marked: $marked): the released dependent moves to Ready: $moves",
+    async ({ setting, marked, moves: moves_ }) => {
+      rulesNow = { ...RULES, planSignoff: setting };
+      if (marked) store.plans.request(REPO, 1139, T0);
+      seed();
+      await release(T0);
+      merge1015(T0 + 5 * MIN);
+      await release(T0 + 6 * MIN);
+      expect(moves).toHaveLength(moves_ ? 1 : 0);
+    },
+  );
+
+  it("moves a held dependent once its plan is signed off", async () => {
+    rulesNow = { ...RULES, planSignoff: "every" };
+    store.plans.file(
+      REPO,
+      1139,
+      { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] },
+      false,
+      T0,
+    );
+    store.plans.approve(REPO, 1139, T0);
+    seed();
+    await release(T0);
+    merge1015(T0 + 5 * MIN);
+    await release(T0 + 6 * MIN);
+    expect(moves).toHaveLength(1);
   });
 
   it("keeps a dependent Blocked when its dependency closed without merging", async () => {

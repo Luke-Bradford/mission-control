@@ -11937,6 +11937,28 @@ describe("plan sign-off", () => {
     );
   });
 
+  it("changing every to larger lets an unmarked ticket through and still holds a marked one", async () => {
+    setting("every");
+    store.plans.file(
+      "mc",
+      7,
+      { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] },
+      false,
+      nowMs,
+    );
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+    setting("larger");
+    expect((await call("promote", P)).isError).toBeUndefined();
+    board(backlog());
+    nowMs += 60 * 60_000;
+    store.plans.request("mc", 7, nowMs);
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+  });
+
   it("never: nothing is held, even a ticket marked earlier", async () => {
     setting("never");
     store.plans.request("mc", 7, nowMs);
@@ -11948,7 +11970,7 @@ describe("plan sign-off", () => {
     expect(await call("send_to_planner", { issue: 7, basis: "a design shift" })).toEqual({
       text: planSentText("mc#7"),
     });
-    expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-plan", required: true });
+    expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-plan", marked: true });
     expect(decisions()).toMatchObject([
       { kind: "promote", ref: "mc#7", decision: "Sent to the Planner tab" },
     ]);

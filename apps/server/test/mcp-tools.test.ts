@@ -6110,7 +6110,7 @@ describe("report_plan", () => {
       const row = store.plans.get("mc", 7);
       expect(row).toMatchObject({
         state: "awaiting-signoff",
-        required: false,
+        marked: false,
         asks: "Show the plan.",
         proposal: PLAN,
         sizeEstimate: "M",
@@ -6187,17 +6187,40 @@ describe("report_plan", () => {
       expect(store.plans.get("mc", 7)).toBeNull();
     });
 
-    it("every holds a new row", async () => {
+    it.each([
+      ["summary", { summary: `key ${TOKEN}` }],
+      ["size_estimate", { size_estimate: `key ${TOKEN}` }],
+      ["risks", { risks: `key ${TOKEN}` }],
+      ["a mockup caption", { mockups: [{ path: "docs/shot.png", caption: `key ${TOKEN}` }] }],
+    ])(
+      "a known secret in %s is refused, recorded as a guard hit and not echoed",
+      async (_name, extra) => {
+        const r = await call(extra);
+        expect(r.isError).toBe(true);
+        expect(r.text).not.toContain(TOKEN);
+        expect(store.guardHits(0).map((h) => [h.agentId, h.rule])).toEqual([["fao-1", "secret"]]);
+        expect(store.plans.get("mc", 7)).toBeNull();
+        expect(ghCalls().filter((c) => c.args[1] === "edit")).toEqual([]);
+      },
+    );
+
+    it("a mention in the summary is refused too", async () => {
+      const r = await call({ summary: "ask @someone" });
+      expect(r.isError).toBe(true);
+      expect(store.plans.get("mc", 7)).toBeNull();
+    });
+
+    it("a plan filed under every is not marked: the setting holds it, so a later change applies", async () => {
       withRules("every");
       await call({});
-      expect(store.plans.get("mc", 7)?.required).toBe(true);
+      expect(store.plans.get("mc", 7)?.marked).toBe(false);
     });
 
     it("a row FLIGHT sent keeps its hold under larger", async () => {
       withRules("larger");
       store.plans.request("mc", 7, NOW);
       await call({});
-      expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", required: true });
+      expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-signoff", marked: true });
     });
 
     it("a plan sent back is written again in place of the old one", async () => {

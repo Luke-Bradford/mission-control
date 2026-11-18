@@ -8,6 +8,7 @@ import {
   hasDoneWhenSection,
   hudColumnOf,
   type PullRequestView,
+  planHolds,
   prCarries,
   type RepoRules,
   type TicketView,
@@ -98,6 +99,8 @@ async function release(
         failed = true;
       } else {
         const complete =
+          // a ticket held for plan sign-off stays Blocked until its plan is signed off
+          !planHolds(rules.planSignoff, store.plans.get(repo.id, issue)) &&
           areaLabelsOf(rules, card).length === 1 &&
           rules.needs.every((n) =>
             n === "done_when" ? hasDoneWhenSection(ticket.body) : card.size !== null,

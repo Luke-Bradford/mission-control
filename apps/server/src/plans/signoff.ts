@@ -65,9 +65,10 @@ export function plansView(store: Store, config: CcConfig): PlansView {
   };
 }
 
-const settingOf = async (deps: SignoffDeps, repoId: string): Promise<PlanSignoff> => {
+/** The repo's live setting, or null when its rules cannot be read (decisions then fail closed). */
+const settingOf = async (deps: SignoffDeps, repoId: string): Promise<PlanSignoff | null> => {
   const rules = await deps.rules(repoId);
-  return rules instanceof Error ? "never" : (rules.planSignoff ?? "never");
+  return rules instanceof Error ? null : (rules.planSignoff ?? "never");
 };
 
 const tellFlight = (deps: SignoffDeps, plan: TicketPlan, text: string): void => {
@@ -83,7 +84,7 @@ const tellFlight = (deps: SignoffDeps, plan: TicketPlan, text: string): void => 
   });
 };
 
-/** One approval at a time per ticket, so a double submit cannot move the card or tell FLIGHT twice. */
+/** One decision at a time per ticket, so a double submit or an approve racing a send back cannot both win. */
 const approving = new Map<string, Promise<unknown>>();
 
 /**
@@ -97,11 +98,16 @@ export function approvePlan(
   repoId: string,
   issue: number,
 ): Promise<SignoffResult> {
+  return decided(repoId, issue, () => approveOne(deps, repoId, issue));
+}
+
+function decided(
+  repoId: string,
+  issue: number,
+  fn: () => Promise<SignoffResult>,
+): Promise<SignoffResult> {
   const key = `${repoId}#${issue}`;
-  const run = (approving.get(key) ?? Promise.resolve()).then(
-    () => approveOne(deps, repoId, issue),
-    () => approveOne(deps, repoId, issue),
-  );
+  const run = (approving.get(key) ?? Promise.resolve()).then(fn, fn);
   const tail = run.catch(() => undefined);
   approving.set(key, tail);
   void tail.then(() => {
@@ -119,7 +125,14 @@ async function approveOne(
   if (plan === null || !deps.config.repos.some((r) => r.id === repoId))
     return { ok: false, status: 404, error: PLAN_NO_SUCH };
   if (plan.state !== "awaiting-signoff") return { ok: false, status: 409, error: PLAN_NOT_WAITING };
-  const held = planHolds(await settingOf(deps, repoId), plan);
+  const setting = await settingOf(deps, repoId);
+  if (setting === null)
+    return {
+      ok: false,
+      status: 502,
+      error: "The repo's rules could not be read, so the plan is not signed off yet. Try again.",
+    };
+  const held = planHolds(setting, plan);
   let moved = false;
   if (held) {
     const card = deps.store.board(repoId).find((i) => i.issueNumber === issue);
@@ -148,7 +161,8 @@ async function approveOne(
       moved = result.changed;
     }
   }
-  deps.store.plans.approve(repoId, issue, deps.now());
+  if (!deps.store.plans.approve(repoId, issue, deps.now()))
+    return { ok: false, status: 409, error: PLAN_NOT_WAITING };
   const signed = deps.store.plans.get(repoId, issue) as TicketPlan;
   tellFlight(deps, signed, PLAN_APPROVED_COMMS(signed.ref));
   return { ok: true, plan: withTitle(deps.store, signed), moved, moveError: null };
@@ -160,13 +174,15 @@ export function sendBackPlan(
   repoId: string,
   issue: number,
   note: string,
-): SignoffResult {
-  const plan = deps.store.plans.get(repoId, issue);
-  if (plan === null || !deps.config.repos.some((r) => r.id === repoId))
-    return { ok: false, status: 404, error: PLAN_NO_SUCH };
-  if (plan.state !== "awaiting-signoff") return { ok: false, status: 409, error: PLAN_NOT_WAITING };
-  deps.store.plans.sendBack(repoId, issue, note);
-  const back = deps.store.plans.get(repoId, issue) as TicketPlan;
-  tellFlight(deps, back, planSentBackComms(back.ref, note));
-  return { ok: true, plan: withTitle(deps.store, back), moved: false, moveError: null };
+): Promise<SignoffResult> {
+  return decided(repoId, issue, async () => {
+    const plan = deps.store.plans.get(repoId, issue);
+    if (plan === null || !deps.config.repos.some((r) => r.id === repoId))
+      return { ok: false, status: 404, error: PLAN_NO_SUCH };
+    if (!deps.store.plans.sendBack(repoId, issue, note))
+      return { ok: false, status: 409, error: PLAN_NOT_WAITING };
+    const back = deps.store.plans.get(repoId, issue) as TicketPlan;
+    tellFlight(deps, back, planSentBackComms(back.ref, note));
+    return { ok: true, plan: withTitle(deps.store, back), moved: false, moveError: null };
+  });
 }

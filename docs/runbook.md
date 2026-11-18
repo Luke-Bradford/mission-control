@@ -2045,13 +2045,21 @@ GitHub by hand is not checked.
 proposed, also written under `## Plan` on the ticket), `summary` (what the ticket asks),
 `size_estimate`, `risks` and `mockups` (up to 8 `{ path, caption }`; each path is a PNG, JPEG or
 WebP file of at most 2 MB inside the planner's checkout, not a link). The hub keeps each picture by
-content hash under `plan-assets/` beside the database. Under `every` the row holds the ticket;
-under `larger` or `never` a plan is still filed, and holds only a ticket FLIGHT sent. When the repo
+content hash under `plan-assets/` beside the database. Whether a ticket is held is
+worked out from the repo's current setting and FLIGHT's mark (`marked` on the plan: FLIGHT sent it as
+larger work): `every` holds all, `larger` the marked, `never` none, so a change on Setup applies to
+plans already filed. The text fields and picture captions are scanned for secrets, mentions and
+references like the plan itself. When the repo
 is `every` or `larger`, FLIGHT sent the ticket, or the planner gives any of the parts, `report_plan`
 is refused unless it has all of `summary`, `size_estimate` and `risks` (mockups only when the operator
 will see something). A bare `plan` in a `never` repo is still written to the ticket but stays off the tab. A plan the
 operator sent back is written again: `report_plan` replaces the old `## Plan` section, and a
 planner may be started on that ticket whatever its size.
+
+**Other ways to Ready.** A held ticket (per the setting above) is also kept out of Ready when an
+operator answer to a set-aside question would move it from Backlog (it stays in Backlog, the answer
+is delivered) and when a released dependency would move it from Blocked (it stays Blocked). Unreadable
+rules hold it too.
 
 **States.** `awaiting-plan` (sent by FLIGHT, no plan yet), `awaiting-signoff`, `sent-back` (waits
 for the planner, with the operator's `note`) and `signed-off`.
@@ -2065,8 +2073,9 @@ for the planner, with the operator's `note`) and `signed-off`.
 - `POST /api/plans/:repoId/:issue/approve` (send `{}`) signs the plan off. For a ticket the repo
   holds, a card in Backlog or Refinement is confirmed in Ready first (the board mover is idempotent and reads GitHub, so a missing or
   stale cached card is caught; a card already past Ready is left), and only then is the plan marked
-  signed off. A failed move answers `502` and the plan stays waiting, so it can be approved again. Two
-  approvals at once move the card once; the second answers `409`. A plan that holds nothing is
+  signed off. A failed move answers `502` and the plan stays waiting, so it can be approved again. Approve and send back run one at a time
+  per ticket, so only one decision stands and the other answers `409`; if the repo's rules cannot be
+  read, approve answers `502` and the plan stays waiting. A plan that holds nothing is
   recorded and the card stays. `409` when the plan is not waiting for sign-off.
 - `POST /api/plans/:repoId/:issue/send-back` with `{ note }` returns the ticket to the planner with
   the note, which the planner's next brief carries.

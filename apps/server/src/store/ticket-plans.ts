@@ -18,7 +18,7 @@ const toPlan = (r: Row): TicketPlan => ({
   ref: `${r.repo_id as string}#${r.issue as number}`,
   title: null,
   state: r.state as PlanState,
-  required: r.required === 1,
+  marked: r.required === 1,
   asks: (r.asks as string | null) ?? null,
   proposal: (r.proposal as string | null) ?? null,
   sizeEstimate: (r.size_estimate as string | null) ?? null,
@@ -75,10 +75,11 @@ export function ticketPlanQueries(db: DatabaseSync) {
     },
 
     /**
-     * The planner filed a plan: waits for sign-off. `required` holds a new row's ticket; a row that
-     * FLIGHT already sent keeps its own.
+     * The planner filed a plan: waits for sign-off. `marked` is FLIGHT's own mark for larger work;
+     * a row that FLIGHT already sent keeps its mark. Whether the ticket is held is worked out from
+     * the repo's current setting and this mark (planHolds), never stored.
      */
-    file(repoId: string, issue: number, parts: PlanParts, required: boolean, at: number): void {
+    file(repoId: string, issue: number, parts: PlanParts, marked: boolean, at: number): void {
       db.prepare(
         `INSERT INTO ticket_plans
            (repo_id, issue, state, required, asks, proposal, size_estimate, risks, mockups,
@@ -92,7 +93,7 @@ export function ticketPlanQueries(db: DatabaseSync) {
       ).run(
         repoId,
         issue,
-        required ? 1 : 0,
+        marked ? 1 : 0,
         parts.asks,
         parts.proposal,
         parts.sizeEstimate,
@@ -104,17 +105,25 @@ export function ticketPlanQueries(db: DatabaseSync) {
     },
 
     /** The operator signs the plan off. */
-    approve(repoId: string, issue: number, at: number): void {
-      db.prepare(
-        "UPDATE ticket_plans SET state = 'signed-off', note = NULL, decided_at = ? WHERE repo_id = ? AND issue = ?",
-      ).run(at, repoId, issue);
+    approve(repoId: string, issue: number, at: number): boolean {
+      return (
+        db
+          .prepare(
+            "UPDATE ticket_plans SET state = 'signed-off', note = NULL, decided_at = ? WHERE repo_id = ? AND issue = ? AND state = 'awaiting-signoff'",
+          )
+          .run(at, repoId, issue).changes === 1
+      );
     },
 
     /** The operator sends the plan back: it returns to the planner with the note. */
-    sendBack(repoId: string, issue: number, note: string): void {
-      db.prepare(
-        "UPDATE ticket_plans SET state = 'sent-back', note = ?, decided_at = NULL WHERE repo_id = ? AND issue = ?",
-      ).run(note, repoId, issue);
+    sendBack(repoId: string, issue: number, note: string): boolean {
+      return (
+        db
+          .prepare(
+            "UPDATE ticket_plans SET state = 'sent-back', note = ?, decided_at = NULL WHERE repo_id = ? AND issue = ? AND state = 'awaiting-signoff'",
+          )
+          .run(note, repoId, issue).changes === 1
+      );
     },
   };
 }
