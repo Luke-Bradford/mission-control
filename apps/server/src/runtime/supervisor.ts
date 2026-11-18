@@ -123,6 +123,7 @@ import {
   TOOL_OUTPUT_DIR,
   TRIM_HOOK_TIMEOUT_S,
   ticketControllerCheck,
+  ticketHasRunText,
   ticketInReviewText,
   ticketPathGrants,
   trimHookCommand,
@@ -946,6 +947,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Writer tickets reserved between their eligibility check and the run row being stored. */
+  const startingTickets = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
@@ -3482,6 +3485,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (!readOnly && waiting.some((r) => r.ticket === ref)) {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
+    const reservesTicket = def.mode === "writer" && !planner;
+    if (reservesTicket) {
+      if (startingTickets.has(ref)) throw new SupervisorError(409, ticketHasRunText(ref));
+      startingTickets.add(ref);
+    }
     starting.add(seatId);
     let startedWorktree: string | null = null;
     try {
@@ -3970,6 +3978,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return { runId, branch: checkout.branch };
     } finally {
       starting.delete(seatId);
+      if (reservesTicket) startingTickets.delete(ref);
       if (startedWorktree !== null) startingWorktrees.delete(startedWorktree);
     }
   }

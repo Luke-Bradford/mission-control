@@ -1808,6 +1808,36 @@ describe("startRun", () => {
     await first;
   });
 
+  it("reserves a ticket while a competing writer starts", async () => {
+    let release = () => {};
+    const fetched = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sup, fetchTicket } = make({
+      fetchTicket: async () => {
+        await fetched;
+        return TICKET;
+      },
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    const first = sup.startRun("guido-1", 42);
+    await until(() => expect(fetchTicket).toHaveBeenCalledTimes(1));
+    const second = refusal(sup.startRun("guido-2", 42));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchTicket).toHaveBeenCalledTimes(1);
+    const error = await second;
+    expect(error.status).toBe(409);
+    release();
+    await first;
+  });
+
   it("busy() names a start held in its checkout, so Update refuses it", async () => {
     const { sup } = make();
     sup.start();
