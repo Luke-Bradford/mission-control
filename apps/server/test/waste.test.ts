@@ -133,6 +133,27 @@ describe("restart storm (7 November replay)", () => {
     expect(restartHold(store, "guido-1")).toBeNull();
   });
 
+  it("does not count reviews that ended ok with a reported review, but counts failed ones", () => {
+    const starts = WASTE_THRESHOLDS.restartStormStarts + 1;
+    for (let i = 0; i < starts; i++)
+      store.upsertRun(
+        run("retro-1", { startedAt: NOW - i * MIN, status: "ok", reviewId: `rv${i}` }),
+      );
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store)).toEqual([]);
+    expect(restartHold(store, "retro-1")).toBeNull();
+    for (let i = 0; i < starts; i++)
+      store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN, status: "failed" }));
+    for (let i = 0; i < starts; i++)
+      store.upsertRun(
+        run("retro-2", { startedAt: NOW - i * MIN, status: "failed", reviewId: `rf${i}` }),
+      );
+    syncWasteAlarms(config, store, NOW);
+    expect(restartHold(store, "guido-1")).not.toBeNull();
+    expect(restartHold(store, "retro-2")).not.toBeNull();
+    expect(restartHold(store, "retro-1")).toBeNull();
+  });
+
   it("does not fire at the limit, and closes when the hour's count falls back", () => {
     for (let i = 0; i < WASTE_THRESHOLDS.restartStormStarts; i++)
       store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));

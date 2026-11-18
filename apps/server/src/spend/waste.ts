@@ -95,6 +95,9 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
   const starts = new Map<string, Run[]>();
   for (const r of runs) {
     if (r.startedAt < now - t.restartStormWindowMs) continue;
+    // A review seat starts a fresh run per review: one that ended ok with its review reported is
+    // the seat doing its job, not a restart.
+    if (r.status === "ok" && r.reviewId != null) continue;
     starts.set(r.agentId, [...(starts.get(r.agentId) ?? []), r]);
   }
   for (const [agentId, list] of starts) {
