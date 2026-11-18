@@ -60,6 +60,29 @@ export function useChartWidth(fallback: number): [RefObject<HTMLDivElement | nul
   return [ref, w];
 }
 
+/** The host's measured dimensions, for charts that fill the panel space available to them. */
+export function useChartSize(
+  fallbackWidth: number,
+  fallbackHeight: number,
+): [RefObject<HTMLDivElement | null>, number, number] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState({ width: fallbackWidth, height: fallbackHeight });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const read = () => {
+      const width = Math.round(el.clientWidth);
+      const height = Math.round(el.clientHeight);
+      if (width > 0 && height > 0) setSize({ width, height });
+    };
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, size.width, size.height];
+}
+
 /**
  * The pointer's x in the SVG's own units. The viewBox is the measured width, so this is px from the
  * SVG's left edge; with no layout (width 0) the client x is taken as is.

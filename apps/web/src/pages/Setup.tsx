@@ -30,7 +30,7 @@ const TAB_LABEL: Record<SetupTab, string> = {
   repos: "Repos",
   loops: "Loops",
   accounts: "Accounts",
-  roles: "Roles, guard and test lock",
+  roles: "Roles & guards",
   sources: "Sources",
   access: "Access and notifications",
 };
@@ -39,7 +39,7 @@ const TAB_LABEL: Record<SetupTab, string> = {
 const SECTIONS = [
   { tab: "accounts", label: "Accounts" },
   { tab: "repos", label: "Repos & seats" },
-  { tab: "roles", label: "Roles" },
+  { tab: "roles", label: "Roles & guards" },
   { tab: "loops", label: "Loops" },
   { tab: "sources", label: "Sources" },
   { tab: "access", label: "Safety" },

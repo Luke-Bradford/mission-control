@@ -407,6 +407,8 @@ describe("the check recorder", () => {
     const r = recorder();
     expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
     expect(await r.lockedBy("r1", "ls")).toBeNull();
+    // the related-tests run takes the lock by name, though the repo no longer lists it as a check
+    expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
     // refused while another seat held the lock: it began but never ended, so no failed row
     await r.begin(KEY, TYPES);
     expect(rows).toEqual([]);

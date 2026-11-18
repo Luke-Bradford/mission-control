@@ -306,33 +306,6 @@
   gap: var(--sp-2);
 }
 
-.picker {
-  display: flex;
-  gap: var(--sp-1);
-  flex-wrap: wrap;
-}
-
-.picker button {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  background: var(--surface);
-  border-color: var(--line);
-}
-
-.banner {
-  display: flex;
-  gap: var(--sp-2);
-  align-items: center;
-  flex-wrap: wrap;
-  padding: var(--sp-2) var(--sp-3);
-  border: 1px solid var(--line);
-  box-shadow: inset 2px 0 0 var(--warn-mark);
-  background: linear-gradient(90deg, var(--warn-soft), transparent 70%), var(--surface);
-  color: var(--warn);
-  border-radius: var(--r);
-}
-
 .ahead .doing {
   margin: 0;
   overflow-wrap: anywhere;
