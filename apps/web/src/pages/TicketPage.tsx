@@ -1,10 +1,4 @@
-import type {
-  ItemThread,
-  QaReport,
-  TicketEvent,
-  TicketHistory,
-  TicketQuestion,
-} from "@mc/core";
+import type { ItemThread, QaReport, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
