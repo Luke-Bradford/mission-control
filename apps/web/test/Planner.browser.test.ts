@@ -4,24 +4,22 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
+import { mockPng } from "./materialsFixture.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "planner-shots");
 
-// Mockups are full-size: a 1x1 picture would hide how far they push the decision down the page.
-const MOCKUP_SVG = (fill: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="${fill}"/></svg>`;
+// Mockups are full-size PNGs: a 1x1 picture would hide how far they push the decision down.
+const picturePath = (c: string) => `/api/attention-material-assets/${c.repeat(64)}`;
+const MOCKUPS: readonly (readonly [string, number])[] = [
+  ["a", 185],
+  ["b", 295],
+];
 const ASSETS = Object.fromEntries(
-  [
-    ["d", "#8aa"],
-    ["e", "#a8a"],
-  ].map(([c, fill]) => [
-    `/api/qa-report-assets/${c.repeat(64)}`,
-    { contentType: "image/svg+xml", body: MOCKUP_SVG(fill) },
-  ]),
+  MOCKUPS.map(([c, hue]) => [picturePath(c), { contentType: "image/png", body: mockPng(hue) }]),
 );
 const picture = (c: string, caption: string) => ({
-  url: `/api/qa-report-assets/${c.repeat(64)}`,
+  url: picturePath(c),
   caption,
 });
 const base = {
@@ -38,7 +36,7 @@ const waiting = {
   id: "p1",
   ticket: "shop-app#102",
   title: "Retry failed payment webhooks",
-  pictures: [picture("d", "Retry queue in the admin screen"), picture("e", "Empty queue")],
+  pictures: [picture("a", "Retry queue in the admin screen"), picture("b", "Empty queue")],
   status: "pending",
 };
 const sentBack = {
@@ -114,7 +112,7 @@ describeRendered("Planner page", () => {
                 expect(detail.width).toBeGreaterThan(size.width * 0.5);
                 expect(await page.reachable(".plan-parts")).toEqual([true]);
                 if (state === "waiting" || state === "50 waiting") {
-                  // the risks and the decision are on the first screen, under real-size mockups
+                  // the risks and decision are on the first screen, under realistic mockups
                   const onFirstScreen = await page.evaluate(() => {
                     const inView = (el: Element | null) =>
                       !!el && el.getBoundingClientRect().bottom <= window.innerHeight + 0.5;
@@ -147,14 +145,32 @@ describeRendered("Planner page", () => {
                   await page.boxes(".needs-frame img");
                   expect(
                     await page.evaluate(async () => {
-                      const imgs = [...document.querySelectorAll<HTMLImageElement>("main img")];
+                      const imgs = [
+                        ...document.querySelectorAll<HTMLImageElement>(".needs-frame img"),
+                      ];
                       const start = performance.now();
                       while (
-                        imgs.some((i) => !i.complete || i.naturalWidth === 0) &&
+                        imgs.some((i) => !i.complete || i.naturalWidth < 1600) &&
                         performance.now() - start < 2000
                       )
                         await new Promise((r) => setTimeout(r, 50));
-                      return imgs.length === 2 && imgs.every((i) => i.naturalWidth > 0);
+                      return (
+                        imgs.length === 2 &&
+                        imgs.every((i) => {
+                          const panel = i.closest(".plan-part-pictures");
+                          const image = i.getBoundingClientRect();
+                          const bounds = panel?.getBoundingClientRect();
+                          return (
+                            i.naturalWidth === 1600 &&
+                            i.naturalHeight === 1000 &&
+                            image.width > 150 &&
+                            image.height > 100 &&
+                            image.height <= window.innerHeight * 0.3 + 1 &&
+                            !!bounds &&
+                            image.right <= bounds.right + 0.5
+                          );
+                        })
+                      );
                     }, null),
                   ).toBe(true);
                   expect(await page.reachable("main button")).not.toContain(false);

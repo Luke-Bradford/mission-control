@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
+import { mockPng } from "./materialsFixture.ts";
 import { qaReportApi, qaReportAssets, qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
@@ -246,6 +247,7 @@ describeRendered("Accountable QA report", () => {
     async () => {
       const report = qaReportFixture();
       const wide = (name: string) => `https://evidence.example/${name}.svg`;
+      const mockup = `/api/attention-material-assets/${"a".repeat(64)}`;
       report.visual.pairs = [
         ...report.visual.pairs,
         { ...report.visual.pairs[0], label: "Planner · 1920×940 · dark" },
@@ -274,7 +276,7 @@ describeRendered("Accountable QA report", () => {
             title: "Planner tab",
             asks: "Show plans for sign-off.",
             proposed: "Add the Planner tab and compare its mockups with QA evidence.",
-            pictures: [],
+            pictures: [{ url: mockup, caption: "Planner mockup at 1600×1000" }],
             size: "M",
             risks: "The retained image needs a bounded preview.",
             status: "approved",
@@ -293,6 +295,7 @@ describeRendered("Accountable QA report", () => {
         api,
         assets: {
           ...qaReportAssets(),
+          [mockup]: { contentType: "image/png", body: mockPng(190) },
           [wide("after-0")]: asset("#789"),
           [wide("before-0")]: asset("#987"),
           [wide("after-1")]: asset("#678"),
@@ -300,24 +303,46 @@ describeRendered("Accountable QA report", () => {
         },
       });
       try {
+        await page.boxes(".plan-beside .needs-frame img");
         await page.boxes(".plan-built-shots img");
         await page.evaluate(() => document.querySelector(".plan-beside")?.scrollIntoView(), null);
         expect(
-          await page.evaluate(
-            () =>
-              document.documentElement.scrollWidth <= window.innerWidth &&
-              [...document.querySelectorAll<HTMLImageElement>(".plan-built-shots img")].every(
-                (img) => {
-                  const section = img.closest("section");
-                  return (
-                    !!section &&
-                    img.getBoundingClientRect().right <= section.getBoundingClientRect().right + 0.5
-                  );
-                },
+          await page.evaluate(async () => {
+            const images = [
+              ...document.querySelectorAll<HTMLImageElement>(
+                ".plan-beside .needs-frame img, .plan-built-shots img",
               ),
-            null,
-          ),
+            ];
+            const start = performance.now();
+            while (
+              images.some((img) => !img.complete || img.naturalWidth < 1600) &&
+              performance.now() - start < 2000
+            )
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            const bounded = (img: HTMLImageElement) => {
+              const section = img.closest("section");
+              const image = img.getBoundingClientRect();
+              const bounds = section?.getBoundingClientRect();
+              return (
+                img.naturalWidth === 1600 &&
+                img.naturalHeight === 1000 &&
+                image.width > 150 &&
+                image.height > 100 &&
+                image.height <= window.innerHeight * 0.3 + 1 &&
+                !!bounds &&
+                image.right <= bounds.right + 0.5
+              );
+            };
+            return (
+              document.documentElement.scrollWidth <= window.innerWidth &&
+              images.length === 3 &&
+              images.every(bounded)
+            );
+          }, null),
         ).toBe(true);
+        expect(
+          await page.reachable(".plan-beside .needs-picture button, .plan-built-shots a"),
+        ).not.toContain(false);
         await page.screenshot(join(SHOTS, "qa-plan-built-1920x940-light.png"));
       } finally {
         await page.close();
