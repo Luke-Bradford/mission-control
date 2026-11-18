@@ -184,6 +184,26 @@ export function withoutAddAgentParam(): string {
   const qs = q.toString();
   return pathname + (qs ? `?${qs}` : "") + hash;
 }
+/** The query parameter that names the seat whose edit form should open (`?edit=s1:guido-1`). */
+export const EDIT_SEAT_PARAM = "edit";
+/** The session and seat a URL's edit query names; null when it names none. */
+export function editSeatParam(search: string): { sessionId: string; seatId: string } | null {
+  const raw = new URLSearchParams(search).get(EDIT_SEAT_PARAM);
+  const at = raw?.indexOf(":") ?? -1;
+  if (!raw || at < 1 || at === raw.length - 1) return null;
+  return { sessionId: raw.slice(0, at), seatId: raw.slice(at + 1) };
+}
+/** The current URL without `?edit=`, keeping its path, other parameters and hash. */
+export function withoutEditSeatParam(): string {
+  const { pathname, search, hash } = window.location;
+  const q = new URLSearchParams(search);
+  q.delete(EDIT_SEAT_PARAM);
+  const qs = q.toString();
+  return pathname + (qs ? `?${qs}` : "") + hash;
+}
+/** Setup › Sessions with one seat's edit form open. */
+export const editSeatPath = (sessionId: string, seatId: string): string =>
+  `${setupPath("sessions")}?${EDIT_SEAT_PARAM}=${enc(`${sessionId}:${seatId}`)}`;
 export const addAgentPath = (sessionId: string): string =>
   `${setupPath("sessions")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
 

@@ -293,6 +293,8 @@ export interface McToolsDeps {
   checkDrops?: (runId: string) => readonly CheckDrop[];
   /** Configured checks still executing or validating their completion. */
   pendingChecks?: (runId: string) => readonly string[];
+  /** Drops a check whose Codex exec cell or process has disappeared before it reported an exit. */
+  lostCheck?: (runId: string, command: string) => boolean;
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -499,6 +501,7 @@ const FindingsArgs = z.strictObject({
 });
 const EvidenceArgs = z.strictObject({
   note: text(MC_EVIDENCE_MAX),
+  lostCheck: text(MC_TEXT_MAX).optional(),
   doneWhen: z
     .array(
       z.strictObject({
@@ -2557,7 +2560,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   async function reportEvidence(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = EvidenceArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
-    const { note, tests, testsAdded, doneWhen } = parsed.data;
+    const { note, tests, testsAdded, doneWhen, lostCheck } = parsed.data;
     const place = seatPlace(config, ctx.seatId);
     const first = liveRun(ctx);
     if (place === null || first === null) return ENDED;
@@ -2597,6 +2600,19 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const currentRefusal = loopRefusal(currentLoop);
       if (currentRefusal !== null) return currentRefusal;
       if (currentLoop === null || currentLoop === undefined) return ENDED;
+
+      // The Codex CLI has already confirmed this cell or process vanished. Clear its aliases now,
+      // before the seat starts a replacement, so the lost call cannot keep evidence pending.
+      if (lostCheck !== undefined) deps.lostCheck?.(currentRun.id, lostCheck);
+      const lost = (deps.checkDrops?.(currentRun.id) ?? []).filter(
+        (drop) => drop.reason === "session-lost",
+      );
+      if (lost.length > 0) {
+        return {
+          text: `Evidence not recorded: ${lost.map((drop) => drop.command).join(", ")} lost its Codex check session before it reported an exit code. Run ${lost.map((drop) => drop.command).join(", ")} again; do not keep polling the lost session. Wait for the new call's final numeric exit code before reporting evidence or ending your turn.`,
+          isError: true,
+        };
+      }
 
       const newest = store.newestRunCommit(currentRun.id);
       const reported = store.latestEvidence(currentRun.id);
@@ -2679,12 +2695,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
       const pending = deps.pendingChecks?.(currentRun.id) ?? [];
-      if (pending.length > 0) {
+      if (pending.length > 0)
         return {
           text: `Evidence not recorded: these checks have no completed receipt yet: ${pending.join(", ")}. A yielded session is still running. Continue polling that session until it reports a final numeric exit code before reporting evidence or ending your turn. If polling is refused, report the blocker; do not claim a pass.`,
           isError: true,
         };
-      }
       store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused or timed-out publication. Budget, account and every other operator hold stay parked.
@@ -3262,6 +3277,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             maxLength: MC_EVIDENCE_MAX,
             description:
               "What changed and how to deploy it; for an unchanged blocking review, explain which finding should not change and why. Start with Ruling: only for a CI decision with no change.",
+          },
+          lostCheck: {
+            type: "string",
+            minLength: 1,
+            maxLength: MC_TEXT_MAX,
+            description:
+              "The exact configured command whose Codex exec cell or process disappeared before reporting an exit code. Use only after the CLI confirms the loss; rerun it before reporting evidence again.",
           },
           doneWhen: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: DoneWhenAnswerSchema },
           tests: { type: "array", maxItems: REVIEW_FINDINGS_MAX, items: ReportedTestSchema },

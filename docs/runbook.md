@@ -509,16 +509,21 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   retrospective's 24 hours; null before the first.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
-- Only a retry-loop alarm wakes FLIGHT, once, through the `waste_alarm` signal: the dealer will not
-  deal the parked ticket until FLIGHT resolves the alarm or its cause ends. The signal is not in the
-  wake-at-once list (see Batching). No other alarm wakes FLIGHT: a review-rounds hold parks the
-  run, and that park's Needs-you item wakes it; a restart storm lifts when the hour's count falls
-  back; the rest hold nothing. Open alarms are served by `GET /api/waste` (a clearance wait from 24
+- An alarm about one ticket going round wakes FLIGHT, once, through the `waste_alarm` signal: a
+  retry loop (the dealer will not deal the parked ticket until FLIGHT resolves the alarm or its
+  cause ends), failed review rounds at the limit, and runs per ticket. The wake comes at the
+  watch's next pass, not in a batch, unless FLIGHT's recent wakes for signals were mostly no-ops
+  (see Batching). The other alarms wake nobody: clearance waiting, cost without output,
+  coordination overhead and ticket churn are stored only; a review-rounds hold parks the run, and
+  that park's Needs-you item wakes FLIGHT; a restart storm lifts when the hour's count falls
+  back. Open alarms are served by `GET /api/waste` (a clearance wait from 24
   hours; before that it is only stored). An alarm is not a question: it never reaches Needs you.
 - FLIGHT lifts a retry-loop park with `resolve_waste_alarm` (the alarm id is the signal's key, and a
   basis, recorded in Decided without you). The alarm stays closed until its cause grows past the
-  level it had. FLIGHT is given no id for the other alarms; a review-rounds hold is lifted by
-  settling the park.
+  level it had. The signal for failed review rounds and for runs per ticket also carries its
+  alarm's id, but those alarms hold nothing: they close when the PR or the ticket moves on, and
+  resolving one only makes the next failed round or run raise a new alarm. A review-rounds hold is
+  lifted by settling the park.
 - A held start is not a fault: the engine keeps the card or the review queued and raises no
   question. Reviews of an external PR are never held by the rounds check.
 - A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
@@ -1254,6 +1259,12 @@ A start of that ticket is refused (422) until FLIGHT has approved the files: `mc
 paths, basis }` logs a `grant` decision ("Approved mc#7 to write package.json") and then starts the seat.
 Every start path checks it, FLIGHT's, the engine's and the operator's.
 
+Entries the seat's own area already covers are dropped first and need no grant: a plain file in the
+area, or a glob that lies wholly inside it, compared segment by segment (for example the area `apps/*` covers
+`apps/server/**`). A glob is kept, and refused like any outside glob, when
+the start cannot prove it stays inside the area (for example `apps/**/server/**` against the area
+`apps/*/server/**`).
+
 - The run may write exactly the listed files that sit outside its area or are protected, for that
   run only. Another run on the same seat holds nothing it was not given. The grant is fixed when
   the run starts; editing the ticket later changes nothing.
@@ -1633,7 +1644,7 @@ FLIGHT decision on the Audit ledger with its route or verb, body and basis, and 
 
 | Tool | What it does |
 |---|---|
-| `operator` | `{ method, path, body?, basis }` calls one of the hub's own operator routes in process, with the operator token and authenticated FLIGHT actor added by the hub. `POST` works on a run's `resume`, `end`, `message`, `controller-check` and `merge-hold`; an external PR's `controller-check` and `merge-hold`; a seat's `start`, `message`, `interrupt` and `end`; `settings/crew-pause`, `settings/away`, `update`; and an attention item's `dismiss`, `hold` and `hold/release`. `GET` reads any other `/api` path except the operator bootstrap and stored screenshots. Any other route (accounts, repos, config, `flight/approvals`) is refused, naming the allowed ones. The route's own checks still apply and its answer comes back (a 4xx is an error). Decision kind `operator`. |
+| `operator` | `{ method, path, body?, basis }` calls one of the hub's own operator routes in process, with the operator token and authenticated FLIGHT actor added by the hub. `POST` works on a run's `resume`, `end`, `message`, `controller-check` and `merge-hold`; an external PR's `controller-check` and `merge-hold`; a seat's `start`, `message`, `interrupt` and `end`; `settings/crew-pause`, `settings/away`, `update`, `version/check`; and an attention item's `dismiss`, `hold` and `hold/release`. `GET` reads any other `/api` path except the operator bootstrap and stored screenshots (`GET /api/version` shows whether an Update waits). Any other route (accounts, repos, config, `flight/approvals`) is refused, naming the allowed ones. The route's own checks still apply and its answer comes back (a 4xx is an error). Decision kind `operator`. |
 | `gh_write` | `{ action, target, number, ... }` runs one `gh` verb on FLIGHT's session repo only: `comment`, `label`, `edit`, `close`, `reopen`, `ready`, or `delete_branch`. Text is scanned for secrets and @mentions as `create_ticket` does; `always_ask` and other-lane tickets are not edited, labelled or closed; a branch is never deleted when it is `main`, `archive/*`, on the repo's keep list, has an open PR or a live run, or when the open PRs could not be read. Merging stays `merge_pr`, board fields `set_fields`. Decision kind `github`. |
 | `crew_tidy` | `remove_worktree { runId }` removes the clean worktree an ended run's branch is checked out in (under the crew's worktree folder, with no live run on the branch and no seat holding it) and keeps the branch, so a seat can start the ticket again; a dirty worktree is refused with nothing removed. `prune_branches` drops the seat clones' local branches that are merged or whose remote is gone. Decision kind `tidy`. |
 
@@ -1884,7 +1895,8 @@ block names them, fills `needs`, `promote_backlog` and `hard_rules` that config.
 only adds to `hard_rules` (when set here), `checks`, `uat.*` and `always_ask`: those keep their
 config source and list the additions in `repoAdds`. A block that cannot be read shows its reason in
 `repoFileError` and the config values still show. The response's `base` is the digest of the same
-config.yaml bytes every value came from.
+config.yaml bytes every value came from. A preview on the live config.yaml answers this read too;
+its `POST` still answers 409, so it shows the rules and never saves them.
 
 `POST` to the same route saves the approved keys only; `commands` and `uat` may name one leaf and
 keep the other. Send `base` from the read: a changed file answers `config.yaml changed since this
@@ -2859,8 +2871,7 @@ A dirty checkout's result is not proof of an unchanged commit.
 
 ## Affected tests before a crew push
 
-This repo requires `pnpm -s lint`, `pnpm -s typecheck` and
-`pnpm -s test:related` before `mc push`. The existing hub check recorder counts
+This repo requires `pnpm -s lint` and `pnpm -s typecheck` before `mc push`; CI runs the tests. The existing hub check recorder counts
 a command only when it starts and finishes on the same clean commit in the session clone. A
 failed or missing command holds the push and names the check to run. Run checks after committing;
 a check on uncommitted edits is not evidence for that commit. Re-run after changing the head.

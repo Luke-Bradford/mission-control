@@ -8,6 +8,8 @@ import {
   commsCrewPath,
   commsInboxPath,
   commsTicketPath,
+  editSeatParam,
+  editSeatPath,
   isPopout,
   itemPath,
   legacyRedirect,
@@ -261,5 +263,26 @@ describe("the ticket page route", () => {
     expect(tabOf({ page: "commsChart" })).toBe("comms");
     // The filter rides in the query and does not change the route.
     expect(route("/comms/chart", "?focus=seat:dev-1")).toEqual({ page: "commsChart" });
+  });
+});
+
+describe("editSeatParam() and editSeatPath()", () => {
+  it.each([
+    ["?edit=s1%3Aguido-1", { sessionId: "s1", seatId: "guido-1" }],
+    ["?edit=s1", null],
+    ["?edit=%3Aguido-1", null],
+    ["?edit=s1%3A", null],
+    ["", null],
+  ])("%s → %j", (search, expected) => {
+    expect(editSeatParam(search)).toEqual(expected);
+  });
+
+  it("round-trips through the path", () => {
+    const path = editSeatPath("s1", "guido-1");
+    expect(path.startsWith("/setup/sessions?")).toBe(true);
+    expect(editSeatParam(path.slice(path.indexOf("?")))).toEqual({
+      sessionId: "s1",
+      seatId: "guido-1",
+    });
   });
 });

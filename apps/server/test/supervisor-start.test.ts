@@ -495,6 +495,50 @@ describe("startRun eligibility", () => {
       });
     });
 
+    it("starts a Paths: line of files and globs in the seat's area with no grant", async () => {
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({
+          body: "Paths: apps/server/src/telemetry/**, apps/server/src/a.ts\n",
+        }),
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it.each(["apps/server", "apps/*"])(
+      "starts Paths: globs under the area %s with no grant",
+      async (guidoArea) => {
+        const { sup } = make({
+          rules: withRules(),
+          guidoArea: [guidoArea],
+          fetchTicket: ticketWith({ body: "Paths: apps/server/src/**, apps/server/**\n" }),
+        });
+        sup.start();
+        const { runId } = await sup.startRun("guido-1", 42);
+        expect(runPathGrants(store, runId)).toEqual([]);
+      },
+    );
+
+    it("refuses an outside glob with the text it always had", async () => {
+      await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
+      });
+    });
+
+    it("asks FLIGHT only for the outside file of a mixed Paths: line", async () => {
+      const body = "Paths: apps/server/src/**, package.json\n";
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body }),
+      });
+      approve();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({ body }) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual(["package.json"]);
+    });
+
     it("starts a ticket with no Paths: line holding no grant", async () => {
       const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
       sup.start();
