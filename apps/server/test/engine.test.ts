@@ -330,6 +330,10 @@ interface Harness {
   gate: GateFacts | null;
   duringDescendant?: (ancestor: string, head: string) => void;
   gateReads: { sha: string; known: boolean }[];
+  /** How many times a pass asked the publisher for origin's tip. */
+  tipReads: number;
+  /** The shared tip each gate read was handed. */
+  gateTips: (unknown | undefined)[];
   duringGate?: () => void;
   /** The merge steps the publisher was asked for, in order, with the ended runs seen at the time. */
   steps: string[];
@@ -437,6 +441,8 @@ function harness(): Harness {
       webChanged: false,
     },
     gateReads: [],
+    tipReads: 0,
+    gateTips: [],
     steps: [],
     stepEnded: {},
     stepResults: {},
@@ -562,8 +568,13 @@ function harness(): Harness {
             rules.some((rule) => globMatches(rule, path, true)),
           );
         },
-        async gateFacts(_r, sha, known): Promise<GateResult> {
+        async originTip() {
+          x.tipReads++;
+          return { ok: true as const, defaultBranch: "main", mainSha: x.gate?.mainSha ?? x.tip };
+        },
+        async gateFacts(_r, sha, known, tip): Promise<GateResult> {
           x.gateReads.push({ sha, known: known != null });
+          x.gateTips.push(tip);
           x.duringGate?.();
           if (x.gate === null) return { ok: false, text: "git is down", transient: true };
           return { ok: true, facts: { ...x.gate, strays: [...x.gate.strays] } };
@@ -6096,6 +6107,36 @@ describe("the engine runs reviews", () => {
           reason: "merging main into the branch failed",
         });
       });
+    });
+
+    it("reads origin's tip once for a tick with many runs in review", async () => {
+      await toReview();
+      const EXTRA = 11;
+      for (let i = 0; i < EXTRA; i++) {
+        const id = `guido-1:extra-${i}`;
+        const branch = `feature/${100 + i}-extra`;
+        const ticket = `${REPO}#${100 + i}`;
+        const sha = (i + 1).toString(16).padStart(40, "a");
+        const loop = { ...loopOf(), prNumber: 100 + i };
+        store.upsertRun(run({ id, seq: 10 + i, ticket, branch, loop }));
+        store.setRunLoop(id, loop);
+        store.addRunCommit({ runId: id, repoId: REPO, branch, sha, at: clock });
+        store.setRunPush({ runId: id, sha, at: clock });
+        store.addEvidence(id, "Changed the thing", clock);
+        store.upsertPullRequests(
+          REPO,
+          [prRow({ number: 100 + i, branch, ticket, headSha: sha, ci: "passing" })],
+          clock,
+        );
+      }
+      h.gateReads.length = 0;
+      h.gateTips.length = 0;
+      h.tipReads = 0;
+      await h.engine.tick();
+      // every run was gated; none read origin itself
+      expect(h.gateReads.length).toBeGreaterThanOrEqual(EXTRA);
+      expect(h.tipReads).toBe(1);
+      expect(h.gateTips.filter((t) => t !== undefined).length).toBeGreaterThanOrEqual(EXTRA);
     });
 
     it("reads origin's tip every pass but reuses the rest while sha and tip are unchanged", async () => {
