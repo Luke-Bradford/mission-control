@@ -1503,6 +1503,23 @@ describe("parseChecks", () => {
     expect(queued).not.toHaveProperty("startedAt");
     expect(status).not.toHaveProperty("completedAt");
   });
+
+  it("gives a run still waiting in GitHub's queue no start, though GitHub dates it from creation", () => {
+    const at = "2026-11-18T16:15:20Z";
+    const rollup = {
+      contexts: {
+        nodes: [
+          { ...checkRun("q", null), status: "QUEUED", startedAt: at },
+          { ...checkRun("w", null), status: "WAITING", startedAt: at },
+          { ...checkRun("r", null), startedAt: at },
+        ],
+      },
+    };
+    const [queued, waiting, running] = parseChecks(rollup);
+    expect(queued).not.toHaveProperty("startedAt");
+    expect(waiting).not.toHaveProperty("startedAt");
+    expect(running).toMatchObject({ startedAt: Date.parse(at) });
+  });
 });
 
 describe("collectGithub pull requests", () => {

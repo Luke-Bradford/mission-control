@@ -1090,7 +1090,12 @@ export function parseChecks(rollup: unknown): PrCheck[] {
         conclusion: str(n.conclusion, "") || str(n.status, ""),
         attempt: typeof attempt === "number" ? attempt : null,
         url: str(n.detailsUrl, "") || null,
-        ...(Number.isFinite(Date.parse(str(n.startedAt, "")))
+        // GitHub dates a queued run from its creation, so only a run that has begun has a start.
+        ...(n.status !== "QUEUED" &&
+        n.status !== "WAITING" &&
+        n.status !== "PENDING" &&
+        n.status !== "REQUESTED" &&
+        Number.isFinite(Date.parse(str(n.startedAt, "")))
           ? { startedAt: Date.parse(str(n.startedAt, "")) }
           : {}),
         ...(Number.isFinite(Date.parse(str(n.completedAt, "")))
