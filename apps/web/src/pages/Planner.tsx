@@ -141,7 +141,9 @@ function PlanRow({ plan, selected, history }: { plan: Plan; selected: boolean; h
         aria-current={selected ? "true" : undefined}
         onClick={(e) => followLink(e, to)}
       >
-        <span className="uat-queue-title">{plan.title}</span>
+        <span className="uat-queue-title" title={plan.title}>
+          {plan.title}
+        </span>
         <span className="uat-age plan-history-status">
           {history ? statusWord(plan) : `Size ${plan.size}`}
         </span>

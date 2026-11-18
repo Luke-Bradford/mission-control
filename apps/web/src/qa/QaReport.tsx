@@ -1,7 +1,7 @@
-import { type QaImageRef, type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
+import { type PullRequestView, type QaImageRef, type QaReport, REVIEW_CHECK_IDS } from "@mc/core";
 import { memo, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiQaReportImage } from "../api.ts";
-import { hub, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -185,6 +185,18 @@ const branchTicket = (branch: string | undefined): number | null => {
   const m = /^[a-z]+\/([1-9]\d*)-/.exec(branch ?? "");
   return m ? Number(m[1]) : null;
 };
+
+/**
+ * The ticket number a report's signed-off plan is looked up by: the PR's ticket when the caller
+ * knows it, else the stored PR row's (a report saved without a branch still finds its plan), else
+ * the one a conventional branch name carries.
+ */
+function usePlanTicket(r: QaReport, ticket: string | null | undefined): number | null {
+  const known = ticket ? ticketNumberOf(ticket) : null;
+  const prs = useResource<PullRequestView[]>(known === null ? RESOURCES.allPrs(r.repoId) : null);
+  const row = prs.data?.find((p) => p.number === r.prNumber);
+  return known ?? (row?.ticket ? ticketNumberOf(row.ticket) : null) ?? branchTicket(r.branch);
+}
 
 /** The selected head is mandatory: an older approval never fills a new head's evidence gap. */
 export function CurrentQaReport({
@@ -470,19 +482,30 @@ export const QaReportRead = memo(function QaReportRead({
               ? "Evidence incomplete"
               : "QA passed · recorded scope";
   const checks = new Map(r.coverage.map((c) => [c.check, c]));
+  const planTicket = usePlanTicket(r, ticket);
   return (
     <article className="qa-report" aria-label={`QA report for PR #${r.prNumber}`}>
       <SignedOffPlan
         repoId={r.repoId}
-        number={(ticket ? ticketNumberOf(ticket) : null) ?? branchTicket(r.branch)}
+        number={planTicket}
         built={
           <>
             <p>{r.summary}</p>
-            <p className="muted">
-              {r.visual.applicability === "not_applicable"
-                ? "Screenshots are not applicable to this change."
-                : `${r.visual.pairs.length} before and after ${r.visual.pairs.length === 1 ? "pair" : "pairs"} in Visual confirmation below.`}
-            </p>
+            {r.visual.applicability === "not_applicable" ? (
+              <p className="muted">Screenshots are not applicable to this change.</p>
+            ) : r.visual.pairs.length === 0 ? (
+              <p className="muted">No retained screenshots of the result in this report.</p>
+            ) : (
+              <div className="plan-built-shots">
+                {r.visual.pairs.map((pair) => (
+                  <Image
+                    key={JSON.stringify(pair.after)}
+                    image={pair.after}
+                    label={`Built · ${pair.label}`}
+                  />
+                ))}
+              </div>
+            )}
           </>
         }
       />

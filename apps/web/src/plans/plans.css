@@ -19,6 +19,43 @@
 .plan-decide {
   display: grid;
   gap: var(--sp-2);
+  /* the decision stays in reach however long the plan is */
+  position: sticky;
+  bottom: 0;
+  padding: var(--sp-2) 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+/* Mockups are previews: bounded so the risks and the decision stay on the first screen. Actual size
+   (the picture's own button) shows the whole image. */
+.plan-parts .needs-pictures {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: start;
+}
+.plan-parts .needs-frame:not(.actual),
+.plan-beside .needs-frame:not(.actual) {
+  max-height: 30vh;
+}
+.plan-parts .needs-frame:not(.actual) img,
+.plan-beside .needs-frame:not(.actual) img {
+  max-height: 30vh;
+  width: auto;
+  margin: 0 auto;
+  object-fit: contain;
+}
+@media (min-width: 1500px) {
+  /* text on the left, the mockups beside it: the whole plan reads without scrolling past a picture */
+  .plan-parts {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .plan-parts > * {
+    grid-column: 1;
+  }
+  .plan-parts > .plan-part-pictures {
+    grid-column: 2;
+    grid-row: 1 / span 4;
+  }
 }
 .plan-decide-buttons {
   display: flex;
@@ -50,4 +87,9 @@
 }
 .plan-history-status {
   white-space: nowrap;
+}
+.plan-built-shots {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
 }

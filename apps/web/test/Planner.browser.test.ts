@@ -8,7 +8,18 @@ import { desktopFixture } from "./desktopFixtures.ts";
 const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "planner-shots");
 
-// The harness serves a PNG for a QA report asset route, so a plan picture uses one.
+// Mockups are full-size: a 1x1 picture would hide how far they push the decision down the page.
+const MOCKUP_SVG = (fill: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="${fill}"/></svg>`;
+const ASSETS = Object.fromEntries(
+  [
+    ["d", "#8aa"],
+    ["e", "#a8a"],
+  ].map(([c, fill]) => [
+    `/api/qa-report-assets/${c.repeat(64)}`,
+    { contentType: "image/svg+xml", body: MOCKUP_SVG(fill) },
+  ]),
+);
 const picture = (c: string, caption: string) => ({
   url: `/api/qa-report-assets/${c.repeat(64)}`,
   caption,
@@ -40,10 +51,25 @@ const sentBack = {
   note: "Keep the postcode lookup on narrow screens.",
   decidedAt: 1_700_000_000_000,
 };
+const LONG = `${"A schema-length sentence about the plan. ".repeat(200)}${"x".repeat(400)}`;
+const many = {
+  pending: Array.from({ length: 50 }, (_, i) => ({
+    ...waiting,
+    id: `m${i}`,
+    ticket: `shop-app#${200 + i}`,
+    title: i === 0 ? `${"Very long title ".repeat(20)}end` : `Plan number ${i}`,
+  })),
+  history: [],
+};
 const STATES = {
   waiting: { pending: [waiting], history: [] },
   "sent back": { pending: [], history: [sentBack] },
   empty: { pending: [], history: [] },
+  "50 waiting": many,
+  "long text": {
+    pending: [{ ...waiting, asks: LONG, proposed: LONG, risks: LONG }],
+    history: [],
+  },
 } as const;
 
 const SIZES = [
@@ -69,6 +95,7 @@ describeRendered("Planner page", () => {
                 ...desktopFixture().api,
                 "/api/plans": plans,
               },
+              assets: ASSETS,
             });
             try {
               await page.boxes("#page-planner");
@@ -86,6 +113,36 @@ describeRendered("Planner page", () => {
                 expect(detail.width).toBeGreaterThan(queue.width * 1.5);
                 expect(detail.width).toBeGreaterThan(size.width * 0.5);
                 expect(await page.reachable(".plan-parts")).toEqual([true]);
+                if (state === "waiting" || state === "50 waiting") {
+                  // the risks and the decision are on the first screen, under real-size mockups
+                  const onFirstScreen = await page.evaluate(() => {
+                    const inView = (el: Element | null) =>
+                      !!el && el.getBoundingClientRect().bottom <= window.innerHeight + 0.5;
+                    const risks = [...document.querySelectorAll(".plan-parts h3")].find((h) =>
+                      /risks/.test(h.textContent ?? ""),
+                    );
+                    const approve = [...document.querySelectorAll("button")].find(
+                      (b) => b.textContent === "Approve",
+                    );
+                    return {
+                      risks: !!risks,
+                      approve: inView(approve ?? null),
+                      heading: inView(risks ?? null),
+                    };
+                  }, null);
+                  expect(onFirstScreen.risks).toBe(true);
+                  expect(onFirstScreen.approve).toBe(true);
+                  expect(onFirstScreen.heading).toBe(true);
+                  // a long title stays whole in the queue row, and no row runs past the queue
+                  expect(
+                    await page.evaluate(() => {
+                      const q = document.querySelector(".uat-queue")?.getBoundingClientRect();
+                      return [...document.querySelectorAll(".uat-queue-row")].every(
+                        (r) => !!q && r.getBoundingClientRect().right <= q.right + 0.5,
+                      );
+                    }, null),
+                  ).toBe(true);
+                }
                 if (state === "waiting") {
                   await page.boxes(".needs-frame img");
                   expect(

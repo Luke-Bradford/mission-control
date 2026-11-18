@@ -42,7 +42,7 @@ export function PlanParts({ plan }: { plan: Plan }) {
         <h3 id={`${plan.id}-proposed`}>What is proposed</h3>
         <Text text={plan.proposed} />
       </section>
-      <section aria-labelledby={`${plan.id}-pictures`}>
+      <section className="plan-part-pictures" aria-labelledby={`${plan.id}-pictures`}>
         <h3 id={`${plan.id}-pictures`}>Mockups and pictures</h3>
         <PlanPictures plan={plan} />
       </section>

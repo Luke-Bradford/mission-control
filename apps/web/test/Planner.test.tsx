@@ -182,4 +182,106 @@ describe("Planner tab", () => {
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     await act(async () => {});
   });
+
+  it("says the plans did not load, and does not call the list empty", async () => {
+    load({ "/api/plans": () => ({ status: 500, body: { error: "hub down" } }) });
+    render(<Planner />);
+    expect((await screen.findByRole("alert")).textContent).toMatch(/The plans did not load/);
+    expect(screen.queryByText("No plan is waiting for you")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("keeps the last plans when a refresh fails, and disables the decisions", async () => {
+    let failing = false;
+    load({
+      "/api/plans": () =>
+        failing ? { status: 500, body: { error: "hub down" } } : { status: 200, body: view },
+    });
+    render(<Planner />);
+    await screen.findByRole("button", { name: "Approve" });
+    failing = true;
+    await act(async () => {
+      hub.refetch("/api/plans");
+    });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/Showing the last plans/);
+    expect(screen.getByText("Queue and retry with backoff.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Send back" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("disables Approve and Send back while the hub is disconnected", async () => {
+    load();
+    render(<Planner />);
+    await screen.findByRole("button", { name: "Approve" });
+    act(() => streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: NOW }));
+    expect((await screen.findByRole("status")).textContent).toMatch(/Disconnected from the hub/);
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Send back" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(fetcher.mock.calls.some(([, i]) => i?.method === "POST")).toBe(false);
+  });
+
+  it("keeps the plan and says why when an approval is rejected", async () => {
+    load({
+      "POST /api/plans/p1/approve": () => ({
+        status: 409,
+        body: { error: "Plan already decided" },
+      }),
+    });
+    render(<Planner />);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/already decided/);
+    expect(screen.getByText("Queue and retry with backoff.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it("keeps the typed note when sending back is rejected", async () => {
+    load({
+      "POST /api/plans/p1/send-back": () => ({ status: 500, body: { error: "hub down" } }),
+    });
+    render(<Planner />);
+    fireEvent.click(await screen.findByRole("button", { name: "Send back" }));
+    fireEvent.change(screen.getByLabelText("Note for the planner"), {
+      target: { value: "Keep the lookup" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+    await screen.findByText(/hub down/);
+    expect((screen.getByLabelText("Note for the planner") as HTMLTextAreaElement).value).toBe(
+      "Keep the lookup",
+    );
+    expect(screen.getByRole("heading", { name: "To plan and sign off" })).toBeTruthy();
+  });
+
+  it("lists 50 waiting plans, each reachable with its full title", async () => {
+    const long = "T".repeat(300);
+    view = {
+      pending: Array.from({ length: 50 }, (_, i) =>
+        plan({ id: `p${i}`, ticket: `mc#${i + 1}`, title: i === 0 ? long : `Plan ${i}` }),
+      ),
+      history: [],
+    };
+    load();
+    render(<Planner />);
+    const list = await screen.findByRole("list", { name: "Plans waiting for sign-off" });
+    expect(within(list).getAllByRole("link")).toHaveLength(50);
+    expect(within(list).getByTitle(long)).toBeTruthy();
+    expect(screen.getByText("50 waiting")).toBeTruthy();
+  });
+
+  it("shows schema-length text whole", async () => {
+    const big = `${"word ".repeat(1900)}end`;
+    view = { pending: [plan({ asks: big, proposed: big, risks: big })], history: [] };
+    load();
+    render(<Planner />);
+    expect((await screen.findAllByText(big)).length).toBe(3);
+  });
 });

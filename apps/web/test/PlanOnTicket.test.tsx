@@ -133,4 +133,43 @@ describe("the signed-off plan beside what was built", () => {
     render(<QaReportRead report={report} archived />);
     expect(await screen.findByRole("region", { name: "Signed-off plan" })).toBeTruthy();
   });
+
+  const signed = {
+    pending: [],
+    history: [plan({ repoId: "mission-control", ticket: "mission-control#2037" })],
+  };
+  const PRS = "/api/repos/mission-control/prs?shape=summary";
+  const prRow = (ticket: string | null) => [{ repoId: "mission-control", number: 1011, ticket }];
+
+  it("finds the plan of an archived report that has no branch, from the PR's ticket", async () => {
+    const report = qaReportFixture();
+    expect(report.branch).toBeUndefined();
+    serve({ "/api/plans?repoId=mission-control": signed, [PRS]: prRow("mission-control#2037") });
+    render(<QaReportRead report={report} archived />);
+    expect(await screen.findByRole("region", { name: "Signed-off plan" })).toBeTruthy();
+  });
+
+  it("finds it when the branch name does not carry the ticket", async () => {
+    const report = { ...qaReportFixture(), branch: "inco-1-planner" };
+    serve({ "/api/plans?repoId=mission-control": signed, [PRS]: prRow("mission-control#2037") });
+    render(<QaReportRead report={report} archived />);
+    expect(await screen.findByRole("region", { name: "Signed-off plan" })).toBeTruthy();
+  });
+
+  it("shows nothing for an archived report whose ticket cannot be found", async () => {
+    serve({ "/api/plans?repoId=mission-control": signed, [PRS]: prRow(null) });
+    render(<QaReportRead report={qaReportFixture()} archived />);
+    await screen.findByRole("article");
+    expect(screen.queryByRole("region", { name: "Signed-off plan" })).toBeNull();
+  });
+
+  it("puts the report's result screenshots in the Built column, beside the mockups", async () => {
+    const report = qaReportFixture();
+    serve({ "/api/plans?repoId=mission-control": signed });
+    render(<QaReportRead report={report} ticket="mission-control#2037" />);
+    const panel = await screen.findByRole("region", { name: "Signed-off plan" });
+    const built = within(panel).getByRole("region", { name: "What was built" });
+    expect(built.textContent).toContain(`Built · ${report.visual.pairs[0].label}`);
+    expect(within(panel).getByRole("region", { name: "What was proposed" })).toBeTruthy();
+  });
 });
