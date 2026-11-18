@@ -5,6 +5,7 @@ import {
   AUDIT_TICKET_TEXT_FLOOR,
   type AuditImprovement,
   type AuditThresholds,
+  COMMS_CAPCOM,
   COMMS_CONTROLLER,
 } from "@mc/core";
 
@@ -81,14 +82,27 @@ export function messageImprovements(
     return (c?.ticket as string | undefined) ?? null;
   };
 
-  // The operator's first reply to a question was a question.
+  // The operator's first reply to a question was a question: from the shared thread's operator
+  // messages, or an older per-item discussion; the earliest of the two counts.
+  const firstReply = new Map<string, { text: string; at: number }>();
+  const note = (key: string, text: string, at: number) => {
+    const seen = firstReply.get(key);
+    if (seen === undefined || at < seen.at) firstReply.set(key, { text, at });
+  };
   for (const d of all("SELECT item_key, messages FROM item_discussions")) {
     const first = (JSON.parse(d.messages as string) as { role: string; text: string; at: number }[])
       .filter((m) => m.role === "operator")
       .sort((a, b) => a.at - b.at)[0];
-    if (first === undefined || first.at < since || first.at > until) continue;
+    if (first !== undefined) note(d.item_key as string, first.text, first.at);
+  }
+  for (const m of all(
+    "SELECT item_key, text, at FROM comms WHERE item_key IS NOT NULL AND from_id = ? ORDER BY at, id",
+    COMMS_CAPCOM,
+  ))
+    note(m.item_key as string, m.text as string, m.at as number);
+  for (const [key, first] of firstReply) {
+    if (first.at < since || first.at > until) continue;
     if (!first.text.trim().endsWith("?")) continue;
-    const key = d.item_key as string;
     out.push({
       kind: "question-asked-back",
       subject: key,

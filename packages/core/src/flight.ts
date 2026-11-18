@@ -267,7 +267,6 @@ export const FLIGHT_STATE_TEXT_MAX = 300;
 export const FLIGHT_STATE_DECISION_MAX = 1000;
 /** Model-supplied about text; hub-assembled descriptions can be longer. */
 export const FLIGHT_ABOUT_ARG_MAX = 300;
-export const DISCUSSION_TEXT_MAX = 4000;
 export const FLIGHT_ABOUT_MAX = 4000;
 export const FLIGHT_DECISION_MAX = 4000;
 export const FLIGHT_BASIS_MAX = 500;
@@ -1425,7 +1424,6 @@ export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
   "idle",
   "breaker",
   "holdsInForce",
-  "discussions",
   "instructions",
 ];
 export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [

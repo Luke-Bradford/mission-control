@@ -84,6 +84,55 @@ describe("question-asked-back", () => {
     discussion("needs:2", "Go with the first option.", NOW - HOUR);
     expect(rows("question-asked-back")).toEqual([]);
   });
+  it("reads the first operator message in the shared thread", () => {
+    choice("needs:3");
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:3",
+      text: "What does this mean?",
+      at: NOW - HOUR,
+    });
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:3",
+      text: "Thanks?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toMatchObject([
+      { subject: "needs:3", ticket: "repo#7", pr: null, at: NOW - HOUR },
+    ]);
+  });
+  it("gives no row when the first shared-thread message is a statement", () => {
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:4",
+      text: "Go ahead.",
+      at: NOW - HOUR,
+    });
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:4",
+      text: "Why?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toEqual([]);
+  });
+  it("gives one row when an item has both a legacy discussion and a thread", () => {
+    choice("needs:5");
+    discussion("needs:5", "Why?", NOW - HOUR);
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:5",
+      text: "Why again?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toHaveLength(1);
+  });
 });
 
 describe("question-waited", () => {
