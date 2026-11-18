@@ -96,6 +96,7 @@ import {
   MC_RUN_ENDED,
   MC_TICKET_READERS_ONLY,
   MC_TOOLS,
+  MERGE_HOLD_PARK,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsYouItems,
@@ -176,7 +177,7 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run/handoffs.ts";
+import { inheritedHandoffLoop, recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -2112,6 +2113,54 @@ describe("start_seat", () => {
         .isError,
     ).toBeUndefined();
     expect(startCalls).toHaveLength(1);
+  });
+  it("reassigns a held PR's ticket: the new run starts under the engine and the hold comes with it", async () => {
+    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+    engineOn = true;
+    board(sc(7, { status: "In review" }));
+    const hold = { by: "CAPCOM" as const, reason: "reproduced bug", at: NOW - 5 };
+    const old = run("old", "guido-cx", {
+      ticket: "mc#7",
+      branch: "feature/7-old",
+      endedAt: NOW - 1000,
+      loop: { ...NEW_LOOP, prNumber: 9, mergeHold: hold },
+    });
+    store.upsertRun(old);
+    recordRunHandoff(store, old, null);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR",
+          url: "u",
+          branch: "feature/7-old",
+          ticket: "mc#7",
+          state: "open" as const,
+          isDraft: false,
+          review: null,
+          ci: "pending" as const,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    expect(
+      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the bug" })).isError,
+    ).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+    const [seatId, issue, opts] = need(startCalls[0]) as [string, number, { loop?: RunLoop }];
+    expect([seatId, issue]).toEqual(["guido-1", 7]);
+    // the supervisor builds the new run's loop from the ended run's loop in just this way
+    expect(inheritedHandoffLoop(old.loop, opts.loop)?.mergeHold).toMatchObject({
+      by: "CAPCOM",
+      reason: "reproduced bug",
+    });
   });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
@@ -7772,7 +7821,7 @@ describe("superuser housekeeping", () => {
         "r-pr",
         "FLIGHT",
         {
-          kinds: ["review", "review-ruling"],
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
           action: "rework",
           basis: "Checked the current state",
           note: "Fix the validation branch and add its regression test.",
@@ -7792,6 +7841,37 @@ describe("superuser housekeeping", () => {
       text: "Settled r-pr: rework.",
     });
     expect(engineCalls).toHaveLength(5);
+  });
+  it("sends a merge-hold park back for rework, and no other settle touches it", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      parked: { kind: MERGE_HOLD_PARK, reason: "merge held by CAPCOM: bug", ended: false },
+      mergeHold: { by: "CAPCOM", reason: "bug", at: NOW },
+    });
+    for (const action of ["accept", "rereview", "lift", "second_review"] as const) {
+      expect(await call("settle_park", { runId: "r-pr", action })).toEqual(
+        refused("This action cannot settle this park."),
+      );
+    }
+    expect(engineCalls).toEqual([]);
+    expect(
+      await call("settle_park", { runId: "r-pr", action: "rework", note: "Fix the overlap." }),
+    ).toEqual({ text: "Settled r-pr: rework." });
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
+          action: "rework",
+          basis: "Checked the current state",
+          note: "Fix the overlap.",
+        },
+      ],
+    ]);
   });
   it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
     elevated();

@@ -1455,6 +1455,12 @@ parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it 
 `{"action":"release"}` on the same route, which returns it to the phase it left. A plain resume or
 message does not lift this park. A new push keeps the hold.
 
+A hold stops only the merge. To fix a defect in a held PR, FLIGHT sends the run parked as `merge-hold`
+back to its builder with `mc settle_park { runId, action: "rework", note: <fix list> }`: the run
+returns to working, the hold stays in force, and after the fix, CI and review it parks at `merge-hold`
+again until the holder releases it. `mc reassign_ticket` on a held PR's ticket (after its run ended)
+gives the new run the same hold. Releasing stays with whoever set it.
+
 FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
 as a decision. FLIGHT may release only its own hold: one set here is released only here. The operator
 may replace or release any hold. The controller's key is refused (403): it neither holds nor releases a
@@ -1628,7 +1634,7 @@ named pause or attributes an unknown grant to FLIGHT.
 
 | Tool | What it does |
 |---|---|
-| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
+| `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat; also sends a merge-hold park back to its builder, the hold staying in force), or `second_review` |
 | `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. |
 | `resolve_waste_alarm` | Close a retry-loop alarm's hold, so the parked ticket is dealt again, with a recorded basis. See Waste alarms. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
@@ -2872,7 +2878,9 @@ A dirty checkout's result is not proof of an unchanged commit.
 ## Affected tests before a crew push
 
 This repo requires `pnpm -s lint` and `pnpm -s typecheck` before `mc push`; CI runs the tests. The existing hub check recorder counts
-a command only when it starts and finishes on the same clean commit in the session clone. A
+a command only when it starts and finishes on the same clean commit in the session clone. It can
+join configured checks and a final `pnpm -s test:related` with `&&` only; a pipe, list separator
+or any other command does not count. A
 failed or missing command holds the push and names the check to run. Run checks after committing;
 a check on uncommitted edits is not evidence for that commit. Re-run after changing the head.
 

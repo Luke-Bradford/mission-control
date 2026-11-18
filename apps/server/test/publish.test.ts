@@ -263,11 +263,51 @@ describe("openPr", () => {
     expect(tools.openDraftPr).not.toHaveBeenCalled();
   });
 
-  it("does not adopt an earlier PR recorded by another seat", async () => {
+  it("adopts a PR recorded by an ended run further back, after more than one handover", async () => {
+    const ended = (over: Partial<Run>) =>
+      run({ status: "ok", ...over, endedAt: (over.startedAt ?? START) + 400 });
+    store.upsertRun(
+      ended({
+        id: "rA",
+        agentId: "guido-1",
+        startedAt: START - 3_000,
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    store.upsertRun(ended({ id: "rB", agentId: "guido-2", startedAt: START - 1_000 }));
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run({ agentId: "guido-3" }), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: 29,
+    });
+    expect(tools.openDraftPr).not.toHaveBeenCalled();
+  });
+
+  it("does not adopt an earlier PR while another run on the ticket is live", async () => {
     store.upsertRun(
       run({
         id: "r0",
         agentId: "other-seat",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    store.upsertRun(run({ id: "r9", agentId: "third-seat", startedAt: START - 200 }));
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
+  });
+
+  it("does not adopt a PR recorded on another ticket", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        ticket: "mc#8",
         startedAt: START - 1_000,
         endedAt: START - 500,
         status: "ok",
