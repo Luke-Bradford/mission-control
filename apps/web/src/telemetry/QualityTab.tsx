@@ -29,6 +29,8 @@ import { Cell, Stat, type StatSpec } from "./Stat.tsx";
 /** Quality's daily counts are fixed to the same fourteen-day window as its summary. */
 export const QUALITY_RANGE = "7d";
 const WINDOW = `${FLOW_DAYS}d`;
+/** Quality rows name server-local calendar days, represented at UTC midnight for formatting. */
+const QUALITY_DAY_TZ = "UTC";
 
 export const QUALITY_SUMMARY_COUNT = 6;
 
@@ -156,7 +158,6 @@ function RatePanel({
   t: Telemetry | undefined;
   review: boolean;
 }) {
-  const tz = useTz() ?? "UTC";
   const points = readQuality14(t?.quality14);
   const values =
     points?.map((p) =>
@@ -164,7 +165,7 @@ function RatePanel({
         ? null
         : ((p[measure] as DailyCount).pass / (p[measure] as DailyCount).total) * 100,
     ) ?? [];
-  const plot = plotOf(values, points?.map((p) => p.at) ?? [], tz);
+  const plot = plotOf(values, points?.map((p) => p.at) ?? [], QUALITY_DAY_TZ);
   const sub = `% of ${review ? "reviewed" : "merged"} PRs · last ${FLOW_DAYS} days`;
   if (!plot || !points)
     return (
@@ -196,7 +197,7 @@ function RatePanel({
           max={100}
           ticks={[0, 50, 100]}
           format={(v) => percent(v)}
-          tz={tz}
+          tz={QUALITY_DAY_TZ}
         />
       </div>
       <p className="pnote">
@@ -208,10 +209,9 @@ function RatePanel({
 }
 
 function RoundsPanel({ t }: { t: Telemetry | undefined }) {
-  const tz = useTz() ?? "UTC";
   const points = readQuality14(t?.quality14);
   const values = points?.map((p) => (p.rounds ? p.rounds.pass / p.rounds.total : null)) ?? [];
-  const plot = plotOf(values, points?.map((p) => p.at) ?? [], tz);
+  const plot = plotOf(values, points?.map((p) => p.at) ?? [], QUALITY_DAY_TZ);
   const sub = `rounds, up to 4 · last ${FLOW_DAYS} days`;
   const gap = <> Test attempts: not collected yet.</>;
   if (!plot || !points)
@@ -238,7 +238,7 @@ function RoundsPanel({ t }: { t: Telemetry | undefined }) {
           max={Math.ceil(peak)}
           ticks={[0, Math.ceil(peak) / 2, Math.ceil(peak)]}
           format={(v) => v.toFixed(1)}
-          tz={tz}
+          tz={QUALITY_DAY_TZ}
         />
       </div>
       <p className="pnote">

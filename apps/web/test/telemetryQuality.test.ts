@@ -39,6 +39,18 @@ describe("collectedFrom", () => {
 });
 
 describe("readQuality14", () => {
+  it("keeps a rounds sum that is larger than the number of reviewed PRs", () => {
+    const days = Array.from({ length: 14 }, (_, i) => ({
+      day: `2026-11-${String(i + 1).padStart(2, "0")}`,
+      ciPrs: 2,
+      ciGreenPrs: 1,
+      reviewedPrs: 2,
+      firstPassPrs: 1,
+      roundsSum: 3,
+    }));
+    expect(readQuality14(days)?.[0]?.rounds).toEqual({ pass: 3, total: 2 });
+  });
+
   it("rejects a missing or malformed fixed daily window", () => {
     expect(readQuality14(undefined)).toBeNull();
     expect(readQuality14([{ day: "2026-10-01", ciPrs: 1 }])).toBeNull();

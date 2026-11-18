@@ -36,7 +36,11 @@ export function readQuality14(value: unknown): QualityDay[] | null {
     };
     const ci = count(r.ciGreenPrs, r.ciPrs);
     const firstPass = count(r.firstPassPrs, r.reviewedPrs);
-    const rounds = count(r.roundsSum, r.reviewedPrs);
+    // A rounds sum can exceed its PR count: a PR needs at least one round and may need more.
+    const rounds =
+      finiteCount(r.roundsSum) && finiteCount(r.reviewedPrs) && r.reviewedPrs > 0
+        ? { pass: r.roundsSum, total: r.reviewedPrs }
+        : null;
     // A negative or over-total numerator is malformed, not an uncollected day.
     if (
       !finiteCount(r.ciGreenPrs) ||
@@ -45,7 +49,8 @@ export function readQuality14(value: unknown): QualityDay[] | null {
       !finiteCount(r.reviewedPrs) ||
       !finiteCount(r.roundsSum) ||
       (r.ciGreenPrs as number) > (r.ciPrs as number) ||
-      (r.firstPassPrs as number) > (r.reviewedPrs as number)
+      (r.firstPassPrs as number) > (r.reviewedPrs as number) ||
+      ((r.reviewedPrs as number) > 0 && (r.roundsSum as number) < (r.reviewedPrs as number))
     )
       return null;
     rows.push({ at, ci, firstPass, rounds });

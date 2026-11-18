@@ -173,6 +173,28 @@ describe("Telemetry, Quality tab", () => {
     expect(document.querySelector("#qCi .tip")?.textContent).toContain("10 of 10 PRs");
   });
 
+  it("plots daily review rounds above one and shows the daily mean on hover", async () => {
+    open();
+    await waitLoaded();
+    expect(document.querySelectorAll("#qRounds .bar")).toHaveLength(10);
+    fireEvent.pointerEnter(document.querySelector("#qRounds .hit") as Element);
+    expect(document.querySelector("#qRounds .tip")?.textContent).toContain("2.0");
+  });
+
+  it("labels server-local quality days without shifting them to the operator's timezone", async () => {
+    const data = tel();
+    data.quality14 = (data.quality14 ?? []).map((row, i) => ({
+      ...row,
+      day: `2026-11-${String(i + 4).padStart(2, "0")}`,
+    }));
+    open("", {
+      "/api/config": { ...CONFIG, operator: { ...CONFIG.operator, timezone: "America/New_York" } },
+      "/api/telemetry?range=7d": data,
+    });
+    await waitLoaded();
+    expect(document.querySelector("#qCi svg")?.getAttribute("aria-label")).toContain("17 Nov");
+  });
+
   it("states that daily quality is not collected when quality14 is absent", async () => {
     const data = tel();
     delete (data as { quality14?: unknown }).quality14;
