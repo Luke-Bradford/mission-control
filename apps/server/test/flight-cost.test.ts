@@ -177,7 +177,6 @@ describe("routine wakes wait for the batch window", () => {
   });
   it("never batches an operator message, a question, a blocker, a signal or the breaker", () => {
     for (const o of [
-      { discussions: [[1, [2]]] },
       { q: [3] },
       { triage: ["mc#1:new"] },
       { signals: ["main_red:abc"] },
@@ -224,7 +223,7 @@ describe("routine wakes wait for the batch window", () => {
   });
 
   it("does not batch immediate facts even in a learned category", () => {
-    const learned = new Set(["signals", "items", "prs", "discussions", "instructions"]);
+    const learned = new Set(["signals", "items", "prs", "instructions"]);
     for (const factsAdded of [
       { q: ["x"] },
       { operator: ["x"] },
@@ -236,7 +235,6 @@ describe("routine wakes wait for the batch window", () => {
       { signals: ["main_red:sha"] },
       { items: ["comms-open:4"] },
       { prs: ["mc#1:7:true:open::"] },
-      { discussions: [["d1", ["m1"]]] },
       { instructions: ["r2"] },
     ] as Record<string, unknown[]>[])
       expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);

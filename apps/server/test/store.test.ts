@@ -3910,40 +3910,6 @@ describe("telemetry store aggregates", () => {
   });
 });
 
-describe("item discussions", () => {
-  it("keeps interleaved versions, retries and late replies across restart", () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    const b = store.ensureDiscussion("note:b", "v1");
-    store.askDiscussion(a.id, "ask-a", "Why?", 1);
-    store.askDiscussion(b.id, "ask-b", "Which?", 2);
-    store.markDiscussionSent(b.id, "ask-b");
-    store.askDiscussion(a.id, "ask-a", "Why?", 1);
-    store.addComms({ at: 3, from: "flight", to: "operator", ticket: null, text: "Global" });
-    const next = store.ensureDiscussion("note:a", "v2");
-    expect(next.messages).toEqual([]);
-    expect(store.replyDiscussion(a.id, "ask-a", "reply-a", "Evidence", 4)).toBe(true);
-    expect(store.replyDiscussion(b.id, "ask-a", "wrong", "Wrong", 5)).toBe(false);
-    store.close();
-    store = new Store(join(dir, "mc.sqlite"));
-    expect(store.discussion("note:a", a.id)?.messages.map((m) => m.text)).toEqual([
-      "Why?",
-      "Evidence",
-    ]);
-    expect(store.discussion("note:b", b.id)?.messages.map((m) => m.text)).toEqual(["Which?"]);
-    expect(store.discussion("note:a", b.id)).toBeNull();
-    expect(store.discussionSent(b.id, "ask-b")).toBe(true);
-    expect(store.replyDiscussion(a.id, "ask-a", "reply-a", "Evidence", 4)).toBe(true);
-    expect(store.discussion("note:a", a.id)?.messages).toHaveLength(2);
-    expect(() => store.askDiscussion(a.id, "ask-a", "Changed", 6)).toThrow();
-  });
-
-  it("bounds a thread without moving messages to another item", () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    for (let n = 0; n < 150; n++) store.askDiscussion(a.id, `ask-${n}`, "Question", n);
-    expect(store.discussion("note:a", a.id)?.messages).toHaveLength(100);
-  });
-});
-
 it("retains complete and legacy briefs across restart without inventing checked sources", () => {
   const legacy = {
     key: "note:legacy",

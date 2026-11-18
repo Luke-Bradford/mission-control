@@ -3,8 +3,6 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlit
 import type {
   AttentionMaterials,
   BriefChoiceReceipt,
-  ItemChatMessage,
-  ItemDiscussion,
   PersonSource,
   PromptSection,
   PromptSectionCost,
@@ -3489,7 +3487,7 @@ export class Store {
   ): TicketQuestion[] {
     const rows =
       this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis,
-        (SELECT x.item_key FROM item_discussions x WHERE x.item_key = 'ask:' || q.id LIMIT 1)
+        (SELECT x.item_key FROM comms x WHERE x.item_key = 'ask:' || q.id LIMIT 1)
           AS discussion_key
       FROM seat_questions q JOIN runs r ON r.id = q.run_id
       LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
@@ -6847,151 +6845,6 @@ export class Store {
   /** The stored sections of a session's brief. */
   flightBrief(sessionId: string): FlightBriefRow[] {
     return this.flightQ.flightBrief(sessionId);
-  }
-
-  /** A stable, bounded thread for one exact version of an item. */
-  ensureDiscussion(
-    itemKey: string,
-    version: string,
-    opening?: { text: string; at: number },
-  ): ItemDiscussion {
-    const id = randomUUID();
-    const messages: ItemChatMessage[] = opening
-      ? [
-          {
-            id: `${id}:opening`,
-            itemKey,
-            correlationId: id,
-            role: "flight",
-            text: opening.text,
-            at: opening.at,
-          },
-        ]
-      : [];
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO item_discussions (id, item_key, version, messages) VALUES (?, ?, ?, ?)`,
-      )
-      .run(id, itemKey, version, JSON.stringify(messages));
-    const row = this.db
-      .prepare("SELECT id FROM item_discussions WHERE item_key = ? AND version = ?")
-      .get(itemKey, version) as Row;
-    return this.discussion(itemKey, row.id as string) as ItemDiscussion;
-  }
-
-  discussion(itemKey: string, id: string): ItemDiscussion | null {
-    const row = this.db
-      .prepare("SELECT * FROM item_discussions WHERE item_key = ? AND id = ?")
-      .get(itemKey, id) as Row | undefined;
-    return row
-      ? {
-          id,
-          itemKey,
-          version: row.version as string,
-          messages: JSON.parse(row.messages as string) as ItemChatMessage[],
-        }
-      : null;
-  }
-
-  /** The newest stored conversation for an item which is no longer in attention. */
-  discussionForItem(itemKey: string): ItemDiscussion | null {
-    const row = this.db
-      .prepare("SELECT id FROM item_discussions WHERE item_key = ? ORDER BY rowid DESC LIMIT 1")
-      .get(itemKey) as Row | undefined;
-    return row ? this.discussion(itemKey, row.id as string) : null;
-  }
-
-  private discussionById(id: string): ItemDiscussion | null {
-    const row = this.db.prepare("SELECT item_key FROM item_discussions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return row ? this.discussion(row.item_key as string, id) : null;
-  }
-
-  private saveDiscussion(thread: ItemDiscussion): void {
-    this.db
-      .prepare("UPDATE item_discussions SET messages = ? WHERE id = ?")
-      .run(JSON.stringify(thread.messages.slice(-100)), thread.id);
-  }
-
-  askDiscussion(id: string, messageId: string, text: string, at: number): boolean {
-    const thread = this.discussionById(id);
-    if (!thread) throw new Error("Unknown discussion.");
-    const prior = thread.messages.find((m) => m.id === messageId);
-    if (prior) {
-      if (prior.role !== "operator" || prior.text !== text)
-        throw new Error("Message id already used.");
-      return false;
-    }
-    thread.messages.push({
-      id: messageId,
-      itemKey: thread.itemKey,
-      correlationId: id,
-      role: "operator",
-      text,
-      at,
-    });
-    this.saveDiscussion(thread);
-    return true;
-  }
-
-  replyDiscussion(
-    id: string,
-    replyTo: string,
-    messageId: string,
-    text: string,
-    at: number,
-  ): boolean {
-    const thread = this.discussionById(id);
-    if (!thread?.messages.some((m) => m.id === replyTo && m.role === "operator")) return false;
-    const prior = thread.messages.find((m) => m.id === messageId || m.replyTo === replyTo);
-    if (prior) return prior.id === messageId && prior.replyTo === replyTo && prior.text === text;
-    thread.messages.push({
-      id: messageId,
-      itemKey: thread.itemKey,
-      correlationId: id,
-      replyTo,
-      role: "flight",
-      text,
-      at,
-    });
-    this.saveDiscussion(thread);
-    return true;
-  }
-
-  discussionSent(id: string, messageId: string): boolean {
-    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return row ? (JSON.parse(row.sent as string) as string[]).includes(messageId) : false;
-  }
-
-  markDiscussionSent(id: string, messageId: string): void {
-    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as Row;
-    const sent = JSON.parse(row.sent as string) as string[];
-    this.db
-      .prepare("UPDATE item_discussions SET sent = ? WHERE id = ?")
-      .run(JSON.stringify([...new Set([...sent, messageId])].slice(-100)), id);
-  }
-
-  pendingDiscussions(): ItemDiscussion[] {
-    const rows = this.db
-      .prepare(`
-        SELECT d.item_key, d.id,
-          (SELECT MIN(json_extract(q.value, '$.at'))
-           FROM json_each(d.messages) AS q
-           WHERE json_extract(q.value, '$.role') = 'operator'
-             AND NOT EXISTS (
-               SELECT 1 FROM json_each(d.messages) AS r
-               WHERE json_extract(r.value, '$.replyTo') = json_extract(q.value, '$.id')
-             )) AS waiting_since
-        FROM item_discussions AS d
-        WHERE waiting_since IS NOT NULL
-        ORDER BY waiting_since ASC, d.rowid ASC
-        LIMIT 100
-      `)
-      .all() as Row[];
-    return rows.map((r) => this.discussion(r.item_key as string, r.id as string) as ItemDiscussion);
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */

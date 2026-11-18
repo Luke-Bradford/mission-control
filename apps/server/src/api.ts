@@ -61,7 +61,6 @@ import {
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
-  DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   ENGINE_TICK_MS,
   effectiveHardRules,
@@ -4925,7 +4924,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   crew: commsCrew,
                   flightId: flightSeat(config)?.seat.id ?? null,
                 },
-                currentDiscussionItem(b.itemKey),
+                currentChoiceItem(b.itemKey),
                 b.itemKey,
                 b.choice,
                 { to: id, text: b.text, question: b.question },
@@ -6771,8 +6770,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
 
-      const discussionSends = new Set<string>();
-      const currentDiscussionItem = (key: string) => {
+      const currentChoiceItem = (key: string) => {
         const item = attentionItems(
           config,
           store,
@@ -6784,16 +6782,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ).find((item) => item.key === key && (!item.acked || isOperatorItem(item)));
         return item ? { ...item, version: attentionVersion(item) } : undefined;
       };
-      const openDiscussion = (item: AttentionItem & { version: string }) => {
-        const brief = item.brief;
-        const recommended = brief?.recommendedOptionId
-          ? brief.options.find((o) => o.id === brief.recommendedOptionId)
-          : undefined;
-        const text = recommended?.description
-          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description.replace(/[.\s]+$/, "")}. What would help you decide? I can pull the Teams thread or the code.`
-          : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
-        return store.ensureDiscussion(item.key, item.version, { text, at: now() });
-      };
       // Reader: apps/web/src/data.ts (the item thread read)
       api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
         const key = req.params.key;
@@ -6801,80 +6789,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         // A note key is raised again later: only this run of the note owns the conversation.
         // Other item keys name one message, question or issue, so all of theirs is the item's.
         return itemThread(store.itemThreadNow(key));
-      });
-      // Reader: apps/web/src/shell/ItemPanel.tsx
-      api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
-        "/attention/:key/discussion",
-        async (req, reply) => {
-          const { key } = req.params;
-          if (req.query.id) {
-            const thread = store.discussion(key, req.query.id);
-            return thread ?? reply.code(404).send({ error: "Unknown discussion." });
-          }
-          const item = currentDiscussionItem(key);
-          if (!item?.version) {
-            const thread = store.discussionForItem(key);
-            return thread ?? reply.code(404).send({ error: "No current item." });
-          }
-          return openDiscussion({ ...item, version: item.version });
-        },
-      );
-      // Reader: apps/web/src/shell/ItemPanel.tsx
-      api.post<{ Params: { key: string } }>("/attention/:key/discussion", async (req, reply) => {
-        const body = z
-          .strictObject({
-            version: z.string().min(1).max(100),
-            messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
-            text: z.string().trim().min(1).max(DISCUSSION_TEXT_MAX),
-          })
-          .safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        const item = currentDiscussionItem(req.params.key);
-        if (!item || item.version !== body.data.version)
-          return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
-        // no FLIGHT seat is configured: nothing would ever pick the reply up
-        const flight = flightSeat(config);
-        if (!flight) return reply.code(409).send({ error: "This hub has no FLIGHT seat." });
-        const thread = openDiscussion({ ...item, version: body.data.version });
-        const { messageId, text } = body.data;
-        try {
-          store.askDiscussion(thread.id, messageId, text, now());
-        } catch {
-          return reply.code(409).send({ error: "Message id already used." });
-        }
-        if (store.discussionSent(thread.id, messageId))
-          return store.discussion(item.key, thread.id);
-        // The reply is stored whether or not FLIGHT is running: an unsent one is in FLIGHT's wake
-        // (pendingDiscussions) when it starts, so nothing here answers "FLIGHT is unavailable".
-        const flightOn = supervisor?.status().enabled === true;
-        if (!supervisor || !flightOn) return store.discussion(item.key, thread.id);
-        const sendKey = `${thread.id}:${messageId}`;
-        if (discussionSends.has(sendKey))
-          return reply.code(409).send({ error: "Message is being sent." });
-        discussionSends.add(sendKey);
-        try {
-          await supervisor.message(
-            flight.seat.id,
-            JSON.stringify({
-              kind: "item-discussion",
-              discussion: { id: thread.id, replyTo: messageId },
-              item,
-              question: text,
-              instruction:
-                "Reply using log_decision with discussion.id, discussion.replyTo and a stable discussion.messageId. Discussion is chat only; do not execute a choice.",
-            }),
-            { interrupt: false, questions: "none" },
-          );
-          store.markDiscussionSent(thread.id, messageId);
-          bus.emit("attention");
-          return store.discussion(item.key, thread.id);
-        } catch (e) {
-          // not pushed now (FLIGHT is down or between turns): it stays stored, and the wake carries it
-          captureError(reply, e);
-          return store.discussion(item.key, thread.id);
-        } finally {
-          discussionSends.delete(sendKey);
-        }
       });
 
       api.register(async (api) => {
@@ -6954,7 +6868,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                       deps.engine?.reconcileRun?.(runId) ?? Promise.resolve(),
                   }),
             },
-            currentDiscussionItem(key),
+            currentChoiceItem(key),
             key,
             body.data,
           );

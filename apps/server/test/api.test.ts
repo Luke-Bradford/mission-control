@@ -1860,8 +1860,6 @@ const API_ROUTES: [string, string, object?][] = [
     "/api/attention/example/choice",
     { briefId: 1, sourceRevision: "a".repeat(64), optionId: "apply", requestId: "route-inventory" },
   ],
-  ["GET", "/api/attention/example/discussion"],
-  ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
   ["POST", "/api/attention/note:blocked:r1:0/dismiss", {}],
   ["GET", "/api/notifications"],
@@ -2984,10 +2982,6 @@ describe("local access", () => {
         });
         continue;
       }
-      if (url.endsWith("/discussion")) {
-        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 404 : 409);
-        continue;
-      }
       if (
         url.endsWith("/dismiss") ||
         url.endsWith("/handled") ||
@@ -3375,7 +3369,6 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/(not-now|drop)$/, "/attention/:key/$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
-            .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
             .replace(/\/attention\/[^/]+\/materials$/, "/attention/:key/materials")
             .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(

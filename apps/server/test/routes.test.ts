@@ -188,8 +188,6 @@ describe("the route table", () => {
     expect(routes).toContain("POST /api/queue/reorder/:key");
     expect(routes).toContain("GET /api/runs/:id/attempts");
     expect(routes).toContain("GET /api/attention/:key");
-    expect(routes).toContain("GET /api/attention/:key/discussion");
-    expect(routes).toContain("POST /api/attention/:key/discussion");
     expect(routes).toContain("GET /api/comms/:id");
     expect(routes).toContain("POST /api/comms/:id/read");
     expect(routes).toContain("GET /api/comms/crew");
