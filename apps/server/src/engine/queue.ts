@@ -534,7 +534,10 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   // the setting or the plan may have changed since the card was queued: read both again; fails
   // closed on unreadable rules
   const live = await deps.rules(repoId);
-  if (live instanceof RepoRulesError || planHolds(live.planSignoff, store.plans.get(repoId, issue))) {
+  if (
+    live instanceof RepoRulesError ||
+    planHolds(live.planSignoff, store.plans.get(repoId, issue))
+  ) {
     store.dropQueued(seatId, repoId, issue);
     return;
   }
