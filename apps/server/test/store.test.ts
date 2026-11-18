@@ -434,6 +434,37 @@ describe("Store", () => {
     new Store(old); // re-opening is a no-op
   });
 
+  it("removes the retired handoff tables from old and fresh databases", () => {
+    const old = join(dir, "retired-tables.sqlite");
+    const db = new DatabaseSync(old);
+    for (const table of ["run_handoffs", "ticket_waits", "holds"]) {
+      db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+      db.exec(`CREATE INDEX ${table}_value ON ${table}(value)`);
+      db.prepare(`INSERT INTO ${table} VALUES (?, ?)`).run(`${table}-row`, "kept until upgrade");
+    }
+    db.close();
+
+    const migrated = new Store(old);
+    expect(migrated.getSetting("missing")).toBeNull();
+    migrated.close();
+    const after = new DatabaseSync(old);
+    expect(
+      after
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') AND name GLOB '*handoffs*' OR name GLOB '*ticket_waits*' OR name GLOB 'holds*'",
+        )
+        .all(),
+    ).toEqual([]);
+    after.close();
+
+    const reopened = new Store(old);
+    expect(reopened.getSetting("missing")).toBeNull();
+    reopened.close();
+    const fresh = new Store(join(dir, "fresh.sqlite"));
+    expect(fresh.getSetting("missing")).toBeNull();
+    fresh.close();
+  });
+
   it("runs returns newest first and respects the limit", () => {
     store.upsertRun(run({ id: "a", seq: 1, startedAt: 1 }));
     store.upsertRun(run({ id: "b", seq: 2, startedAt: 2 }));

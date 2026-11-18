@@ -684,6 +684,44 @@ describe("supervisor events (Plan 7a)", () => {
       const { runId } = await idleRun();
       expect(store.run(runId)?.loop).toBeUndefined();
     });
+
+    it("keeps unresolved durable gates when a stopped ticket starts again", async () => {
+      store.upsertRun({
+        id: "stopped-ticket",
+        agentId: "former-seat",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: 2,
+        status: "failed",
+        sessionId: null,
+        model: null,
+        branch: BRANCH,
+        ticket: "mc#42",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "/tmp/stopped-ticket.log",
+        prs: [],
+        summary: "Fix the review findings.",
+        reviewId: null,
+        loop: {
+          ...LOOP,
+          mergeHold: { by: "CAPCOM", reason: "Wait for acceptance.", at: 1 },
+          controllerCheck: { sha: "a".repeat(40), from: "review", pass: false },
+          uat: { sha: "b".repeat(40), from: "review", accepted: false },
+          awaitingFlight: "c".repeat(40),
+        },
+      });
+
+      const { runId } = await idleRun({ loop: LOOP });
+
+      expect(store.run(runId)?.loop).toMatchObject({
+        mergeHold: { by: "CAPCOM", reason: "Wait for acceptance." },
+        controllerCheck: { pass: false },
+        uat: { accepted: false },
+        awaitingFlight: "c".repeat(40),
+      });
+    });
   });
 
   describe("send", () => {

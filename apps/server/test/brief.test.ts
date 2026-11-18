@@ -160,6 +160,20 @@ describe("ticketBrief leftover changes", () => {
   });
 });
 
+describe("ticketBrief continuation", () => {
+  it("adds only the replacement ticket's bounded continuation", () => {
+    const brief = ticketBrief({
+      ...input,
+      continuation:
+        "Earlier summary: Fix the review findings.\n\nOpen Important finding at api.ts:12: Validate the input. Required next action: Add boundary validation.",
+    });
+
+    expect(brief).toContain("## Continue the earlier run");
+    expect(brief).toContain("Required next action: Add boundary validation.");
+    expect(ticketBrief(input)).not.toContain("Continue the earlier run");
+  });
+});
+
 describe("ticketBrief profile lines", () => {
   const base = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
   const chosen = (profile: Profile, route: ProfileRoute): RunProfile => ({

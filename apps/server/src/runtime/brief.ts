@@ -86,6 +86,8 @@ export interface BriefInput {
   fileContext?: string | null;
   /** The ticket's answered questions, newest first; the brief lists ten at most. */
   decisions?: readonly { question: string; answer: string }[];
+  /** Bounded work that a stopped run left for this ticket's replacement seat. */
+  continuation?: string | null;
 }
 
 /** How many of a ticket's answered questions a run's start brief lists. */
@@ -215,6 +217,9 @@ export function ticketBrief(i: BriefInput): string {
     "",
     ...(profile.length > 0 ? [...profile, ""] : []),
     ...decisionsSection(i.decisions),
+    ...(i.continuation === null || i.continuation === undefined
+      ? []
+      : ["## Continue the earlier run", "", i.continuation, ""]),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
     ...(writer

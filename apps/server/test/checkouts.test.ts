@@ -789,6 +789,53 @@ describe("prepareCheckout", () => {
     expect(existsSync(join(wtPath(), "wip.txt"))).toBe(true);
   });
 
+  it("fast-forwards a clean reused worktree behind its origin branch", async () => {
+    await prepareCheckout(input());
+    const remote = commit(seed, { "remote.txt": "new\n" });
+    git(seed, "push", "-q", "origin", `HEAD:refs/heads/${BRANCH}`);
+
+    const reused = await prepareCheckout(input());
+
+    expect(reused.leftoverChanges).toEqual([]);
+    expect(git(wtPath(), "rev-parse", "HEAD")).toBe(remote);
+    expect(readFileSync(join(wtPath(), "remote.txt"), "utf8")).toBe("new\n");
+  });
+
+  it("refuses a dirty reused worktree behind its origin branch", async () => {
+    await prepareCheckout(input());
+    writeFileSync(join(wtPath(), "wip.txt"), "keep\n");
+    commit(seed, { "remote.txt": "new\n" });
+    git(seed, "push", "-q", "origin", `HEAD:refs/heads/${BRANCH}`);
+
+    const e = await fail(prepareCheckout(input()));
+
+    expect(e.message).toBe("the reused worktree is behind origin and has uncommitted changes");
+    expect(readFileSync(join(wtPath(), "wip.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("refuses a diverged reused worktree without changing its files", async () => {
+    await prepareCheckout(input());
+    const local = commit(wtPath(), { "local.txt": "keep\n" });
+    commit(seed, { "remote.txt": "new\n" });
+    git(seed, "push", "-q", "origin", `HEAD:refs/heads/${BRANCH}`);
+
+    const e = await fail(prepareCheckout(input()));
+
+    expect(e.message).toBe("the reused worktree diverges from origin");
+    expect(git(wtPath(), "rev-parse", "HEAD")).toBe(local);
+    expect(readFileSync(join(wtPath(), "local.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("keeps a reused worktree already ahead of origin", async () => {
+    await prepareCheckout(input());
+    const local = commit(wtPath(), { "local.txt": "keep\n" });
+
+    const reused = await prepareCheckout(input());
+
+    expect(reused.leftoverChanges).toEqual([]);
+    expect(git(wtPath(), "rev-parse", "HEAD")).toBe(local);
+  });
+
   it("captures clean status and quotes spaces and control characters in reused worktrees", async () => {
     const first = await prepareCheckout(input());
     expect(first.leftoverChanges).toBeUndefined();

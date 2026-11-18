@@ -1671,7 +1671,37 @@ export async function prepareCheckout(
       common,
       { gitDir },
     );
-    const leftoverChanges = status.split("\n").filter((line) => line !== "");
+    let leftoverChanges = status.split("\n").filter((line) => line !== "");
+    const worktreeGit = (args: string[]) =>
+      crewGit(path, args, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+    const origin = await worktreeGit(["rev-parse", "--verify", "--quiet", `origin/${branch}`]).then(
+      (sha) => sha.trim(),
+      () => null,
+    );
+    if (origin !== null) {
+      const head = (await worktreeGit(["rev-parse", "--verify", "HEAD"])).trim();
+      const isAncestor = async (older: string, newer: string) =>
+        worktreeGit(["merge-base", "--is-ancestor", older, newer]).then(
+          () => true,
+          (e: unknown) => {
+            if ((e as { code?: unknown } | null)?.code === 1) return false;
+            throw e;
+          },
+        );
+      if (!(await isAncestor(origin, head))) {
+        if (await isAncestor(head, origin)) {
+          if (leftoverChanges.length > 0)
+            throw new CheckoutError(
+              "worktree",
+              "the reused worktree is behind origin and has uncommitted changes",
+            );
+          await worktreeGit(["reset", "--hard", origin]);
+          leftoverChanges = [];
+        } else {
+          throw new CheckoutError("worktree", "the reused worktree diverges from origin");
+        }
+      }
+    }
     await installReusedPnpm(
       {
         checkout: i.checkout,

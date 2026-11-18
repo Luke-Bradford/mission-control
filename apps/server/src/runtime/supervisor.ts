@@ -3645,6 +3645,46 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let runId = `${seatId}:${compactUtc(startedAt)}`;
       if (store.run(runId) !== null) runId = `${runId}-${seq}`;
       const cliSessionId = randomUUID();
+      const priorRun = opts?.loop
+        ? store
+            .runsOnTicket(info.repo.id, `${info.repo.id}#${issue}`)
+            .filter((candidate) => candidate.branch === checkout.branch)
+            .at(-1)
+        : undefined;
+      const prior = priorRun?.loop;
+      const continuedLoop =
+        opts?.loop === undefined
+          ? undefined
+          : {
+              ...opts.loop,
+              ...(prior?.mergeHold ? { mergeHold: prior.mergeHold } : {}),
+              ...(prior?.controllerCheck && !prior.controllerCheck.pass
+                ? { controllerCheck: prior.controllerCheck }
+                : {}),
+              ...(prior?.uat && !prior.uat.accepted ? { uat: prior.uat } : {}),
+              ...(prior?.awaitingFlight ? { awaitingFlight: prior.awaitingFlight } : {}),
+            };
+      const continuation =
+        priorRun === undefined
+          ? null
+          : (() => {
+              const evidence = store.evidenceNotes(priorRun.id).at(-1)?.note;
+              const findings = store
+                .reviewsOfRun(priorRun.id)
+                .flatMap((review) => store.findingsOf(review.id))
+                .filter((finding) => finding.resolution === null)
+                .slice(0, 10);
+              if (priorRun.summary === null && evidence === undefined && findings.length === 0)
+                return null;
+              return [
+                ...(priorRun.summary === null ? [] : [`Earlier summary: ${priorRun.summary}`]),
+                ...(evidence === undefined ? [] : [`Earlier evidence: ${evidence}`]),
+                ...findings.map(
+                  (finding) =>
+                    `Open ${finding.severity} finding at ${finding.file}:${finding.line}: ${finding.summary}. Required next action: ${finding.fix}`,
+                ),
+              ].join("\n\n");
+            })();
       const run: Run = {
         id: runId,
         agentId: seatId,
@@ -3671,10 +3711,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         transcriptPath: crewTranscriptPath(deps.dbPath, runId),
         prs: [],
         summary: null,
-        ...(opts?.loop
+        ...(continuedLoop
           ? {
               loop: {
-                ...opts.loop,
+                ...continuedLoop,
                 // a ticket that lists a controller check needs the controller's pass, whatever it says later
                 ...(ticketControllerCheck(ticket) === null
                   ? {}
@@ -3798,6 +3838,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           BRIEF_DECISIONS_MAX,
         ),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
+        continuation,
       });
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;

@@ -408,7 +408,9 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
     /** Every run on the ticket, ended ones too; review runs do not count. */
     runsOnTicket(repoId: RepoId, ticket: string): Run[] {
       const rows = db
-        .prepare("SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL")
+        .prepare(
+          "SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL ORDER BY started_at, seq",
+        )
         .all(repoId, ticket) as Row[];
       return rows.map(toRun);
     },
