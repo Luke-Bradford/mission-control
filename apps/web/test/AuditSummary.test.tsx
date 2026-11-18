@@ -708,3 +708,32 @@ it("names a window shared by every figure once, in the column heads", async () =
   expect(heads).toContain("30d");
   expect(within(table).queryAllByText(/·\s*30d/)).toHaveLength(0);
 });
+
+it("shows the From column, status dots, the eight-stage strip and the closed-loop note", async () => {
+  setup();
+  render(<CodeHealth />);
+  await ready();
+  const doNext = screen.getByRole("heading", { name: "Do next" }).closest("section") as HTMLElement;
+  expect(within(doNext).getByRole("columnheader", { name: "From" })).toBeTruthy();
+  expect(doNext.querySelector("tr.as-rec .as-from")?.textContent).toBe("Reviews");
+  expect(doNext.querySelectorAll("tr.as-rec .as-dot").length).toBeGreaterThan(0);
+  const past = screen
+    .getByRole("heading", { name: "What past recommendations achieved" })
+    .closest("section") as HTMLElement;
+  const stages = [...past.querySelectorAll(".as-cell .as-cap")].map((c) => c.textContent);
+  expect(stages).toEqual([
+    "Proposed",
+    "Challenged",
+    "Accepted",
+    "Ticket",
+    "Measured",
+    "Paid off",
+    "No effect",
+    "Set aside",
+  ]);
+  expect(within(past).getByText("Loop never closed")).toBeTruthy();
+  const days = [...document.querySelectorAll(".as-axis span")].map((e) => e.textContent);
+  expect(days.filter(Boolean)).toHaveLength(14);
+  expect(days[0]).toBe("22 Oct");
+  expect(days).toContain("1 Nov");
+});

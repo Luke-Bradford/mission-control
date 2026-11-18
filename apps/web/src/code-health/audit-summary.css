@@ -449,8 +449,8 @@
   border-bottom: 1px solid var(--line-2);
 }
 .as-axis {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  text-align: center;
   font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
@@ -511,10 +511,6 @@
 .as-cell {
   flex: 1 1 0;
   min-width: 0;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0 var(--sp-2);
   padding: 0 var(--sp-2);
   border-left: 1px solid var(--line);
 }
@@ -524,7 +520,7 @@
   color: var(--muted);
 }
 .as-fig {
-  display: inline;
+  display: block;
   font: 600 var(--fs-panel) / var(--lh-panel) var(--mono);
 }
 .as-sub {
@@ -777,4 +773,28 @@
 .code-health.as-fit th {
   text-transform: none;
   letter-spacing: normal;
+}
+
+/* Measures and file rows: 32 px, figures centred, a state dot at the end, per-touch values over 1 in amber. */
+.as-scroll tr.as-hrow,
+.as-scroll tr.as-frow {
+  height: 32px;
+}
+.as-scroll .as-hrow > td,
+.as-scroll .as-frow > td {
+  vertical-align: middle;
+}
+.as-c-dotcol {
+  width: 40px;
+}
+.as-dotcell {
+  text-align: center;
+}
+.as-hot {
+  color: var(--warn);
+}
+
+.as-loop {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
 }

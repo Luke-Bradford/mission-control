@@ -5,7 +5,7 @@ import type {
   CodeHealthRecommendation,
   CodeHealthWasteAlarmRow,
 } from "@mc/core";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, type Ref, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
@@ -321,6 +321,20 @@ const figureValue = (f: CodeHealthFigure | undefined): string =>
         ? `$${f.value.toFixed(2)}`
         : num(f.value);
 
+/** The next 1, 2, 5 or 10 times a power of ten at or above v: a plain top for the count scale. */
+function niceCeiling(v: number): number {
+  const pow = 10 ** Math.floor(Math.log10(v)),
+    f = v / pow;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** A day as its number, with the month on the first label and on the first of a month. */
+function dayLabel(iso: string, first: boolean): string {
+  const [, m, d] = iso.split("-").map(Number);
+  return first || d === 1 ? `${d} ${MONTHS[m - 1]}` : String(d);
+}
+
 function MergedChart({
   days,
   showDays,
@@ -329,22 +343,25 @@ function MergedChart({
   showDays: boolean;
 }) {
   const totals = days.map((d) => d.noHubReview + d.round1 + d.round2 + d.round3Plus),
-    max = Math.max(1, ...totals),
+    top = niceCeiling(Math.max(1, ...totals)),
+    max = top,
     W = 560,
     H = 100,
-    bw = days.length ? W / days.length : W;
+    bw = days.length ? W / days.length : W,
+    step = Math.max(1, Math.ceil(days.length / 14));
   const y = (v: number) => H - (v / max) * H;
   return (
     <>
       <div className="as-chart">
         <div className="as-yscale" aria-hidden="true">
-          <span>{max}</span>
+          <span>{top}</span>
+          <span>{top / 2}</span>
           <span>0</span>
         </div>
         <div className="as-plot">
           <svg
             role="img"
-            aria-label={`Merged PRs per day over ${days.length} days, by highest review round. Most days: ${max} merged at most.`}
+            aria-label={`Merged PRs per day over ${days.length} days, by highest review round. The scale runs to ${top}.`}
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
           >
@@ -382,27 +399,14 @@ function MergedChart({
               );
             })}
           </svg>
-          <div className="as-axis">
-            <span>{days[0]?.day}</span>
-            <span className="as-lg">
-              <span>
-                <i className="as-k0" />
-                no hub review
-              </span>
-              <span>
-                <i className="as-k1" />
-                round 1
-              </span>
-              <span>
-                <i className="as-k2" />
-                round 2
-              </span>
-              <span>
-                <i className="as-k3" />
-                round 3+
-              </span>
-            </span>
-            <span>{days.at(-1)?.day}</span>
+          <div
+            className="as-axis"
+            style={{ gridTemplateColumns: `repeat(${days.length || 1}, 1fr)` }}
+            aria-hidden="true"
+          >
+            {days.map((d, i) => (
+              <span key={d.day}>{i % step === 0 ? dayLabel(d.day, i === 0) : ""}</span>
+            ))}
           </div>
         </div>
       </div>
@@ -421,6 +425,21 @@ function MergedChart({
         </ScrollRegion>
       )}
     </>
+  );
+}
+
+/** A dot for how much data a figure has: ● all, ◐ some, ○ none. Spoken, not only drawn. */
+function StateDot({ state }: { state: CodeHealthFigure["state"] }) {
+  const [mark, say] =
+    state === "available"
+      ? ["●", "Data available"]
+      : state === "partial"
+        ? ["◐", "Partial data"]
+        : ["○", "No data yet"];
+  return (
+    <span className="as-dot" role="img" aria-label={say}>
+      {mark}
+    </span>
   );
 }
 
@@ -466,6 +485,9 @@ function FigureRow({ f, showWindow }: { f: CodeHealthFigure; showWindow: boolean
         {f.state !== "available" && <span className="as-fstate">{FIGURE_STATE[f.state]} · </span>}
         {change(f)}
       </td>
+      <td className="as-dotcell">
+        <StateDot state={f.state} />
+      </td>
     </tr>
   );
 }
@@ -492,14 +514,16 @@ function ScrollRegion({
   className,
   label,
   children,
+  innerRef,
 }: {
   className: string;
   label: string;
   children: ReactNode;
+  innerRef?: Ref<HTMLElement>;
 }) {
   return (
     // biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it
-    <section className={className} tabIndex={0} aria-label={label}>
+    <section ref={innerRef} className={className} tabIndex={0} aria-label={label}>
       {children}
     </section>
   );
@@ -525,6 +549,42 @@ export function Verdict({ verdict }: { verdict: CodeHealthOverview["verdict"] })
   );
 }
 
+/**
+ * Ends a filling list on a whole row: the list is cut at the bottom of the last row that fits, so no row
+ * is sliced through. Only while the list fills its panel and sits at the top; otherwise it is left alone.
+ */
+function useWholeRows(list: RefObject<HTMLElement | null>, rowSet: unknown) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rowSet names the rows the effect re-measures
+  useLayoutEffect(() => {
+    const el = list.current,
+      panel = el?.closest<HTMLElement>(".panel");
+    if (!el || !panel) return;
+    const fit = () => {
+      el.style.flex = "";
+      el.style.height = "";
+      if (getComputedStyle(panel).flexGrow === "0" || el.scrollTop > 0) return;
+      const box = el.clientHeight,
+        top = el.getBoundingClientRect().top;
+      if (el.scrollHeight <= box + 1) return;
+      let best = 0;
+      for (const tr of el.querySelectorAll<HTMLElement>("tbody > tr")) {
+        const bottom = tr.getBoundingClientRect().bottom - top;
+        if (bottom <= box + 1 && bottom > best) best = bottom;
+      }
+      const head = el.querySelector("thead")?.getBoundingClientRect().height ?? 0;
+      if (best > head) {
+        el.style.flex = "0 0 auto";
+        el.style.height = `${Math.floor(best)}px`;
+      }
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(fit);
+    watch.observe(panel);
+    return () => watch.disconnect();
+  }, [list, rowSet]);
+}
+
 /** The Audit first screen: one stored summary, shown. It reads nothing and decides nothing itself. */
 export function AuditSummary({
   overview,
@@ -542,7 +602,8 @@ export function AuditSummary({
   const [filter, setFilter] = useState<Who>("all"),
     [open, setOpen] = useState<string | null | undefined>(undefined),
     [showDays, setShowDays] = useState(false),
-    [showPast, setShowPast] = useState(false);
+    [showPast, setShowPast] = useState(false),
+    doNextList = useRef<HTMLElement>(null);
   // When every figure covers one window (and one comparison window), the column heads say so once.
   const nows = new Set(overview.figures.map((f) => f.window.label)),
     befores = new Set(overview.figures.flatMap((f) => (f.comparison ? [f.comparison.label] : []))),
@@ -550,6 +611,21 @@ export function AuditSummary({
       nows.size === 1 && befores.size <= 1
         ? { now: [...nows][0], before: [...befores][0] as string | undefined }
         : null;
+  // The eight stages of a proposal's life; one the server does not record reads as a dash.
+  const funnelCount = (...kinds: string[]) =>
+      overview.past.funnel.filter((f) => kinds.includes(f.kind)).reduce((n, f) => n + f.count, 0),
+    measured = overview.past.measured,
+    paidOff = funnelCount("paid-off"),
+    stages: { name: string; count: number | null }[] = [
+      { name: "Proposed", count: funnelCount("proposed") },
+      { name: "Challenged", count: null },
+      { name: "Accepted", count: funnelCount("accepted") },
+      { name: "Ticket", count: null },
+      { name: "Measured", count: measured.improved + measured.unchanged + measured.worse },
+      { name: "Paid off", count: paidOff },
+      { name: "No effect", count: funnelCount("no-effect") },
+      { name: "Set aside", count: funnelCount("dismissed", "snoozed") },
+    ];
   const rows = overview.rows,
     counts: Record<Who, number> = {
       all: rows.length,
@@ -559,6 +635,7 @@ export function AuditSummary({
   const shown = rows.filter((r) =>
     filter === "all" ? true : r.decision?.tier === (filter === "you" ? "operator" : "flight"),
   );
+  useWholeRows(doNextList, `${shown.length}|${String(open)}|${filter}|${overview.generatedAt}`);
   const openId = open === undefined ? shown[0]?.id : open;
   const alarms = overview.wasteAlarms?.rows ?? [];
   const COLS = 6;
@@ -595,7 +672,7 @@ export function AuditSummary({
             </>
           }
         >
-          <ScrollRegion className="as-scroll as-grow" label="Recommendations">
+          <ScrollRegion className="as-scroll as-grow" label="Recommendations" innerRef={doNextList}>
             {shown.length === 0 && alarms.length === 0 ? (
               <p className="as-empty">
                 {rows.length === 0
@@ -701,16 +778,36 @@ export function AuditSummary({
         <Panel
           className="as-build"
           title="How we build"
-          sub="Merged PRs a day, by highest review round"
+          sub="Merged PRs a day"
           actions={
-            <button
-              type="button"
-              className="as-defbtn"
-              aria-expanded={showDays}
-              onClick={() => setShowDays((v) => !v)}
-            >
-              Count for each day
-            </button>
+            <>
+              <span className="as-lg">
+                <span>
+                  <i className="as-k0" />
+                  no hub review
+                </span>
+                <span>
+                  <i className="as-k1" />
+                  round 1
+                </span>
+                <span>
+                  <i className="as-k2" />
+                  round 2
+                </span>
+                <span>
+                  <i className="as-k3" />
+                  round 3+
+                </span>
+              </span>
+              <button
+                type="button"
+                className="as-defbtn"
+                aria-expanded={showDays}
+                onClick={() => setShowDays((v) => !v)}
+              >
+                Count for each day
+              </button>
+            </>
           }
         >
           <MergedChart days={overview.build.mergedPerDay} showDays={showDays} />
@@ -721,6 +818,7 @@ export function AuditSummary({
                 <col className="as-c-hwin" />
                 <col className="as-c-hwin" />
                 <col className="as-c-hchg" />
+                <col className="as-c-dotcol" />
               </colgroup>
               <thead>
                 <tr>
@@ -730,6 +828,9 @@ export function AuditSummary({
                   </th>
                   <th className="as-r">{sharedWindow ? sharedWindow.now : "Now"}</th>
                   <th>Change</th>
+                  <th>
+                    <span className="sr-only">Data state</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -762,6 +863,7 @@ export function AuditSummary({
                   <col className="as-c-fig" />
                   <col className="as-c-fig" />
                   <col className="as-c-fig" />
+                  <col className="as-c-dotcol" />
                 </colgroup>
                 <thead>
                   <tr>
@@ -771,6 +873,9 @@ export function AuditSummary({
                     </th>
                     <th className="as-r">Touches</th>
                     <th className="as-r">Per touch</th>
+                    <th>
+                      <span className="sr-only">Data state</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -783,8 +888,15 @@ export function AuditSummary({
                         </td>
                         <td className="as-r">{f.findings}</td>
                         <td className="as-r">{f.touches}</td>
-                        <td className="as-r">
+                        <td
+                          className={
+                            f.ratio.value !== null && f.ratio.value > 1 ? "as-r as-hot" : "as-r"
+                          }
+                        >
                           {f.ratio.value === null ? "—" : num(Math.round(f.ratio.value * 10) / 10)}
+                        </td>
+                        <td className="as-dotcell">
+                          <StateDot state={f.ratio.state} />
                         </td>
                       </tr>
                     ))}
@@ -798,23 +910,31 @@ export function AuditSummary({
           title="What past recommendations achieved"
           sub={`${overview.past.measured.improved} paid off · ${overview.past.measured.unchanged} unchanged · ${overview.past.measured.worse} worse · ${overview.past.measured.unmeasured} not measured`}
           actions={
-            overview.past.items.length > 0 && (
-              <button
-                type="button"
-                className="as-defbtn"
-                aria-expanded={showPast}
-                onClick={() => setShowPast((v) => !v)}
-              >
-                {showPast ? "Hide results" : `Show ${overview.past.items.length} results`}
-              </button>
-            )
+            <>
+              {paidOff === 0 && <span className="as-loop">Loop never closed</span>}
+              {overview.past.items.length > 0 && (
+                <button
+                  type="button"
+                  className="as-defbtn"
+                  aria-expanded={showPast}
+                  onClick={() => setShowPast((v) => !v)}
+                >
+                  {showPast ? "Hide results" : `Show ${overview.past.items.length} results`}
+                </button>
+              )}
+            </>
           }
         >
           <div className="as-fun">
-            {overview.past.funnel.map((f) => (
-              <div key={f.kind} className="as-cell">
-                <b className="as-fig">{f.count}</b>
-                <span className="as-cap">{label(f.kind)}</span>
+            {stages.map((st) => (
+              <div key={st.name} className="as-cell">
+                <b
+                  className="as-fig"
+                  title={st.count === null ? "Not recorded by this server" : undefined}
+                >
+                  {st.count === null ? "—" : st.count}
+                </b>
+                <span className="as-cap">{st.name}</span>
               </div>
             ))}
           </div>

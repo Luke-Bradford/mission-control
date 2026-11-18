@@ -112,6 +112,39 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
           return bottom > top && bottom > p.top && top < p.bottom;
         });
       })(),
+      // A ranked row cut through its middle by the bottom of the Do next list.
+      cutRow: list
+        ? rows.filter((r) => {
+            const b = rect(r),
+              l = rect(list);
+            return b.top < l.bottom - 1 && b.bottom > l.bottom + 1;
+          }).length
+        : 0,
+      // The verdict is the first line under the nav, with Repo and the window control beside it.
+      verdictTop: document.querySelector(".as-verdict")?.getBoundingClientRect().top ?? -1,
+      verdictBeside: (() => {
+        const v = document.querySelector(".as-verdict"),
+          f = document.querySelector(".ch-filters");
+        if (!v || !f) return false;
+        const a = rect(v),
+          b = rect(f);
+        return b.top < a.bottom && b.bottom > a.top;
+      })(),
+      doNextTop: document.querySelector(".as-do")?.getBoundingClientRect().top ?? -1,
+      recHeights: [...document.querySelectorAll(".as-do tr.as-rec:not(.as-open)")].map((r) =>
+        Math.round(rect(r).height),
+      ),
+      measureRowHeights: [
+        ...document.querySelectorAll(".as-hrow"),
+        ...document.querySelectorAll(".as-frow"),
+      ].map((r) => Math.round(rect(r).height)),
+      headCase: getComputedStyle(document.querySelector(".as-do thead th") as Element)
+        .textTransform,
+      heads: [...document.querySelectorAll(".as-do thead th")].map((h) => h.textContent),
+      stageCells: document.querySelectorAll(".as-past .as-cell").length,
+      dayLabels: [...document.querySelectorAll(".as-axis span")].filter((e) => e.textContent)
+        .length,
+      legendInHeader: !!document.querySelector(".as-build .ph .as-lg"),
       truncatedMeta: [...document.querySelectorAll(".as-hrow .as-fmeta")].filter(
         (e) => e.scrollWidth > e.clientWidth,
       ).length,
@@ -162,6 +195,23 @@ describeRendered("Audit first screen in a real browser", () => {
             );
             expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.truncatedMeta, "no figure unit or window is cut off").toBe(0);
+            expect(m.cutRow, "Do next ends on a whole row").toBe(0);
+            expect(m.verdictTop, "the verdict is the first line under the nav").toBeLessThan(90);
+            expect(m.verdictBeside, "Repo and the window control sit on the verdict line").toBe(
+              true,
+            );
+            expect(m.doNextTop, "Do next starts high").toBeLessThan(160);
+            expect(m.heads, "Do next has a From column").toContain("From");
+            expect(m.headCase, "column heads are mixed case").toBe("none");
+            for (const h of m.recHeights)
+              expect(h, "a closed Do next row is about 49 px").toBeGreaterThanOrEqual(47);
+            for (const h of m.recHeights)
+              expect(h, "a closed Do next row is about 49 px").toBeLessThanOrEqual(52);
+            for (const h of m.measureRowHeights)
+              expect(h, "a measure or file row is about 32 px").toBeLessThanOrEqual(35);
+            expect(m.stageCells, "the stage strip has eight cells").toBe(8);
+            expect(m.dayLabels, "every day is labelled on the axis").toBe(14);
+            expect(m.legendInHeader, "the legend sits in the panel header").toBe(true);
             expect(m.figures).toBe(5);
             expect(m.figuresVisible, `every figure is fully visible: ${m.figuresDebug}`).toBe(5);
             expect(m.detailInside, m.detailDebug).toBe(true);
