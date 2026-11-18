@@ -2967,6 +2967,39 @@ describe("FLIGHT settles a ruling", () => {
     },
   );
 
+  it.each([
+    ["pending", "still pending: lint"],
+    ["failing", "failed: lint"],
+  ] as const)("refuses a moved head with a %s non-required check", async (state, message) => {
+    await ruled();
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing repo");
+    repo.requiredChecks = ["server"];
+    setPr({
+      ci: "passing",
+      headSha: SHA_B,
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+        { name: "lint", kind: "check", state, conclusion: state, attempt: 1, url: null },
+      ],
+    });
+
+    expect(await accept()).toEqual({
+      kind: "not",
+      text:
+        state === "failing"
+          ? `checks on the PR's new head ${SHA_B.slice(0, 7)} ${message}`
+          : `checks on the PR's new head ${SHA_B.slice(0, 7)} are ${message}`,
+    });
+  });
+
   it("refuses a rerun gh would not start, leaving no re-run recorded", async () => {
     await ruled();
     h.rerunResults = [{ ok: false, text: "no failed Actions run", transient: false }];

@@ -3726,11 +3726,23 @@ export function createEngine(deps: EngineDeps): Engine {
           const repo = config.repos.find((r) => r.id === run.repoId);
           const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
           const short = head.slice(0, 7);
-          if (verdict.failing.length > 0)
-            return not(
-              `checks on the PR's new head ${short} failed: ${verdict.failing.join(", ")}`,
-            );
-          const pending = [...verdict.pending, ...verdict.missing];
+          const checks = (pr.checks ?? []).filter(
+            (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
+          );
+          const failing = [
+            ...new Set(
+              checks.filter((check) => check.state === "failing").map((check) => check.name),
+            ),
+          ];
+          if (failing.length > 0)
+            return not(`checks on the PR's new head ${short} failed: ${failing.join(", ")}`);
+          const pending = [
+            ...new Set([
+              ...verdict.pending,
+              ...verdict.missing,
+              ...checks.filter((check) => check.state === "pending").map((check) => check.name),
+            ]),
+          ];
           if (pending.length > 0 || pr.ci === "pending")
             return not(
               `checks on the PR's new head ${short} are still pending${pending.length > 0 ? `: ${pending.join(", ")}` : ""}`,
