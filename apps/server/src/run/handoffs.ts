@@ -75,7 +75,9 @@ export function recordRunHandoff(
     done: progress.length ? progress : digest?.lastText ? [safe(digest.lastText)] : [],
     left,
     next: hold
-      ? `Address the reason ${hold.by} held the merge (${safe(hold.reason)}) with a new commit; the holder releases the hold. Do not push the same head again while it stands.`
+      ? hold.by === "FLIGHT"
+        ? `Address the reason FLIGHT held the merge (${safe(hold.reason)}) with a new commit; the holder releases the hold. Do not push the same head again while it stands.`
+        : `Wait for ${hold.by} to release the merge hold, or address the reason if it names a change (${safe(hold.reason)}). The holder releases the hold.`
       : findings.length
         ? "Resolve the open review findings, then report the updated head."
         : run.loop?.parked

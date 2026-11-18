@@ -39,6 +39,8 @@ const SCAN_DAYS = 7;
 /** Tickets named in an alarm's evidence, before "and N more". */
 const NAMED = 10;
 
+const REVIEW_ROUNDS_CHECK: WasteCheck = "review-rounds";
+
 interface AgentInfo {
   loop: string;
   vendor: string;
@@ -196,7 +198,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     if (r.rounds <= t.reviewRounds) continue;
     if (r.prState === null && r.ticket !== null && done(r.ticket)) continue;
     out.push({
-      check: REVIEW_ROUNDS,
+      check: REVIEW_ROUNDS_CHECK,
       subject: r.runId,
       repoId: r.repoId,
       ticket: r.ticket,
@@ -453,14 +455,12 @@ export function reviewsHeld(store: Store, authorRunId: string): boolean {
   return rounds > resolvedReviewRound(store, authorRunId);
 }
 
-const REVIEW_ROUNDS: WasteCheck = "review-rounds";
-
 /** The highest review round FLIGHT has settled for this author run, or -1 when it has settled none. */
 export const resolvedReviewRound = (store: Store, authorRunId: string): number =>
   store.waste
     .alarms(
       "WHERE check_id = ? AND subject = ? AND resolved_at IS NOT NULL",
-      REVIEW_ROUNDS,
+      REVIEW_ROUNDS_CHECK,
       authorRunId,
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
@@ -492,7 +492,7 @@ export function settleReviewRounds(
   const evidence = `${run.ticket ?? run.id} is on review round ${rounds}; FLIGHT settled the park.`;
   const open = store.waste.alarms(
     "WHERE check_id = ? AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",
-    REVIEW_ROUNDS,
+    REVIEW_ROUNDS_CHECK,
     run.id,
   )[0];
   let id = open?.id;
@@ -500,7 +500,7 @@ export function settleReviewRounds(
   else
     id = store.waste.insertAlarm(
       {
-        check: REVIEW_ROUNDS,
+        check: REVIEW_ROUNDS_CHECK,
         subject: run.id,
         repoId: run.repoId ?? "",
         ticket: run.ticket,

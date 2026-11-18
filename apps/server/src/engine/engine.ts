@@ -2109,6 +2109,15 @@ export function createEngine(deps: EngineDeps): Engine {
     if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId, run.id)) return;
     const at = now();
     const input: RunLoop = { ...stored };
+    // a rework grant is used up once a review in its epoch or after passes; a blocking one keeps it
+    const grantEpoch = input.flightReworkGrantEpoch;
+    if (
+      grantEpoch !== undefined &&
+      store
+        .reviewsOfRun(runId)
+        .some((r) => r.epoch >= grantEpoch && r.state === "reported" && r.blocking === 0)
+    )
+      delete input.flightReworkGrantEpoch;
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     // a web PR's head needs its screenshot pairs; asking is cheap once they exist
@@ -2153,6 +2162,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const reason = mergeHoldParkText(hold.by, hold.reason);
       input.mergeHold = { ...hold, from: input.phase };
       input.phase = "parked";
+      input.awaitingFlight = null;
       input.parked = { kind: MERGE_HOLD_PARK, reason, ended: false };
       store.addLoopEvent(
         `${run.id}:${input.epoch}:parked:merge-hold:${hold.at}`,

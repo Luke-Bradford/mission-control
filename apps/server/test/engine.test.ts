@@ -6378,6 +6378,7 @@ describe("the engine runs reviews", () => {
         parked: { kind: MERGE_HOLD_PARK },
         mergeHold: { by: "FLIGHT", from: "review" },
       });
+      expect(loopOf().awaitingFlight ?? null).toBeNull();
       const sentBefore = h.sent.length;
       expect(await operate(RUN, "FLIGHT", { kinds: [MERGE_HOLD_PARK], action: "rework" })).toBe(
         true,
@@ -6385,6 +6386,7 @@ describe("the engine runs reviews", () => {
       expect(loopOf().phase).toBe("working");
       // the fix message reached the seat, and the hold still stands for its holder to release
       expect(h.sent).toHaveLength(sentBefore + 1);
+      expect(h.sent.at(-1)?.text).toContain("design not approved");
       expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT" });
       expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
       expect(loopOf().mergeHold ?? null).toBeNull();
@@ -7119,6 +7121,43 @@ describe("the engine runs reviews", () => {
         await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
         expect(loopOf().parked?.kind).toBe("review");
         expect(h.sent).toHaveLength(sentBefore);
+      });
+
+      it("a grant is used up once its review passes: a later epoch's blocking review gets a fix line", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        reported(need(reviewRows().find((r) => r.round === 2)).id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        const granted = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        // held so the passing review does not merge the change
+        setLoop({ mergeHold: { by: "CAPCOM", reason: "keep open", at: clock } });
+        reported(granted.id, []);
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().flightReworkGrantEpoch).toBeUndefined();
+        // a later epoch: the seat pushes again and that review fails
+        setLoop({
+          epoch: loopOf().epoch + 1,
+          phase: "working",
+          parked: null,
+          mergeHold: null,
+        });
+        await push(SHA_E);
+        const later = need(reviewRows().find((r) => r.sha === SHA_E && r.state === "running"));
+        expect(later.round).toBe(1);
+        const sentBefore = h.sent.length;
+        reported(later.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(sentBefore));
+        expect(h.sent.at(-1)?.text).toContain("Important");
+        expect(loopOf().parked?.kind).not.toBe("review");
       });
 
       it("a second rework after the granted round fails grants the next review again", async () => {
