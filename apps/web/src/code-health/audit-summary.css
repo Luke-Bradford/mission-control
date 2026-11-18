@@ -818,3 +818,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* A missing now or target says so in plain, muted words. */
+.as-gap {
+  color: var(--muted);
+}

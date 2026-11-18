@@ -175,6 +175,11 @@ const measure = (page: Awaited<ReturnType<typeof renderAt>>) =>
       decClipped: [...document.querySelectorAll(".as-rec .as-dec div")]
         .filter((e) => e.scrollWidth > e.clientWidth)
         .map((e) => e.textContent),
+      // The words a reader sees, not text that is only spoken: row 2 has no measure and no target.
+      row2Painted: (() => {
+        const v = document.querySelectorAll(".as-do tr.as-rec")[1]?.querySelector(".as-meas .as-v");
+        return v ? { text: v.textContent, spoken: v.querySelectorAll(".sr-only").length } : null;
+      })(),
       measureLines: (() => {
         const cell = document.querySelectorAll(".as-do tr.as-rec")[1]?.querySelector(".as-meas");
         if (!cell) return 0;
@@ -235,6 +240,13 @@ describeRendered("Audit first screen in a real browser", () => {
               expect(m.filesScroll, "the files list scrolls its extra rows").toBe(true);
             expect(m.truncatedMeta, "no figure unit or window is cut off").toBe(0);
             expect(m.cutRow, "Do next ends on a whole row").toBe(0);
+            expect(m.row2Painted?.spoken, "no spoken-only words in a measure").toBe(0);
+            expect(m.row2Painted?.text, "a missing measure says unknown on screen").toContain(
+              "unknown",
+            );
+            expect(m.row2Painted?.text, "a missing target says so on screen").toContain(
+              "no target",
+            );
             expect(m.measureLines, "row 2's Measure cell is at most two lines").toBeLessThanOrEqual(
               2,
             );

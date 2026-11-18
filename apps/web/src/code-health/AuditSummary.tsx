@@ -115,24 +115,12 @@ function Measure({ row }: { row: CodeHealthRecommendation }) {
         >
           {now === null ? "○" : "●"}
         </span>
-        <span>
-          {now === null ? (
-            <>
-              —<span className="sr-only"> unknown</span>
-            </>
-          ) : (
-            num(now)
-          )}
+        <span className={now === null ? "as-gap" : undefined}>
+          {now === null ? "— unknown" : num(now)}
         </span>
         <span aria-hidden="true">→</span>
-        <span>
-          {target === null ? (
-            <>
-              no target<span className="sr-only"> set</span>
-            </>
-          ) : (
-            num(target)
-          )}
+        <span className={target === null ? "as-gap" : undefined}>
+          {target === null ? "no target" : num(target)}
         </span>
       </span>
     </div>
