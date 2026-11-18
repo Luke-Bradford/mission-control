@@ -190,22 +190,6 @@ describe("dependency chain stored read", () => {
     expect(chains[1]?.root.children[0]?.waitedMs).toBeNull();
     expect(chains.every((c) => c.frees.length === 0)).toBe(true);
   });
-  it("includes holds and ignores a merged hold until the engine reconciles it", () => {
-    store.replaceBoard("mc", [card(2)]);
-    store.addHold({ ref: "mc#2", waitsOn: 7, basis: "Build after this", at: T });
-    store.upsertPullRequests("mc", [pr(7, { ticket: null })], T);
-    expect(read()[0]?.root.children[0]).toMatchObject({
-      ref: "mc#2",
-      edge: "held",
-      waitedMs: 20 * M,
-    });
-    store.upsertPullRequests(
-      "mc",
-      [pr(7, { ticket: null, state: "merged", mergedAt: T + M })],
-      T + M,
-    );
-    expect(read()).toEqual([]);
-  });
   it("keeps unread PRs and untracked references unknown", () => {
     store.replaceBoard("mc", [
       card(2, {

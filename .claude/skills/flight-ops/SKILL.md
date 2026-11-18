@@ -49,12 +49,12 @@ Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`,
 | `PR #N has head <a>, not <b>` | the hub's copy of the PR is stale, or the push hasn't landed | check the head with `mc read_pr`. Once it shows `<b>`, `mc settle_park { action: "lift" }` |
 | `an earlier PR is open on this branch` | another seat's ended run opened the PR; a seat continues only its own | use `mc gh_write` to close a superseded PR after preserving its work, then return the ticket to its owner |
 | `could not create a worktree for <branch>` (a `start_seat` refusal) | an ended run's worktree still holds the branch | use `mc crew_tidy` on the ended run; preserve dirty work and the branch |
-| `conflicts with main` | main moved under the PR | `mc sync_main { runId }`. If the seat already resolved it and can't push, `mc message_seat { unpark: true }` |
+| `conflicts with main` | main moved under the PR | `mc sync_main { runId }` while the run is in CI or review. If the run stopped, start the ticket again with `mc start_seat`: the new run carries on its branch and PR |
 | `found blocking issues in` | the review-round cap | the cap is the stop, so don't buy another round by default. A Critical finding, a failed `design` verdict, or the `floor-enforced` refusal (`stalls.md`): `mc settle_park { action: "rework", note }`. Your accept is refused while the run's last design verdict is a fail (`design-failed`). If the review after one rework fails the design again, brief the operator: the review's images (`mc operator` GET `/api/qa-reports?repoId=<repo>&prNumber=<n>&headSha=<full sha>`; its `/api/qa-report-assets` links open for the operator), the failed points, and that they accept with Waive on the run's review park. Your accept stays refused after they answer. Anything else, on a hard-rule path too: file the findings on a ticket or fold them into one, narrowing the ticket if the same findings keep coming, then `mc settle_park { action: "accept", basis }` |
 | `controller check on <sha>` | the ticket asks for head-bound evidence | produce evidence for that exact head: a preview of the PR's head on a spare port (`MC_PORT`, a copy of the DB in `MC_DB`, `MC_NO_LOOP_WRITES=1`), the PR's own evidence capture, or a CI rerun. `mc screenshot_hud` shows the live hub, which runs main, so it is never head evidence; then record the head-bound verdict with `mc operator` POST `/api/runs/:id/controller-check` |
 | `run ended (the process crashed)` / interrupted | a crash | resume the run through `mc operator`; with no resumable PR, return the preserved ticket to the board. On a second failure of the same seat or ticket, read why first |
-| `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | `mc message_seat { unpark: true, text }` with the exact next step (often "push and report") |
-| a ticket In review or In progress with no run | its run ended with a PR open | resume the existing PR owner through `mc operator`. If the resume is refused because the run has ended, hand the PR on with `mc reassign_ticket` (the role's Each wake, step 4). Preserve the branch and avoid a second competing PR |
+| `stopped after 3 carry-on resumes without reporting` | the seat lost the thread; the run stopped | start the ticket again with `mc start_seat`, then `mc message_seat` the exact next step (often "push and report") |
+| a ticket In review or In progress with no run | its run stopped with a PR open | start the ticket again with `mc start_seat` on a free seat in its area: the new run carries on the open PR on its branch (the role's Each wake, step 4). Avoid a second competing PR |
 | a PR that changes what confines seats (guard, runtime, path grants or the push gate) | it needs a careful review | read the hunk, make sure its review ran on the most capable model, then `mc merge_pr` |
 | a PR green and reviewed, not merging | it waits on clearance or a merge hold | `mc merge_pr`. Your own merge hold: release it with `mc hold_pr { action: "release" }`. The operator's: ask them in one brief once its reason is met |
 | a draft PR no run owns | nobody else will decide it | read it: mark it ready and route it to review, take it over with a seat, or close it with its reason |
@@ -65,8 +65,8 @@ For a stop not listed here, find its text with `rg -F '<text>' apps/server/src p
 
 ## Dependencies and conflicts
 
-- Work that builds on an unmerged PR waits. Hold it with `mc promote { issue, to: "Backlog", waits_on: <PR>, basis }`.
-- When that PR merges, promote each held ticket in the same wake (`mc promote { issue, to: "Ready", basis }`). Never ask a seat to merge main; use `mc sync_main` only when a running PR conflicts.
+- Work that builds on an unmerged PR waits in Backlog, with a `Depends on` line naming that PR's ticket.
+- When that PR merges, promote each waiting ticket in the same wake (`mc promote { issue, to: "Ready", basis }`). Never ask a seat to merge main; use `mc sync_main` only when a running PR conflicts.
 - Two seats on the same files make conflicts. Compare a ticket's files with active work before you start it.
 
 ## Comms and the operator

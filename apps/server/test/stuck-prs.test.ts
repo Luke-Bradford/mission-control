@@ -448,13 +448,6 @@ describe("tickets and PRs that are never taken", () => {
         holdItem(store, `pr:${REPO}#7:123`, "later", { kind: "manual" }, "CAPCOM", T0);
       },
     ],
-    [
-      "a ticket held behind another PR",
-      () => {
-        stuckSetup(7);
-        store.addHold({ ref: `${REPO}#7`, waitsOn: 3, basis: "b", at: T0 });
-      },
-    ],
     ["a closed card", () => stuckSetup(7, {}, { closed: true })],
   ];
   it.each(cases)("%s", async (_name, setup) => {

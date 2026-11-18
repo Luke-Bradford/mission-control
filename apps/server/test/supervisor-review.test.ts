@@ -2077,7 +2077,6 @@ describe("a run set aside in review", () => {
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "operator" },
     ]);
     expect(existsSync(wt())).toBe(true);
-    expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
     expect(store.seatSession("guido-1")).toEqual(before);
     expect(starts()).toHaveLength(1);
   });
@@ -2416,7 +2415,6 @@ describe("a run set aside in review", () => {
       { kind: "run-ended", seatId: "guido-1", runId, endedBy: "engine" },
     ]);
     expect(existsSync(wt())).toBe(true);
-    expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
     expect(store.seatSession("guido-1")).toEqual(row);
     expect(store.seatSession("guido-1")?.runId).toBe(other.runId);
     expect(sup.seatFacts("guido-1")).not.toBeNull();

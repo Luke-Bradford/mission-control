@@ -854,7 +854,6 @@ export async function main(): Promise<void> {
         config,
         store,
         supervisor,
-        rules: engineRules,
         enabled: engineOn,
         now: Date.now,
         log: (line) => log(`engine: ${line}`),

@@ -337,7 +337,7 @@ describe("startRun eligibility", () => {
   });
 
   it("0: refuses a closed card", async () => {
-    onBoard(boardCard(42, { closed: true }));
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
     await refused(422, startClosedText("mc#42"));
   });
 
@@ -1808,6 +1808,36 @@ describe("startRun", () => {
     await first;
   });
 
+  it("reserves a ticket while a competing writer starts", async () => {
+    let release = () => {};
+    const fetched = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sup, fetchTicket } = make({
+      fetchTicket: async () => {
+        await fetched;
+        return TICKET;
+      },
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    const first = sup.startRun("guido-1", 42);
+    await until(() => expect(fetchTicket).toHaveBeenCalledTimes(1));
+    const second = refusal(sup.startRun("guido-2", 42));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchTicket).toHaveBeenCalledTimes(1);
+    const error = await second;
+    expect(error.status).toBe(409);
+    release();
+    await first;
+  });
+
   it("busy() names a start held in its checkout, so Update refuses it", async () => {
     const { sup } = make();
     sup.start();
@@ -2182,6 +2212,50 @@ describe("endRun", () => {
     expect(next.runId).not.toBe(runId);
     expect(store.run(next.runId)?.seq).toBe(2);
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("removes a stopped ticket worktree after its card closes", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
+  });
+
+  it("removes a stopped ticket worktree after its branch PR merges", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 1,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
   });
 
   it("with hold, stops the seat and keeps it out of rotation", async () => {

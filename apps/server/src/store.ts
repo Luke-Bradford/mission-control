@@ -9,7 +9,6 @@ import type {
   PromptWakeCost,
   QaHistoryEntry,
   QaReport,
-  RunHandoff,
   RunTokenAudit,
   TicketQuestion,
   TokenAuditSession,
@@ -131,7 +130,6 @@ import {
   type Telemetry,
   type TestLockRun,
   TICKET_SIZES,
-  type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
@@ -264,7 +262,6 @@ import {
   type FlightBriefRow,
   HISTORY_BATCH_ROWS,
   HISTORY_SWEEP_MAX_BATCHES,
-  type Hold,
   type KeeperCursor,
   LIVE_LOOP_EVENTS_LIMIT,
   type LockHoldRow,
@@ -1481,7 +1478,7 @@ export class Store {
 
   /**
    * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
-   * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
+   * someone releases it. Only the latest run counts.
    */
   branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
     return this.runQ.branchMergeHold(repoId, branch);
@@ -2406,53 +2403,6 @@ export class Store {
       .prepare("SELECT * FROM board_items WHERE repo_id = ? AND issue_number = ?")
       .get(repoId, issueNumber) as Row | undefined;
     return row === undefined ? null : toBoardItem(row);
-  }
-
-  /** The hub-owned wait for a ticket. GitHub's board state remains the source for every other field. */
-  ticketWait(repoId: RepoId, issue: number): TicketWait | null {
-    const row = this.db
-      .prepare("SELECT reason, frees_when, at FROM ticket_waits WHERE repo_id = ? AND issue = ?")
-      .get(repoId, issue) as Row | undefined;
-    return row === undefined
-      ? null
-      : { reason: row.reason as string, freesWhen: row.frees_when as string, at: row.at as number };
-  }
-
-  /** Every ticket of the repo that is waiting, oldest first. */
-  ticketWaits(repoId: RepoId): ({ issue: number } & TicketWait)[] {
-    const rows = this.db
-      .prepare(
-        "SELECT issue, reason, frees_when, at FROM ticket_waits WHERE repo_id = ? ORDER BY at, issue",
-      )
-      .all(repoId) as Row[];
-    return rows.map((row) => ({
-      issue: row.issue as number,
-      reason: row.reason as string,
-      freesWhen: row.frees_when as string,
-      at: row.at as number,
-    }));
-  }
-
-  /** Records that a ticket, rather than its former seat, waits for a known condition. */
-  setTicketWait({ repoId, issue, ...wait }: { repoId: RepoId; issue: number } & TicketWait): void {
-    this.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO ticket_waits (repo_id, issue, reason, frees_when, at) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(repo_id, issue) DO UPDATE SET reason = excluded.reason,
-             frees_when = excluded.frees_when, at = excluded.at`,
-        )
-        .run(repoId, issue, wait.reason, wait.freesWhen, wait.at);
-    });
-  }
-
-  /** Clears a condition the hub has observed to be resolved. */
-  clearTicketWait(repoId: RepoId, issue: number): void {
-    this.transaction(() => {
-      this.db
-        .prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?")
-        .run(repoId, issue);
-    });
   }
 
   /**
@@ -4253,103 +4203,6 @@ export class Store {
   setRunLoop(runId: string, loop: RunLoop | null, at = Date.now()): void {
     this.runQ.setRunLoop(runId, loop, at);
     if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
-  }
-
-  /** An unfinished author gets one immutable context record; Git status can be filled afterward. */
-  recordHandoff(h: RunHandoff): void {
-    this.statement(
-      "INSERT OR IGNORE INTO run_handoffs (run_id, repo_id, ticket, at, record) VALUES (?, ?, ?, ?, ?)",
-    ).run(h.runId, h.repoId, h.ticket, h.at, JSON.stringify(h));
-  }
-
-  handoff(runId: string): RunHandoff | null {
-    const row = this.statement(
-      "SELECT record, accepted_by, accepted_run_id FROM run_handoffs WHERE run_id = ?",
-    ).get(runId) as Row | undefined;
-    return row
-      ? {
-          ...JSON.parse(row.record as string),
-          acceptedBy: row.accepted_by as string | null,
-          acceptedRunId: row.accepted_run_id as string | null,
-        }
-      : null;
-  }
-
-  openHandoff(repoId: string, ticket: string): RunHandoff | null {
-    const row = this.statement(
-      "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND ticket = ? ORDER BY at DESC, run_id DESC LIMIT 1",
-    ).get(repoId, ticket) as Row | undefined;
-    const h = row ? this.handoff(row.run_id as string) : null;
-    return h?.acceptedRunId == null ? h : null;
-  }
-
-  receivedHandoff(runId: string): RunHandoff | null {
-    const row = this.statement(
-      "SELECT run_id FROM run_handoffs WHERE accepted_run_id = ? ORDER BY at DESC LIMIT 1",
-    ).get(runId) as Row | undefined;
-    return row ? this.handoff(row.run_id as string) : null;
-  }
-
-  latestHandoffs(repoId: string): RunHandoff[] {
-    return (
-      this.statement(`SELECT h.run_id FROM run_handoffs h WHERE repo_id = ? AND h.run_id = (
-      SELECT fresh.run_id FROM run_handoffs fresh WHERE fresh.repo_id = h.repo_id AND fresh.ticket = h.ticket ORDER BY fresh.at DESC, fresh.run_id DESC LIMIT 1
-    )`).all(repoId) as Row[]
-    ).flatMap((r) => {
-      const h = this.handoff(r.run_id as string);
-      return h ? [h] : [];
-    });
-  }
-
-  /** Enrichment never changes the reservation or the seat that accepted the work. */
-  handoffGit(runId: string, gitStatus: string[], gitState: RunHandoff["gitState"]): void {
-    const h = this.handoff(runId);
-    if (h)
-      this.statement("UPDATE run_handoffs SET record = ? WHERE run_id = ?").run(
-        JSON.stringify({ ...h, gitStatus, gitState }),
-        runId,
-      );
-  }
-
-  claimHandoff(runId: string, token: string): boolean {
-    return (
-      this.statement(
-        "UPDATE run_handoffs SET claim_token = ? WHERE run_id = ? AND claim_token IS NULL AND accepted_run_id IS NULL",
-      ).run(token, runId).changes === 1
-    );
-  }
-
-  /** Handoffs a seat has claimed and not yet accepted into a run row: a seat is starting on them. */
-  claimedHandoffs(repoId: string): RunHandoff[] {
-    return (
-      this.statement(
-        "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND claim_token IS NOT NULL AND accepted_run_id IS NULL",
-      ).all(repoId) as Row[]
-    ).flatMap((r) => {
-      const h = this.handoff(r.run_id as string);
-      return h ? [h] : [];
-    });
-  }
-
-  releaseHandoff(runId: string, token: string): void {
-    this.statement(
-      "UPDATE run_handoffs SET claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",
-    ).run(runId, token);
-  }
-
-  acceptHandoff(runId: string, token: string, seatId: string, newRunId: string): boolean {
-    return (
-      this.statement(
-        "UPDATE run_handoffs SET accepted_by = ?, accepted_run_id = ?, claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",
-      ).run(seatId, newRunId, runId, token).changes === 1
-    );
-  }
-
-  /** Called only by the supervisor after it acquires the single crew lock on startup. */
-  releaseHandoffClaims(): void {
-    this.statement(
-      "UPDATE run_handoffs SET claim_token = NULL WHERE accepted_run_id IS NULL",
-    ).run();
   }
 
   /** Ends the run: when, with what status, and who ended it. */
@@ -7139,49 +6992,6 @@ export class Store {
           },
         ]),
     );
-  }
-
-  /** Holds a card in Backlog behind PR `waitsOn`; an earlier open hold on the card is replaced. */
-  addHold(h: { ref: string; waitsOn: number; basis: string; at: number }): void {
-    this.releaseHold(h.ref, h.at);
-    this.db
-      .prepare("INSERT INTO holds (ref, waits_on, basis, at) VALUES (?, ?, ?, ?)")
-      .run(h.ref, h.waitsOn, h.basis, h.at);
-  }
-
-  /** Releases the card's open hold, if it has one. */
-  releaseHold(ref: string, at: number): void {
-    this.db
-      .prepare("UPDATE holds SET released_at = ? WHERE ref = ? AND released_at IS NULL")
-      .run(at, ref);
-  }
-
-  /** The holds not yet released, oldest first. */
-  activeHolds(): Hold[] {
-    const rows = this.db
-      .prepare("SELECT * FROM holds WHERE released_at IS NULL ORDER BY at, id")
-      .all() as Row[];
-    return rows.map((r) => ({
-      ref: r.ref as string,
-      waitsOn: r.waits_on as number,
-      basis: r.basis as string,
-      at: r.at as number,
-      releasedAt: r.released_at as number | null,
-      seen: r.seen === 1,
-      toldState: (r.told_state as string | null) ?? null,
-    }));
-  }
-
-  /** The board has shown the card's open hold in Backlog. */
-  markHoldSeen(ref: string): void {
-    this.db.prepare("UPDATE holds SET seen = 1 WHERE ref = ? AND released_at IS NULL").run(ref);
-  }
-
-  /** FLIGHT has been told the card's open hold waits on a PR in `state`. */
-  markHoldTold(ref: string, state: string): void {
-    this.db
-      .prepare("UPDATE holds SET told_state = ? WHERE ref = ? AND released_at IS NULL")
-      .run(state, ref);
   }
 
   /** How many briefs were written at or after `since`. */

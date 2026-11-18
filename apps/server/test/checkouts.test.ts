@@ -293,105 +293,36 @@ async function syncCheckout() {
 }
 
 describe("prepareCheckout", () => {
-  it("adopts another ended author's managed worktree without losing tracked or untracked work", async () => {
-    const old = await prepareCheckout(input());
-    writeFileSync(join(old.path, "README.md"), "unfinished tracked edit\n");
-    writeFileSync(join(old.path, "new-file.txt"), "unfinished new file\n");
-    const adopted = await prepareCheckout({
-      ...input(),
-      seatId: "guido-2",
-      handoff: { branch: old.branch, worktree: old.path },
-    });
-    expect(adopted.path).toBe(old.path);
-    expect(adopted.branch).toBe(old.branch);
-    expect(adopted.created).toBe(false);
-    expect(readFileSync(join(adopted.path, "README.md"), "utf8")).toBe("unfinished tracked edit\n");
-    expect(readFileSync(join(adopted.path, "new-file.txt"), "utf8")).toBe("unfinished new file\n");
-    expect(adopted.leftoverChanges).toEqual(
-      expect.arrayContaining([" M README.md", "?? new-file.txt"]),
+  it("carries a stopped ticket on in another seat's worktree, keeping its uncommitted files", async () => {
+    const first = await prepareCheckout(input());
+    writeFileSync(join(first.path, "wip.txt"), "unfinished\n");
+    const next = await prepareCheckout({ ...input(), seatId: "inco" });
+    expect(next.path).toBe(first.path);
+    expect(next.branch).toBe(first.branch);
+    expect(next.created).toBe(false);
+    expect(readFileSync(join(next.path, "wip.txt"), "utf8")).toBe("unfinished\n");
+  });
+
+  it("refuses to replace a stopped ticket's dirty worktree with a different open PR branch", async () => {
+    const first = await prepareCheckout(input());
+    commit(first.path, { "pushed.txt": "on the stopped branch\n" });
+    git(first.path, "push", "-q", "origin", first.branch);
+    writeFileSync(join(first.path, "wip.txt"), "keep this work\n");
+    const prBranch = "feature/42-pr-head";
+    git(seed, "checkout", "-q", "-b", prBranch);
+    commit(seed, { "pr.txt": "open PR head\n" });
+    git(seed, "push", "-q", "origin", prBranch);
+
+    const e = await fail(
+      prepareCheckout({
+        ...input(),
+        seatId: "inco",
+        openPullRequestBranches: [prBranch],
+      }),
     );
-  });
 
-  it("takes a handed-over branch at origin's tip when the PR head moved on", async () => {
-    const old = await prepareCheckout(input());
-    git(old.path, "push", "-q", "origin", `HEAD:refs/heads/${old.branch}`);
-    const tip = commit(old.path, { "controller.txt": "controller's commit\n" }, "controller");
-    git(old.path, "push", "-q", "origin", `HEAD:refs/heads/${old.branch}`);
-    git(old.path, "reset", "-q", "--hard", "HEAD~1");
-    const adopted = await prepareCheckout({
-      ...input(),
-      seatId: "guido-2",
-      handoff: { branch: old.branch, worktree: old.path },
-    });
-    expect(git(adopted.path, "rev-parse", "HEAD")).toBe(tip);
-  });
-
-  it("gives a PR back to the seat that wrote it when its head is another ref", async () => {
-    const old = await prepareCheckout(input());
-    commit(old.path, { "pr.txt": "pr\n" }, "pr");
-    git(old.path, "push", "-q", "origin", "HEAD:refs/heads/feature/pr-head");
-    const back = await prepareCheckout({
-      ...input(),
-      handoff: { branch: "feature/pr-head", worktree: null },
-    });
-    expect(back.branch).toBe("feature/pr-head");
-    expect(git(back.path, "symbolic-ref", "HEAD")).toBe("refs/heads/feature/pr-head");
-  });
-
-  it("uses an explicit handoff branch despite other ticket branches", async () => {
-    git(clone, "branch", BRANCH);
-    git(clone, "branch", "feature/42-ended-stage");
-
-    expect(
-      await prepareCheckout({ ...input(), handoff: { branch: BRANCH, worktree: null } }),
-    ).toMatchObject({ branch: BRANCH, created: true });
-  });
-
-  it("refuses to move a seat's worktree with unpushed work onto the PR's ref", async () => {
-    const old = await prepareCheckout(input());
-    commit(old.path, { "pr.txt": "pr\n" }, "pr");
-    git(old.path, "push", "-q", "origin", "HEAD:refs/heads/feature/pr-head");
-    commit(old.path, { "more.txt": "unpushed\n" }, "unpushed");
-    await expect(
-      prepareCheckout({ ...input(), handoff: { branch: "feature/pr-head", worktree: null } }),
-    ).rejects.toThrow("unpushed work");
-  });
-
-  it("refuses a handed-over branch that diverged from origin's", async () => {
-    const old = await prepareCheckout(input());
-    commit(old.path, { "a.txt": "origin\n" }, "origin side");
-    git(old.path, "push", "-q", "origin", `HEAD:refs/heads/${old.branch}`);
-    git(old.path, "reset", "-q", "--hard", "HEAD~1");
-    const local = commit(old.path, { "b.txt": "local\n" }, "local side");
-    await expect(
-      prepareCheckout({
-        ...input(),
-        seatId: "guido-2",
-        handoff: { branch: old.branch, worktree: old.path },
-      }),
-    ).rejects.toThrow("diverged");
-    expect(git(old.path, "rev-parse", "HEAD")).toBe(local);
-  });
-
-  it("refuses a handoff outside the managed root and never recreates a missing source branch", async () => {
-    const old = await prepareCheckout(input());
-    await expect(
-      prepareCheckout({
-        ...input(),
-        seatId: "guido-2",
-        worktreesRoot: join(dir, "other-root"),
-        handoff: { branch: old.branch, worktree: old.path },
-      }),
-    ).rejects.toThrow();
-    expect(readFileSync(join(old.path, "README.md"), "utf8")).toBeTruthy();
-    await expect(
-      prepareCheckout({
-        ...input(),
-        seatId: "guido-2",
-        handoff: { branch: "feature/42-deleted", worktree: null },
-      }),
-    ).rejects.toThrow("handoff branch is missing");
-    expect(hasBranch("feature/42-deleted")).toBe(false);
+    expect(e.message).toContain("stopped ticket worktree");
+    expect(readFileSync(join(first.path, "wip.txt"), "utf8")).toBe("keep this work\n");
   });
 
   it.each([false, true])("refuses helper config on reuse=%s", async (reuse) => {
@@ -878,6 +809,53 @@ describe("prepareCheckout", () => {
     const again = await prepareCheckout(input());
     expect(again).toEqual({ ...first, created: false, leftoverChanges: ["?? wip.txt"] });
     expect(existsSync(join(wtPath(), "wip.txt"))).toBe(true);
+  });
+
+  it("fast-forwards a clean reused worktree behind its origin branch", async () => {
+    await prepareCheckout(input());
+    const remote = commit(seed, { "remote.txt": "new\n" });
+    git(seed, "push", "-q", "origin", `HEAD:refs/heads/${BRANCH}`);
+
+    const reused = await prepareCheckout(input());
+
+    expect(reused.leftoverChanges).toEqual([]);
+    expect(git(wtPath(), "rev-parse", "HEAD")).toBe(remote);
+    expect(readFileSync(join(wtPath(), "remote.txt"), "utf8")).toBe("new\n");
+  });
+
+  it("refuses a dirty reused worktree behind its origin branch", async () => {
+    await prepareCheckout(input());
+    writeFileSync(join(wtPath(), "wip.txt"), "keep\n");
+    commit(seed, { "remote.txt": "new\n" });
+    git(seed, "push", "-q", "origin", `HEAD:refs/heads/${BRANCH}`);
+
+    const e = await fail(prepareCheckout(input()));
+
+    expect(e.message).toBe("the reused worktree is behind origin and has uncommitted changes");
+    expect(readFileSync(join(wtPath(), "wip.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("refuses a diverged reused worktree without changing its files", async () => {
+    await prepareCheckout(input());
+    const local = commit(wtPath(), { "local.txt": "keep\n" });
+    commit(seed, { "remote.txt": "new\n" });
+    git(seed, "push", "-q", "origin", `HEAD:refs/heads/${BRANCH}`);
+
+    const e = await fail(prepareCheckout(input()));
+
+    expect(e.message).toBe("the reused worktree diverges from origin");
+    expect(git(wtPath(), "rev-parse", "HEAD")).toBe(local);
+    expect(readFileSync(join(wtPath(), "local.txt"), "utf8")).toBe("keep\n");
+  });
+
+  it("keeps a reused worktree already ahead of origin", async () => {
+    await prepareCheckout(input());
+    const local = commit(wtPath(), { "local.txt": "keep\n" });
+
+    const reused = await prepareCheckout(input());
+
+    expect(reused.leftoverChanges).toEqual([]);
+    expect(git(wtPath(), "rev-parse", "HEAD")).toBe(local);
   });
 
   it("captures clean status and quotes spaces and control characters in reused worktrees", async () => {

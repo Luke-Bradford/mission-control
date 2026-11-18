@@ -442,7 +442,6 @@ import {
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
 import { compressResponse } from "./run/compress.ts";
-import { publicHandoff } from "./run/handoffs.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
@@ -1826,13 +1825,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/agent/HandoffPanel.tsx
+      // Reader: apps/web/src/agent/HandoffPanel.tsx (runs are no longer handed off: always null)
       api.get<{ Params: { id: string } }>("/runs/:id/handoff", async (req, reply) => {
         const run = store.run(req.params.id);
         if (!run || !config.repos.some((r) => r.id === run.repoId))
           return reply.code(404).send({ error: "unknown run" });
-        const h = store.handoff(run.id) ?? store.receivedHandoff(run.id);
-        return h ? publicHandoff(h) : null;
+        return null;
       });
 
       // The latest run's transcript (a loop's or a seat's), read on demand. Responses carry fixed
@@ -4047,25 +4045,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { repoId: string } }>("/boards/:repoId", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
-        const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
-        return store.board(repo.id).map((card) => {
-          const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
-          const waiting = store.ticketWait(repo.id, card.issueNumber);
-          return {
-            ...card,
-            ...(waiting ? { waiting, assignees: [], owner: null } : {}),
-            ...(h
-              ? {
-                  handoff: {
-                    runId: h.runId,
-                    fromSeat: h.fromSeat,
-                    at: h.at,
-                    acceptedBy: h.acceptedBy,
-                  },
-                }
-              : {}),
-          };
-        });
+        return store.board(repo.id);
       });
 
       // Read live from GitHub (the board's rows carry no body); the number is validated here.

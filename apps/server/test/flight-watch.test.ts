@@ -37,7 +37,6 @@ import {
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_TICK_MS,
-  FLIGHT_UNPARK_KINDS,
   FLIGHT_WAKE_HEAD,
   type FlightLedgerEntry,
   type FlightSeatState,
@@ -766,21 +765,6 @@ describe("FLIGHT's flow queues", () => {
     ]);
   });
 
-  it("shows a held dependent PR in both the wait and block sides", () => {
-    store.upsertPullRequests("mc", [stored(7), stored(9)], T0);
-    store.addHold({ ref: "mc#9", waitsOn: 7, basis: "Depends on PR 7", at: T0 });
-
-    expect(flightState({ config, store, busy: [], now: T0 }).prFlow?.rows).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ pr: 7, blocks: ["mc#9", "PR 9"] }),
-        expect.objectContaining({
-          pr: 9,
-          waitsOn: expect.arrayContaining(["PR 7 to merge (mc#9)"]),
-        }),
-      ]),
-    );
-  });
-
   it("keeps a review carried across a main merge current", () => {
     live("guido-1", "r-guido");
     store.setRunLoop("r-guido", {
@@ -1117,134 +1101,6 @@ describe("FLIGHT's flow queues", () => {
         expect.objectContaining({ kind: "seat-stopped", reason: "INCO-1 is stopped" }),
       ]),
     );
-  });
-});
-
-describe("FLIGHT's holds", () => {
-  const heldCard = (status: string) =>
-    store.replaceBoard("mc", [
-      {
-        repoId: "mc",
-        issueNumber: 9,
-        title: "Ticket 9",
-        status,
-        state: "planned",
-        labels: [],
-        priority: null,
-        updatedAt: T0,
-        url: "u",
-        stage: null,
-        owner: null,
-        parent: null,
-        subIssues: null,
-        blockedBy: [],
-        milestone: null,
-        size: null,
-        closed: false,
-        prioritySource: null,
-        createdAt: T0,
-        itemId: "I9",
-        projectId: "P1",
-      },
-    ]);
-  beforeEach(() => heldCard("Backlog"));
-  const hold = () => store.addHold({ ref: "mc#9", waitsOn: 7, basis: "same files", at: T0 });
-
-  it("lists a hold in the digest with its age", () => {
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    nowMs = T0 + 5 * MIN;
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([
-      { ref: "mc#9", waitsOn: 7, ageMin: 5, prState: "open", told: false },
-    ]);
-  });
-
-  it("wakes once when the waited-on PR merges, with the hold listed", async () => {
-    liveCrew();
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    await watch.check();
-    // an open PR moving through the pipeline wakes nothing; the hold's release is the wake
-    expect(sendCalls).toEqual([]);
-    // updatedAt is over an hour old, so the PR is not listed and only the hold can cause the wake
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
-      T0 + MIN,
-    );
-    nowMs = T0 + FLIGHT_MIN_WAKE_GAP_MS;
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0]?.text).toContain("1 hold to release");
-    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
-    expect(sent.holds).toMatchObject([{ ref: "mc#9", waitsOn: 7, prState: "merged" }]);
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-  });
-
-  it("wakes when the PR closes unmerged, and a released hold wakes nothing", async () => {
-    flightOnly();
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })],
-      T0 + MIN,
-    );
-    sendCalls = [];
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(sendCalls[0]?.text).toContain("1 hold to release");
-    // FLIGHT keeps the hold: it is told once, not at every re-wake
-    nowMs = T0 + 3 * 60 * MIN;
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
-      { ref: "mc#9", prState: "closed", told: true },
-    ]);
-    store.releaseHold("mc#9", nowMs);
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
-  });
-
-  it("reports a hold whose PR is not in the stored read as unknown", () => {
-    hold();
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
-      { ref: "mc#9", prState: "unknown", told: false },
-    ]);
-  });
-
-  it("remembers a hold was told across a store reopen", () => {
-    store.upsertPullRequests("mc", [stored(7, { state: "closed", updatedAt: T0 - 120 * MIN })], T0);
-    hold();
-    markPrsShown(store, flightState({ config, store, busy: [], now: nowMs }));
-    store.close();
-    store = new Store(join(dir, "mc.sqlite"));
-    store.setSetting(
-      `${FLIGHT_RETROSPECTIVE_SETTING}:mc`,
-      JSON.stringify({ day: "2026-10-22", told: true }),
-    );
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toMatchObject([
-      { ref: "mc#9", prState: "closed", told: true },
-    ]);
-  });
-
-  it("drops a hold whose card the board has moved past, and wakes for its merged PR", async () => {
-    liveCrew();
-    store.upsertPullRequests("mc", [stored(7)], T0);
-    hold();
-    await watch.check();
-    sendCalls = [];
-    heldCard("Ready");
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { state: "merged", mergedAt: T0, updatedAt: T0 - 120 * MIN })],
-      T0 + MIN,
-    );
-    nowMs = T0 + MIN;
-    expect(flightState({ config, store, busy: [], now: nowMs }).holds).toEqual([]);
-    await watch.check();
-    expect(sendCalls).toHaveLength(1);
-    expect(store.activeHolds()).toEqual([]);
   });
 });
 
@@ -3150,7 +3006,6 @@ describe("wakeSummary", () => {
     tickets: [],
     prs: [],
     items: [],
-    holds: [],
     recent: [],
     breaker: { tripped: false, reason: null },
     brief: [],
@@ -3228,12 +3083,12 @@ describe("wakeSummary", () => {
       expect(pending(before)).toBe(false);
     });
 
-    it("is true for a question, a free build seat with a ticket, or a park FLIGHT can lift", () => {
+    it("is true for a question, a free build seat with a ticket, or a ruling park FLIGHT settles", () => {
       expect(pending(state({ questions: [q] }))).toBe(true);
       expect(pending(state({ seats: [s({ free: true })], tickets: [ticket] }))).toBe(true);
-      expect(
-        pending(state({ seats: [s({ parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "x" } })] })),
-      ).toBe(true);
+      expect(pending(state({ seats: [s({ parked: { kind: "ruling", reason: "x" } })] }))).toBe(
+        true,
+      );
     });
 
     it("a stuck park is the engine's: it is not pending and leaves the wake facts unchanged", () => {
@@ -3496,17 +3351,7 @@ describe("ops signals", () => {
       store.setSeatSession(row("guido-1", "r-park", "parked"));
       store.addLoopEvent("park-old", "r-park", "parked: push stuck", T0 - 16 * MIN);
     },
-    push_unseen() {
-      store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
-      store.upsertRun(run("r-unseen", "guido-1", { ticket: "mc#176" }));
-      store.setRunLoop("r-unseen", {
-        ...NEW_LOOP,
-        phase: "parked",
-        parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
-      });
-      store.setSeatSession(row("guido-1", "r-unseen", "parked"));
-      store.addLoopEvent("park-unseen", "r-unseen", "parked: PR has no head", T0 - 31 * MIN);
-    },
+
     merge_stalled() {
       store.upsertRun(run("r-ready", "guido-1", { ticket: "mc#176" }));
       store.setRunLoop("r-ready", { ...NEW_LOOP, prNumber: 7 });
@@ -4929,23 +4774,6 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).not.toContain("old_park");
     nowMs += 2 * MIN;
     expect(kinds()).toContain("old_park");
-  });
-
-  it("a push the PR does not show is the engine's for 30 minutes, then a wake reason", () => {
-    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
-    store.upsertRun(run("r-park", "guido-1", { ticket: "mc#176" }));
-    store.setRunLoop("r-park", {
-      ...NEW_LOOP,
-      phase: "parked",
-      parked: { kind: STUCK_PARK, reason: "PR has no head", ended: false },
-    });
-    store.setSeatSession(row("guido-1", "r-park", "parked"));
-    store.addLoopEvent("p", "r-park", "parked: PR has no head", T0 - 29 * MIN);
-    expect(kinds()).not.toContain("old_park");
-    expect(kinds()).not.toContain("push_unseen");
-    nowMs += 2 * MIN;
-    expect(kinds().filter((k) => k === "push_unseen")).toHaveLength(1);
-    expect(kinds()).not.toContain("old_park");
   });
 
   it("a controller request counts after 15 minutes, and an answer from CAPCOM ends it", () => {

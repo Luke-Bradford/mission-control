@@ -30,7 +30,6 @@ import type { Move, MoveResult } from "../github/board.ts";
 import { ensureLabels } from "../github/setup.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { prTextProblem, readKnown } from "../mcp/tools.ts";
-import { recordRunHandoff } from "../run/handoffs.ts";
 import { parseTicket } from "../run/view.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { crewDir } from "../store/crew-paths.ts";
@@ -192,7 +191,7 @@ async function once(key: string, act: () => Promise<ActionResult>): Promise<Acti
   }
 }
 
-/** Ends the run that waits on the question (if it is live) and records its handoff. */
+/** Ends the run that waits on the question, if it is live. */
 async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
   const run = c.store.run(runId);
   if (run === null) return;
@@ -203,8 +202,6 @@ async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
     else if (run.loop?.aside) await c.supervisor.endAsideRun(run.id);
     else throw new Error("the run is not on its seat");
   }
-  const ended = c.store.run(runId);
-  if (ended !== null) recordRunHandoff(c.store, ended, null);
 }
 
 /**

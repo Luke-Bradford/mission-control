@@ -871,6 +871,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             onTicket.some(
               (earlier) =>
                 earlier.id !== run.id &&
+                earlier.branch === run.branch &&
                 earlier.startedAt < run.startedAt &&
                 earlier.endedAt !== null &&
                 earlier.endedAt <= run.startedAt &&
@@ -878,7 +879,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             ),
           );
       if (adopted !== undefined) return { ok: true, prNumber: adopted.number };
-      // A PR opened outside any run (by the controller, or by a seat with no handoff) has no run
+      // A PR opened outside any run (by the controller, or by a seat with no run) has no run
       // that recorded it. It is this run's when it is the only one open on the branch, it closes
       // this run's ticket, and no other run on the ticket has recorded it.
       const lone = open.length === 1 ? open[0] : undefined;
