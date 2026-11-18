@@ -3759,12 +3759,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const cloneGit = await cloneGitDir(info.session.checkout);
         for (const { sha, at } of store.commitsOnBranch(info.repo.id, checkout.branch)) {
           const isAncestor = await inClone(checkout.path, async () =>
-            crewGit(
-              checkout.path,
-              ["merge-base", "--is-ancestor", sha, "HEAD"],
-              cloneGit,
-              { gitDir: checkout.gitDir },
-            )
+            crewGit(checkout.path, ["merge-base", "--is-ancestor", sha, "HEAD"], cloneGit, {
+              gitDir: checkout.gitDir,
+            })
               .then(() => true)
               .catch(() => false),
           );
