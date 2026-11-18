@@ -133,7 +133,8 @@ function RepoCard({
   const [open, setOpen] = useState(false);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
-  const rules = useResource<RepoRulesView>(RESOURCES.repoRules(repo.id));
+  // A closed card is summary-only. Read its editable rules when the operator opens it.
+  const rules = useResource<RepoRulesView>(open ? RESOURCES.repoRules(repo.id) : null);
   const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
