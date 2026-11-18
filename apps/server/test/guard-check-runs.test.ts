@@ -14,6 +14,7 @@ import {
 
 const LINT = "pnpm -s lint";
 const TYPES = "pnpm -s typecheck";
+const RELATED = "pnpm -s test:related";
 const CHECKS = [LINT, TYPES];
 
 describe("checksRun", () => {
@@ -32,8 +33,11 @@ describe("checksRun", () => {
   });
 
   it("keeps related tests as a configured check when it runs alone", () => {
-    const related = "pnpm -s test:related";
-    expect(checksRun(related, [LINT, related])).toEqual([related]);
+    expect(checksRun(RELATED, [LINT, RELATED])).toEqual([RELATED]);
+  });
+
+  it("keeps related tests as a configured check when it ends a chain", () => {
+    expect(checksRun(`${LINT} && ${RELATED}`, [LINT, RELATED])).toEqual([LINT, RELATED]);
   });
 
   it.each([
@@ -353,6 +357,18 @@ describe("the check recorder", () => {
     await r.begin(KEY, command);
     await r.end(KEY, false, 1);
     expect(rows).toEqual([]);
+  });
+
+  it("records a configured related-tests check with its real failure exit", async () => {
+    checks = [LINT, RELATED];
+    const r = recorder();
+    const command = `${LINT} && ${RELATED}`;
+    await r.begin(KEY, command);
+    await r.end(KEY, false, 1);
+    expect(rows).toMatchObject([
+      { command: LINT, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+      { command: RELATED, invokedCommand: command, headSha: HEAD, ok: false, exitCode: 1 },
+    ]);
   });
 
   it.each([

@@ -25,11 +25,11 @@ export { plainCall };
 
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
- * EVERY trimmed segment is a configured check, with `pnpm -s test:related` allowed only at the
- * end. The latter is a companion to the configured checks, not itself a recorded check. Anything
- * else in the chain (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees
- * or whether it runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break
- * counts for nothing too.
+ * EVERY trimmed segment is a configured check. When it is not configured, `pnpm -s test:related`
+ * is allowed only at the end as a companion, not a recorded check. Anything else in the chain
+ * (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees or whether it
+ * runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break counts for
+ * nothing too.
  */
 /** The related-tests run, as a repo's `checks` list spells it. */
 export const RELATED_CHECK = "pnpm -s test:related";
@@ -37,7 +37,8 @@ export const RELATED_CHECK = "pnpm -s test:related";
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
   const segments = command.split("&&").map((s) => s.trim());
-  const relatedAtEnd = segments.length > 1 && segments.at(-1) === RELATED_CHECK;
+  const relatedAtEnd =
+    !checks.includes(RELATED_CHECK) && segments.length > 1 && segments.at(-1) === RELATED_CHECK;
   const checkSegments = relatedAtEnd ? segments.slice(0, -1) : segments;
   if (checkSegments.some((s) => !checks.includes(s))) return [];
   return checks.filter((c) => checkSegments.includes(c));
@@ -292,7 +293,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
             CHECK_BASH_TIMEOUT_MS,
           ),
-          relatedTests: hasRelatedTestsCompanion(command),
+          relatedTests: !matched.includes(RELATED_CHECK) && hasRelatedTestsCompanion(command),
         };
         // A new Codex call with the same command replaces an earlier one that never delivered a
         // completion. Its exec cell no longer exists, so keeping the old receipt pending would
