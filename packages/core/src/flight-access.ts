@@ -37,6 +37,7 @@ export const FLIGHT_OPERATOR_ROUTES: readonly string[] = [
   "/settings/crew-pause",
   "/settings/away",
   "/update",
+  "/version/check",
   "/attention/:key/dismiss",
   "/attention/:key/hold",
   "/attention/:key/hold/release",
