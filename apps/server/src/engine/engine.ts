@@ -3272,6 +3272,9 @@ export function createEngine(deps: EngineDeps): Engine {
           next.flightClearedSha = null;
           next.phase = opts.action === "rereview" ? "review" : "working";
           if (opts.action === "rework") {
+            // at the review-round cap the grant is for the next epoch's review, of the seat's fix
+            if (kind === "review" || kind === "review-ruling")
+              next.flightReworkGrantEpoch = next.epoch;
             if (pushed)
               next.flightReworks = {
                 ...loop.flightReworks,
@@ -3548,12 +3551,26 @@ export function createEngine(deps: EngineDeps): Engine {
         const at = now();
         // a run already parked on the hold keeps the phase it left, and its park names the new holder
         const parkedOnHold = loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK;
-        const from = loop.mergeHold?.from;
+        // a run waiting on FLIGHT's clearance parks on the hold at once: FLIGHT's settle (rework) needs
+        // a park to apply to, and the release returns it to the review it left
+        const waitsOnFlight =
+          !parkedOnHold && loop.phase === "review" && loop.awaitingFlight != null;
+        const from = loop.mergeHold?.from ?? (waitsOnFlight ? loop.phase : undefined);
         store.setRunLoop(runId, {
           ...loop,
           mergeHold: { by, reason, at, ...(from ? { from } : {}) },
           ...(parkedOnHold && loop.parked
             ? { parked: { ...loop.parked, reason: mergeHoldParkText(by, reason) } }
+            : {}),
+          ...(waitsOnFlight
+            ? {
+                phase: "parked" as const,
+                parked: {
+                  kind: MERGE_HOLD_PARK,
+                  reason: mergeHoldParkText(by, reason),
+                  ended: false,
+                },
+              }
             : {}),
         });
         store.addLoopEvent(

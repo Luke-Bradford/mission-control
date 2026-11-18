@@ -462,9 +462,16 @@ export const resolvedReviewRound = (store: Store, authorRunId: string): number =
     )
     .reduce((n, a) => Math.max(n, a.level), -1);
 
+/** The round the next review of this author run gets once FLIGHT has settled a hold: blocking reviews count across epochs. */
+export const nextReviewRound = (store: Store, authorRunId: string): number =>
+  1 +
+  store.reviewsOfRun(authorRunId).filter((r) => r.state === "reported" && r.blocking > 0).length;
+
 /**
- * FLIGHT's settle closes this run's review-rounds hold at the live round, not at whatever level the
- * scan last wrote (or before it wrote one), so reviews start again. False when no hold stands.
+ * FLIGHT's settle that sends a review closes this run's review-rounds hold at the round that review
+ * will get (the live round, or the next one when the run is parked past a granted round, which is no
+ * hold), not at whatever level the scan last wrote, so that review runs. False when nothing would
+ * hold it.
  */
 export function settleReviewRounds(
   store: Store,
@@ -472,8 +479,9 @@ export function settleReviewRounds(
   at: number,
   basis: string,
 ): boolean {
-  if (!reviewsHeld(store, run.id)) return false;
-  const rounds = store.waste.maxRound(run.id);
+  const rounds = Math.max(store.waste.maxRound(run.id), nextReviewRound(store, run.id));
+  if (rounds <= WASTE_THRESHOLDS.reviewRounds || rounds <= resolvedReviewRound(store, run.id))
+    return false;
   const evidence = `${run.ticket ?? run.id} is on review round ${rounds}; FLIGHT settled the park.`;
   const open = store.waste.alarms(
     "WHERE check_id = 'review-rounds' AND subject = ? AND closed_at IS NULL AND resolved_at IS NULL LIMIT 1",

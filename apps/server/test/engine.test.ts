@@ -6366,6 +6366,24 @@ describe("the engine runs reviews", () => {
       expect(h.steps).toContain("merge");
     });
 
+    it("a merge hold on a run waiting on FLIGHT's clearance parks it, so FLIGHT's rework applies", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      expect(await h.engine.holdMerge(RUN, "FLIGHT", "design not approved")).toEqual({ ok: true });
+      expect(loopOf()).toMatchObject({
+        phase: "parked",
+        parked: { kind: MERGE_HOLD_PARK },
+        mergeHold: { by: "FLIGHT", from: "review" },
+      });
+      expect(await operate(RUN, "FLIGHT", { kinds: [MERGE_HOLD_PARK], action: "rework" })).toBe(
+        true,
+      );
+      expect(loopOf().phase).toBe("working");
+    });
+
     it("a stored pending controller check on the head is passed by FLIGHT's clearance", async () => {
       flightSeatConfig();
       h.touches = ["apps/server/src/api.ts"];
@@ -7004,23 +7022,25 @@ describe("the engine runs reviews", () => {
         expect(h.sent.at(-1)?.text).toContain("Important");
       });
 
-      it("rework grants one more round: the next push's review runs, and a fail parks at the cap again", async () => {
+      // rounds 1 and 2 fail and the push after them is held at the cap; FLIGHT's rework grants round 3,
+      // that review fails, and the run parks for FLIGHT again
+      const SHA_D = "d".repeat(40);
+      const SHA_E = "e".repeat(40);
+      const push = async (sha: string) => {
+        clock += 1000;
+        report("Fixed it", sha);
+        await h.engine.reconcileRun(RUN);
+        setPr({ ci: "passing", headSha: sha });
+        await h.engine.reconcileRun(RUN);
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+      };
+      const grantedThenFailed = async () => {
         need(config.repos[0]).flightPowers = "superuser";
-        const SHA_D = "d".repeat(40);
         await toReview();
         await h.engine.reconcileRun(RUN);
-        // rounds 1 and 2 fail; the push after round 2 is queued as round 3 and held
         reported(first().id, [finding("Important")]);
         await h.engine.reconcileRun(RUN);
-        const push = async (sha: string) => {
-          clock += 1000;
-          report("Fixed it", sha);
-          await h.engine.reconcileRun(RUN);
-          setPr({ ci: "passing", headSha: sha });
-          await h.engine.reconcileRun(RUN);
-          await h.engine.tick();
-          await h.engine.reconcileRun(RUN);
-        };
         await push(SHA_B);
         const two = need(reviewRows().find((r) => r.round === 2));
         reported(two.id, [finding("Important")]);
@@ -7028,7 +7048,6 @@ describe("the engine runs reviews", () => {
         await push(SHA_C);
         await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
         expect(reviewsHeld(store, RUN)).toBe(true);
-
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
         expect(reviewsHeld(store, RUN)).toBe(false);
         await push(SHA_D);
@@ -7036,11 +7055,58 @@ describe("the engine runs reviews", () => {
         expect(granted).toHaveLength(1);
         expect(granted[0]).toMatchObject({ round: 3, state: "running" });
         expect(loopOf().phase).not.toBe("parked");
-
-        // that round fails: the run parks for FLIGHT at once, with no further fix cycle
+        const sentBefore = h.sent.length;
         reported(need(granted[0]).id, [finding("Important")]);
         await h.engine.reconcileRun(RUN);
         await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        // it parks as a plain review park: no fix line goes to the seat, and no round-4 review exists
+        expect(loopOf().parked?.kind).toBe("review");
+        expect(h.sent).toHaveLength(sentBefore);
+        expect(reviewRows().some((r) => r.round >= 4)).toBe(false);
+      };
+
+      it("rework grants one more round: the next push's review runs, and a fail parks at the cap again", async () => {
+        await grantedThenFailed();
+      });
+
+      it("a second rework after the granted round fails grants the next review again", async () => {
+        await grantedThenFailed();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_E);
+        const next = reviewRows().filter((r) => r.sha === SHA_E && r.state !== "superseded");
+        expect(next).toHaveLength(1);
+        expect(next[0]).toMatchObject({ round: 4, state: "running" });
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("a rereview after the granted round fails runs the review of that head", async () => {
+        await grantedThenFailed();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rereview" })).toBe(true);
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const next = reviewRows().filter((r) => r.round >= 4 && r.state !== "superseded");
+        expect(next.map((r) => r.state)).toEqual(["running"]);
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("a second_review after the granted round fails runs the second review", async () => {
+        config.accounts.push({ id: "claude-2", vendor: "claude", alertAt: 80, stopAt: 95 });
+        seats().push({ ...retroSeat(), id: "retro-2", accountId: "claude-2" });
+        h.touches = ["apps/server/src/guard/x.ts"];
+        await grantedThenFailed();
+        expect(
+          await operate(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "second_review",
+            note: "the floor review looks wrong",
+          }),
+        ).toBe(true);
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const next = reviewRows().filter((r) => r.round >= 4 && r.state !== "superseded");
+        expect(next.map((r) => r.seatId)).toEqual(["retro-2"]);
+        expect(next[0]?.state).toBe("running");
+        expect(loopOf().phase).not.toBe("parked");
       });
 
       it("accept is refused when the last review failed the design check", async () => {

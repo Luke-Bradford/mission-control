@@ -48,8 +48,13 @@ export function recordRunHandoff(
     ...(run.summary ? [safe(run.summary)] : []),
   ].slice(-6);
   const phase = run.loop?.phase ?? "building";
+  const hold = run.loop?.mergeHold;
   const left = [
     safe(run.loop?.parked?.reason ?? `Unfinished at ${phase}`),
+    // a merge hold stands until it is released: the next author must know why, and not re-push
+    ...(hold
+      ? [safe(`${hold.by} holds the merge: ${hold.reason}. Do not push the head again unchanged.`)]
+      : []),
     ...store
       .runDoneWhen(run.id)
       .slice(0, 8)
@@ -69,7 +74,9 @@ export function recordRunHandoff(
     goal: safe(run.ticketTitle ?? run.ticket),
     done: progress.length ? progress : digest?.lastText ? [safe(digest.lastText)] : [],
     left,
-    next: findings.length
+    next: hold
+      ? `Resolve the merge hold (${hold.by}: ${safe(hold.reason)}), then continue the ticket; do not push the same head again while it stands.`
+      : findings.length
       ? "Resolve the open review findings, then report the updated head."
       : run.loop?.parked
         ? "Resolve the recorded stop reason, then continue the ticket."

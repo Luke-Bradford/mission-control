@@ -180,6 +180,11 @@ export interface RunLoop {
   >;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
+  /**
+   * The epoch whose review a FLIGHT rework at the review-round cap grants: the seat's fix is a new
+   * head, so the grant is by epoch, and only that epoch's review is limited to one blocking outcome.
+   */
+  flightReworkGrantEpoch?: number;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;
