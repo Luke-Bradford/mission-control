@@ -109,12 +109,15 @@ export function EvidenceDialog({
   title,
   refs,
   coverage,
+  gap,
   onClose,
 }: {
   repo: string;
   title: string;
   refs: CodeHealthEvidenceRef[];
   coverage?: CodeHealthView["coverage"];
+  /** Said plainly when the row's own evidence is not in the current read. */
+  gap?: string;
   onClose: () => void;
 }) {
   const [index, setIndex] = useState(0),
@@ -148,6 +151,7 @@ export function EvidenceDialog({
   }, [repo, reference, cursor]);
   return (
     <HealthDialog title={title} onClose={onClose}>
+      {gap && <p role="status">{gap}</p>}
       {coverage?.map((c) => (
         <section key={`${c.source}-${c.from}-${c.until}`} className="ch-evidence-item">
           <h3>
@@ -163,7 +167,7 @@ export function EvidenceDialog({
           <p className="ch-secondary">{c.note}</p>
         </section>
       ))}
-      {!refs.length && !coverage && (
+      {!refs.length && !coverage && !gap && (
         <p>
           Supporting rows are not collected. This proposal asks for collection; it does not
           establish a measured defect.

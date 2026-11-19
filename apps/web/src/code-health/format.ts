@@ -9,3 +9,5 @@ export const date = (value: number | null) =>
 export const label = (value: string) => value.replaceAll("-", " ");
 export const message = (error: unknown) =>
   error instanceof Error ? error.message : "The request failed. Retry after refreshing evidence.";
+export const day = (value: number) =>
+  new Date(value).toLocaleDateString("en-GB", { timeZone: "UTC", dateStyle: "medium" });
