@@ -314,6 +314,7 @@ const LAUNCHERS = new Set([
   "open",
   "crontab",
 ]);
+const STDIN_LAUNCHERS = new Set(["at", "batch", "crontab", "osascript"]);
 /** The related-tests check runs the suite as a child process, so it counts as a full suite here. */
 const RELATED_SUITE = /\btest:related\b|check-related\.ts/;
 function launchesSuite(
@@ -326,7 +327,10 @@ function launchesSuite(
   const launcher =
     LAUNCHERS.has(program) || (program === "ssh" && args.some((a) => /^-[A-Za-z]*f/.test(a)));
   if (!launcher) return false;
-  const text = program === "at" || program === "batch" ? command : argv.join(" ");
+  // these also read what to run from stdin (`printf ... | crontab -`, `osascript` fed a script), so
+  // the whole line is searched; `crontab -l` and `-r` only show or clear the table
+  if (program === "crontab" && args.some((a) => /^-[A-Za-z]*[lr]/.test(a))) return false;
+  const text = STDIN_LAUNCHERS.has(program) ? command : argv.join(" ");
   return RELATED_SUITE.test(text) || fullSuite.some((entry) => text.includes(entry.trim()));
 }
 /** Terminal multiplexers: any command they are given runs detached, in the background. */

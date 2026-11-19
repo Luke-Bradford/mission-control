@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  BACKGROUND_SUITE_TEXT,
   DEFAULT_REPO_RULES,
   FLIGHT_RUNAWAY,
   GUARD_BODY_LIMIT,
@@ -776,6 +777,15 @@ describe("POST /api/guard/check", () => {
     const read = (id: string) => check(tokA, pre(id, "Read", { file_path: big }));
     expect((await read("r1")).body).toBe("{}");
     expect((await read("r2")).body).toBe("{}");
+  });
+
+  it.each([
+    "printf 'pnpm -s test\\n' | crontab -",
+    `echo 'do shell script "pnpm -s test"' | osascript`,
+  ])("refuses a full suite fed to a launcher on stdin, with no lock taken: %s", async (command) => {
+    const r = await check(tokA, bash("l1", command));
+    expect(reason(r.body)).toBe(BACKGROUND_SUITE_TEXT);
+    expect(lock.state().holder).toBeNull();
   });
 
   it("serves the guard and MCP routes at the paths a seat is given", async () => {

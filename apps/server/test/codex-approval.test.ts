@@ -430,6 +430,19 @@ describe("Codex check records", () => {
     );
   });
 
+  it.each([
+    "printf 'pnpm -s test\\n' | crontab -",
+    `echo 'do shell script "pnpm -s test"' | osascript`,
+  ])(
+    "declines a full suite fed to a launcher on stdin (a Codex seat cannot pipe at all): %s",
+    async (command) => {
+      const h = approver("writer", [], undefined, undefined, new TestLock());
+      expect(await h.approve(request(command, { itemId: "item-30" }), undefined, signal())).toBe(
+        "decline",
+      );
+    },
+  );
+
   it("takes the test lock for the related-tests check", async () => {
     const { checks } = recorder();
     const lock = new TestLock();
