@@ -46,6 +46,7 @@ import {
   crewMcpPath,
   crewPromptPath,
   crewTokenPath,
+  crewTranscriptPath,
 } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -623,7 +624,7 @@ describe("reattach after a restart", () => {
       ticket: "mc#42",
       costUsd: null,
       tokens: null,
-      transcriptPath: join(dir, "orphan.jsonl"),
+      transcriptPath: crewTranscriptPath(dbPath, "orphan:20261020T000000Z"),
       prs: [],
       summary: null,
     };
@@ -634,6 +635,43 @@ describe("reattach after a restart", () => {
     await until(() =>
       expect(store.run(run.id)).toMatchObject({ status: "failed", endedAt: expect.any(Number) }),
     );
+  });
+
+  it("leaves an observed loop's running row alone when the hub starts", async () => {
+    const run = {
+      id: "ta-loop:20261020T000000Z",
+      agentId: "ta-loop",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running" as const,
+      sessionId: "11111111-2222-4333-8444-555555555555",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: join(dir, "ta-loop.jsonl"),
+      prs: [],
+      summary: null,
+    };
+    writeFileSync(run.transcriptPath, "{}\n");
+    store.upsertRun(run);
+    const orphan = {
+      ...run,
+      id: "orphan-check:20261020T000000Z",
+      agentId: "guido-1",
+      transcriptPath: crewTranscriptPath(dbPath, "orphan-check:20261020T000000Z"),
+    };
+    writeFileSync(orphan.transcriptPath, "{}\n");
+    store.upsertRun(orphan);
+    const { sup } = make();
+    sup.start();
+    await until(() =>
+      expect(store.run(orphan.id)).toMatchObject({ status: "failed", endedAt: expect.any(Number) }),
+    );
+    expect(store.run(run.id)).toMatchObject({ status: "running", endedAt: null });
   });
 
   it("marks a run whose worktree is gone in error", async () => {

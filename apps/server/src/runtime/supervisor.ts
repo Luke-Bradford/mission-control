@@ -2698,8 +2698,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     reattaching = (async () => {
       const heldRunIds = new Set(store.liveSeatRuns().map(({ run }) => run.id));
       for (const run of store.runsActiveSince(0)) {
-        // A generated session id with no recorded seat session was saved before its seat existed.
+        // A supervisor-owned generated session with no recorded seat session was saved before its
+        // seat existed. Observed loops use their own transcript paths and never record a seat.
         const abandonedStart =
+          run.transcriptPath === crewTranscriptPath(deps.dbPath, run.id) &&
           run.sessionId !== null &&
           RUN_SESSION_ID.test(run.sessionId) &&
           store.getSetting(seatSessionKey(run.id)) === null;
