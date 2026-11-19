@@ -38,17 +38,31 @@ export const FSEVENTSD_RSS_HARD_BYTES = 6 * 1024 ** 3;
  */
 export const FSEVENTSD_RUNAWAY_BYTES = 150 * 1024 ** 2;
 export const FSEVENTSD_RUNAWAY_WINDOW_MS = 60 * 60_000;
+/**
+ * A service this large is stuck whether or not it is still growing (it may have levelled off
+ * while the hub was down or the crew idle): healthy, it holds megabytes, not a gigabyte.
+ */
+export const FSEVENTSD_STUCK_BYTES = 1024 ** 3;
+/** At most one diagnostics capture in this long, so the one from the onset is kept. */
+export const FILE_SERVICE_CAPTURE_GAP_MS = 6 * 60 * 60_000;
+/** This many restarts within `FILE_SERVICE_CAPTURE_GAP_MS` means restarting is not fixing it. */
+export const FILE_SERVICE_RECURRING_RESTARTS = 3;
+/** The setting holding when the hub last saved diagnostics. */
+export const FILE_SERVICE_CAPTURE_SETTING = "machine-capacity:fseventsd-capture-at";
+/** The setting holding the times of the hub's recent successful restarts, as a JSON array. */
+export const FILE_SERVICE_RESTARTS_SETTING = "machine-capacity:fseventsd-restarts";
 /** The setting holding when the hub last tried to restart a runaway `fseventsd`. */
 export const FILE_SERVICE_RESTART_SETTING = "machine-capacity:fseventsd-restart-at";
-/** The operator alert for a runaway the hub could not restart. */
+/** The operator alert for a runaway the hub could not restart, or one that keeps coming back. */
 export const FILE_SERVICE_RUNAWAY_KEY = "file-service-runaway";
 /**
- * The one sudoers rule that lets the hub restart it unattended, and nothing else. It is written by
- * root straight into place (no user-writable file between the check and the install), then the
- * whole sudoers configuration is checked.
+ * The one sudoers rule that lets the hub restart it unattended, and nothing else. Root writes it
+ * under a dotted name (sudo ignores those), checks it, and only then moves it into place, so no
+ * user-writable file sits between the check and the install and a bad line never goes live; the
+ * last step shows whether sudo now grants the command without a password.
  */
 export const FILE_SERVICE_SUDOERS_ADVICE =
-  'To let the hub restart it by itself next time, run once in Terminal: `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd >/dev/null && sudo chmod 440 /etc/sudoers.d/mc-fseventsd && sudo visudo -c`. It allows only that one command; any program running as you could then restart fseventsd, and nothing more.';
+  'To let the hub restart it by itself next time, run once in Terminal: `sudo sh -c \'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd\' _ "$(whoami)" && sudo -k && sudo -n -l /usr/bin/killall fseventsd`. The last line should print the command. It allows only that one command; any program running as you could then restart fseventsd, and nothing more.';
 
 export interface FileServiceRunaway {
   fromBytes: number;
@@ -56,12 +70,15 @@ export interface FileServiceRunaway {
   sinceAt: number;
 }
 
-/** `fseventsd` grew by the runaway amount within the last hour of readings; null if it did not. */
+/**
+ * `fseventsd` grew by the runaway amount within the last hour of readings, or holds the stuck size
+ * now; null if neither.
+ */
 export function fileServiceRunaway(
   samples: readonly MachineSample[],
   now: number,
 ): FileServiceRunaway | null {
-  // 0 is the collector finding no fseventsd process (as just after a restart), not a size
+  // a 0 is no reading (a missing process normally carries the last reading forward instead)
   const recent = samples.filter(
     (s) =>
       s.at >= now - FSEVENTSD_RUNAWAY_WINDOW_MS &&
@@ -75,7 +92,8 @@ export function fileServiceRunaway(
   for (const s of recent)
     if (low === undefined || (s.fileServiceBytes ?? 0) < (low.fileServiceBytes ?? 0)) low = s;
   if (low === undefined || typeof low.fileServiceBytes !== "number") return null;
-  return latest.fileServiceBytes - low.fileServiceBytes >= FSEVENTSD_RUNAWAY_BYTES
+  return latest.fileServiceBytes - low.fileServiceBytes >= FSEVENTSD_RUNAWAY_BYTES ||
+    latest.fileServiceBytes >= FSEVENTSD_STUCK_BYTES
     ? { fromBytes: low.fileServiceBytes, toBytes: latest.fileServiceBytes, sinceAt: low.at }
     : null;
 }

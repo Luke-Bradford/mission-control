@@ -72,7 +72,11 @@ async function saveDiagnostics(dir: string, at: number, exec: Exec): Promise<str
         await exec(file, args, { timeout: DIAGNOSTIC_TIMEOUT_MS, maxBuffer: DIAGNOSTIC_MAX_BUFFER })
       ).stdout;
     } catch (e) {
-      return `(failed: ${failureReason(e)})`;
+      // over the buffer limit, what was read so far is kept
+      const partial = (e as { stdout?: unknown }).stdout;
+      return typeof partial === "string" && partial !== ""
+        ? `${partial}\n(cut short: ${failureReason(e)})`
+        : `(failed: ${failureReason(e)})`;
     }
   };
   const processes = await read("/bin/ps", ["-axo", "pid,ppid,lstart,etime,rss,command"]);

@@ -1788,7 +1788,7 @@ describe("scheduler", () => {
 
       it("is restarted once an hour, across hub restarts, without holding the crew past the old 2 GB", async () => {
         let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
-        let size = 2000 * mb;
+        let size = 10 * mb;
         const restart = vi.fn(async () => ({
           restarted: true,
           diagnostics: "/data/diagnostics/fseventsd-x.txt",
@@ -1807,7 +1807,7 @@ describe("scheduler", () => {
         expect(restart).toHaveBeenCalledWith(expect.any(Number), { diagnose: true });
         await vi.waitFor(() =>
           expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
-            expect.stringContaining("grew from 2000 MB to 2300 MB within an hour"),
+            expect.stringContaining("went from 10 MB to 2300 MB within an hour"),
           ),
         );
         expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
@@ -1876,15 +1876,16 @@ describe("scheduler", () => {
         await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
         expect(restart).toHaveBeenLastCalledWith(expect.any(Number), { diagnose: false });
         await vi.waitFor(() =>
-          expect(store.hubEvents(0).at(-1)?.text).toContain("grew from 450 MB to 700 MB"),
+          expect(store.hubEvents(0).at(-1)?.text).toContain("went from 450 MB to 700 MB"),
         );
         expect(item()?.text).toBe(text);
         // growth pauses but the service still holds 700 MB: the alert stays
         await grow(61, 700);
         expect(item()).toBeDefined();
-        // a hand restart two minutes after a high reading: a 0 (no process yet), then small
+        // a hand restart two minutes after a high reading: while fseventsd is gone the collector
+        // carries the last reading forward, then the new one is small
         await grow(1, 900);
-        await grow(2, 0);
+        await grow(2, 900);
         expect(item()).toBeDefined();
         await grow(1, 8);
         expect(item()).toBeUndefined();
@@ -1921,7 +1922,45 @@ describe("scheduler", () => {
         );
       });
 
-      it("is never touched on a hub without the restart wired (previews)", async () => {
+      it("captures once in 6 hours and alerts when restarts that work keep recurring", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const restart = vi.fn(async (_at: number, opts: { diagnose: boolean }) => ({
+          restarted: true,
+          ...(opts.diagnose ? { diagnostics: "/data/diagnostics/onset.txt" } : {}),
+        }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        const item = () => store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+        await s.tick("machine");
+        // stuck again after each restart: small, then 200 MB more within the hour
+        for (let i = 1; i <= 3; i++) {
+          t += 30 * 60_000;
+          size = 8 * mb;
+          await s.tick("machine");
+          t += 31 * 60_000;
+          size = 220 * mb;
+          await s.tick("machine");
+          await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(i));
+        }
+        expect(restart.mock.calls.map((c) => c[1].diagnose)).toEqual([true, false, false]);
+        await vi.waitFor(() =>
+          expect(item()?.text).toContain("has restarted it 3 times in 6 hours"),
+        );
+        // small again, but restarts are still recent: the alert stays until they age out
+        t += 30 * 60_000;
+        size = 8 * mb;
+        await s.tick("machine");
+        expect(item()).toBeDefined();
+        t += 6 * 60 * 60_000;
+        await s.tick("machine");
+        expect(item()).toBeUndefined();
+      });
+
+      it("does nothing when no restart is wired (main.ts wires it only off previews)", async () => {
         let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
         let size = 10 * mb;
         const s = make(

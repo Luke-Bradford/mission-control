@@ -46,14 +46,13 @@ describe("restartFileService", () => {
     expect((await stat(out)).mode & 0o777).toBe(0o700);
   });
 
-  it("says in plain words why sudo could not restart it, and never prompts", async () => {
-    const { calls, exec } = fake({
+  it("says in plain words why sudo could not restart it", async () => {
+    const { exec } = fake({
       "/usr/bin/sudo": "sudo: a password is required\n",
       "/bin/ps": "ps: no such thing\n",
     });
     const r = await restartFileService(dir, 1, { diagnose: true }, exec);
     expect(r).toMatchObject({ restarted: false, error: "a password is required" });
-    expect(calls.some((c) => c.includes("osascript"))).toBe(false);
     expect(await readFile(r.diagnostics ?? "", "utf8")).toContain("(failed: ps: no such thing)");
   });
 

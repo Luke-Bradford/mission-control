@@ -127,8 +127,12 @@ import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
 import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
+  FILE_SERVICE_CAPTURE_GAP_MS,
+  FILE_SERVICE_CAPTURE_SETTING,
+  FILE_SERVICE_RECURRING_RESTARTS,
   FILE_SERVICE_RESTART_ADVICE,
   FILE_SERVICE_RESTART_SETTING,
+  FILE_SERVICE_RESTARTS_SETTING,
   FILE_SERVICE_RUNAWAY_KEY,
   FILE_SERVICE_SUDOERS_ADVICE,
   FSEVENTSD_RUNAWAY_BYTES,
@@ -484,34 +488,54 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let machineBlocked = false;
   /**
    * A runaway `fseventsd` is restarted at most once an hour, across hub restarts, through the
-   * operator's sudoers rule. Without the rule the first failure of an episode raises one operator
-   * alert; its text is not rewritten by later attempts, so FLIGHT is not woken again for it. The
-   * alert stays until a restart works or the service is back under the runaway size: growth merely
-   * pausing (an idle crew, or readings carried forward) does not clear it.
+   * operator's sudoers rule. Diagnostics are saved at most once in `FILE_SERVICE_CAPTURE_GAP_MS`,
+   * so the capture of the onset is kept. One operator alert is raised when a restart fails, or when
+   * restarts keep recurring (restarting is not fixing the cause); its text is not rewritten by
+   * later attempts, so FLIGHT is not woken again for it. It stays until the service is back under
+   * the runaway size with no recurrence; growth merely pausing does not clear it.
    */
   const restartRunawayFileService = (at: number): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
-    const samples = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS);
     const open = (): boolean => store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
     const small = (): boolean => {
       const size = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS).at(-1)?.fileServiceBytes;
       return typeof size === "number" && size > 0 && size < FSEVENTSD_RUNAWAY_BYTES;
     };
-    const runaway = fileServiceRunaway(samples, at);
+    const restarts = (until: number): number[] => {
+      let list: unknown;
+      try {
+        list = JSON.parse(store.getSetting(FILE_SERVICE_RESTARTS_SETTING) ?? "[]");
+      } catch {
+        list = [];
+      }
+      return Array.isArray(list)
+        ? list.filter(
+            (v): v is number =>
+              typeof v === "number" && v <= until && until - v < FILE_SERVICE_CAPTURE_GAP_MS,
+          )
+        : [];
+    };
+    const recurring = (until: number): boolean =>
+      restarts(until).length >= FILE_SERVICE_RECURRING_RESTARTS;
+    const runaway = fileServiceRunaway(store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS), at);
     if (runaway === null) {
-      if (open() && small()) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
+      if (open() && small() && !recurring(at)) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
       return;
     }
-    // a stored time ahead of now (the clock moved back) does not block restarts
-    const last = Number(store.getSetting(FILE_SERVICE_RESTART_SETTING) ?? "0");
-    if (Number.isFinite(last) && last <= at && at - last < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
+    // a stored time ahead of now (the clock moved back) does not count
+    const since = (key: string): number => {
+      const v = Number(store.getSetting(key) ?? "0");
+      return Number.isFinite(v) && v <= at ? at - v : Number.POSITIVE_INFINITY;
+    };
+    if (since(FILE_SERVICE_RESTART_SETTING) < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
     store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
+    const diagnose = since(FILE_SERVICE_CAPTURE_SETTING) >= FILE_SERVICE_CAPTURE_GAP_MS;
+    if (diagnose) store.setSetting(FILE_SERVICE_CAPTURE_SETTING, String(at));
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
-    const grew = `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it stays flat.`;
-    // the first capture of an episode covers the moment it tipped over, so later ones are skipped
-    const first = !open();
-    void restart(at, { diagnose: first })
+    const grew = `The file-change service (fseventsd) went from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it holds a few MB and stays flat.`;
+    const wasOpen = open();
+    void restart(at, { diagnose })
       .then((r) => {
         const saved =
           r.diagnostics === undefined
@@ -519,18 +543,31 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             : r.diagnostics === null
               ? " Saving what was running failed."
               : ` What was running is saved in ${r.diagnostics}.`;
-        if (r.restarted) {
-          store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
-        } else if (first && !open() && !small()) {
+        const raise = (text: string): void => {
+          if (wasOpen || open()) return;
           store.raiseNote({
             key: FILE_SERVICE_RUNAWAY_KEY,
             kind: "flag",
             runId: null,
             seatId: null,
             repoId: null,
-            text: `${grew} The hub could not restart it (${r.error ?? "no reason given"}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
+            text,
             at: now(),
           });
+        };
+        if (r.restarted) {
+          const recent = [...restarts(at), at];
+          store.setSetting(FILE_SERVICE_RESTARTS_SETTING, JSON.stringify(recent));
+          if (recent.length < FILE_SERVICE_RECURRING_RESTARTS)
+            store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
+          else
+            raise(
+              `${grew} The hub has restarted it ${recent.length} times in ${FILE_SERVICE_CAPTURE_GAP_MS / 3_600_000} hours and it keeps getting stuck again, so restarting is not fixing the cause. The captures of what was running are in the diagnostics folder beside the hub's database.`,
+            );
+        } else if (!small()) {
+          raise(
+            `${grew} The hub could not restart it (${r.error ?? "no reason given"}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
+          );
         }
         const done = r.restarted
           ? " The hub restarted it."

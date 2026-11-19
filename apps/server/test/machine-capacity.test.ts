@@ -277,6 +277,13 @@ describe("fileServiceRunaway", () => {
     expect(fileServiceRunaway([at(55, 5 * mb), at(0, 36 * mb)], NOW)).toBeNull();
   });
 
+  it("finds a stuck service that has stopped growing: a gigabyte held is never healthy", () => {
+    expect(fileServiceRunaway([at(90, 5 * mb), at(0, 1100 * mb)], NOW)).toMatchObject({
+      toBytes: 1100 * mb,
+    });
+    expect(fileServiceRunaway([at(30, 1100 * mb), at(0, 1100 * mb)], NOW)).not.toBeNull();
+  });
+
   it("ignores growth older than an hour and a service just restarted", () => {
     expect(fileServiceRunaway([at(90, 5 * mb), at(0, 400 * mb)], NOW)).toBeNull();
     expect(fileServiceRunaway([at(30, 2000 * mb), at(0, 6 * mb)], NOW)).toBeNull();

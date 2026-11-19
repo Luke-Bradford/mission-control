@@ -37,15 +37,20 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
 - A runaway `fseventsd` is restarted long before that stop. Healthy, it stays flat under crew
   work (5 to 13 MB through 100 to 230 runs a day, 13 to 18 November); in the stuck state seen on
   18 November it kept every event and grew 150 to 317 MB an hour. When it grows 150 MB within an
-  hour, the live hub (never a preview) restarts it at most once an hour with
-  `sudo -n /usr/bin/killall fseventsd`, which works only with the sudoers rule below. The first
-  attempt of each episode first saves the process list and the fseventsd log to
-  `<data dir>/diagnostics/fseventsd-*.txt` (the latest 10 are kept): read it to find what tips it
-  into that state. Without the rule, the hub raises one operator alert per episode (as the
-  machine-capacity stop does, after FLIGHT's triage window) naming the capture and the manual
-  command; it stays until a restart works or the service is back under 150 MB. The rule, which
-  allows that one command only, for any program running as the operator:
-  `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd >/dev/null && sudo chmod 440 /etc/sudoers.d/mc-fseventsd && sudo visudo -c`.
+  hour, or holds 1 GB or more, the live hub (never a preview) restarts it at most once an hour
+  with `sudo -n /usr/bin/killall fseventsd`, which works only with the sudoers rule below. At most
+  once in 6 hours it first saves the process list and the fseventsd log to
+  `<data dir>/diagnostics/fseventsd-*.txt` (the latest 10 are kept): read the one from the onset
+  to find what tips it into that state. One operator alert is raised (as the machine-capacity
+  stop is, after FLIGHT's triage window) when a restart fails, or when the hub has restarted it 3
+  times in 6 hours, meaning restarting is not fixing the cause. Its text is not rewritten while it
+  is open. It clears once the service is back under 150 MB with no recent run of restarts. While
+  no browser is open and nothing waits to start, the hub reads `fseventsd` less often and carries
+  the last reading forward, so detection waits for the next fresh reading.
+- The sudoers rule allows that one command only, for any program running as the operator. To add
+  it, run once in Terminal (root writes it under a dotted name that sudo ignores, checks it, then
+  moves it into place; the last command should print the allowed command):
+  `sudo sh -c 'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd' _ "$(whoami)" && sudo -k && sudo -n -l /usr/bin/killall fseventsd`
 - `load_window_min: 5` requires sustained load; `clear_after_min: 5` avoids start/stop churn.
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a
