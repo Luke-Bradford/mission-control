@@ -478,6 +478,7 @@ const seatCommand = z.string().superRefine((e, ctx) => {
 const percent = z.number().min(0).max(100);
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 export const seatEffort = z.string().min(1);
+const RETIRED_MC_TOOLS: readonly unknown[] = ["code_health", "publish_preview"];
 const MC_TOOL_VALUES = Object.values(MC_TOOL_NAMES) as [McToolName, ...McToolName[]];
 /** A `crew.roles` entry; `here` is optional and falls back to the `ROLES` row's. */
 const roleSchema = z.strictObject({
@@ -485,7 +486,13 @@ const roleSchema = z.strictObject({
   model: modelName,
   mode: z.enum(CREW_MODES),
   loop: z.enum(LOOP_KINDS),
-  tools: z.array(z.enum(MC_TOOL_VALUES)).default([]),
+  // code_health and publish_preview are retired tools: a role that still lists them loads, without them
+  tools: z
+    .preprocess(
+      (v) => (Array.isArray(v) ? v.filter((t) => !RETIRED_MC_TOOLS.includes(t)) : v),
+      z.array(z.enum(MC_TOOL_VALUES)),
+    )
+    .default([]),
   here: z
     .string()
     .refine(

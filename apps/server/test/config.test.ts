@@ -740,6 +740,18 @@ ${seats.join("\n")}
       expect(crewSeatGrants(cfg, "scout-1")).toEqual([]);
     });
 
+    it("a role that lists the retired code_health or publish_preview tool still loads, without it", () => {
+      const cfg = load(
+        crewText({
+          roles: [
+            "SCOUT: { prompt: roles/SCOUT.md, model: haiku, mode: read-only, loop: plan, tools: [report_plan, read_ticket, code_health, publish_preview] }",
+          ],
+          seats: [modelless("scout-1", "SCOUT")],
+        }),
+      );
+      expect(cfg.crew?.roles?.SCOUT?.tools).toEqual(["report_plan", "read_ticket"]);
+    });
+
     it("replacing a built-in", () => {
       const cfg = load(
         crewText({

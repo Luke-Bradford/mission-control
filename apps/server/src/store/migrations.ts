@@ -466,6 +466,13 @@ class Migrations {
         .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
         .run(COMMS_NOTICE, "hub");
     this.migrateCommsLabels();
+    // the old code-health triggers on kept tables write into a retired table: drop them first
+    for (const { name } of this.db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'code\\_health\\_%' ESCAPE '\\'",
+      )
+      .all() as { name: string }[])
+      this.db.exec(`DROP TRIGGER IF EXISTS "${name}"`);
     for (const table of RETIRED_TABLES) this.db.exec(`DROP TABLE IF EXISTS ${table}`);
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);

@@ -292,15 +292,52 @@ describe("Store", () => {
     const first = new Store(path);
     const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
     for (const table of RETIRED_FIXTURE) raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
+    // the old release's trigger on a kept table writes into a retired one
+    raw.exec(`CREATE TABLE code_health_revisions (repo_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0);
+      CREATE TRIGGER code_health_pull_requests_insert AFTER INSERT ON pull_requests BEGIN
+        INSERT INTO code_health_revisions (repo_id, version) SELECT NEW.repo_id, 1 WHERE NEW.repo_id IS NOT NULL
+        ON CONFLICT(repo_id) DO UPDATE SET version = version + 1;
+      END`);
     first.close();
     const second = new Store(path);
-    const names = (
-      (second as unknown as { rawDb: DatabaseSync }).rawDb
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
-        .all() as { name: string }[]
-    ).map((r) => r.name);
+    const rows = (type: string) =>
+      (
+        (second as unknown as { rawDb: DatabaseSync }).rawDb
+          .prepare("SELECT name FROM sqlite_master WHERE type = ?")
+          .all(type) as { name: string }[]
+      ).map((r) => r.name);
+    const names = rows("table");
+    for (const table of [...RETIRED_FIXTURE, "code_health_revisions"])
+      expect(names).not.toContain(table);
+    expect(rows("trigger").filter((n) => n.startsWith("code_health"))).toEqual([]);
+    expect(() =>
+      second.upsertPullRequests(
+        "r",
+        [
+          {
+            repoId: "r",
+            number: 2,
+            title: "t",
+            url: "u",
+            branch: "b",
+            ticket: null,
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: 1,
+            updatedAt: 1,
+            mergedAt: null,
+            headSha: "sha",
+            mergeable: null,
+            author: null,
+            assignees: [],
+          },
+        ],
+        2,
+      ),
+    ).not.toThrow();
     second.close();
-    for (const table of RETIRED_FIXTURE) expect(names).not.toContain(table);
   });
 
   it("close releases the database: the store cannot be used after", () => {
