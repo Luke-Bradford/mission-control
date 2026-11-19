@@ -4421,7 +4421,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const prev =
         store
           .reviewsOfRun(review.authorRunId)
-          .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
+          .filter((r) => r.id < reviewId && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
       const { scratch, inputs, repoDocs, references, screenshots, signedPlan, planMockupFiles } =
