@@ -82,6 +82,7 @@ import {
   type LoopAction,
   type LoopReviewFacts,
   type LoopSnapshot,
+  leftOpenText,
   localNotDeletedText,
   MC_PUSH_CHECKS,
   MC_RUN_ENDED,
@@ -1676,6 +1677,11 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "move-card": {
+        // a ticket left open by a part-only PR keeps the card the close step gave it
+        if (cur.leftOpen === true && a.column === "Done") {
+          cur.cardFor = a.mark ?? cardMark(planned.phase, planned.epoch);
+          return;
+        }
         await deps.board.move({ runId: run.id, repoId: run.repoId, issue, column: a.column });
         // moved or failed (a failure is its Activity row): not tried again until the phase changes
         cur.cardFor = a.mark ?? cardMark(planned.phase, planned.epoch);
@@ -2056,6 +2062,23 @@ export function createEngine(deps: EngineDeps): Engine {
       case "close-issue": {
         const r = await publisher.closeIssue(live());
         if (!r.ok) return refused(r, "close");
+        if (r.left === true) {
+          // the PR is only part of the ticket: it stays open, and its card is not Done's
+          cur.leftOpen = true;
+          const another =
+            run.ticket !== null &&
+            store
+              .runsOnTicket(run.repoId, run.ticket)
+              .some((other) => other.id !== run.id && other.endedAt === null);
+          await deps.board.move({
+            runId: run.id,
+            repoId: run.repoId,
+            issue,
+            column: another ? "In progress" : "Backlog",
+          });
+          stepDone("close", mergedSha(), leftOpenText(issue));
+          return;
+        }
         stepDone("close", mergedSha(), closedIssueText(issue));
         return;
       }

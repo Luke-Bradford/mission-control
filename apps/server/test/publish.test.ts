@@ -2656,23 +2656,70 @@ describe("merge steps", () => {
   });
 
   describe("closeIssue", () => {
+    const prBody = (body: string) => () => ({ code: 0, stdout: JSON.stringify({ body }) });
+    const open = () => ({ code: 0, stdout: JSON.stringify({ state: "OPEN" }) });
+
     it("closes an open issue as completed", async () => {
-      ghAnswers = [() => ({ code: 0, stdout: JSON.stringify({ state: "OPEN" }) }), ok];
+      ghAnswers = [prBody("Closes #7."), open, ok];
       expect(await publisher().closeIssue(R)).toEqual({ ok: true });
       expect(ghCalls).toEqual([
+        ["pr", "view", "12", "--repo=o/mc", "--json=body"],
         ["issue", "view", "7", "--repo=o/mc", "--json", "state"],
         ["issue", "close", "7", "--repo=o/mc", "--reason=completed"],
       ]);
     });
 
-    it("counts an issue already closed as success", async () => {
-      ghAnswers = [() => ({ code: 0, stdout: JSON.stringify({ state: "CLOSED" }) })];
+    it("closes an issue the PR body does not name", async () => {
+      ghAnswers = [prBody("Did a thing."), open, ok];
       expect(await publisher().closeIssue(R)).toEqual({ ok: true });
-      expect(ghCalls).toHaveLength(1);
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "view", "close"]);
+    });
+
+    it.each(["Part of #7.", "refs #7", "REFS #7", "Part of #7, Closes #8"])(
+      "leaves the issue open when the PR body says %j",
+      async (body) => {
+        ghAnswers = [prBody(body)];
+        expect(await publisher().closeIssue(R)).toEqual({ ok: true, left: true });
+        expect(ghCalls).toHaveLength(1);
+      },
+    );
+
+    it.each(["Part of #7. Closes #7.", "Refs #7\nfixes #7", "Resolves: #7 (Part of #7)"])(
+      "closes the issue when the PR body also closes it: %j",
+      async (body) => {
+        ghAnswers = [prBody(body), open, ok];
+        expect(await publisher().closeIssue(R)).toEqual({ ok: true });
+        expect(ghCalls.map((c) => c[1])).toEqual(["view", "view", "close"]);
+      },
+    );
+
+    it("ignores a part-only reference to another repo's same-numbered issue", async () => {
+      ghAnswers = [prBody("Part of other/project#7."), open, ok];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "view", "close"]);
+    });
+
+    it("a foreign closing reference does not cancel a real part-only one", async () => {
+      ghAnswers = [prBody("Part of o/mc#7. Closes other/project#7.")];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true, left: true });
+    });
+
+    it("counts an issue already closed as success", async () => {
+      ghAnswers = [
+        prBody("Closes #7"),
+        () => ({ code: 0, stdout: JSON.stringify({ state: "CLOSED" }) }),
+      ];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true });
+      expect(ghCalls).toHaveLength(2);
+    });
+
+    it("refuses transiently when gh cannot read the PR", async () => {
+      ghAnswers = [() => ({ code: 1, stdout: "" })];
+      expect(await publisher().closeIssue(R)).toMatchObject({ ok: false, transient: true });
     });
 
     it("refuses transiently when gh cannot read the issue", async () => {
-      ghAnswers = [() => ({ code: 1, stdout: "" })];
+      ghAnswers = [prBody("Closes #7"), () => ({ code: 1, stdout: "" })];
       expect(await publisher().closeIssue(R)).toMatchObject({ ok: false, transient: true });
     });
   });

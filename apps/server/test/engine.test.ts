@@ -40,6 +40,7 @@ import {
   hardRulesFlagKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
+  leftOpenText,
   localNotDeletedText,
   MC_PR_UNCLOSED,
   MC_PUSH_FAILED,
@@ -345,7 +346,7 @@ interface Harness {
   steps: string[];
   stepEnded: Record<string, string[]>;
   /** The next results of each merge step, oldest first; empty: success. */
-  stepResults: Record<string, PublishResult[]>;
+  stepResults: Record<string, (PublishResult & { left?: boolean })[]>;
   minorIssueCalls: (number | undefined)[];
   /** The branch updates asked for, and their next results, oldest first; empty: wait. */
   tip: string;
@@ -6137,6 +6138,34 @@ describe("the engine runs reviews", () => {
       expect(h.steps).toEqual(ALL);
     });
 
+    it("leaves the ticket open, off Done, when the PR is only part of it", async () => {
+      h.stepResults.close = [{ ok: true, left: true }];
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(h.moves).toContainEqual({ runId: RUN, repoId: REPO, issue: 7, column: "Backlog" });
+      expect(h.moves.map((m) => m.column)).not.toContain("Done");
+      expect(loopOf().merging?.done).toContain("close");
+      const texts = loopTexts();
+      expect(texts).toContain(leftOpenText(7));
+      expect(texts).not.toContain(closedIssueText(7));
+    });
+    it("a ticket another run has open goes back to In progress", async () => {
+      h.stepResults.close = [{ ok: true, left: true }];
+      store.upsertRun(
+        run({ id: "guido-2:other", agentId: "guido-2", branch: "other", startedAt: clock + 1 }),
+      );
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(h.moves).toContainEqual({ runId: RUN, repoId: REPO, issue: 7, column: "In progress" });
+      expect(h.moves.map((m) => m.column)).not.toContain("Done");
+    });
+    it("a PR that closes the ticket moves its card to Done", async () => {
+      await gateOpen();
+      await vi.waitFor(() => expect(h.steps).toEqual(ALL));
+      expect(h.moves).toContainEqual({ runId: RUN, repoId: REPO, issue: 7, column: "Done" });
+      expect(loopTexts()).toContain(closedIssueText(7));
+      expect(loopTexts()).not.toContain(leftOpenText(7));
+    });
     it("merges without resuming the author's missing CLI", async () => {
       await toReview();
       await h.engine.reconcileRun(RUN);
