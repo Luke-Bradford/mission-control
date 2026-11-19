@@ -355,7 +355,6 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { withLegacyHoldFields } from "./legacy-hold.ts";
 import { loopTries } from "./loop/history.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -1035,8 +1034,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   const requestErrors = new WeakMap<object, Error>();
-  // the web app still reads the old park and set-aside fields: fill them from `hold` (#2071)
-  app.addHook("preSerialization", async (_req, _reply, payload) => withLegacyHoldFields(payload));
   app.addHook("onError", async (req, _reply, error) => {
     requestErrors.set(req, error);
   });
