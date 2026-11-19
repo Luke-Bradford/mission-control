@@ -29,6 +29,7 @@ import { createFlightWatch } from "../src/flight/watch.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { rolePrompt } from "../src/runtime/brief.ts";
+import * as checkouts from "../src/runtime/checkouts.ts";
 import * as keeper from "../src/runtime/keeper.ts";
 import {
   CLI_PID_FILE,
@@ -116,14 +117,44 @@ describe("the CLI update hold", () => {
     const hold = new CliHold();
     const { sup } = make({ cliHold: hold });
     sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP, prNumber: 1 } });
+    await sup.endRun("guido-1");
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
     let release = () => {};
-    prep.gate = new Promise<void>((resolve) => {
+    const cloneGate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    const originalCloneGit = checkouts.cloneGitDir;
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir").mockImplementation(async (...args) => {
+      await cloneGate;
+      return await originalCloneGit(...args);
+    });
     try {
-      const start = sup.startRun("guido-1", 42);
-      await until(() => expect(prep.inFlight).toBe(1));
-      const run = store.runs("guido-1", 1)[0];
+      const start = sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+      await until(() => expect(cloneGit).toHaveBeenCalled());
+      const run = store.runs("guido-1", 1).find(({ id }) => id !== first.runId);
       if (run === undefined) throw new Error("missing in-progress run");
       const orphan = {
         ...run,
@@ -150,7 +181,7 @@ describe("the CLI update hold", () => {
       });
     } finally {
       release();
-      prep.gate = null;
+      cloneGit.mockRestore();
     }
   });
 
