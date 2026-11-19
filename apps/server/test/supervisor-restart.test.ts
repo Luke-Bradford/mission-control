@@ -112,6 +112,48 @@ describe("the CLI update hold", () => {
     expect(store.runs("fao-1", 1)).toHaveLength(1);
   });
 
+  it("leaves a start in progress alone when a CLI hold is released", async () => {
+    const hold = new CliHold();
+    const { sup } = make({ cliHold: hold });
+    sup.start();
+    let release = () => {};
+    prep.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      const start = sup.startRun("guido-1", 42);
+      await until(() => expect(prep.inFlight).toBe(1));
+      const run = store.runs("guido-1", 1)[0];
+      if (run === undefined) throw new Error("missing in-progress run");
+      const orphan = {
+        ...run,
+        id: "orphan-release:20261020T000000Z",
+        agentId: "orphan",
+        transcriptPath: crewTranscriptPath(dbPath, "orphan-release:20261020T000000Z"),
+      };
+      writeFileSync(orphan.transcriptPath, "{}\n");
+      store.upsertRun(orphan);
+      hold.hold("held");
+      hold.release();
+      await until(() =>
+        expect(store.run(orphan.id)).toMatchObject({
+          status: "failed",
+          endedAt: expect.any(Number),
+        }),
+      );
+      expect(store.run(run.id)).toMatchObject({ status: "running", endedAt: null });
+      release();
+      const started = await start;
+      expect(store.seatSession("guido-1")).toMatchObject({
+        runId: started.runId,
+        state: expect.stringMatching(/^(starting|running)$/),
+      });
+    } finally {
+      release();
+      prep.gate = null;
+    }
+  });
+
   it("refuses a start the hold caught during its checkout, and records no run", async () => {
     const hold = new CliHold();
     const { sup } = make({

@@ -2711,6 +2711,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (
           run.endedAt !== null ||
           heldRunIds.has(run.id) ||
+          starting.has(run.agentId) ||
           run.loop?.hold?.worktree != null ||
           !abandonedStart
         )

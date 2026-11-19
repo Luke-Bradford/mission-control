@@ -2148,6 +2148,9 @@ describe("reused worktrees", () => {
     sup.start();
     const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
     await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
     store.upsertPullRequests(
       "mc",
       [
@@ -2186,6 +2189,7 @@ describe("reused worktrees", () => {
       const failed = store.runs("guido-1", 1)[0];
       expect(failed).toMatchObject({ status: "failed" });
       expect(failed?.endedAt).not.toBeNull();
+      expect(store.runsOnTicket("mc", "mc#42").every((run) => run.endedAt !== null)).toBe(true);
       cloneGit.mockRestore();
       upsertRun.mockRestore();
       const carriedOn = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
