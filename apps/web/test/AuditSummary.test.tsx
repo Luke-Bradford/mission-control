@@ -674,6 +674,31 @@ it("says plainly when a row beyond the top three has no evidence in the read", a
   expect(within(dialog).queryByText(/Requested/)).toBeNull();
 });
 
+it("reads the full view fresh on every evidence click, so a new row is not judged by an older read", async () => {
+  let over = overviewFixture({ rows: 1 });
+  setup(over, {
+    [OVERVIEW()]: () => ({ status: 200, body: over }),
+    "/api/code-health?repo=sample&window=30d&tab=overview": () => ({
+      status: 200,
+      body: fullRead(over),
+    }),
+  });
+  render(<CodeHealth />);
+  await ready();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  const first = await screen.findByRole("dialog", { name: "Recommendation evidence" });
+  fireEvent.click(within(first).getByRole("button", { name: "Close" }));
+  // The summary changes: a second row appears, and the server's full read now carries it too.
+  over = overviewFixture({ rows: 2 });
+  act(() => hub.refetchTopic("health"));
+  await waitFor(() => expect(rowButtons()).toHaveLength(2));
+  fireEvent.click(rowButtons()[1]);
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  const dialog = await screen.findByRole("dialog", { name: "Recommendation evidence" });
+  expect(within(dialog).queryByText(/not in the current read/)).toBeNull();
+  expect(within(dialog).getAllByText(/Reported review cohort/).length).toBeGreaterThan(0);
+});
+
 it("shows findings per touch from the stored summary's own figure, with no placeholder", async () => {
   setup();
   render(<CodeHealth />);

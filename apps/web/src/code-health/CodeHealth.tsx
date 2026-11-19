@@ -103,40 +103,44 @@ export function CodeHealth() {
   const view = res.data ?? (last?.path === ref?.path ? last?.view : undefined);
   const overview = ovRes.data ?? (lastOv?.path === ovRef?.path ? lastOv?.view : undefined);
   // The summary has no coverage list; its evidence and coverage come from the full read, fetched on demand.
-  const [wanted, setWanted] = useState<{ title: string; id?: string }>();
-  const fullRef = useMemo(
-      () => (repo && summary && wanted ? RESOURCES.codeHealth(repo, window, "overview") : null),
-      [repo, window, summary, wanted],
-    ),
-    fullRes = useResource<CodeHealthView>(fullRef);
-  useEffect(() => {
-    if (!wanted) return;
-    if (fullRes.data) {
-      const full = fullRes.data,
-        row =
-          wanted.id !== undefined && full.data.tab === "overview"
-            ? full.data.recommendations.find((r) => r.id === wanted.id)
-            : undefined;
-      // The full read carries evidence for only the top few rows; say so for any other row.
-      setEvidence(
-        wanted.id !== undefined && !row
-          ? {
-              title: wanted.title,
-              refs: [],
-              gap: "This row's evidence is not in the current read. Its source and why are shown on the row.",
-            }
-          : {
-              title: wanted.title,
-              refs: wanted.id === undefined ? [] : (row?.evidence ?? []),
-              coverage: full.coverage,
-            },
+  // Each click reads the full view fresh, and applies it only if the repo, window and tab are unchanged.
+  const evidenceToken = useRef(0);
+  const readFull = (w: { title: string; id?: string }) => {
+    if (!repo) return;
+    const token = ++evidenceToken.current,
+      scope = JSON.stringify([repo, window, "summary"]);
+    hub
+      .read<CodeHealthView>(RESOURCES.codeHealth(repo, window, "overview"))
+      .then(
+        (full) => {
+          if (token !== evidenceToken.current || scope !== selection.current) return;
+          const row =
+            w.id !== undefined && full.data.tab === "overview"
+              ? full.data.recommendations.find((r) => r.id === w.id)
+              : undefined;
+          // The full read carries evidence for only the top few rows; say so for any other row.
+          setEvidence(
+            w.id !== undefined && !row
+              ? {
+                  title: w.title,
+                  refs: [],
+                  gap: "This row's evidence is not in the current read. Its source and why are shown on the row.",
+                }
+              : {
+                  title: w.title,
+                  refs: w.id === undefined ? [] : (row?.evidence ?? []),
+                  coverage: full.coverage,
+                },
+          );
+        },
+        (error: unknown) => {
+          if (token !== evidenceToken.current || scope !== selection.current) return;
+          setNotice(
+            `Evidence could not be read: ${error instanceof Error ? error.message : String(error)} Refresh and try again.`,
+          );
+        },
       );
-      setWanted(undefined);
-    } else if (fullRes.error) {
-      setNotice(`Evidence could not be read: ${fullRes.error.message} Refresh and try again.`);
-      setWanted(undefined);
-    }
-  }, [wanted, fullRes.data, fullRes.error]);
+  };
   const generatedAt = summary ? overview?.generatedAt : view?.generatedAt,
     staleAfter = summary ? SUMMARY_STALE_MS : 120000,
     active = summary ? ovRes : res;
@@ -173,7 +177,7 @@ export function CodeHealth() {
   const changeScope = (next: () => void) => {
     setEvidence(undefined);
     setAction(undefined);
-    setWanted(undefined);
+    evidenceToken.current++;
     setNotice("");
     setHistory(false);
     next();
@@ -222,7 +226,7 @@ export function CodeHealth() {
     heading.current?.focus();
   };
   const coverageButton = () => {
-    if (summary) setWanted({ title: "Collection coverage" });
+    if (summary) readFull({ title: "Collection coverage" });
     else if (view) inspect("Collection coverage", [], view.coverage);
   };
   return (
@@ -308,7 +312,7 @@ export function CodeHealth() {
             </>
           )}
           {(summary ? !!overview : !!view) && (
-            <button type="button" onClick={coverageButton} disabled={summary && !!wanted}>
+            <button type="button" onClick={coverageButton}>
               Inspect coverage
             </button>
           )}
@@ -408,7 +412,7 @@ export function CodeHealth() {
             overview={overview}
             blocked={blocked}
             onDecide={(row, kind) => setAction({ row, kind })}
-            onInspect={(row) => setWanted({ title: "Recommendation evidence", id: row.id })}
+            onInspect={(row) => readFull({ title: "Recommendation evidence", id: row.id })}
             onHistory={() => setHistory(true)}
           />
         )}
