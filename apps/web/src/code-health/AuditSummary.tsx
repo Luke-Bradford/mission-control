@@ -765,6 +765,8 @@ export function AuditSummary({
         >
           {outside.state === "not-collected" && outside.items.length === 0 ? (
             <p className="as-empty">Not collected yet. {outside.note}</p>
+          ) : outside.items.length === 0 ? (
+            <p className="as-empty">Collected, and nothing new outside in this window.</p>
           ) : (
             <ScrollRegion className="as-scroll as-out" label="External items">
               <table>

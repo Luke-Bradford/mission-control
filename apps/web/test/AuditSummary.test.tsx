@@ -831,3 +831,15 @@ it("states each row's decider, state and review date in its open detail", async 
   const more = document.querySelector("tr.as-more") as HTMLElement;
   expect(more.textContent).toMatch(/Decides: FLIGHT .*\. Proposed, Review date unset\./);
 });
+
+it("says plainly when New outside was collected and found nothing", async () => {
+  setup(overviewFixture({ rows: 2, outside: 0 }));
+  render(<CodeHealth />);
+  await ready();
+  const panel = screen
+    .getByRole("heading", { name: "New outside" })
+    .closest(".panel") as HTMLElement;
+  expect(within(panel).getByText(/Collected, and nothing new outside/)).toBeTruthy();
+  expect(within(panel).queryByText(/Not collected yet/)).toBeNull();
+  expect(within(panel).queryByRole("columnheader", { name: "Source" })).toBeNull();
+});
