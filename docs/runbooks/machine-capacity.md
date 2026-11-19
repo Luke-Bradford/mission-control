@@ -46,11 +46,13 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
   times in 6 hours, meaning restarting is not fixing the cause. Its text is not rewritten while it
   is open. It clears once the service is back under 150 MB with no recent run of restarts. While
   no browser is open and nothing waits to start, the hub reads `fseventsd` less often and carries
-  the last reading forward, so detection waits for the next fresh reading.
+  the last reading forward without reading `fseventsd` at all; neither rule acts on a carried
+  reading, so detection waits for the next fresh one. A restart that works clears the alert at
+  once unless it is the third in 6 hours.
 - The sudoers rule allows that one command only, for any program running as the operator. To add
   it, run once in Terminal (root writes it under a dotted name that sudo ignores, checks it, then
-  moves it into place; the last command should print the allowed command):
-  `sudo sh -c 'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd' _ "$(whoami)" && sudo -k && sudo -n -l /usr/bin/killall fseventsd`
+  moves it into place; the last step restarts it once without a password, as the hub will, and says so):
+  `sudo sh -c 'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd' _ "$(whoami)" && sudo -k && sudo -n /usr/bin/killall fseventsd && echo "The hub can now restart it."`
 - `load_window_min: 5` requires sustained load; `clear_after_min: 5` avoids start/stop churn.
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a

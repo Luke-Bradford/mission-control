@@ -1009,8 +1009,9 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
   // a runaway fseventsd the hub could not restart, or one that keeps coming back
-  // (telemetry/machine-capacity.ts): it holds nothing back and clears itself once the service is
-  // small again, but only the operator can restart it by hand or add the sudoers rule
+  // (telemetry/machine-capacity.ts): it holds nothing back and clears itself once a restart works
+  // or the service is small again with no recent run of restarts, but only the operator can
+  // restart it by hand or add the sudoers rule
   `${NOTE_KEY}${FILE_SERVICE_RUNAWAY_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,

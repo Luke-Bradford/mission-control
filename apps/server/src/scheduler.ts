@@ -76,7 +76,12 @@ import {
   sweepPullRequests,
 } from "./collectors/github.ts";
 import { type LaunchctlRunner, launchctl } from "./collectors/launchd.ts";
-import { type MachineResult, realMachineDeps, sampleMachine } from "./collectors/machine.ts";
+import {
+  FILE_SERVICE,
+  type MachineResult,
+  realMachineDeps,
+  sampleMachine,
+} from "./collectors/machine.ts";
 import {
   collectNotifications,
   makeRest,
@@ -494,7 +499,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    * later attempts, so FLIGHT is not woken again for it. It stays until the service is back under
    * the runaway size with no recurrence; growth merely pausing does not clear it.
    */
-  const restartRunawayFileService = (at: number): void => {
+  const restartRunawayFileService = (at: number, fresh: boolean): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
     const open = (): boolean => store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
@@ -523,6 +528,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (open() && small() && !recurring(at)) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
       return;
     }
+    // a carried-forward figure may be a process already restarted: act only on a fresh one
+    if (!fresh) return;
     // a stored time ahead of now (the clock moved back) does not count
     const since = (key: string): number => {
       const v = Number(store.getSetting(key) ?? "0");
@@ -533,7 +540,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const diagnose = since(FILE_SERVICE_CAPTURE_SETTING) >= FILE_SERVICE_CAPTURE_GAP_MS;
     if (diagnose) store.setSetting(FILE_SERVICE_CAPTURE_SETTING, String(at));
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
-    const grew = `The file-change service (fseventsd) went from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it holds a few MB and stays flat.`;
+    const grew =
+      runaway.toBytes - runaway.fromBytes >= FSEVENTSD_RUNAWAY_BYTES
+        ? `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it holds a few MB and stays flat.`
+        : `The file-change service (fseventsd) holds ${mb(runaway.toBytes)}; healthy, it holds a few MB.`;
     const wasOpen = open();
     void restart(at, { diagnose })
       .then((r) => {
@@ -1517,7 +1527,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         const capacityConfig = deps.config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
         const capacity = storedMachineCapacity(store, at, capacityConfig);
         machineBlocked = capacity.blocked;
-        restartRunawayFileService(at);
+        // only a reading taken now counts: an idle hub carries the last figure forward
+        restartRunawayFileService(
+          at,
+          spawn && !r.errors.some((e) => e.startsWith(`${FILE_SERVICE}:`)),
+        );
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
             bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;

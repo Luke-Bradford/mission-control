@@ -3,8 +3,9 @@
  *
  * On 18 November `fseventsd` went into a state where it kept every file event in memory and grew
  * about 250 MB an hour until restarted; healthy, it stays flat under any amount of crew work. What
- * tips it into that state is not known yet, so the first attempt of each episode saves what was
- * running and the service's own log, for finding the trigger.
+ * tips it into that state is not known yet, so the caller has it save what was running and the
+ * service's own log (at most once in six hours, so the onset's capture is kept), for finding the
+ * trigger.
  *
  * Restarting a system daemon needs root. The hub runs `sudo -n /usr/bin/killall fseventsd`, which
  * works only when the operator has added a sudoers rule for exactly that command. Without it the

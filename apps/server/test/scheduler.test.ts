@@ -1762,6 +1762,7 @@ describe("scheduler", () => {
         size: () => number,
         clock: () => number,
         restartFileService: SchedulerDeps["restartFileService"],
+        errors: () => string[] = () => [],
       ) =>
         createScheduler({
           config,
@@ -1781,12 +1782,12 @@ describe("scheduler", () => {
                 fileServiceBytes: size(),
               }),
               cpus: [],
-              errors: [],
+              errors: errors(),
             })),
           }),
         });
 
-      it("is restarted once an hour, across hub restarts, without holding the crew past the old 2 GB", async () => {
+      it("is restarted on fast growth, once an hour, across hub restarts", async () => {
         let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
         let size = 10 * mb;
         const restart = vi.fn(async () => ({
@@ -1801,13 +1802,13 @@ describe("scheduler", () => {
         await s.tick("machine");
         expect(restart).not.toHaveBeenCalled();
         t += 30 * 60_000;
-        size = 2300 * mb;
+        size = 300 * mb;
         await s.tick("machine");
         await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
         expect(restart).toHaveBeenCalledWith(expect.any(Number), { diagnose: true });
         await vi.waitFor(() =>
           expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
-            expect.stringContaining("went from 10 MB to 2300 MB within an hour"),
+            expect.stringContaining("grew from 10 MB to 300 MB within an hour"),
           ),
         );
         expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
@@ -1815,7 +1816,7 @@ describe("scheduler", () => {
         expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeUndefined();
         // a new hub process on the same database keeps the hour
         t += 10 * 60_000;
-        size = 2600 * mb;
+        size = 600 * mb;
         const again = vi.fn(restart);
         await make(
           () => size,
@@ -1823,6 +1824,33 @@ describe("scheduler", () => {
           again,
         ).tick("machine");
         expect(again).not.toHaveBeenCalled();
+      });
+
+      it("restarts a flat service holding 2.3 GB without holding the crew, and leaves a carried-forward figure alone", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let fresh = false;
+        const restart = vi.fn(async () => ({ restarted: true }));
+        const s = make(
+          () => 2300 * mb,
+          () => t,
+          restart,
+          () => (fresh ? [] : ["fseventsd: unrecognised top output"]),
+        );
+        // the figure was not read this minute (an idle hub carries the last one forward)
+        await s.tick("machine");
+        t += 60_000;
+        await s.tick("machine");
+        expect(restart).not.toHaveBeenCalled();
+        fresh = true;
+        t += 60_000;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() =>
+          expect(store.hubEvents(0).at(-1)?.text).toContain(
+            "holds 2300 MB; healthy, it holds a few MB. The hub restarted it.",
+          ),
+        );
+        expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
       });
 
       it("restarts when the stored time is ahead of now (the clock moved back)", async () => {
@@ -1876,7 +1904,7 @@ describe("scheduler", () => {
         await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
         expect(restart).toHaveBeenLastCalledWith(expect.any(Number), { diagnose: false });
         await vi.waitFor(() =>
-          expect(store.hubEvents(0).at(-1)?.text).toContain("went from 450 MB to 700 MB"),
+          expect(store.hubEvents(0).at(-1)?.text).toContain("grew from 450 MB to 700 MB"),
         );
         expect(item()?.text).toBe(text);
         // growth pauses but the service still holds 700 MB: the alert stays

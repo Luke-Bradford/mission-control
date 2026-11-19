@@ -62,7 +62,7 @@ export const FILE_SERVICE_RUNAWAY_KEY = "file-service-runaway";
  * last step shows whether sudo now grants the command without a password.
  */
 export const FILE_SERVICE_SUDOERS_ADVICE =
-  'To let the hub restart it by itself next time, run once in Terminal: `sudo sh -c \'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd\' _ "$(whoami)" && sudo -k && sudo -n -l /usr/bin/killall fseventsd`. The last line should print the command. It allows only that one command; any program running as you could then restart fseventsd, and nothing more.';
+  'To let the hub restart it by itself next time, run once in Terminal: `sudo sh -c \'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd\' _ "$(whoami)" && sudo -k && sudo -n /usr/bin/killall fseventsd && echo "The hub can now restart it."`. The last step restarts it once without a password, as the hub will, and says so. It allows only that one command; any program running as you could then restart fseventsd, and nothing more.';
 
 export interface FileServiceRunaway {
   fromBytes: number;
