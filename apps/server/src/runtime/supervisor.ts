@@ -895,6 +895,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   const transferKey = (runId: string) => `account-transfer:${runId}`;
+  const seatSessionKey = (runId: string) => `seat-session:${runId}`;
   function transferState(runId: string): AccountTransfer | null {
     const text = store.getSetting(transferKey(runId));
     return text === null ? null : (JSON.parse(text) as AccountTransfer);
@@ -1077,7 +1078,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       worktree: null,
       updatedAt: 0,
     };
-    store.setSeatSession({ ...prev, ...patch, seatId, updatedAt: now() });
+    const next = { ...prev, ...patch, seatId, updatedAt: now() };
+    store.setSeatSession(next);
+    if (
+      next.runId !== null &&
+      ACTIVE_SEAT_STATES.includes(next.state) &&
+      store.run(next.runId)?.sessionId !== null
+    )
+      store.setSetting(seatSessionKey(next.runId), "recorded");
     bus.emit("agents");
   }
 
@@ -2690,8 +2698,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     reattaching = (async () => {
       const heldRunIds = new Set(store.liveSeatRuns().map(({ run }) => run.id));
       for (const run of store.runsActiveSince(0)) {
-        // A generated session id without a seat-session row was saved before its seat existed.
-        const abandonedStart = run.sessionId !== null && RUN_SESSION_ID.test(run.sessionId);
+        // A generated session id with no recorded seat session was saved before its seat existed.
+        const abandonedStart =
+          run.sessionId !== null &&
+          RUN_SESSION_ID.test(run.sessionId) &&
+          store.getSetting(seatSessionKey(run.id)) === null;
         if (
           run.endedAt !== null ||
           heldRunIds.has(run.id) ||
