@@ -56,7 +56,7 @@ const tries: LoopTry[] = [
 
 const view: RunLoopView = {
   runId: "run/alpha",
-  loop: { phase: "ci", ciFails: 1, parked: null } as RunLoopView["loop"] & object,
+  loop: { phase: "ci", ciFails: 1, hold: null } as RunLoopView["loop"] & object,
   events: [{ key: "e", runId: "run/alpha", text: "CI started", at: NOW - 3_000 }],
   tries,
   round: 1,

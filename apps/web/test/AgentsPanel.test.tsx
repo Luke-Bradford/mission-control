@@ -153,7 +153,7 @@ it("shows FLIGHT, the crew and the observed loops as rows of one table, in eleve
     step: "implement",
     text: "Implementing",
     prNumber: null,
-    parked: null,
+    hold: null,
   };
   const rows = [
     seatRow({ id: "free", index: 4, hudState: "idle" }),
@@ -537,7 +537,7 @@ it("keeps live tool prose in the row tooltip and only the loop node in the cell"
   stub([
     seatRow({
       digest: { ...digest([]), liveTool: tool },
-      loop: { phase: "working", text: "Working", prNumber: null, parked: null },
+      loop: { phase: "working", text: "Working", prNumber: null, hold: null },
     }),
   ]);
   const { container } = render(<AgentsPanel />);
@@ -638,7 +638,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "working", text: "Working", prNumber: null, parked: null },
+        loop: { phase: "working", text: "Working", prNumber: null, hold: null },
       }),
     "Idle",
   ],
@@ -648,7 +648,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "ci", text: "CI", prNumber: null, parked: null },
+        loop: { phase: "ci", text: "CI", prNumber: null, hold: null },
       }),
     "Watching",
   ],
@@ -658,7 +658,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "review", text: "Review", prNumber: null, parked: null },
+        loop: { phase: "review", text: "Review", prNumber: null, hold: null },
       }),
     "Review",
   ],
@@ -668,7 +668,12 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "parked", text: "Parked", prNumber: null, parked: "Waiting" },
+        loop: {
+          phase: "parked",
+          text: "Parked",
+          prNumber: null,
+          hold: { kind: null, reason: "Waiting", offSeat: false },
+        },
       }),
     "Parked",
   ],
@@ -678,7 +683,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "done", text: "Done", prNumber: null, parked: null },
+        loop: { phase: "done", text: "Done", prNumber: null, hold: null },
       }),
     "Idle",
   ],
@@ -768,7 +773,7 @@ it("keeps full text in titles on compact row labels and doing lines", async () =
     step: "implement",
     text: "Implementing",
     prNumber: null,
-    parked: null,
+    hold: null,
   };
   stub([seatRow({ id: "running", role, mode: "writer", loop })]);
   const { container } = render(<AgentsPanel />);
@@ -848,7 +853,7 @@ it("keeps eleven cells with the need on the second Work line", async () => {
         text: "Implementing",
         step: "implement",
         prNumber: null,
-        parked: null,
+        hold: null,
       },
     }),
   ]);
@@ -1058,7 +1063,7 @@ it.each(["ci", "review", "parked"] as const)(
         seatRow({
           id: "waiting-work",
           hudState: "idle",
-          loop: { phase, text: "Waiting", prNumber: 524, parked: null },
+          loop: { phase, text: "Waiting", prNumber: 524, hold: null },
         }),
       ],
       true,
@@ -1154,7 +1159,7 @@ it.each([
 it("uses engine state and loop phase for current work", () => {
   const row = seatRow({
     hudState: "idle",
-    loop: { phase: "ci", text: "CI", prNumber: 1, parked: null },
+    loop: { phase: "ci", text: "CI", prNumber: 1, hold: null },
   });
   expect(isCurrentWork(row)).toBe(true);
   expect(isCurrentWork({ ...row, paused: true })).toBe(false);
@@ -1211,7 +1216,12 @@ it.each(["blocked", "parked", "idle"] as const)(
         seatRow({
           id: "guido-cx",
           hudState,
-          loop: { phase: "parked", text: "Blocked", prNumber: null, parked: "Waiting" },
+          loop: {
+            phase: "parked",
+            text: "Blocked",
+            prNumber: null,
+            hold: { kind: null, reason: "Waiting", offSeat: false },
+          },
         }),
       ],
       true,
@@ -1237,7 +1247,12 @@ it.each(["stopped", "idle"] as const)(
           id: "guido-cx",
           hudState,
           run: null,
-          loop: { phase: "parked", text: "Blocked", prNumber: null, parked: "Waiting" },
+          loop: {
+            phase: "parked",
+            text: "Blocked",
+            prNumber: null,
+            hold: { kind: null, reason: "Waiting", offSeat: false },
+          },
         }),
       ],
       true,
@@ -1293,7 +1308,7 @@ describe("the Work line of an idle seat with an open run", () => {
     await screen.findByText("guido-cx");
     return (rowsIn(container)[1] as HTMLElement).querySelector(".ticket-cell")?.textContent ?? "";
   };
-  const open = { phase: "working", text: "Working on it", prNumber: null, parked: null } as const;
+  const open = { phase: "working", text: "Working on it", prNumber: null, hold: null } as const;
 
   it("says the run is open rather than working on the ticket", async () => {
     const text = await work({ loop: open });

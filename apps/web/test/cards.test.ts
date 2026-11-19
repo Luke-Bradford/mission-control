@@ -302,7 +302,7 @@ describe("statusOutOfDateTitle", () => {
   });
 });
 
-const L = { phase: "working", text: "Working", prNumber: null, parked: null } as const;
+const L = { phase: "working", text: "Working", prNumber: null, hold: null } as const;
 
 describe("cardStep", () => {
   it("a looped run shows its template, step and try", () => {

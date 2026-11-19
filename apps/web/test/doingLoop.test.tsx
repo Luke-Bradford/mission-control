@@ -13,7 +13,7 @@ const seat = (phase: "ci" | "review", text: string): CrewRow =>
     hudState: "idle",
     note: null,
     review: { prNumber: 77, state: "open" },
-    loop: { phase, text, prNumber: 77, parked: null },
+    loop: { phase, text, prNumber: 77, hold: null },
   });
 
 const rendered = (row: CrewRow): string =>
