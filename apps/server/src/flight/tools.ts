@@ -1905,7 +1905,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
 
   /** The run's ticket and park, for the line a decision is filed under. */
   const aboutRun = (call: string, run: Run): string =>
-    `${call}: ${run.ticket ?? run.id}${run.loop?.parked ? `, ${run.loop.parked.reason}` : ""}`;
+    `${call}: ${run.ticket ?? run.id}${run.loop?.hold?.kind ? `, ${run.loop.hold.reason}` : ""}`;
 
   async function acceptRuling(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, RunArgs, args);
@@ -2004,7 +2004,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // where it never parks (an evidence hold) can still be ended
     const onSeat = store.seatSession(seat)?.runId === run.id;
     const parked = run.loop?.phase === "parked";
-    if (!onSeat && !run.loop?.aside) return fail(notEndableRunText(call));
+    if (!onSeat && !run.loop?.hold?.worktree) return fail(notEndableRunText(call));
     // a parked or stalled run keeps the old rule; ending one that is working is a controller power
     const stalled = onSeat && stalledSeats(config, store, at).has(seat);
     const working = onSeat && !parked && !stalled;
@@ -3817,7 +3817,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (run !== null && run.endedAt === null) {
           if (!inRunLane(run)) return fail("Run is in another lane.");
           const accountId = runAccountId(store, run.id, cfg.accountId);
-          if (run.loop?.parked?.kind === "budget") return fail("Run is held by its budget.");
+          if (run.loop?.hold?.kind === "budget") return fail("Run is held by its budget.");
           if (accountAtStop(config, store, accountId, at))
             return fail(accountStoppedText(seatCallSign(a.seat), accountId));
           if (
@@ -3934,7 +3934,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       "merge",
       async (a, repo, ctx) => {
         const run = prRun(a.pr);
-        if (run?.loop?.parked?.kind === UAT_PARK)
+        if (run?.loop?.hold?.kind === UAT_PARK)
           return fail(
             "This PR waits for the operator's acceptance; only the operator can clear it.",
           );
@@ -4051,7 +4051,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const run = found.run;
         if (held(run)) return fail("Run is held.");
         if (!inRunLane(run)) return fail("Run is in another lane.");
-        if (!run.loop?.parked) return fail("Run is not parked.");
+        if (!run.loop?.hold?.kind) return fail("Run is not parked.");
         const kinds =
           a.action === "lift"
             ? ["stuck", "gate"]
@@ -4060,7 +4060,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               : a.action === "rework"
                 ? ["review", "review-ruling", MERGE_HOLD_PARK]
                 : ["review", "review-ruling"];
-        if (!kinds.includes(run.loop.parked.kind))
+        if (!kinds.includes(run.loop.hold.kind))
           return fail("This action cannot settle this park.");
         const head = store.runPush(run.id)?.sha ?? run.loop.awaitingFlight ?? null;
         const settled = await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {

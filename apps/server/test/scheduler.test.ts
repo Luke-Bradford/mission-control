@@ -55,11 +55,16 @@ import {
   PR_SWEEP_FIRST_DELAY_MS,
   PR_SWEEP_MS,
   refreshOnSeatFree,
+  type SchedulerDeps,
   waitedPrNumbers,
 } from "../src/scheduler.ts";
 import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
+import {
+  FILE_SERVICE_RESTART_SETTING,
+  FILE_SERVICE_RUNAWAY_KEY,
+  MACHINE_CAPACITY_KEY,
+} from "../src/telemetry/machine-capacity.ts";
 import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
 
@@ -1749,6 +1754,324 @@ describe("scheduler", () => {
       t += 5 * 60_000 + 1;
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+    });
+
+    describe("a runaway file-change service", () => {
+      const mb = 1024 ** 2;
+      const make = (
+        size: () => number,
+        clock: () => number,
+        restartFileService: SchedulerDeps["restartFileService"],
+        errors: () => string[] = () => [],
+      ) =>
+        createScheduler({
+          config,
+          store,
+          bus,
+          now: clock,
+          ...(restartFileService ? { restartFileService } : {}),
+          collectors: stubs({
+            machine: vi.fn(async (_p, _prev, at) => ({
+              sample: machineSample({
+                at,
+                memTotalBytes: 24 * 1024 ** 3,
+                swapUsedBytes: 1024 ** 3,
+                swapTotalBytes: 20 * 1024 ** 3,
+                memoryPressureFreePct: 44,
+                load1: 1,
+                fileServiceBytes: size(),
+              }),
+              cpus: [],
+              errors: errors(),
+            })),
+          }),
+        });
+
+      it("is restarted on fast growth, once an hour, across hub restarts", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const restart = vi.fn(async () => ({
+          restarted: true,
+          diagnostics: "/data/diagnostics/fseventsd-x.txt",
+        }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        await s.tick("machine");
+        expect(restart).not.toHaveBeenCalled();
+        t += 30 * 60_000;
+        size = 300 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+        expect(restart).toHaveBeenCalledWith(expect.any(Number), { diagnose: true });
+        await vi.waitFor(() =>
+          expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
+            expect.stringContaining("grew from 10 MB to 300 MB within an hour"),
+          ),
+        );
+        expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
+        expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+        expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeUndefined();
+        // a new hub process on the same database keeps the hour
+        t += 10 * 60_000;
+        size = 1100 * mb;
+        const again = vi.fn(restart);
+        await make(
+          () => size,
+          () => t,
+          again,
+        ).tick("machine");
+        expect(again).not.toHaveBeenCalled();
+      });
+
+      it("restarts a flat service holding 2.3 GB without holding the crew, and leaves a carried-forward figure alone", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let fresh = false;
+        const restart = vi.fn(async () => ({ restarted: true }));
+        const s = make(
+          () => 2300 * mb,
+          () => t,
+          restart,
+          () => (fresh ? [] : ["fseventsd: unrecognised top output"]),
+        );
+        // the figure was not read this minute (an idle hub carries the last one forward)
+        await s.tick("machine");
+        t += 60_000;
+        await s.tick("machine");
+        expect(restart).not.toHaveBeenCalled();
+        fresh = true;
+        t += 60_000;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() =>
+          expect(store.hubEvents(0).at(-1)?.text).toContain(
+            "holds 2300 MB; healthy, it holds a few MB. The hub restarted it.",
+          ),
+        );
+        expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+      });
+
+      it("judges only readings the hub took: an idle hub's carried figure neither triggers a restart nor starts a growth window", async () => {
+        config.crew = {
+          worktrees: join(dir, "worktrees"),
+          maxSeats: 1,
+          sessions: [
+            { id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] },
+          ],
+        } as NonNullable<CcConfig["crew"]>;
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 50 * mb;
+        let pending = true;
+        const restart = vi.fn(async () => ({ restarted: true }));
+        const s = createScheduler({
+          config,
+          store,
+          bus,
+          now: () => t,
+          restartFileService: restart,
+          hasViewClients: () => false,
+          startPending: () => pending,
+          collectors: stubs({
+            machine: vi.fn(async (_p, _prev, at) => ({
+              sample: machineSample({
+                at,
+                memTotalBytes: 24 * 1024 ** 3,
+                swapUsedBytes: 1024 ** 3,
+                swapTotalBytes: 20 * 1024 ** 3,
+                memoryPressureFreePct: 44,
+                load1: 1,
+                fileServiceBytes: size,
+              }),
+              cpus: [],
+              errors: [],
+            })),
+          }),
+        });
+        await s.tick("machine");
+        // idle for five hours: the stored figure is carried, even a stuck-looking one
+        pending = false;
+        size = 2300 * mb;
+        for (let i = 0; i < 5 * 60; i += 30) {
+          t += 30 * 60_000;
+          await s.tick("machine");
+        }
+        expect(restart).not.toHaveBeenCalled();
+        // a fresh 50 MB, then an hour and a half carried at 50 MB, then a fresh 210 MB: the
+        // carried minutes are not readings, so this is not 160 MB of growth within an hour
+        pending = true;
+        size = 50 * mb;
+        t += 60_000;
+        await s.tick("machine");
+        pending = false;
+        for (let i = 0; i < 90; i += 10) {
+          t += 10 * 60_000;
+          await s.tick("machine");
+        }
+        pending = true;
+        size = 210 * mb;
+        t += 60_000;
+        await s.tick("machine");
+        expect(restart).not.toHaveBeenCalled();
+      });
+
+      it("restarts when the stored time is ahead of now (the clock moved back)", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        store.setSetting(FILE_SERVICE_RESTART_SETTING, String(t + 24 * 3_600_000));
+        const restart = vi.fn(async () => ({ restarted: true }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 300 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+      });
+
+      it("raises one unchanging alert when it cannot be restarted, keeps the first capture, and clears only when the service is small again", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const restart = vi.fn(async (_at: number, opts: { diagnose: boolean }) => ({
+          restarted: false,
+          error: "a password is required",
+          ...(opts.diagnose ? { diagnostics: "/data/diagnostics/first.txt" } : {}),
+        }));
+        let gone = false;
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+          () => (gone ? ["fseventsd: unrecognised top output"] : []),
+        );
+        const grow = async (minutes: number, to: number) => {
+          t += minutes * 60_000;
+          size = to * mb;
+          await s.tick("machine");
+        };
+        const item = () => store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+        await s.tick("machine");
+        await grow(30, 300);
+        await vi.waitFor(() =>
+          expect(item()?.text).toContain("could not restart it (a password is required)"),
+        );
+        const text = item()?.text ?? "";
+        expect(text).toContain("/data/diagnostics/first.txt");
+        expect(text).toContain("sudo killall fseventsd");
+        expect(text).toContain("NOPASSWD: /usr/bin/killall fseventsd");
+        // an hour later, still growing: tried again without a new capture, the alert unchanged
+        await grow(31, 450);
+        await grow(30, 700);
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
+        expect(restart).toHaveBeenLastCalledWith(expect.any(Number), { diagnose: false });
+        await vi.waitFor(() =>
+          expect(store.hubEvents(0).at(-1)?.text).toContain("grew from 450 MB to 700 MB"),
+        );
+        expect(item()?.text).toBe(text);
+        // growth pauses but the service still holds 700 MB: the alert stays
+        await grow(61, 700);
+        expect(item()).toBeDefined();
+        // figures the hub did not read neither clear nor restart: a small one does not clear the
+        // alert over the last reading taken (700 MB), and a stuck-looking one does not restart it
+        const before = restart.mock.calls.length;
+        gone = true;
+        await grow(1, 8);
+        expect(item()).toBeDefined();
+        await grow(61, 2300);
+        expect(restart.mock.calls.length).toBe(before);
+        // a fresh small reading clears it
+        gone = false;
+        await grow(1, 8);
+        expect(item()).toBeUndefined();
+      });
+
+      it("clears an open alert when a later restart works", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        let works = false;
+        const restart = vi.fn(async () =>
+          works ? { restarted: true } : { restarted: false, error: "a password is required" },
+        );
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 300 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() =>
+          expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeDefined(),
+        );
+        works = true;
+        t += 31 * 60_000;
+        size = 450 * mb;
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 700 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() =>
+          expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeUndefined(),
+        );
+      });
+
+      it("captures once in 6 hours and alerts when restarts that work keep recurring", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const restart = vi.fn(async (_at: number, opts: { diagnose: boolean }) => ({
+          restarted: true,
+          ...(opts.diagnose ? { diagnostics: "/data/diagnostics/onset.txt" } : {}),
+        }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        const item = () => store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+        await s.tick("machine");
+        // stuck again after each restart: small, then 200 MB more within the hour
+        for (let i = 1; i <= 3; i++) {
+          t += 30 * 60_000;
+          size = 8 * mb;
+          await s.tick("machine");
+          t += 31 * 60_000;
+          size = 220 * mb;
+          await s.tick("machine");
+          await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(i));
+        }
+        expect(restart.mock.calls.map((c) => c[1].diagnose)).toEqual([true, false, false]);
+        await vi.waitFor(() =>
+          expect(item()?.text).toContain("has restarted it 3 times in 6 hours"),
+        );
+        // small again, but restarts are still recent: the alert stays until they age out
+        t += 30 * 60_000;
+        size = 8 * mb;
+        await s.tick("machine");
+        expect(item()).toBeDefined();
+        t += 6 * 60 * 60_000;
+        await s.tick("machine");
+        expect(item()).toBeUndefined();
+      });
+
+      it("does nothing when no restart is wired (main.ts wires it only off previews)", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const s = make(
+          () => size,
+          () => t,
+          undefined,
+        );
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 900 * mb;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === "file-service-runaway")).toBeUndefined();
+      });
     });
 
     it("tells the operator to restart the file-change service, and drops the item when it recovers", async () => {

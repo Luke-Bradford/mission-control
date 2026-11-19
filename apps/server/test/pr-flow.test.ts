@@ -217,7 +217,13 @@ describe("PR flow ownership and clocks", () => {
         ...NEW_LOOP,
         prNumber: 7,
         phase: "parked",
-        parked: { kind: "review-failed", reason: "reviewer failed", ended: false },
+        hold: {
+          kind: "review-failed",
+          reason: "reviewer failed",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
       T + 5 * M,
     );

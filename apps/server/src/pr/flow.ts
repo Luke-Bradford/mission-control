@@ -93,7 +93,8 @@ function position(
   if (loop?.awaitingFlight)
     return { stage: "clearance", owner: "FLIGHT", reason: "FLIGHT clearance" };
   if (loop?.mainMerge) return { stage: "sync", owner: "seat", reason: "main to sync" };
-  if (loop?.parked) return { stage: "clearance", owner: "FLIGHT", reason: loop.parked.reason };
+  if (loop?.hold?.kind)
+    return { stage: "clearance", owner: "FLIGHT", reason: loop.hold.reason ?? undefined };
   if (loop?.merging || loop?.phase === "done") return { stage: "merge", owner: "hub" };
   if (fixing) return { stage: "rework", owner: "seat", reason: "fixing blocking review findings" };
   if (loop?.phase === "ci") return { stage: "CI", owner: "CI" };
@@ -309,13 +310,13 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
             currentReview?.startedAt ??
             currentReview?.createdAt ??
             pr.createdAt);
-      const ahead = active?.loop?.aside
+      const ahead = active?.loop?.hold?.worktree
         ? runs.find(
             (r) =>
               r.id !== active.id &&
               r.agentId === active.agentId &&
               r.endedAt === null &&
-              !r.loop?.aside,
+              !r.loop?.hold?.worktree,
           )
         : null;
       if (ahead && !liveReview && p.owner === "review") ownerKind = "seat";

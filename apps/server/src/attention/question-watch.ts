@@ -139,8 +139,8 @@ export function questionFacts(store: Store, s: QuestionSubject): QuestionFacts {
         ? "none"
         : run.endedAt !== null
           ? "ended"
-          : run.loop?.parked
-            ? `parked:${run.loop.parked.kind}`
+          : run.loop?.hold?.kind
+            ? `parked:${run.loop.hold.kind}`
             : "live",
   };
   facts.sight = sightOf(store, s, facts);

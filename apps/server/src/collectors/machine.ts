@@ -26,7 +26,8 @@ export interface MachineDeps {
   psTree: () => Promise<string>;
   /**
    * `top -l 1 -pid <fseventsd> -stats pid,mem,cmprs`: its memory with compressed pages counted,
-   * which `ps` RSS leaves out. Empty when there is no such process. Optional: older callers lack it.
+   * which `ps` RSS leaves out. With no such process `pgrep` exits 1, so this rejects and the last
+   * figure is kept (an empty answer would read as 0). Optional: older callers lack it.
    */
   fileService?: () => Promise<string>;
   /** The test-lock holder's command; null when the lock is free. */
@@ -350,7 +351,7 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
   if (spawn && deps.fileService !== undefined) {
     try {
       const text = await deps.fileService();
-      // no process: nothing held; an unreadable answer keeps the last figure
+      // an empty answer holds nothing; a failed or unreadable one (no process) keeps the last figure
       if (text.trim() === "") fileServiceBytes = 0;
       else {
         const bytes = parseFileServiceBytes(text);

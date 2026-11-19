@@ -220,7 +220,11 @@ describe("dependency chain stored read", () => {
     );
     store.setRunLoop(
       "queued",
-      { ...NEW_LOOP, prNumber: 9, aside: { worktree: "/unused", wake: false } },
+      {
+        ...NEW_LOOP,
+        prNumber: 9,
+        hold: { kind: null, reason: null, ended: false, worktree: "/unused", wake: false },
+      },
       T + 5 * M,
     );
     const chains = read();
@@ -239,7 +243,10 @@ describe("dependency chain stored read", () => {
     store.upsertRun(
       run("queued", {
         ticket: "mc#2",
-        loop: { ...NEW_LOOP, aside: { worktree: "/unused", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          hold: { kind: null, reason: null, ended: false, worktree: "/unused", wake: false },
+        },
       }),
     );
     expect(read()[0]?.root.children[0]).toMatchObject({

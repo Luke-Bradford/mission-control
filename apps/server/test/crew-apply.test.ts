@@ -894,10 +894,26 @@ describe("the reloader", () => {
           prs: [],
           summary: null,
           ...(state === "aside"
-            ? { loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } } }
+            ? {
+                loop: {
+                  ...NEW_LOOP,
+                  hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+                },
+              }
             : {}),
           ...(state === "parked"
-            ? { loop: { ...NEW_LOOP, parked: { kind: "silent", reason: "waiting", ended: false } } }
+            ? {
+                loop: {
+                  ...NEW_LOOP,
+                  hold: {
+                    kind: "silent",
+                    reason: "waiting",
+                    ended: false,
+                    worktree: null,
+                    wake: false,
+                  },
+                },
+              }
             : {}),
         });
       }
@@ -928,7 +944,10 @@ describe("the reloader", () => {
         transcriptPath: "",
         prs: [],
         summary: null,
-        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+        },
       };
       store.upsertRun(aside);
       expect(store.seatSession("guido-1")).toBeNull();
@@ -971,7 +990,7 @@ describe("the reloader", () => {
       expect(store.openQuestions()).toEqual([]);
       expect(store.notes()).toEqual([]);
       expect(store.run(aside.id)).toMatchObject({ endedBy: "operator", status: "ok" });
-      expect(store.asideRuns()).toEqual([]);
+      expect(store.offSeatRuns()).toEqual([]);
       expect(endedRemoval).toHaveBeenCalledExactlyOnceWith({
         kind: "run-ended",
         seatId: "guido-1",

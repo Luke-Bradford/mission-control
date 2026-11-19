@@ -162,6 +162,28 @@ export interface CiRerun {
   outcome: "pending" | "passed" | "failed";
 }
 
+/** The run's one wait state, in place of the park and set-aside records. Null: on its seat, nothing holds it. */
+export interface RunHold {
+  /** The park's kind while `phase` is "parked"; null while the run only waits off its seat. */
+  kind: string | null;
+  reason: string | null;
+  /** A stop: the run ended on this park. Only true with `kind`. */
+  ended: boolean;
+  /** The worktree the run kept when its seat moved on; null while its seat holds it. */
+  worktree: string | null;
+  /** Off its seat and due back first. */
+  wake: boolean;
+  /** The operator question it waits on, off its seat. */
+  ask?: number;
+}
+
+/** A run's hold as the HUD shows it. */
+export interface CrewHold {
+  kind: string | null;
+  reason: string | null;
+  offSeat: boolean;
+}
+
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
   /** Computed from the checked diff; FLIGHT copies this exact key and evidence path. */
@@ -215,7 +237,17 @@ export interface RunLoop {
   lastRefusal: string | null;
   epoch: number;
   budgetExtra: number;
-  parked: { kind: string; reason: string; ended: boolean } | null;
+  /**
+   * The run's one wait state: why a park holds it (`kind`, `reason`, `ended`) and whether it has
+   * left its seat (`worktree`, `wake`, `ask`). Null: on its seat, nothing holds it. Optional only
+   * while the web app's fixtures predate it (the web ticket makes it required again).
+   */
+  hold?: RunHold | null;
+  /**
+   * @deprecated The old park record, filled from `hold` where the API sends a loop to the web app.
+   * Nothing in the server or core reads it.
+   */
+  parked?: { kind: string; reason: string; ended: boolean } | null;
   /** Hard-rule files in the pushed sha's diff. */
   touches: {
     sha: string;
@@ -232,8 +264,8 @@ export interface RunLoop {
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
   /**
-   * Off its seat while in review; `wake`: rework or a park is due, so it goes back first.
-   * `ask`: the operator question this run waits on; the run wakes once it is answered.
+   * @deprecated The old set-aside record, filled from `hold` where the API sends a loop to the web
+   * app. Nothing in the server or core reads it.
    */
   aside?: { worktree: string; wake: boolean; ask?: number } | null;
   /**
@@ -252,6 +284,8 @@ export interface RunLoop {
     /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
     webChanged?: boolean;
   } | null;
+  /** The merged PR was only part of the ticket: the ticket was left open and its card is not Done's. */
+  leftOpen?: boolean;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
   /** Saved before issue creation; an interrupted write must be reconciled before retrying. */
@@ -1027,8 +1061,10 @@ export interface CrewLoop {
   phase: LoopPhase;
   text: string;
   prNumber: number | null;
-  /** The park reason while `phase` is `parked`, else null. */
-  parked: string | null;
+  /** The run's hold, else null. */
+  hold?: CrewHold | null;
+  /** @deprecated The park reason while `phase` is `parked`, else null; the API fills it from `hold`. */
+  parked?: string | null;
   /** The name of the run's template profile; absent on a run without one. */
   profile?: string;
   /** The profile's step for the phase; null when parked, done or no step has the phase. */
@@ -1057,8 +1093,11 @@ export interface CrewQueueItem {
   pos: number;
 }
 
-/** A run its seat has set aside (in review, off the seat). */
-export interface CrewAsideRun {
+/** @deprecated The old name of `CrewOffSeatRun`, for the web app until it reads that. */
+export type CrewAsideRun = CrewOffSeatRun;
+
+/** A run its seat has moved on from (in review, off the seat). */
+export interface CrewOffSeatRun {
   runId: string;
   /** Resolved as the row's `ticket` is (`repo#n`), else null. */
   ticket: string | null;
@@ -1136,8 +1175,10 @@ export interface CrewRow {
   ticketTitle: string | null;
   /** The latest run's loop; null when no loop drives it (always null until the engine lands). */
   loop: CrewLoop | null;
-  /** Crew: the seat's set-aside runs other than `run`, oldest first; [] for a loop row. */
-  asideRuns?: CrewAsideRun[];
+  /** Crew: the seat's off-seat runs other than `run`, oldest first; [] for a loop row. */
+  offSeatRuns?: CrewOffSeatRun[];
+  /** @deprecated Same list as `offSeatRuns`; the API fills it for the web app until it reads that. */
+  asideRuns?: CrewOffSeatRun[];
   /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
   queue?: CrewQueueItem[];
   /**
@@ -1196,9 +1237,11 @@ export type CrewSummaryDigest = Pick<
 >;
 
 /** A crew row as the Overview reads it: state, ticket, loop step, tokens and cost, without the event timelines or the whole digest. */
-export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns"> & {
+export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns" | "offSeatRuns"> & {
   digest: CrewSummaryDigest | null;
-  asideRuns?: Omit<CrewAsideRun, "events">[];
+  offSeatRuns?: Omit<CrewOffSeatRun, "events">[];
+  /** @deprecated Same list as `offSeatRuns`. */
+  asideRuns?: Omit<CrewOffSeatRun, "events">[];
 };
 
 /** `GET /api/crew?shape=summary`. */

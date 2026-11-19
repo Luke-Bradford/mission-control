@@ -222,6 +222,45 @@ class Migrations {
       ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
+    // A run's park and set-aside records fold into one `hold` (#2071). Both old keys go, so a
+    // second open finds nothing to change (and takes no write lock); the indexes on the old paths
+    // go with them. The rows are read again inside the write-locked transaction.
+    const unfolded = `SELECT id, loop FROM runs
+           WHERE json_type(loop, '$.parked') IS NOT NULL OR json_type(loop, '$.aside') IS NOT NULL`;
+    if (this.db.prepare(`${unfolded} LIMIT 1`).get() !== undefined) {
+      this.transaction(() => {
+        const rows = this.db.prepare(unfolded).all() as { id: string; loop: string }[];
+        const set = this.db.prepare("UPDATE runs SET loop = ? WHERE id = ?");
+        for (const r of rows) {
+          const loop = JSON.parse(r.loop) as Record<string, unknown>;
+          const parked = loop.parked as
+            | { kind?: string; reason?: string; ended?: boolean }
+            | null
+            | undefined;
+          const aside = loop.aside as
+            | { worktree?: string; wake?: boolean; ask?: number }
+            | null
+            | undefined;
+          delete loop.parked;
+          delete loop.aside;
+          loop.hold =
+            parked == null && aside == null
+              ? null
+              : {
+                  kind: parked?.kind ?? null,
+                  reason: parked?.reason ?? null,
+                  ended: parked?.ended ?? false,
+                  worktree: aside?.worktree ?? null,
+                  wake: aside?.wake ?? false,
+                  ...(aside?.ask !== undefined ? { ask: aside.ask } : {}),
+                };
+          set.run(JSON.stringify(loop), r.id);
+        }
+      }, true);
+    }
+    this.db.exec(
+      "DROP INDEX IF EXISTS runs_loop_aside; DROP INDEX IF EXISTS runs_agent_aside_worktree;",
+    );
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id);
       CREATE INDEX IF NOT EXISTS reviews_run ON reviews(run_id);
@@ -235,10 +274,10 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
-      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_off_seat ON runs(ended_at, json_extract(loop, '$.hold.worktree'), started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_merging_started ON runs(json_extract(loop, '$.merging'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_agent_aside_worktree ON runs(agent_id, json_extract(loop, '$.aside.worktree'));
+      CREATE INDEX IF NOT EXISTS runs_agent_off_seat_worktree ON runs(agent_id, json_extract(loop, '$.hold.worktree'));
       CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
       CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);

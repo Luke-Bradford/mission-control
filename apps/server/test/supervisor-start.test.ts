@@ -711,7 +711,11 @@ describe("startRun", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
-      loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/older", wake: true } },
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        hold: { kind: null, reason: null, ended: false, worktree: "/w/older", wake: true },
+      },
     });
     const pause = { seats: "all" as const, reason: "Hold other work", at: 1, by: "operator" };
     writeCrewPause(store, pause, 1);
@@ -739,7 +743,7 @@ describe("startRun", () => {
     const error = await refusal(sup.startRun("guido-1", 42));
     expect(error.status).toBe(409);
     expect(error.message).toContain("mc#41");
-    expect(store.run(older)?.loop?.aside?.wake).toBe(true);
+    expect(store.run(older)?.loop?.hold?.wake).toBe(true);
   });
 
   it("binds a run-bound pause exception at the actual pre-launch run boundary", async () => {
@@ -3814,7 +3818,10 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   store.upsertRun({ ...run, endedAt: null, status: "running" });
   store.setRunLoop(run.id, {
     ...NEW_LOOP,
-    aside: {
+    hold: {
+      kind: null,
+      reason: null,
+      ended: false,
       worktree: join(root, "mc-crew", "guido-1-42"),
       wake: true,
     },
@@ -3822,7 +3829,7 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   const error = await refusal(sup.wakeRun(run.id));
   expect(error.status).toBe(409);
   expect(store.run(run.id)?.endedAt).toBeNull();
-  expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
+  expect(store.run(run.id)?.loop?.hold?.wake).toBe(true);
   expect(recorded()).toEqual([]);
 });
 

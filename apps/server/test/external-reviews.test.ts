@@ -1247,7 +1247,13 @@ describe("current-head review read model", () => {
       {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "stuck", reason: "Waiting for the exact pushed head", ended: false },
+        hold: {
+          kind: "stuck",
+          reason: "Waiting for the exact pushed head",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
     );
     expect(state).toEqual({ kind: "held", by: "hub", reason: "Waiting for the exact pushed head" });

@@ -21,7 +21,8 @@ function queuedSince(store: Store, run: Run): number | null {
   let queued = false;
   for (const attempt of store.runAttempts(run.id)) {
     if (attempt.runId !== run.id || attempt.kind !== "loop") continue;
-    const aside = !!attempt.data.aside;
+    const aside = !!(attempt.data.hold as { worktree?: string | null } | null | undefined)
+      ?.worktree;
     if (aside && !queued) since = attempt.at;
     if (!aside) since = null;
     queued = aside;
@@ -184,9 +185,9 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
       add(`PR ${pr.number}`, `PR ${underlying.number}`, "stacked", since);
     }
   }
-  for (const run of active.filter((r) => !!r.loop?.aside)) {
+  for (const run of active.filter((r) => !!r.loop?.hold?.worktree)) {
     const ahead = active.find(
-      (r) => r.id !== run.id && r.agentId === run.agentId && !r.loop?.aside,
+      (r) => r.id !== run.id && r.agentId === run.agentId && !r.loop?.hold?.worktree,
     );
     if (!ahead) continue;
     const refOf = (r: Run) => (r.loop?.prNumber != null ? `PR ${r.loop.prNumber}` : r.ticket);

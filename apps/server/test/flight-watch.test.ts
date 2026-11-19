@@ -531,7 +531,7 @@ describe("FLIGHT's PR list", () => {
     store.setRunLoop("r-guido", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "silent", reason: "x", ended: false },
+      hold: { kind: "silent", reason: "x", ended: false, worktree: null, wake: false },
       prNumber: 7,
     });
     store.upsertPullRequests("mc", [stored(7)], T0);
@@ -617,7 +617,7 @@ describe("FLIGHT's evidence", () => {
     store.setRunLoop("r-guido", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind, reason: "x", ended: false },
+      hold: { kind, reason: "x", ended: false, worktree: null, wake: false },
     });
   };
 
@@ -705,7 +705,7 @@ describe("FLIGHT's flow queues", () => {
       ...NEW_LOOP,
       phase: "review",
       prNumber: 7,
-      aside: { worktree: "/w", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/w", wake: false },
     });
     store.upsertRun(run("r-current", "guido-1", { ticket: "mc#8", startedAt: T0 + 1 }));
     store.setRunLoop("r-current", { ...NEW_LOOP, phase: "ci", prNumber: 8 });
@@ -3197,7 +3197,7 @@ describe("ops signals", () => {
       store.setRunLoop("r-park", {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "push", reason: "push stuck", ended: false },
+        hold: { kind: "push", reason: "push stuck", ended: false, worktree: null, wake: false },
       });
       store.setSeatSession(row("guido-1", "r-park", "parked"));
       store.addLoopEvent("park-old", "r-park", "parked: push stuck", T0 - 16 * MIN);
@@ -3599,7 +3599,7 @@ describe("ops signals", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "push", reason: "push stuck", ended: false },
+          hold: { kind: "push", reason: "push stuck", ended: false, worktree: null, wake: false },
         },
       }),
     );
@@ -3791,7 +3791,7 @@ describe("triage and quiet wakes", () => {
       ...NEW_LOOP,
       prNumber: 7,
       phase: "review",
-      aside: { worktree: "/tmp/aside", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/tmp/aside", wake: false },
     });
     store.upsertPullRequests("mc", [stored(7, { updatedAt: T0 + MIN })], T0 + MIN);
     const after = signalState();
@@ -3890,7 +3890,11 @@ describe("ops review regressions", () => {
       store.upsertRun(
         run(id as string, "guido-1", {
           ticket: "mc#176",
-          loop: { ...NEW_LOOP, phase: "parked", parked: { kind: "budget", reason, ended: false } },
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            hold: { kind: "budget", reason, ended: false, worktree: null, wake: false },
+          },
         }),
       );
       store.addLoopEvent(`${id}:park`, id as string, `parked: ${reason}`, T0);
@@ -3916,7 +3920,7 @@ describe("ops review regressions", () => {
           loop: {
             ...NEW_LOOP,
             phase: "parked",
-            parked: { kind: "ci-pending", reason, ended: false },
+            hold: { kind: "ci-pending", reason, ended: false, worktree: null, wake: false },
           },
         }),
       );
@@ -3936,7 +3940,7 @@ describe("ops review regressions", () => {
     store.setRunLoop("push-a", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "push", reason: "push stuck", ended: false },
+      hold: { kind: "push", reason: "push stuck", ended: false, worktree: null, wake: false },
     });
     expect(signalState().signals).toHaveLength(1);
     expect(signalState().signals[0]?.key).toBe(current.signals[0]?.key);
@@ -4086,7 +4090,13 @@ describe("ops review regressions", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "silent", reason: "stopped twice without reporting", ended: false },
+          hold: {
+            kind: "silent",
+            reason: "stopped twice without reporting",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         },
       }),
     );
@@ -4645,7 +4655,7 @@ describe("the sweep's new checks hold back until their time", () => {
     store.setRunLoop("r-park", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "push", reason: "push stuck", ended: false },
+      hold: { kind: "push", reason: "push stuck", ended: false, worktree: null, wake: false },
     });
     store.setSeatSession(row("guido-1", "r-park", "parked"));
     store.addLoopEvent("p", "r-park", "parked: push stuck", T0 - 14 * MIN);
@@ -4774,7 +4784,7 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
       ...NEW_LOOP,
       prNumber: 7,
       phase: "parked",
-      parked: { kind: "push", reason: "push stuck", ended: false },
+      hold: { kind: "push", reason: "push stuck", ended: false, worktree: null, wake: false },
     });
     store.setSeatSession(row("guido-1", "r-pr", "parked"));
     await watch.check();
@@ -4783,7 +4793,13 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
       ...NEW_LOOP,
       prNumber: 7,
       phase: "parked",
-      parked: { kind: RULING_PARK, reason: "needs a ruling", ended: false },
+      hold: {
+        kind: RULING_PARK,
+        reason: "needs a ruling",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
     });
     await tick();
     expect(sendCalls).toHaveLength(1);

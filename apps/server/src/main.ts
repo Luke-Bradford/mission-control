@@ -145,6 +145,7 @@ import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
+import { restartFileService } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
   createAutoUpdate,
@@ -342,6 +343,12 @@ export async function main(): Promise<void> {
   });
   const scheduler = createScheduler({
     config,
+    ...(preview
+      ? {}
+      : {
+          restartFileService: (at: number, opts: { diagnose: boolean }) =>
+            restartFileService(join(dirname(dbPath), "diagnostics"), at, opts),
+        }),
     hubDiskUse: () => {
       void hubDiskUse.read().catch(() => {});
       return hubDiskUse.last();
@@ -1078,8 +1085,7 @@ export async function main(): Promise<void> {
     return store.runsActiveSince(Date.now() - 15 * 60_000).flatMap((run): RingSource[] => {
       if (!seats.has(run.agentId)) return [];
       const session = store.seatSession(run.agentId);
-      const cwd =
-        run.loop?.aside?.worktree ?? (session?.runId === run.id ? session.worktree : null);
+      const cwd = run.loop?.hold?.worktree ?? (session?.runId === run.id ? session.worktree : null);
       return cwd
         ? [
             {

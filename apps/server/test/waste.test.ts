@@ -211,7 +211,7 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
       store.upsertRun(r);
       store.setRunLoop(r.id, {
         phase: "parked",
-        parked: { kind: "stuck", reason: "no progress", ended: true },
+        hold: { kind: "stuck", reason: "no progress", ended: true, worktree: null, wake: false },
       } as RunLoop);
       last = r.id;
     }

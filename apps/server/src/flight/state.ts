@@ -1212,7 +1212,7 @@ export function flightState(i: {
     .filter(
       (r) =>
         r.endedAt === null &&
-        r.loop?.aside != null &&
+        r.loop?.hold?.worktree != null &&
         r.repoId === session.repoId &&
         mine.some((s) => s.id === r.agentId),
     )
@@ -1637,8 +1637,8 @@ export function flightWake(
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
 const parkOf = (store: Store, run: Run): FlightPark | null => {
   if (run.loop?.phase !== "parked") return null;
-  const kind = run.loop.parked?.kind ?? "";
-  const park: FlightPark = { kind, reason: run.loop.parked?.reason ?? "" };
+  const kind = run.loop.hold?.kind ?? "";
+  const park: FlightPark = { kind, reason: run.loop.hold?.reason ?? "" };
   if (FLIGHT_REPORT_PARKS.includes(kind)) {
     const report = store.latestEvidence(run.id)?.note;
     if (report !== undefined) park.report = cut(report, FLIGHT_REPORT_MAX);
