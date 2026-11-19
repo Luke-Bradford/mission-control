@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PullRequestView } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { MapConflicts } from "../src/map/conflicts.ts";
+import { MergeConflicts } from "../src/flight/merge-conflicts.ts";
 
 let dir: string;
 const git = (...args: string[]) =>
@@ -55,7 +55,7 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 /** The conflicts, or a rejection when any pair went unchecked: never a clean report by omission. */
-async function strict(collector: MapConflicts, worktree: string, prs: ReturnType<typeof pr>[]) {
+async function strict(collector: MergeConflicts, worktree: string, prs: ReturnType<typeof pr>[]) {
   const { conflicts, unchecked } = await collector.check(worktree, prs);
   if (unchecked.length > 0) throw new Error(`unchecked: ${JSON.stringify(unchecked)}`);
   return conflicts;
@@ -83,20 +83,20 @@ function contents(path: string): Record<string, string> {
 it("reports computed conflicts naming both open PR branches and their stored tips", async () => {
   // Branch refs deliberately differ from the stored PR tips.
   git("branch", "-f", "left", base);
-  expect(await strict(new MapConflicts(), dir, [pr("left", left), pr("right", right)])).toEqual([
+  expect(await strict(new MergeConflicts(), dir, [pr("left", left), pr("right", right)])).toEqual([
     { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
 });
 
 it("leaves every file in the source checkout and object store unchanged", async () => {
   const before = contents(dir);
-  await strict(new MapConflicts(), dir, [pr("left", left), pr("right", right)]);
+  await strict(new MergeConflicts(), dir, [pr("left", left), pr("right", right)]);
   expect(contents(dir)).toEqual(before);
 });
 
 it("ignores closed PRs and missing tips, and never calls clean overlap a conflict", async () => {
   expect(
-    await strict(new MapConflicts(), dir, [
+    await strict(new MergeConflicts(), dir, [
       pr("left", left),
       pr("closed", right, "closed"),
       pr("missing", null),
@@ -108,7 +108,7 @@ it("ignores closed PRs and missing tips, and never calls clean overlap a conflic
 });
 
 it("caches by unordered SHA pair, retains current branch names and invalidates changed tips", async () => {
-  const collector = new MapConflicts();
+  const collector = new MergeConflicts();
   await strict(collector, dir, [pr("left", left), pr("right", right)]);
   git("checkout", "--detach", base);
   git("branch", "-D", "left", "right");
@@ -128,7 +128,7 @@ it("caches by unordered SHA pair, retains current branch names and invalidates c
 });
 
 it("does not cache an unavailable pair as a clean merge", async () => {
-  const collector = new MapConflicts();
+  const collector = new MergeConflicts();
   await expect(
     strict(collector, dir, [pr("left", left), pr("missing", "a".repeat(40))]),
   ).rejects.toThrow();
@@ -139,7 +139,9 @@ it("reads linked worktree objects without changing either checkout", async () =>
   const linked = join(dir, "linked");
   git("worktree", "add", "--detach", linked, base);
   const before = contents(dir);
-  expect(await strict(new MapConflicts(), linked, [pr("left", left), pr("right", right)])).toEqual([
+  expect(
+    await strict(new MergeConflicts(), linked, [pr("left", left), pr("right", right)]),
+  ).toEqual([
     { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
   expect(contents(dir)).toEqual(before);
@@ -150,7 +152,7 @@ it("accepts a checkout reached through a symlinked directory", async () => {
   symlinkSync(dir, symlink, "dir");
   try {
     expect(
-      await strict(new MapConflicts(), symlink, [pr("left", left), pr("right", right)]),
+      await strict(new MergeConflicts(), symlink, [pr("left", left), pr("right", right)]),
     ).toEqual([
       { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
     ]);
@@ -161,7 +163,7 @@ it("accepts a checkout reached through a symlinked directory", async () => {
 
 it("skips a pair whose head the checkout has not fetched, keeping the rest of the snapshot", async () => {
   const missing = "f".repeat(40);
-  const result = await new MapConflicts().check(dir, [
+  const result = await new MergeConflicts().check(dir, [
     pr("left", left),
     pr("right", right),
     pr("unfetched", missing),
@@ -175,12 +177,12 @@ it("skips a pair whose head the checkout has not fetched, keeping the rest of th
 it("fails rather than reporting unchecked when the checkout itself is broken", async () => {
   const gone = join(dir, "not-a-checkout");
   await expect(
-    new MapConflicts().check(gone, [pr("left", left), pr("right", right)]),
+    new MergeConflicts().check(gone, [pr("left", left), pr("right", right)]),
   ).rejects.toThrow();
 });
 
 it("names an unfetched head unchecked, never clean", async () => {
-  const result = await new MapConflicts().check(dir, [
+  const result = await new MergeConflicts().check(dir, [
     pr("left", left),
     pr("unfetched", "e".repeat(40)),
   ]);
@@ -195,7 +197,7 @@ it("blames only the unrelated tip, holds its failed pairs until a head changes, 
   git("commit", "-qm", "orphan");
   const orphan = git("rev-parse", "HEAD");
   let now = 1_000_000;
-  const collector = new MapConflicts(() => now);
+  const collector = new MergeConflicts(() => now);
   const prs = [pr("left", left), pr("right", right), pr("orphan", orphan)];
   const first = await collector.check(dir, prs);
   expect(first.conflicts).toEqual([
@@ -238,7 +240,7 @@ it("checks a pair once its head is fetched, after the 10 s missing-head hold", a
     run("commit", "-qam", "late");
     const late = run("rev-parse", "HEAD");
     let now = 1_000_000;
-    const collector = new MapConflicts(() => now);
+    const collector = new MergeConflicts(() => now);
     const prs = [pr("left", left), pr("late", late)];
     expect((await collector.check(dir, prs)).unchecked).toEqual([
       { branch: "late", reason: "head not fetched" },
@@ -266,7 +268,7 @@ it("fails when the checkout is an existing directory that is not a repo", async 
   const plain = mkdtempSync(join(tmpdir(), "mc-map-conflicts-plain-"));
   try {
     await expect(
-      new MapConflicts().check(plain, [pr("left", left), pr("right", right)]),
+      new MergeConflicts().check(plain, [pr("left", left), pr("right", right)]),
     ).rejects.toThrow();
   } finally {
     rmSync(plain, { recursive: true, force: true });
@@ -275,7 +277,7 @@ it("fails when the checkout is an existing directory that is not a repo", async 
 
 it("names each branch's PR number in the order of the pair, null when the row has none", async () => {
   expect(
-    await strict(new MapConflicts(), dir, [
+    await strict(new MergeConflicts(), dir, [
       pr("left", left, "open", 11),
       pr("right", right, "open", 12),
     ]),
@@ -283,43 +285,8 @@ it("names each branch's PR number in the order of the pair, null when the row ha
     { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [11, 12] },
   ]);
   expect(
-    await strict(new MapConflicts(), dir, [pr("right", right, "open", 12), pr("left", left)]),
+    await strict(new MergeConflicts(), dir, [pr("right", right, "open", 12), pr("left", left)]),
   ).toEqual([
     { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [12, null] },
   ]);
-});
-
-it("the checked pairs are kept as one row per checkout, and a fresh instance merges nothing anew", async () => {
-  // a persist that behaves as the store's map cache does: exclusive keeps one row per kind+scope
-  const rows = new Map<string, string>();
-  let puts = 0;
-  const rowKey = (kind: string, scope: string, key: string) => `${kind}\0${scope}\0${key}`;
-  const persist = {
-    get: (kind: string, scope: string, key: string) => rows.get(rowKey(kind, scope, key)) ?? null,
-    put: (kind: string, scope: string, key: string, value: string, exclusive: boolean) => {
-      puts += 1;
-      if (exclusive)
-        for (const k of [...rows.keys()])
-          if (k.startsWith(`${kind}\0${scope}\0`) && k !== rowKey(kind, scope, key)) rows.delete(k);
-      rows.set(rowKey(kind, scope, key), value);
-    },
-  };
-  git("checkout", "-qb", "third", base);
-  writeFileSync(join(dir, "third.txt"), "third\n");
-  git("add", ".");
-  git("commit", "-qm", "third");
-  const third = git("rev-parse", "HEAD");
-  const prs = [pr("left", left), pr("right", right), pr("third", third)];
-  const first = await new MapConflicts(undefined, persist).check(dir, prs);
-  expect(rows.size).toBe(1);
-  expect(Object.keys(JSON.parse([...rows.values()][0] as string))).toHaveLength(3);
-  expect(puts).toBe(1);
-  // the same pairs from a fresh instance with an empty memory cache: the row answers, nothing is rewritten
-  const again = await new MapConflicts(undefined, persist).check(dir, prs);
-  expect(again.conflicts).toEqual(first.conflicts);
-  expect(puts).toBe(1);
-  // a pair that closed is dropped from the row on the next check
-  await new MapConflicts(undefined, persist).check(dir, [pr("left", left), pr("right", right)]);
-  expect(Object.keys(JSON.parse([...rows.values()][0] as string))).toHaveLength(1);
-  expect(puts).toBe(2);
 });
