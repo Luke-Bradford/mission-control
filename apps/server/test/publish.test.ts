@@ -1824,6 +1824,16 @@ describe("postMinorFindings", () => {
     expect(lines).toContain(minorMoreLine(1));
   });
 
+  it("builds the body from the latest note: a later Part of report ends the body Part of", async () => {
+    store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
+    answer();
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
+    expect(posted?.trimEnd().split("\n").at(-3)).toBe("Part of #7.");
+  });
+
   it("drops the section when there are no minors", async () => {
     const rv = review([]);
     answer();

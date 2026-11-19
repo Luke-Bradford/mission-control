@@ -934,7 +934,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (prNumber === null || repo === undefined || issue === null) {
         return { ok: false, text: prNotRunsText(0), transient: false };
       }
-      const note = deps.store.evidenceNotes(run.id)[0]?.note ?? "";
+      const note = deps.store.latestEvidence(run.id)?.note ?? "";
       const title =
         run.ticketTitle ??
         deps.store.board(run.repoId).find((b) => b.issueNumber === issue)?.title ??

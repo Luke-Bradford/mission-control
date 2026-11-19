@@ -1998,7 +1998,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         issue !== null &&
         marker !== null &&
         (noteIsPartOf(own, issue) ||
-          noteIsPartOf(deps.store.evidenceNotes(run.id)[0]?.note ?? "", issue) ||
+          noteIsPartOf(deps.store.latestEvidence(run.id)?.note ?? "", issue) ||
           current.split("\n").some((l) => l.trim() === marker));
       const lines = own.split("\n");
       const text = (marker !== null && lines.at(-1)?.trim() === marker ? lines.slice(0, -1) : lines)

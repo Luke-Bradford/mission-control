@@ -3876,6 +3876,18 @@ describe("push and draft_pr", () => {
       },
     );
 
+    it("reads the run's latest note, not the first, to see a PR is staged", async () => {
+      store.addEvidence(RUN, "Done.", Date.now() - 1000);
+      store.addEvidence(RUN, "Part of #42: stage 2.", Date.now());
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("Stage 2 text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).not.toContain("Closes #42.");
+      expect(body.match(/Part of #42\./g)).toHaveLength(1);
+      expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
+    });
+
     it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {
       store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
       ghState(view());
