@@ -19,8 +19,8 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
   type Crew,
-  type CrewAsideRun,
   type CrewLoop,
+  type CrewOffSeatRun,
   type CrewQueueItem,
   type CrewRow,
   clockHm,
@@ -629,8 +629,8 @@ function buildCrew(
   });
   const digestByRun = store.digests(latestRunIds);
   const contextWindows = store.digestContextWindows(allRuns.map((run) => run.id));
-  const asideAll = store.asideRuns();
-  const referencedPrs = [...allRuns, ...asideAll].flatMap((run) =>
+  const offSeatAll = store.offSeatRuns();
+  const referencedPrs = [...allRuns, ...offSeatAll].flatMap((run) =>
     run.prs.flatMap((pr) => {
       const repo = config.repos.find((repo) => repo.github.toLowerCase() === pr.repo.toLowerCase());
       return repo ? [{ repoId: repo.id, number: pr.number }] : [];
@@ -649,7 +649,14 @@ function buildCrew(
       phase: run.loop.phase,
       text: loopText(ticket, run.loop),
       prNumber: run.loop.prNumber,
-      parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
+      hold:
+        run.loop.hold && (run.loop.phase === "parked" || run.loop.hold.worktree)
+          ? {
+              kind: run.loop.phase === "parked" ? run.loop.hold.kind : null,
+              reason: run.loop.phase === "parked" ? run.loop.hold.reason : null,
+              offSeat: !!run.loop.hold.worktree,
+            }
+          : null,
       tries: runTries(store, run, run.loop),
       wait,
       ...(wait === "seat" ? { waitText: reworkWaitText(store, run) } : {}),
@@ -793,11 +800,11 @@ function buildCrew(
         ticket,
         ticketTitle: latest ? runTicketTitle(latest, ticket, ticketTitle(ticket)) : null,
         loop: agent.kind === "crew" && latest ? crewLoop(latest, ticket) : null,
-        asideRuns:
+        offSeatRuns:
           agent.kind === "crew"
-            ? asideAll
+            ? offSeatAll
                 .filter((r) => r.agentId === agent.id && r.id !== latest?.id)
-                .flatMap((r): CrewAsideRun[] => {
+                .flatMap((r): CrewOffSeatRun[] => {
                   const t = runTicket(r, runPrs(config, store, r, prCache));
                   const l = crewLoop(r, t);
                   return l
@@ -1016,7 +1023,7 @@ export const HUB_STOP_KEYS = [
 /** The park kind of the run behind a note item, if any. */
 function noteParkOf(item: Pick<AttentionItem, "key">, store: Store): string | undefined {
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  return note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  return note?.runId ? (store.run(note.runId)?.loop?.hold?.kind ?? undefined) : undefined;
 }
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
@@ -1851,7 +1858,7 @@ function endedParkGone(
   boardOf: (repoId: string) => BoardItem[],
 ): boolean {
   const loop = run.loop;
-  if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
+  if (loop?.phase !== "parked" || loop.hold?.kind !== "ended") return false;
   return runSubjectGone(config, store, run, boardOf);
 }
 
@@ -2063,7 +2070,9 @@ function crewItems(
     const resolved =
       run !== null &&
       (run.endedAt !== null ||
-        (n.kind === "blocked" && run.loop?.parked == null && (run.loop?.unparkedAt ?? 0) > n.at) ||
+        (n.kind === "blocked" &&
+          run.loop?.hold?.kind == null &&
+          (run.loop?.unparkedAt ?? 0) > n.at) ||
         (n.kind === "blocked" && confirmedResumeAfter(store, run, n.at)) ||
         run.loop?.phase === "done" ||
         (pr !== undefined && pr.state !== "open") ||
@@ -2076,8 +2085,8 @@ function crewItems(
       pr !== undefined &&
       pr.state !== "open" &&
       (pr.mergedAt ?? (pr.state === "closed" ? pr.updatedAt : 0)) >= n.at &&
-      run?.loop?.parked?.kind !== "budget" &&
-      run?.loop?.parked?.kind !== "account" &&
+      run?.loop?.hold?.kind !== "budget" &&
+      run?.loop?.hold?.kind !== "account" &&
       (run === null || store.seatSession(run.agentId)?.state !== "stopped");
     if (
       (n.kind === "blocked" || n.kind === "review") &&

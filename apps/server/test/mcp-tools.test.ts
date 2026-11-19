@@ -3295,7 +3295,7 @@ describe("push and draft_pr", () => {
         store.setRunLoop(RUN, {
           ...NEW_LOOP,
           phase: "review",
-          aside: { worktree: wt, wake: false },
+          hold: { kind: null, reason: null, ended: false, worktree: wt, wake: false },
         });
         expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
       });
@@ -4290,7 +4290,7 @@ describe("report_evidence", () => {
     lastRefusal: null,
     epoch: 0,
     budgetExtra: 0,
-    parked: null,
+    hold: null,
     touches: null,
     cardFor: null,
   };
@@ -4614,7 +4614,7 @@ describe("report_evidence", () => {
   it.each(["review"])("records fresh evidence and resumes a %s park", async (kind) => {
     setLoop({
       phase: "parked",
-      parked: { kind, reason: "parked", ended: false },
+      hold: { kind, reason: "parked", ended: false, worktree: null, wake: false },
       transient: 2,
       lastRefusal: "no",
     });
@@ -4622,7 +4622,7 @@ describe("report_evidence", () => {
     expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
     expect(store.run(RUN)?.loop).toMatchObject({
       phase: "working",
-      parked: null,
+      hold: null,
       transient: 0,
       lastRefusal: null,
     });
@@ -4632,7 +4632,10 @@ describe("report_evidence", () => {
   it.each(["budget", "account-stop", "controller-check", "uat", "gate", "review-ruling"])(
     "keeps a %s park held",
     async (kind) => {
-      setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+      setLoop({
+        phase: "parked",
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
+      });
       await committed();
       expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
       expect(store.latestEvidence(RUN)).toBeNull();
@@ -4642,7 +4645,13 @@ describe("report_evidence", () => {
   it("keeps an ended push-wait stop held despite fresh committed work", async () => {
     setLoop({
       phase: "parked",
-      parked: { kind: "stuck", reason: "Ended by operator", ended: true },
+      hold: {
+        kind: "stuck",
+        reason: "Ended by operator",
+        ended: true,
+        worktree: null,
+        wake: false,
+      },
     });
     await committed();
     expect(await report("Fresh work must not undo an operator stop.")).toEqual(
@@ -4744,17 +4753,23 @@ describe("report_evidence", () => {
           return crewGit(cwd, args, common, options);
         },
       });
-      setLoop({ phase: "parked", parked: { kind, reason: "waiting", ended: false } });
+      setLoop({
+        phase: "parked",
+        hold: { kind, reason: "waiting", ended: false, worktree: null, wake: false },
+      });
       const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
       await vi.waitFor(() => expect(statusReads).toBe(1));
-      setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
+      setLoop({
+        phase: "parked",
+        hold: { kind: "budget", reason: "held", ended: false, worktree: null, wake: false },
+      });
       release();
 
       expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
       expect(store.latestEvidence(RUN)).toBeNull();
       expect(store.run(RUN)?.loop).toMatchObject({
         phase: "parked",
-        parked: { kind: "budget", reason: "held", ended: false },
+        hold: { kind: "budget", reason: "held", ended: false, worktree: null, wake: false },
       });
     },
   );

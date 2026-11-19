@@ -103,6 +103,7 @@ import {
   type Run,
   type RunLoop,
   type RunPlan,
+  rejoinSeat,
   retiringText,
   reviewDepth,
   reworkFirstText,
@@ -152,7 +153,7 @@ import {
   realish,
   seatUnavailable,
 } from "../config.ts";
-import { wakeDueAsideRun } from "../engine/aside.ts";
+import { offSeatHold, wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
@@ -1179,7 +1180,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     };
     fold(l, true);
     const fresh = store.run(l.run.id);
-    const parked = fresh?.loop?.parked?.kind;
+    const parked = fresh?.loop?.hold?.kind;
     const failedReview =
       fresh?.reviewId != null && store.review(fresh.reviewId)?.state === "failed";
     const isCheck = checkRuns.has(l.run.id);
@@ -1963,8 +1964,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 return w == null ? [] : [realish(w)];
               }),
               // a run set aside in review has no seat row to name its worktree
-              ...store.asideRuns().flatMap((r) => {
-                const w = r.loop?.aside?.worktree;
+              ...store.offSeatRuns().flatMap((r) => {
+                const w = r.loop?.hold?.worktree;
                 const mate = info.session.seats.some((s) => s.id === r.agentId);
                 return w == null || !mate || r.agentId === info.seat.id ? [] : [realish(w)];
               }),
@@ -3441,7 +3442,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw busy;
     }
-    const waiting = store.asideRuns();
+    const waiting = store.offSeatRuns();
     const ref = `${info.repo.id}#${issue}`;
     const inReview = !readOnly
       ? waiting.find(
@@ -3449,7 +3450,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             r.ticket === ref &&
             r.agentId === seatId &&
             r.loop?.phase === "review" &&
-            r.loop.parked == null,
+            r.loop.hold?.kind == null,
         )
       : undefined;
     const rework = wakeDueAsideRun(store, seatId);
@@ -4776,7 +4777,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (info === undefined) return;
     if (row?.runId !== runId) {
       // a run set aside in review: no process, no seat; its worktree is all it holds
-      const aside = run.loop?.aside;
+      const aside = offSeatHold(run);
       if (aside && live.get(seatId)?.run.id !== runId) {
         await endAside(run, info, aside.worktree, reason ?? "engine");
       }
@@ -4895,7 +4896,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** The operator ends a run set aside in review: no CLI is woken, the seat is left as it is. */
   async function endAsideRun(runId: string): Promise<void> {
     const run = store.run(runId);
-    const aside = run?.endedAt === null ? run.loop?.aside : null;
+    const aside = offSeatHold(run);
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
     const info = need(run.agentId);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
@@ -4912,7 +4913,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function wakeRun(runId: string, options: { reviewResume?: boolean } = {}): Promise<void> {
     const run = store.run(runId);
-    const aside = run?.endedAt === null ? run.loop?.aside : null;
+    const aside = offSeatHold(run);
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
     const seatId = run.agentId;
     const info = need(seatId);
@@ -4992,9 +4993,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           current === null ||
           current.endedAt !== null ||
           loop?.phase !== "review" ||
-          loop.parked !== null ||
-          loop.aside?.worktree !== aside.worktree ||
-          loop.aside.wake !== aside.wake
+          loop.hold?.kind != null ||
+          loop.hold?.worktree !== aside.worktree ||
+          loop.hold.wake !== aside.wake
         )
           return null;
         return current;
@@ -5073,7 +5074,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (options.reviewResume) {
         const current = store.run(runId)?.loop;
         if (current !== null && current !== undefined)
-          store.setRunLoop(runId, { ...current, aside: null });
+          store.setRunLoop(runId, { ...current, hold: rejoinSeat(current.hold) });
       }
     } finally {
       wakingRuns.delete(runId);
@@ -5457,13 +5458,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     endRemovedAside(runId) {
       if (!mayAct()) return false;
       const run = store.run(runId);
-      if (!run || run.endedAt !== null || !run.loop?.aside) return false;
+      if (!run || run.endedAt !== null || !run.loop?.hold?.worktree) return false;
       if (config.loops.some((loop) => loop.id === run.agentId)) return false;
       if (starting.has(run.agentId) || live.has(run.agentId)) return false;
       if (
         store
           .runsActiveSince(Number.MAX_SAFE_INTEGER)
-          .some((r) => r.agentId === run.agentId && r.endedAt === null && !r.loop?.aside)
+          .some((r) => r.agentId === run.agentId && r.endedAt === null && !r.loop?.hold?.worktree)
       )
         return false;
       recordEnded(run.id, now(), "ok", "operator");

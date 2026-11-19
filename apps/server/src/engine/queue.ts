@@ -155,7 +155,7 @@ export function seatMayTake(
 ): boolean {
   if (pausedSeat(store, seatId, null)) return false;
   if (wakeDueAsideRun(store, seatId) !== undefined) return false;
-  const open = store.asideRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
+  const open = store.offSeatRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
   if (open.length >= maxOpenRuns) return false;
   const row = store.seatSession(seatId);
   if (row === null) return true;

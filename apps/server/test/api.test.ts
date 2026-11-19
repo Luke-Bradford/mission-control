@@ -4485,7 +4485,13 @@ describe("away settings", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "stuck", reason: "Verify stopped producing output", ended: false },
+          hold: {
+            kind: "stuck",
+            reason: "Verify stopped producing output",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         },
       }),
     );
@@ -7641,7 +7647,7 @@ describe("seat ids in the agent routes", () => {
       store.setRunLoop("c1", {
         ...NEW_LOOP,
         phase: "review",
-        aside: { worktree: wt, wake: false },
+        hold: { kind: null, reason: null, ended: false, worktree: wt, wake: false },
       });
       const body = (await get("/api/agents/guido-1/files")).json<ChangedFiles>();
       expect(body.files.map((f) => f.path)).toContain("done.txt");
@@ -7760,7 +7766,7 @@ describe("the first loop's engine", () => {
     lastRefusal: null,
     epoch: 0,
     budgetExtra: 0,
-    parked: null,
+    hold: null,
     touches: null,
     cardFor: null,
   } as const;
@@ -7843,7 +7849,18 @@ describe("the first loop's engine", () => {
         id: "parked",
         agentId: "guido-1",
         ticket: "shop-app#9",
-        loop: { ...loop, phase: "working", aside: { worktree: "/w/parked", wake: false, ask: 1 } },
+        loop: {
+          ...loop,
+          phase: "working",
+          hold: {
+            kind: null,
+            reason: null,
+            ended: false,
+            worktree: "/w/parked",
+            wake: false,
+            ask: 1,
+          },
+        },
       }),
     );
     store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
@@ -7909,7 +7926,11 @@ describe("the first loop's engine", () => {
           id,
           agentId: "guido-1",
           ticket,
-          loop: { ...loop, phase: "working", aside: { worktree: `/w/${id}`, wake: false } },
+          loop: {
+            ...loop,
+            phase: "working",
+            hold: { kind: null, reason: null, ended: false, worktree: `/w/${id}`, wake: false },
+          },
         }),
       );
     const passed = (runId: string, text: string) => {
@@ -8144,7 +8165,11 @@ describe("the first loop's engine", () => {
         run({
           id: "aside",
           agentId: "guido-1",
-          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+          loop: {
+            ...loop,
+            phase: "parked",
+            hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
+          },
         }),
       );
       const { a, calls } = engineApp(null);
@@ -8167,7 +8192,11 @@ describe("the first loop's engine", () => {
         run({
           id: "aside",
           agentId: "guido-1",
-          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+          loop: {
+            ...loop,
+            phase: "parked",
+            hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
+          },
         }),
       );
       const { a, calls } = engineApp(null);
@@ -8268,7 +8297,11 @@ describe("the first loop's engine", () => {
           id: "aside",
           agentId: "guido-1",
           ticket: "shop-app#9",
-          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+          loop: {
+            ...loop,
+            phase: "parked",
+            hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
+          },
         }),
       );
       const { a, calls } = engineApp(null, undefined, true);
@@ -8305,7 +8338,11 @@ describe("the first loop's engine", () => {
         run({
           id: "aside",
           agentId: "guido-1",
-          loop: { ...loop, phase: "parked", parked: { kind, reason: "held", ended: false } },
+          loop: {
+            ...loop,
+            phase: "parked",
+            hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
+          },
         }),
       );
       const { a, calls } = engineApp(null);
@@ -8331,7 +8368,7 @@ describe("the first loop's engine", () => {
         loop: {
           ...loop,
           phase: "parked",
-          parked: { kind: "review", reason: "held", ended: false },
+          hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
         },
       }),
     );
@@ -8362,7 +8399,7 @@ describe("the first loop's engine", () => {
         loop: {
           ...loop,
           phase: "parked",
-          parked: { kind: "review", reason: "held", ended: false },
+          hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
         },
       }),
     );
@@ -8686,6 +8723,31 @@ describe("the first loop's engine", () => {
       prompt: [],
     });
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
+  });
+
+  it("keeps deprecated park and set-aside fields at the API boundary", async () => {
+    withCrew();
+    const hold = {
+      kind: "review",
+      reason: "x",
+      ended: false,
+      worktree: "/w",
+      wake: true,
+    };
+    store.upsertRun(run({ id: "held", agentId: "guido-1" }));
+    store.setRunLoop("held", { ...NEW_LOOP, phase: "parked", hold });
+    expect((await get("/api/runs/held/loop")).json().loop).toMatchObject({
+      hold,
+      parked: { kind: "review", reason: "x", ended: false },
+      aside: { worktree: "/w", wake: true },
+    });
+
+    store.upsertRun(run({ id: "current", agentId: "guido-1", startedAt: NOW + 1 }));
+    store.setRunLoop("current", { ...NEW_LOOP, phase: "working" });
+    const row = (await get("/api/crew")).json<Crew>().rows.find((r) => r.id === "guido-1");
+    expect(row?.offSeatRuns).toHaveLength(1);
+    expect(row?.asideRuns).toEqual(row?.offSeatRuns);
+    expect(row?.loop?.parked).toBeNull();
   });
 
   it("omits toolStarts from /api/crew digests", async () => {
@@ -9347,7 +9409,13 @@ describe("operator token", () => {
             lastRefusal: null,
             epoch: 0,
             budgetExtra: 0,
-            parked: { kind: "controller-check", reason: "check", ended: false },
+            hold: {
+              kind: "controller-check",
+              reason: "check",
+              ended: false,
+              worktree: null,
+              wake: false,
+            },
             touches: null,
             cardFor: null,
           },
@@ -9483,7 +9551,13 @@ describe("operator token", () => {
             ...NEW_LOOP,
             phase: "parked",
             prNumber: 12,
-            parked: { kind: "uat", reason: "waiting for your acceptance", ended: false },
+            hold: {
+              kind: "uat",
+              reason: "waiting for your acceptance",
+              ended: false,
+              worktree: null,
+              wake: false,
+            },
             uat: { sha: SHA, from: "review", accepted: false },
           },
         }),
@@ -9940,7 +10014,7 @@ describe("overview", () => {
   });
 
   it("shares crew across crew, attention and Overview, expiring at the next two-second bucket", async () => {
-    const reads = vi.spyOn(store, "asideRuns");
+    const reads = vi.spyOn(store, "offSeatRuns");
     clock = Math.floor(clock / 2_000) * 2_000;
     await get("/api/crew");
     expect(reads).toHaveBeenCalledTimes(1);
@@ -9960,7 +10034,7 @@ describe("overview", () => {
   it.each(["agents", "boards", "escalations", "health", "settings", "config", "guard"] as const)(
     "invalidates shared crew on %s",
     async (topic) => {
-      const reads = vi.spyOn(store, "asideRuns");
+      const reads = vi.spyOn(store, "offSeatRuns");
       await get("/api/crew");
       bus.emit(topic);
       await get("/api/overview");

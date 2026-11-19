@@ -115,8 +115,8 @@ export function awayDigest(
       {
         kind: "failures",
         items: runs.flatMap((r) =>
-          r.endedAt === null && r.loop?.parked && !r.loop.parked.ended
-            ? [{ runId: r.id, ticket: r.ticket, reason: r.loop.parked.reason }]
+          r.endedAt === null && r.loop?.hold?.kind && !r.loop.hold.ended
+            ? [{ runId: r.id, ticket: r.ticket, reason: r.loop.hold.reason ?? "" }]
             : [],
         ),
       },

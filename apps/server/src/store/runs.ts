@@ -306,7 +306,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       const rows = db
         .prepare(
           `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
-             AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
+             AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.hold.kind') IS NOT NULL)
            ORDER BY started_at, seq`,
         )
         .all() as Row[];
@@ -322,11 +322,11 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
     },
 
     /** The runs that have not ended and are off their seat in review, oldest first. */
-    asideRuns(): Run[] {
+    offSeatRuns(): Run[] {
       const rows = db
         .prepare(
           `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
-             AND json_extract(loop, '$.aside') IS NOT NULL
+             AND json_extract(loop, '$.hold.worktree') IS NOT NULL
            ORDER BY started_at, seq`,
         )
         .all() as Row[];
@@ -353,7 +353,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         db
           .prepare(
             `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
-               AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
+               AND (loop IS NULL OR json_extract(loop, '$.hold.worktree') IS NULL) LIMIT 1`,
           )
           .get(since, ...agentIds) !== undefined
       );
@@ -363,7 +363,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       return (
         db
           .prepare(
-            "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+            "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.hold.worktree') IS NULL) LIMIT 1",
           )
           .get() !== undefined
       );

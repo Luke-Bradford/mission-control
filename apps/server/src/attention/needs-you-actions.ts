@@ -199,7 +199,7 @@ async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
     if (c.supervisor === undefined) throw new Error("the crew is off");
     if (c.store.seatSession(run.agentId)?.runId === run.id)
       await c.supervisor.endRun(run.agentId, { hold: false });
-    else if (run.loop?.aside) await c.supervisor.endAsideRun(run.id);
+    else if (run.loop?.hold?.worktree) await c.supervisor.endAsideRun(run.id);
     else throw new Error("the run is not on its seat");
   }
 }

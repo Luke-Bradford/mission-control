@@ -31,7 +31,7 @@ import {
 import { FLIGHT_FLOOR_ENFORCING_PATHS, FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
 import { globMatches } from "./runtime.ts";
 import type { SeatState } from "./runtime-model.ts";
-import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
+import type { MergeStep, PrCheck, PullRequestView, RunHold, RunLoop } from "./types.ts";
 import type { TicketView } from "./views.ts";
 
 /** What a PR head's checks say about CI, with the names behind it. */
@@ -88,14 +88,71 @@ export const EVIDENCE_PARKED =
 export const EVIDENCE_UNPARK_KINDS = ["review"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
-export function evidenceCanUnpark(
-  parked: RunLoop["parked"],
-): parked is NonNullable<RunLoop["parked"]> {
+export function evidenceCanUnpark(hold: RunLoop["hold"]): hold is RunHold & { kind: string } {
   return (
-    parked !== null &&
-    !parked.ended &&
-    (EVIDENCE_UNPARK_KINDS as readonly string[]).includes(parked.kind)
+    hold != null &&
+    hold.kind !== null &&
+    !hold.ended &&
+    (EVIDENCE_UNPARK_KINDS as readonly string[]).includes(hold.kind)
   );
+}
+
+/** A hold with no park: only the worktree the run kept; null when nothing is left to hold. */
+const keptOnly = (hold: RunHold | null | undefined): RunHold | null =>
+  hold?.worktree
+    ? {
+        kind: null,
+        reason: null,
+        ended: false,
+        worktree: hold.worktree,
+        wake: hold.wake,
+        ...(hold.ask !== undefined ? { ask: hold.ask } : {}),
+      }
+    : null;
+
+/** Park the run, keeping any worktree it has left on. */
+export function parkHold(
+  hold: RunHold | null | undefined,
+  kind: string,
+  reason: string,
+  ended: boolean,
+): RunHold {
+  return {
+    kind,
+    reason,
+    ended,
+    worktree: hold?.worktree ?? null,
+    wake: hold?.wake ?? false,
+    ...(hold?.ask !== undefined ? { ask: hold.ask } : {}),
+  };
+}
+
+/** Lift the park; a run off its seat stays off it. */
+export function liftPark(hold: RunHold | null | undefined): RunHold | null {
+  return keptOnly(hold);
+}
+
+/** The run leaves its seat, keeping `worktree`; any park it is under stays. */
+export function leaveSeat(
+  hold: RunHold | null | undefined,
+  worktree: string,
+  wake: boolean,
+  ask?: number,
+): RunHold {
+  return {
+    kind: hold?.kind ?? null,
+    reason: hold?.reason ?? null,
+    ended: hold?.ended ?? false,
+    worktree,
+    wake,
+    ...(ask !== undefined ? { ask } : {}),
+  };
+}
+
+/** The run is back on its seat; any park it is under stays. */
+export function rejoinSeat(hold: RunHold | null | undefined): RunHold | null {
+  if (!hold || hold.kind === null) return null;
+  return { kind: hold.kind, reason: hold.reason, ended: hold.ended, worktree: null, wake: false };
 }
 /** The last push is in CI. */
 export const EVIDENCE_IN_CI =
@@ -403,6 +460,24 @@ const prRef = (pr: number | null): string => (pr === null ? "the PR" : `PR #${pr
 export const readyMarkedText = (pr: number | null): string => `marked ${prRef(pr)} ready`;
 export const mergedText = (pr: number | null): string => `merged ${prRef(pr)} (merge commit)`;
 export const closedIssueText = (issue: number): string => `closed #${issue}`;
+export const leftOpenText = (issue: number): string =>
+  `left #${issue} open: the PR is part of the ticket`;
+
+/**
+ * Whether a merged PR's body names ticket `issue` of `repo` (`owner/name`) only as a part of it
+ * ("Part of #N", "Refs #N", any case) and never with a closing keyword (Closes, Fixes, Resolves).
+ * A bare `#N` is this repo's; `owner/name#N` counts only when it is this repo. A body that names
+ * the ticket not at all is not part-only: the engine closes the ticket as before.
+ */
+export function prIsPartOf(body: string, repo: string, issue: number): boolean {
+  const mine = (words: string): boolean =>
+    [
+      ...body.matchAll(
+        new RegExp(`\\b(?:${words})\\b:?\\s+(?:([\\w.-]+/[\\w.-]+))?#${issue}(?!\\d)`, "gi"),
+      ),
+    ].some((m) => m[1] === undefined || m[1].toLowerCase() === repo.toLowerCase());
+  return mine("part\\s+of|refs?|references?") && !mine("close[sd]?|fix(?:e[sd])?|resolve[sd]?");
+}
 export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
 export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;
 export const localNotDeletedText = (branch: string, why: string): string =>
@@ -481,7 +556,7 @@ export const loopText = (ref: string | null, loop: RunLoop): string => {
         ? LOOP_TEXT_REVIEW
         : fillLoopText(LOOP_TEXT_REVIEW_PR, { n: String(loop.prNumber) });
     case "parked":
-      return fillLoopText(LOOP_TEXT_PARKED, { reason: loop.parked?.reason ?? "" });
+      return fillLoopText(LOOP_TEXT_PARKED, { reason: loop.hold?.reason ?? "" });
     case "done":
       return loop.prNumber === null
         ? LOOP_TEXT_DONE
@@ -505,12 +580,11 @@ export const NEW_LOOP: RunLoop = {
   lastRefusal: null,
   epoch: 0,
   budgetExtra: 0,
-  parked: null,
+  hold: null,
   touches: null,
   cardFor: null,
   reviewWaivedSha: null,
   prBody: null,
-  aside: null,
 };
 
 /** A run in review leaves its seat when the session has a review seat. */
@@ -789,7 +863,7 @@ function untilText(at: number | null, tz: string | null): string {
  * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
  * free while it stands. The run rejoins its seat's queue when the park is lifted.
  */
-const isDecisionPark = (kind: string | undefined): boolean =>
+const isDecisionPark = (kind: string | null | undefined): boolean =>
   kind === CONTROLLER_CHECK_PARK ||
   kind === UAT_PARK ||
   kind === MERGE_HOLD_PARK ||
@@ -805,11 +879,11 @@ const isDecisionPark = (kind: string | undefined): boolean =>
 const park = (loop: RunLoop, kind: string, reason: string): Step =>
   isDecisionPark(kind)
     ? {
-        loop: { ...loop, phase: "parked", parked: { kind, reason, ended: false } },
+        loop: { ...loop, phase: "parked", hold: parkHold(loop.hold, kind, reason, false) },
         actions: [{ kind: "event", text: parkedEventText(reason) }],
       }
     : {
-        loop: { ...loop, phase: "parked", parked: { kind, reason, ended: true } },
+        loop: { ...loop, phase: "parked", hold: parkHold(loop.hold, kind, reason, true) },
         actions: [
           { kind: "event", text: parkedEventText(reason) },
           { kind: "end-run" },
@@ -931,7 +1005,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.hardRulesSet === true &&
     gate !== null &&
     (elevated || (gate.hubOnly && gate.strays.length === 0)) &&
-    (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
+    (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || !!loop.hold?.worktree)));
   const awaiting = elevated && otherGates && flightCall && !cleared;
   const passes = otherGates && clear;
   return { on, P, touches, gate, clear, passes, awaiting };
@@ -1009,7 +1083,7 @@ function stateStep(s: LoopSnapshot): Step {
   const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
   // the server parked this run after the merge: its step failed, and the operator decides
-  if (loop.phase === "parked" && loop.parked?.kind === "merge-step") return unchanged(loop);
+  if (loop.phase === "parked" && loop.hold?.kind === "merge-step") return unchanged(loop);
   if (merged && loop.phase !== "done") {
     const mergedSha = pr?.headSha ?? pushed?.sha ?? null;
     const merging =
@@ -1038,25 +1112,25 @@ function stateStep(s: LoopSnapshot): Step {
           : [...doneMove(loop), { kind: "end-run" }, { kind: "take-next" }],
     };
   }
-  if (s.ended !== null && !loop.parked?.ended) {
+  if (s.ended !== null && !loop.hold?.ended) {
     // the CLI stops itself at its cap: the end keeps the dollar figure the cap hit parked with
     const capReason = dollarCapReason(s);
-    const parked =
-      loop.parked?.kind === "budget"
-        ? { ...loop.parked, ended: true }
+    const stop =
+      loop.hold?.kind === "budget"
+        ? parkHold(loop.hold, "budget", loop.hold.reason ?? "", true)
         : capReason !== null
-          ? { kind: "budget", reason: capReason, ended: true }
-          : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
+          ? parkHold(loop.hold, "budget", capReason, true)
+          : parkHold(loop.hold, "ended", `run ended (${s.ended.reason})`, true);
     // A park that ended with blocking findings owes its card the Ready move even if the park
     // already moved it to Blocked: clear the mark so desiredStep plans it. A budget stop stays, and so
     // does a closed PR (nobody wants that work restarted).
     const reviewed = reviewView(s, loop);
     const owesReady =
-      parked.kind !== "budget" && s.pr?.state === "open" && reviewed.blocked && !reviewed.waived;
+      stop.kind !== "budget" && s.pr?.state === "open" && reviewed.blocked && !reviewed.waived;
     return {
-      loop: { ...loop, phase: "parked", parked, ...(owesReady ? { cardFor: null } : {}) },
+      loop: { ...loop, phase: "parked", hold: stop, ...(owesReady ? { cardFor: null } : {}) },
       actions:
-        capReason !== null && loop.parked?.kind !== "budget"
+        capReason !== null && loop.hold?.kind !== "budget"
           ? [{ kind: "event", text: parkedEventText(capReason) }]
           : [],
     };
@@ -1064,8 +1138,8 @@ function stateStep(s: LoopSnapshot): Step {
   // a ruling on a red head is void once the seat's newer push shows green checks: back to review
   if (
     loop.phase === "parked" &&
-    (loop.parked?.kind === RULING_PARK || loop.parked?.kind === "review-ruling") &&
-    !loop.parked.ended &&
+    (loop.hold?.kind === RULING_PARK || loop.hold?.kind === "review-ruling") &&
+    !loop.hold.ended &&
     loop.ciFailedSha !== null &&
     pr?.state === "open" &&
     pr.ci === "passing" &&
@@ -1078,7 +1152,7 @@ function stateStep(s: LoopSnapshot): Step {
       loop: {
         ...loop,
         phase: "review",
-        parked: null,
+        hold: liftPark(loop.hold),
         ciFails: 0,
         transient: 0,
         lastRefusal: null,
@@ -1096,19 +1170,19 @@ function stateStep(s: LoopSnapshot): Step {
     // Old databases can still hold parks from before non-decision parks became stops. End those
     // runs here so an upgrade cannot leave a seat held by a park nothing can lift.
     if (
-      loop.parked !== null &&
-      !loop.parked.ended &&
-      !isDecisionPark(loop.parked.kind) &&
-      loop.parked.kind !== "ci"
+      loop.hold?.kind != null &&
+      !loop.hold.ended &&
+      !isDecisionPark(loop.hold.kind) &&
+      loop.hold.kind !== "ci"
     ) {
       return {
-        loop: { ...loop, parked: { ...loop.parked, ended: true } },
+        loop: { ...loop, hold: { ...loop.hold, ended: true } },
         actions: [{ kind: "end-run" }, { kind: "take-next" }],
       };
     }
     // a stop whose run is still live (the hub went down between saving the stop and ending the run)
     // ends it now
-    return loop.parked?.ended && s.ended === null
+    return loop.hold?.ended && s.ended === null
       ? { loop, actions: [{ kind: "end-run" }, { kind: "take-next" }] }
       : unchanged(loop);
   }
@@ -1380,11 +1454,11 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
   if (loop.phase === "parked") {
     notes.set(blockedNoteKey(runId, loop.epoch), {
       noteKind: "blocked",
-      text: `${ticket.ref} parked: ${loop.parked?.reason ?? "parked"}`,
+      text: `${ticket.ref} parked: ${loop.hold?.reason ?? "parked"}`,
     });
   }
   // an ended run keeps only its blocked note: the seat's rate limit belongs to its next run
-  if (loop.parked?.ended) return notes;
+  if (loop.hold?.ended) return notes;
   const rv = reviewView(s, loop);
   if (rv.R !== null) {
     if (loop.phase === "review" && s.ended === null && rv.P !== null) {
@@ -1512,12 +1586,12 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
   return (
     s.asideOk &&
-    !loop.aside &&
+    !loop.hold?.worktree &&
     s.ended === null &&
     (loop.phase === "review" ||
       loop.phase === "ci" ||
       // the seat is free while the operator decides
-      (loop.phase === "parked" && isDecisionPark(loop.parked?.kind))) &&
+      (loop.phase === "parked" && isDecisionPark(loop.hold?.kind))) &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
@@ -1525,7 +1599,7 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     pushed !== null &&
     s.headCommit === pushed.sha &&
     // a ruling on the failure waits on FLIGHT or the operator, not on a fix
-    (loop.ciFailedSha !== pushed.sha || loop.parked?.kind === RULING_PARK) &&
+    (loop.ciFailedSha !== pushed.sha || loop.hold?.kind === RULING_PARK) &&
     pr?.state === "open" &&
     pr.headSha === pushed.sha &&
     !fixDue(s, loop) &&
@@ -1535,7 +1609,7 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
 
 /** A line the engine owes the run (the answer to its parked question) goes before it leaves its seat again. */
 function pendingLineDue(s: LoopSnapshot, loop: RunLoop): boolean {
-  return !loop.aside && !!loop.pendingLine && !(loop.pendingLine.key in s.claimed);
+  return !loop.hold?.worktree && !!loop.pendingLine && !(loop.pendingLine.key in s.claimed);
 }
 
 /** Whether the run being built leaves its seat to wait for the operator's answer, not hold the seat idle. */
@@ -1545,7 +1619,7 @@ function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
     s.operatorAsk === true &&
     seat.openQuestion &&
     (loop.phase === "working" || loop.phase === "ci" || loop.phase === "review") &&
-    !loop.aside &&
+    !loop.hold?.worktree &&
     s.ended === null &&
     seat.holdsRun &&
     seat.state === "idle" &&
@@ -1578,7 +1652,8 @@ function branchUpdateDue(s: LoopSnapshot, loop: RunLoop): string | null {
   ) {
     return null;
   }
-  if (!loop.aside && !(seat.holdsRun && !seat.inTurn && seat.state === "idle")) return null;
+  if (!loop.hold?.worktree && !(seat.holdsRun && !seat.inTurn && seat.state === "idle"))
+    return null;
   return pr.mergeable === "CONFLICTING" ? gate.mainSha : null;
 }
 
@@ -1593,7 +1668,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   // (in ci or review only the line that carries an answer to a parked question is ever pending)
   if (
     (working || loop.phase === "ci" || loop.phase === "review") &&
-    !loop.aside &&
+    !loop.hold?.worktree &&
     loop.pendingLine &&
     free(loop.pendingLine.key)
   ) {
@@ -1737,7 +1812,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 
   // A PR closed by someone else is no signal to write: the card stays where it is, and the agent
   // or FLIGHT decides what the closed PR means.
-  const closedPark = loop.phase === "parked" && loop.parked?.kind === "pr-closed";
+  const closedPark = loop.phase === "parked" && loop.hold?.kind === "pr-closed";
   if (loop.phase !== "done" && !closedPark) {
     // A review with blocking findings is rework: the card goes back In progress with its seat (In
     // review means a review is queued or running). An ended run's reviewed card goes to Ready.
@@ -1749,7 +1824,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
           ? IN_PROGRESS
           : IN_REVIEW
         : loop.phase === "parked"
-          ? loop.parked?.ended && loop.parked.kind === "ended" && s.pr?.state === "open" && reviewed
+          ? loop.hold?.ended && loop.hold.kind === "ended" && s.pr?.state === "open" && reviewed
             ? READY
             : BLOCKED
           : IN_PROGRESS;
@@ -1808,7 +1883,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     // an aside run is off its seat: it comes back, or leaves it, instead of any line
     const updateSha = branchUpdateDue(s, loop);
     const line: LoopAction | null =
-      loop.aside?.wake && s.ended === null
+      loop.hold?.wake && s.ended === null
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
@@ -1836,12 +1911,11 @@ export function reconcile(input: LoopSnapshot): { loop: RunLoop; actions: LoopAc
   const s = watchHead(input);
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside, gate, merging, mainMerge, carry, rerun, rulingRerun } = step.loop;
+  const { hold, touches, gate, merging, mainMerge, carry, rerun, rulingRerun } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
-    parked: parked === null ? null : { ...parked },
+    hold: hold ? { ...hold } : null,
     touches: touches === null ? null : { ...touches, paths: [...touches.paths] },
-    ...(aside ? { aside: { ...aside } } : {}),
     ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
     ...(mainMerge ? { mainMerge: { ...mainMerge, files: [...mainMerge.files] } } : {}),
@@ -1853,21 +1927,21 @@ export function reconcile(input: LoopSnapshot): { loop: RunLoop; actions: LoopAc
   };
   // the line went (its key is claimed): it is no longer pending
   if (loop.pendingLine && loop.pendingLine.key in s.claimed) loop.pendingLine = null;
-  if (loop.aside) {
+  if (loop.hold?.worktree) {
     if (s.seat.holdsRun) {
       // a restart mid set-aside or mid wake left the run on its seat
-      loop.aside = null;
+      loop.hold = rejoinSeat(loop.hold);
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
       // (a run parked on the operator's question waits for the answer, whatever else holds; once
       // it is answered the run comes back in any phase)
-      const asked = loop.aside.ask !== undefined;
+      const asked = loop.hold.ask !== undefined;
       const held = s.operatorAsk === true && (asked || loop.phase === "working");
       if (!held) {
-        loop.aside.wake ||=
+        loop.hold.wake ||=
           asked ||
-          (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
+          (loop.phase === "parked" && !isDecisionPark(loop.hold?.kind)) ||
           loop.phase === "working" ||
           !s.asideOk ||
           fixDue(s, loop);
