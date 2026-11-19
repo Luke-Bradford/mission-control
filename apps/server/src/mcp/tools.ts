@@ -83,6 +83,7 @@ import {
   formerSubmoduleText,
   grantedPath,
   isProtectedPath,
+  liftPark,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
   MC_COMMIT_TOO_BIG,
@@ -733,7 +734,7 @@ function liveRunOf(store: Store, runId: string): Run | null {
 /** The run, unended and set aside for review (off its seat), else null. */
 function asideRunOf(store: Store, runId: string): Run | null {
   const run = store.run(runId);
-  return run !== null && run.endedAt === null && run.loop?.aside ? run : null;
+  return run !== null && run.endedAt === null && run.loop?.hold?.worktree ? run : null;
 }
 
 /** The run's issue number from its ticket (`{repo}#{n}`), or null. */
@@ -2567,7 +2568,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   /** The refusal the run's loop alone decides (no loop, held park, in CI), else null. */
   function loopRefusal(loop: Run["loop"]): Result | null {
     if (loop === null || loop === undefined) return { text: EVIDENCE_NO_LOOP, isError: true };
-    if (loop.phase === "parked" && !evidenceCanUnpark(loop.parked)) {
+    if (loop.phase === "parked" && !evidenceCanUnpark(loop.hold)) {
       return { text: EVIDENCE_PARKED, isError: true };
     }
     if (loop.phase === "ci") return { text: EVIDENCE_IN_CI, isError: true };
@@ -2659,7 +2660,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         reported.id === currentLoop.reportedEvidenceId;
       const refusedRetry =
         currentLoop.phase === "parked" &&
-        currentLoop.parked?.kind === "refused" &&
+        currentLoop.hold?.kind === "refused" &&
         newest !== null &&
         newest.sha === currentLoop.pushFor &&
         reported !== null &&
@@ -2720,11 +2721,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
       // refused or timed-out publication. Budget, account and every other operator hold stay parked.
-      if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
+      if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.hold)) {
         store.setRunLoop(currentRun.id, {
           ...currentLoop,
           phase: "working",
-          parked: null,
+          hold: liftPark(currentLoop.hold),
           transient: 0,
           lastRefusal: null,
           unparkedAt: now(),

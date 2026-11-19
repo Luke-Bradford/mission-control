@@ -140,7 +140,7 @@ it("retains a budget-held ended run until the operator explicitly settles the qu
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "budget", reason: "Hold", ended: true },
+        hold: { kind: "budget", reason: "Hold", ended: true, worktree: null, wake: false },
       },
     }),
   );

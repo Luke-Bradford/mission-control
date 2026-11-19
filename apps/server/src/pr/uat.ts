@@ -17,7 +17,7 @@ export function prAcceptanceFor(store: Store, repoId: string) {
       run.repoId !== repoId ||
       run.endedAt !== null ||
       loop?.prNumber == null ||
-      loop.parked?.kind !== UAT_PARK ||
+      loop.hold?.kind !== UAT_PARK ||
       !loop.uat ||
       loop.uat.accepted
     )
@@ -79,7 +79,7 @@ function uatOf({ store, pr }: PrUatInput): PrUatView["uat"] {
       note: control?.note ?? null,
     };
   }
-  const waiting = loop.parked?.kind === UAT_PARK && !loop.uat?.accepted;
+  const waiting = loop.hold?.kind === UAT_PARK && !loop.uat?.accepted;
   const since = waiting
     ? (store
         .loopEventsOfRun(run.id)

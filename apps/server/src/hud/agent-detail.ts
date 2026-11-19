@@ -99,8 +99,8 @@ export function agentDetail({
     reason = safe(row.sourceError ?? row.note);
   } else if (row.loop?.phase === "parked") {
     label = "Parked";
-    reason = safe(loop?.loop?.parked?.reason ?? row.loop.parked ?? row.note);
-    if (loop?.loop?.parked?.kind === "review" && loop.round !== null)
+    reason = safe(loop?.loop?.hold?.reason ?? row.loop.hold?.reason ?? row.note);
+    if (loop?.loop?.hold?.kind === "review" && loop.round !== null)
       reason = `Review round ${loop.round}${loop.limits ? ` of ${loop.limits.rounds}` : ""}${reason ? `: ${reason}` : ""}`;
   } else if (row.reviewing) {
     label = "Checking";
@@ -115,7 +115,7 @@ export function agentDetail({
     } else {
       label = open ? "Waiting" : "Free";
       reason = open
-        ? safe(row.note ?? loop?.loop?.parked?.reason ?? row.loop?.parked)
+        ? safe(row.note ?? loop?.loop?.hold?.reason ?? row.loop?.hold?.reason)
         : safe(row.note);
     }
   } else if (row.hudState === "waiting") {
@@ -211,14 +211,14 @@ export function agentDetail({
       href: null,
       detail: `${sub.tokens ?? "—"} tokens · ${sub.toolUses ?? "—"} tool calls`,
     });
-  for (const aside of row.asideRuns ?? [])
+  for (const aside of row.offSeatRuns ?? [])
     related.push({
       id: `aside:${aside.runId}`,
       kind: "aside",
       title: safe(aside.ticketTitle ?? aside.ticket ?? aside.runId) ?? "Set-aside run",
       status: "Set aside",
       href: `/agent/${encodeURIComponent(row.id)}?trace=${encodeURIComponent(aside.runId)}`,
-      detail: safe(aside.loop.parked),
+      detail: safe(aside.loop.hold?.reason),
     });
   for (const file of evidence?.testsAdded ?? [])
     if (!deliverables.some((item) => item.id === `file:${file.file}`))

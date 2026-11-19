@@ -1085,8 +1085,7 @@ export async function main(): Promise<void> {
     return store.runsActiveSince(Date.now() - 15 * 60_000).flatMap((run): RingSource[] => {
       if (!seats.has(run.agentId)) return [];
       const session = store.seatSession(run.agentId);
-      const cwd =
-        run.loop?.aside?.worktree ?? (session?.runId === run.id ? session.worktree : null);
+      const cwd = run.loop?.hold?.worktree ?? (session?.runId === run.id ? session.worktree : null);
       return cwd
         ? [
             {

@@ -85,11 +85,13 @@ import {
   LEDGER_FULL_TEXT,
   LEDGER_KIND_CHANGE_TEXT,
   LEDGER_TRACK_CLOSED_TEXT,
+  leaveSeat,
   ledgerClosedText,
   ledgerNextText,
   ledgerNoKeyText,
   ledgerOwnerText,
   ledgerTitleText,
+  liftPark,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -106,6 +108,7 @@ import {
   PROFILE_PAIR_TEXT,
   PROTECTED_ITEM_REFUSED,
   type PullRequestView,
+  parkHold,
   passNeedsBriefText,
   pathGrantProblem,
   planNeedsSignoffText,
@@ -1254,7 +1257,7 @@ describe("resume_seat", () => {
         store.setRunLoop("r-guido", {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "budget", ended: false },
+          hold: { kind: "budget", reason: "budget", ended: false, worktree: null, wake: false },
         });
       if (limit === "account")
         store.addUsage({
@@ -2883,7 +2886,13 @@ describe("end_run", () => {
       store.setRunLoop("r-g", {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "nothing", reason: "nothing to push", ended: false },
+        hold: {
+          kind: "nothing",
+          reason: "nothing to push",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       });
       return call("end_run", { runId: "r-g", basis: "nothing left to do" });
     };
@@ -2902,7 +2911,7 @@ describe("end_run", () => {
     store.setRunLoop("r-g", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind, reason: "nothing to push", ended: false },
+      hold: { kind, reason: "nothing to push", ended: false, worktree: null, wake: false },
     });
   };
   /** The run is off its seat, in review, parked. */
@@ -2913,8 +2922,13 @@ describe("end_run", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed", ended: false },
-          aside: { worktree: "/tmp/none/wt", wake: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed",
+            ended: false,
+            worktree: "/tmp/none/wt",
+            wake: false,
+          },
         },
       }),
     );
@@ -3102,7 +3116,8 @@ describe("end_run", () => {
   it("refuses a set-aside run with uncommitted work, in any phase", async () => {
     setAside();
     const r = store.run("r-g");
-    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    if (r?.loop)
+      store.setRunLoop("r-g", { ...r.loop, phase: "review", hold: liftPark(r.loop.hold) });
     dirty = ["apps/a.ts"];
     expect((await call("end_run", E())).isError).toBe(true);
     expect(asideEnds).toEqual([]);
@@ -3111,7 +3126,8 @@ describe("end_run", () => {
   it("ends a set-aside run that never parked (an evidence hold keeps it in review)", async () => {
     setAside();
     const r = store.run("r-g");
-    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    if (r?.loop)
+      store.setRunLoop("r-g", { ...r.loop, phase: "review", hold: liftPark(r.loop.hold) });
     expect((await call("end_run", E())).isError).toBeFalsy();
     expect(asideEnds.length).toBe(1);
   });
@@ -3139,7 +3155,7 @@ describe("accept_ruling", () => {
       ...NEW_LOOP,
       phase: "parked",
       ciFailedSha: SHA,
-      parked: { kind: "ruling", reason: "ruled", ended: false },
+      hold: { kind: "ruling", reason: "ruled", ended: false, worktree: null, wake: false },
     });
   });
 
@@ -3596,8 +3612,13 @@ describe("flight_state", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed", ended: false },
-          aside: { worktree: "/tmp/none/wt", wake: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed",
+            ended: false,
+            worktree: "/tmp/none/wt",
+            wake: false,
+          },
         },
       }),
     );
@@ -3624,7 +3645,7 @@ describe("flight_state", () => {
     store.setRunLoop("r-inco", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "silent", reason: "budget", ended: false },
+      hold: { kind: "silent", reason: "budget", ended: false, worktree: null, wake: false },
     });
     store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
     store.addQuestion({
@@ -5663,7 +5684,7 @@ describe("brief_item", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind, reason: "operator needed", ended: false },
+          hold: { kind, reason: "operator needed", ended: false, worktree: null, wake: false },
         },
       }),
     );
@@ -7213,7 +7234,7 @@ describe("superuser housekeeping", () => {
     runPr();
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
-      aside: { worktree: "/tmp/preserved", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/tmp/preserved", wake: false },
     });
     const row = need(store.seatSession("guido-1"));
     store.setSeatSession({ ...row, runId: null });
@@ -7267,7 +7288,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind, reason: "held", ended: false },
+      hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
     });
     expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
       "isError",
@@ -7283,7 +7304,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "held", ended: false },
+      hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
     });
     const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(refused).toHaveProperty("isError", true);
@@ -7293,11 +7314,36 @@ describe("superuser housekeeping", () => {
   it("settle_park says when the run is not parked", async () => {
     elevated();
     runPr();
-    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), phase: "working", parked: null });
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "working",
+      hold: liftPark(need(store.run("r-pr")?.loop).hold),
+    });
     const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(refused).toHaveProperty("isError", true);
     expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
+  });
+  it("settle_park says a run only held off its seat is not parked, and reaches the engine once a review park holds it", async () => {
+    elevated();
+    runPr();
+    const off = leaveSeat(null, "/tmp/none/wt", false);
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "review",
+      hold: off,
+    });
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is not parked.");
+    expect(engineCalls).toEqual([]);
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      hold: parkHold(off, "review", "held", false),
+    });
+    await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(engineCalls).not.toEqual([]);
   });
   it.each(["lift", "accept", "rework", "rereview"] as const)(
     "settle_park cannot settle a controller check with a review action (%s)",
@@ -7307,7 +7353,13 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind: "controller-check", reason: "held", ended: false },
+        hold: {
+          kind: "controller-check",
+          reason: "held",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       });
       const refused = await call("settle_park", { runId: "r-pr", action });
       expect(refused).toHaveProperty("isError", true);
@@ -7322,7 +7374,7 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind, reason: "held", ended: false },
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
       });
     park("conflict");
     expect(await call("settle_park", { runId: "r-pr", action: "lift" })).toHaveProperty(
@@ -7353,7 +7405,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "held", ended: false },
+      hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
     });
     lifts = false;
     refuseWith = reason;
@@ -7367,7 +7419,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "Blocked", ended: false },
+      hold: { kind: "review", reason: "Blocked", ended: false, worktree: null, wake: false },
     });
     const result = await call("settle_park", {
       runId: "r-pr",
@@ -7396,7 +7448,13 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind: "review", reason: "review round cap", ended: false },
+        hold: {
+          kind: "review",
+          reason: "review round cap",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
         ...(flightReworks === undefined ? {} : { flightReworks }),
       });
 
@@ -7440,7 +7498,13 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: MERGE_HOLD_PARK, reason: "merge held by CAPCOM: bug", ended: false },
+      hold: {
+        kind: MERGE_HOLD_PARK,
+        reason: "merge held by CAPCOM: bug",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       mergeHold: { by: "CAPCOM", reason: "bug", at: NOW },
     });
     for (const action of ["accept", "rereview", "lift", "second_review"] as const) {
@@ -7471,7 +7535,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "budget", reason: "tokens", ended: false },
+      hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
     });
     expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
       refused("Run is held."),
@@ -7499,7 +7563,7 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind, reason: "held", ended: false },
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
       });
 
     park("budget");
@@ -7622,7 +7686,13 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: UAT_PARK, reason: "waiting for your acceptance", ended: false },
+      hold: {
+        kind: UAT_PARK,
+        reason: "waiting for your acceptance",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       uat: { sha: SHA, from: "review", accepted: false },
     });
     const refused = await call("merge_pr", { pr: 12, basis: "ready" });
@@ -7971,7 +8041,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r", {
       ...need(store.run("r")?.loop),
       phase: "parked",
-      parked: { kind: "budget", reason: "budget", ended: false },
+      hold: { kind: "budget", reason: "budget", ended: false, worktree: null, wake: false },
     });
     expect(await call("dismiss_item", { key: `note:${blockedNoteKey("r", 0)}` })).toHaveProperty(
       "isError",
@@ -9270,7 +9340,13 @@ describe("attention hold tools", () => {
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "controller-check", reason: "check", ended: false },
+        hold: {
+          kind: "controller-check",
+          reason: "check",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
     });
     store.raiseNote({
@@ -11197,7 +11273,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "tokens", ended: false },
+          hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
         },
       });
       nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -11225,7 +11301,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "tokens", ended: false },
+          hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
         },
       });
       nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
