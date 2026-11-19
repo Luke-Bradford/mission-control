@@ -196,17 +196,12 @@ export function createCodexApprover(i: {
           verdict,
           typeof params.cwd === "string" ? params.cwd : undefined,
         );
-      // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+      // the related-tests check can run the whole suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
-        const check = await i.checks?.lockedBy(i.runId, event.input.command);
-        if (check) verdict = { kind: "lock", command: check };
+        const related = i.checks?.lockedBy(event.input.command);
+        if (related) verdict = { kind: "lock", command: related };
       }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
-      // the same check on the same commit with nothing changed is not run again (waste alarm)
-      if (verdict.kind === "lock" && event.tool === "Bash" && event.input.command !== undefined) {
-        const rerun = await i.checks?.rerun?.(i.runId, event.input.command);
-        if (rerun) return refuse("full-suite", rerun);
-      }
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");

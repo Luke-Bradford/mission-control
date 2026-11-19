@@ -459,6 +459,16 @@ describe("the check recorder", () => {
     expect(rows.map((x) => x.runId)).toEqual(["r2"]);
   });
 
+  it("names only the related-tests check as one that takes the test lock", () => {
+    const r = recorder();
+    expect(r.lockedBy("pnpm -s test:related")).toBe("pnpm -s test:related");
+    expect(r.lockedBy("pnpm run test:related")).toBe("pnpm -s test:related");
+    expect(r.lockedBy(`${LINT} && pnpm -s test:related`)).toBe("pnpm -s test:related");
+    expect(r.lockedBy(TYPES)).toBeNull();
+    expect(r.lockedBy(LINT)).toBeNull();
+    expect(r.lockedBy("ls")).toBeNull();
+  });
+
   it("never throws when the clone read does", async () => {
     const lines: string[] = [];
     const r = createCheckRecorder({
@@ -470,32 +480,6 @@ describe("the check recorder", () => {
       log: (l) => void lines.push(l),
     });
     await r.begin(KEY, LINT);
-    expect(lines).toHaveLength(1);
-  });
-
-  it("names the check a call must take the test lock for, and records nothing for a call that waited", async () => {
-    const r = recorder();
-    expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
-    expect(await r.lockedBy("r1", "ls")).toBeNull();
-    // the related-tests run takes the lock by name, though the repo no longer lists it as a check
-    expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
-    expect(await r.lockedBy("r1", `${LINT} && ${TYPES} && pnpm -s test:related`)).toBe(LINT);
-    // refused while another seat held the lock: it began but never ended, so no failed row
-    await r.begin(KEY, TYPES);
-    expect(rows).toEqual([]);
-  });
-
-  it("takes no lock when the repo's rules cannot be read", async () => {
-    const lines: string[] = [];
-    const r = createCheckRecorder({
-      store: { addCheckRun: () => {} },
-      checks: async () => {
-        throw new Error("no rules");
-      },
-      state: async () => state,
-      log: (l) => void lines.push(l),
-    });
-    expect(await r.lockedBy("r1", TYPES)).toBeNull();
     expect(lines).toHaveLength(1);
   });
 });
@@ -613,100 +597,6 @@ describe("why the recorder dropped a check call", () => {
       { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
     ]);
     expect(r.pending("r1")).toEqual([]);
-  });
-
-  describe("an unchanged rerun", () => {
-    type Row = {
-      runId: string;
-      command: string;
-      headSha: string;
-      ok: boolean;
-      exitCode?: number | null;
-      at: number;
-    };
-    const withRerun = () => {
-      const refused: string[] = [];
-      const stored = (): Row[] => rows as Row[];
-      const r = createCheckRecorder({
-        store: {
-          addCheckRun: (c) => void rows.push(c),
-          latestCheckRun: (runId, command, headSha) => {
-            const found = stored()
-              .filter((x) => x.runId === runId && x.command === command && x.headSha === headSha)
-              .at(-1);
-            return found === undefined
-              ? null
-              : {
-                  headSha,
-                  invokedCommand: command,
-                  ok: found.ok,
-                  exitCode: found.exitCode ?? null,
-                  at: found.at,
-                };
-          },
-          latestCheckResults: (runId, command, headSha, limit) =>
-            stored()
-              .filter(
-                (x) =>
-                  x.runId === runId &&
-                  x.command === command &&
-                  x.headSha === headSha &&
-                  (x.ok || (x.exitCode ?? null) !== null),
-              )
-              .slice(-limit)
-              .reverse()
-              .map((x) => ({ ok: x.ok, exitCode: x.exitCode ?? null })),
-          addRerunRefusal: (_run, command) => void refused.push(command),
-        },
-        checks: async () => CHECKS,
-        state: async () => state,
-        now: () => clock,
-      });
-      return { r, refused };
-    };
-
-    it("is refused after a pass, and the refusal is recorded", async () => {
-      const { r, refused } = withRerun();
-      await r.begin(KEY, LINT);
-      await r.end(KEY, true, 0);
-      expect(await r.rerun?.("r1", LINT)).toMatch(/already ran on commit/);
-      expect(refused).toEqual([LINT]);
-    });
-
-    it("allows one retry after a failure with an exit code, and refuses the second identical failure", async () => {
-      const { r, refused } = withRerun();
-      await r.begin(KEY, LINT);
-      await r.end(KEY, false, 1);
-      expect(await r.rerun?.("r1", LINT)).toBeNull();
-      await r.begin(KEY, LINT);
-      await r.end(KEY, false, 1);
-      expect(await r.rerun?.("r1", LINT)).toMatch(/Not run/);
-      expect(refused).toEqual([LINT]);
-    });
-
-    it("allows configured checks to run again after related tests fail twice", async () => {
-      const { r, refused } = withRerun();
-      const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
-      await r.begin(KEY, command);
-      await r.end(KEY, false, 1);
-      await r.begin({ runId: "r1", toolUseId: "t2" }, command);
-      await r.end({ runId: "r1", toolUseId: "t2" }, false, 1);
-      expect(await r.rerun?.("r1", LINT)).toBeNull();
-      expect(refused).toEqual([]);
-
-      await r.begin({ runId: "r1", toolUseId: "t3" }, LINT);
-      await r.end({ runId: "r1", toolUseId: "t3" }, true, 0);
-      expect(rows.at(-1)).toMatchObject({ command: LINT, ok: true, exitCode: 0 });
-    });
-
-    it("is not refused after a call the Bash timeout killed: it may run again with a longer one", async () => {
-      const { r, refused } = withRerun();
-      await r.begin(KEY, LINT);
-      clock += 120_000;
-      await r.end(KEY, false);
-      expect(await r.rerun?.("r1", LINT)).toBeNull();
-      expect(refused).toEqual([]);
-    });
   });
 
   it("says a failed call with no exit code that ran to its Bash timeout was killed by it", async () => {

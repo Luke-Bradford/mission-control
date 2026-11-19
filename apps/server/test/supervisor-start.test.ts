@@ -2567,7 +2567,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token
@@ -3482,18 +3482,18 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
   });
 
-  it.each([
-    ["git commit -m x", "git-write"],
-    ["sleep 1 &", "background"],
-  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
-    const { sup } = codex({ command });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await untilCodex(() => expect(decision()).toBe("decline"));
-    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
-    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRunByEngine(runId);
-  });
+  it.each([["git commit -m x", "git-write"]] as const)(
+    "sends %s to the shared %s outcome guard",
+    async (command, rule) => {
+      const { sup } = codex({ command });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await untilCodex(() => expect(decision()).toBe("decline"));
+      expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
+      await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it.each([
     { name: "uncorrelated mc", server: MC_MCP_SERVER, correlated: false },

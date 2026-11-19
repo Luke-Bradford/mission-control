@@ -515,8 +515,8 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 
 | Check | Fires when | Then |
 | --- | --- | --- |
-| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded. A rerun is refused once the newest result on that commit passed, or the last two both failed with an exit code, so one retry after a failure is allowed. A call killed by the Bash timeout, or a failure with no exit code, is not a result and may run again |
 | Retry loop | A ticket has 2 failed attempts (a run that ended failed, or parked as stuck, refused, conflict, no CI or gate), or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
+| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The alarm is raised; the hook no longer refuses the rerun |
 | Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
 | Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
 | Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm with the runs listed |
@@ -852,23 +852,11 @@ What each seat's process starts with:
   writes. A resume keeps the run's prompt file; if it is gone, the resume rebuilds it from the role
   brief alone and logs `<seat>: prompt file missing on resume; …`.
 - **The mc tools** over `--mcp-config`, at `http://127.0.0.1:<port>/mcp`.
-- **The guard hook** before every tool call, after each Bash call ends, and when the seat stops:
+- **The guard hook** before every tool call and after each Bash call ends:
   `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/hook-cli.ts' '<token file>' 'http://127.0.0.1:<port>/api/guard/check' || exit 2`.
   `crew.node` defaults to `/opt/homebrew/bin/node`. A start is refused if one of those paths holds
-  a `'` or a line break.
-  - **A Stop is continued in-process** (#1048). When a Claude seat ends a turn with its report
-    missing (`report_evidence`, `report_findings` or `report_plan`, by the run's loop kind), no
-    open question, and unfinished items in its live checklist (the run digest's tasks), the hook
-    answers `{"decision":"block","reason":"…"}` with those items, and the seat carries on without
-    a new hub turn. Only a run whose loop is still working is blocked: one in review, in CI, parked
-    (a budget hold included) or done owes the seat no work now. A Stop with no verdict from the hub
-    (hub down, a 401 or 500, the hook's deadline) lets the stop stand: its command ends `|| true`
-    and the hook prints `{}` and exits 0, because exit 2 from a Stop hook would block the stop for
-    as long as the hub is away. At most three Stops per run are blocked, counted from the last report the loop
-    took in (a rework round gets its own three); the fourth stands, and the hub's carry-on resume
-    and its "stopped after 3 carry-on resumes" park apply as before. The count is in the hub's
-    memory, so a hub restart gives a run three more. Codex seats have no Stop hook and keep the
-    hub's resume path.
+  a `'` or a line break. A seat that ends a turn is not sent back to its checklist: there is no
+  Stop hook, and a run that stops with its report missing goes through the hub's resume path.
 - **The trim hook** (#1045) after every tool call (`PostToolUse`, matcher `*`), for Claude seats:
   `'<crew.node>' --experimental-strip-types '<hub>/apps/server/src/guard/trim-cli.ts' '<run temp root>/tool-output'`.
   A result over 32 KB is answered as `updatedToolOutput` with its first 8 KB, its last 4 KB and a
@@ -1068,22 +1056,13 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **GitHub:** no `gh` at all; GitHub goes through Mission Control. A seat rewrites its own open
   PR's body with `mc pr_body { body }` (the same text checks as the opened PR; the engine's
   minor-findings section is kept; refused for a PR that is not the run's).
-- **Attached work:** no `&`, `setsid`, `coproc`, `nohup … &`, a multiplexer that starts a session
-  (`tmux new`, `screen -dm`; listing, attaching and `send-keys` into an existing one are allowed) or
-  a scheduler or launcher (`at`, `batch`, `crontab`, `launchctl`, `osascript`, `open`).
-- **Full suites:** the repo's `full_suite` commands take the shared test lock, one seat at a time. So do the repo's `mc.checks` commands (lint, typecheck): a check waits its turn like the suite, so the push gate never puts more than one heavy check on the Mac at once. A check that waited is not recorded as failed. The hub keeps, in memory, why it did not count a check call it saw start (a pipe or extra command in the chain, a dirty tree at the start or end, the head moving, the turn ending first, a background call, a call killed at its Bash timeout, an unreadable clone), and `mc push` puts that reason in its refusal; with no reason it says the hub saw no start (it may have restarted). `pnpm -s test:related` takes the lock however big its set is, and so do `pnpm test:related`, `pnpm run test:related` and its node script; a run of one test file takes none. A related-tests run can take most of the suite's time, so a seat runs a check in the foreground with the Bash `timeout` parameter at 2700000 (45 minutes; the seat's `BASH_MAX_TIMEOUT_MS` allows it, and the CLI's own limit without it is 10 minutes): the default is two minutes, and a killed call has no exit code. The wait for the lock is not part of that time. A seat holding the lock is shown as stalled only after 10 minutes of silence since it took the lock; a running Claude check writes a heartbeat every 30 seconds. A seat waiting for the lock is refused after 10 minutes and runs the same check again, unchanged. A passing call that ran longer than two minutes is recorded like any other.
+- **Full suites:** the repo's `full_suite` commands and the related-tests check (`pnpm -s test:related`, however spelled) take the shared test lock, one seat at a time. A full suite run with `&` or `nohup`, in a multiplexer that starts a session (`tmux new`, `screen -dm`), or handed to a launcher (`launchctl`, `at`, `batch`, `systemd-run`, `daemonize`, `start-stop-daemon`, `osascript`, `open`, `crontab`, `ssh -f`) is refused: it would outlive the lock. Other background commands are not refused. The repo's `mc.checks` commands (lint, typecheck) do not take the lock unless `full_suite` lists them: two seats may run them at once. A check that waited is not recorded as failed. The hub keeps, in memory, why it did not count a check call it saw start (a pipe or extra command in the chain, a dirty tree at the start or end, the head moving, the turn ending first, a background call, a call killed at its Bash timeout, an unreadable clone), and `mc push` puts that reason in its refusal; with no reason it says the hub saw no start (it may have restarted). A run of one test file takes no lock. A related-tests run can take most of the suite's time, so a seat runs a check in the foreground with the Bash `timeout` parameter at 2700000 (45 minutes; the seat's `BASH_MAX_TIMEOUT_MS` allows it, and the CLI's own limit without it is 10 minutes): the default is two minutes, and a killed call has no exit code. The wait for the lock is not part of that time. A seat holding the lock is shown as stalled only after 10 minutes of silence since it took the lock; a running Claude check writes a heartbeat every 30 seconds. A seat waiting for the lock is refused after 10 minutes and runs the same check again, unchanged. A passing call that ran longer than two minutes is recorded like any other.
   This covers the commands the guard sees; a process a seat starts some other way is not covered.
 - **Unreadable lines:** a command line the guard cannot read to the end is refused.
 
 Each refusal is recorded as a guard hit (`/api/guard/hits`, Comms › Guard).
 
-**Re-reads.** A second whole-file read (a `Read` with no `offset`, `limit` or `pages`, a lone `cat FILE` or
-`sed -n p FILE`) of a file of 32 KB or more that the run already read whole, with the same size and
-mtime and no compaction since, by the same agent (a subagent has its own context, so its reads are
-kept apart), is answered with the earlier read's tool call instead of the file.
-A range, a smaller file, a changed file and another run's read all pass. This is not a guard hit: it
-is counted in `run_rereads` and shows as `digest.rereads` (`count`, `tokensSaved` at about 4 bytes a
-token) on the run's digest. The ledger is `run_reads`; both tables go with the run.
+**Re-reads.** A seat may read the same file again; the guard does not refuse or count it.
 
 ### A looped run, step by step
 

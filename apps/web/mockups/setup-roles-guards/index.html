@@ -225,14 +225,13 @@ function openEditor(key){
   const b=$(`[data-edit="${key}"]`);if(b)b.focus()};
 }
 function notify(t){const s=$('#status');s.textContent=t;s.hidden=false}
-const COUNTS={background:3,'codex-allowlist':0,'git-env':1,'git-write':9,'gh-cli':4,'merge-push':2,'flight-powers':0,'full-suite':14,'read-only':5,network:6,'repo-rules':1,unreadable:0,secret:0};
+const COUNTS={'codex-allowlist':0,'git-env':1,'git-write':9,'gh-cli':4,'merge-push':2,'flight-powers':0,'full-suite':14,'read-only':5,'repo-rules':1,unreadable:0,secret:0};
 function renderGuard(){
  const rules=window.GUARD;const none=state==='empty';const unknown=state==='disconnected'||state==='loading';
  $('#guard-body').innerHTML=(none?'<div class="pb"><p>No refusals in the last 7 days.</p></div>':'')+Object.keys(rules).map(id=>`<div class="guard-row" data-rule="${id}"><span class="rule" title="${esc(rules[id])}">${esc(rules[id])}</span><a class="cnt" data-guard-drawer="${id}" href="#guard-drawer" aria-label="${unknown?'Unknown':none?0:COUNTS[id]} refusals, open the guard drawer">${unknown?'—':none?0:COUNTS[id]}</a></div>`).join('');
  $$('[data-guard-drawer]').forEach(a=>a.onclick=e=>{e.preventDefault();notify('Opens the guard drawer for this rule.')});
  $('#guard-note').textContent=window.GUARD_NOTE}
 window.GUARD={
-background:"Commands must stay attached to the seat's current tool call",
 "codex-allowlist":"The Codex request is outside the seat’s area, protected files or sandbox",
 "git-env":"Git reads must keep the seat’s isolated environment and stay in its worktree",
 "git-write":"git writes only through the mc commit tool; report with mc report_evidence and Mission Control pushes and opens the PR",
@@ -241,11 +240,10 @@ background:"Commands must stay attached to the seat's current tool call",
 "flight-powers":"Only repos with flight_powers: superuser may use these tools",
 "full-suite":"Full test suites only through Mission Control (one at a time)",
 "read-only":"Read-only roles cannot write",
-network:"No network from a crew's commands",
 "repo-rules":"FLIGHT must keep this repository's protected paths and Mission Control rules; on a standard repo ask a controller to approve an override; on a superuser repo change them through a seat's PR and mc merge_pr",
 unreadable:"Commands the guard cannot read to the end are refused",
 secret:"No secrets in a push"};
-window.GUARD_NOTE="The guard catches agent mistakes and ordinary spellings, not deliberate evasion.";
+window.GUARD_NOTE="The guard catches agent mistakes and ordinary spellings, not deliberate evasion. Limits set when each seat starts, separate from the refusal counts above: Build and review seats have no network: their sandbox allows no domains, and web fetch and web search are off; Claude seats cannot start background tool calls, and Codex seats have no such limit; a full suite run with & or nohup, or handed to a launcher, is still refused; FLIGHT runs with full access, network included.";
 const ROLEROWS=[['FLIGHT','Flight Director','Head agent: assigns, unblocks, brings you decisions','Read only',1,['What this is for','What the operator sees','Each wake','How to unblock','How to pass things on','Orders and records','The floor']],
 ['FAO','Flight Activities Officer',"Planner: writes each ticket's plan for the developers",'Read only',2,['What the plan holds','How you work','What you may not do']],
 ['GUIDO','Guidance Officer','Backend developer, test-first in its area','Writes code',3,['How you work','Coordination','What you may not do']],

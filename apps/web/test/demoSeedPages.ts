@@ -641,7 +641,7 @@ function setupApi(): Record<string, unknown> {
       quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
     },
     "/api/guard/hits?days=7": { hits: [], counts: {} },
-    "/api/guard/hits?days=14": { hits: [], counts: { "git-write": 7, network: 3 } },
+    "/api/guard/hits?days=14": { hits: [], counts: { "git-write": 7, "full-suite": 3 } },
     "/api/qa/flow?days=14": {
       days: 14,
       since: NOW - 14 * 24 * HOUR,

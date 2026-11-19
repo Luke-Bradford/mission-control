@@ -1349,7 +1349,7 @@ describe("crew seats in the rows", () => {
     commit("c1", "b".repeat(40));
     commit("c1", "c".repeat(40));
     const hit = (runId: string) =>
-      store.addGuardHit({ agentId: "GUIDO-1", runId, rule: "network", text: "x", at: NOW });
+      store.addGuardHit({ agentId: "GUIDO-1", runId, rule: "unreadable", text: "x", at: NOW });
     hit("c0");
     hit("c0");
     hit("c1");
