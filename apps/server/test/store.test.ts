@@ -279,19 +279,65 @@ describe("Store", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
-    const s = new Store(":memory:");
-    s.mapCachePut("tree", "checkout", "a", "1", true);
-    s.mapCachePut("tree", "other", "z", "9", true);
-    s.mapCachePut("merge", "", "m", "[]", false);
-    expect(s.mapCacheGet("tree", "checkout", "a")).toBe("1");
-    s.mapCachePut("tree", "checkout", "b", "2", true);
-    expect(s.mapCacheGet("tree", "checkout", "a")).toBeNull();
-    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("2");
-    expect(s.mapCacheGet("tree", "other", "z")).toBe("9");
-    expect(s.mapCacheGet("merge", "", "m")).toBe("[]");
-    s.mapCachePut("tree", "checkout", "b", "3", true);
-    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("3");
+  it("drops the tables of the removed code-health, Map, token-audit and bug-escape features", () => {
+    const RETIRED_FIXTURE = [
+      "map_cache",
+      "code_health_overview",
+      "run_token_audit",
+      "bug_escapes",
+      "controller_messages",
+      "controller_files",
+    ];
+    const path = join(mkdtempSync(join(tmpdir(), "mc-retired-")), "hub.db");
+    const first = new Store(path);
+    const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
+    for (const table of RETIRED_FIXTURE) raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
+    // the old release's trigger on a kept table writes into a retired one
+    raw.exec(`CREATE TABLE code_health_revisions (repo_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0);
+      CREATE TRIGGER code_health_pull_requests_insert AFTER INSERT ON pull_requests BEGIN
+        INSERT INTO code_health_revisions (repo_id, version) SELECT NEW.repo_id, 1 WHERE NEW.repo_id IS NOT NULL
+        ON CONFLICT(repo_id) DO UPDATE SET version = version + 1;
+      END`);
+    first.close();
+    const second = new Store(path);
+    const rows = (type: string) =>
+      (
+        (second as unknown as { rawDb: DatabaseSync }).rawDb
+          .prepare("SELECT name FROM sqlite_master WHERE type = ?")
+          .all(type) as { name: string }[]
+      ).map((r) => r.name);
+    const names = rows("table");
+    for (const table of [...RETIRED_FIXTURE, "code_health_revisions"])
+      expect(names).not.toContain(table);
+    expect(rows("trigger").filter((n) => n.startsWith("code_health"))).toEqual([]);
+    expect(() =>
+      second.upsertPullRequests(
+        "r",
+        [
+          {
+            repoId: "r",
+            number: 2,
+            title: "t",
+            url: "u",
+            branch: "b",
+            ticket: null,
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: 1,
+            updatedAt: 1,
+            mergedAt: null,
+            headSha: "sha",
+            mergeable: null,
+            author: null,
+            assignees: [],
+          },
+        ],
+        2,
+      ),
+    ).not.toThrow();
+    second.close();
   });
 
   it("close releases the database: the store cannot be used after", () => {

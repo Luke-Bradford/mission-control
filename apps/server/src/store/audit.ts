@@ -31,8 +31,3 @@ export function auditItems(db: DatabaseSync, since: number, until: number): Audi
     )
     .all(since, until) as unknown as AuditItem[];
 }
-
-/** Records that a run's transcript could not give call times, so it is not tried again. */
-export function markTokenTimesChecked(db: DatabaseSync, runId: string): void {
-  db.prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?").run(runId);
-}

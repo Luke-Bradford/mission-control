@@ -11,7 +11,6 @@ export const DATA_DIRS = {
   reviewShots: "review-screenshots",
   hudShots: "hud-screenshots",
   attentionMaterials: "attention-material-assets",
-  designPreviews: "design-previews",
   controller: "controller",
 } as const;
 
