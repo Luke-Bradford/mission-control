@@ -198,11 +198,6 @@ CREATE TABLE IF NOT EXISTS comms (
   to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
--- Each exact repeat of a stored message that was turned away, for the count in Audit.
-CREATE TABLE IF NOT EXISTS comms_repeats (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
-  to_id TEXT NOT NULL, message_id INTEGER NOT NULL
-);
 CREATE INDEX IF NOT EXISTS comms_from_id ON comms(from_id, id);
 CREATE INDEX IF NOT EXISTS comms_to_id ON comms(to_id, id);
 CREATE TABLE IF NOT EXISTS comms_reads (
@@ -278,11 +273,6 @@ CREATE INDEX IF NOT EXISTS run_attempts_run ON run_attempts(run_id, id);
 -- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
 -- it to be the branch's tip.
 CREATE TABLE IF NOT EXISTS run_pushes (run_id TEXT PRIMARY KEY, sha TEXT NOT NULL, at INTEGER NOT NULL);
--- Paths a refused commit had outside the seat's area (Needs you). key: strayKey(session, path).
-CREATE TABLE IF NOT EXISTS strays (
-  key TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, agent_id TEXT NOT NULL,
-  kind TEXT NOT NULL, at INTEGER NOT NULL
-);
 -- A seat's ask_flight questions; answered_at is set by a message to the seat, or the run's end.
 CREATE TABLE IF NOT EXISTS seat_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
@@ -295,11 +285,6 @@ CREATE TABLE IF NOT EXISTS question_closures (
   at INTEGER NOT NULL, PRIMARY KEY (key, ask_at)
 );
 CREATE INDEX IF NOT EXISTS question_closures_at ON question_closures(at);
--- Failures of the mc tools that the operator is told of (Needs you, until acked).
-CREATE TABLE IF NOT EXISTS crew_errors (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT, text TEXT NOT NULL,
-  at INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0
-);
 -- What the FLIGHT seat decided, with its basis ("Decided without you").
 CREATE TABLE IF NOT EXISTS flight_decisions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, seat_id TEXT,

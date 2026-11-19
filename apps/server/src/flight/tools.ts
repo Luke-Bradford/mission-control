@@ -347,7 +347,6 @@ import { RepoRulesError } from "../engine/rules.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
-  CREW_ERROR_KEY,
   crew,
   hubAlert,
   isOperatorCall,
@@ -4155,8 +4154,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           const problem = dismissProblem(item);
           if (problem !== null) return fail(problem);
           store.ack([a.key], now());
-          const id = a.key.startsWith(CREW_ERROR_KEY) ? a.key.slice(CREW_ERROR_KEY.length) : "";
-          if (/^[1-9]\d{0,15}$/.test(id)) store.ackCrewError(Number(id));
           bus.emit("attention");
           return { text: `Dismissed ${a.key}.` };
         }

@@ -429,7 +429,6 @@ it("stores an identical message sent again within a minute once, and counts the 
   expect(again.id).toBe(first.id);
   expect(again.repeat).toBe(true);
   expect(store.comms(0)).toHaveLength(1);
-  expect(store.commsRepeatCount(0)).toBe(1);
   // the recipient is woken by the first copy only
   expect(notify).toHaveBeenCalledTimes(1);
   // a different recipient or text is not a repeat; the same text after the window is stored

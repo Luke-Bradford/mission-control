@@ -77,15 +77,7 @@ import {
 
 skipTestsIf(await blockedHere("crew-run"));
 
-describe("questions and strays", () => {
-  const stray = (path: string, agentId = "guido-1") => ({
-    sessionId: "mc-crew",
-    path,
-    agentId,
-    kind: "outside" as const,
-    at: 1,
-  });
-
+describe("questions", () => {
   it("a message to the seat answers its open questions", async () => {
     const { sup } = make();
     sup.start();
@@ -121,16 +113,14 @@ describe("questions and strays", () => {
     expect(store.openQuestions()).toHaveLength(1);
   });
 
-  it("the run's end closes its questions and clears its strays, not another seat's", async () => {
+  it("the run's end closes its questions", async () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     store.addQuestion({ agentId: "guido-1", runId, text: "one?", at: 1 });
-    store.addStrays([stray("docs/a.md"), stray("docs/b.md", "retro")]);
     await sup.endRun("guido-1");
     expect(store.openQuestions()).toEqual([]);
-    expect(store.strays().map((s) => s.path)).toEqual(["docs/b.md"]);
   });
 
   it("another run's end or a message spares a question of a set-aside run of the seat (#1451)", async () => {
@@ -195,11 +185,9 @@ describe("questions and strays", () => {
     const { runId } = await sup.startRun("guido-1", 42);
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     store.addQuestion({ agentId: "guido-1", runId, text: "one?", at: 1 });
-    store.addStrays([stray("docs/a.md")]);
     await sup.message("guido-1", "DIE", { interrupt: false });
     await until(() => expect(seatState("guido-1")).toBe("error"));
     expect(store.openQuestions()).toEqual([]);
-    expect(store.strays()).toEqual([]);
   });
 
   it("ending a run with no process (left by a stopped hub) closes them too", async () => {
@@ -232,12 +220,10 @@ describe("questions and strays", () => {
       updatedAt: 1,
     });
     store.addQuestion({ agentId: "guido-1", runId: "guido-1:old", text: "one?", at: 1 });
-    store.addStrays([stray("docs/a.md")]);
     // start() would resume it; the lock is taken without resuming by a disabled reattach
     sup.start();
     await until(() => expect(seatState("guido-1")).toBe("error")); // no worktree: failed resume
     expect(store.openQuestions()).toEqual([]);
-    expect(store.strays()).toEqual([]);
   });
 
   it("endRun on a run with no process (none was resumed) closes them too", async () => {
@@ -271,11 +257,9 @@ describe("questions and strays", () => {
       updatedAt: 1,
     });
     store.addQuestion({ agentId: "guido-1", runId: "guido-1:old", text: "one?", at: 1 });
-    store.addStrays([stray("docs/a.md")]);
     await sup.endRun("guido-1");
     expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
     expect(store.openQuestions()).toEqual([]);
-    expect(store.strays()).toEqual([]);
   });
 
   it("endRun with hold on a run with no process stops the seat, out of rotation", async () => {

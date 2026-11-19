@@ -15,7 +15,6 @@ import type {
   ReportedTest,
   Run,
   SeatState,
-  StrayKind,
 } from "@mc/core";
 
 export const COMMS_RETENTION_DAYS = 90;
@@ -65,17 +64,6 @@ export interface FlightBriefRow {
   updatedBy: string;
 }
 
-/** One path a refused commit had outside the seat's area. */
-export interface Stray {
-  key: string;
-  sessionId: string;
-  path: string;
-  /** The seat whose commit had it. */
-  agentId: AgentId;
-  kind: StrayKind;
-  at: number;
-}
-
 /** A seat's open `ask_flight` question. */
 export interface SeatQuestion {
   id: number;
@@ -90,15 +78,6 @@ export interface SeatQuestion {
    * on the Ticket page, but it is not in Needs you and the end of its run does not close it.
    */
   asideAt: number | null;
-}
-
-/** An mc tool failure the operator is told of. */
-export interface CrewError {
-  id: number;
-  agentId: AgentId;
-  runId: string | null;
-  text: string;
-  at: number;
 }
 
 /** The seat states that still hold a run: the supervisor reattaches these after a restart. */

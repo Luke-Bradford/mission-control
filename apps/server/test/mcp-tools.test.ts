@@ -1,6 +1,5 @@
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -176,8 +175,6 @@ const write = (rel: string, text: string) => {
 
 const head = () => git(wt, "rev-parse", "HEAD").trim();
 const staged = () => git(wt, "diff", "--cached", "--name-only");
-const strayKey = (path: string) =>
-  `stray:${createHash("sha256").update(`${SESSION}\0${path}`).digest("hex").slice(0, 16)}`;
 
 function config(): CcConfig {
   return {
@@ -494,7 +491,6 @@ describe("commit", () => {
     expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n")).toEqual([
       "apps/a.ts",
     ]);
-    expect(store.strays()).toEqual([]);
     // left where pnpm put them, untracked
     expect(git(wt, "status", "--porcelain", "-uall").split("\n").filter(Boolean)).toEqual([
       "?? .pnpm-store/v11/index.db",
@@ -527,13 +523,11 @@ describe("commit", () => {
     expect(git(wt, "show", "--name-only", "--format=", "HEAD").trim().split("\n")).toEqual([
       "apps/a.ts",
     ]);
-    expect(store.strays()).toEqual([]);
   });
 
   it("answers Nothing to commit when only a .pnpm-store changed, recording no stray", async () => {
     write(".pnpm-store/v11/index.db", "db\n");
     expect(await commit("feat: x")).toEqual({ text: "Nothing to commit." });
-    expect(store.strays()).toEqual([]);
     expect(staged()).toBe("");
   });
 
@@ -567,16 +561,6 @@ describe("commit", () => {
       " M apps/a.ts",
       " M docs/c.md",
     ]);
-    expect(store.strays()).toEqual([
-      {
-        key: strayKey("docs/c.md"),
-        sessionId: SESSION,
-        path: "docs/c.md",
-        agentId: "guido-1",
-        kind: "outside",
-        at: NOW,
-      },
-    ]);
     expect(store.runCommits(RUN)).toEqual([]);
     expect(emitted).toContain("attention");
   });
@@ -601,12 +585,6 @@ describe("commit", () => {
     expect(r.isError).toBe(true);
     expect(head()).toBe(base);
     expect(staged()).toBe("");
-    // protected files are refused, not strays
-    expect(store.strays().map((s) => [s.path, s.kind])).toEqual([
-      ["README.md", "outside"],
-      ["docs/c.md", "outside"],
-      ["web/b.ts", "other-area"],
-    ]);
   });
 
   it("commits a protected file and one outside the area when this run holds a grant for them", async () => {
@@ -647,7 +625,6 @@ describe("commit", () => {
     expect((await commit("chore: ts")).text).toBe(
       `Not committed: apps/tsconfig.json is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.\n${REVERT}`,
     );
-    expect(store.strays()).toEqual([]);
     write("apps/tsconfig.json", "{}\n");
     rmSync(join(wt, "apps/tsconfig.json"));
     write("apps/.github/workflows/ci.yml", "on: push\n");
@@ -669,7 +646,6 @@ describe("commit", () => {
       `Not committed: apps/pyproject.toml is protected (build, install and CI files); ask FLIGHT with mc ask_flight if the ticket needs it.\n${REVERT}`,
     );
     expect(head()).toBe(base);
-    expect(store.strays()).toEqual([]);
     expect((await commit("chore: py")).text).toMatch(/^Committed /);
   });
 
@@ -690,7 +666,6 @@ describe("commit", () => {
     expect((await commit("docs")).text).toBe(
       `Not committed: ${names.join(", ")} and 2 more are outside your area (apps/**).\n${REVERT}`,
     );
-    expect(store.strays()).toHaveLength(12);
   });
 
   it("sees both sides of a rename: out of the area, and into it", async () => {
@@ -719,7 +694,6 @@ describe("commit", () => {
     expect(r.text).toBe(`Not committed: docs/late.md is outside your area (apps/**).\n${REVERT}`);
     expect(head()).toBe(base);
     expect(staged()).toBe("");
-    expect(store.strays().map((s) => s.path)).toEqual(["docs/late.md"]);
   });
 
   it("commits the index it checked: a file changed after the check is not in the commit", async () => {
@@ -743,29 +717,6 @@ describe("commit", () => {
     expect(await commit("feat: x")).toEqual({ text, isError: true });
     expect(git(wt, "rev-list", "--count", "--all").trim()).toBe("1");
     expect(staged()).toBe("");
-  });
-
-  it("clears the seat's strays on the commit that reverts them, and keeps the ones still there", async () => {
-    write("docs/c.md", "c2\n");
-    write("README.md", "hi2\n");
-    await commit("feat: x");
-    expect(store.strays().map((s) => s.path)).toEqual(["README.md", "docs/c.md"]);
-    git(wt, "checkout", "--", "README.md");
-    await commit("feat: x");
-    expect(store.strays().map((s) => s.path)).toEqual(["docs/c.md"]);
-    git(wt, "checkout", "--", "docs/c.md");
-    write("apps/a.ts", "a2\n");
-    expect((await commit("feat: x")).text).toMatch(/^Committed /);
-    expect(store.strays()).toEqual([]);
-  });
-
-  it("leaves another seat's strays alone", async () => {
-    store.addStrays([
-      { sessionId: SESSION, path: "docs/z.md", agentId: "guido-2", kind: "outside", at: 1 },
-    ]);
-    write("apps/a.ts", "a2\n");
-    await commit("feat: x");
-    expect(store.strays().map((s) => s.path)).toEqual(["docs/z.md"]);
   });
 
   it("validates the message: 1 to 2000 characters, not blank", async () => {
@@ -951,7 +902,6 @@ describe("commit: remove", () => {
     expect(existsSync(join(wt, "web/b.ts"))).toBe(true);
     expect(head()).toBe(base);
     expect(staged()).toBe("");
-    expect(store.strays()).toEqual([]);
     expect(store.guardHits(0)).toEqual([]);
   });
 
@@ -990,9 +940,7 @@ describe("commit: remove", () => {
   it("removes a new file outside the area and clears its stray", async () => {
     write("docs/new.md", "n\n");
     expect((await commit("x")).isError).toBe(true);
-    expect(store.strays()).toHaveLength(1);
     expect(await rm(["docs/new.md"])).toEqual({ text: "Removed docs/new.md.\nNothing to commit." });
-    expect(store.strays()).toEqual([]);
     expect(existsSync(join(wt, "docs/new.md"))).toBe(false);
   });
 
@@ -1909,7 +1857,6 @@ describe("Comms seat tools", () => {
     expect(again).toEqual({ text: first.text.replace("Sent", "Already sent") });
     expect(again.isError).toBeUndefined();
     expect(store.commsForPair("guido-1", "guido-2")).toHaveLength(1);
-    expect(store.commsRepeatCount(0)).toBe(1);
   });
 
   it("persists every supported destination, label, ref, reply and mention", async () => {
@@ -2091,7 +2038,6 @@ describe("commit: what it refuses beyond areas (fix round 1)", () => {
     });
     expect(head()).toBe(base);
     expect(staged()).toBe("");
-    expect(store.strays()).toEqual([]);
   });
 
   it("refuses symlinks inside the area, absolute or relative", async () => {
@@ -2180,7 +2126,6 @@ describe("commit: what it refuses beyond areas (fix round 1)", () => {
     });
     expect(await commit("feat: x", ts)).toEqual({ text: "This run has ended.", isError: true });
     expect(ran).toBe(0);
-    expect(store.strays()).toEqual([]);
   });
 
   it("tells a read-only seat it cannot commit", async () => {
@@ -2220,7 +2165,6 @@ describe("commit: fix round 2", () => {
     expect((await commit("feat: x")).text).toBe(
       `Not committed: .huſky/pre-commit is not plain ASCII paths; the crew commits ASCII paths only.\n${REVERT}`,
     );
-    expect(store.strays()).toEqual([]);
   });
 
   it("protects .gitmodules", async () => {
@@ -2619,7 +2563,6 @@ describe("push and draft_pr", () => {
       ...logs,
       ...answers,
       ...store.guardHits(0).map((h) => h.text),
-      ...store.crewErrors().map((e) => e.text),
       ...store.openQuestions().map((q) => q.text),
     ].join("\n");
     expect(everything).not.toContain(TOKEN);
@@ -2809,7 +2752,6 @@ describe("push and draft_pr", () => {
       emitted = [];
       expect(await push()).toEqual({ text: FOREIGN(raw), isError: true });
       expect(remoteTip()).toBeNull();
-      expect(store.crewErrors()).toEqual([]);
       expect(emitted).not.toContain("attention");
     });
 
@@ -3313,7 +3255,6 @@ describe("push and draft_pr", () => {
         isError: true,
       });
       expect(remoteTip()).toBeNull();
-      expect(store.crewErrors()).toEqual([]);
     });
 
     it("refuses a token in an added file: where, line and kind, a guard hit, never the token", async () => {
@@ -3337,7 +3278,6 @@ describe("push and draft_pr", () => {
       const r = await push();
       expect(r.isError).toBe(true);
       expect(store.openQuestions()).toEqual([]);
-      expect(store.crewErrors()).toEqual([]);
       expect(emitted).not.toContain("attention");
       const items = attentionItems(config(), store, NOW, NO_LOCK).filter(
         (i) => i.kind === "question" || i.kind === "error",
@@ -3909,7 +3849,6 @@ describe("push and draft_pr", () => {
       const raw = head();
       await commitOk("apps/b.ts", "hub\n");
       expect(await push()).toEqual({ text: FOREIGN(raw), isError: true });
-      expect(store.crewErrors()).toEqual([]);
       expect(remoteTip()).toBeNull();
     });
 
@@ -6537,7 +6476,6 @@ describe("commit: a merge of main in progress", () => {
     expect(parents()).toEqual([tip, mainSha]);
     expect(readFileSync(join(wt, "docs/c.md"), "utf8")).toBe("c from main\n");
     expect(mergeHead()).toBeNull();
-    expect(store.strays()).toEqual([]);
     expect(store.branchCommits("mc", BRANCH).has(head())).toBe(true);
   });
 

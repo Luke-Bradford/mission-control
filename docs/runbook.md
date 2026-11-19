@@ -2720,7 +2720,6 @@ branch previews do.
   - `question-waited`: a question that waited more than the wait, counted when it is answered or closed in the range (operator choices, operator closures, seats' `ask_flight` questions) or while still open at the range end, whenever it began.
   - `delivered-after-run-ended`: a message with a target run delivered after that run ended.
   - `chatter`: a pair past `COMMS_CHATTER_ROUNDS` on one ticket.
-  - `repeat-message`: a message the exact-repeat guard turned away at least once.
   - `repeat-notice`: the same hub notice sent `notice_repeats` times on one PR.
   - `controller-request-waited`: a message to the controller with no reply, `done` or settlement from it within the wait; counted when closed in the range or still open at its end.
   - `ticket-message-volume`: a ticket whose message text is at least `ticket_text_factor` times the median ticket's and over 5,000 characters.
@@ -2962,8 +2961,7 @@ keep their permission checks.
 - **Start brief.** A run's first message (a build run's, and a review run's) lists the ticket's answered questions (FLIGHT's recorded
   answer), one line each, ten at most, under "Already decided on this ticket".
 - **Exact repeats.** From any sender, the same sender, recipient, text, ticket and label within 60 seconds is stored
-  once. The sender is told "Already sent comms:N." (a success), nobody is woken again, and a row in
-  `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days. The operator's routes
+  once. The sender is told "Already sent comms:N." (a success), nobody is woken again. The operator's routes
   (`POST /api/comms`, `POST /api/seats/:id/message`) answer such a send with 200 and
   `alreadySent: true`, with the first copy's state. Both also return `state` and `deliveredAt`.
 - **Stored, then delivered.** Every message has `deliveredAt`, null while only stored. It is set the

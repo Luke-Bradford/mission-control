@@ -99,7 +99,6 @@ export const AUDIT_IMPROVEMENT_KINDS = [
   "question-waited",
   "delivered-after-run-ended",
   "chatter",
-  "repeat-message",
   "repeat-notice",
   "controller-request-waited",
   "ticket-message-volume",

@@ -336,7 +336,6 @@ import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
-  CREW_ERROR_KEY,
   crew,
   forgetViews,
   hubAlert,
@@ -6310,11 +6309,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const keys = [...new Set(body.data.keys)];
         store.ack(keys, now());
-        // a crew error stays listed until acked: its row is marked, so it leaves Needs you
-        for (const k of keys) {
-          const id = k.startsWith(CREW_ERROR_KEY) ? k.slice(CREW_ERROR_KEY.length) : "";
-          if (/^[1-9]\d{0,15}$/.test(id)) store.ackCrewError(Number(id));
-        }
         bus.emit("attention");
         if (keys.some((k) => k.startsWith(GUARD_ACK_PREFIX))) bus.emit("guard");
         return { acked: keys.length };

@@ -64,7 +64,6 @@ import {
   OWNER_OPERATOR,
   PR_WAIT_MS,
   type PullRequestView,
-  pathInArea,
   profileStep,
   prYouAction,
   questionText,
@@ -77,10 +76,8 @@ import {
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
-  seatDef,
   stallStart,
   startOfLocalDay,
-  strayText,
   type TestLockState,
   type TokenUsage,
   UAT_PARK,
@@ -115,7 +112,6 @@ import {
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { reviewHoldOf } from "../engine/review-hold.ts";
 import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
@@ -139,8 +135,6 @@ import { transcriptFilePath } from "../transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
-/** A crew error's attention key: this, then its row id (an ack of it acks the row). */
-export const CREW_ERROR_KEY = "crew-error:";
 /** An engine note's Needs-you key: this, then the note's own key. */
 export const NOTE_KEY = NOTE_ITEM_PREFIX;
 
@@ -786,8 +780,7 @@ function buildCrew(
                     view.stop?.reason ??
                     (accountAtStop(config, store, agent.accountId, now)
                       ? "The reviewer's account is at its stop threshold."
-                      : (reviewHoldOf(store, queued.id)?.reason ??
-                        "Waiting for the reviewer to become available.")),
+                      : "Waiting for the reviewer to become available."),
                 },
               };
             })()),
@@ -1985,33 +1978,6 @@ function crewItems(
     return b;
   };
 
-  for (const s of store.strays()) {
-    const session = sessions.find((x) => x.id === s.sessionId);
-    // the writer whose area holds it, by today's config; none: it reads as outside every area
-    const owner =
-      s.kind === "other-area"
-        ? (session?.seats.find(
-            (w) =>
-              w.id !== s.agentId &&
-              seatDef(w).mode === "writer" &&
-              w.area.length > 0 &&
-              pathInArea(w.area, s.path),
-          ) ?? null)
-        : null;
-    out.push(
-      item({
-        key: s.key,
-        kind: "stray",
-        agentId: s.agentId,
-        repoId: session?.repoId ?? null,
-        path: s.path,
-        sessionId: s.sessionId,
-        text: strayText(s.path, s.sessionId, owner === null ? null : seatCallSign(owner.id)),
-        at: s.at,
-      }),
-    );
-  }
-
   for (const q of store.openQuestions()) {
     const asker = store.run(q.runId);
     if (asker !== null && endedWorkOver(config, store, asker, boardOf, now)) continue;
@@ -2104,19 +2070,6 @@ function crewItems(
     )
       continue;
     out.push(noteItem);
-  }
-
-  for (const e of store.crewErrors()) {
-    out.push(
-      item({
-        key: `${CREW_ERROR_KEY}${e.id}`,
-        kind: "error",
-        agentId: e.agentId,
-        repoId: repoOfSeat(e.agentId),
-        text: e.text,
-        at: e.at,
-      }),
-    );
   }
 
   const holder = lock.holder;

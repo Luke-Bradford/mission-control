@@ -1509,23 +1509,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /**
-   * A run has ended (however it ended): its open questions close and its strays go. Never throws;
+   * A run has ended (however it ended): its open questions close. Never throws;
    * the end itself is already recorded.
    */
   function closeRunItems(info: SeatInfo, runId: string | null): void {
     try {
       const seatId = info.seat.id;
-      const mine = store
-        .strays()
-        .filter((x) => x.sessionId === info.session.id && x.agentId === seatId)
-        .map((x) => x.path);
-      store.clearStrays(info.session.id, mine);
       // only this run's questions: another run of the seat, set aside, may still wait on the operator
       if (runId === null) store.endSeatQuestions(seatId, now());
       else store.endRunQuestions(runId, now());
       bus.emit("attention");
     } catch (e) {
-      log(`${info.seat.id}: could not close the run's questions and strays: ${errText(e)}`);
+      log(`${info.seat.id}: could not close the run's questions: ${errText(e)}`);
     }
   }
 

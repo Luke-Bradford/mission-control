@@ -16,6 +16,9 @@ const RETIRED_TABLES = [
   "holds",
   "run_reads",
   "run_rereads",
+  "strays",
+  "crew_errors",
+  "comms_repeats",
   // the code-health, Map, token-audit and bug-escape features
   "map_cache",
   "escaped_defects",
@@ -322,7 +325,6 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
-      CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
       CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
       CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
