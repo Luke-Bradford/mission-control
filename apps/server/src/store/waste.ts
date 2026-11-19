@@ -45,7 +45,8 @@ export function wasteQueries(db: DatabaseSync) {
            MAX(c.at) AS lastAt, r.ticket AS ticket, r.repo_id AS repoId, r.agent_id AS agentId
          FROM check_runs c JOIN runs r ON r.id = c.run_id
          WHERE c.at >= ? AND (c.ok = 1 OR c.exit_code IS NOT NULL) GROUP BY c.run_id, c.command, c.head_sha
-         HAVING COUNT(*) > 2 OR (COUNT(*) > 1 AND SUM(c.ok) > 1)`,
+         HAVING COUNT(*) > 2
+           OR (COUNT(*) > 1 AND (SUM(c.ok) > 1 OR MIN(CASE WHEN c.ok = 1 THEN c.at END) < MAX(c.at)))`,
         since,
       ) as unknown as {
         runId: string;
