@@ -3699,6 +3699,14 @@ describe("push and draft_pr", () => {
       );
     });
 
+    it("adds no closing line to a body that ends Part of the run's issue", async () => {
+      await pushed();
+      await pr("feat: x", "Stage 2.\n\nPart of #42.");
+      expect(ghCalls()[1]?.body).toBe(
+        "Stage 2.\n\nPart of #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
+    });
+
     it("refuses before a push, and after a commit the push has not sent", async () => {
       const text = { text: "Push first: the PR shows what is on origin.", isError: true };
       expect(await pr("feat: x", "body")).toEqual(text);
@@ -3840,6 +3848,44 @@ describe("push and draft_pr", () => {
       expect(body).toContain(MINORS.trimEnd());
       expect(body).toContain("Closes #42.");
       expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("keeps a staged body's Part of line last, with no closing line", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view({ body: `#42\n\n## What changed\n\nold\n\n${MINORS}\nPart of #42.\n` }));
+      await edit("New text.\n\nPart of #42.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).toBe(
+        `New text.\n\n${MINORS.trimEnd()}\n\nPart of #42.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      );
+    });
+
+    it.each(["Stage 3, part of #42.", "New text.\n\nPart of #42"])(
+      "keeps a staged PR staged when the seat's text %j does not end with the marker",
+      async (text) => {
+        store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+        ghState(
+          view({
+            body: `#42\n\n## What changed\n\nPart of #42: stage 3.\n\n${MINORS}\nPart of #42.\n`,
+          }),
+        );
+        await edit(text);
+        const body = edits()[0]?.body ?? "";
+        expect(body).not.toContain("Closes #42.");
+        expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
+      },
+    );
+
+    it("reads the run's latest note, not the first, to see a PR is staged", async () => {
+      store.addEvidence(RUN, "Done.", Date.now() - 1000);
+      store.addEvidence(RUN, "Part of #42: stage 2.", Date.now());
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("Stage 2 text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).not.toContain("Closes #42.");
+      expect(body.match(/Part of #42\./g)).toHaveLength(1);
+      expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
     });
 
     it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {

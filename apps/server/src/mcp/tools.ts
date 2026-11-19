@@ -127,6 +127,7 @@ import {
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
   nonAsciiPathsText,
+  noteIsPartOf,
   notOnBranchText,
   originMovedText,
   otherAreaText,
@@ -163,6 +164,7 @@ import {
   prNotRunsText,
   prOpenedByLine,
   protectedPathsText,
+  prPartOfLine,
   prSecretText,
   pushChecksText,
   pushedText,
@@ -1130,7 +1132,11 @@ function repoOf(deps: McToolsDeps, run: Run): string {
  */
 function prBody(body: string, repo: string, issue: number | null, call: string): string {
   const parts = [body.trimEnd()];
-  if (issue !== null && !closesIssue(body, { repo, issue })) parts.push(prClosesLine(issue));
+  // a body that says it is part of the ticket is a stage of it: it is not given a closing line
+  const staged = issue !== null && noteIsPartOf(body, issue);
+  if (issue !== null && !staged && !closesIssue(body, { repo, issue })) {
+    parts.push(prClosesLine(issue));
+  }
   parts.push(prOpenedByLine(call));
   return `${parts.join("\n\n")}\n`;
 }
@@ -1447,7 +1453,7 @@ export function minorSection(body: string): string | null {
   const at = body.indexOf(MINOR_HEADING);
   if (at === -1) return null;
   const rest = body.slice(at + MINOR_HEADING.length);
-  const end = rest.search(/^(?:#{1,2}\s|Closes #\d+\.|Opened by )/m);
+  const end = rest.search(/^(?:#{1,2}\s|(?:Closes|Part of) #\d+\.|Opened by )/m);
   return `${MINOR_HEADING}${end === -1 ? rest : rest.slice(0, end)}`.trimEnd();
 }
 
@@ -1465,19 +1471,26 @@ export function seatWroteBody(body: string, issue: number): boolean {
 
 /**
  * `body` without the parts the hub adds around a seat's text: its minor-findings section, the
- * closing line and its own line. `section`, when given, goes at the end.
+ * closing line and its own line. `section`, when given, goes at the end; a "Part of #n." line is
+ * put back after it, so it stays last.
  */
 export function withEngineSection(body: string, issue: number, section: string | null): string {
   const own = minorSection(body);
+  const staged = body.split("\n").some((l) => l.trim() === prPartOfLine(issue));
   const rest = (own === null ? body : body.replace(own, ""))
     .split("\n")
     .filter(
-      (l) => l.trim() !== prClosesLine(issue) && !/^Opened by .* \(Mission Control\)\.$/.test(l),
+      (l) =>
+        l.trim() !== prClosesLine(issue) &&
+        l.trim() !== prPartOfLine(issue) &&
+        !/^Opened by .* \(Mission Control\)\.$/.test(l),
     )
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return section === null ? rest : `${rest}\n\n${section}`;
+  const kept = section === null ? rest : `${rest}\n\n${section}`;
+  // a staged PR keeps "Part of #n." as its last line
+  return staged ? `${kept}\n\n${prPartOfLine(issue)}` : kept;
 }
 
 /** Another open writer run whose changes share paths with a commit. */
@@ -1978,8 +1991,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     // the engine's own section outlives the seat's rewrite
     return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
       const section = minorSection(current);
+      // a staged PR (its note, the seat's text or the PR as it stands says "Part of #n") keeps
+      // "Part of #n." as its last line, after the hub's sections
+      const marker = issue === null ? null : prPartOfLine(issue);
+      const staged =
+        issue !== null &&
+        marker !== null &&
+        (noteIsPartOf(own, issue) ||
+          noteIsPartOf(deps.store.latestEvidence(run.id)?.note ?? "", issue) ||
+          current.split("\n").some((l) => l.trim() === marker));
+      const lines = own.split("\n");
+      const text = (marker !== null && lines.at(-1)?.trim() === marker ? lines.slice(0, -1) : lines)
+        .join("\n")
+        .trimEnd();
+      const joined = section === null ? text : `${text}\n\n${section}`;
       return withSection(
-        section === null ? own : `${own}\n\n${section}`,
+        staged ? `${joined}\n\n${marker}` : joined,
         EVIDENCE_HEADING,
         sectionOf(current, EVIDENCE_HEADING),
       );
@@ -3164,7 +3191,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.prBody,
       description:
-        "Rewrite the body of your run's own open PR. Your body replaces the old one; Mission Control keeps its own minor-findings section and adds the closing line and its own line. It is refused when the body would notify someone, reference another item, hold a secret or end inside an open block, and for a PR that is not your run's.",
+        "Rewrite the body of your run's own open PR. Your body replaces the old one; Mission Control keeps its own minor-findings section and adds the closing line (\"Part of #n.\" when the PR is part of the ticket) and its own line. It is refused when the body would notify someone, reference another item, hold a secret or end inside an open block, and for a PR that is not your run's.",
       inputSchema: {
         type: "object",
         properties: {
