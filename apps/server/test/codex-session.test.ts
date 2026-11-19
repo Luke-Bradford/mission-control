@@ -373,8 +373,9 @@ describe("Codex session", () => {
       {},
       {
         approve: async (_req, _paths, s) => {
-          if (s.aborted) return "decline";
+          // Record the signal first: on exit the abort can land before this runs.
           signal = s;
+          if (s.aborted) return "decline";
           return new Promise((r) => {
             resolve = r;
           });
