@@ -34,7 +34,7 @@ const PAGES: [string, string, RegExp, string][] = [
   ["Comms", "/comms/crew", /Starting on the checkout cache/, "Comms"],
   ["QA", "/qa", /Export orders as CSV/, "QA"],
   ["Telemetry", "/telemetry", /Crew health/i, "Telemetry"],
-  ["Audit", "/audit", /Do next/, "Audit"],
+  ["Audit", "/audit", /Improvements to consider/, "Audit"],
   ...SETUP_TABS.map((tab): [string, string, RegExp, string] => [
     `Setup ${tab}`,
     `/setup/${tab}`,

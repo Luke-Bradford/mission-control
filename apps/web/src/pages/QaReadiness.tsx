@@ -452,20 +452,17 @@ function Detail({
           <div className="pb uat-stack">
             <p>
               {data?.files?.length
-                ? `${plural(data.files.length, "changed file")}. Review code risk in Audit.`
+                ? plural(data.files.length, "changed file")
                 : "Changed paths have not been captured."}
             </p>
             {data?.files?.length ? (
-              <>
-                <ul className="uat-files">
-                  {data.files.slice(0, 6).map((file) => (
-                    <li key={file} title={file}>
-                      {file}
-                    </li>
-                  ))}
-                </ul>
-                <a href="/audit?tab=risk">Open code risk in Audit</a>
-              </>
+              <ul className="uat-files">
+                {data.files.slice(0, 6).map((file) => (
+                  <li key={file} title={file}>
+                    {file}
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </div>
         </Panel>

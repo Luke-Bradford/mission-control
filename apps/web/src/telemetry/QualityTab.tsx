@@ -1,20 +1,17 @@
 import {
-  type DefectVia,
   FLOW_DAYS,
   GUARD_RULES,
   type GuardHitsView,
   type GuardRule,
-  type QaFlowView,
   type Telemetry,
 } from "@mc/core";
 import { useRef } from "react";
 import { ListScrollCue } from "../agent/ListScrollCue.tsx";
-import { useTz } from "../clock.ts";
 import { hub, RESOURCES, type Resource, useResource } from "../data.ts";
 import { dayMonth, percent, plural } from "../fmt.ts";
 import { HBar } from "../hud/charts/HBar.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { PAGE_PATHS, ticketPath } from "../router.ts";
+import { PAGE_PATHS } from "../router.ts";
 import { DASH } from "./common.ts";
 import { DailyRateChart } from "./DailyRateChart.tsx";
 import { GUARD_DRAWER_HREF } from "./guardCopy.ts";
@@ -36,12 +33,6 @@ const GAP_TEXT = {
   ci: "No merged PRs that day",
   firstPass: "No reviewed PRs that day",
 } as const;
-const DEFECT_LINK_TEXT: Record<DefectVia, string> = {
-  pr: "Names the PR",
-  commit: "Names a commit of the PR",
-  file: "Touches a file only this PR changed",
-};
-
 export const QUALITY_SUMMARY_COUNT = 6;
 
 const one = (n: number | null | undefined): string => (n == null ? DASH : n.toFixed(1));
@@ -332,74 +323,9 @@ function GuardPanel({ res }: { res: Resource<GuardHitsView> }) {
   );
 }
 
-function EscapedTable({ res }: { res: Resource<QaFlowView> }) {
-  const tz = useTz() ?? "UTC";
-  const flow = res.data;
-  const rows = flow?.escapedDefects ?? [];
-  return (
-    <Panel id="qEscaped" title="Escaped defects" sub={`found after merge · last ${FLOW_DAYS} days`}>
-      <ResourceState res={res} path={RESOURCES.qaFlow.path} what="Escaped defects" />
-      {!flow ? (
-        res.error ? null : (
-          <p className="pb s muted">Loading…</p>
-        )
-      ) : rows.length === 0 ? (
-        <p className="pb s muted">No escaped defects in the last {FLOW_DAYS} days.</p>
-      ) : (
-        <div className="pb tw">
-          <table>
-            <caption className="sr-only">Escaped defects</caption>
-            <thead>
-              <tr>
-                <th>Defect</th>
-                <th>Merged PR</th>
-                <th>How it was linked</th>
-                <th>Seat</th>
-                <th>Model</th>
-                <th>Found</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={`${r.repoId}#${r.issueNumber}:${r.prNumber}`}>
-                  <td>
-                    <a href={ticketPath(r.repoId, r.issueNumber)}>
-                      {r.repoId}#{r.issueNumber}
-                    </a>
-                  </td>
-                  <td>#{r.prNumber}</td>
-                  <td>{DEFECT_LINK_TEXT[r.via]}</td>
-                  <td>{r.seat ?? DASH}</td>
-                  <td>{r.model ?? DASH}</td>
-                  <td>{dayMonth(r.filedAt, tz)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Panel>
-  );
-}
-
-/** The Quality tab's panels: daily charts and guard blocks as charts, escaped defects as the table. */
-export function QualityPanels({
-  t,
-  view,
-  dim,
-}: {
-  t: Telemetry | undefined;
-  view: "charts" | "table";
-  dim: boolean;
-}) {
+/** The Quality tab's panels: daily charts and guard blocks. */
+export function QualityPanels({ t, dim }: { t: Telemetry | undefined; dim: boolean }) {
   const hits = useResource<GuardHitsView>(RESOURCES.guardHitsFlow);
-  const flow = useResource<QaFlowView>(RESOURCES.qaFlow);
-  if (view === "table")
-    return (
-      <div className={`grid${dim ? " dim" : ""}`} data-view="table" data-n="1">
-        <EscapedTable res={flow} />
-      </div>
-    );
   return (
     <div className={`grid${dim ? " dim" : ""}`} data-view="charts" data-n="4">
       <RatePanel

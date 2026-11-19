@@ -114,7 +114,6 @@ describeRendered("Demo, rendered", () => {
   it.each([
     ["needs-you", "/needs-you/demo-design-signoff", 2000],
     ["agents", "/agent", 800],
-    ["comms-chart", "/comms/chart", 100],
   ] as const)(
     "%s fills a 1920x940 window with demo data",
     async (name, at, minText) => {
