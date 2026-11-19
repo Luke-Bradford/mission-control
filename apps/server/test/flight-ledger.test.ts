@@ -678,7 +678,6 @@ describe("retrospective measures", () => {
         ],
         instruction: expect.stringContaining("log pages checked and tickets filed or folded"),
       },
-      wakeActions: { wakes: 2, noAction: 1, share: 0.5 },
     });
     await prepareRetrospective(config, store, NOW + MIN);
     expect(pendingRetrospective(store, "mc")).toEqual(report);
