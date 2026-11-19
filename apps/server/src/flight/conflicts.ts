@@ -1,5 +1,5 @@
 import type { PullRequestView } from "@mc/core";
-import type { MapConflicts } from "../map/conflicts.ts";
+import type { MergeConflicts } from "./merge-conflicts.ts";
 
 /**
  * The files whose merge conflicts between open PRs, with the PRs: each pair's `git merge-tree`
@@ -7,7 +7,7 @@ import type { MapConflicts } from "../map/conflicts.ts";
  * cannot be read; FLIGHT's state then carries no list rather than failing to build.
  */
 export async function flightConflicts(
-  conflicts: MapConflicts,
+  conflicts: MergeConflicts,
   checkout: string,
   prs: readonly Pick<PullRequestView, "branch" | "headSha" | "state" | "number">[],
 ): Promise<{ file: string; prs: number[] }[] | undefined> {

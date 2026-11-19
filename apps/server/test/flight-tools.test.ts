@@ -22,7 +22,6 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
-  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   ciLogText,
@@ -151,7 +150,6 @@ import { buildApp } from "../src/api.ts";
 import { AttentionMaterialsError } from "../src/attention/attention-materials.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/config/crew-pause.ts";
 import {
@@ -270,8 +268,6 @@ let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let aliveNow: string[];
-/** Tickets of repo mc with a published branch preview. */
-let previewTickets: number[];
 let engineOn: boolean;
 let lifts: boolean;
 let refuseWith: OperatorRefusal | null = null;
@@ -439,10 +435,8 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
-  previewTickets = [];
   flightDeps = (): FlightToolsDeps => ({
     attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
-    hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
       save: (png) => shotsSaveImpl(png),
@@ -1530,17 +1524,6 @@ describe("seat schema", () => {
       ).properties;
       expect(props.seat?.pattern).toBe(SEAT_ID.source);
     }
-  });
-});
-
-describe("create_ticket recommendationId", () => {
-  it("tells FLIGHT which proposed code-health rules it may accept itself", () => {
-    const props = (
-      named("create_ticket").inputSchema as { properties: Record<string, { description?: string }> }
-    ).properties;
-    for (const rule of CODE_HEALTH_FLIGHT_TIER_RULES)
-      expect(props.recommendationId?.description).toContain(rule);
-    expect(props.recommendationId?.description).toContain("operator accepts");
   });
 });
 
@@ -4307,235 +4290,6 @@ describe("create_ticket", () => {
     okGh();
   });
 
-  function acceptedRecommendation() {
-    store.refreshCodeHealthRecommendations("mc", NOW);
-    const row = store.codeHealthRecommendations("mc")[0];
-    if (!row) throw Error("fixture recommendation missing");
-    store.decideCodeHealthRecommendation(
-      "mc",
-      row.id,
-      {
-        requestId: "12345678-1234-4234-8234-123456789abc",
-        basis: "Fixture evidence",
-        expectedUpdatedAt: row.updatedAt,
-        change: { action: "accept", owner: "owner", reviewAt: NOW + 10000 },
-      },
-      "operator",
-      NOW,
-    );
-    return row.id;
-  }
-  it("links accepted recommendation work before a project failure and never recreates it on retry", async () => {
-    const recommendationId = acceptedRecommendation();
-    readImpl = (n) => card(n, { status: "" });
-    let creates = 0,
-      failProject = true;
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      if (a[1] === "create") {
-        creates++;
-        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-      }
-      return { code: failProject ? 1 : 0, stdout: "", stderr: "project refused" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toBe(
-      "https://github.com/o/mc/issues/42",
-    );
-    failProject = false;
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain(
-      "Recovered existing",
-    );
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.workReady).toBe(true);
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain("already links");
-    expect(creates).toBe(1);
-  });
-  function proposed(rule: string) {
-    const id = `chr_${(rule.length.toString(16).padStart(2, "0")).repeat(16)}`;
-    upsertRecommendation(
-      (store as unknown as { db: DatabaseSync }).db,
-      {
-        id,
-        repoId: "mc",
-        rule,
-        ruleVersion: 1,
-        scope: null,
-        evidenceFingerprint: "f",
-        observation: "o",
-        proposal: "p",
-        uncertainty: "u",
-        rankingReason: "r",
-        target: { metric: "m", direction: "decrease", baseline: 5 },
-      },
-      NOW,
-    );
-    return id;
-  }
-  it("accepts a proposal of FLIGHT's own tier by filing its work, and leaves the others for the operator", async () => {
-    readImpl = (n) => card(n, { status: "" });
-    const other = proposed("recurring-correction");
-    expect((await call("create_ticket", C({ recommendationId: other }))).isError).toBe(true);
-    expect(store.codeHealthRecommendation("mc", other)?.state.kind).toBe("proposed");
-    const mine = proposed("repeatedly-changed-large-file");
-    await call("create_ticket", C({ recommendationId: mine }));
-    const row = store.codeHealthRecommendation("mc", mine);
-    expect(row?.state.kind).toBe("accepted");
-    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
-  });
-  it("recovers a created issue marker after a lost response without a second issue write", async () => {
-    const recommendationId = acceptedRecommendation();
-    readImpl = (n) => card(n, { status: "In progress" });
-    let body = "",
-      creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list")
-        return {
-          code: 0,
-          stdout: JSON.stringify(
-            body ? [{ number: 42, title: "Server: fix the flake", body }] : [],
-          ),
-          stderr: "",
-        };
-      if (a[1] === "create") {
-        creates++;
-        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
-        return { code: 1, stdout: "", stderr: "response lost" };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(
-      (
-        await call(
-          "create_ticket",
-          C({ recommendationId, title: "Rephrased title", body: `${BODY}Updated phrasing` }),
-        )
-      ).text,
-    ).toContain("Recovered existing");
-    expect(creates).toBe(1);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toContain(
-      "issues/42",
-    );
-  });
-  function assessRecommendation(id: string) {
-    const row = store.codeHealthRecommendation("mc", id);
-    if (!row) throw Error("missing fixture recommendation");
-    store.decideCodeHealthRecommendation(
-      "mc",
-      id,
-      {
-        requestId: "a2345678-1234-4234-8234-123456789abc",
-        basis: "Later evidence",
-        expectedUpdatedAt: row.updatedAt,
-        change: {
-          action: "assess",
-          outcome: "no-effect",
-          reason: "Work no longer needed",
-          comparison: "Compared with saved baseline",
-          evidenceId: "fixture-evidence",
-        },
-      },
-      "operator",
-      NOW + 10001,
-    );
-  }
-  it("creates no issue when assessment wins during the issue-list await", async () => {
-    const recommendationId = acceptedRecommendation();
-    let creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list") {
-        assessRecommendation(recommendationId);
-        return { code: 0, stdout: "[]", stderr: "" };
-      }
-      creates++;
-      return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(creates).toBe(0);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.state.kind).toBe("no-effect");
-  });
-  it("keeps the created issue link and assessment when assessment wins during creation", async () => {
-    const recommendationId = acceptedRecommendation();
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      if (a[1] === "create") {
-        assessRecommendation(recommendationId);
-        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-      }
-      throw Error("No board write after assessment");
-    };
-    const result = await call("create_ticket", C({ recommendationId }));
-    expect(result.isError).toBeUndefined();
-    expect(result.text).toContain("was assessed");
-    const row = store.codeHealthRecommendation("mc", recommendationId);
-    expect(row?.state.kind).toBe("no-effect");
-    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
-    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(0);
-  });
-  it("recovers a lost creation response after assessment without overwriting that decision", async () => {
-    const recommendationId = acceptedRecommendation();
-    let body = "",
-      creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list")
-        return {
-          code: 0,
-          stdout: JSON.stringify(body ? [{ number: 42, body, title: "Original issue" }] : []),
-          stderr: "",
-        };
-      if (a[1] === "create") {
-        creates++;
-        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
-        assessRecommendation(recommendationId);
-        return { code: 1, stdout: "", stderr: "response lost" };
-      }
-      throw Error("No board write after assessment");
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(
-      (await call("create_ticket", C({ recommendationId, title: "Rephrased recovery" }))).text,
-    ).toContain("was assessed");
-    expect(creates).toBe(1);
-    const row = store.codeHealthRecommendation("mc", recommendationId);
-    expect(row?.state.kind).toBe("no-effect");
-    expect(row?.linkedWork).toContain("issues/42");
-  });
-  it("fails closed after an ambiguous creation with no visible marker", async () => {
-    const recommendationId = acceptedRecommendation();
-    let creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      creates++;
-      return { code: 1, stdout: "", stderr: "response lost" };
-    };
-    await call("create_ticket", C({ recommendationId }));
-    const retry = await call("create_ticket", C({ recommendationId, title: "Changed title" }));
-    expect(retry.isError).toBe(true);
-    expect(retry.text).toContain("uncertain outcome");
-    expect(creates).toBe(1);
-  });
-  it("counts partial project-recovery writes before a failed board read", async () => {
-    const recommendationId = acceptedRecommendation();
-    store.linkCodeHealthRecommendation(
-      "mc",
-      recommendationId,
-      "https://github.com/o/mc/issues/42",
-      "flight-1",
-      NOW,
-    );
-    readImpl = () => null;
-    ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
-    for (let i = 0; i < 6; i++) await call("create_ticket", C({ recommendationId }));
-    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(5);
-    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toHaveLength(5);
-  });
-  it("refuses an unaccepted or foreign recommendation before GitHub reads", async () => {
-    store.refreshCodeHealthRecommendations("mc", NOW);
-    const recommendationId = store.codeHealthRecommendations("mc")[0]?.id;
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(ghCalls).toEqual([]);
-  });
-
   it("counts tickets that were filed and then failed at the project, so they cannot go on unbounded", async () => {
     let n = 40;
     ghImpl = async (a) => {
@@ -5196,12 +4950,8 @@ describe("brief_item", () => {
       );
       expect(ok).toEqual({ text: BRIEFED_TEXT });
     });
-    it("refuses a looks question with no picture and no preview; passes with either", async () => {
+    it("refuses a looks question with no picture; passes with one", async () => {
       await refused({ looks: true }, /about how something looks/);
-      previewTickets = [7];
-      const withPreview = await call("brief_item", B({ looks: true }));
-      expect(withPreview).toEqual({ text: BRIEFED_TEXT });
-      previewTickets = [];
       const picture = `/api/hud-screenshots/${"a".repeat(32)}`;
       expect(
         await call(

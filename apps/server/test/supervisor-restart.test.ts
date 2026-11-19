@@ -617,7 +617,7 @@ describe("reattach after a restart", () => {
       startedAt: 1,
       endedAt: null,
       status: "running" as const,
-      sessionId: null,
+      sessionId: "11111111-2222-4333-8444-555555555555",
       model: "haiku",
       branch: BRANCH,
       ticket: "mc#42",

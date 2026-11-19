@@ -11,7 +11,6 @@ export const EVIDENCE_FOLDERS = [
   "hud-screenshots",
   "pr-evidence",
   "pr-evidence-work",
-  "design-previews",
 ] as const;
 
 /** Puts the marker at the root of each folder, making the folder if it is missing. Never throws. */

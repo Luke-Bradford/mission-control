@@ -5,13 +5,12 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
-import type { MapPersist } from "./snapshot.ts";
 
 const execFileP = promisify(execFile);
 type Tip = Pick<PullRequestView, "branch" | "headSha" | "state"> & { number?: number };
 const SHA = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 
-// Serialise checks, leaving room for another map git collector under the two-process limit.
+// Serialise checks, leaving room for another git collector under the two-process limit.
 let pending: Promise<unknown> = Promise.resolve();
 function queued<T>(run: () => Promise<T>): Promise<T> {
   const next = pending.then(run, run);
@@ -31,15 +30,10 @@ export interface PairFailure {
  * unrelated histories) is held until either head changes, which changes the pair's key.
  */
 export const RETRY_HOLD_MS = 10_000;
-/** The map cache kind for a checked pair: sha pair → conflicting files. */
-const CONFLICT_KIND = "conflict";
-/** The one row per checkout under that kind. */
-const PAIRS_KEY = "pairs";
-
 type Held = { reason: string; until: number };
 
-/** Slice 6: the snapshot's conflicts, from Store.pullRequests(repoId), never local branch refs. */
-export class MapConflicts {
+/** The merge conflicts between open PRs, from Store.pullRequests(repoId), never local branch refs. */
+export class MergeConflicts {
   /** sha pair → the conflicting files of a pair that merged (or failed to) cleanly. */
   private readonly cache = new Map<string, string[]>();
   /** worktree and sha pair → a failed check, held as unchecked (never clean) until `until`. */
@@ -48,29 +42,9 @@ export class MapConflicts {
   private readonly missing = new Map<string, number>();
 
   private readonly now: () => number;
-  /** Pair results outlive the hub: a restart must not re-run every merge check on the first snapshot. */
-  private readonly persist: MapPersist | null;
 
-  constructor(now: () => number = Date.now, persist: MapPersist | null = null) {
+  constructor(now: () => number = Date.now) {
     this.now = now;
-    this.persist = persist;
-  }
-
-  /** The checkout's stored pairs (sha pair → files): one row per checkout, so closed pairs fall away. */
-  private persistedPairs(worktree: string): Map<string, string[]> {
-    const raw = this.persist?.get(CONFLICT_KIND, worktree, PAIRS_KEY);
-    const pairs = new Map<string, string[]>();
-    if (raw == null) return pairs;
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return pairs;
-      for (const [key, files] of Object.entries(parsed as Record<string, unknown>))
-        if (Array.isArray(files) && files.every((f) => typeof f === "string"))
-          pairs.set(key, files as string[]);
-    } catch {
-      // a row the hub cannot read is the same as none
-    }
-    return pairs;
   }
 
   /**
@@ -95,9 +69,6 @@ export class MapConflicts {
       const failures: PairFailure[] = [];
       const failedPairs: [string, string][] = [];
       const checkedTips = new Set<string>();
-      const stored = this.persistedPairs(worktree);
-      /** Every pair this check resolved, from memory, the store or a merge: the row to keep. */
-      const seen = new Map<string, string[]>();
       // Checked only on a cache miss: a cached pair needs no object reads.
       const present = new Map<string, Promise<boolean>>();
       let checkoutChecked = false;
@@ -126,13 +97,6 @@ export class MapConflicts {
           const key = shas.join(":");
           const failedKey = `${worktree}\0${key}`;
           let files = this.cache.get(key);
-          if (files === undefined) {
-            const kept = stored.get(key);
-            if (kept !== undefined) {
-              files = kept;
-              this.cache.set(key, files);
-            }
-          }
           if (files === undefined) {
             await ensureCheckout();
             const held = this.failed.get(failedKey);
@@ -169,7 +133,6 @@ export class MapConflicts {
             this.cache.set(key, files);
             if (this.cache.size > 256) this.cache.delete(this.cache.keys().next().value as string);
           }
-          seen.set(key, files);
           checkedTips.add(a.branch);
           checkedTips.add(b.branch);
           for (const file of files) {
@@ -182,16 +145,6 @@ export class MapConflicts {
           }
         }
       }
-      // the row holds the open pairs as they stand now; an unchanged set is not rewritten
-      const same = seen.size === stored.size && [...seen.keys()].every((k) => stored.has(k));
-      if (!same)
-        this.persist?.put(
-          CONFLICT_KIND,
-          worktree,
-          PAIRS_KEY,
-          JSON.stringify(Object.fromEntries(seen)),
-          true,
-        );
       // blame the tip common to the failing pairs: a branch that checked against some other tip is
       // sound; when neither side of a failed pair checked anywhere, or both did, both are unknown
       for (const [a, b] of failedPairs) {
@@ -261,7 +214,7 @@ function reasonOf(e: unknown): string {
   return `${how}: ${first}`.slice(0, 300);
 }
 
-/** Git's environment for map reads: no system or global config, no lazy fetch, no prompts. */
+/** Git's environment for merge checks: no system or global config, no lazy fetch, no prompts. */
 function isolatedEnv(): NodeJS.ProcessEnv {
   return {
     ...gitEnv(process.env),
@@ -304,7 +257,7 @@ async function hasCommit(worktree: string, sha: string): Promise<boolean> {
 }
 
 async function mergeFiles(worktree: string, left: string, right: string): Promise<string[]> {
-  const scratch = await mkdtemp(join(tmpdir(), "mc-map-merge-"));
+  const scratch = await mkdtemp(join(tmpdir(), "mc-merge-"));
   const env = isolatedEnv();
   const git = async (args: string[], extra: NodeJS.ProcessEnv = {}) =>
     (

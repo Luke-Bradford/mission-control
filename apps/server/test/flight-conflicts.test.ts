@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { flightConflicts } from "../src/flight/conflicts.ts";
-import { MapConflicts } from "../src/map/conflicts.ts";
+import { MergeConflicts } from "../src/flight/merge-conflicts.ts";
 
 let dir: string;
 const git = (...args: string[]) =>
@@ -40,13 +40,13 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 it("names only the files whose merge conflicts, not every file two PRs both change", async () => {
-  const found = await flightConflicts(new MapConflicts(), dir, [tip("left", 7), tip("right", 8)]);
+  const found = await flightConflicts(new MergeConflicts(), dir, [tip("left", 7), tip("right", 8)]);
   expect(found).toEqual([{ file: "clash.txt", prs: [7, 8] }]);
 });
 
 it("is undefined when the checkout cannot be read, so FLIGHT's state still builds", async () => {
   expect(
-    await flightConflicts(new MapConflicts(), join(dir, "missing"), [
+    await flightConflicts(new MergeConflicts(), join(dir, "missing"), [
       tip("left", 7),
       tip("right", 8),
     ]),
