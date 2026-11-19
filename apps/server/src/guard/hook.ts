@@ -218,14 +218,13 @@ export async function hookMain(
   post: HookPost,
   retryMs: number = HOOK_RETRY_MS,
 ): Promise<HookResult> {
-  const failed = FAILED;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<HookResult>((resolve) => {
-    timer = setTimeout(() => resolve(failed), HOOK_DEADLINE_MS);
+    timer = setTimeout(() => resolve(FAILED), HOOK_DEADLINE_MS);
   });
   try {
     return await Promise.race([
-      decide(stdin, argv, post, retryMs, failed).catch(() => failed),
+      decide(stdin, argv, post, retryMs, FAILED).catch(() => FAILED),
       deadline,
     ]);
   } finally {

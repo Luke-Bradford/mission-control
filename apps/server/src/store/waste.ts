@@ -5,7 +5,6 @@ import { toRun } from "./rows.ts";
 type Row = Record<string, SQLInputValue>;
 
 /** What a rerun refusal is recorded as, next to the run's own attempts. */
-export const RERUN_REFUSED_ATTEMPT = "rerun-refused";
 /** The attempt a carry-on resume is recorded as. */
 export const RESUME_ATTEMPT = "resume";
 
@@ -47,28 +46,6 @@ export function wasteQueries(db: DatabaseSync) {
          WHERE c.at >= ? AND (c.ok = 1 OR c.exit_code IS NOT NULL) GROUP BY c.run_id, c.command, c.head_sha
          HAVING COUNT(*) > 2
            OR (COUNT(*) > 1 AND (SUM(c.ok) > 1 OR MIN(CASE WHEN c.ok = 1 THEN c.at END) < MAX(c.at)))`,
-        since,
-      ) as unknown as {
-        runId: string;
-        command: string;
-        sha: string;
-        n: number;
-        lastAt: number;
-        ticket: string | null;
-        repoId: string;
-        agentId: string;
-      }[];
-    },
-
-    /** Reruns the hook refused, by run, command and commit. */
-    refusedReruns(since: number) {
-      return all(
-        `SELECT a.run_id AS runId, json_extract(a.data, '$.command') AS command,
-           json_extract(a.data, '$.sha') AS sha, COUNT(*) AS n, MAX(a.at) AS lastAt,
-           r.ticket AS ticket, r.repo_id AS repoId, r.agent_id AS agentId
-         FROM run_attempts a JOIN runs r ON r.id = a.run_id
-         WHERE a.kind = '${RERUN_REFUSED_ATTEMPT}' AND a.at >= ?
-         GROUP BY a.run_id, command, sha`,
         since,
       ) as unknown as {
         runId: string;
