@@ -2705,7 +2705,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     reattaching = (async () => {
       const heldRunIds = new Set(store.liveSeatRuns().map(({ run }) => run.id));
       for (const run of store.runsActiveSince(0)) {
-        if (run.endedAt !== null || heldRunIds.has(run.id)) continue;
+        // A review run is deliberately off its seat while its worktree waits for a reviewer.
+        if (run.endedAt !== null || heldRunIds.has(run.id) || run.loop?.hold?.worktree != null)
+          continue;
         const at = now();
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         recordEnded(run.id, at, "failed", "exit");
