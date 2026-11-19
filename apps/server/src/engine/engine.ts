@@ -171,7 +171,6 @@ import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { wakeDueAsideRun } from "./aside.ts";
-import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
   EMPTY_LOG,
@@ -2994,20 +2993,6 @@ export function createEngine(deps: EngineDeps): Engine {
           await phase("refresh rule notes", () => refreshRuleNotes(runs));
           await phase("sweep notes", () => sweepNotes(notes));
           await phase("untake stale", untakeStale);
-          await phase("release dependents", () =>
-            releaseDependents({
-              store,
-              config,
-              now,
-              move: deps.board.move,
-              syncMain: engine.syncMain,
-              rules: deps.rules,
-              fetchTicket: deps.fetchTicket,
-              prsFor,
-              ...(deps.pollGithub ? { pollGithub: deps.pollGithub } : {}),
-              log,
-            }),
-          );
           await phase("take for seats", takeForSeats);
           await phase("kick reviews", kickReviews);
         });

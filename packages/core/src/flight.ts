@@ -1055,8 +1055,6 @@ export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
 /** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
 export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
-/** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
-export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
@@ -1071,7 +1069,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
-  "chain_stalled",
   "github_budget",
   "hub_error",
   "old_park",
@@ -1090,6 +1087,7 @@ export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [
   "wait_over",
   "stuck_pr",
   "waste_alarm",
+  "chain_stalled",
 ];
 export interface FlightSignal {
   checks?: string[];
