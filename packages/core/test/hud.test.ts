@@ -602,10 +602,11 @@ describe("guard and test lock copy", () => {
     expect(GUARD_NOTE).toContain(
       "The guard catches agent mistakes and ordinary spellings, not deliberate evasion.",
     );
-    expect(RUNTIME_LIMITS).toHaveLength(2);
+    expect(RUNTIME_LIMITS).toHaveLength(3);
     for (const limit of RUNTIME_LIMITS) expect(GUARD_NOTE).toContain(limit);
-    expect(GUARD_NOTE).toContain("No network");
-    expect(GUARD_NOTE).toContain("No background tasks");
+    expect(GUARD_NOTE).toContain("no network");
+    expect(GUARD_NOTE).toContain("& or nohup is not stopped");
+    expect(GUARD_NOTE).toContain("FLIGHT runs with full access");
     expect(GUARD_NOTE).toContain("separate from the refusal counts above");
     expect(guardSummary(1, 0)).toBe("Guard: 1 blocked command (for information)");
     expect(guardSummary(3, 2)).toBe("Guard: 3 blocked commands, 2 new (for information)");
