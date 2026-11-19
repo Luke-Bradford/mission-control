@@ -403,6 +403,21 @@ const prRef = (pr: number | null): string => (pr === null ? "the PR" : `PR #${pr
 export const readyMarkedText = (pr: number | null): string => `marked ${prRef(pr)} ready`;
 export const mergedText = (pr: number | null): string => `merged ${prRef(pr)} (merge commit)`;
 export const closedIssueText = (issue: number): string => `closed #${issue}`;
+export const leftOpenText = (issue: number): string =>
+  `left #${issue} open: the PR is part of the ticket`;
+
+/**
+ * Whether a merged PR's body names ticket `issue` only as a part of it ("Part of #N", "Refs #N",
+ * any case) and never with a closing keyword (Closes, Fixes, Resolves). A body that names the
+ * ticket not at all is not part-only: GitHub or the engine closes the ticket as before.
+ */
+export function prIsPartOf(body: string, issue: number): boolean {
+  const n = String(issue);
+  const target = `(?:[\\w.-]+/[\\w.-]+)?#${n}(?!\\d)`;
+  const closing = new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\b:?\\s+${target}`, "i");
+  const partial = new RegExp(`\\b(?:part\\s+of|refs?|references?)\\b:?\\s+${target}`, "i");
+  return partial.test(body) && !closing.test(body);
+}
 export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
 export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;
 export const localNotDeletedText = (branch: string, why: string): string =>

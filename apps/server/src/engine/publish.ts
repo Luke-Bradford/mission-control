@@ -32,6 +32,7 @@ import {
   minorMoreLine,
   parseMinorFindings,
   pathInArea,
+  prIsPartOf,
   prNotRunsText,
   REVIEW_STATUS_CONTEXT,
   type ReviewStatusState,
@@ -285,7 +286,7 @@ export interface Publisher {
   /** Merges the run's PR with a merge commit, only if its head is `sha`. */
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
-  closeIssue(run: Run): Promise<PublishResult>;
+  closeIssue(run: Run): Promise<PublishResult & { left?: boolean }>;
   fileMinorFindings(
     run: Run,
     prNumber: number,
@@ -2025,6 +2026,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const repo = repoOf(run);
       const issue = issueOf(run);
       if (repo === undefined || issue === null) return final(MERGE_NO_PR);
+      const prNumber = run.loop?.prNumber ?? null;
+      if (prNumber !== null) {
+        // a PR that is only part of the ticket leaves it open
+        const pr = await ghJson(
+          ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=body"],
+          "pr view",
+        );
+        if (isRefusal(pr)) return pr;
+        if (typeof pr.body === "string" && prIsPartOf(pr.body, issue))
+          return { ok: true, left: true };
+      }
       const view = await ghJson(
         ["issue", "view", String(issue), `--repo=${repo}`, "--json", "state"],
         "issue view",
