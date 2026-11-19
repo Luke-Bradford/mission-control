@@ -40,15 +40,15 @@ export const FSEVENTSD_RUNAWAY_BYTES = 150 * 1024 ** 2;
 export const FSEVENTSD_RUNAWAY_WINDOW_MS = 60 * 60_000;
 /** The setting holding when the hub last tried to restart a runaway `fseventsd`. */
 export const FILE_SERVICE_RESTART_SETTING = "machine-capacity:fseventsd-restart-at";
-/** The setting holding when the hub last showed the administrator prompt for it. */
-export const FILE_SERVICE_PROMPT_SETTING = "machine-capacity:fseventsd-prompt-at";
-/** An unanswered prompt is not shown again for this long; a sudoers rule still restarts hourly. */
-export const FILE_SERVICE_PROMPT_GAP_MS = 12 * 60 * 60_000;
-/** The Needs-you item for a runaway the hub could not restart. */
+/** The operator alert for a runaway the hub could not restart. */
 export const FILE_SERVICE_RUNAWAY_KEY = "file-service-runaway";
-/** The one sudoers line that lets the hub restart it unattended, and nothing else. */
+/**
+ * The one sudoers rule that lets the hub restart it unattended, and nothing else. It is written by
+ * root straight into place (no user-writable file between the check and the install), then the
+ * whole sudoers configuration is checked.
+ */
 export const FILE_SERVICE_SUDOERS_ADVICE =
-  'To let the hub do this itself next time, run once: `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" > /tmp/mc-fseventsd && sudo visudo -cf /tmp/mc-fseventsd && sudo install -m 440 -o root -g wheel /tmp/mc-fseventsd /etc/sudoers.d/mc-fseventsd`. It checks the rule before installing it and allows only that one command; any program running as you could then restart fseventsd.';
+  'To let the hub restart it by itself next time, run once in Terminal: `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd >/dev/null && sudo chmod 440 /etc/sudoers.d/mc-fseventsd && sudo visudo -c`. It allows only that one command; any program running as you could then restart fseventsd, and nothing more.';
 
 export interface FileServiceRunaway {
   fromBytes: number;

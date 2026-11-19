@@ -3,12 +3,12 @@
  *
  * On 18 November `fseventsd` went into a state where it kept every file event in memory and grew
  * about 250 MB an hour until restarted; healthy, it stays flat under any amount of crew work. What
- * tips it into that state is not known yet, so each restart first saves what was running and the
- * service's own log, for finding the trigger.
+ * tips it into that state is not known yet, so the first attempt of each episode saves what was
+ * running and the service's own log, for finding the trigger.
  *
- * Restarting a system daemon needs root. The hub tries `sudo -n` first, which works only when the
- * operator has added a sudoers rule for exactly `/usr/bin/killall fseventsd`; otherwise, when the
- * caller allows it, it shows the macOS administrator prompt. Nothing else runs as root.
+ * Restarting a system daemon needs root. The hub runs `sudo -n /usr/bin/killall fseventsd`, which
+ * works only when the operator has added a sudoers rule for exactly that command. Without it the
+ * caller raises an operator alert; the hub never shows a password prompt of its own.
  */
 import { execFile } from "node:child_process";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
@@ -17,11 +17,6 @@ import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
 
-const KILLALL = "/usr/bin/killall";
-const PROMPT =
-  "Mission Control: the file-change service (fseventsd) is stuck and growing. Restarting it takes about 15 seconds; programs watching files reconnect by themselves.";
-/** Long enough to type a password; an unanswered prompt is cancelled when osascript is killed. */
-const PROMPT_TIMEOUT_MS = 5 * 60_000;
 const DIAGNOSTIC_TIMEOUT_MS = 120_000;
 const DIAGNOSTIC_MAX_BUFFER = 16 * 1024 ** 2;
 /** Diagnostics files kept; older ones are deleted. */
@@ -29,12 +24,9 @@ export const DIAGNOSTICS_KEPT = 10;
 const DIAGNOSTICS_PREFIX = "fseventsd-";
 
 export interface FileServiceRestart {
-  /** How it was restarted, or that it was not. */
-  how: "sudo" | "prompt" | "not restarted";
-  /** Why it was not restarted, from each attempt's error. */
+  restarted: boolean;
+  /** Why it was not restarted. */
   error?: string;
-  /** Whether the administrator prompt was shown. */
-  prompted: boolean;
   /**
    * Where what was running and the service's log were saved; null if saving failed; absent when
    * the caller asked for none (a later attempt in the same episode keeps the first capture).
@@ -54,17 +46,14 @@ const defaultExec: Exec = async (file, args, options) => {
 };
 
 /** One readable line from an `execFile` failure: its last stderr line, or that it timed out. */
-export function failureReason(e: unknown, timeoutMs?: number): string {
+export function failureReason(e: unknown): string {
   const x = (typeof e === "object" && e !== null ? e : {}) as {
     killed?: boolean;
     signal?: string | null;
     stderr?: unknown;
     message?: unknown;
   };
-  if (x.killed === true || x.signal === "SIGTERM")
-    return timeoutMs === undefined
-      ? "it timed out"
-      : `no answer within ${Math.round(timeoutMs / 60_000)} minutes`;
+  if (x.killed === true || x.signal === "SIGTERM") return "it timed out";
   const last = (text: unknown): string | undefined =>
     typeof text === "string"
       ? text
@@ -120,38 +109,18 @@ async function saveDiagnostics(dir: string, at: number, exec: Exec): Promise<str
   }
 }
 
-/** Saves diagnostics into `dir`, then restarts `fseventsd`; never throws. */
+/** Saves diagnostics into `dir` when asked, then restarts `fseventsd` through sudo; never throws. */
 export async function restartFileService(
   dir: string,
   at: number,
-  opts: { prompt: boolean; diagnose: boolean },
+  opts: { diagnose: boolean },
   exec: Exec = defaultExec,
 ): Promise<FileServiceRestart> {
   const saved = opts.diagnose ? { diagnostics: await saveDiagnostics(dir, at, exec) } : {};
-  let error: string;
   try {
-    await exec("/usr/bin/sudo", ["-n", KILLALL, "fseventsd"], { timeout: 30_000 });
-    return { how: "sudo", prompted: false, ...saved };
+    await exec("/usr/bin/sudo", ["-n", "/usr/bin/killall", "fseventsd"], { timeout: 30_000 });
+    return { restarted: true, ...saved };
   } catch (e) {
-    error = `sudo: ${failureReason(e)}`;
-  }
-  if (!opts.prompt) return { how: "not restarted", error, prompted: false, ...saved };
-  try {
-    await exec(
-      "/usr/bin/osascript",
-      [
-        "-e",
-        `do shell script "${KILLALL} fseventsd" with administrator privileges with prompt "${PROMPT}"`,
-      ],
-      { timeout: PROMPT_TIMEOUT_MS },
-    );
-    return { how: "prompt", prompted: true, ...saved };
-  } catch (e) {
-    return {
-      how: "not restarted",
-      error: `${error}; prompt: ${failureReason(e, PROMPT_TIMEOUT_MS)}`,
-      prompted: true,
-      ...saved,
-    };
+    return { restarted: false, error: failureReason(e), ...saved };
   }
 }

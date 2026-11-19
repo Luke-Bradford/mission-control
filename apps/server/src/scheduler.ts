@@ -127,8 +127,6 @@ import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
 import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
-  FILE_SERVICE_PROMPT_GAP_MS,
-  FILE_SERVICE_PROMPT_SETTING,
   FILE_SERVICE_RESTART_ADVICE,
   FILE_SERVICE_RESTART_SETTING,
   FILE_SERVICE_RUNAWAY_KEY,
@@ -332,10 +330,7 @@ export interface SchedulerDeps {
    * Restarts a runaway `fseventsd` after saving what was running. Absent on previews and in unit
    * callers, which never touch a system service.
    */
-  restartFileService?: (
-    at: number,
-    opts: { prompt: boolean; diagnose: boolean },
-  ) => Promise<FileServiceRestart>;
+  restartFileService?: (at: number, opts: { diagnose: boolean }) => Promise<FileServiceRestart>;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
@@ -488,64 +483,58 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /** The capacity guard held new starts at the last stored sample. */
   let machineBlocked = false;
   /**
-   * A runaway `fseventsd` is restarted at most once an hour, across hub restarts: silently through
-   * the operator's sudoers rule when there is one, else through the administrator prompt at most
-   * once in `FILE_SERVICE_PROMPT_GAP_MS`. A restart that fails raises an operator alert, which
-   * stays until a restart works or the service is back under the runaway size; growth merely
+   * A runaway `fseventsd` is restarted at most once an hour, across hub restarts, through the
+   * operator's sudoers rule. Without the rule the first failure of an episode raises one operator
+   * alert; its text is not rewritten by later attempts, so FLIGHT is not woken again for it. The
+   * alert stays until a restart works or the service is back under the runaway size: growth merely
    * pausing (an idle crew, or readings carried forward) does not clear it.
    */
   const restartRunawayFileService = (at: number): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
     const samples = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS);
-    const open = store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+    const open = (): boolean => store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+    const small = (): boolean => {
+      const size = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS).at(-1)?.fileServiceBytes;
+      return typeof size === "number" && size > 0 && size < FSEVENTSD_RUNAWAY_BYTES;
+    };
     const runaway = fileServiceRunaway(samples, at);
     if (runaway === null) {
-      const size = samples.at(-1)?.fileServiceBytes;
-      if (open && typeof size === "number" && size > 0 && size < FSEVENTSD_RUNAWAY_BYTES)
-        store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
+      if (open() && small()) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
       return;
     }
     // a stored time ahead of now (the clock moved back) does not block restarts
-    const since = (key: string): number => {
-      const v = Number(store.getSetting(key) ?? "0");
-      return Number.isFinite(v) && v <= at ? at - v : Number.POSITIVE_INFINITY;
-    };
-    if (since(FILE_SERVICE_RESTART_SETTING) < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
-    const prompt = since(FILE_SERVICE_PROMPT_SETTING) >= FILE_SERVICE_PROMPT_GAP_MS;
+    const last = Number(store.getSetting(FILE_SERVICE_RESTART_SETTING) ?? "0");
+    if (Number.isFinite(last) && last <= at && at - last < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
     store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
     const grew = `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it stays flat.`;
     // the first capture of an episode covers the moment it tipped over, so later ones are skipped
-    void restart(at, { prompt, diagnose: !open })
+    const first = !open();
+    void restart(at, { diagnose: first })
       .then((r) => {
-        if (r.prompted) store.setSetting(FILE_SERVICE_PROMPT_SETTING, String(at));
         const saved =
           r.diagnostics === undefined
             ? ""
             : r.diagnostics === null
               ? " Saving what was running failed."
               : ` What was running is saved in ${r.diagnostics}.`;
-        const why = `${r.error ?? "no reason given"}${prompt ? "" : `; the password prompt is shown at most once in ${FILE_SERVICE_PROMPT_GAP_MS / 3_600_000} hours`}`;
-        if (r.how === "not restarted") {
-          store.refreshNoteInEpisode({
+        if (r.restarted) {
+          store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
+        } else if (first && !open() && !small()) {
+          store.raiseNote({
             key: FILE_SERVICE_RUNAWAY_KEY,
             kind: "flag",
             runId: null,
             seatId: null,
             repoId: null,
-            text: `${grew} The hub could not restart it (${why}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
+            text: `${grew} The hub could not restart it (${r.error ?? "no reason given"}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
             at: now(),
           });
-        } else {
-          store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
         }
-        const done =
-          r.how === "sudo"
-            ? " The hub restarted it."
-            : r.how === "prompt"
-              ? " Restarted after the operator's password."
-              : ` It was not restarted: ${why}.`;
+        const done = r.restarted
+          ? " The hub restarted it."
+          : ` It was not restarted: ${r.error ?? "no reason given"}.`;
         store.addHubEvent(`${grew}${done}${saved}`, now());
         emit("agents", "attention");
       })

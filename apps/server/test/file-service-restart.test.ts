@@ -31,15 +31,13 @@ describe("restartFileService", () => {
     };
     return { calls, exec };
   };
-  const both = { prompt: true, diagnose: true };
 
-  it("saves what was running in a private file, then restarts through sudo when the rule allows it", async () => {
+  it("saves what was running in a private file, then restarts through sudo", async () => {
     const { calls, exec } = fake({});
     const out = join(dir, "diagnostics");
-    const r = await restartFileService(out, 0, both, exec);
-    expect(r).toMatchObject({ how: "sudo", prompted: false });
+    const r = await restartFileService(out, 0, { diagnose: true }, exec);
+    expect(r.restarted).toBe(true);
     expect(calls.at(-1)).toBe("/usr/bin/sudo -n /usr/bin/killall fseventsd");
-    expect(calls.some((c) => c.startsWith("/usr/bin/osascript"))).toBe(false);
     expect(calls.find((c) => c.startsWith("/usr/bin/log"))).toContain('process == "fseventsd"');
     const saved = await readFile(r.diagnostics ?? "", "utf8");
     expect(saved).toContain("/bin/ps output");
@@ -48,48 +46,30 @@ describe("restartFileService", () => {
     expect((await stat(out)).mode & 0o777).toBe(0o700);
   });
 
-  it("falls back to the administrator prompt, and says in plain words why it was not restarted", async () => {
-    const prompted = fake({ "/usr/bin/sudo": "sudo: a password is required\n" });
-    expect(await restartFileService(dir, 0, both, prompted.exec)).toMatchObject({
-      how: "prompt",
-      prompted: true,
-    });
-    expect(prompted.calls.at(-1)).toContain("with administrator privileges");
-
-    const declined = fake({
+  it("says in plain words why sudo could not restart it, and never prompts", async () => {
+    const { calls, exec } = fake({
       "/usr/bin/sudo": "sudo: a password is required\n",
-      "/usr/bin/osascript": "0:93: execution error: User canceled. (-128)\n",
       "/bin/ps": "ps: no such thing\n",
     });
-    const r = await restartFileService(dir, 1, both, declined.exec);
-    expect(r).toMatchObject({
-      how: "not restarted",
-      prompted: true,
-      error: "sudo: a password is required; prompt: 0:93: execution error: User canceled. (-128)",
-    });
+    const r = await restartFileService(dir, 1, { diagnose: true }, exec);
+    expect(r).toMatchObject({ restarted: false, error: "a password is required" });
+    expect(calls.some((c) => c.includes("osascript"))).toBe(false);
     expect(await readFile(r.diagnostics ?? "", "utf8")).toContain("(failed: ps: no such thing)");
   });
 
-  it("names a timed-out prompt as unanswered", () => {
-    const killed = Object.assign(
-      new Error("Command failed: /usr/bin/osascript -e do shell script"),
-      {
-        killed: true,
-        signal: "SIGTERM",
-        stderr: "",
-      },
-    );
-    expect(failureReason(killed, 5 * 60_000)).toBe("no answer within 5 minutes");
+  it("names a killed command as timed out", () => {
+    const killed = Object.assign(new Error("Command failed: /usr/bin/sudo -n"), {
+      killed: true,
+      signal: "SIGTERM",
+      stderr: "",
+    });
+    expect(failureReason(killed)).toBe("it timed out");
   });
 
-  it("shows no prompt and saves nothing when the caller says not to", async () => {
+  it("saves nothing when the caller says not to", async () => {
     const { calls, exec } = fake({ "/usr/bin/sudo": "sudo: a password is required\n" });
-    const r = await restartFileService(dir, 0, { prompt: false, diagnose: false }, exec);
-    expect(r).toEqual({
-      how: "not restarted",
-      error: "sudo: a password is required",
-      prompted: false,
-    });
+    const r = await restartFileService(dir, 0, { diagnose: false }, exec);
+    expect(r).toEqual({ restarted: false, error: "a password is required" });
     expect(calls).toEqual(["/usr/bin/sudo -n /usr/bin/killall fseventsd"]);
     expect(await readdir(dir)).toEqual([]);
   });
@@ -97,14 +77,14 @@ describe("restartFileService", () => {
   it("keeps only the latest diagnostics files, and still restarts when saving fails", async () => {
     const { exec } = fake({});
     for (let i = 0; i < DIAGNOSTICS_KEPT + 3; i++)
-      await restartFileService(dir, i * 1000, { prompt: false, diagnose: true }, exec);
+      await restartFileService(dir, i * 1000, { diagnose: true }, exec);
     const kept = (await readdir(dir)).filter((f) => f.startsWith("fseventsd-")).sort();
     expect(kept).toHaveLength(DIAGNOSTICS_KEPT);
     expect(kept[0]).toContain("1970-01-01T00-00-03");
 
     const blocked = join(dir, "not-a-dir");
     await writeFile(blocked, "");
-    const r = await restartFileService(blocked, 0, { prompt: false, diagnose: true }, exec);
-    expect(r).toEqual({ how: "sudo", prompted: false, diagnostics: null });
+    const r = await restartFileService(blocked, 0, { diagnose: true }, exec);
+    expect(r).toEqual({ restarted: true, diagnostics: null });
   });
 });
