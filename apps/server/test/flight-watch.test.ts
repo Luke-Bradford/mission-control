@@ -4459,7 +4459,13 @@ describe("daily retrospective wakes", () => {
       ...NEW_LOOP,
       prNumber: 7,
       phase: "parked",
-      parked: { kind: RULING_PARK, reason: "needs a ruling", ended: false },
+      hold: {
+        kind: RULING_PARK,
+        reason: "needs a ruling",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
     });
     store.setSeatSession(row("guido-1", "r-pr", "parked"));
     await watch.check();
@@ -5092,7 +5098,13 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
       ...NEW_LOOP,
       prNumber: 7,
       phase: "parked",
-      parked: { kind: RULING_PARK, reason: "needs a ruling", ended: false },
+      hold: {
+        kind: RULING_PARK,
+        reason: "needs a ruling",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
     });
     store.setSeatSession(row("guido-1", "r-pr", "parked"));
     await watch.check();
