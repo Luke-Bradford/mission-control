@@ -2517,7 +2517,7 @@ describe("start_seat", () => {
       expect(startCalls).toEqual([]);
     });
 
-    it("starts a ticket whose open PR an ended run recorded, and still refuses one no run recorded", async () => {
+    it("start_seat carries an open PR on only after its prior run ended", async () => {
       const pr = {
         repoId: "mc",
         number: 9,
@@ -2537,6 +2537,7 @@ describe("start_seat", () => {
       };
       store.upsertPullRequests("mc", [pr], NOW);
       board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      startImpl = async () => ({ runId: "r-carried", branch: pr.branch });
       expect(await start()).toEqual(refused(wrongColumnText("mc#7", "In progress")));
       store.upsertRun(
         run("r-old", "guido-2", {
@@ -2549,7 +2550,7 @@ describe("start_seat", () => {
       );
       const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
-      expect(startCalls.length).toBe(1);
+      expect(startCalls).toEqual([["guido-1", 7, undefined]]);
     });
   });
 });

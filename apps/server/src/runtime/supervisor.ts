@@ -3781,7 +3781,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let startFailed = false;
       let l: Live | undefined;
       const failStartedRun = (error: unknown) => {
-        if (startFailed) return;
+        if (startFailed || store.run(runId)?.endedAt != null || l?.session.alive === false) return;
         startFailed = true;
         log(`${seatId}: could not start: ${errText(error)}`);
         const at = now();
@@ -3999,6 +3999,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
         return { runId, branch: checkout.branch };
       } catch (e) {
+        if (store.run(runId)?.endedAt != null || l?.session.alive === false) throw e;
         failStartedRun(e);
         throw e;
       }

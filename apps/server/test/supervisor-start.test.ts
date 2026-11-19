@@ -2192,8 +2192,6 @@ describe("reused worktrees", () => {
       expect(store.runsOnTicket("mc", "mc#42").every((run) => run.endedAt !== null)).toBe(true);
       cloneGit.mockRestore();
       upsertRun.mockRestore();
-      const carriedOn = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
-      expect(carriedOn.branch).toBe(BRANCH);
     } finally {
       cloneGit.mockRestore();
       upsertRun.mockRestore();

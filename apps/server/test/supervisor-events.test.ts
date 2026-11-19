@@ -1262,6 +1262,46 @@ describe("supervisor events (Plan 7a)", () => {
       expect(snaps[0]?.run?.endedAt).not.toBeNull();
     });
 
+    it("keeps the exit reason when a session dies before it is ready", async () => {
+      const listeners = new Set<(event: sessionDriver.SessionEvent) => void>();
+      let alive = true;
+      const session: sessionDriver.CrewSession = {
+        send: () => {},
+        control: async () => ({}),
+        close: async () => 0,
+        detach: () => {},
+        on: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        pid: undefined,
+        get alive() {
+          return alive;
+        },
+        ready: Promise.resolve().then(() => {
+          alive = false;
+          for (const listener of [...listeners]) listener({ kind: "exit", code: 7, signal: null });
+        }),
+        lines: 0,
+        closeSent: Promise.resolve(),
+      };
+      const launch = vi.spyOn(sessionDriver, "startSession").mockReturnValue(session);
+      const { sup } = make();
+      const snaps = watchStored(sup);
+      sup.start();
+      try {
+        await refusal(sup.startRun("guido-1", 42));
+        await until(() => expect(snaps).toHaveLength(1));
+        expect(snaps[0]?.event).toMatchObject({ kind: "run-ended", endedBy: "exit" });
+        expect(snaps[0]?.run).toMatchObject({ status: "failed", endedBy: "exit" });
+        expect(store.seatSession("guido-1")?.reason).toBe("process exited 7");
+      } finally {
+        launch.mockRestore();
+      }
+    });
+
     it("a crash, once, after the store write", async () => {
       const { sup, runId } = await idleRun();
       const snaps = watchStored(sup);
