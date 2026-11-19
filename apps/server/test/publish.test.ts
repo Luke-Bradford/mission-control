@@ -2693,6 +2693,17 @@ describe("merge steps", () => {
       },
     );
 
+    it("ignores a part-only reference to another repo's same-numbered issue", async () => {
+      ghAnswers = [prBody("Part of other/project#7."), open, ok];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view", "view", "close"]);
+    });
+
+    it("a foreign closing reference does not cancel a real part-only one", async () => {
+      ghAnswers = [prBody("Part of o/mc#7. Closes other/project#7.")];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true, left: true });
+    });
+
     it("counts an issue already closed as success", async () => {
       ghAnswers = [
         prBody("Closes #7"),

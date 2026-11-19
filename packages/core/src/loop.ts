@@ -407,16 +407,19 @@ export const leftOpenText = (issue: number): string =>
   `left #${issue} open: the PR is part of the ticket`;
 
 /**
- * Whether a merged PR's body names ticket `issue` only as a part of it ("Part of #N", "Refs #N",
- * any case) and never with a closing keyword (Closes, Fixes, Resolves). A body that names the
- * ticket not at all is not part-only: GitHub or the engine closes the ticket as before.
+ * Whether a merged PR's body names ticket `issue` of `repo` (`owner/name`) only as a part of it
+ * ("Part of #N", "Refs #N", any case) and never with a closing keyword (Closes, Fixes, Resolves).
+ * A bare `#N` is this repo's; `owner/name#N` counts only when it is this repo. A body that names
+ * the ticket not at all is not part-only: the engine closes the ticket as before.
  */
-export function prIsPartOf(body: string, issue: number): boolean {
-  const n = String(issue);
-  const target = `(?:[\\w.-]+/[\\w.-]+)?#${n}(?!\\d)`;
-  const closing = new RegExp(`\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\b:?\\s+${target}`, "i");
-  const partial = new RegExp(`\\b(?:part\\s+of|refs?|references?)\\b:?\\s+${target}`, "i");
-  return partial.test(body) && !closing.test(body);
+export function prIsPartOf(body: string, repo: string, issue: number): boolean {
+  const mine = (words: string): boolean =>
+    [
+      ...body.matchAll(
+        new RegExp(`\\b(?:${words})\\b:?\\s+(?:([\\w.-]+/[\\w.-]+))?#${issue}(?!\\d)`, "gi"),
+      ),
+    ].some((m) => m[1] === undefined || m[1].toLowerCase() === repo.toLowerCase());
+  return mine("part\\s+of|refs?|references?") && !mine("close[sd]?|fix(?:e[sd])?|resolve[sd]?");
 }
 export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
 export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;

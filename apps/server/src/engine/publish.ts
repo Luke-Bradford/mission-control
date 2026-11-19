@@ -2034,7 +2034,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           "pr view",
         );
         if (isRefusal(pr)) return pr;
-        if (typeof pr.body === "string" && prIsPartOf(pr.body, issue))
+        if (typeof pr.body === "string" && prIsPartOf(pr.body, repo, issue))
           return { ok: true, left: true };
       }
       const view = await ghJson(
