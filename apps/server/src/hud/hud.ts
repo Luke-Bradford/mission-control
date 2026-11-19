@@ -134,6 +134,7 @@ import {
   runTicketTitle,
 } from "../run/view.ts";
 import type { AttentionNote, Store } from "../store.ts";
+import { FILE_SERVICE_RUNAWAY_KEY } from "../telemetry/machine-capacity.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
@@ -1007,6 +1008,8 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
+  // a runaway fseventsd the hub could not restart: only the operator holds the password
+  `${NOTE_KEY}${FILE_SERVICE_RUNAWAY_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
   // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)

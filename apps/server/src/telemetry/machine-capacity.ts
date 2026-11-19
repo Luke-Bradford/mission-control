@@ -48,7 +48,7 @@ export const FILE_SERVICE_PROMPT_GAP_MS = 12 * 60 * 60_000;
 export const FILE_SERVICE_RUNAWAY_KEY = "file-service-runaway";
 /** The one sudoers line that lets the hub restart it unattended, and nothing else. */
 export const FILE_SERVICE_SUDOERS_ADVICE =
-  'To let the hub do this itself next time, run once: `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd && sudo chmod 440 /etc/sudoers.d/mc-fseventsd`. It allows only that one command; any program running as you could then restart fseventsd.';
+  'To let the hub do this itself next time, run once: `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" > /tmp/mc-fseventsd && sudo visudo -cf /tmp/mc-fseventsd && sudo install -m 440 -o root -g wheel /tmp/mc-fseventsd /etc/sudoers.d/mc-fseventsd`. It checks the rule before installing it and allows only that one command; any program running as you could then restart fseventsd.';
 
 export interface FileServiceRunaway {
   fromBytes: number;

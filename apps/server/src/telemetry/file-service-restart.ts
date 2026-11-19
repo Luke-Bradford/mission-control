@@ -31,10 +31,15 @@ const DIAGNOSTICS_PREFIX = "fseventsd-";
 export interface FileServiceRestart {
   /** How it was restarted, or that it was not. */
   how: "sudo" | "prompt" | "not restarted";
-  /** Why it was not restarted, from the last attempt's error. */
+  /** Why it was not restarted, from each attempt's error. */
   error?: string;
-  /** Where what was running and the service's log were saved; null if saving failed. */
-  diagnostics: string | null;
+  /** Whether the administrator prompt was shown. */
+  prompted: boolean;
+  /**
+   * Where what was running and the service's log were saved; null if saving failed; absent when
+   * the caller asked for none (a later attempt in the same episode keeps the first capture).
+   */
+  diagnostics?: string | null;
 }
 
 type Exec = (
@@ -48,8 +53,28 @@ const defaultExec: Exec = async (file, args, options) => {
   return { stdout };
 };
 
-const message = (e: unknown): string =>
-  (e instanceof Error ? e.message : String(e)).trim().split("\n").slice(-1)[0] ?? "";
+/** One readable line from an `execFile` failure: its last stderr line, or that it timed out. */
+export function failureReason(e: unknown, timeoutMs?: number): string {
+  const x = (typeof e === "object" && e !== null ? e : {}) as {
+    killed?: boolean;
+    signal?: string | null;
+    stderr?: unknown;
+    message?: unknown;
+  };
+  if (x.killed === true || x.signal === "SIGTERM")
+    return timeoutMs === undefined
+      ? "it timed out"
+      : `no answer within ${Math.round(timeoutMs / 60_000)} minutes`;
+  const last = (text: unknown): string | undefined =>
+    typeof text === "string"
+      ? text
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l !== "" && !l.startsWith("Command failed:"))
+          .at(-1)
+      : undefined;
+  return (last(x.stderr) ?? last(x.message) ?? String(e)).replace(/^sudo: /, "");
+}
 
 async function saveDiagnostics(dir: string, at: number, exec: Exec): Promise<string | null> {
   const read = async (file: string, args: readonly string[]): Promise<string> => {
@@ -58,7 +83,7 @@ async function saveDiagnostics(dir: string, at: number, exec: Exec): Promise<str
         await exec(file, args, { timeout: DIAGNOSTIC_TIMEOUT_MS, maxBuffer: DIAGNOSTIC_MAX_BUFFER })
       ).stdout;
     } catch (e) {
-      return `(failed: ${message(e)})`;
+      return `(failed: ${failureReason(e)})`;
     }
   };
   const processes = await read("/bin/ps", ["-axo", "pid,ppid,lstart,etime,rss,command"]);
@@ -99,23 +124,18 @@ async function saveDiagnostics(dir: string, at: number, exec: Exec): Promise<str
 export async function restartFileService(
   dir: string,
   at: number,
-  opts: { prompt: boolean },
+  opts: { prompt: boolean; diagnose: boolean },
   exec: Exec = defaultExec,
 ): Promise<FileServiceRestart> {
-  const diagnostics = await saveDiagnostics(dir, at, exec);
+  const saved = opts.diagnose ? { diagnostics: await saveDiagnostics(dir, at, exec) } : {};
   let error: string;
   try {
     await exec("/usr/bin/sudo", ["-n", KILLALL, "fseventsd"], { timeout: 30_000 });
-    return { how: "sudo", diagnostics };
+    return { how: "sudo", prompted: false, ...saved };
   } catch (e) {
-    error = `sudo: ${message(e)}`;
+    error = `sudo: ${failureReason(e)}`;
   }
-  if (!opts.prompt)
-    return {
-      how: "not restarted",
-      error: `${error}; the administrator prompt was shown less than 12 hours ago`,
-      diagnostics,
-    };
+  if (!opts.prompt) return { how: "not restarted", error, prompted: false, ...saved };
   try {
     await exec(
       "/usr/bin/osascript",
@@ -125,8 +145,13 @@ export async function restartFileService(
       ],
       { timeout: PROMPT_TIMEOUT_MS },
     );
-    return { how: "prompt", diagnostics };
+    return { how: "prompt", prompted: true, ...saved };
   } catch (e) {
-    return { how: "not restarted", error: `${error}; prompt: ${message(e)}`, diagnostics };
+    return {
+      how: "not restarted",
+      error: `${error}; prompt: ${failureReason(e, PROMPT_TIMEOUT_MS)}`,
+      prompted: true,
+      ...saved,
+    };
   }
 }

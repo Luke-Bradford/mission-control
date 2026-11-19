@@ -60,7 +60,12 @@ import {
 } from "../src/scheduler.ts";
 import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
+import {
+  FILE_SERVICE_PROMPT_SETTING,
+  FILE_SERVICE_RESTART_SETTING,
+  FILE_SERVICE_RUNAWAY_KEY,
+  MACHINE_CAPACITY_KEY,
+} from "../src/telemetry/machine-capacity.ts";
 import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
 
@@ -1787,6 +1792,7 @@ describe("scheduler", () => {
         let size = 2000 * mb;
         const restart = vi.fn(async () => ({
           how: "sudo" as const,
+          prompted: false,
           diagnostics: "/data/diagnostics/fseventsd-x.txt",
         }));
         const s = make(
@@ -1800,7 +1806,7 @@ describe("scheduler", () => {
         size = 2300 * mb;
         await s.tick("machine");
         await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
-        expect(restart).toHaveBeenCalledWith(expect.any(Number), { prompt: true });
+        expect(restart).toHaveBeenCalledWith(expect.any(Number), { prompt: true, diagnose: true });
         await vi.waitFor(() =>
           expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
             expect.stringContaining("grew from 2000 MB to 2300 MB within an hour"),
@@ -1808,6 +1814,9 @@ describe("scheduler", () => {
         );
         expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
         expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+        expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeUndefined();
+        // sudo restarted it, so no prompt was shown and the 12-hour prompt gap has not started
+        expect(store.getSetting(FILE_SERVICE_PROMPT_SETTING)).toBeNull();
         // a new hub process on the same database keeps the hour
         t += 10 * 60_000;
         size = 2600 * mb;
@@ -1820,14 +1829,102 @@ describe("scheduler", () => {
         expect(again).not.toHaveBeenCalled();
       });
 
-      it("raises a Needs-you item when it cannot be restarted, prompts again only after 12 hours, and clears when growth stops", async () => {
+      it("restarts when the stored time is ahead of now (the clock moved back)", async () => {
         let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
         let size = 10 * mb;
-        const restart = vi.fn(async () => ({
+        store.setSetting(FILE_SERVICE_RESTART_SETTING, String(t + 24 * 3_600_000));
+        const restart = vi.fn(async () => ({ how: "sudo" as const, prompted: false }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 300 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+      });
+
+      it("alerts the operator when it cannot be restarted, keeps the first capture, prompts again after 12 hours, and clears only when the service is small again", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const failed = {
           how: "not restarted" as const,
-          error: "sudo: a password is required; prompt: User canceled.",
-          diagnostics: null,
-        }));
+          error: "sudo: a password is required; prompt: no answer within 5 minutes",
+        };
+        const restart = vi.fn(
+          async (_at: number, opts: { prompt: boolean; diagnose: boolean }) => ({
+            ...failed,
+            prompted: opts.prompt,
+            ...(opts.diagnose ? { diagnostics: "/data/diagnostics/first.txt" } : {}),
+          }),
+        );
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        const grow = async (minutes: number, to: number) => {
+          t += minutes * 60_000;
+          size = to * mb;
+          await s.tick("machine");
+        };
+        const item = () => store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+        await s.tick("machine");
+        await grow(30, 300);
+        await vi.waitFor(() =>
+          expect(item()?.text).toContain(
+            "could not restart it (sudo: a password is required; prompt: no answer within 5 minutes)",
+          ),
+        );
+        expect(item()?.text).toContain("/data/diagnostics/first.txt");
+        expect(item()?.text).toContain("sudo killall fseventsd");
+        expect(item()?.text).toContain("NOPASSWD: /usr/bin/killall fseventsd");
+        expect(restart).toHaveBeenLastCalledWith(expect.any(Number), {
+          prompt: true,
+          diagnose: true,
+        });
+        // an hour later, still growing: sudo only, and the first capture is not replaced
+        await grow(31, 450);
+        await grow(30, 700);
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
+        expect(restart).toHaveBeenLastCalledWith(expect.any(Number), {
+          prompt: false,
+          diagnose: false,
+        });
+        await vi.waitFor(() =>
+          expect(item()?.text).toContain("the password prompt is shown at most once in 12 hours"),
+        );
+        // growth pauses but the service still holds 700 MB: the alert stays
+        await grow(61, 700);
+        expect(item()).toBeDefined();
+        // 12 hours after the prompt, a fresh runaway prompts again
+        await grow(12 * 60, 700);
+        await grow(30, 900);
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(3));
+        expect(restart).toHaveBeenLastCalledWith(expect.any(Number), {
+          prompt: true,
+          diagnose: false,
+        });
+        // the operator restarts it by hand: back under 150 MB, the alert goes
+        await grow(61, 8);
+        expect(item()).toBeUndefined();
+      });
+
+      it("clears an open alert when a later restart works", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        let works = false;
+        const restart = vi.fn(async () =>
+          works
+            ? { how: "sudo" as const, prompted: false }
+            : {
+                how: "not restarted" as const,
+                error: "sudo: a password is required",
+                prompted: false,
+              },
+        );
         const s = make(
           () => size,
           () => t,
@@ -1838,26 +1935,18 @@ describe("scheduler", () => {
         size = 300 * mb;
         await s.tick("machine");
         await vi.waitFor(() =>
-          expect(store.notes().find((n) => n.key === "file-service-runaway")?.text).toContain(
-            "could not restart it (sudo: a password is required; prompt: User canceled.)",
-          ),
+          expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeDefined(),
         );
-        const item = store.notes().find((n) => n.key === "file-service-runaway")?.text ?? "";
-        expect(item).toContain("sudo killall fseventsd");
-        expect(item).toContain("NOPASSWD: /usr/bin/killall fseventsd");
+        works = true;
         t += 31 * 60_000;
         size = 450 * mb;
         await s.tick("machine");
-        expect(restart).toHaveBeenCalledTimes(1);
         t += 30 * 60_000;
         size = 700 * mb;
         await s.tick("machine");
-        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
-        expect(restart).toHaveBeenLastCalledWith(expect.any(Number), { prompt: false });
-        // flat for an hour: no longer a runaway, so the item goes
-        t += 61 * 60_000;
-        await s.tick("machine");
-        expect(store.notes().find((n) => n.key === "file-service-runaway")).toBeUndefined();
+        await vi.waitFor(() =>
+          expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeUndefined(),
+        );
       });
 
       it("is never touched on a hub without the restart wired (previews)", async () => {

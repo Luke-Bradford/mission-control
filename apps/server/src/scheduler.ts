@@ -133,6 +133,7 @@ import {
   FILE_SERVICE_RESTART_SETTING,
   FILE_SERVICE_RUNAWAY_KEY,
   FILE_SERVICE_SUDOERS_ADVICE,
+  FSEVENTSD_RUNAWAY_BYTES,
   FSEVENTSD_RUNAWAY_WINDOW_MS,
   fileServiceFault,
   fileServiceRunaway,
@@ -331,7 +332,10 @@ export interface SchedulerDeps {
    * Restarts a runaway `fseventsd` after saving what was running. Absent on previews and in unit
    * callers, which never touch a system service.
    */
-  restartFileService?: (at: number, opts: { prompt: boolean }) => Promise<FileServiceRestart>;
+  restartFileService?: (
+    at: number,
+    opts: { prompt: boolean; diagnose: boolean },
+  ) => Promise<FileServiceRestart>;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
@@ -486,15 +490,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /**
    * A runaway `fseventsd` is restarted at most once an hour, across hub restarts: silently through
    * the operator's sudoers rule when there is one, else through the administrator prompt at most
-   * once in `FILE_SERVICE_PROMPT_GAP_MS`. A restart that fails raises a Needs-you item (FLIGHT
-   * sees it too), which clears once the growth stops.
+   * once in `FILE_SERVICE_PROMPT_GAP_MS`. A restart that fails raises an operator alert, which
+   * stays until a restart works or the service is back under the runaway size; growth merely
+   * pausing (an idle crew, or readings carried forward) does not clear it.
    */
   const restartRunawayFileService = (at: number): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
-    const runaway = fileServiceRunaway(store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS), at);
+    const samples = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS);
+    const open = store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+    const runaway = fileServiceRunaway(samples, at);
     if (runaway === null) {
-      if (store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY))
+      const size = samples.at(-1)?.fileServiceBytes;
+      if (open && typeof size === "number" && size > 0 && size < FSEVENTSD_RUNAWAY_BYTES)
         store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
       return;
     }
@@ -506,15 +514,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     if (since(FILE_SERVICE_RESTART_SETTING) < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
     const prompt = since(FILE_SERVICE_PROMPT_SETTING) >= FILE_SERVICE_PROMPT_GAP_MS;
     store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
-    if (prompt) store.setSetting(FILE_SERVICE_PROMPT_SETTING, String(at));
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
     const grew = `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it stays flat.`;
-    void restart(at, { prompt })
+    // the first capture of an episode covers the moment it tipped over, so later ones are skipped
+    void restart(at, { prompt, diagnose: !open })
       .then((r) => {
+        if (r.prompted) store.setSetting(FILE_SERVICE_PROMPT_SETTING, String(at));
         const saved =
-          r.diagnostics === null
-            ? " Saving what was running failed."
-            : ` What was running is saved in ${r.diagnostics}.`;
+          r.diagnostics === undefined
+            ? ""
+            : r.diagnostics === null
+              ? " Saving what was running failed."
+              : ` What was running is saved in ${r.diagnostics}.`;
+        const why = `${r.error ?? "no reason given"}${prompt ? "" : `; the password prompt is shown at most once in ${FILE_SERVICE_PROMPT_GAP_MS / 3_600_000} hours`}`;
         if (r.how === "not restarted") {
           store.refreshNoteInEpisode({
             key: FILE_SERVICE_RUNAWAY_KEY,
@@ -522,7 +534,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             runId: null,
             seatId: null,
             repoId: null,
-            text: `${grew} The hub could not restart it (${r.error ?? "no reason given"}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
+            text: `${grew} The hub could not restart it (${why}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
             at: now(),
           });
         } else {
@@ -533,7 +545,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             ? " The hub restarted it."
             : r.how === "prompt"
               ? " Restarted after the operator's password."
-              : ` It was not restarted: ${r.error ?? "no reason given"}.`;
+              : ` It was not restarted: ${why}.`;
         store.addHubEvent(`${grew}${done}${saved}`, now());
         emit("agents", "attention");
       })

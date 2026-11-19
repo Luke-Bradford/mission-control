@@ -57,7 +57,10 @@ import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue/queue-reorder.ts";
 import { clearLeftovers } from "../src/repo/leftovers.ts";
 import { foldTranscript } from "../src/run/streamjson.ts";
 import { Store } from "../src/store.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
+import {
+  FILE_SERVICE_RUNAWAY_KEY,
+  MACHINE_CAPACITY_KEY,
+} from "../src/telemetry/machine-capacity.ts";
 import {
   HUB_UPDATE_HELD_KEY,
   HUB_UPDATE_HELD_SINCE,
@@ -4254,6 +4257,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     flight();
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
+      `note:${FILE_SERVICE_RUNAWAY_KEY}`,
       `note:${CLI_NOTE_KEY}`,
       `note:${CLI_AUTO_NOTE_PREFIX}`,
       `note:${INSTRUCTION_FOCUS_NOTE_PREFIX}`,
@@ -4262,6 +4266,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(CLI_UPGRADE_NOTE_KEY.startsWith(`${CLI_NOTE_KEY}:`)).toBe(true);
     for (const [key, kind] of [
       [MACHINE_CAPACITY_KEY, "flag"],
+      [FILE_SERVICE_RUNAWAY_KEY, "flag"],
       [CLI_NOTE_KEY, "blocked"],
       [CLI_UPGRADE_NOTE_KEY, "blocked"],
       ["cli-auto:claude:2.0.1", "blocked"],
@@ -4282,6 +4287,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     ).toEqual(
       [
         `note:${MACHINE_CAPACITY_KEY}`,
+        `note:${FILE_SERVICE_RUNAWAY_KEY}`,
         `note:${CLI_NOTE_KEY}`,
         `note:${CLI_UPGRADE_NOTE_KEY}`,
         "note:cli-auto:claude:2.0.1",

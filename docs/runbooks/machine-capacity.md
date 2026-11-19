@@ -41,10 +41,12 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
   `<data dir>/diagnostics/fseventsd-*.txt` (the latest 10 are kept), then restarts it at most once
   an hour: through `sudo -n /usr/bin/killall fseventsd` when the operator has added the rule
   below, else through the macOS administrator prompt, shown at most once in 12 hours. A restart
-  that fails raises a Needs-you item, which clears once the growth stops. The diagnostics are
+  that fails raises an operator alert on Needs you (as the machine-capacity stop does), which
+  stays until a restart works or the service is back under 150 MB. Only the first attempt of an
+  episode saves diagnostics, so the capture of the moment it tipped over is kept. The diagnostics are
   what to read to find what tips it into that state. The rule that lets the hub restart it
   unattended allows that one command only, for any program running as the operator:
-  `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd && sudo chmod 440 /etc/sudoers.d/mc-fseventsd`.
+  `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" > /tmp/mc-fseventsd && sudo visudo -cf /tmp/mc-fseventsd && sudo install -m 440 -o root -g wheel /tmp/mc-fseventsd /etc/sudoers.d/mc-fseventsd`.
 - `load_window_min: 5` requires sustained load; `clear_after_min: 5` avoids start/stop churn.
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a

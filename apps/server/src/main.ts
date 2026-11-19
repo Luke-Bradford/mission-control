@@ -346,7 +346,7 @@ export async function main(): Promise<void> {
     ...(preview
       ? {}
       : {
-          restartFileService: (at: number, opts: { prompt: boolean }) =>
+          restartFileService: (at: number, opts: { prompt: boolean; diagnose: boolean }) =>
             restartFileService(join(dirname(dbPath), "diagnostics"), at, opts),
         }),
     hubDiskUse: () => {
