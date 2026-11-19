@@ -332,7 +332,13 @@ it("names and confirms the waiver for a review-parked seat", async () => {
   const f = stub([row], true, [ask], "CI", undefined, {
     "/api/runs/r-12/loop": {
       loop: {
-        hold: { kind: "review", reason: "RETRO finding", ended: false, worktree: null, wake: false },
+        hold: {
+          kind: "review",
+          reason: "RETRO finding",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
         pushFor: "abc1234def",
       },
     },
@@ -369,10 +375,16 @@ describe("the overview's waiver follows the park's own Needs-you item", () => {
     });
   const loops = {
     "/api/runs/r-30/loop": {
-      loop: { hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false }, pushFor: "eee5555000" },
+      loop: {
+        hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
+        pushFor: "eee5555000",
+      },
     },
     "/api/runs/r-31/loop": {
-      loop: { hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false }, pushFor: "ddd4444000" },
+      loop: {
+        hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
+        pushFor: "ddd4444000",
+      },
     },
   };
   const waivers = () => [
@@ -428,7 +440,10 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     hold: { kind: "review", reason, offSeat: false },
   });
   const park = (sha: string, reason: string) => ({
-    loop: { hold: { kind: "review", reason, ended: false, worktree: null, wake: false }, pushFor: sha },
+    loop: {
+      hold: { kind: "review", reason, ended: false, worktree: null, wake: false },
+      pushFor: sha,
+    },
   });
   const run = seatRow().run as NonNullable<CrewRow["run"]>;
   const row = seatRow({

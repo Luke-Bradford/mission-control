@@ -1806,7 +1806,13 @@ describe("Agent page: loop steps", () => {
           text: "Blocked: RETRO finding",
         }),
         pushFor: "abc1234def5678",
-        hold: { kind: "review", reason: "RETRO finding", ended: false, worktree: "/w/r-12", wake: false },
+        hold: {
+          kind: "review",
+          reason: "RETRO finding",
+          ended: false,
+          worktree: "/w/r-12",
+          wake: false,
+        },
       } as unknown as RunLoop;
       const f = stub({
         rows: [

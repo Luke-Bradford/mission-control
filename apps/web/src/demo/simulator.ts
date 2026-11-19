@@ -267,10 +267,7 @@ function work(s: DemoState, at: number) {
       phase: phase.phase,
       text: phase.text,
       step: phase.step,
-      hold:
-        phase.phase === "parked"
-          ? { kind: "lock", reason: phase.text, offSeat: false }
-          : null,
+      hold: phase.phase === "parked" ? { kind: "lock", reason: phase.text, offSeat: false } : null,
       wait: phase.wait,
       tries:
         phase.step === "review"
