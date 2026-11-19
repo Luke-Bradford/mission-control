@@ -437,7 +437,8 @@ describe("Store", () => {
   it("removes the retired handoff tables from old and fresh databases", () => {
     const old = join(dir, "retired-tables.sqlite");
     const db = new DatabaseSync(old);
-    for (const table of ["run_handoffs", "ticket_waits", "holds"]) {
+    const retired = ["run_handoffs", "ticket_waits", "holds", "run_reads", "run_rereads"];
+    for (const table of retired) {
       db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX ${table}_value ON ${table}(value)`);
       db.prepare(`INSERT INTO ${table} VALUES (?, ?)`).run(`${table}-row`, "kept until upgrade");
@@ -448,12 +449,13 @@ describe("Store", () => {
     expect(migrated.getSetting("missing")).toBeNull();
     migrated.close();
     const after = new DatabaseSync(old);
+    const left = after
+      .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")
+      .all() as {
+      name: string;
+    }[];
     expect(
-      after
-        .prepare(
-          "SELECT name FROM sqlite_master WHERE type IN ('table', 'index') AND name GLOB '*handoffs*' OR name GLOB '*ticket_waits*' OR name GLOB 'holds*'",
-        )
-        .all(),
+      left.filter((r) => retired.some((t) => r.name === t || r.name.startsWith(`${t}_`))),
     ).toEqual([]);
     after.close();
 
