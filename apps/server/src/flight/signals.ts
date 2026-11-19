@@ -309,7 +309,6 @@ export function flightSignals(i: {
   session: CrewSessionConfig;
   seats: FlightState["seats"];
   aside?: FlightState["aside"];
-  /** The repo's area labels and their globs; absent: any seat may take any stuck PR. */
   /** Items awaiting FLIGHT's triage, with when each arrived. */
   triageItems?: { key: string; kind: string; at: number; text: string }[];
   /** Open PRs whose run reported them ready to merge, with when it did. */

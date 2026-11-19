@@ -1212,8 +1212,7 @@ function otherLogin(
 /**
  * Needs-you items: every escalation, every stalled loop (keyed by run and last output, so a new
  * stall, on a new run or later in the same one, pulses again) and every loop in error (keyed by
- * its last success, so a failure after a recovery pulses again); the crew's strays, open
- * questions and unacked errors; and the test lock when its holder has stalled with seats in line.
+ * its last success, so a failure after a recovery pulses again); the crew's open questions; and the test lock when its holder has stalled with seats in line.
  * Messages are not needs: unread chatter is counted on its Comms thread. FLIGHT's own lines count
  * only as an `@CAPCOM` question (a `tag` for the operator); another agent's `@CAPCOM` tag, or a
  * question on its direct line, is FLIGHT's to triage and reaches the operator only through a brief
@@ -1940,7 +1939,7 @@ function noteOwner(
   return OWNER_OPERATOR;
 }
 
-/** The crew's own Needs-you items: strays, questions, crew errors and a blocked test lock. */
+/** The crew's own Needs-you items: questions and a blocked test lock. */
 function crewItems(
   config: CcConfig,
   store: Store,

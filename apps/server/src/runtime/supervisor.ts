@@ -946,8 +946,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
-  /** Runs the engine is waking for rework: that is a fix, not a "carry on" resume the waste alarm counts. */
-  const wakingRuns = new Set<string>();
   const deferredRecoveries = new Set<string>();
   let recoveringDeferred: Promise<void> | null = null;
   let unpauseResume: (() => void) | undefined;
@@ -4897,7 +4895,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
     starting.add(seatId);
-    wakingRuns.add(runId);
     try {
       /** The run cannot go back: it ends `failed`, the seat (another run's now) untouched. */
       const fail = (reason: string, cause?: unknown): never => {
@@ -5049,7 +5046,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           store.setRunLoop(runId, { ...current, hold: rejoinSeat(current.hold) });
       }
     } finally {
-      wakingRuns.delete(runId);
       starting.delete(seatId);
       startingWorktrees.delete(aside.worktree);
     }

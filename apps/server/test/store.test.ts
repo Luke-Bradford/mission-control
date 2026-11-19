@@ -553,7 +553,17 @@ describe("Store", () => {
   it("removes the retired handoff tables from old and fresh databases", () => {
     const old = join(dir, "retired-tables.sqlite");
     const db = new DatabaseSync(old);
-    const retired = ["run_handoffs", "ticket_waits", "holds", "run_reads", "run_rereads"];
+    const retired = [
+      "run_handoffs",
+      "ticket_waits",
+      "holds",
+      "run_reads",
+      "run_rereads",
+      "strays",
+      "crew_errors",
+      "waste_alarms",
+      "comms_repeats",
+    ];
     for (const table of retired) {
       db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX ${table}_value ON ${table}(value)`);
@@ -581,6 +591,12 @@ describe("Store", () => {
     const fresh = new Store(join(dir, "fresh.sqlite"));
     expect(fresh.getSetting("missing")).toBeNull();
     fresh.close();
+    const freshDb = new DatabaseSync(join(dir, "fresh.sqlite"));
+    const freshTables = freshDb
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as { name: string }[];
+    expect(freshTables.filter((r) => retired.includes(r.name))).toEqual([]);
+    freshDb.close();
   });
 
   it("runs returns newest first and respects the limit", () => {

@@ -364,7 +364,7 @@ export interface Engine {
       beforeLift?: () => Promise<boolean>;
       /** A short FLIGHT fix list, appended after RETRO's findings for the author; for `second_review`, FLIGHT's reason. */
       note?: string;
-      /** FLIGHT's basis for the settle; it closes the run's review-rounds hold when one stands. */
+      /** FLIGHT's basis for the settle, kept with the decision for the audit trail. */
       basis?: string;
     },
   ): Promise<OperatorResult>;
