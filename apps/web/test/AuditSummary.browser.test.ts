@@ -314,8 +314,11 @@ describeRendered("Audit first screen in a real browser", () => {
               () =>
                 [...document.querySelectorAll<HTMLElement>(".as-do .as-n")]
                   .filter((n) => {
+                    // The cell stretches with its row, so measure the number's own text.
+                    const range = document.createRange();
+                    range.selectNodeContents(n);
                     const lh = Number.parseFloat(getComputedStyle(n).lineHeight);
-                    return n.getBoundingClientRect().height > lh + 1;
+                    return range.getBoundingClientRect().height > lh + 1;
                   })
                   .map((n) => n.textContent),
               undefined,

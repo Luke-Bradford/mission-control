@@ -286,7 +286,7 @@
 }
 .as-rt {
   all: unset;
-  display: flex;
+  display: block;
   min-width: 0;
   cursor: pointer;
   font-size: var(--fs);
@@ -305,12 +305,12 @@
   border-radius: 2px;
 }
 .as-rtx {
-  display: block;
-  min-width: 0;
-  flex: 1 1 auto;
+  display: inline-block;
+  vertical-align: top;
+  max-width: calc(100% - var(--sp-4));
 }
 .as-rt i {
-  flex: none;
+  vertical-align: top;
   font-style: normal;
   color: var(--muted);
   display: inline-block;
