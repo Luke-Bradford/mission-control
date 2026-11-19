@@ -34,7 +34,7 @@ import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { runawayTrip } from "../src/flight/runaway.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -929,6 +929,7 @@ describe("POST /api/guard/check", () => {
           options.push(o);
         },
         end: async (k, ok) => void calls.push(["end", k, ok]),
+        lockedBy: (c) => lockedCheck(c, ["pnpm -s test:related"]),
         dropRun: () => {},
         lost: () => false,
         drops: () => [],
@@ -962,6 +963,27 @@ describe("POST /api/guard/check", () => {
         expect((await check(tokA, bash(id, "pnpm -s lint"))).body).toBe("{}");
         await check(tokA, post(id));
       }
+    });
+
+    it("takes the test lock for the related-tests check, however it is spelled, but not for a single test file", async () => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s test:related"))).body).toBe("{}");
+      expect(lock.state().holder).toMatchObject({
+        runId: "run-a",
+        command: "pnpm -s test:related",
+      });
+      // a single test file runs at once while the related run holds the lock
+      expect(
+        (await check(tokB, bash("b0", "pnpm -s vitest run apps/server/test/a.test.ts"))).body,
+      ).toBe("{}");
+      expect(lock.state().waiting).toHaveLength(0);
+      const b = check(tokB, bash("b1", "pnpm run test:related"));
+      await until(() => lock.state().waiting.length === 1);
+      await check(tokA, post("a1"));
+      expect((await b).body).toBe("{}");
+      expect(lock.state().holder).toMatchObject({ runId: "run-b" });
     });
 
     it("answers a check that waited too long with the busy text, and takes no lock for other commands", async () => {
@@ -1075,6 +1097,7 @@ describe("POST /api/guard/check", () => {
     app = await build({
       checks: {
         begin: async () => {},
+        lockedBy: () => null,
         end: async (_key, ok, exitCode) => {
           ends.push([ok, exitCode]);
         },
@@ -1101,6 +1124,7 @@ describe("POST /api/guard/check", () => {
     app = await build({
       checks: {
         begin: async () => {},
+        lockedBy: () => null,
         end: async (_key, ok, exitCode) => {
           ends.push([ok, exitCode]);
         },

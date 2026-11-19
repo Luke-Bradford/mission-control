@@ -298,6 +298,37 @@ const SHELL_KEYWORDS = new Set([
 ]);
 /** Wrappers that start their command in the background: `coproc cmd`, `setsid cmd`. */
 const BACKGROUND_WRAPPERS = new Set(["coproc", "setsid"]);
+/**
+ * Programs that hand a command to something else to run later or elsewhere: a full suite named in
+ * one would load the Mac outside the test lock, so it is refused like a backgrounded one. `ssh` counts
+ * only with `-f` (go to background); `at` and `batch` read the command from stdin.
+ */
+const LAUNCHERS = new Set([
+  "launchctl",
+  "at",
+  "batch",
+  "systemd-run",
+  "daemonize",
+  "start-stop-daemon",
+  "osascript",
+  "open",
+  "crontab",
+]);
+/** The related-tests check runs the suite as a child process, so it counts as a full suite here. */
+const RELATED_SUITE = /\btest:related\b|check-related\.ts/;
+function launchesSuite(
+  argv: readonly string[],
+  command: string,
+  fullSuite: readonly string[],
+): boolean {
+  const [program, ...args] = argv;
+  if (program === undefined) return false;
+  const launcher =
+    LAUNCHERS.has(program) || (program === "ssh" && args.some((a) => /^-[A-Za-z]*f/.test(a)));
+  if (!launcher) return false;
+  const text = program === "at" || program === "batch" ? command : argv.join(" ");
+  return RELATED_SUITE.test(text) || fullSuite.some((entry) => text.includes(entry.trim()));
+}
 /** Terminal multiplexers: any command they are given runs detached, in the background. */
 const MULTIPLEXERS = new Set(["screen", "tmux"]);
 /** Runners whose options are not modelled (`watch`, `flock -c`, `script -c`, `parallel`, `npx -c` take a command line as one word): judged like a multiplexer, in the foreground. */
@@ -2241,6 +2272,7 @@ export function guardDecision(
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
   let backgroundSuite = false;
+  let launchedSuite = false;
   const backgroundCommand = e.input.run_in_background === true;
   let gitEnvDenied = false;
   let githubDenied: string | null = null;
@@ -2391,6 +2423,7 @@ export function guardDecision(
     } else if (program === "gh") {
       githubDenied ??= ghText(args);
     }
+    if (launchesSuite(argv, e.input.command ?? "", ctx.fullSuite)) launchedSuite = true;
     const suite =
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
@@ -2402,7 +2435,7 @@ export function guardDecision(
   if (gitEnvDenied) return deny("git-env", "git environment override");
   if (githubDenied !== null) return deny("gh-cli", githubDenied);
   // A suite in the background returns at once while it keeps running: it would leave the lock early.
-  if (lock !== null && (backgroundSuite || walk.lineBackground)) {
+  if (launchedSuite || (lock !== null && (backgroundSuite || walk.lineBackground))) {
     return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
   }
   if (lock === null) return { kind: "allow" };

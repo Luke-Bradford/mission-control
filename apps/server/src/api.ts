@@ -2875,6 +2875,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             });
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
+          // the related-tests check runs `pnpm test --changed`, which is the whole suite when the
+          // package or the config changes: it takes the lock too (lint and typecheck do not)
+          if (
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const related = checks?.lockedBy(command);
+            if (related) verdict = { kind: "lock", command: related };
+          }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {
             if (body.data.tool_name !== "Bash" || typeof command !== "string") return;

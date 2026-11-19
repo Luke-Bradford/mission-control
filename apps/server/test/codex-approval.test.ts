@@ -11,7 +11,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
@@ -342,6 +342,7 @@ describe("Codex check records", () => {
     const checks: CheckRecorder = {
       begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
       end: async () => {},
+      lockedBy: (c) => lockedCheck(c, ["pnpm -s test:related"]),
       dropRun: () => {},
       lost: () => false,
       drops: () => [],
@@ -427,6 +428,27 @@ describe("Codex check records", () => {
     expect(await h.approve(request("ls", { itemId: "item-10" }), undefined, signal())).toBe(
       "accept",
     );
+  });
+
+  it("takes the test lock for the related-tests check", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    await lock.acquire(
+      { runId: "other", toolUseId: "x" },
+      "other-seat",
+      "pnpm -s test",
+      1000,
+      signal(),
+    );
+    const h = approver("writer", [], undefined, checks, lock);
+    const busy = new AbortController();
+    const waiting = h.approve(
+      request("pnpm -s test:related", { itemId: "item-11" }),
+      undefined,
+      busy.signal,
+    );
+    busy.abort();
+    expect(await waiting).not.toBe("accept");
   });
 
   describe("a check queued behind a long lock hold", () => {

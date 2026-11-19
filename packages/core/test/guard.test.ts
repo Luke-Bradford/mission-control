@@ -1282,6 +1282,29 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
   );
 
   it.each([
+    "launchctl submit -l mc.suite -- pnpm -s test",
+    "echo 'pnpm -s test' | at now",
+    "batch <<< 'pnpm -s test'",
+    "systemd-run --user pnpm -s test",
+    "ssh -f host pnpm -s test",
+    "ssh -fN host pnpm -s test",
+    "daemonize /usr/local/bin/pnpm -s test",
+    "start-stop-daemon --start --exec /usr/bin/env -- pnpm -s test",
+    `osascript -e 'do shell script "pnpm -s test"'`,
+    "launchctl submit -l x -- pnpm -s test:related",
+    "systemd-run --user node --experimental-strip-types scripts/check-related.ts",
+  ])("denies a full suite handed to a launcher: %s", (c) => {
+    const d = guardDecision(bash(c), writer);
+    expect(d).toEqual({ kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT });
+  });
+  it.each(["launchctl list", "ssh host pnpm -s test", "open https://example.com", "at -l"])(
+    "leaves %s alone",
+    (c) => {
+      expect(guardDecision(bash(c), writer).kind).not.toBe("deny");
+    },
+  );
+
+  it.each([
     "find . -exec git push ;",
     "find . -name x -exec git add {} +",
     "find . -execdir git commit -m x ';'",

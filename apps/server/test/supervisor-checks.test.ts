@@ -15,6 +15,7 @@ const spy = () => {
   const checks: CheckRecorder = {
     begin: async (k, c) => void calls.push(["begin", k, c]),
     end: async (k, ok) => void calls.push(["end", k, ok]),
+    lockedBy: () => null,
     dropRun: (runId) => void calls.push(["drop", runId]),
     lost: () => false,
     drops: () => [],

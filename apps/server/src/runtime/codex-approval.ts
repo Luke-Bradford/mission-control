@@ -196,6 +196,11 @@ export function createCodexApprover(i: {
           verdict,
           typeof params.cwd === "string" ? params.cwd : undefined,
         );
+      // the related-tests check can run the whole suite: it takes the lock too
+      if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
+        const related = i.checks?.lockedBy(event.input.command);
+        if (related) verdict = { kind: "lock", command: related };
+      }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;

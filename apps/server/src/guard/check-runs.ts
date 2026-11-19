@@ -129,6 +129,8 @@ export interface CheckRecorder {
   ): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
+  /** RELATED_CHECK when this shell command runs it, which takes the test lock (it can run the whole suite); else null. */
+  lockedBy(command: string): string | null;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
   /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
@@ -201,6 +203,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     else dropped.set(runId, rest);
   };
   return {
+    lockedBy: (command) => lockedCheck(command, [RELATED_CHECK]),
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);

@@ -459,6 +459,16 @@ describe("the check recorder", () => {
     expect(rows.map((x) => x.runId)).toEqual(["r2"]);
   });
 
+  it("names only the related-tests check as one that takes the test lock", () => {
+    const r = recorder();
+    expect(r.lockedBy("pnpm -s test:related")).toBe("pnpm -s test:related");
+    expect(r.lockedBy("pnpm run test:related")).toBe("pnpm -s test:related");
+    expect(r.lockedBy(`${LINT} && pnpm -s test:related`)).toBe("pnpm -s test:related");
+    expect(r.lockedBy(TYPES)).toBeNull();
+    expect(r.lockedBy(LINT)).toBeNull();
+    expect(r.lockedBy("ls")).toBeNull();
+  });
+
   it("never throws when the clone read does", async () => {
     const lines: string[] = [];
     const r = createCheckRecorder({
