@@ -231,7 +231,9 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
 
   describe("a rerun on one commit", () => {
     const unchanged = (command: string) =>
-      openWasteAlarms(store).filter((a) => a.check === "unchanged-rerun" && a.evidence.includes(command));
+      openWasteAlarms(store).filter(
+        (a) => a.check === "unchanged-rerun" && a.evidence.includes(command),
+      );
     const start = () => {
       const r = run("guido-1", { ticket: TICKET, startedAt: NOW - HOUR, status: "ok" });
       store.upsertRun(r);
