@@ -4010,7 +4010,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return removedTokenAudit(days, null, now());
         },
       );
-      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      // Reader: docs/runbook.md#spend-report (spend per merged change and the building share; the Audit page reads it)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;

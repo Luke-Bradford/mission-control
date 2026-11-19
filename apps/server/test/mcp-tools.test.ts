@@ -545,7 +545,7 @@ describe("commit", () => {
     expect(store.runCommits(RUN)).toEqual([]);
   });
 
-  it("refuses a path outside the area: index reset, a stray recorded, nothing committed", async () => {
+  it("refuses a path outside the area: index reset, nothing committed", async () => {
     const base = head();
     write("apps/a.ts", "a2\n");
     write("docs/c.md", "c2\n");
@@ -562,7 +562,6 @@ describe("commit", () => {
       " M docs/c.md",
     ]);
     expect(store.runCommits(RUN)).toEqual([]);
-    expect(emitted).toContain("attention");
   });
 
   it("refuses each kind in its own line: outside, another writer's area, protected", async () => {
