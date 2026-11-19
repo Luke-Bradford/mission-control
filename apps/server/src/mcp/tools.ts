@@ -1131,7 +1131,12 @@ function repoOf(deps: McToolsDeps, run: Run): string {
  */
 function prBody(body: string, repo: string, issue: number | null, call: string): string {
   const parts = [body.trimEnd()];
-  if (issue !== null && !closesIssue(body, { repo, issue })) parts.push(prClosesLine(issue));
+  // a body that ends "Part of #n." is a stage of the ticket: it is not given a closing line
+  const staged =
+    issue !== null && body.trimEnd().split("\n").at(-1)?.trim() === prPartOfLine(issue);
+  if (issue !== null && !staged && !closesIssue(body, { repo, issue })) {
+    parts.push(prClosesLine(issue));
+  }
   parts.push(prOpenedByLine(call));
   return `${parts.join("\n\n")}\n`;
 }
@@ -1466,10 +1471,12 @@ export function seatWroteBody(body: string, issue: number): boolean {
 
 /**
  * `body` without the parts the hub adds around a seat's text: its minor-findings section, the
- * closing line and its own line. `section`, when given, goes at the end.
+ * closing line and its own line. `section`, when given, goes at the end; a "Part of #n." line is
+ * put back after it, so it stays last.
  */
 export function withEngineSection(body: string, issue: number, section: string | null): string {
   const own = minorSection(body);
+  const staged = body.split("\n").some((l) => l.trim() === prPartOfLine(issue));
   const rest = (own === null ? body : body.replace(own, ""))
     .split("\n")
     .filter(
@@ -1481,7 +1488,9 @@ export function withEngineSection(body: string, issue: number, section: string |
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  return section === null ? rest : `${rest}\n\n${section}`;
+  const kept = section === null ? rest : `${rest}\n\n${section}`;
+  // a staged PR keeps "Part of #n." as its last line
+  return staged ? `${kept}\n\n${prPartOfLine(issue)}` : kept;
 }
 
 /** Another open writer run whose changes share paths with a commit. */
@@ -1982,8 +1991,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     // the engine's own section outlives the seat's rewrite
     return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
       const section = minorSection(current);
+      // a staged body keeps "Part of #n." as its last line, after the hub's sections
+      const marker = issue === null ? null : prPartOfLine(issue);
+      const staged = marker !== null && own.split("\n").at(-1)?.trim() === marker;
+      const text = staged ? own.slice(0, own.lastIndexOf("\n") + 1).trimEnd() : own;
+      const joined = section === null ? text : `${text}\n\n${section}`;
       return withSection(
-        section === null ? own : `${own}\n\n${section}`,
+        staged ? `${joined}\n\n${marker}` : joined,
         EVIDENCE_HEADING,
         sectionOf(current, EVIDENCE_HEADING),
       );

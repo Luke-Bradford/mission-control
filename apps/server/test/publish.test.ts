@@ -1832,6 +1832,23 @@ describe("postMinorFindings", () => {
     expect(posted).toContain("Closes #7.");
   });
 
+  it("swaps the minor section of a staged seat body and leaves one Part of line, last", async () => {
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: `Seat rewrite.\n\n${MINOR_HEADING}\n\nold intro\n\n- \`a.ts\` — old\n\nPart of #7.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("old intro");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
+    expect(posted?.trimEnd().split("\n").at(-3)).toBe("Part of #7.");
+    expect(posted?.match(/Opened by/g)).toHaveLength(1);
+  });
+
   it("keeps a body the seat rewrote with pr_body, and swaps only the hub's section", async () => {
     const seat = JSON.stringify({
       headRefName: BRANCH,
