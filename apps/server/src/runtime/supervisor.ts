@@ -1083,7 +1083,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (
       next.runId !== null &&
       ACTIVE_SEAT_STATES.includes(next.state) &&
-      store.run(next.runId)?.sessionId !== null
+      (store.run(next.runId)?.sessionId ?? null) !== null
     )
       store.setSetting(seatSessionKey(next.runId), "recorded");
     bus.emit("agents");
@@ -2293,8 +2293,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       rmSync(crewSkillsDir(deps.dbPath, runId), { recursive: true, force: true });
       const codexTmp = store.getSetting(codexTmpKey(runId));
       if (codexTmp === null) rmSync(seatTmp(runId), { recursive: true, force: true });
-      else if (!removeCodexTmp(runId, codexTmp))
+      else if (!removeCodexTmp(runId, codexTmp)) {
         log(`could not remove run files of ${runId}: temp root changed`);
+        return;
+      }
+      store.deleteSetting(seatSessionKey(runId));
     } catch (e) {
       log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
