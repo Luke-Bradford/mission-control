@@ -480,20 +480,60 @@ describe("Store", () => {
     new Store(old); // re-opening is a no-op
   });
 
-  it("drops the old set-aside indexes when the database opens", () => {
-    const path = join(dir, "aside-indexes.sqlite");
+  it("folds a stored park and set-aside into one hold when the database opens", () => {
+    const path = join(dir, "fold-hold.sqlite");
     new Store(path).close();
+    const store0 = new Store(path);
+    store0.upsertRun(run({ id: "held", seq: 1, startedAt: 1000 }));
+    store0.upsertRun(run({ id: "plain", seq: 2, startedAt: 2000 }));
+    store0.close();
     const raw = new DatabaseSync(path);
+    const write = (id: string, loop: object) =>
+      raw.prepare("UPDATE runs SET loop = ? WHERE id = ?").run(JSON.stringify(loop), id);
+    const { hold: _hold, ...bare } = NEW_LOOP;
+    write("held", {
+      ...bare,
+      phase: "parked",
+      parked: { kind: "review", reason: "x", ended: false },
+      aside: { worktree: "/w", wake: true, ask: 3 },
+    });
+    write("plain", { ...bare, parked: null, aside: null });
     raw.exec("CREATE INDEX runs_loop_aside ON runs(id)");
     raw.exec("CREATE INDEX runs_agent_aside_worktree ON runs(id)");
     raw.close();
-    new Store(path).close();
-    const after = new DatabaseSync(path);
-    const indexes = after
+
+    const reopened = new Store(path);
+    expect(reopened.run("held")?.loop?.hold).toEqual({
+      kind: "review",
+      reason: "x",
+      ended: false,
+      worktree: "/w",
+      wake: true,
+      ask: 3,
+    });
+    expect(reopened.run("plain")?.loop?.hold).toBeNull();
+    expect(reopened.offSeatRuns().map((r) => r.id)).toEqual(["held"]);
+    reopened.close();
+    const check = new DatabaseSync(path);
+    const types = check
+      .prepare(
+        "SELECT json_type(loop, '$.parked') AS parked, json_type(loop, '$.aside') AS aside FROM runs",
+      )
+      .all() as { parked: string | null; aside: string | null }[];
+    expect(types).toEqual([
+      { parked: null, aside: null },
+      { parked: null, aside: null },
+    ]);
+    const before = check.prepare("SELECT id, loop FROM runs ORDER BY id").all();
+    check.close();
+    new Store(path).close(); // a second open changes nothing
+    const again = new DatabaseSync(path);
+    expect(again.prepare("SELECT id, loop FROM runs ORDER BY id").all()).toEqual(before);
+    const indexes = again
       .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'runs_%aside%'")
       .all();
-    after.close();
     expect(indexes).toEqual([]);
+    again.close();
   });
 
   it("drops the flight_wakes columns the wake no longer writes", () => {
