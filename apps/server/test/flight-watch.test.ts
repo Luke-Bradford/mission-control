@@ -4442,6 +4442,29 @@ describe("daily retrospective wakes", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(2);
   });
+  it("a hub restart keeps the failure gap: an open ruling park does not wake FLIGHT again", async () => {
+    flightOnly();
+    store.upsertRun(run("r-pr", "guido-1", { ticket: "mc#176" }));
+    store.setRunLoop("r-pr", {
+      ...NEW_LOOP,
+      prNumber: 7,
+      phase: "parked",
+      parked: { kind: RULING_PARK, reason: "needs a ruling", ended: false },
+    });
+    store.setSeatSession(row("guido-1", "r-pr", "parked"));
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += MIN;
+    watch.stop();
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    makeWatch();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_BATCH_MS;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+  });
   it("retries an undelivered fact after restart without recomputing it", async () => {
     liveCrew();
     nowMs = Date.parse("2026-10-24T02:00:00Z");
@@ -4506,6 +4529,23 @@ describe("a seat's call to FLIGHT", () => {
     const text = sendCalls[0]?.text ?? "";
     expect(text.split("\n")[0]).toContain("woke on: signals (1)");
     expect(text).toContain("guido-1 calls FLIGHT about mc#7: blocked on a change in apps/web");
+  });
+
+  it("is not held to the failure gap: a call two minutes after a question wakes at once", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS;
+    recordSeatCall(store, "mc", {
+      seat: "guido-1",
+      reason: "blocked on a change in apps/web",
+      ref: "mc#7",
+      at: nowMs,
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text).toContain("guido-1 calls FLIGHT about mc#7");
   });
 
   it("is told once: a call FLIGHT leaves alone does not wake it again", async () => {

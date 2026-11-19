@@ -67,6 +67,7 @@ import {
   flightWake,
   flightWakes,
   idleSeatLine,
+  lastRecordedWake,
   markItemsShown,
   markPointersShown,
   markPrsShown,
@@ -165,6 +166,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let handover: { runId: string; at: number } | null = null;
   let lastFacts = "";
   let lastWakeAt = 0;
+  /** A hub restart keeps the failure gap: the last wake comes back from the stored record. */
+  let wakeRestored = false;
   let delivered: { runId: string; snapshot: FlightWakeSnapshot } | null = null;
   /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
   let lastTurnEndAt = 0;
@@ -612,6 +615,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         await supervisor.endRunByEngine(runId);
       }
       return;
+    }
+    if (!wakeRestored) {
+      wakeRestored = true;
+      lastWakeAt = Math.max(lastWakeAt, lastRecordedWake(store, found.session.repoId));
     }
     prepareDaily(t);
     const state = flightState({

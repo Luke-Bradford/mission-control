@@ -1484,8 +1484,8 @@ minutes writes a hub log line), and disk (the disk sweep). A free seat, a Ready 
 green, a review queued or finished, a merge and a PR ready to merge are in `flight_state` for the
 next wake and wake nobody.
 
-An operator message and a seat's question wake FLIGHT within the debounce (a message within 30 seconds of
-another wake, a question within 2 minutes). Every other reason waits until `FLIGHT_BATCH_MS` (30
+An operator message, a seat's question and a seat's call wake FLIGHT within the debounce (a message within 30 seconds of
+another wake, the others within 2 minutes). The last wake time is kept across a hub restart, so a restart does not repeat a wake for a failure that is still open. Every other reason waits until `FLIGHT_BATCH_MS` (30
 minutes) after the last wake, so failures wake FLIGHT twice an hour at most. Each wake stores its
 reasons (the fact categories, e.g. `q`, `signals`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
 by reason and by hour over the last day. Measure the wake rate from `flight_wakes`.

@@ -312,6 +312,11 @@ function readWakeRecord(store: Store, repo: string): WakeRecord | null {
   }
 }
 
+/** When this repo's FLIGHT session was last woken, from the stored record; 0 when none. */
+export function lastRecordedWake(store: Store, repo: string): number {
+  return readWakeRecord(store, repo)?.at ?? 0;
+}
+
 /** Records a wake: its time, the session's repo and what woke FLIGHT. */
 export function recordFlightWake(store: Store, repo: string, at: number, wokeOn: string[]): void {
   const record: WakeRecord = { repo, at, wokeOn, next: null };
@@ -1745,14 +1750,18 @@ const URGENT_CATEGORIES: readonly string[] = [
   "retrospective",
 ];
 
-/** Whether a changed fact set adds an urgent fact. */
+/** Whether a changed fact set adds an urgent fact: one of the categories above, or a seat's call. */
 export function urgentChange(previous: string, current: string): boolean {
   const before = JSON.parse(previous || "{}") as Facts;
   const after = JSON.parse(current) as Facts;
-  return URGENT_CATEGORIES.some((category) => {
+  const added = (category: string): unknown[] => {
     const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
-    return (after[category] ?? []).some((v) => !old.has(JSON.stringify(v)));
-  });
+    return (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
+  };
+  return (
+    URGENT_CATEGORIES.some((category) => added(category).length > 0) ||
+    added("signals").some((v) => String(v).startsWith("seat_call:"))
+  );
 }
 
 /**
