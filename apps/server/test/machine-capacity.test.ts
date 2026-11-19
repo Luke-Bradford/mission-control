@@ -2,6 +2,7 @@ import type { MachineSample } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   fileServiceFault,
+  fileServiceRunaway,
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
 } from "../src/telemetry/machine-capacity.ts";
@@ -139,7 +140,7 @@ describe("machineCapacity", () => {
     });
     expect(machineCapacity([s], NOW)).toEqual({
       blocked: true,
-      reason: "the file-change service (fseventsd) holds 28.0 GB of memory (above 2.0 GB)",
+      reason: "the file-change service (fseventsd) holds 28.0 GB of memory (above 6.0 GB)",
     });
     expect(
       machineCapacity(
@@ -154,7 +155,7 @@ describe("machineCapacity", () => {
     ).toEqual({ blocked: false, reason: null });
   });
 
-  it("blocks when fseventsd holds over 2 GB, and names it in plain words", () => {
+  it("blocks when fseventsd holds over 6 GB, and names it in plain words", () => {
     const gb = 1024 ** 3;
     const top = (rssBytes: number) => [
       { pid: 1, command: "Docker", rssBytes: 9 * gb, cpuPct: 1 },
@@ -162,7 +163,7 @@ describe("machineCapacity", () => {
     ];
     expect(machineCapacity([sample({ topConsumers: top(28 * gb) })], NOW)).toEqual({
       blocked: true,
-      reason: "the file-change service (fseventsd) holds 28.0 GB of memory (above 2.0 GB)",
+      reason: "the file-change service (fseventsd) holds 28.0 GB of memory (above 6.0 GB)",
     });
     expect(machineCapacity([sample({ topConsumers: top(1.5 * gb) })], NOW)).toEqual({
       blocked: false,
@@ -173,7 +174,7 @@ describe("machineCapacity", () => {
   it("clears the file-change block after the usual headroom once the reading recovers", () => {
     const gb = 1024 ** 3;
     const bad = sample({
-      topConsumers: [{ pid: 2, command: "fseventsd", rssBytes: 3 * gb, cpuPct: 0 }],
+      topConsumers: [{ pid: 2, command: "fseventsd", rssBytes: 7 * gb, cpuPct: 0 }],
     });
     const ok = (at: number) => sample({ at, topConsumers: [] });
     expect(machineCapacity([bad, ok(NOW + 4 * 60_000)], NOW + 4 * 60_000)).toMatchObject({
@@ -243,5 +244,52 @@ describe("machineCapacity", () => {
       blocked: false,
       reason: null,
     });
+  });
+});
+
+describe("machineCapacity at 2.2 GB of fseventsd", () => {
+  it("does not hold the crew for 2.2 GB on a Mac with headroom (19 November)", () => {
+    const s = sample({
+      fileServiceBytes: 2.2 * 1024 ** 3,
+      memTotalBytes: 24 * 1024 ** 3,
+      swapUsedBytes: 6 * 1024 ** 3,
+      swapTotalBytes: 7 * 1024 ** 3,
+      memoryPressureFreePct: 42,
+    });
+    expect(machineCapacity([s], NOW)).toEqual({ blocked: false, reason: null });
+  });
+});
+
+describe("fileServiceRunaway", () => {
+  const mb = 1024 ** 2;
+  const at = (minutesAgo: number, bytes: number) => ({ at: NOW - minutesAgo * 60_000, bytes });
+
+  it("finds the stuck state: 150 MB of growth within an hour", () => {
+    expect(fileServiceRunaway([at(50, 12 * mb), at(20, 90 * mb), at(0, 170 * mb)], NOW)).toEqual({
+      fromBytes: 12 * mb,
+      toBytes: 170 * mb,
+      sinceAt: NOW - 50 * 60_000,
+    });
+  });
+
+  it("leaves a healthy service alone: the busiest normal hour grew 31 MB", () => {
+    expect(fileServiceRunaway([at(55, 5 * mb), at(0, 36 * mb)], NOW)).toBeNull();
+  });
+
+  it("finds a stuck service that has stopped growing: a gigabyte held is never healthy", () => {
+    expect(fileServiceRunaway([at(90, 5 * mb), at(0, 1100 * mb)], NOW)).toMatchObject({
+      toBytes: 1100 * mb,
+    });
+    expect(fileServiceRunaway([at(30, 1100 * mb), at(0, 1100 * mb)], NOW)).not.toBeNull();
+  });
+
+  it("ignores growth older than an hour and a service just restarted", () => {
+    expect(fileServiceRunaway([at(90, 5 * mb), at(0, 400 * mb)], NOW)).toBeNull();
+    expect(fileServiceRunaway([at(30, 2000 * mb), at(0, 6 * mb)], NOW)).toBeNull();
+  });
+
+  it("needs readings of the service, and a 0 is not one", () => {
+    expect(fileServiceRunaway([], NOW)).toBeNull();
+    expect(fileServiceRunaway([at(10, 0), at(0, 160 * mb)], NOW)).toBeNull();
   });
 });

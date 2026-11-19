@@ -134,6 +134,7 @@ import {
   runTicketTitle,
 } from "../run/view.ts";
 import type { AttentionNote, Store } from "../store.ts";
+import { FILE_SERVICE_RUNAWAY_KEY } from "../telemetry/machine-capacity.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
@@ -1007,13 +1008,19 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 }
 
 /**
- * Hub stops that only the operator clears, by note key or key prefix: machine capacity
- * (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
- * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
- * them to those modules' keys.
+ * Hub alerts that only the operator can act on, by note key or key prefix: machine capacity and a
+ * runaway file-change service (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and
+ * upgrade (cli-update.ts), the CLI auto-rollback (cli-auto.ts) and a seat's focus import
+ * (instructions/notices.ts). Most are stops the operator clears; the file-change alert holds
+ * nothing back and clears itself. hud.test.ts pins them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
+  // a runaway fseventsd the hub could not restart, or one that keeps coming back
+  // (telemetry/machine-capacity.ts): it holds nothing back and clears itself once a restart works
+  // or the service is small again with no recent run of restarts, but only the operator can
+  // restart it by hand or add the sudoers rule
+  `${NOTE_KEY}${FILE_SERVICE_RUNAWAY_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
   // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
