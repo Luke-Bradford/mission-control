@@ -50,14 +50,6 @@ CREATE TABLE IF NOT EXISTS pr_files (
   repo_id TEXT NOT NULL, pr_number INTEGER NOT NULL, path TEXT NOT NULL, change_type TEXT NOT NULL,
   PRIMARY KEY (repo_id, pr_number, path)
 );
--- A bug filed after a PR merged that names it, a commit of it or a file only it changed. Kept
--- after the card leaves the board; seat and model are the PR branch's author run.
-CREATE TABLE IF NOT EXISTS escaped_defects (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, pr_number INTEGER NOT NULL,
-  via TEXT NOT NULL, filed_at INTEGER NOT NULL, merged_at INTEGER NOT NULL, seat TEXT, model TEXT,
-  PRIMARY KEY (repo_id, issue_number, pr_number)
-);
-CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)

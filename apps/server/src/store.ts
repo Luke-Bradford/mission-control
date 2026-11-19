@@ -42,8 +42,6 @@ import {
   type CommsReactionKind,
   classifyOveruse,
   DECISION_DEFAULT_WAIT_MS,
-  type DefectRefs,
-  type DefectVia,
   type DoneWhenEntry,
   type Escalation,
   estimateTokens,
@@ -76,12 +74,9 @@ import {
   type HealthRow,
   type HudColumn,
   type HudState,
-  isBugLabelled,
   type LoopEvent,
   type LoopKind,
-  linkEscapedDefect,
   type MachineSample,
-  type MergedPrFacts,
   OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
@@ -1294,9 +1289,6 @@ export class Store {
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
     this.db
-      .prepare("DELETE FROM escaped_defects WHERE merged_at < ?")
-      .run(now - QA_RETENTION_DAYS * day);
-    this.db
       .prepare(
         `DELETE FROM pr_files WHERE NOT EXISTS (
            SELECT 1 FROM pull_requests p WHERE p.repo_id = pr_files.repo_id AND p.number = pr_files.pr_number)
@@ -1634,7 +1626,6 @@ export class Store {
           i.defectRefs ? JSON.stringify(i.defectRefs) : null,
         );
       }
-      this.captureEscapedDefects(repoId);
     });
   }
 
@@ -1878,7 +1869,7 @@ export class Store {
         p.isCrossRepository == null ? null : p.isCrossRepository ? 1 : 0,
       );
       if (p.mergedAt !== null) {
-        const { files: _files, escapedDefects: _defects, ...record } = p;
+        const { files: _files, ...record } = p;
         addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(record));
         const additions = p.additions ?? null;
         const deletions = p.deletions ?? null;
@@ -1895,109 +1886,12 @@ export class Store {
         );
       }
     }
-    this.captureEscapedDefects(repoId);
   }
 
   /**
-   * Records each bug card against the PRs merged within QA_RETENTION_DAYS before it was filed that
-   * it names (see linkEscapedDefect). Rerun on every board and PR write, so a bug read before its
-   * PR's diff still links on the next poll; a recorded link is never rewritten.
-   */
-  private captureEscapedDefects(repoId: RepoId): void {
-    const bugs = (
-      this.db
-        .prepare(
-          "SELECT issue_number, labels, created_at, defect_refs FROM board_items WHERE repo_id = ? AND defect_refs IS NOT NULL",
-        )
-        .all(repoId) as Row[]
-    ).filter((b) => isBugLabelled(JSON.parse(b.labels as string) as string[]));
-    if (bugs.length === 0) return;
-    const newest = Math.max(...bugs.map((b) => b.created_at as number));
-    const oldest = Math.min(...bugs.map((b) => b.created_at as number));
-    const merged = this.db
-      .prepare(
-        `SELECT h.number, h.merged_at, json_extract(h.record, '$.branch') AS branch,
-           COALESCE(p.head_sha, json_extract(h.record, '$.headSha')) AS head_sha,
-           COALESCE(p.merge_commit_sha, json_extract(h.record, '$.mergeCommitSha')) AS merge_sha
-         FROM pr_history h LEFT JOIN pull_requests p ON p.repo_id = h.repo_id AND p.number = h.number
-         WHERE h.repo_id = ? AND h.merged_at >= ? AND h.merged_at <= ?`,
-      )
-      .all(repoId, oldest - QA_RETENTION_DAYS * DAY_MS, newest) as Row[];
-    if (merged.length === 0) return;
-    const filesOf = this.db.prepare(
-      "SELECT path FROM pr_files WHERE repo_id = ? AND pr_number = ?",
-    );
-    const commitsOf = this.db.prepare(
-      "SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ?",
-    );
-    const facts = new Map<number, MergedPrFacts & { branch: string }>();
-    for (const m of merged) {
-      const branch = (m.branch as string | null) ?? "";
-      facts.set(m.number as number, {
-        number: m.number as number,
-        mergedAt: m.merged_at as number,
-        branch,
-        shas: [
-          ...[m.head_sha, m.merge_sha].filter((x): x is string => typeof x === "string"),
-          ...(commitsOf.all(repoId, branch) as Row[]).map((c) => c.sha as string),
-        ],
-        files: (filesOf.all(repoId, m.number) as Row[]).map((f) => f.path as string),
-      });
-    }
-    const authorOf = this.db.prepare(
-      `SELECT agent_id, model FROM runs WHERE repo_id = ? AND branch = ? AND id NOT IN (
-         SELECT run_id FROM reviews WHERE run_id IS NOT NULL) ORDER BY started_at DESC LIMIT 1`,
-    );
-    const add = this.db.prepare(
-      `INSERT OR IGNORE INTO escaped_defects
-         (repo_id, issue_number, pr_number, via, filed_at, merged_at, seat, model)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const b of bugs) {
-      const filedAt = b.created_at as number;
-      const window = [...facts.values()].filter(
-        (f) => f.mergedAt >= filedAt - QA_RETENTION_DAYS * DAY_MS,
-      );
-      const refs = JSON.parse(b.defect_refs as string) as DefectRefs;
-      for (const link of linkEscapedDefect({ createdAt: filedAt, refs }, window)) {
-        const f = facts.get(link.prNumber);
-        if (f === undefined) continue;
-        const author = authorOf.get(repoId, f.branch) as Row | undefined;
-        add.run(
-          repoId,
-          b.issue_number as number,
-          f.number,
-          link.via,
-          filedAt,
-          f.mergedAt,
-          (author?.agent_id as string | undefined) ?? null,
-          (author?.model as string | undefined) ?? null,
-        );
-      }
-    }
-  }
-
-  /**
-   * The QA board's workflow figures for work that ended or merged at or after `since`: escaped
-   * defects, review wait and time per head, rework ratio per seat and model, tests per PR.
+   * The QA board's workflow figures for work that ended or merged at or after `since`: review wait and time per head, rework ratio per seat and model, tests per PR.
    */
   qaFlow(since: number): Omit<QaFlowView, "days" | "since" | "metrics"> {
-    const escapedDefects = (
-      this.db
-        .prepare(
-          "SELECT * FROM escaped_defects WHERE merged_at >= ? ORDER BY filed_at DESC, issue_number DESC, pr_number",
-        )
-        .all(since) as Row[]
-    ).map((r) => ({
-      repoId: r.repo_id as string,
-      issueNumber: r.issue_number as number,
-      prNumber: r.pr_number as number,
-      via: r.via as DefectVia,
-      filedAt: r.filed_at as number,
-      mergedAt: r.merged_at as number,
-      seat: r.seat as string | null,
-      model: r.model as string | null,
-    }));
     const reviews = this.db
       .prepare(
         `SELECT v.id, v.repo_id, v.pr_number, v.sha, v.created_at, v.started_at, v.ended_at,
@@ -2045,7 +1939,6 @@ export class Store {
       byPr.set(key, row);
     }
     return {
-      escapedDefects,
       reviewTimings: { ...timings, heads },
       rework: reworkRatios(
         reviews.map((v) => ({
@@ -2794,24 +2687,7 @@ export class Store {
   }
 
   private pullRequestRows(rows: Row[]): PullRequestView[] {
-    const defects = new Map<string, NonNullable<PullRequestView["escapedDefects"]>>();
-    for (const d of this.statement(
-      "SELECT repo_id, pr_number, issue_number, via, filed_at FROM escaped_defects ORDER BY filed_at",
-    ).all() as Row[]) {
-      const key = `${d.repo_id}#${d.pr_number}`;
-      defects.set(key, [
-        ...(defects.get(key) ?? []),
-        {
-          issueNumber: d.issue_number as number,
-          via: d.via as DefectVia,
-          filedAt: d.filed_at as number,
-        },
-      ]);
-    }
     return rows.map((r) => ({
-      ...(defects.has(`${r.repo_id}#${r.number}`)
-        ? { escapedDefects: defects.get(`${r.repo_id}#${r.number}`) }
-        : {}),
       repoId: r.repo_id as string,
       number: r.number as number,
       title: r.title as string,

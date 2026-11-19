@@ -18,6 +18,7 @@ const RETIRED_TABLES = [
   "run_rereads",
   // the code-health, Map, token-audit and bug-escape features
   "map_cache",
+  "escaped_defects",
   "bug_escapes",
   "bug_escape_tries",
   "run_token_audit",

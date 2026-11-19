@@ -8861,7 +8861,6 @@ describe("QA board data", () => {
     const flow = (await get("/api/qa/flow")).json();
     expect(flow).toMatchObject({
       days: 30,
-      escapedDefects: [],
       reviewTimings: { heads: [], wait: { n: 0, medianMs: null } },
       rework: { bySeat: [], byModel: [] },
       testsPerPr: [],
