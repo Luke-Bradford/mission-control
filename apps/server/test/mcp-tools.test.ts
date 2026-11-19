@@ -3860,6 +3860,22 @@ describe("push and draft_pr", () => {
       );
     });
 
+    it.each(["Stage 3, part of #42.", "New text.\n\nPart of #42"])(
+      "keeps a staged PR staged when the seat's text %j does not end with the marker",
+      async (text) => {
+        store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+        ghState(
+          view({
+            body: `#42\n\n## What changed\n\nPart of #42: stage 3.\n\n${MINORS}\nPart of #42.\n`,
+          }),
+        );
+        await edit(text);
+        const body = edits()[0]?.body ?? "";
+        expect(body).not.toContain("Closes #42.");
+        expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
+      },
+    );
+
     it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {
       store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
       ghState(view());

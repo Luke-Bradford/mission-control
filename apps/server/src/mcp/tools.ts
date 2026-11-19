@@ -127,6 +127,7 @@ import {
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
   nonAsciiPathsText,
+  noteIsPartOf,
   notOnBranchText,
   originMovedText,
   otherAreaText,
@@ -1131,9 +1132,8 @@ function repoOf(deps: McToolsDeps, run: Run): string {
  */
 function prBody(body: string, repo: string, issue: number | null, call: string): string {
   const parts = [body.trimEnd()];
-  // a body that ends "Part of #n." is a stage of the ticket: it is not given a closing line
-  const staged =
-    issue !== null && body.trimEnd().split("\n").at(-1)?.trim() === prPartOfLine(issue);
+  // a body that says it is part of the ticket is a stage of it: it is not given a closing line
+  const staged = issue !== null && noteIsPartOf(body, issue);
   if (issue !== null && !staged && !closesIssue(body, { repo, issue })) {
     parts.push(prClosesLine(issue));
   }
@@ -1991,10 +1991,19 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     // the engine's own section outlives the seat's rewrite
     return editRunPrBody(deps, ctx.runId, prNumber, (current) => {
       const section = minorSection(current);
-      // a staged body keeps "Part of #n." as its last line, after the hub's sections
+      // a staged PR (its note, the seat's text or the PR as it stands says "Part of #n") keeps
+      // "Part of #n." as its last line, after the hub's sections
       const marker = issue === null ? null : prPartOfLine(issue);
-      const staged = marker !== null && own.split("\n").at(-1)?.trim() === marker;
-      const text = staged ? own.slice(0, own.lastIndexOf("\n") + 1).trimEnd() : own;
+      const staged =
+        issue !== null &&
+        marker !== null &&
+        (noteIsPartOf(own, issue) ||
+          noteIsPartOf(deps.store.evidenceNotes(run.id)[0]?.note ?? "", issue) ||
+          current.split("\n").some((l) => l.trim() === marker));
+      const lines = own.split("\n");
+      const text = (marker !== null && lines.at(-1)?.trim() === marker ? lines.slice(0, -1) : lines)
+        .join("\n")
+        .trimEnd();
       const joined = section === null ? text : `${text}\n\n${section}`;
       return withSection(
         staged ? `${joined}\n\n${marker}` : joined,
@@ -3182,7 +3191,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.prBody,
       description:
-        "Rewrite the body of your run's own open PR. Your body replaces the old one; Mission Control keeps its own minor-findings section and adds the closing line and its own line. It is refused when the body would notify someone, reference another item, hold a secret or end inside an open block, and for a PR that is not your run's.",
+        "Rewrite the body of your run's own open PR. Your body replaces the old one; Mission Control keeps its own minor-findings section and adds the closing line (\"Part of #n.\" when the PR is part of the ticket) and its own line. It is refused when the body would notify someone, reference another item, hold a secret or end inside an open block, and for a PR that is not your run's.",
       inputSchema: {
         type: "object",
         properties: {
