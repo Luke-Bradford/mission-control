@@ -1853,6 +1853,59 @@ describe("scheduler", () => {
         expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
       });
 
+      it("judges only readings the hub took: an idle hub's carried figure neither triggers a restart nor starts a growth window", async () => {
+        config.crew = {
+          worktrees: join(dir, "worktrees"),
+          maxSeats: 1,
+          sessions: [
+            { id: "crew", repoId: "shop-app", checkout: join(dir, "checkout"), seats: [] },
+          ],
+        } as NonNullable<CcConfig["crew"]>;
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 50 * mb;
+        let pending = true;
+        const restart = vi.fn(async () => ({ restarted: true }));
+        const s = createScheduler({
+          config,
+          store,
+          bus,
+          now: () => t,
+          restartFileService: restart,
+          hasViewClients: () => false,
+          startPending: () => pending,
+          collectors: stubs({
+            machine: vi.fn(async (_p, _prev, at) => ({
+              sample: machineSample({
+                at,
+                memTotalBytes: 24 * 1024 ** 3,
+                swapUsedBytes: 1024 ** 3,
+                swapTotalBytes: 20 * 1024 ** 3,
+                memoryPressureFreePct: 44,
+                load1: 1,
+                fileServiceBytes: size,
+              }),
+              cpus: [],
+              errors: [],
+            })),
+          }),
+        });
+        await s.tick("machine");
+        // idle for five hours: the stored figure is carried, even a stuck-looking one
+        pending = false;
+        size = 2300 * mb;
+        for (let i = 0; i < 5 * 60; i += 30) {
+          t += 30 * 60_000;
+          await s.tick("machine");
+        }
+        expect(restart).not.toHaveBeenCalled();
+        // the first fresh reading: 210 MB is not growth of 160 MB within an hour
+        pending = true;
+        size = 210 * mb;
+        t += 60_000;
+        await s.tick("machine");
+        expect(restart).not.toHaveBeenCalled();
+      });
+
       it("restarts when the stored time is ahead of now (the clock moved back)", async () => {
         let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
         let size = 10 * mb;

@@ -70,31 +70,31 @@ export interface FileServiceRunaway {
   sinceAt: number;
 }
 
+/** One reading of `fseventsd` taken at that minute (never a figure carried forward). */
+export interface FileServiceReading {
+  at: number;
+  bytes: number;
+}
+
 /**
- * `fseventsd` grew by the runaway amount within the last hour of readings, or holds the stuck size
- * now; null if neither.
+ * `fseventsd` grew by the runaway amount within the last hour of fresh readings, or holds the
+ * stuck size at the latest one; null if neither. Only readings actually taken count: a figure
+ * carried forward while the hub was idle says nothing about when it was reached.
  */
 export function fileServiceRunaway(
-  samples: readonly MachineSample[],
+  readings: readonly FileServiceReading[],
   now: number,
 ): FileServiceRunaway | null {
-  // a 0 is no reading (a missing process normally carries the last reading forward instead)
-  const recent = samples.filter(
-    (s) =>
-      s.at >= now - FSEVENTSD_RUNAWAY_WINDOW_MS &&
-      s.at <= now &&
-      typeof s.fileServiceBytes === "number" &&
-      s.fileServiceBytes > 0,
+  const recent = readings.filter(
+    (r) => r.at >= now - FSEVENTSD_RUNAWAY_WINDOW_MS && r.at <= now && r.bytes > 0,
   );
   const latest = recent.at(-1);
-  if (latest === undefined || typeof latest.fileServiceBytes !== "number") return null;
-  let low: MachineSample | undefined;
-  for (const s of recent)
-    if (low === undefined || (s.fileServiceBytes ?? 0) < (low.fileServiceBytes ?? 0)) low = s;
-  if (low === undefined || typeof low.fileServiceBytes !== "number") return null;
-  return latest.fileServiceBytes - low.fileServiceBytes >= FSEVENTSD_RUNAWAY_BYTES ||
-    latest.fileServiceBytes >= FSEVENTSD_STUCK_BYTES
-    ? { fromBytes: low.fileServiceBytes, toBytes: latest.fileServiceBytes, sinceAt: low.at }
+  if (latest === undefined) return null;
+  let low = latest;
+  for (const r of recent) if (r.bytes < low.bytes) low = r;
+  return latest.bytes - low.bytes >= FSEVENTSD_RUNAWAY_BYTES ||
+    latest.bytes >= FSEVENTSD_STUCK_BYTES
+    ? { fromBytes: low.bytes, toBytes: latest.bytes, sinceAt: low.at }
     : null;
 }
 /** What a swollen file-change service costs to fix, for the Needs-you item. */

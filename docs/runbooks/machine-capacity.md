@@ -45,9 +45,10 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
   stop is, after FLIGHT's triage window) when a restart fails, or when the hub has restarted it 3
   times in 6 hours, meaning restarting is not fixing the cause. Its text is not rewritten while it
   is open. It clears once the service is back under 150 MB with no recent run of restarts. While
-  no browser is open and nothing waits to start, the hub reads `fseventsd` less often and carries
-  the last reading forward without reading `fseventsd` at all; neither rule acts on a carried
-  reading, so detection waits for the next fresh one. A restart that works clears the alert at
+  no browser is open and nothing waits to start, the hub does not read `fseventsd` and carries the
+  last figure forward; only readings actually taken are judged (kept in the hub's memory, so after
+  a hub restart the growth rule needs an hour of fresh readings again), so detection waits for the
+  next fresh one. A restart that works clears the alert at
   once unless it is the third in 6 hours.
 - The sudoers rule allows that one command only, for any program running as the operator. To add
   it, run once in Terminal (root writes it under a dotted name that sudo ignores, checks it, then

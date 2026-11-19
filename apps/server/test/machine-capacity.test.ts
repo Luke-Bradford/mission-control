@@ -262,8 +262,7 @@ describe("machineCapacity at 2.2 GB of fseventsd", () => {
 
 describe("fileServiceRunaway", () => {
   const mb = 1024 ** 2;
-  const at = (minutesAgo: number, bytes: number) =>
-    sample({ at: NOW - minutesAgo * 60_000, fileServiceBytes: bytes });
+  const at = (minutesAgo: number, bytes: number) => ({ at: NOW - minutesAgo * 60_000, bytes });
 
   it("finds the stuck state: 150 MB of growth within an hour", () => {
     expect(fileServiceRunaway([at(50, 12 * mb), at(20, 90 * mb), at(0, 170 * mb)], NOW)).toEqual({
@@ -289,8 +288,8 @@ describe("fileServiceRunaway", () => {
     expect(fileServiceRunaway([at(30, 2000 * mb), at(0, 6 * mb)], NOW)).toBeNull();
   });
 
-  it("needs readings of the service, and a 0 (no process found) is not one", () => {
-    expect(fileServiceRunaway([sample({ at: NOW })], NOW)).toBeNull();
+  it("needs readings of the service, and a 0 is not one", () => {
+    expect(fileServiceRunaway([], NOW)).toBeNull();
     expect(fileServiceRunaway([at(10, 0), at(0, 160 * mb)], NOW)).toBeNull();
   });
 });

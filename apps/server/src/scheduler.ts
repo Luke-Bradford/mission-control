@@ -140,6 +140,7 @@ import {
   FILE_SERVICE_RESTARTS_SETTING,
   FILE_SERVICE_RUNAWAY_KEY,
   FILE_SERVICE_SUDOERS_ADVICE,
+  type FileServiceReading,
   FSEVENTSD_RUNAWAY_BYTES,
   FSEVENTSD_RUNAWAY_WINDOW_MS,
   fileServiceFault,
@@ -496,12 +497,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    * operator's sudoers rule. Diagnostics are saved at most once in `FILE_SERVICE_CAPTURE_GAP_MS`,
    * so the capture of the onset is kept. One operator alert is raised when a restart fails, or when
    * restarts keep recurring (restarting is not fixing the cause); its text is not rewritten by
-   * later attempts, so FLIGHT is not woken again for it. It stays until the service is back under
-   * the runaway size with no recurrence; growth merely pausing does not clear it.
+   * later attempts, so FLIGHT is not woken again for it. A restart that works clears it unless it
+   * is the third in six hours; otherwise it stays until the service is back under the runaway size
+   * with no recent run of restarts. Growth merely pausing does not clear it. Only readings actually
+   * taken are judged, kept in memory, so after a hub restart growth needs fresh readings again (the
+   * stuck size acts on the first one).
    */
-  const restartRunawayFileService = (at: number, fresh: boolean): void => {
+  /** The last hour of `fseventsd` readings actually taken (an idle hub carries the figure). */
+  const fileServiceReadings: FileServiceReading[] = [];
+  const restartRunawayFileService = (at: number, fresh: number | null): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
+    if (fresh !== null && fresh > 0) fileServiceReadings.push({ at, bytes: fresh });
+    while ((fileServiceReadings[0]?.at ?? at) < at - FSEVENTSD_RUNAWAY_WINDOW_MS)
+      fileServiceReadings.shift();
     const open = (): boolean => store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
     const small = (): boolean => {
       const size = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS).at(-1)?.fileServiceBytes;
@@ -523,13 +532,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     };
     const recurring = (until: number): boolean =>
       restarts(until).length >= FILE_SERVICE_RECURRING_RESTARTS;
-    const runaway = fileServiceRunaway(store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS), at);
+    // judged only when this minute's figure was read, on the readings actually taken
+    const runaway = fresh === null ? null : fileServiceRunaway(fileServiceReadings, at);
     if (runaway === null) {
       if (open() && small() && !recurring(at)) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
       return;
     }
-    // a carried-forward figure may be a process already restarted: act only on a fresh one
-    if (!fresh) return;
     // a stored time ahead of now (the clock moved back) does not count
     const since = (key: string): number => {
       const v = Number(store.getSetting(key) ?? "0");
@@ -1530,7 +1538,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         // only a reading taken now counts: an idle hub carries the last figure forward
         restartRunawayFileService(
           at,
-          spawn && !r.errors.some((e) => e.startsWith(`${FILE_SERVICE}:`)),
+          spawn && !r.errors.some((e) => e.startsWith(`${FILE_SERVICE}:`))
+            ? (r.sample.fileServiceBytes ?? null)
+            : null,
         );
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
