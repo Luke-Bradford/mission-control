@@ -108,7 +108,6 @@ const busyBoard = (): FlightState => ({
   aside: [],
   questions: [{ id: 1, seat: "guido-0", ticket: "mc#40", text: "Which lane?", ageMin: 0 }],
   items: [],
-  holds: [],
   breaker: { tripped: false, reason: null },
 });
 

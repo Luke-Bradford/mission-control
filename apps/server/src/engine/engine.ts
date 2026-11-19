@@ -24,7 +24,6 @@ import {
   answerLineKey,
   asideEventText,
   asideForAnswerEventText,
-  asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
   awayDiffSafe,
@@ -135,7 +134,6 @@ import {
   reviewStatusOf,
   reviewTokenBudgetOf,
   STDERR_TEXT_MAX,
-  STUCK_PARK,
   SYNC_MAIN_GAP_MS,
   seatCallSign,
   seatDef,
@@ -169,7 +167,7 @@ import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
-import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
+import { wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
@@ -1114,7 +1112,6 @@ export function createEngine(deps: EngineDeps): Engine {
       asideOk: reviewer !== null,
       // a question FLIGHT passed to the operator: the run waits off its seat for the answer
       operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
-      reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
         : {}),
@@ -1461,7 +1458,11 @@ export function createEngine(deps: EngineDeps): Engine {
         step === undefined ? r.text : mergeStepFailedText(MERGE_STEP_WORDS[step], r.text);
       out.parked = true;
       cur.phase = "parked";
-      cur.parked = { kind: step === undefined ? "refused" : "merge-step", reason, ended: false };
+      cur.parked = {
+        kind: step === undefined ? "refused" : "merge-step",
+        reason,
+        ended: step === undefined,
+      };
       store.addLoopEvent(
         `${run.id}:${cur.epoch}:parked:${cur.reportedEvidenceId}`,
         run.id,
@@ -1777,14 +1778,12 @@ export function createEngine(deps: EngineDeps): Engine {
         const worktree = supervisor.seat(run.agentId)?.worktree ?? null;
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
-        // (a run set aside mid-build is due back as soon as the rework is out of the way)
         // (not while the run waits for the operator's answer: that wakes it)
         const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
         const waitsOnPerson = asked !== undefined;
         cur.aside = {
           worktree,
-          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
-          ...(a.displaced ? { displaced: true as const } : {}),
+          wake: cur.phase === "working" && !waitsOnPerson,
           ...(asked ? { ask: asked.id } : {}),
         };
         store.setRunLoop(run.id, cur);
@@ -1800,11 +1799,9 @@ export function createEngine(deps: EngineDeps): Engine {
           run.id,
           waitsOnPerson
             ? asideForAnswerEventText(call)
-            : cur.phase === "working" || a.displaced
-              ? asideForReworkEventText(call)
-              : cur.phase === "ci"
-                ? asideInCiEventText(call)
-                : asideEventText(call),
+            : cur.phase === "ci"
+              ? asideInCiEventText(call)
+              : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -4214,21 +4211,16 @@ export function createEngine(deps: EngineDeps): Engine {
         if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") {
           return refused("its repo is a draft workspace");
         }
-        const parkedOn = (kind: string) =>
-          loop.phase === "parked" && loop.parked?.kind === kind && !loop.parked.ended;
-        const parkedOnConflict = parkedOn("conflict");
-        // a push or PR GitHub does not show: the merge is the new push, so the old one need not match
-        const parkedStuck = parkedOn(STUCK_PARK);
-        if (loop.phase !== "ci" && loop.phase !== "review" && !parkedOnConflict && !parkedStuck) {
-          return refused("the run is not in CI or review, or parked on a conflict or a stuck push");
+        if (loop.phase !== "ci" && loop.phase !== "review") {
+          return refused("the run is not in CI or review");
         }
         if (loop.mainMerge) return refused("a merge of main already waits on the seat");
         const newest = store.newestRunCommit(run.id)?.sha;
         const pushed = store.runPush(run.id);
-        if (!parkedStuck && (pushed === null || newest !== pushed.sha)) {
+        if (pushed === null || newest !== pushed.sha) {
           return refused("the branch has unpushed commits");
         }
-        const tip = parkedStuck ? (newest ?? pushed?.sha) : pushed?.sha;
+        const tip = pushed.sha;
         if (tip === undefined) return refused("the branch has no recorded commit");
         const worktree = worktreeOf(run, loop);
         if (worktree === null) return refused("the run has no worktree");
@@ -4245,12 +4237,6 @@ export function createEngine(deps: EngineDeps): Engine {
         const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
         if (!r.ok) return refused(r.text);
         if (r.kind === "wait") return refused("the worktree has uncommitted changes");
-        if (parkedOnConflict || parkedStuck) {
-          cur.epoch += 1;
-          cur.parked = null;
-          cur.unparkedAt = at;
-          store.addLoopEvent(`${run.id}:resumed:${cur.epoch}`, run.id, "resumed by FLIGHT", at);
-        }
         cur.transient = 0;
         cur.lastRefusal = null;
         lastTransient.delete(run.id);

@@ -1,5 +1,31 @@
 # Mission Control runbook
 
+## Stage size measurement
+
+Stage 2 of the light-harness work compares the merged main commit, `1dc257a`, with
+`df6c162`. Non-test TypeScript and TSX lines under `apps` and `packages` changed from
+204,000 to 202,886. Run this from the repository root once for each ref:
+
+```sh
+git ls-tree -r --name-only <ref> -- apps packages \
+  | rg '\.(ts|tsx)$' \
+  | rg -v '(^|/)[^/]+\.(test|spec)\.(ts|tsx)$' \
+  | while IFS= read -r file; do git show "<ref>:$file"; done \
+  | wc -l
+```
+
+Anchored `CREATE TABLE` names under `apps/server/src` changed from 91 to 88. Run this
+from the repository root once for each ref:
+
+```sh
+git ls-tree -r --name-only <ref> -- apps/server/src \
+  | while IFS= read -r file; do git show "<ref>:$file"; done \
+  | rg '^CREATE TABLE' \
+  | sed -E 's/^CREATE TABLE( IF NOT EXISTS)? ([^ (]+).*/\2/' \
+  | sort -u \
+  | wc -l
+```
+
 ## Code-health reads
 
 `GET /api/code-health?repo=<id>&window=30d&tab=overview` requires the operator token.
@@ -407,7 +433,7 @@ PR flow. It returns `DependencyChain[]`; omit `repoId` for all configured reposi
 An unknown repository returns 404 and an invalid query returns 400. This is the approved server
 contract for the Dependencies Board, FLIGHT and QA builds. Those web readers ship separately.
 
-The read joins stored ticket dependencies, stacked PRs, active holds, PR ownership and seat queues.
+The read joins stored ticket dependencies, stacked PRs, PR ownership and seat queues.
 A PR reference continues through its carried ticket's waits. All open waits participate; work
 with multiple roots appears under each, with its other roots in `alsoWaitsOn`. Cycles return
 `stuck` with their refs. Unread or out-of-repository roots remain `unknown`.
@@ -1458,8 +1484,8 @@ message does not lift this park. A new push keeps the hold.
 A hold stops only the merge. To fix a defect in a held PR, FLIGHT sends the run parked as `merge-hold`
 back to its builder with `mc settle_park { runId, action: "rework", note: <fix list> }`: the run
 returns to working, the hold stays in force, and after the fix, CI and review it parks at `merge-hold`
-again until the holder releases it. `mc reassign_ticket` on a held PR's ticket (after its run ended)
-gives the new run the same hold. Releasing stays with whoever set it.
+again until the holder releases it. When a held PR's run has ended, start the ticket again; the new
+run carries the same hold. Releasing stays with whoever set it.
 
 FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
 as a decision. FLIGHT may release only its own hold: one set here is released only here. The operator
@@ -1499,7 +1525,7 @@ branch this hub has a run on (so not an external PR) in a `merge` repo that conf
 red CI, that `prFlow` shows owned by nobody, with no unended run on the ticket. The hub notes when it first saw each
 stuck state on a head (the `stuck-prs` setting), and the PR is stuck once it has stood 30 minutes since that, or since
 the last run on it ended, whichever is later. Never taken: a ticket labelled `waiting:operator`, a ticket with an open
-retry-loop waste alarm, a ticket held behind a PR, a PR whose author run holds a
+retry-loop waste alarm, a PR whose author run holds a
 merge hold (operator or FLIGHT), a PR the operator holds in Needs you, a PR that has failed two reviews or whose run FLIGHT ended (the two-attempt rule: that call stays FLIGHT's), a stacked PR, a closed card.
 A conflicting PR is first tried without a model: the hub merges main into the branch with `git merge-tree` in the
 session's clone, commits `Merge main into <branch>` as Mission Control, and pushes it plain (never forced), the same
@@ -1515,7 +1541,6 @@ its area raises `idle_seat`; `stuck_pr` is raised when no seat of its area could
 | `stuck_pr` | an open crew PR in conflict with main or red has had no run on it for 30 minutes and no seat of its area can take it (see Stuck PRs); once per PR head and kind |
 | `wake_stuck` | a set-aside run's wake met the same hub error (a 502, such as its dependencies not reinstalling) on two passes in a row; the hub keeps trying every pass. The evidence names the run and the error. Once per run |
 | `old_park` | a run has been parked for 15 minutes |
-| `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
 | `item_stale` | a Needs-you item for FLIGHT has gone 10 minutes untriaged (a PR ready to merge is `merge_stalled`) |
 | `run_no_pr` | a build run ended (crashed or not) with a ticket and no PR, within the last day, and not already a missing report |
@@ -1577,7 +1602,7 @@ Anything else answers 409 and writes nothing. Both are the operator's own click 
 - `POST /api/attention/:key/not-now` sets a seat question aside (`seat_questions.aside_at`: it stays open,
   leaves Needs you, and the end of its run does not close it). It then creates the `waiting:operator` label once per
   repo, adds it to the issue and moves the card to Backlog; a failure up to here puts the question back in Needs you.
-  It then ends the run that waits on it (`recordRunHandoff` and `endRun`, or `endAsideRun` for a run set aside in
+  It then ends the run that waits on it (`endRun`, or `endAsideRun` for a run set aside in
   review) and posts one comment holding the question, its options and the date. A Comms question is settled
   instead, and ends the sender's run only when it is a crew seat's own run on that ticket; FLIGHT's own question is
   never offered. If the comment alone fails once the run has ended, the question stays aside and the route answers
@@ -1600,8 +1625,8 @@ a question whose text fails it answers 422 and nothing is written.
   (left alone when another hand already moved it or a run works the ticket now), sends the text to the asking seat as
   a Comms line to the ended run only (another run of that seat never reads it), and closes the question as answered. The
   answer is stored first as an `answer` decision, so every later run on the ticket starts with it in its brief
-  (`answeredQuestionsOn`); a retry after a 502 replaces it. The run's handoff stays open, so the next start of the
-  ticket picks it up. A GitHub step that fails answers 502 and changes nothing a retry cannot repeat. An unknown
+  (`answeredQuestionsOn`); a retry after a 502 replaces it. The next start of the
+  ticket reuses the run's branch and reads the answer in its brief. A GitHub step that fails answers 502 and changes nothing a retry cannot repeat. An unknown
   question or one on another ticket answers 404; one that is not set aside, or already answered, answers 409.
 - `POST /api/seats/:id/message` with a `question` that is set aside, whose run has ended, answers 409 and sends nothing:
   without the refusal the text would reach whatever run holds the seat now.
@@ -1712,7 +1737,7 @@ same-repository/default-branch provenance, the complete changed-file list, linke
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
 with `--match-head-commit`; branch protection stays in force. A branch keeps its normal engine path
 while a build run is live or parked on it, while a run is live on the same ticket under another
-branch, while a seat has claimed the ticket's handoff and has no run row yet, and for every run of a
+branch, and for every run of a
 configured (observed) loop. Once that run has ended (a controller pushed the head and FLIGHT ended the
 run to free the seat), the PR is reviewed and merged like one with no crew author; a
 hard-rule PR then needs the same head-bound `merge-floor` approval below on a standard repo; on a
@@ -1721,14 +1746,9 @@ latest build run still refuses the merge after that run ends, until the hold is 
 Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
 This is decided, not an oversight: a hold that outlived the run could be cleared only by starting a
 seat. A clean review reads only the pushed head, so uncommitted work the ended run left in its
-worktree is not seen by the review or by `merge_pr`; the ticket's open handoff lists it.
+worktree is not seen by the review or by `merge_pr`.
 
-An ended run's PR with review findings goes back to a seat with `reassign_ticket`. The seat works on
-the PR's own head: when the run opened a PR whose head ref differs from the run's branch, the seat
-starts on that ref, and a handed-over branch behind origin's is moved to origin's tip (a diverged one
-is refused, and nothing is changed). A stuck run whose newest commit is the PR's head, pushed by hand
-after the push gate refused it, is recorded as pushed when FLIGHT lifts the park, so it reaches review.
-No build run is invented and no board card is marked Done by this path.
+An ended run's PR with review findings is picked up by starting the ticket again: the new run, on any seat, reuses the ticket's branch and the managed worktree a stopped run left (uncommitted files included), and continues the PR an earlier run on that branch opened.
 
 When such a PR is behind main or conflicts, FLIGHT can bring main in itself: `mc sync_main` needs an
 unended run, but FLIGHT's shell may merge, resolve and commit on a detached HEAD (`git fetch`, `git
@@ -1954,10 +1974,7 @@ set it well above what a large ticket needs (the live config uses `1500000`). A 
 passes its expected use is not parked; Audit raises a finding for it (see Audit API). A writer run leaves its seat (is set aside) once
 its draft PR is open on the pushed sha and the seat is between turns, in CI as well as in review, so
 the seat does not idle through CI. Rework on a set-aside run (review findings, a failed controller
-check, a CI failure) comes first, oldest first, ahead of any new ticket. If it lands while the seat is
-building a new ticket, that ticket is set aside at the seat's next turn end (its worktree, with its commits and any
-uncommitted work, is kept as it is; nothing is pushed) and comes back after the rework; the rework's
-wait reads "rework waiting on GUIDO-1 (behind #N)" until it starts.
+check, a CI failure) comes first, oldest first, ahead of any new ticket; it waits until the seat is free. A run is never set aside to make way for another run's rework.
 A ticket waiting on a person is parked the same way: when a seat's question has been passed to the
 operator and the seat is between turns, the run leaves its seat (worktree and commits kept) and the seat
 takes its next ticket. The run does not wake while the question is open. A reply that names the question
@@ -1972,13 +1989,7 @@ free reviewer of the session, not the same seat, and only a single reviewer retr
 `crew.max_open_runs_per_seat` (default `2`) is how many set-aside runs that are not done a seat may
 hold before it takes no new ticket; it applies live, and starts by hand are not capped.
 
-**FLIGHT holds.** With `promote_backlog` on, FLIGHT's `promote` can hold a Ready or Refinement card
-that has no run: `to: "Backlog"` with `waits_on` set to an open PR in the session's repo (so it need
-not have moved the card itself). The hold is a row in the `holds` table (ref, the PR, basis, time,
-`released_at`), shows in FLIGHT's digest as
-`holds: [{ ref, waitsOn, ageMin, prState, told }]` (`told` once FLIGHT has been woken for the PR's merge or close). When the PR merges or closes, the watch wakes FLIGHT
-(`n hold(s) to release`); a closed-unmerged PR leaves the hold in place for FLIGHT to decide. FLIGHT
-promotes the card to Ready again through `promote` with the usual checks, and that move releases the hold.
+**Stopped runs.** A run that cannot go on (a closed PR, nothing committed, a refused push, a push that never shows, a conflict it already tried, CI failing too often, CI pending or missing too long, a spent budget, a seat gone silent) stops: the run ends, the reason is on its card, its timeline and a Needs-you note, and its seat takes the next ticket. Nothing resumes it: start the ticket again and the new run reuses the ticket's branch and unfinished worktree. Only the parks that wait on a person or FLIGHT (review rounds, a CI ruling, the controller check, UAT, a merge hold) stay parked and resume by their own route. Runs in CI or review still leave their seat (are set aside) so the seat is free; collapsing those states is planned as its own stage, with the web readers changed in the same PR. An account at its usage stop ends the run the same way, with the account named; no ticket wait is kept.
 
 ### Loop liveness
 
@@ -2912,7 +2923,7 @@ operator questions.
 
 ## A ticket whose seat hits its account's stop
 
-A seat is never the one that waits. Each engine cycle (`engine/account-release.ts`), a build seat that sits idle at its account's usage stop with an unfinished run has that run ended; its branch, PR and handoff notes stay. The ticket records a wait (`ticket_waits`: the reason and what frees it, shown on `GET /api/boards/:repoId` as `waiting`, with no owner). In the same cycle a free seat in the ticket's area on an account that is under its stop resumes the ticket on the same branch and PR, and the wait is cleared. With no such seat the ticket keeps its wait and is offered again each cycle, so it clears as soon as any account in the area can work (including the original one when its window resets). A seat in the middle of a turn finishes it first.
+A seat is never the one that waits. Each engine cycle (`engine/account-release.ts`), a build seat that sits idle at its account's usage stop with an unfinished run has that run stopped: the run ends, the reason (`stopped: GUIDO-1's account <id> reached its usage limit`) goes on the run's timeline, and the seat takes the next ticket. The branch, PR and unfinished worktree stay; no ticket wait is kept. Starting the ticket again, once an account can work, continues on the same branch. A seat in the middle of a turn finishes it first.
 
 ## FLIGHT's fresh session
 

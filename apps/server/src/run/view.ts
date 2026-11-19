@@ -15,7 +15,6 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
-import { publicHandoff } from "./handoffs.ts";
 
 /** Compact list diagnostics without mutating the single-run record. */
 export function runSummary(run: Run): RunSummary {
@@ -107,7 +106,6 @@ export function runView(
   cache: PrCache,
   boards: BoardTitleCache = new Map(),
 ): RunView {
-  const handoff = store.handoff(run.id) ?? store.receivedHandoff(run.id);
   const prs = runPrs(config, store, run, cache);
   const ticket = runTicket(run, prs);
   const t = ticket === null ? null : parseTicket(ticket);
@@ -122,7 +120,6 @@ export function runView(
   }
   return {
     ...runSummary(run),
-    ...(handoff ? { handoff: publicHandoff(handoff) } : {}),
     usage: runUsage(store, run),
     prs,
     ticket,

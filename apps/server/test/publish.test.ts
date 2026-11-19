@@ -288,6 +288,7 @@ describe("openPr", () => {
       run({
         id: "r0",
         agentId: "other-seat",
+        branch: "feature/other",
         startedAt: START - 1_000,
         endedAt: START - 500,
         status: "ok",
@@ -296,6 +297,27 @@ describe("openPr", () => {
     );
     store.upsertRun(run({ id: "r9", agentId: "third-seat", startedAt: START - 200 }));
     ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: false,
+      text: EARLIER_PR_OPEN,
+      transient: false,
+    });
+  });
+
+  it("does not adopt an ended ticket PR from another branch", async () => {
+    store.upsertRun(
+      run({
+        id: "r0-other-branch",
+        agentId: "other-seat",
+        branch: "feature/other",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+
     expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
       ok: false,
       text: EARLIER_PR_OPEN,
@@ -322,7 +344,7 @@ describe("openPr", () => {
     });
   });
 
-  it("adopts the earlier PR of the run this run received a handoff from, whatever its seat", async () => {
+  it("adopts the earlier PR of an ended run on the same branch, whatever its seat", async () => {
     store.upsertRun(
       run({
         id: "r0",
@@ -333,27 +355,6 @@ describe("openPr", () => {
         loop: { ...NEW_LOOP, prNumber: 29 },
       }),
     );
-    store.recordHandoff({
-      runId: "r0",
-      repoId: "mc",
-      ticket: "mc#7",
-      fromSeat: "other-seat",
-      at: START - 400,
-      goal: "g",
-      done: [],
-      left: [],
-      next: "n",
-      branch: BRANCH,
-      worktree: null,
-      gitStatus: [],
-      gitState: "ready",
-      findings: [],
-      messages: [],
-      acceptedBy: null,
-      acceptedRunId: null,
-    });
-    expect(store.claimHandoff("r0", "t")).toBe(true);
-    expect(store.acceptHandoff("r0", "t", "guido-1", "r1")).toBe(true);
     ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
     expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
       ok: true,

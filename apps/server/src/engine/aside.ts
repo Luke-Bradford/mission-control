@@ -58,14 +58,6 @@ function fixDueReason(store: Store, run: Run): "ci" | "review" | null {
     : null;
 }
 
-/**
- * A run set aside to make way for rework: one still being built (never pushed), or one that
- * pushed and holds a refused newer commit.
- */
-const isDisplaced = (store: Store, run: Run): boolean =>
-  run.loop?.aside?.displaced === true ||
-  (run.loop?.phase === "working" && store.runPush(run.id) === null);
-
 /** Only a run eligible under its own pause state may displace or hold up another run. */
 function unpausedAsideRuns(store: Store, seatId: string): Run[] {
   const pause = readCrewPause(store);
@@ -74,18 +66,7 @@ function unpausedAsideRuns(store: Store, seatId: string): Run[] {
     .filter((run) => run.agentId === seatId && !seatIsPaused(pause, seatId, run.id));
 }
 
-/**
- * The seat's aside run that is due back, if any: rework on a run with a PR first, oldest first;
- * a run displaced mid-build comes back after all of that.
- */
+/** The seat's aside run that is due back, if any, oldest first. */
 export function wakeDueAsideRun(store: Store, seatId: string): Run | undefined {
-  const due = unpausedAsideRuns(store, seatId).filter((r) => asideWakeDue(store, r));
-  return due.find((r) => !isDisplaced(store, r)) ?? due[0];
-}
-
-/** Whether another run of the seat has rework due, so the run being built gives way to it. */
-export function reworkDueBesides(store: Store, run: Run): boolean {
-  return unpausedAsideRuns(store, run.agentId).some(
-    (r) => r.id !== run.id && !isDisplaced(store, r) && asideWakeDue(store, r),
-  );
+  return unpausedAsideRuns(store, seatId).find((r) => asideWakeDue(store, r));
 }

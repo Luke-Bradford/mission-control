@@ -4618,75 +4618,6 @@ describe("report_evidence", () => {
     });
   });
 
-  it("takes a fresh recovery report after a push-wait stop and its check completes", async () => {
-    const oldHead = await committed();
-    store.addCheckRun({
-      runId: RUN,
-      command: "pnpm -s test:related",
-      headSha: oldHead,
-      ok: false,
-      exitCode: 1,
-      at: clock,
-    });
-    expect(await report("Original check failed; work retained.")).toEqual({
-      text: EVIDENCE_RECORDED,
-    });
-    const original = store.latestEvidence(RUN);
-    if (!original) throw new Error("Original evidence was not saved");
-    const recoveryHead = await committed("apps/recovery.ts");
-    const command = "pnpm -s test:related";
-    const checks = createCheckRecorder({
-      store,
-      checks: async () => [command],
-      state: async () => ({ head: head(), clean: true }),
-    });
-    ev = make({
-      now: () => clock,
-      pendingChecks: (runId) => checks.pending(runId),
-      onEvidence: (s, r) => told.push([s, r]),
-    });
-    told = [];
-    const key = { runId: RUN, toolUseId: "codex-recovery-check" };
-    await checks.begin(key, command);
-    setLoop({
-      phase: "parked",
-      parked: { kind: "stuck", reason: "Push missing while recovery check ran", ended: false },
-      pushFor: recoveryHead,
-      pushStartedAt: clock - 11 * 60_000,
-      reportedEvidenceId: original.id,
-    });
-    try {
-      const pending = await report("Recovery check still running.");
-      expect(pending.isError).toBe(true);
-      expect(pending.text).toContain(command);
-      expect(pending.text).toContain("poll");
-      expect(store.latestEvidence(RUN)?.id).toBe(original.id);
-      expect(store.run(RUN)?.loop?.parked?.kind).toBe("stuck");
-      expect(told).toEqual([]);
-    } finally {
-      await checks.end(key, true, 0);
-    }
-    expect(await report("Recovery checks completed with exit 0.")).toEqual({
-      text: EVIDENCE_RECORDED,
-    });
-    expect(store.run(RUN)?.loop).toMatchObject({ phase: "working", parked: null });
-    expect(told).toEqual([[CTX.seatId, CTX.runId]]);
-
-    const reported = store.latestEvidence(RUN);
-    if (!reported) throw new Error("Recovery evidence was not saved");
-    setLoop({
-      phase: "parked",
-      parked: { kind: "stuck", reason: "A later push wait on the reported head", ended: false },
-      pushFor: recoveryHead,
-      reportedEvidenceId: reported.id,
-    });
-    expect(await report("Repeat of the already reported recovery.")).toEqual(
-      refused(EVIDENCE_NO_COMMIT),
-    );
-    expect(store.run(RUN)?.loop?.parked?.kind).toBe("stuck");
-    expect(store.evidenceCount(RUN)).toBe(2);
-  });
-
   it("records build-seat test runs and tests added", async () => {
     await committed();
     expect(
@@ -4865,26 +4796,23 @@ describe("report_evidence", () => {
     expect(await report("@someone done")).toEqual(refused(EVIDENCE_NO_COMMIT));
   });
 
-  it.each(["review", "silent", "refused", "stuck"])(
-    "records fresh evidence and resumes a %s park",
-    async (kind) => {
-      setLoop({
-        phase: "parked",
-        parked: { kind, reason: "parked", ended: false },
-        transient: 2,
-        lastRefusal: "no",
-      });
-      await committed();
-      expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
-      expect(store.run(RUN)?.loop).toMatchObject({
-        phase: "working",
-        parked: null,
-        transient: 0,
-        lastRefusal: null,
-      });
-      expect(told).toEqual([["guido-1", RUN]]);
-    },
-  );
+  it.each(["review"])("records fresh evidence and resumes a %s park", async (kind) => {
+    setLoop({
+      phase: "parked",
+      parked: { kind, reason: "parked", ended: false },
+      transient: 2,
+      lastRefusal: "no",
+    });
+    await committed();
+    expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.run(RUN)?.loop).toMatchObject({
+      phase: "working",
+      parked: null,
+      transient: 0,
+      lastRefusal: null,
+    });
+    expect(told).toEqual([["guido-1", RUN]]);
+  });
 
   it.each(["budget", "account-stop", "controller-check", "uat", "gate", "review-ruling"])(
     "keeps a %s park held",
@@ -4907,23 +4835,6 @@ describe("report_evidence", () => {
     );
     expect(store.latestEvidence(RUN)).toBeNull();
     expect(told).toEqual([]);
-  });
-
-  it("records a refused retry for the same pushed and reported head", async () => {
-    const sha = await committed();
-    expect(await report("first report")).toEqual({ text: EVIDENCE_RECORDED });
-    const reported = store.latestEvidence(RUN);
-    if (reported === null) throw new Error("evidence was not recorded");
-    setLoop({
-      phase: "parked",
-      parked: { kind: "refused", reason: "refused", ended: false },
-      pushFor: sha,
-      reportedEvidenceId: reported.id,
-    });
-
-    expect(await report("retry after refusal")).toEqual({ text: EVIDENCE_RECORDED });
-    expect(store.evidenceCount(RUN)).toBe(2);
-    expect(store.run(RUN)?.loop).toMatchObject({ phase: "working", parked: null });
   });
 
   it("names up to ten uncommitted paths, untracked ones too, then how many more", async () => {
@@ -4999,7 +4910,7 @@ describe("report_evidence", () => {
     expect(store.evidenceCount(RUN)).toBe(0);
   });
 
-  it.each(["review", "stuck"])(
+  it.each(["review"])(
     "does not unpark %s when a budget hold lands during git status",
     async (kind) => {
       await committed();

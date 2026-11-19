@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
-  CI_PENDING_MAX_MS,
   conflictKey,
   conflictText,
   evidenceCanUnpark,
@@ -236,7 +235,7 @@ describe("main moves", () => {
     expect(
       reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) }, { ...ci, mainMerge: merging }))
         .loop.parked,
-    ).toEqual({ kind: "conflict", reason: "PR #12 conflicts with main", ended: false });
+    ).toEqual({ kind: "conflict", reason: "PR #12 conflicts with main", ended: true });
   });
 
   describe("a newly found conflict sends the seat to merge main", () => {
@@ -267,33 +266,30 @@ describe("main moves", () => {
       expect(reconcile(s).loop.parked).toEqual({
         kind: "conflict",
         reason: "PR #12 conflicts with main",
-        ended: false,
+        ended: true,
       });
     });
   });
 
-  describe("a run parked on a conflict", () => {
-    const parked = (over: Partial<LoopSnapshot> = {}): LoopSnapshot =>
-      behind(over, {
-        phase: "parked",
-        parked: { kind: "conflict", reason: "PR #12 conflicts with main", ended: false },
-        pushFor: SHA,
-      });
+  describe("a run stopped on a conflict", () => {
+    const stopped = (over: Partial<LoopSnapshot> = {}): LoopSnapshot =>
+      behind(
+        { ended: { reason: "stopped" }, ...over },
+        {
+          phase: "parked",
+          parked: { kind: "conflict", reason: "PR #12 conflicts with main", ended: true },
+          pushFor: SHA,
+        },
+      );
 
-    it("goes back to CI once the pushed head shows on a PR that no longer conflicts", () => {
-      const r = reconcile(parked({ pr: pr({ mergeable: "MERGEABLE" }) }));
-      expect(r.loop.phase).toBe("ci");
-      expect(r.loop.parked).toBeNull();
-      expect(r.loop.pushFor).toBe(SHA);
-    });
-
-    it("stays parked while the PR still conflicts", () => {
-      const r = reconcile(parked({ pr: pr({ mergeable: "CONFLICTING" }) }));
+    it("stays stopped, even once the PR no longer conflicts", () => {
+      const r = reconcile(stopped({ pr: pr({ mergeable: "MERGEABLE" }) }));
       expect(r.loop.phase).toBe("parked");
+      expect(r.loop.parked).toMatchObject({ kind: "conflict", ended: true });
     });
 
-    it("lets the seat's report of a committed merge resume it", () => {
-      expect(evidenceCanUnpark({ kind: "conflict", reason: "x", ended: false })).toBe(true);
+    it("a report of a committed merge does not resume it", () => {
+      expect(evidenceCanUnpark({ kind: "conflict", reason: "x", ended: true })).toBe(false);
     });
   });
 
@@ -312,9 +308,9 @@ describe("main moves", () => {
     const s = behind(
       {
         pr: pr({ mergeable: "CONFLICTING" }),
-        pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 },
+        pushed: { sha: SHA, at: NOW - 30 * 60_000 - 1 },
       },
-      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - CI_PENDING_MAX_MS - 1, gate: null },
+      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - 30 * 60_000 - 1, gate: null },
     );
     const r = reconcile(s);
     expect(r.loop.parked).toBeNull();

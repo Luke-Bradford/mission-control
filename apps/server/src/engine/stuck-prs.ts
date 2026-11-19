@@ -101,7 +101,6 @@ export function stuckPrs(i: {
   const seen = readSeen(store);
   const open = store.openPullRequests(repoId);
   const board = store.board(repoId);
-  const ticketHolds = new Set(store.activeHolds().map((h) => h.ref));
   const attentionHolds = Object.entries(holds(store)).filter(([, h]) => h.releasedAt === undefined);
   const out: StuckPr[] = [];
   for (const pr of open) {
@@ -138,7 +137,6 @@ export function stuckPrs(i: {
         .some((d) => d.kind === "end")
     )
       continue;
-    if (ticketHolds.has(pr.ticket)) continue;
     if (attentionHolds.some(([key]) => key.startsWith(`pr:${repoId}#${pr.number}:`))) continue;
     const card = board.find((c) => c.issueNumber === issue);
     if (card === undefined || card.closed || card.labels.includes(WAITING_OPERATOR_LABEL)) continue;

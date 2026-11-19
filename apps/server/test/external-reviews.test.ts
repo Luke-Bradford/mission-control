@@ -3,7 +3,6 @@ import {
   NEW_LOOP,
   type PullRequestView,
   type QaReport,
-  type RunHandoff,
   reviewBudgetFailure,
   reviewCheckOf,
 } from "@mc/core";
@@ -399,25 +398,6 @@ describe("external PR review subjects", () => {
   });
 
   describe("branchOwned", () => {
-    it("holds a branch a seat has claimed the handoff of before its run row exists", () => {
-      buildRun({ endedAt: 2 });
-      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);
-      store.recordHandoff({
-        runId: "builder:old",
-        repoId: "sample",
-        ticket: "sample#1",
-        branch: "feature/sample",
-        at: 2,
-      } as RunHandoff);
-      expect(store.claimHandoff("builder:old", "token")).toBe(true);
-      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(true);
-      // a PR head under another ref is held through the ticket
-      expect(branchOwned(config, store, "sample", "feature/other")).toBe(false);
-      expect(branchOwned(config, store, "sample", "feature/other", "sample#1")).toBe(true);
-      store.acceptHandoff("builder:old", "token", "guido-2", "guido-2:new");
-      expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);
-    });
-
     it("holds a PR whose ticket has a live run on another branch", () => {
       buildRun({ id: "builder:live", endedAt: null, status: "running", branch: "feature/live" });
       expect(branchOwned(config, store, "sample", "feature/sample")).toBe(false);

@@ -237,7 +237,6 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
   );
   const events = runs.flatMap((r) => store.loopEventsOfRun(r.id));
   const board = store.board(repoId);
-  const holds = store.activeHolds().filter((h) => h.ref.startsWith(`${repoId}#`));
   const open = prs.filter((p) => p.state === "open");
   const histories = new Map<string, ReturnType<typeof history>>();
   const readHistory = (pr: PullRequestView, run: Run) => {
@@ -353,11 +352,6 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
       }
       for (const dependent of open.filter((p) => p.number !== pr.number && p.base === pr.branch))
         blocks.add(`PR ${dependent.number}`);
-      for (const hold of holds.filter((v) => v.waitsOn === pr.number)) {
-        blocks.add(hold.ref);
-        for (const dependent of open.filter((p) => p.ticket === hold.ref))
-          blocks.add(`PR ${dependent.number}`);
-      }
       const waitsOn = [
         ...new Set([
           ...(ownerKind === "nobody" ? [`no run since ${clockHm(ownerSince, "UTC")}`] : []),
@@ -366,9 +360,6 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
             ? [`${active?.agentId} is on PR ${ahead.loop.prNumber} (2nd in its queue)`]
             : []),
           ...ownDeps,
-          ...holds
-            .filter((v) => v.ref === pr.ticket)
-            .map((v) => `PR ${v.waitsOn} to merge (${v.ref})`),
         ]),
       ];
       const actions: Action[] = [...(h?.actions ?? [])];
@@ -407,8 +398,6 @@ export function prFlow(store: Store, repoId: string, now: number): FlightPrFlow 
           d.ref === `${repoId}/PR ${pr.number}`,
       ))
         actions.push({ at: d.at, text: d.decision, actor: "FLIGHT" });
-      for (const hold of holds.filter((v) => v.ref === pr.ticket))
-        actions.push({ at: hold.at, text: hold.basis, actor: "FLIGHT" });
       const last = actions
         .filter((a) => a.at <= now)
         .sort((a, b) => a.at - b.at)

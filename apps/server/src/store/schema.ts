@@ -235,12 +235,6 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
-CREATE TABLE IF NOT EXISTS run_handoffs (
-  run_id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, ticket TEXT NOT NULL, at INTEGER NOT NULL,
-  record TEXT NOT NULL, accepted_by TEXT, accepted_run_id TEXT, claim_token TEXT
-);
-CREATE INDEX IF NOT EXISTS run_handoffs_ticket ON run_handoffs(repo_id, ticket, at DESC);
-CREATE INDEX IF NOT EXISTS run_handoffs_received ON run_handoffs(accepted_run_id);
 -- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
 CREATE TABLE IF NOT EXISTS comms (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
@@ -403,13 +397,6 @@ CREATE TABLE IF NOT EXISTS profile_overrides (
   repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
   by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
 );
--- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
-CREATE TABLE IF NOT EXISTS holds (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
-  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0,
-  told_state TEXT
-);
-CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 -- FLIGHT's living brief: one row per crew session and section.
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
@@ -465,12 +452,6 @@ CREATE INDEX IF NOT EXISTS waste_alarms_subject ON waste_alarms(check_id, subjec
 -- Worktree paths a crew start is making (worktree add, then the install); one still here at the
 -- next start was left half-made, and is removed and made again.
 CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
--- Hub-owned ticket waits do not change the GitHub Project Status field. They make the ticket
--- unowned while it waits, so a free seat can take other Ready work.
-CREATE TABLE IF NOT EXISTS ticket_waits (
-  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, reason TEXT NOT NULL, frees_when TEXT NOT NULL,
-  at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
-);
 -- A ticket's plan and the operator's sign-off: one row per ticket. proposal is the text the planner
 -- also wrote under ## Plan; mockups is a JSON list of kept pictures; required holds the ticket.
 CREATE TABLE IF NOT EXISTS ticket_plans (

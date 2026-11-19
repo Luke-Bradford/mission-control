@@ -65,7 +65,6 @@ import {
   FLIGHT_RUNAWAY,
   FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_STATE_TEXT_MAX,
-  FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   flightWakeId,
   GH_READ_BAD_PATH,
@@ -118,7 +117,6 @@ import {
   RETURN_NOT_SEAT_QUESTION,
   type RepoRules,
   type Run,
-  type RunLoop,
   researchText,
   retiredBriefText,
   returnedQuestionText,
@@ -136,7 +134,6 @@ import {
   UAT_PARK,
   untrackedText,
   WAITING_OPERATOR_LABEL,
-  WAITS_ON_ONLY_BACKLOG,
   WITHDRAW_NOT_YOURS,
   WITHDRAW_SEAT_QUESTION,
   waitingOperatorPromoteText,
@@ -180,7 +177,6 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { inheritedHandoffLoop, recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -1374,7 +1370,6 @@ describe("tool list", () => {
       "withdraw_question",
       "attach_materials",
       "start_seat",
-      "reassign_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
@@ -1988,184 +1983,6 @@ describe("start_seat", () => {
     expect(startCalls).toHaveLength(1);
   });
 
-  it("reassigns an ended author's ticket through the existing start checks and logs the handoff", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    store.upsertRun(
-      run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
-    );
-    expect(
-      (
-        await call("reassign_ticket", {
-          issue: 7,
-          seat: "guido-1",
-          reason: "The old seat hit quota",
-        })
-      ).isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
-      kind: "start",
-      ref: "mc#7",
-      basis: "The old seat hit quota",
-    });
-    expect(store.flightDecisions(0, 10)[0]?.decision).toContain(
-      "Reassigned from GUIDO-CX to GUIDO-1",
-    );
-  });
-
-  it("refuses to reassign a ticket with a live author and never ends it", async () => {
-    store.upsertRun(run("live", "guido-cx", { ticket: "mc#7", branch: "feature/7-live" }));
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Move it" })).isError,
-    ).toBe(true);
-    expect(startCalls).toEqual([]);
-    expect(store.run("live")?.endedAt).toBeNull();
-  });
-  it("reassigns a removed author only when it has a durable crew handoff", async () => {
-    const old = run("removed", "removed-seat", {
-      ticket: "mc#7",
-      branch: "feature/7-old",
-      endedAt: NOW - 1000,
-    });
-    store.upsertRun(old);
-    const args = { issue: 7, seat: "guido-1", reason: "Continue after the seat was removed" };
-    expect((await call("reassign_ticket", args)).isError).toBe(true);
-    recordRunHandoff(store, old, null);
-    expect((await call("reassign_ticket", args)).isError).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-  });
-  it.each(["In progress", "In review"])(
-    "continues the preserved author's open PR from %s",
-    async (status) => {
-      cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-      board(sc(7, { status }));
-      store.upsertRun(
-        run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
-      );
-      const savedPr = {
-        repoId: "mc",
-        number: 9,
-        title: "PR",
-        url: "u",
-        branch: "feature/7-old",
-        ticket: "mc#7",
-        state: "open" as const,
-        isDraft: true,
-        review: null,
-        ci: "pending" as const,
-        createdAt: NOW,
-        updatedAt: NOW,
-        mergedAt: null,
-        headSha: null,
-        mergeable: null,
-      };
-      store.upsertPullRequests("mc", [savedPr], NOW);
-      expect(
-        (
-          await call("reassign_ticket", {
-            issue: 7,
-            seat: "guido-1",
-            reason: "Continue CI and review",
-          })
-        ).isError,
-      ).toBeUndefined();
-      expect(startCalls).toHaveLength(1);
-      startCalls.length = 0;
-      store.upsertPullRequests("mc", [{ ...savedPr, branch: "feature/7-unrelated" }], NOW);
-      expect(
-        await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Continue" }),
-      ).toEqual(refused(openPrText("mc#7", 9)));
-      expect(startCalls).toEqual([]);
-    },
-  );
-  it("returns an ended run's open PR to a seat when the PR's head is not the run's branch", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    board(sc(7, { status: "In review" }));
-    store.upsertRun(
-      run("old", "guido-cx", {
-        ticket: "mc#7",
-        branch: "feature/7-local",
-        endedAt: NOW - 1000,
-        loop: { ...NEW_LOOP, prNumber: 9 },
-      }),
-    );
-    store.upsertPullRequests(
-      "mc",
-      [
-        {
-          repoId: "mc",
-          number: 9,
-          title: "PR",
-          url: "u",
-          branch: "feature/7-pr-head",
-          ticket: "mc#7",
-          state: "open" as const,
-          isDraft: false,
-          review: null,
-          ci: "pending" as const,
-          createdAt: NOW,
-          updatedAt: NOW,
-          mergedAt: null,
-          headSha: null,
-          mergeable: null,
-        },
-      ],
-      NOW,
-    );
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the findings" }))
-        .isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-  });
-  it("reassigns a held PR's ticket: the new run starts under the engine and the hold comes with it", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    engineOn = true;
-    board(sc(7, { status: "In review" }));
-    const hold = { by: "CAPCOM" as const, reason: "reproduced bug", at: NOW - 5 };
-    const old = run("old", "guido-cx", {
-      ticket: "mc#7",
-      branch: "feature/7-old",
-      endedAt: NOW - 1000,
-      loop: { ...NEW_LOOP, prNumber: 9, mergeHold: hold },
-    });
-    store.upsertRun(old);
-    recordRunHandoff(store, old, null);
-    store.upsertPullRequests(
-      "mc",
-      [
-        {
-          repoId: "mc",
-          number: 9,
-          title: "PR",
-          url: "u",
-          branch: "feature/7-old",
-          ticket: "mc#7",
-          state: "open" as const,
-          isDraft: false,
-          review: null,
-          ci: "pending" as const,
-          createdAt: NOW,
-          updatedAt: NOW,
-          mergedAt: null,
-          headSha: null,
-          mergeable: null,
-        },
-      ],
-      NOW,
-    );
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the bug" })).isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-    const [seatId, issue, opts] = need(startCalls[0]) as [string, number, { loop?: RunLoop }];
-    expect([seatId, issue]).toEqual(["guido-1", 7]);
-    // the supervisor builds the new run's loop from the ended run's loop in just this way
-    expect(inheritedHandoffLoop(old.loop, opts.loop)?.mergeHold).toMatchObject({
-      by: "CAPCOM",
-      reason: "reproduced bug",
-    });
-  });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
     [
@@ -2713,6 +2530,41 @@ describe("start_seat", () => {
       expect(await start()).toEqual(refused(openPrText("mc#7", 9)));
       expect(startCalls).toEqual([]);
     });
+
+    it("starts a ticket whose open PR an ended run recorded, and still refuses one no run recorded", async () => {
+      const pr = {
+        repoId: "mc",
+        number: 9,
+        title: "t",
+        url: "u",
+        branch: "feature/7-x",
+        ticket: "mc#7",
+        state: "open" as const,
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      };
+      store.upsertPullRequests("mc", [pr], NOW);
+      board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      expect(await start()).toEqual(refused(wrongColumnText("mc#7", "In progress")));
+      store.upsertRun(
+        run("r-old", "guido-2", {
+          repoId: "mc",
+          ticket: "mc#7",
+          endedAt: NOW,
+          status: "failed",
+          loop: { ...NEW_LOOP, prNumber: 9 },
+        }),
+      );
+      const r = (await start()) as { isError?: boolean };
+      expect(r.isError).toBeUndefined();
+      expect(startCalls.length).toBe(1);
+    });
   });
 });
 
@@ -3003,156 +2855,23 @@ describe("comms_pin", () => {
   });
 });
 
-describe("message_seat unpark", () => {
-  const U = (over: Record<string, unknown> = {}) => ({
-    seat: "guido-1",
-    text: "Carry on",
-    unpark: true,
-    basis: "silent",
-    ...over,
-  });
-  const parked = (kind = "silent", ended = false) => {
+describe("message_seat", () => {
+  it("sends the text to the seat and records a message; unpark is not an argument", async () => {
     live("guido-1", "r-g");
-    const loop: RunLoop = {
-      ...NEW_LOOP,
-      phase: "parked",
-      parked: { kind, reason: "went quiet", ended },
-    };
-    store.setRunLoop("r-g", loop);
-  };
-  beforeEach(() => {
-    engineOn = true;
-  });
-
-  it("un-parks a silent park by FLIGHT", async () => {
-    parked("silent");
-    expect(await call("message_seat", U())).toEqual({
-      text: "Sent to GUIDO-1, and its run is un-parked.",
+    expect(
+      await call("message_seat", { seat: "guido-1", text: "Carry on", basis: "silent" }),
+    ).toEqual({
+      text: "Sent to GUIDO-1.",
     });
     expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
-    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
+    expect(engineCalls).toEqual([]);
     expect(decisions()).toMatchObject([
-      {
-        kind: "unpark",
-        seatId: "guido-1",
-        targetRunId: "r-g",
-        about: "GUIDO-1: went quiet",
-        decision: "Carry on",
-      },
+      { kind: "message", seatId: "guido-1", decision: "Carry on" },
     ]);
-  });
-
-  it("records a message when the engine did not un-park", async () => {
-    parked("silent");
-    lifts = false;
-    expect(await call("message_seat", U())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1" }]);
-  });
-
-  describe("a set-aside run, by runId", () => {
-    const aside = (id = "r-g") =>
-      store.upsertRun(
-        run(id, "guido-1", {
-          loop: {
-            ...NEW_LOOP,
-            phase: "parked",
-            parked: { kind: "ci", reason: "CI failed", ended: false },
-            aside: { worktree: "/tmp/none/wt", wake: false },
-          },
-        }),
-      );
-
-    it("un-parks it without a word to the seat, which is on another run", async () => {
-      aside();
-      expect(await call("message_seat", U({ runId: "r-g" }))).toEqual({
-        text: "Sent to GUIDO-1, and its run is un-parked.",
-      });
-      expect(messageCalls).toEqual([]);
-      expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-      expect(decisions()).toMatchObject([
-        { kind: "unpark", seatId: "guido-1", targetRunId: "r-g", about: "GUIDO-1: CI failed" },
-      ]);
-    });
-
-    it("still sends to the seat when the run is the one it holds", async () => {
-      parked("silent");
-      expect((await call("message_seat", U({ runId: "r-g" }))).isError).toBeUndefined();
-      expect(messageCalls).toHaveLength(1);
-    });
-
-    it("refuses another seat's run, an ended run, and a runId without unpark", async () => {
-      aside("r-x");
-      expect(await call("message_seat", U({ runId: "r-x", seat: "inco-1" }))).toEqual(
-        refused("Not sent: r-x is not an unended run of INCO-1."),
-      );
-      store.upsertRun(run("r-y", "guido-1", { endedAt: NOW, status: "ok" }));
-      expect((await call("message_seat", U({ runId: "r-y" }))).isError).toBe(true);
-      expect(await call("message_seat", U({ runId: "r-x", unpark: false }))).toEqual(
-        refused("Not sent: runId goes with unpark: true."),
-      );
-      expect(engineCalls).toEqual([]);
-    });
-  });
-
-  it("leaves a budget park to the operator", async () => {
-    parked("budget");
-    expect(await call("message_seat", U())).toEqual(
-      refused(
-        'Not sent: a budget park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-      ),
-    );
-    expect(messageCalls).toEqual([]);
-  });
-
-  it.each(["review", "review-ruling", "ruling", "review-failed"])(
-    "cannot lift a %s park with a message",
-    async (kind) => {
-      parked(kind);
-      expect((await call("message_seat", U())).isError).toBe(true);
-      expect(messageCalls).toEqual([]);
-      expect(engineCalls).toEqual([]);
-    },
-  );
-
-  it.each(["nothing", "gate", "conflict"])("lifts a %s park", async (kind) => {
-    parked(kind);
-    expect(await call("message_seat", U())).toEqual({
-      text: "Sent to GUIDO-1, and its run is un-parked.",
-    });
-  });
-
-  it("leaves an ended park to the operator", async () => {
-    parked("silent", true);
-    expect((await call("message_seat", U())).text).toBe(
-      'Not sent: a silent park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-    );
-  });
-
-  it("refuses a run that is not parked, or no run", async () => {
-    expect(await call("message_seat", U())).toEqual(
-      refused("Not sent: GUIDO-1's run is not parked."),
-    );
-    live("guido-1", "r-g");
-    store.setRunLoop("r-g", NEW_LOOP);
-    expect((await call("message_seat", U())).text).toBe("Not sent: GUIDO-1's run is not parked.");
-  });
-
-  it("un-parks one run 5 times, with no refusal", async () => {
-    for (let i = 0; i < 5; i++) {
-      parked("ci");
-      expect((await call("message_seat", U())).isError).toBeUndefined();
-    }
-    expect(decisions().filter((d) => d.kind === "unpark")).toHaveLength(5);
-  });
-
-  it("refuses with the engine off", async () => {
-    parked("silent");
-    engineOn = false;
-    expect(await call("message_seat", U())).toEqual(
-      refused("Not sent: the loop engine is off on this server, so nothing can be un-parked."),
-    );
-    expect(messageCalls).toEqual([]);
+    expect(
+      (await call("message_seat", { seat: "guido-1", text: "x", unpark: true, basis: "b" }))
+        .isError,
+    ).toBe(true);
   });
 });
 
@@ -3905,7 +3624,7 @@ describe("flight_state", () => {
     store.setRunLoop("r-inco", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget", ended: false },
+      parked: { kind: "silent", reason: "budget", ended: false },
     });
     store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
     store.addQuestion({
@@ -4027,7 +3746,7 @@ describe("flight_state", () => {
           idleMin: 7,
           ticket: "mc#5",
           phase: "parked",
-          parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget" },
+          parked: { kind: "silent", reason: "budget" },
           openQuestion: true,
         },
         {
@@ -4137,7 +3856,6 @@ describe("flight_state", () => {
           triageRemainingMs: 20 * 60_000,
         },
       ],
-      holds: [],
       reviewQueue: {
         queued: 0,
         running: 0,
@@ -4537,112 +4255,6 @@ describe("promote", () => {
     moveImpl = async () => ({ ok: false, reason: "card not on the project" });
     expect(await call("promote", P())).toEqual(refused("Not moved: card not on the project"));
     expect(decisions()).toEqual([]);
-  });
-
-  describe("holds", () => {
-    const pr = (number: number, state: "open" | "merged" | "closed" = "open") => ({
-      repoId: "mc",
-      number,
-      title: `PR ${number}`,
-      url: "u",
-      branch: `feature/${number}-x`,
-      ticket: null,
-      state,
-      isDraft: false,
-      review: null,
-      ci: null,
-      createdAt: NOW,
-      updatedAt: NOW,
-      mergedAt: null,
-      headSha: "abc",
-      mergeable: null,
-      author: null,
-      assignees: [],
-    });
-    const H = (over: Record<string, unknown> = {}) => P({ to: "Backlog", waits_on: 246, ...over });
-
-    beforeEach(() => {
-      board(backlog({ status: "Ready" }));
-      store.upsertPullRequests("mc", [pr(246), pr(247, "merged"), pr(248, "closed")], NOW);
-    });
-
-    it("holds a Ready card FLIGHT did not move, behind an open PR", async () => {
-      expect((await call("promote", H())).isError).toBeUndefined();
-      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Backlog" }]);
-      expect(store.activeHolds()).toMatchObject([
-        { ref: "mc#7", waitsOn: 246, basis: "it is complete", releasedAt: null },
-      ]);
-      expect(decisions()).toMatchObject([
-        { kind: "promote", ref: "mc#7", decision: "Held in Backlog behind PR #246" },
-      ]);
-    });
-
-    it("holds a Refinement card too", async () => {
-      board(backlog({ status: "Refinement" }));
-      expect((await call("promote", H())).isError).toBeUndefined();
-    });
-
-    it("refuses a hold on a card with a run", async () => {
-      live("guido-1", "r-guido", { ticket: "mc#7" });
-      expect(await call("promote", H())).toEqual(refused("Not moved: mc#7 has a run."));
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("refuses a hold behind a merged, closed or unknown PR", async () => {
-      for (const n of [247, 248, 999]) {
-        expect(await call("promote", H({ waits_on: n }))).toEqual(
-          refused(`Not moved: PR #${n} is not an open PR in mc.`),
-        );
-      }
-      expect(moveCalls).toEqual([]);
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("refuses waits_on on a move that is not to Backlog, and a hold from Backlog", async () => {
-      board(backlog());
-      expect(await call("promote", P({ waits_on: 246 }))).toEqual(refused(WAITS_ON_ONLY_BACKLOG));
-      expect(await call("promote", P({ to: "Refinement", waits_on: 246 }))).toEqual(
-        refused(WAITS_ON_ONLY_BACKLOG),
-      );
-      expect((await call("promote", H())).isError).toBe(true);
-      expect(moveCalls).toEqual([]);
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("keeps a new hold while the stored board still shows the card in Ready", async () => {
-      await call("promote", H());
-      await call("flight_state", {});
-      expect(store.activeHolds()).toHaveLength(1);
-      board(backlog());
-      await call("flight_state", {});
-      board(backlog({ status: "Ready" }));
-      await call("flight_state", {});
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("releases a hold whose card a run has taken, though the board never showed it in Backlog", async () => {
-      await call("promote", H());
-      board(backlog({ status: "Ready" }));
-      await call("flight_state", {});
-      expect(store.activeHolds()).toHaveLength(1);
-      live("guido-1", "r-guido", { ticket: "mc#7" });
-      await call("flight_state", {});
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("releases the hold when the card is promoted again", async () => {
-      await call("promote", H());
-      board(backlog());
-      expect((await call("promote", P())).isError).toBeUndefined();
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("keeps the hold when the promote again is refused", async () => {
-      await call("promote", H());
-      board(backlog({ labels: [] }));
-      expect((await call("promote", P())).isError).toBe(true);
-      expect(store.activeHolds()).toHaveLength(1);
-    });
   });
 });
 
