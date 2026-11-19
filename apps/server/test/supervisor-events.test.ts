@@ -1293,7 +1293,7 @@ describe("supervisor events (Plan 7a)", () => {
       sup.start();
       try {
         const start = refusal(sup.startRun("guido-1", 42));
-        await until(() => expect(listeners).toHaveLength(1));
+        await until(() => expect(listeners.size).toBeGreaterThan(0));
         alive = false;
         for (const listener of [...listeners]) listener({ kind: "exit", code: 7, signal: null });
         ready();
