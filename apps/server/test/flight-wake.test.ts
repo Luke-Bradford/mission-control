@@ -733,13 +733,13 @@ describe("no re-wake on a timer", () => {
   const T = 1_000_000_000;
 
   it("schedules nothing for work that waits: only a changed fact wakes FLIGHT", () => {
-    expect(nextWakeAt(waiting(), T, T)).toBeNull();
-    expect(nextWakeAt(waiting(), T, T + 5 * HOUR)).toBeNull();
+    expect(nextWakeAt(waiting(), T)).toBeNull();
+    expect(nextWakeAt(waiting(), T + 5 * HOUR)).toBeNull();
   });
 
   it("schedules nothing with nothing waiting", () => {
     const quiet = { ...busyBoard(), questions: [], tickets: [], prs: [], seats: [] };
-    expect(nextWakeAt(quiet, T, T)).toBeNull();
+    expect(nextWakeAt(quiet, T)).toBeNull();
   });
 });
 
@@ -753,29 +753,12 @@ describe("wake facts that name a seat or tickets", () => {
   };
   const facts = (s: FlightState) => JSON.parse(wakeFacts(s)) as Record<string, unknown[]>;
 
-  it("names a free seat and the startable tickets when a Ready ticket is in its area", () => {
+  it("names no free seat and no startable ticket: the hub starts tickets on free seats itself", () => {
     const s = { ...withFreeSeat(), wake: { fit: { "guido-0": ["mc#1"] }, fresh: [] } };
-    expect(facts(s).free).toEqual(["guido-0"]);
-    expect(facts(s).t).toEqual(["mc#1"]);
-  });
-
-  it("names neither when no Ready ticket is in the free seat's area", () => {
-    const s = { ...withFreeSeat(), wake: { fit: {}, fresh: [] } };
-    expect(facts(s).free).toEqual([]);
-    expect(facts(s).t).toEqual([]);
-  });
-
-  it("lists only the tickets a free seat could start", () => {
-    const s = withFreeSeat();
-    const other = s.seats[1];
-    if (!other) throw new Error("missing seat");
-    other.free = true;
-    s.wake = { fit: { "guido-0": ["mc#1"], "guido-1": ["mc#1", "mc#3"] }, fresh: [] };
-    expect(facts(s).t).toEqual(["mc#1", "mc#3"]);
-  });
-
-  it("keeps the older reading when the state carries no fit", () => {
-    expect(facts(withFreeSeat()).free).toEqual(["guido-0"]);
+    expect(facts(s)).not.toHaveProperty("free");
+    expect(facts(s)).not.toHaveProperty("t");
+    expect(facts(s)).not.toHaveProperty("idle");
+    expect(wakeFacts(s)).toBe(wakeFacts(busyBoard()));
   });
 
   it("wakes on an item only while FLIGHT has not seen it", () => {

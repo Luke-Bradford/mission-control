@@ -69,7 +69,6 @@ import {
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightPointerKind,
-  type FlightWakeAction,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -6489,15 +6488,8 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(
-    runId: string,
-    at: number,
-    reasons: string[],
-    wakeId?: string,
-    rode: string[] = [],
-    immediate: string[] = [],
-  ): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
+  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -6508,14 +6500,6 @@ export class Store {
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     return this.flightQ.flightWakes(since);
-  }
-
-  flightWakeActions(
-    since: number,
-    until: number,
-    nonActing: readonly string[],
-  ): FlightWakeAction[] {
-    return this.flightQ.flightWakeActions(since, until, nonActing);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
