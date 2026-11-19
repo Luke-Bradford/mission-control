@@ -279,6 +279,33 @@ describe("Agent page: first load", () => {
     // The page asks for no seat's full row but the one it shows.
     expect(asked).not.toContain("/api/agents/studio");
   });
+
+  it("shows an off-seat run in Also open without a queue", async () => {
+    const row = crewRow({
+      offSeatRuns: [
+        {
+          runId: "r-secondary",
+          ticket: "shop-app#88",
+          ticketTitle: "Secondary cache work",
+          loop: {
+            phase: "review",
+            text: "In review · PR #88",
+            prNumber: 88,
+            hold: null,
+          },
+        },
+      ],
+    });
+    stub({ rows: [row] });
+
+    render(<Agent id={row.id} />);
+
+    const alsoOpen = await screen.findByRole("region", { name: "Also open" });
+    expect(alsoOpen.textContent).toContain("Also open");
+    expect(alsoOpen.textContent).toContain("shop-app#88");
+    expect(alsoOpen.textContent).toContain("Secondary cache work");
+    expect(alsoOpen.textContent).toContain("In review · PR #88");
+  });
 });
 
 describe("Agent page: static run rows", () => {
