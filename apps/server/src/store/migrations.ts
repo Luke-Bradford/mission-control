@@ -23,6 +23,8 @@ const RETIRED_TABLES = [
   "bug_escape_tries",
   "run_token_audit",
   "run_token_calls",
+  "controller_messages",
+  "controller_files",
   "code_health_file_memberships",
   "code_health_file_sizes",
   "code_health_git_sources",

@@ -157,17 +157,12 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 });
   });
 
-  it("reads audit.controller_sessions, defaulting to off, and refuses unknown audit keys", () => {
-    expect(loadConfig(EXAMPLE).audit).toEqual({ controllerSessions: false });
-    const on = tmpConfig((y) => `${y}\naudit:\n  controller_sessions: true\n`);
-    expect(loadConfig(on).audit).toEqual({ controllerSessions: true });
-    const where = tmpConfig(
+  it("accepts audit.controller_sessions and controller_checkout but ignores them, and refuses unknown audit keys", () => {
+    expect(loadConfig(EXAMPLE).audit).toEqual({});
+    const old = tmpConfig(
       (y) => `${y}\naudit:\n  controller_sessions: true\n  controller_checkout: /Users/op/repo\n`,
     );
-    expect(loadConfig(where).audit).toEqual({
-      controllerSessions: true,
-      controllerCheckout: "/Users/op/repo",
-    });
+    expect(loadConfig(old).audit).toEqual({});
     const bad = tmpConfig((y) => `${y}\naudit:\n  other: 1\n`);
     expect(() => loadConfig(bad)).toThrow(ConfigError);
   });
@@ -178,7 +173,6 @@ describe("loadConfig", () => {
         `${y}\naudit:\n  question_wait_minutes: 30\n  controller_wait_minutes: 60\n  ticket_text_factor: 2.5\n  notice_repeats: 4\n`,
     );
     expect(loadConfig(set).audit).toEqual({
-      controllerSessions: false,
       thresholds: {
         questionWaitMs: 30 * 60_000,
         controllerWaitMs: 60 * 60_000,

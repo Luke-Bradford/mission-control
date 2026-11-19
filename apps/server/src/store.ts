@@ -180,11 +180,7 @@ import {
   type SeatQuestion,
   type Stray,
 } from "./store/types.ts";
-import {
-  type ControllerMessageUsage,
-  type ControllerUsageTotals,
-  usageQueries,
-} from "./store/usage.ts";
+import { usageQueries } from "./store/usage.ts";
 import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
@@ -449,7 +445,7 @@ export class Store {
 
   /** The usage sample and controller usage queries (store/usage.ts). */
   private get usageQ(): ReturnType<typeof usageQueries> {
-    this.usageQueriesCache ??= usageQueries(this.db, (fn) => this.transaction(fn));
+    this.usageQueriesCache ??= usageQueries(this.db);
     return this.usageQueriesCache;
   }
 
@@ -669,28 +665,6 @@ export class Store {
         "SELECT section, SUM(tokens) AS tokens FROM prompt_sections WHERE at >= ? GROUP BY section",
       )
       .all(since) as { section: PromptSection; tokens: number }[];
-  }
-
-  /**
-   * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
-   * session's copy of its history or a subagent file, counts once; the larger output is kept.
-   */
-  saveControllerMessages(sessionId: string, messages: readonly ControllerMessageUsage[]): void {
-    this.usageQ.saveControllerMessages(sessionId, messages);
-  }
-
-  /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
-  controllerUsageSince(since: number): ControllerUsageTotals {
-    return this.usageQ.controllerUsageSince(since);
-  }
-
-  /** The mtime a controller file was last read at, or null when it has not been read. */
-  controllerFileMtime(path: string): number | null {
-    return this.usageQ.controllerFileMtime(path);
-  }
-
-  markControllerFile(path: string, mtime: number): void {
-    this.usageQ.markControllerFile(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */

@@ -141,6 +141,7 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
+  TOKEN_AUDIT_DAYS_DEFAULT,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -397,6 +398,12 @@ import {
   QueueReorderError,
   resolveQueueReorder,
 } from "./queue/queue-reorder.ts";
+import {
+  removedCodeHealthOverview,
+  removedCodeHealthView,
+  removedTokenAudit,
+  removedWindow,
+} from "./removed-stubs.ts";
 import { cleanText } from "./repo/clean.ts";
 import {
   changedFiles,
@@ -3951,6 +3958,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             kinds,
             config.audit?.thresholds,
           ),
+        );
+      });
+      // Stubs for the web cut (it deletes these with the pages that read them): the pages keep
+      // loading, empty, until then.
+      // Reader: apps/web/src/code-health/CodeHealth.tsx (the Audit summary tab; empty until the web cut)
+      api.get<{ Querystring: { repo?: string; window?: string } }>(
+        "/code-health/overview",
+        async (req) =>
+          removedCodeHealthOverview(
+            String(req.query.repo ?? ""),
+            removedWindow(req.query.window),
+            now(),
+          ),
+      );
+      // Reader: apps/web/src/code-health/CodeHealth.tsx (the Audit tabs; empty until the web cut)
+      api.get<{ Querystring: { repo?: string; window?: string; tab?: string } }>(
+        "/code-health",
+        async (req) =>
+          removedCodeHealthView(
+            String(req.query.repo ?? ""),
+            removedWindow(req.query.window),
+            req.query.tab,
+            now(),
+          ),
+      );
+      // Reader: apps/web/src/code-health/TokenAudit.tsx (the Tokens tab; empty until the web cut)
+      api.get<{ Querystring: { days?: string; hours?: string } }>("/audit/tokens", async (req) => {
+        const hours = Number(req.query.hours);
+        const days = Number(req.query.days);
+        return removedTokenAudit(
+          Number.isInteger(days) && days > 0 ? days : TOKEN_AUDIT_DAYS_DEFAULT,
+          Number.isInteger(hours) && hours > 0 ? hours : null,
+          now(),
         );
       });
       // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)

@@ -283,7 +283,13 @@ describe("Store", () => {
     const path = join(mkdtempSync(join(tmpdir(), "mc-retired-")), "hub.db");
     const first = new Store(path);
     const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
-    for (const table of ["map_cache", "code_health_overview", "run_token_audit", "bug_escapes"])
+    for (const table of [
+      "map_cache",
+      "code_health_overview",
+      "run_token_audit",
+      "bug_escapes",
+      "controller_messages",
+    ])
       raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
     first.close();
     const second = new Store(path);
@@ -293,7 +299,13 @@ describe("Store", () => {
         .all() as { name: string }[]
     ).map((r) => r.name);
     second.close();
-    for (const table of ["map_cache", "code_health_overview", "run_token_audit", "bug_escapes"])
+    for (const table of [
+      "map_cache",
+      "code_health_overview",
+      "run_token_audit",
+      "bug_escapes",
+      "controller_messages",
+    ])
       expect(names).not.toContain(table);
   });
 

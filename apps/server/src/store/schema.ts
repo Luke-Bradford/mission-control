@@ -69,12 +69,6 @@ CREATE TABLE IF NOT EXISTS mcp_tool_calls (
   tool TEXT NOT NULL, written INTEGER NOT NULL, returned INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
-CREATE TABLE IF NOT EXISTS controller_messages (
-  message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL,
-  cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, output INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS controller_messages_at ON controller_messages(at);
-CREATE TABLE IF NOT EXISTS controller_files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, title TEXT, PRIMARY KEY (repo_id, number)

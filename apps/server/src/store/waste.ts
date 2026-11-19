@@ -312,15 +312,6 @@ export function wasteQueries(db: DatabaseSync) {
       ) as unknown as { repoId: string; number: number; mergedAt: number; branch: string | null }[];
     },
 
-    controllerTokens(since: number): number {
-      return (
-        (get(
-          "SELECT COALESCE(SUM(input + cache_write + output), 0) AS n FROM controller_messages WHERE at >= ?",
-          since,
-        )?.n as number | undefined) ?? 0
-      );
-    },
-
     alarms(where: string, ...args: SQLInputValue[]): WasteAlarm[] {
       return all(`SELECT * FROM waste_alarms ${where}`, ...args).map(toAlarm);
     },
