@@ -541,7 +541,7 @@ describe("Agents panel", () => {
         seatRow({
           hudState: "running",
           loop: { ...loopOf("working", "Working on the ticket"), wait: null },
-          asideRuns: [
+          offSeatRuns: [
             {
               runId: "r-9",
               ticket: ASIDE_TICKET,
@@ -575,7 +575,7 @@ describe("Agents panel", () => {
         seatRow({
           run: null,
           loop: null,
-          asideRuns: [
+          offSeatRuns: [
             {
               runId: "r-9",
               ticket: ASIDE_TICKET,

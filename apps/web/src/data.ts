@@ -374,7 +374,7 @@ export const RESOURCES = {
     path: `/api/agents/${enc(agentId)}/runs?limit=${RUNS_LIMIT}`,
     topic: "agents",
   }),
-  /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.aside` is set while it is off its seat. */
+  /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.hold` says why it waits. */
   runHandoff: (runId: string): ResourceRef => ({
     path: `/api/runs/${enc(runId)}/handoff`,
     topic: "agents",

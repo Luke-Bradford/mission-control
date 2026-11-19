@@ -325,14 +325,14 @@ it("names and confirms the waiver for a review-parked seat", async () => {
     phase: "parked" as const,
     text: "Blocked: RETRO finding",
     prNumber: 9,
-    parked: "RETRO finding",
+    hold: { kind: "review", reason: "RETRO finding", offSeat: false },
   };
   const row = seatRow({ hudState: "parked", loop, ticket: "shop-app#9" });
   const ask = item({ key: "note:blocked:r-12:0", kind: "blocked", agentId: "guido-1" });
   const f = stub([row], true, [ask], "CI", undefined, {
     "/api/runs/r-12/loop": {
       loop: {
-        parked: { kind: "review", reason: "RETRO finding", ended: false },
+        hold: { kind: "review", reason: "RETRO finding", ended: false, worktree: null, wake: false },
         pushFor: "abc1234def",
       },
     },
@@ -356,7 +356,7 @@ describe("the overview's waiver follows the park's own Needs-you item", () => {
     phase: "parked" as const,
     text: "Blocked: held past its review rounds",
     prNumber: 31,
-    parked: "held past its review rounds; FLIGHT decides",
+    hold: { kind: "review", reason: "held past its review rounds; FLIGHT decides", offSeat: false },
     wait: "operator" as const,
   };
   const row = () =>
@@ -365,14 +365,14 @@ describe("the overview's waiver follows the park's own Needs-you item", () => {
       loop: parked,
       ticket: "shop-app#30",
       run: { ...run, id: "r-30" },
-      asideRuns: [{ runId: "r-31", ticket: null, ticketTitle: null, loop: parked }],
+      offSeatRuns: [{ runId: "r-31", ticket: null, ticketTitle: null, loop: parked }],
     });
   const loops = {
     "/api/runs/r-30/loop": {
-      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "eee5555000" },
+      loop: { hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false }, pushFor: "eee5555000" },
     },
     "/api/runs/r-31/loop": {
-      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "ddd4444000" },
+      loop: { hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false }, pushFor: "ddd4444000" },
     },
   };
   const waivers = () => [
@@ -425,10 +425,10 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     phase: "parked" as const,
     text: reason,
     prNumber: 9,
-    parked: reason,
+    hold: { kind: "review", reason, offSeat: false },
   });
   const park = (sha: string, reason: string) => ({
-    loop: { parked: { kind: "review", reason, ended: false }, pushFor: sha },
+    loop: { hold: { kind: "review", reason, ended: false, worktree: null, wake: false }, pushFor: sha },
   });
   const run = seatRow().run as NonNullable<CrewRow["run"]>;
   const row = seatRow({
@@ -436,7 +436,7 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     loop: loop("first"),
     run: { ...run, id: "r-20" },
     ticket: "shop-app#20",
-    asideRuns: ["r-21", "r-22"].map((runId) => ({
+    offSeatRuns: ["r-21", "r-22"].map((runId) => ({
       runId,
       ticket: `shop-app#${runId.slice(2)}`,
       ticketTitle: null,

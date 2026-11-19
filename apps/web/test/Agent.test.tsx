@@ -214,7 +214,7 @@ async function moreButton(name: string) {
 
 const traceView = (): RunLoopView => ({
   runId: "r-12",
-  loop: { phase: "working", ciFails: 0, parked: null } as RunLoop,
+  loop: { phase: "working", ciFails: 0, hold: null } as RunLoop,
   events: [],
   tries: [
     {
@@ -236,7 +236,7 @@ const traceView = (): RunLoopView => ({
 describe("Agent run trace", () => {
   it("opens the active run trace from its checklist and returns to the agent", async () => {
     const row = crewRow({
-      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+      loop: { phase: "working", text: "Editing", prNumber: null, hold: null },
     });
     stub({ rows: [row], extra: { "/api/runs/r-12/loop": traceView() } });
     const view = render(<Agent id={row.id} />);
@@ -1312,7 +1312,7 @@ describe("Agent page: loop steps", () => {
     phase: "working",
     text: "Writing the failing test",
     prNumber: null,
-    parked: null,
+    hold: null,
     ...over,
   });
   const seat = (loop: CrewLoop | null) =>
@@ -1537,7 +1537,12 @@ describe("Agent page: loop steps", () => {
         triesAt("ci", 3, "parked", { reason: why }),
       ];
       const panel = await openLoop(
-        loopOf({ phase: "parked", text: `Blocked: ${why}`, parked: why, prNumber: 77 }),
+        loopOf({
+          phase: "parked",
+          text: `Blocked: ${why}`,
+          hold: { kind: "review", reason: why, offSeat: false },
+          prNumber: 77,
+        }),
         viewOf("parked", tries),
       );
       await waitFor(() => expect(panel.querySelector(".vsteps")).not.toBeNull());
@@ -1551,7 +1556,7 @@ describe("Agent page: loop steps", () => {
         const loop = loopOf({
           phase: "parked",
           text: "Blocked: RETRO found a missing regression test",
-          parked: "RETRO found a missing regression test",
+          hold: { kind: "review", reason: "RETRO found a missing regression test", offSeat: false },
           prNumber: 77,
         });
         const f = stub({
@@ -1562,7 +1567,13 @@ describe("Agent page: loop steps", () => {
               ...viewOf("parked", []),
               loop: {
                 ...viewOf("parked", []).loop,
-                parked: { kind, reason: "RETRO found a missing regression test", ended: false },
+                hold: {
+                  kind,
+                  reason: "RETRO found a missing regression test",
+                  ended: false,
+                  worktree: null,
+                  wake: false,
+                },
                 pushFor: sha,
               },
             },
@@ -1611,7 +1622,7 @@ describe("Agent page: loop steps", () => {
       const loop = loopOf({
         phase: "parked",
         text: "Blocked: RETRO finding",
-        parked: "RETRO finding",
+        hold: { kind: "review", reason: "RETRO finding", offSeat: false },
         prNumber: 77,
       });
       const f = stub({
@@ -1717,8 +1728,8 @@ describe("Agent page: loop steps", () => {
   describe("End run on a set-aside run", () => {
     const LOOP_PATH = "/api/runs/r-12/loop";
     const END_PATH = "/api/runs/r-12/end";
-    const loopAnswer = (aside: unknown) => ({
-      [LOOP_PATH]: { runId: "r-12", loop: { phase: "review", aside }, events: [] },
+    const loopAnswer = (hold: unknown) => ({
+      [LOOP_PATH]: { runId: "r-12", loop: { phase: "review", hold }, events: [] },
     });
     const asideRun = async (extra: Record<string, unknown>) => {
       const f = stub({
@@ -1736,14 +1747,16 @@ describe("Agent page: loop steps", () => {
       await settled(f, LOOP_PATH);
       expect(screen.queryByRole("button", { name: "End run" })).toBeNull();
       cleanup();
-      const g = await asideRun(loopAnswer({ worktree: "/w/r-12", wake: false }));
+      const g = await asideRun(
+        loopAnswer({ kind: null, reason: null, ended: false, worktree: "/w/r-12", wake: false }),
+      );
       await settled(g, LOOP_PATH);
       expect(await screen.findByRole("button", { name: "End run" })).toBeTruthy();
     });
 
     it("confirms, then posts {} to the run", async () => {
       const f = await asideRun({
-        ...loopAnswer({ worktree: "/w/r-12", wake: false }),
+        ...loopAnswer({ kind: null, reason: null, ended: false, worktree: "/w/r-12", wake: false }),
         [`POST ${END_PATH}`]: { ok: true },
       });
       const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -1767,7 +1780,10 @@ describe("Agent page: loop steps", () => {
         runs: [
           rv({
             id: "r-12",
-            loop: { phase: "review", aside: { worktree: "/w/r-12", wake: false } } as RunLoop,
+            loop: {
+              phase: "review",
+              hold: { kind: null, reason: null, ended: false, worktree: "/w/r-12", wake: false },
+            } as RunLoop,
           }),
         ],
         extra: { "POST /api/runs/r-12/end": { ok: true } },
@@ -1784,10 +1800,13 @@ describe("Agent page: loop steps", () => {
 
     it("names and confirms a historical review waiver from the Runs trace", async () => {
       const parked = {
-        ...loopOf({ phase: "parked", parked: "RETRO finding", text: "Blocked: RETRO finding" }),
+        ...loopOf({
+          phase: "parked",
+          hold: { kind: "review", reason: "RETRO finding", offSeat: true },
+          text: "Blocked: RETRO finding",
+        }),
         pushFor: "abc1234def5678",
-        parked: { kind: "review", reason: "RETRO finding", ended: false },
-        aside: { worktree: "/w/r-12", wake: false },
+        hold: { kind: "review", reason: "RETRO finding", ended: false, worktree: "/w/r-12", wake: false },
       } as unknown as RunLoop;
       const f = stub({
         rows: [
@@ -1818,7 +1837,10 @@ describe("Agent page: loop steps", () => {
     });
 
     it("is in the Runs list only for an unended run that is not the seat's current one", async () => {
-      const loop = { phase: "review", aside: { worktree: "/w/x", wake: false } } as RunLoop;
+      const loop = {
+        phase: "review",
+        hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+      } as RunLoop;
       stub({
         rows: [
           {
@@ -1867,7 +1889,7 @@ describe("Agent page: loop steps", () => {
 
     it("shows the server's refusal text on a 409", async () => {
       await asideRun({
-        ...loopAnswer({ worktree: "/w/r-12", wake: false }),
+        ...loopAnswer({ kind: null, reason: null, ended: false, worktree: "/w/r-12", wake: false }),
         [`POST ${END_PATH}`]: () => ({ status: 409, body: { error: "NOT_ASIDE" } }),
       });
       const ask = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -1879,7 +1901,11 @@ describe("Agent page: loop steps", () => {
 
   it("parked shows a held line and no current step", async () => {
     const panel = await open(
-      loopOf({ phase: "parked", text: "Held: CI failed twice", parked: "CI failed twice" }),
+      loopOf({
+        phase: "parked",
+        text: "Held: CI failed twice",
+        hold: { kind: "ci", reason: "CI failed twice", offSeat: false },
+      }),
     );
     const held = $(panel, ".vhold") as HTMLElement;
     expect(held.textContent).toContain("parked: CI failed twice");
