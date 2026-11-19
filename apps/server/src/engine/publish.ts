@@ -30,10 +30,13 @@ import {
   minorIssueTitle,
   minorLine,
   minorMoreLine,
+  noteIsPartOf,
   parseMinorFindings,
   pathInArea,
+  prClosesLine,
   prIsPartOf,
   prNotRunsText,
+  prPartOfLine,
   REVIEW_STATUS_CONTEXT,
   type ReviewStatusState,
   type Run,
@@ -619,20 +622,23 @@ export function ciLogBody(log: string, max: number): string {
   return out.join("\n");
 }
 
-/** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */
+/** The run's PR body as the hub writes it; `section` goes between "What changed" and the closing line ("Part of #n." when the note says so). */
 export function runPrBody(
   ticket: { issue: number; title: string },
   note: string,
   section: string | null,
   withTitle: boolean,
 ): string {
+  const end = noteIsPartOf(note, ticket.issue)
+    ? prPartOfLine(ticket.issue)
+    : prClosesLine(ticket.issue);
   const heading = `#${ticket.issue}${withTitle ? ` — ${ticket.title}` : ""}`;
   const extra = section === null ? "" : `${section}\n\n`;
-  const around = `${heading}\n\n## What changed\n\n\n\n${extra}Closes #${ticket.issue}.`;
+  const around = `${heading}\n\n## What changed\n\n\n\n${extra}${end}`;
   const room = Math.max(0, MC_PR_BODY_MAX - around.length);
   // the note is cut, never the closing line, to keep the body inside what GitHub takes
   const shown = note.length > room ? `${note.slice(0, Math.max(0, room - 1))}…` : note;
-  return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}Closes #${ticket.issue}.`;
+  return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}${end}`;
 }
 
 /** Each repo's last merge call: merges in one repo run one at a time. */

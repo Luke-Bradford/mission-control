@@ -163,6 +163,7 @@ import {
   prNotRunsText,
   prOpenedByLine,
   protectedPathsText,
+  prPartOfLine,
   prSecretText,
   pushChecksText,
   pushedText,
@@ -1447,7 +1448,7 @@ export function minorSection(body: string): string | null {
   const at = body.indexOf(MINOR_HEADING);
   if (at === -1) return null;
   const rest = body.slice(at + MINOR_HEADING.length);
-  const end = rest.search(/^(?:#{1,2}\s|Closes #\d+\.|Opened by )/m);
+  const end = rest.search(/^(?:#{1,2}\s|(?:Closes|Part of) #\d+\.|Opened by )/m);
   return `${MINOR_HEADING}${end === -1 ? rest : rest.slice(0, end)}`.trimEnd();
 }
 
@@ -1472,7 +1473,10 @@ export function withEngineSection(body: string, issue: number, section: string |
   const rest = (own === null ? body : body.replace(own, ""))
     .split("\n")
     .filter(
-      (l) => l.trim() !== prClosesLine(issue) && !/^Opened by .* \(Mission Control\)\.$/.test(l),
+      (l) =>
+        l.trim() !== prClosesLine(issue) &&
+        l.trim() !== prPartOfLine(issue) &&
+        !/^Opened by .* \(Mission Control\)\.$/.test(l),
     )
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")

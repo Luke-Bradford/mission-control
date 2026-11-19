@@ -51,6 +51,7 @@ import {
   NO_FAILED_RUN,
   READY_UNDO_FAILED,
   REVIEW_STATUS_FAILED,
+  runPrBody,
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
@@ -202,6 +203,29 @@ describe("openPr", () => {
       body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
     });
   });
+
+  it.each(["Part of #7: stage 3.", "This is part of #7.", "PART OF #7"])(
+    "ends the body with Part of, and no closing keyword, when the note says %j",
+    async (note) => {
+      ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+      tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+      await createPublisher(deps()).openPr(run(), TICKET, note);
+      const pr = tools.openDraftPr.mock.calls[0]?.[2] as { body: string };
+      expect(pr.body.endsWith("\n\nPart of #7.")).toBe(true);
+      expect(pr.body).not.toMatch(/closes/i);
+    },
+  );
+
+  it.each(["Part of #8.", "Part of #70", "Did part of the work.", "Fixes #7"])(
+    "keeps the closing line when the note says %j",
+    async (note) => {
+      ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+      tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+      await createPublisher(deps()).openPr(run(), TICKET, note);
+      const pr = tools.openDraftPr.mock.calls[0]?.[2] as { body: string };
+      expect(pr.body.endsWith("\n\nCloses #7.")).toBe(true);
+    },
+  );
 
   it("cuts a note that would take the body past the limit, and keeps the closing line", async () => {
     ghAnswers = [list()];
@@ -2667,6 +2691,12 @@ describe("merge steps", () => {
         ["issue", "view", "7", "--repo=o/mc", "--json", "state"],
         ["issue", "close", "7", "--repo=o/mc", "--reason=completed"],
       ]);
+    });
+
+    it("leaves the issue open for the body the hub writes from a Part of note", async () => {
+      ghAnswers = [prBody(runPrBody(TICKET, "Part of #7: stage 3.", null, true))];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true, left: true });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view"]);
     });
 
     it("closes an issue the PR body does not name", async () => {
