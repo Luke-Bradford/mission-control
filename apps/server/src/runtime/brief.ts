@@ -32,7 +32,6 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import type { ReviewReach } from "../review/reach.ts";
 import { readBaseFile } from "./checkouts.ts";
 import { crewGitBytes, overflowed } from "./git.ts";
 import type { RepoSkills } from "./skills.ts";
@@ -83,8 +82,6 @@ export interface BriefInput {
   profileNames?: readonly string[];
   /** Quoted porcelain status from a reused ticket worktree. */
   leftoverChanges?: readonly string[];
-  /** Redacted, bounded observations for explicitly declared ticket files. */
-  fileContext?: string | null;
   /** The ticket's answered questions, newest first; the brief lists ten at most. */
   decisions?: readonly { question: string; answer: string }[];
   /** Bounded work that a stopped run left for this ticket's replacement seat. */
@@ -242,14 +239,6 @@ export function ticketBrief(i: BriefInput): string {
         ]
       : []),
     last,
-    ...(i.role === "FAO" && i.loop === "plan" && i.fileContext
-      ? [
-          "",
-          "## Relevant file evidence",
-          "Use this evidence within the declared ticket scope. Existing approval and action rules apply.",
-          wrapExternalText(i.fileContext.slice(0, 4000)),
-        ]
-      : []),
     ...((i.leftoverChanges?.length ?? 0) > 0
       ? [
           "",
@@ -344,8 +333,6 @@ export interface ReviewBriefInput {
   preview?: boolean;
   /** The PR changed untrusted dependency inputs, so this review has no installed branch packages. */
   installNote?: string;
-  /** The PR's changed files and the default branch's files that import them; absent when unknown. */
-  reach?: ReviewReach;
   /** The plan the operator signed off for the ticket, to check the work against. */
   signedOffPlan?: QaPlan | null;
   /** The signed-off mockups copied into the scratch copy, by path. */
@@ -382,20 +369,6 @@ function evidenceLine(p: EvidencePair, dir: string): string {
   const count = p.regions.length === 1 ? "1 region" : `${p.regions.length} regions`;
   const files = EVIDENCE_KINDS.map((k) => `${dir}/${evidenceImageName(p.page, p.scheme, k)}`);
   return `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${count} (${where}${more})`} — ${files.join(", ")}`;
-}
-
-const listWith = (shown: readonly string[], more: number): string =>
-  `${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
-
-/** The brief's lines on what the change touches and what imports it. */
-function reachLines(reach: ReviewReach | undefined): string[] {
-  if (reach === undefined) return [];
-  return [
-    `- Files changed (${reach.changed.length + reach.changedMore}): ${listWith(reach.changed, reach.changedMore)}.`,
-    reach.importers.length + reach.importersMore === 0
-      ? "- No file in the default branch imports them."
-      : `- Files that import them (${reach.importers.length + reach.importersMore}): ${listWith(reach.importers, reach.importersMore)}. Check these still work with the change.`,
-  ];
 }
 
 /** RETRO's first message: the PR, what it has to read, how to review, the ticket and the notes. */
@@ -442,7 +415,6 @@ export function reviewBrief(i: ReviewBriefInput): string {
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,
         ]
       : []),
-    ...reachLines(i.reach),
     `- Below: the ticket and the author's report notes${i.prevFindings.length > 0 ? ", and the findings and reply from the last review" : ""}.`,
     "",
     "How to review:",

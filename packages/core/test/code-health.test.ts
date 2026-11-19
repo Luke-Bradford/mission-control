@@ -13,8 +13,6 @@ import {
   codeHealthTestRate,
   codeHealthWindowBounds,
 } from "../src/code-health.ts";
-import { MC_TOOL_NAMES, MC_TOOLS } from "../src/mcp.ts";
-import { BUILTIN_ROLES } from "../src/runtime.ts";
 
 const review = (pr: number, round = 1): CodeHealthReviewRound => ({
   reviewId: `review-${pr}-${round}`,
@@ -209,12 +207,7 @@ describe("code-health definitions", () => {
     expect(() => codeHealthDurationMs(Number.POSITIVE_INFINITY, "s", "fixture")).toThrow();
   });
 
-  it("exposes a read-only tool to FLIGHT and FAO with no writer-role grant", () => {
-    expect(MC_TOOL_NAMES.codeHealth).toBe("code_health");
-    expect(MC_TOOLS.codeHealth).toBe("mcp__mc__code_health");
-    expect(BUILTIN_ROLES.FLIGHT.tools).toContain(MC_TOOL_NAMES.codeHealth);
-    expect(BUILTIN_ROLES.FAO.tools).toContain(MC_TOOL_NAMES.codeHealth);
-    expect(BUILTIN_ROLES.GUIDO.tools).not.toContain(MC_TOOL_NAMES.codeHealth);
+  it("keeps the read input schema closed", () => {
     expect(CODE_HEALTH_READ_INPUT_SCHEMA.additionalProperties).toBe(false);
     expect(CODE_HEALTH_RULES.recurringCorrection).toEqual({
       windowDays: 30,

@@ -26,111 +26,10 @@ git ls-tree -r --name-only <ref> -- apps/server/src \
   | wc -l
 ```
 
-## Code-health reads
-
-`GET /api/code-health?repo=<id>&window=30d&tab=overview` requires the operator token.
-Windows are `7d`, `30d` and `90d`; tabs are `overview`, `review`, `risk` and `test`.
-Each response states its observed dates, source and collection gaps. Rework rates describe
-distinct reported PRs. Job observations are not test attempts, and mixed outcomes remain
-candidates. Current file sizes have an analysed SHA; historical growth and line churn need
-their own collection. Raw command durations with unknown units remain unnormalised.
-
-The response issues repo-scoped evidence references. Read one through
-`GET /api/code-health/evidence/<id>?repo=<id>`, passing its returned `cursor` for later pages.
-A page holds at most 50 rows; the bounded reader stops after 20,000. A changed source answers
-409 and asks for a fresh summary. References lost after restart or bounded-cache eviction
-answer 404 with the same recovery. These reads send no GitHub or config writes.
-
-Summary caches follow relevant review, CI, PR and Map writes, including writes from another
-SQLite connection. Unrelated settings and machine samples leave them intact. Collection reads
-use a consistent deferred SQLite snapshot. Responses redact credentials and bound evidence
-text; a failed secret-provider read fails closed. Named-test ingestion retains its explicit
-collection state until its dependent service is available.
-
-### Code-health recommendation decisions
-
-Overview shows at most three ranked open proposals. Conservative rules use reported 30-day
-review evidence. Dated file touches and ordered test results remain collection proposals until
-those sources exist. Refresh materialises derived proposal rows in the local database; it never
-changes a decision, starts a seat, files a ticket or applies code or rules. Expired proposals become
-inactive, while decisions and accepted metric baselines remain durable. Each proposal carries
-its own fixed-30-day query and observed coverage, including category/file or PR filters.
-Changing the dashboard window cannot substitute a shorter cohort for that evidence.
-
-Read retained records with `GET /api/code-health/recommendations?repo=<id>&cursor=0`.
-Pages hold at most 50 records. Both history and decisions require the operator token.
-`POST /api/code-health/recommendations/<id>?repo=<id>` takes `requestId` (UUID), `basis`,
-`expectedUpdatedAt` and `change`. Change actions are `accept` (owner, future reviewAt),
-`dismiss` (reason), `snooze` (future until), or `assess` (paid-off/no-effect outcome, reason,
-comparison, and an issued evidenceId). Assessment waits for the metric review date. It records
-an explicit comparison, never an automatic claim of causation. Replaying a request ID returns
-its recorded response; conflicting reuse and stale decisions return 409.
-
-Accept leaves linked work pending and records a durable message for the configured repo's
-FLIGHT. FLIGHT reads the recommendation, then uses its existing authorised `create_ticket`
-path with `recommendationId`. That path retains engine, role, secret, breaker and Away checks.
-It records the issue link before project updates, so a project failure cannot create another
-issue on retry. The same call finishes a failed board handoff and preserves an existing card
-status. A stable body marker recovers an issue whose creation response was lost, even after rephrasing.
-The creation attempt is recorded before calling GitHub. If its outcome is uncertain and no
-marker is found in the bounded issue list, the handoff stays pending for inspection; the
-service does not risk a second issue. Partial recovery writes count toward the runaway breaker. Config/rule
-changes still need their existing proposal and approval paths. No recommendation action
-applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
-
-**FLIGHT's own accept.** When `create_ticket` is given a `recommendationId` whose proposal is still
-`proposed` and whose rule is in `CODE_HEALTH_FLIGHT_TIER_RULES` (packages/core `flight-model.ts`, a hard rule, so widening it needs operator clearance; today
-`repeatedly-changed-large-file`), the hub accepts it for FLIGHT first: owner `FLIGHT (<seat>)`, review
-date 30 days on, the call's `basis` as the reason, recorded in the flight decision audit with the
-seat as actor. Any other rule is left proposed and the call is refused; the operator's token, typed
-owner and date stay the only way to accept it. This is no new GitHub write.
-
-**Unprompted audit work.** Once an hour (and a minute after start) the hub runs `runCodeHealthAudit`.
-It records every merged PR in `code_health_merged_reviews`: how it merged (`crew-run`, `ended-run` or
-`hand`) and the last review the hub reported for it (`reviewId`, null when none exists; a review that
-lands later is linked on the next pass). It also re-measures each accepted proposal whose review date
-has passed, once, against its accepted baseline, and stores the result as `remeasure`
-(`improved`, `unchanged`, `worse` or `unmeasured`, with the baseline, current value and a note).
-Re-measuring never ends the work; `assess` stays a manual, evidence-backed decision.
-The recommendation history reply also carries `groups`: one-per-PR proposals (repeated review rounds)
-with the same rule and cause (the PR's most common finding category) read as one group listing each PR.
-
-**Audit first-screen summary.** `GET /api/code-health/overview?repo=&window=` (operator token) returns the
-whole first screen in one reply: verdict, ranked proposals (without evidence references; the evidence
-drawer stays on `/api/code-health`), figures, outside sources, waste alarms, merged-per-day and rework,
-findings per touch, and the proposal funnel and outcomes. Each figure carries unit, window, comparison
-(the equal window before), source, coverage and last update. Definitions: merged-per-day uses the stored
-merge time and keeps "no hub review record" apart from rounds 1, 2 and 3 or more; rework is the share of
-reviewed PRs reaching round 2, with the reviewed count as denominator; findings per touch counts a finding
-once per PR, file, category, summary and fix, only for PRs merged in the window (an open PR's
-findings are left out), over those merged PRs that changed that exact path, and zero
-touches is null (undefined), not 0; the funnel counts every stored proposal in SQL, not the newest 200;
-after-date results come only from stored remeasure records; a PR with a run whose cost is not recorded
-(for example Codex) is left out of the median cost and counted as unpriced, never as free. Outside sources
-read "not collected" until that part exists. Waste alarms are supplied: the repo's open alarms from
-`waste_alarms` (all six families), one Do next row per check-and-subject cause with the alarm's own
-scope, evidence, measure, threshold, owner and state; an unrecorded cost stays null, never zero. An
-alarm opening or closing does not touch the code-health revision, so a stored summary is compared with
-the live alarm rows and rebuilt when they differ. The summary is stored in
-`code_health_overview`, one row per repo and window, and served while the code-health source revision is
-unchanged and the row is under 10 minutes old; a new hub process serves the stored row without rebuilding.
-The hub emits the `health` topic only when a rebuild changes the content shown (`summaryRevision`).
-
-Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
-issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
-read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and
-proposal text is untrusted data. Decision actor, basis, response and linked work enter the
-existing flight decision audit. The read tool cannot accept, dismiss, snooze or assess.
-
-
-Mission Control is a local hub that watches the autonomous loops on this Mac. It reads their state
-files, transcripts, usage limits and GitHub boards, and shows them in one web app, the HUD. In
-phase 1 it **observes only**. Its one write into a loop's files is the TA loop's `PAUSE` sentinel,
-which it writes only when you press pause or resume.
-
-- Design: [`docs/superpowers/specs/2026-10-18-mission-control-design.md`](superpowers/specs/2026-10-18-mission-control-design.md)
-- The HUD it builds: [`docs/prototype/mission-control-hud.html`](prototype/mission-control-hud.html),
-  catalogued in [`docs/prototype/mission-control-hud-catalogue.md`](prototype/mission-control-hud-catalogue.md)
+Cut B of the same work removed the code-health, Map, token-audit, bug-escape and design-preview
+server code. By the first command above, non-test TypeScript and TSX lines went from 204,256 to
+193,396. A fresh database went from 107 tables to 89; a migration drops the 18 retired tables
+from an existing one.
 
 ## Install
 
@@ -577,36 +476,6 @@ dismissing its flag in Needs you, or with `curl -s -X POST 127.0.0.1:7420/api/fl
 flag and starts the count afresh, so the calls that tripped it do not trip it again; it answers 409
 when the breaker is not tripped. `flight_state` shows `breaker.tripped`. While it is tripped the hub
 sends FLIGHT no wakes (it could only idle), and the wake facts list the breaker.
-
-### Map payload cache and polling
-
-`/api/repos/:repoId/map` is built once and reused until something it shows changes: the default
-branch's commit, the call ring's revision (deltas, aged-out calls, branch diff reads), the seats
-(crew rows and test-lock state), the repo's PRs and board, or its rules or FLIGHT powers. Fields that age on their own
-(context usage, ages) are refreshed at most every 15 seconds. The call ring polls only seats with a
-live run (a finished run is read once more, then left), every second while a map client is
-connected and every five seconds otherwise. After a hub restart each transcript is read from the
-byte offset that covers the last `MAP_RECENT_MS` (15 minutes, scanning back at most 16 MB), not
-from the start, so the first map request after an Update no longer re-reads whole transcripts.
-
-The payload also carries what the Ownership and Conflicts lenses read: each seat's configured
-`area` globs (empty when it has none), `prs` on each conflict (the open PR number of each branch,
-in the order of `branches`, null when unknown), and `rules.hardRules` as the effective list the
-engine enforces (on a `superuser` repo the repo's own list plus the defaults and FLIGHT floor).
-
-The hourly maintenance sweep retains seat lines for seven days after their run ends, and
-loop events and run evidence for 30 days after their run ends. Findings stay for 90 days
-after both their review and author run end; test-lock holds and CI runs stay 90 days too
-(see [QA board data](#qa-board-data)). Unfinished reviews, open runs, parked and
-set-aside runs, unanswered questions, pending drafts and open attention notes protect
-their associated rows. Deletions use transactions of at most 500 rows, yield between
-batches and stop after 5,000 rows per sweep; later sweeps drain any backlog.
-Rows exactly at the cutoff stay. Settled attention notes and episodes, board moves, guard hits,
-hub events, answered questions, completed drafts, acknowledged crew errors and superseded briefs
-also expire after 90 days. Runs, reviews and their child evidence, commits, pushes, attempts and
-merged-PR history remain available to Activity and Telemetry for one year. Reported reviews and
-unresolved findings remain while their PR snapshot is open. Deletion makes SQLite
-pages reusable; it does not shrink the database file on disk.
 
 ### Ticket history
 
@@ -2864,16 +2733,6 @@ branch previews do.
 - `surgeonProposals`: always empty until SURGEON proposals are stored.
 
 The route only reads data the hub already stores.
-
-**Token audit.** `GET /api/audit/tokens?days=N` (a whole number from 1 to 365, default 7; anything else answers 400) says where the crew's tokens went, for runs started in the last N days. It returns `TokenAuditView` from mc/core: totals (`runs`, `calls`, `output`, `cacheRead`, `cacheWrite`, `reread`, `rewrites`), `byRole`, `bySource` and `byCommand` (each with tokens added to a context and `reread`, which is tokens added times the calls left in the run), `topRuns` (the ten with the most re-reading), `hubSections` (what the hub itself sent, from the `prompt_sections` rows), `flightStart` (FLIGHT's cost of starting sessions, the `start` reason of `wakeCost`) `controller` and `figures`. `figures` holds the figures the Tokens tab lists: `contextByRole` (90th-percentile context per model call by role, against `TOKEN_CONTEXT_BUDGET`, one budget for every role until roles get their own), `overBudget` (runs whose peak context passed it), `reviewRunsPerTicket`, `flight` (wakes, wakes with no decision, context at wake, sessions a day, start cost) and `costPerMergedPr` (by role). Each is `{ recorded: true, days, unit, value }` or `{ recorded: false, reason }`; `longPassingCommands`, `repeatedPrompt` and `rewriteWait` are always the second, because the hub stores no command results or prompt text, and does not yet work out the pause before a rewrite from call times. `topRuns` rows carry `ticket`; `bySource`, `byCommand` and `hubSections` rows carry `topRun`, the run that put most into the row (`runId`, `agentId`, `ticket`, `value`).
-
-**Token audit by the hour.** `GET /api/audit/tokens?hours=N` (1 to 24; not with `days`) counts the model calls made in the last N hours, by role, source and command, whichever run made them: an old run's new call counts, a call exactly N hours back does not (the window is `(now - N hours, now]`). Each stored call (`run_token_calls.at`) carries the time of its first frame in the transcript; tokens added to the context belong to the call that took them in. In the window, `calls`, `output`, `cacheRead` and `cacheWrite` are sums over those calls, `added` is what arrived at them, and `reread` is added tokens times the run's later calls that are also in the window. Run totals are never divided by time. The answer is the same `TokenAuditView` with `hours`, `basis` (`events`; `days` answers `runs`) and `coverage`. `readAfterReportShare` is null in an hours window. `coverage.status` is `complete` (every run overlapping the window is read and timed, so zero calls is a true zero), `partial` (named gaps, some data) or `unavailable` (named gaps and no timed call). The gaps are `pendingRuns` (no audit stored yet: still running or not read yet), `untimedRuns` (audited before call times were kept, and the transcript could not give them) and `unreadRuns` (Codex, observed loops, missing transcript: their calls are unknown). Any of the three makes the window `partial` or `unavailable`. Ended runs are read every 10 minutes (the `tokenAudit` scheduler job), so a run that ended a few minutes ago shows as pending for at most that long. The audit pass back-fills times for older audits once from retained transcripts (`run_token_audit.timestamps_checked`); one that cannot give times stays untimed. `?shape=summary` (with `days` or `hours`) is the compact read for agents: totals, every role, the top 15 sources and top 15 commands each followed by an `other` row (so the list adds up to the full read), five runs, `coverage` and `links` (the full read, and each listed run's agent run list, `GET /api/agents/:id/runs`). It stays under 20,000 characters; the plain route keeps the detail.
-- **How it is filled.** The `transcripts` job (every 6 hours, first run a minute after start) first reads each ended run's transcript once and stores a `run_token_audit` row plus one `run_token_calls` row per model call, then gzips or deletes old transcripts as before, so a transcript is read before it can be removed. Only a transcript in the hub's own `crew/` folder is read; an observed loop's run, a Codex run or a missing file is stored with no calls and is not retried. A pass stops starting new runs after 20 seconds and carries on at the next one. Nothing is parsed on a request.
-- **What a call is.** One assistant message id from the run's own frames (a subagent's frames are left out). Context is input plus cache read plus cache write. What was added since the previous call is split between the agent's own earlier output, each tool result (by tool name; for Bash by the command's first word, or `pnpm <script>`), hub or operator lines (`hub line`) and, for the first call, `start of run`. A context that shrank adds nothing (compaction or a fresh session). The split uses each item's size in characters, so it is an estimate; the context sizes are the CLI's own.
-- **Cache rewrite.** A call that writes more than 20,000 tokens to the cache while reading less than half the previous call's context.
-- **After the report.** `readAfterReportShare` is the share of a run's cache reads on calls after its first `report_evidence` (null if it never ran one).
-- **Output.** A run's output tokens are the sum of its `result` events' `usage.output_tokens`, the CLI's own figure; the streamed figure of an assistant message is only a part of it. Per-call output in the audit is still the streamed figure. Runs folded before this change keep the old output count until their transcript is folded again.
-- **Controller sessions (off by default).** `audit: { controller_sessions: true }` in `config.yaml` makes the same job read the Claude Code session files of the controller from `~/.claude/projects/<checkout path with every non-alphanumeric character as a dash>/`. The checkout is the hub's own (where the controller works), or `audit.controller_checkout` when set; the crew's clones and worktrees are not read. Session files and each session's `subagents/*.jsonl` are read once each, after the file has been idle for an hour (again if it grew). Only usage numbers are stored, per assistant message id in `controller_messages`; a message id that appears in several files (a resumed session copies its history) counts once, and the figures are summed by message time. No message text is kept. With the switch off, nothing outside the hub's data folder is listed or read, and `controller` is null. The operator turns it on; no seat can.
 
 **Automatic CLI updates (Auto tier).** With `updates.cli: between_runs`, the `cliAuto` job runs every `CLI_UPDATE_INTERVAL_MS` (`apps/server/src/cli-auto.ts`) for `claude` and `codex`. A tool is managed only when its binary resolves into an npm global prefix (`<prefix>/lib/node_modules/<package>/`, `npmPrefix`); a Homebrew cask or formula, or the native installer, is left to whatever installed it and shows on a `cli-auto:<tool>` health row. The hub installs into that same prefix (`npm --prefix <prefix> install -g pkg@x.y.z`), so the copy seats start is the one that changes. Per tool: read the newest version (`npm view`); if it is newer than the installed one and is a plain `x.y.z`, then
 - a new **major** version installs nothing and records one `cli-update-major` (go-ahead) item;

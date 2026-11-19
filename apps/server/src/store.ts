@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
   AttentionMaterials,
@@ -9,11 +8,8 @@ import type {
   PromptWakeCost,
   QaHistoryEntry,
   QaReport,
-  RunTokenAudit,
   TicketQuestion,
-  TokenAuditSession,
   TokenCall,
-  TokenCounts,
   TokenSourceAdd,
 } from "@mc/core";
 import {
@@ -40,12 +36,8 @@ import {
   type BoardItem,
   type BriefOption,
   type CiRunView,
-  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
-  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_CAPCOM,
-  COMMS_MC,
   COMMS_OPEN_PREFIX,
-  type CodeHealthWindow,
   type CommsReaction,
   type CommsReactionKind,
   classifyOveruse,
@@ -134,95 +126,12 @@ import {
   tokenBaselines,
   type UsageSample,
 } from "@mc/core";
-import { CodeHealthReadError } from "./code-health/error.ts";
-import {
-  failGitFileSource,
-  gitFileMetrics,
-  gitFileSource,
-  installGitFileSources,
-  markGitFileChecked,
-  recordGitFileSource,
-} from "./code-health/git-store.ts";
-import {
-  installMergedReviews,
-  mergedReviewRecords,
-  recordMergedReviews,
-} from "./code-health/merged-reviews.ts";
-import {
-  costAggregate,
-  installOverview,
-  landingAggregate,
-  landingTotals,
-  mergedAggregate,
-  mergedObserved,
-  readOverviewRow,
-  type StoredOverview,
-  writeOverviewRow,
-} from "./code-health/overview-store.ts";
-import {
-  decidedRecommendationRows,
-  installRecommendations,
-  linkRecommendation,
-  type Mutation,
-  mutateRecommendation,
-  openRepeatedRoundsRows,
-  RecommendationMutation,
-  recommendationFunnel,
-  recommendationProposals,
-  recommendationRow,
-  recommendationRows,
-  recommendationRowsForFiles,
-  remeasureCounts,
-  upsertRecommendation,
-} from "./code-health/recommendations.ts";
-import { remeasureDue } from "./code-health/remeasure.ts";
-import {
-  aggregateDatedRisk,
-  datedPrFiles,
-  installRiskMemberships,
-  pruneRiskMemberships,
-  recordRiskMembership,
-  reviewedFileMembership,
-} from "./code-health/risk.ts";
-import {
-  checkFileSizes,
-  failFileSizes,
-  fileSizeHistory,
-  fileSizeSource,
-  installFileSizes,
-  recordFileSizes,
-  sizedPaths,
-} from "./code-health/size-store.ts";
-import {
-  codeHealthCiSource,
-  codeHealthEvidenceSource,
-  codeHealthReviewSource,
-  codeHealthSizeSource,
-  codeHealthSourceRevision,
-  installCodeHealthRevisions,
-} from "./code-health/source.ts";
-import { installTestQa, linkTestQa, readTestQa } from "./code-health/test-qa.ts";
-import {
-  importTestReport,
-  installTestReports,
-  testAttemptSource,
-  testCollectionCoverage,
-} from "./code-health/test-reports.ts";
 import { StandingInstructions } from "./instructions/standing.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
-import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
-import {
-  type BugFixCandidate,
-  bugEscapes,
-  bugFixCandidates,
-  type IntroducingPrFacts,
-  introducingPrFacts,
-  noteBugTraceTried,
-  recordBugEscape,
-} from "./store/bug-escapes.ts";
+import { auditItems, recordAuditItem } from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -372,12 +281,8 @@ type RepoTable = keyof typeof REPO_TABLES;
 const DIGEST_BATCH = 500;
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
-const sessionsOf = (raw: unknown): { sessions?: TokenAuditSession[] } => {
-  const list = JSON.parse(typeof raw === "string" ? raw : "[]") as TokenAuditSession[];
-  return list.length > 0 ? { sessions: list } : {};
-};
 
-const toTokenCall = (r: Row): TokenCall => ({
+const _toTokenCall = (r: Row): TokenCall => ({
   at: (r.at as number | null) ?? null,
   context: r.context as number,
   cacheRead: r.cache_read as number,
@@ -436,341 +341,6 @@ export class Store {
     migrate(this.db, (fn, writeLock) => this.transaction(fn, writeLock));
     this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
-    installRiskMemberships(this.db);
-    installGitFileSources(this.db);
-    installFileSizes(this.db);
-    installRecommendations(this.db);
-    installMergedReviews(this.db);
-    installTestReports(this.db);
-    installTestQa(this.db);
-    installOverview(this.db);
-    installCodeHealthRevisions(this.db);
-  }
-
-  importCodeHealthTestReport(
-    raw: unknown,
-    actor: string,
-    at: number,
-    knownSecrets: readonly string[],
-  ) {
-    let result: ReturnType<typeof importTestReport> | undefined;
-    this.transaction(() => {
-      result = importTestReport(this.db, raw, actor, at, knownSecrets);
-    }, true);
-    if (!result) throw new Error("The test report was not stored.");
-    return result;
-  }
-  linkCodeHealthTestQa(raw: unknown, actor: string, at: number, knownSecrets: readonly string[]) {
-    let result: ReturnType<typeof linkTestQa> | undefined;
-    this.transaction(() => {
-      result = linkTestQa(this.db, raw, actor, at, knownSecrets);
-    }, true);
-    if (!result) throw new Error("The test QA proposal was not stored.");
-    return result;
-  }
-  codeHealthTestQa(repoId: string, from: number, until: number) {
-    return readTestQa(this.db, repoId, from, until);
-  }
-  codeHealthTestAttempts(repoId: string, from: number, until: number) {
-    return testAttemptSource(this.db, repoId, from, until);
-  }
-  codeHealthTestCollection(repoId: string, from: number, until: number) {
-    return testCollectionCoverage(this.db, repoId, from, until);
-  }
-
-  codeHealthRecommendations(repoId: string, openAt?: number) {
-    return recommendationRows(this.db, repoId, openAt);
-  }
-  codeHealthOpenRepeatedRounds(repoId: string, at: number) {
-    return openRepeatedRoundsRows(this.db, repoId, at);
-  }
-  codeHealthRecommendationPage(repoId: string, offset: number) {
-    const rows = this.db
-      .prepare(
-        "SELECT id FROM code_health_recommendations WHERE repo_id=? ORDER BY created_at DESC,id LIMIT 51 OFFSET ?",
-      )
-      .all(repoId, offset);
-    return {
-      recommendations: rows
-        .slice(0, 50)
-        .map((row) => recommendationRow(this.db, repoId, String(row.id))),
-      nextCursor: rows.length > 50 ? String(offset + 50) : null,
-    };
-  }
-  codeHealthRecommendation(repoId: string, id: string) {
-    return recommendationRow(this.db, repoId, id);
-  }
-  refreshCodeHealthRecommendations(repoId: string, at: number, checkout?: string) {
-    this.transaction(() => {
-      const proposals = recommendationProposals(this, repoId, at, checkout);
-      const ids = proposals.map((proposal) => upsertRecommendation(this.db, proposal, at));
-      this.db
-        .prepare(
-          `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,
-        )
-        .run(at, repoId, ...ids);
-    });
-  }
-  codeHealthFileRecommendations(repoId: string, paths: readonly string[], at: number) {
-    return recommendationRowsForFiles(this.db, repoId, paths, at);
-  }
-  codeHealthDecisionRecorded(repoId: string, requestId: string): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
-        )
-        .get(repoId, requestId) !== undefined
-    );
-  }
-  decideCodeHealthRecommendation(
-    repoId: string,
-    id: string,
-    request: Mutation,
-    actor: string,
-    at: number,
-    flightId?: string,
-  ) {
-    let response: ReturnType<typeof mutateRecommendation> | undefined;
-    this.transaction(() => {
-      const previous = this.db
-        .prepare(
-          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
-        )
-        .get(repoId, request.requestId);
-      response = mutateRecommendation(this.db, repoId, id, request, actor, at);
-      if (!previous) {
-        if (request.change.action === "accept" && flightId)
-          this.insertComms(
-            {
-              at,
-              from: COMMS_MC,
-              senderKind: "hub",
-              to: flightId,
-              ticket: null,
-              text: `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
-            },
-            `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
-            null,
-          );
-        this.addFlightDecision({
-          at,
-          kind: "note",
-          seatId: actor,
-          targetRunId: null,
-          ref: id,
-          questionId: null,
-          about: `Code health ${repoId}: ${id}`,
-          decision: JSON.stringify({ actor, change: request.change, response: response.state }),
-          basis: request.basis,
-        });
-      }
-    }, true);
-    if (!response) throw new Error("Recommendation transaction returned no result");
-    return response;
-  }
-  /**
-   * FLIGHT's own accept: only a FLIGHT-tier rule, with the seat as owner and the default review
-   * date. The same transition, decision record and idempotency as the operator's accept.
-   */
-  flightAcceptCodeHealth(repoId: string, id: string, seatId: string, basis: string, at: number) {
-    const row = recommendationRow(this.db, repoId, id);
-    if (!row) throw new CodeHealthReadError(404, "Unknown code-health recommendation.");
-    if (!CODE_HEALTH_FLIGHT_TIER_RULES.includes(row.rule))
-      throw new CodeHealthReadError(
-        403,
-        "FLIGHT may not accept this kind of proposal; it stays with the operator.",
-      );
-    const request = RecommendationMutation.parse({
-      requestId: randomUUID(),
-      basis,
-      expectedUpdatedAt: row.updatedAt,
-      change: {
-        action: "accept",
-        owner: `FLIGHT (${seatId})`,
-        reviewAt: at + CODE_HEALTH_FLIGHT_REVIEW_DAYS * DAY_MS,
-      },
-    });
-    return this.decideCodeHealthRecommendation(repoId, id, request, seatId, at);
-  }
-  recordCodeHealthMergedReviews(repoId: string, at: number) {
-    let changed = 0;
-    this.transaction(() => {
-      changed = recordMergedReviews(this.db, repoId, at);
-    }, true);
-    return changed;
-  }
-  codeHealthMergedReviews(repoId: string) {
-    return mergedReviewRecords(this.db, repoId);
-  }
-  remeasureCodeHealth(repoId: string, at: number, checkout?: string) {
-    let done: string[] = [];
-    this.transaction(() => {
-      done = remeasureDue(this, this.db, repoId, at, checkout);
-    }, true);
-    return done;
-  }
-  linkCodeHealthRecommendation(
-    repoId: string,
-    id: string,
-    link: string,
-    actor: string,
-    at: number,
-  ) {
-    this.transaction(() => {
-      linkRecommendation(this.db, repoId, id, link, at);
-      this.addFlightDecision({
-        at,
-        kind: "ticket",
-        seatId: actor,
-        targetRunId: null,
-        ref: id,
-        questionId: null,
-        about: `Code health ${repoId}: ${id}`,
-        decision: `Linked ${link}`,
-        basis: "Accepted recommendation; existing authorised FLIGHT ticket path.",
-      });
-    });
-  }
-
-  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number): boolean {
-    const result = this.db
-      .prepare(
-        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL AND json_extract(state,'$.kind')='accepted'",
-      )
-      .run(JSON.stringify({ fingerprint, at }), repoId, id);
-    return Number(result.changes) === 1;
-  }
-  completeCodeHealthWork(repoId: string, id: string) {
-    this.db
-      .prepare(
-        "UPDATE code_health_recommendations SET work_ready=1 WHERE repo_id=? AND id=? AND linked_work IS NOT NULL",
-      )
-      .run(repoId, id);
-  }
-
-  codeHealthDatedRisk(repoId: string, from: number, until: number) {
-    return aggregateDatedRisk(datedPrFiles(this.db, repoId, from, until));
-  }
-  codeHealthGitSource(repoId: string, checkout: string) {
-    return gitFileSource(this.db, repoId, checkout);
-  }
-  recordCodeHealthGitSource(
-    repoId: string,
-    checkout: string,
-    source: Parameters<typeof recordGitFileSource>[3],
-    at: number,
-  ) {
-    this.transaction(() => recordGitFileSource(this.db, repoId, checkout, source, at));
-  }
-  markCodeHealthGitChecked(repoId: string, checkout: string, sha: string, at: number) {
-    markGitFileChecked(this.db, repoId, checkout, sha, at);
-  }
-  failCodeHealthGitSource(repoId: string, checkout: string, sha: string | null, at: number) {
-    failGitFileSource(this.db, repoId, checkout, sha, at);
-  }
-  codeHealthGitMetrics(repoId: string, checkout: string, from: number, until: number, at: number) {
-    return gitFileMetrics(this.db, repoId, checkout, from, until, at);
-  }
-  codeHealthReviewedFiles(repoId: string, from: number, until: number) {
-    return reviewedFileMembership(this.db, repoId, from, until);
-  }
-  recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
-    recordRiskMembership(this.db, input);
-  }
-  codeHealthOverviewRow(repoId: string, window: CodeHealthWindow) {
-    return readOverviewRow(this.db, repoId, window);
-  }
-  saveCodeHealthOverview(repoId: string, window: CodeHealthWindow, row: StoredOverview) {
-    writeOverviewRow(this.db, repoId, window, row);
-  }
-  codeHealthMergedAggregate(repoId: string, from: number, until: number) {
-    return mergedAggregate(this.db, repoId, from, until);
-  }
-  codeHealthMergedObserved(repoId: string) {
-    return mergedObserved(this.db, repoId);
-  }
-  codeHealthCostAggregate(repoId: string, from: number, until: number) {
-    return costAggregate(this.db, repoId, from, until);
-  }
-  codeHealthLandingTotals(repoId: string, from: number, until: number) {
-    return landingTotals(this.db, repoId, from, until);
-  }
-  codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
-    return landingAggregate(this.db, repoId, from, until, limit);
-  }
-  codeHealthDecidedRecommendations(repoId: string, limit: number) {
-    return decidedRecommendationRows(this.db, repoId, limit);
-  }
-  codeHealthFunnel(repoId: string) {
-    return recommendationFunnel(this.db, repoId);
-  }
-  codeHealthRemeasureCounts(repoId: string) {
-    return remeasureCounts(this.db, repoId);
-  }
-  codeHealthRevision(repoId: string): string {
-    return codeHealthSourceRevision(this.db, repoId);
-  }
-
-  /** A consistent, deferred read snapshot; WAL writers remain independent. */
-  codeHealthSnapshot<T>(read: () => T): T {
-    let result: T | undefined;
-    this.transaction(() => {
-      result = read();
-    });
-    return result as T;
-  }
-
-  codeHealthReviews(repoId: string, from: number, until: number) {
-    return codeHealthReviewSource(this.db, repoId, from, until);
-  }
-
-  codeHealthCi(repoId: string, from: number, until: number) {
-    return codeHealthCiSource(this.db, repoId, from, until);
-  }
-
-  codeHealthSizes(checkout: string) {
-    return codeHealthSizeSource(this.db, checkout);
-  }
-  codeHealthSizeSnapshot(repoId: string, checkout: string) {
-    return fileSizeSource(this.db, repoId, checkout);
-  }
-  codeHealthSizedPaths(
-    repoId: string,
-    checkout: string,
-    sha: string,
-    paths: readonly string[],
-    minimum: number,
-  ) {
-    return sizedPaths(this.db, repoId, checkout, sha, paths, minimum);
-  }
-  recordCodeHealthSizeSnapshot(
-    repoId: string,
-    checkout: string,
-    snapshot: Parameters<typeof recordFileSizes>[3],
-    at: number,
-  ) {
-    this.transaction(() => recordFileSizes(this.db, repoId, checkout, snapshot, at));
-  }
-  checkCodeHealthSizes(repoId: string, checkout: string, sha: string, at: number) {
-    checkFileSizes(this.db, repoId, checkout, sha, at);
-  }
-  failCodeHealthSizes(repoId: string, checkout: string, sha: string | null, at: number) {
-    failFileSizes(this.db, repoId, checkout, sha, at);
-  }
-  codeHealthSizeHistory(
-    repoId: string,
-    checkout: string,
-    paths: readonly string[],
-    from: number,
-    until: number,
-    sha: string,
-  ) {
-    return fileSizeHistory(this.db, repoId, checkout, paths, from, until, sha);
-  }
-
-  codeHealthEvidence(query: Parameters<typeof codeHealthEvidenceSource>[1]) {
-    return codeHealthEvidenceSource(this.db, query);
   }
 
   /** One-time-safe reconstruction from sources that already survived retention. */
@@ -1045,194 +615,6 @@ export class Store {
     );
   }
 
-  /** Stores a run's token audit and its calls; a run audited twice keeps the later read. */
-  saveRunTokenAudit(
-    runId: string,
-    at: number,
-    audit: RunTokenAudit,
-    calls: readonly TokenCall[],
-  ): void {
-    this.transaction(() => {
-      this.db.prepare("DELETE FROM run_token_calls WHERE run_id = ?").run(runId);
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
-             cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command, sessions, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        )
-        .run(
-          runId,
-          at,
-          audit.calls,
-          audit.peakContext,
-          audit.medianContext,
-          audit.cacheRead,
-          audit.cacheWrite,
-          audit.output,
-          audit.rewrites,
-          audit.rewriteTokens,
-          audit.readAfterReport,
-          JSON.stringify(audit.bySource),
-          JSON.stringify(audit.byCommand),
-          JSON.stringify(audit.sessions ?? []),
-        );
-      const insert = this.db.prepare(
-        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      for (const [i, c] of calls.entries()) {
-        insert.run(
-          runId,
-          i,
-          c.context,
-          c.cacheRead,
-          c.cacheWrite,
-          c.output,
-          JSON.stringify(c.added),
-          c.at ?? null,
-        );
-      }
-    });
-  }
-
-  /** A run's stored calls, in order. */
-  runTokenCalls(runId: string): TokenCall[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
-        .all(runId) as Row[]
-    ).map(toTokenCall);
-  }
-
-  /** Audited runs with calls whose call times were never looked for, oldest first (the back-fill). */
-  runsToRetimeTokens(limit: number): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT r.* FROM run_token_audit a JOIN runs r ON r.id = a.run_id
-           WHERE a.timestamps_checked = 0 AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC LIMIT ?`,
-        )
-        .all(limit) as Row[]
-    ).map(toRun);
-  }
-
-  /** Records that a run's transcript could not give call times, so it is not tried again. */
-  markTokenTimesChecked(runId: string): void {
-    markTokenTimesChecked(this.db, runId);
-  }
-
-  /**
-   * Every stored call of each run that made a call in `(from, to]`, in order, so a window can read
-   * the calls before it (the context a call grew from) and after it (what re-read an addition).
-   */
-  tokenCallsOfRunsActiveIn(from: number, to: number): { run: Run; calls: TokenCall[] }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT r.*, c.context AS c_context, c.cache_read AS c_cache_read, c.cache_write AS c_cache_write,
-           c.output AS c_output, c.added AS c_added, c.at AS c_at
-         FROM run_token_calls c JOIN runs r ON r.id = c.run_id
-         WHERE c.run_id IN (SELECT run_id FROM run_token_calls WHERE at > ? AND at <= ?)
-         ORDER BY r.started_at DESC, r.seq DESC, c.run_id, c.idx`,
-      )
-      .all(from, to) as Row[];
-    const out: { run: Run; calls: TokenCall[] }[] = [];
-    for (const r of rows) {
-      let last = out.at(-1);
-      if (last === undefined || last.run.id !== (r.id as string)) {
-        last = { run: toRun(r), calls: [] };
-        out.push(last);
-      }
-      last.calls.push({
-        at: (r.c_at as number | null) ?? null,
-        context: r.c_context as number,
-        cacheRead: r.c_cache_read as number,
-        cacheWrite: r.c_cache_write as number,
-        output: r.c_output as number,
-        added: JSON.parse(r.c_added as string) as TokenSourceAdd[],
-      });
-    }
-    return out;
-  }
-
-  /**
-   * For each run overlapping `[from, to]`: whether its token audit is stored, whether it has calls,
-   * and whether any call has no time. What an event window can and cannot say.
-   */
-  tokenAuditStates(
-    from: number,
-    to: number,
-  ): { runId: string; stored: boolean; calls: number; untimed: boolean }[] {
-    const ids = this.overlappingRuns("id", from, to + 1).map((r) => r.id as string);
-    const state = this.db.prepare(
-      `SELECT a.calls AS calls, (SELECT COUNT(*) FROM run_token_calls c WHERE c.run_id = ? AND c.at IS NULL) AS untimed
-       FROM run_token_audit a WHERE a.run_id = ?`,
-    );
-    return ids.map((runId) => {
-      const row = state.get(runId, runId) as { calls: number; untimed: number } | undefined;
-      return {
-        runId,
-        stored: row !== undefined,
-        calls: row?.calls ?? 0,
-        untimed: (row?.untimed ?? 0) > 0,
-      };
-    });
-  }
-
-  /** Ended runs started since `since` with no token audit yet, newest first. */
-  runsToAuditTokens(since: number, limit: number): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE ended_at IS NOT NULL AND started_at >= ?
-             AND id NOT IN (SELECT run_id FROM run_token_audit)
-           ORDER BY started_at DESC, seq DESC LIMIT ?`,
-        )
-        .all(since, limit) as Row[]
-    ).map(toRun);
-  }
-
-  /** The stored token audits of runs that started since `since`, with the run each belongs to. */
-  runTokenAudits(since: number): { run: Run; audit: RunTokenAudit }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
-           a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
-           a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
-           a.sessions AS a_sessions
-         FROM run_token_audit a JOIN runs r ON r.id = a.run_id
-         WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
-      )
-      .all(since) as Row[];
-    return rows.map((r) => ({
-      run: toRun(r),
-      audit: {
-        calls: r.a_calls as number,
-        peakContext: r.a_peak as number,
-        medianContext: r.a_median as number,
-        cacheRead: r.a_cache_read as number,
-        cacheWrite: r.a_cache_write as number,
-        output: r.a_output as number,
-        rewrites: r.a_rewrites as number,
-        rewriteTokens: r.a_rewrite_tokens as number,
-        readAfterReport: r.a_after as number | null,
-        bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
-        byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
-        ...sessionsOf(r.a_sessions),
-      },
-    }));
-  }
-
-  /** Context size of every stored model call of runs that started since `since`. */
-  runCallContexts(since: number): { runId: string; context: number }[] {
-    return this.db
-      .prepare(
-        `SELECT c.run_id AS runId, c.context AS context FROM run_token_calls c
-         JOIN runs r ON r.id = c.run_id WHERE r.started_at >= ?`,
-      )
-      .all(since) as { runId: string; context: number }[];
-  }
-
   /** Review runs that started since `since` on a ticket, oldest first. */
   reviewRunsSince(since: number): Run[] {
     return (
@@ -1445,11 +827,6 @@ export class Store {
     heldRunIds: readonly string[] = [],
   ): Map<AgentId, Run[]> {
     return this.runQ.runsForAgents(agentIds, limit, heldRunIds);
-  }
-
-  /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
-  mapAsideRuns(agentId: AgentId): Run[] {
-    return this.runQ.mapAsideRuns(agentId);
   }
 
   /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
@@ -1709,29 +1086,6 @@ export class Store {
       .run(runId, JSON.stringify(d));
   }
 
-  mapCacheGet(kind: string, scope: string, key: string): string | null {
-    const row = this.db
-      .prepare("SELECT value FROM map_cache WHERE kind = ? AND scope = ? AND key = ?")
-      .get(kind, scope, key) as { value: string } | undefined;
-    return row?.value ?? null;
-  }
-
-  /** Stores a map cache row; `exclusive` drops the kind and scope's other rows (superseded keys). */
-  mapCachePut(kind: string, scope: string, key: string, value: string, exclusive: boolean): void {
-    this.transaction(() => {
-      if (exclusive)
-        this.db
-          .prepare("DELETE FROM map_cache WHERE kind = ? AND scope = ? AND key <> ?")
-          .run(kind, scope, key);
-      this.db
-        .prepare(
-          `INSERT INTO map_cache (kind, scope, key, value) VALUES (?, ?, ?, ?)
-           ON CONFLICT(kind, scope, key) DO UPDATE SET value = excluded.value`,
-        )
-        .run(kind, scope, key, value);
-    });
-  }
-
   digest(runId: string): RunDigest | null {
     const row = this.db.prepare("SELECT digest FROM run_digests WHERE run_id = ?").get(runId) as
       | { digest: string }
@@ -1935,15 +1289,8 @@ export class Store {
 
   private historyNextTable = 0;
   private operationalHistoryNextTable = 0;
-  private riskMembershipPruneCursor = { at: -1, id: 0 };
-
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
-    this.riskMembershipPruneCursor = pruneRiskMemberships(
-      this.db,
-      now,
-      this.riskMembershipPruneCursor,
-    );
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
     this.db
@@ -2013,8 +1360,6 @@ export class Store {
         AUDIT_RETENTION_DAYS,
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
-      ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
-      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -2502,25 +1847,6 @@ export class Store {
       if (p.files !== undefined) {
         deleteFiles.run(repoId, p.number);
         for (const f of p.files) addFile.run(repoId, p.number, f.path, f.changeType);
-        if (p.headSha) {
-          try {
-            recordRiskMembership(this.db, {
-              repoId,
-              pr: p.number,
-              sha: p.headSha,
-              kind: "github-head",
-              files: p.files.map((file) => file.path),
-              declaredFiles: p.changedFiles ?? null,
-              at: readAt,
-            });
-          } catch {
-            this.db
-              .prepare(
-                "DELETE FROM code_health_file_memberships WHERE repo_id=? AND pr_number=? AND sha=? AND kind='github-head'",
-              )
-              .run(repoId, p.number, p.headSha);
-          }
-        }
       }
       this.markMovedPullRequest(repoId, p, readAt);
       ins.run(
@@ -2900,7 +2226,7 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
-      bugEscapes: bugEscapes(this.db, since, until),
+      bugEscapes: [],
       improvements: [
         ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
@@ -2914,24 +2240,6 @@ export class Store {
       specBounces: specBounces(this.db, since, until),
       surgeonProposals: [],
     };
-  }
-
-  /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
-  bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
-    return bugFixCandidates(this.db, repoId, limit);
-  }
-
-  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
-    noteBugTraceTried(this.db, repoId, issue, at);
-  }
-
-  introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
-    return introducingPrFacts(this.db, repoId, pr);
-  }
-
-  /** Records a traced bug once per ticket; a repeat leaves the row as it was. */
-  recordBugEscape(e: Parameters<typeof recordBugEscape>[1]): void {
-    recordBugEscape(this.db, e);
   }
 
   /**
@@ -3236,7 +2544,7 @@ export class Store {
     return out;
   }
 
-  /** The newest PR of a branch, as its number and state: one narrow row, for the design previews. */
+  /** The newest PR of a branch, as its number and state: one narrow row. */
   pullRequestOfBranch(
     repoId: RepoId,
     branch: string,

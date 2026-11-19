@@ -265,7 +265,6 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
-      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
@@ -321,7 +320,6 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       prBody: "mcp__mc__pr_body",
-      publishPreview: "mcp__mc__publish_preview",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",
@@ -345,7 +343,6 @@ describe("the allowlist in phase 2b", () => {
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
-      codeHealth: "mcp__mc__code_health",
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
       messageSeat: "mcp__mc__message_seat",
@@ -695,7 +692,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "plan",
-        tools: ["report_plan", "read_ticket", "code_health"],
+        tools: ["report_plan", "read_ticket"],
         here: "planner: writes each ticket's plan for the developers",
       },
       FLIGHT: {
@@ -704,7 +701,6 @@ describe("crew constants", () => {
         mode: "read-only",
         loop: "watch",
         tools: [
-          "code_health",
           "log_decision",
           "read_ticket",
           "answer_question",
@@ -777,7 +773,7 @@ describe("seatDef", () => {
     expect(seatDef({ role: "RETRO" })).toMatchObject({ mode: "read-only", loop: "none" });
     expect(seatDef({ role: "FAO" })).toMatchObject({
       loop: "plan",
-      mcTools: ["report_plan", "read_ticket", "code_health"],
+      mcTools: ["report_plan", "read_ticket"],
     });
   });
 
@@ -839,7 +835,6 @@ describe("mc tool grants", () => {
 
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
     expect(FLIGHT_TOOLS).toEqual([
-      "code_health",
       "log_decision",
       "read_ticket",
       "answer_question",

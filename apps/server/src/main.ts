@@ -37,12 +37,8 @@ import {
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
-import { createBugEscapeCollector } from "./bug-escapes/sweep.ts";
 import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
-import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
-import { createFileContext } from "./code-health/file-context.ts";
-import { createGitFileCollector } from "./code-health/git-collector.ts";
 import {
   fetchBoard,
   fetchCardNow,
@@ -61,7 +57,6 @@ import {
 import { loadProfiles, PROFILES_FILE } from "./config/profiles.ts";
 import {
   ConfigError,
-  configuredAgents,
   crewAllowed,
   findHubRoot,
   isPreview,
@@ -69,11 +64,6 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import {
-  DESIGN_PREVIEW_PORT,
-  DESIGN_PREVIEW_SWEEP_MS,
-  DesignPreviews,
-} from "./design-preview/previews.ts";
 import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
 import { cachedDiskUse } from "./disk/use.ts";
 import { releaseAtAccountStop } from "./engine/account-release.ts";
@@ -87,6 +77,7 @@ import { refreshAuthors } from "./flight/collaborators.ts";
 import { flightConflicts } from "./flight/conflicts.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
+import { MergeConflicts } from "./flight/merge-conflicts.ts";
 import { operatorCall } from "./flight/operator-call.ts";
 import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
@@ -100,8 +91,6 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
-import { MapConflicts } from "./map/conflicts.ts";
-import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
 import { RunTokens } from "./mcp/tokens.ts";
@@ -411,19 +400,6 @@ export async function main(): Promise<void> {
     config.repos,
     config.crew?.sessions ?? [],
   );
-  // A seat's published design previews (its branch's built app, shown with Demo data): live hub only.
-  const designPreviews =
-    !preview && previewRepoId !== undefined
-      ? new DesignPreviews({
-          root: join(dirname(dbPath), "design-previews"),
-          port: DESIGN_PREVIEW_PORT,
-          hubPort: port,
-          repoId: previewRepoId,
-          // the newest PR of the branch decides: a closed one takes its preview with it
-          prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
-          log: (line) => log(line),
-        })
-      : undefined;
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;
@@ -518,11 +494,7 @@ export async function main(): Promise<void> {
     const rules = await engineRules(repoId);
     return rules instanceof RepoRulesError ? undefined : rules.areas;
   };
-  const flightMergeChecks = new MapConflicts(undefined, {
-    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
-    put: (kind, scope, key, value, exclusive) =>
-      store.mapCachePut(kind, scope, key, value, exclusive),
-  });
+  const flightMergeChecks = new MergeConflicts();
   const flightConflictFiles = async (repoId: RepoId) => {
     const checkout = config.crew?.sessions.find((x) => x.repoId === repoId)?.checkout;
     return checkout === undefined
@@ -622,15 +594,6 @@ export async function main(): Promise<void> {
       }
       return subject;
     },
-    fileContext: createFileContext({
-      config,
-      store,
-      knownSecrets: async () => [
-        await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
-        operatorToken,
-        controllerToken,
-      ],
-    }),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
     enabled: crewEnabled,
@@ -733,15 +696,6 @@ export async function main(): Promise<void> {
         );
       });
     },
-    ...(designPreviews === undefined || previewRepoId === undefined
-      ? {}
-      : {
-          designPreviews: {
-            repoId: previewRepoId,
-            url: `http://${HOST}:${DESIGN_PREVIEW_PORT}/`,
-            publish: (input) => designPreviews.publish(input),
-          },
-        }),
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined
@@ -950,12 +904,6 @@ export async function main(): Promise<void> {
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
-    ...(designPreviews === undefined
-      ? {}
-      : {
-          hasPreview: (repoId: string, ticket: number) =>
-            repoId === previewRepoId && designPreviews.list().some((v) => v.ticket === ticket),
-        }),
     operator: operatorCall(() => hubApp, operatorToken),
     tidy: crewTidy,
     hudShots,
@@ -1069,38 +1017,11 @@ export async function main(): Promise<void> {
   });
   void flushInstructionNotices({ config, store, bus, supervisor });
 
-  const mapRing = new CallRing(() => {
-    const seats = new Set(
-      configuredAgents(config)
-        .filter((a) => a.kind === "crew")
-        .map((a) => a.id),
-    );
-    return store.runsActiveSince(Date.now() - 15 * 60_000).flatMap((run): RingSource[] => {
-      if (!seats.has(run.agentId)) return [];
-      const session = store.seatSession(run.agentId);
-      const cwd =
-        run.loop?.aside?.worktree ?? (session?.runId === run.id ? session.worktree : null);
-      return cwd
-        ? [
-            {
-              id: run.id,
-              seat: run.agentId,
-              repoId: run.repoId,
-              cwd,
-              transcriptPath: run.transcriptPath,
-              vendor: run.vendor,
-              current: session?.runId === run.id,
-            },
-          ]
-        : [];
-    });
-  });
   const app = buildApp({
     diskUse: hubDiskUse,
     qaReports,
     previews,
     previewRepoId,
-    designPreviews,
     previewActivity,
     hudShots,
     prEvidence: evidenceStore,
@@ -1108,8 +1029,6 @@ export async function main(): Promise<void> {
     queueReorder,
     ticketMove: engineBoard.move,
     ticketRead: engineBoard.read,
-    mapRing,
-    warmMap: true,
     operatorToken,
     controllerToken,
     gh,
@@ -1183,12 +1102,6 @@ export async function main(): Promise<void> {
   });
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
-  const gitFiles = preview ? null : createGitFileCollector({ config, store, bus });
-  const bugEscapes = preview ? null : createBugEscapeCollector({ config, store });
-  app.addHook("onClose", async () => {
-    await gitFiles?.stop();
-    await bugEscapes?.stop();
-  });
   const previewExpiry = previews ? setInterval(() => void previews.expire(), 60_000) : null;
   app.addHook("onClose", async () => {
     if (previewExpiry) clearInterval(previewExpiry);
@@ -1202,18 +1115,6 @@ export async function main(): Promise<void> {
       log(`crew: restored ${r.tokens} token(s) and ${r.holds} test-lock hold(s)`);
     }
   }
-  if (designPreviews !== undefined) {
-    const sweep = setInterval(() => void designPreviews.sweep(), DESIGN_PREVIEW_SWEEP_MS);
-    sweep.unref();
-    app.addHook("onClose", async () => {
-      clearInterval(sweep);
-      await designPreviews.close();
-    });
-    // a taken port must not stop the hub: previews just cannot be shown
-    await designPreviews.listen().catch((e: unknown) => {
-      log(`design previews: cannot listen on ${DESIGN_PREVIEW_PORT}: ${String(e)}`);
-    });
-  }
   await app.listen({ host: HOST, port });
   // External service tooling can identify this hub without inspecting a process command line.
   if (!preview) {
@@ -1226,8 +1127,6 @@ export async function main(): Promise<void> {
   // reviews already in flight when this hub updated keep finishing: they count as asked once
   if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
-  gitFiles?.start();
-  bugEscapes?.start();
   supervisor.start();
   // After the supervisor has taken the crew lock (it does so before returning), so the engine's
   // first look at the seats works; its resumed runs start in the background, so no idle event of
@@ -1324,16 +1223,6 @@ export async function main(): Promise<void> {
       setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
     }
   }
-  // Local only (no GitHub write): merged PRs' reviews are recorded and due proposals re-measured.
-  const audit = () => {
-    try {
-      runCodeHealthAudit({ store, config, now: Date.now });
-    } catch (e) {
-      log(`code-health audit failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
-  setInterval(audit, CODE_HEALTH_AUDIT_EVERY_MS).unref();
-  setTimeout(audit, 60_000).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = () => {
     try {

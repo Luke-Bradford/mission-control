@@ -4,9 +4,7 @@ import {
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
-  joinMapGraph,
   SPEC_BOUNCE_CAUSES,
-  unpackMap,
 } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
@@ -47,12 +45,9 @@ import {
   type CrewChanges,
   type CrewSessionFolders,
   DEFAULT_AWAY,
-  DEFAULT_HARD_RULES,
   DEFAULT_PROFILES,
-  DEFAULT_REPO_RULES,
   DEFAULT_SEAT_COMMANDS,
   type Escalation,
-  effectiveHardRules,
   type FileDiff,
   FLIGHT_HEADLINE,
   FLIGHT_LIST_MAX,
@@ -114,13 +109,11 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config/config-write.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
-import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import * as views from "../src/hud/views.ts";
-import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
 import { qaNativeIdentity } from "../src/qa/history-key.ts";
@@ -133,7 +126,7 @@ import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
-import { mapCheckout } from "./map-checkout.ts";
+import { repoCheckout } from "./repo-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 const HOUR = 3600e3;
@@ -198,12 +191,6 @@ const stubUpdater = (): Updater => ({
   },
 });
 /** One crew seat, added to `config` by the tests that need it (the shared fixture has none). */
-/** A map transcript fixture stamped now: the ring reads only the window the map shows. */
-const mapFixture = (vendor: "claude" | "codex"): string =>
-  readFileSync(new URL(`./fixtures/map/${vendor}.jsonl`, import.meta.url), "utf8").replaceAll(
-    "2026-10-25T00:00:",
-    new Date().toISOString().slice(0, 17),
-  );
 const withCrew = () => {
   config.crew = {
     worktrees: join(dir, "crew"),
@@ -1636,7 +1623,6 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
-  ["GET", "/api/audit/tokens?days=7"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -1645,13 +1631,6 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa-reports/:id/markdown"],
   ["GET", "/api/qa-report-assets/:id"],
   ["GET", "/api/attention-material-assets/:id"],
-  ["GET", "/api/code-health/recommendations?repo=shop-app"],
-  ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
-  ["POST", "/api/code-health/test-reports", {}],
-  ["POST", "/api/code-health/test-qa", {}],
-  ["GET", "/api/code-health?repo=shop-app"],
-  ["GET", "/api/code-health/overview?repo=shop-app"],
-  ["GET", "/api/code-health/evidence/:id?repo=shop-app"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
   ["GET", "/api/agents/shop-app-ta/stream"],
@@ -1704,9 +1683,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["GET", "/api/previews"],
-  ["GET", "/api/design-previews"],
   ["GET", "/api/disk-use"],
-  ["POST", "/api/design-previews/41/open", {}],
   ["POST", "/api/previews", { pr: 41 }],
   ["DELETE", "/api/previews/41", {}],
   ["POST", "/api/previews/41/activity", {}],
@@ -1749,8 +1726,6 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs/4"],
-  ["GET", "/api/repos/shop-app/map"],
-  ["GET", "/api/repos/shop-app/map/graph"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -2206,7 +2181,7 @@ describe("Setup Roles & guards", () => {
   /** A crew clone whose origin/HEAD CLAUDE.md holds `block`. */
   const repoFile = (block: string) => {
     withCrew();
-    const checkout = mapCheckout(dir);
+    const checkout = repoCheckout(dir);
     const session = config.crew?.sessions[0];
     if (!session) throw new Error("fixture session missing");
     session.checkout = checkout;
@@ -2912,7 +2887,6 @@ describe("local access", () => {
     for (const [method, url, body] of API_ROUTES) {
       if (url.startsWith("/api/qa-reports") || url.startsWith("/api/qa-report-assets")) continue; // durable archive auth/reads have their own tests
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
-      if (url.startsWith("/api/design-previews")) continue; // the design preview tests below cover them
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (/^\/api\/attention\/unknown\/choo?[si]/.test(url)) continue; // needs an open question; choose.test.ts covers it
@@ -2921,7 +2895,6 @@ describe("local access", () => {
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.includes("/set-aside/")) continue; // needs the Needs-you wiring; needs-you-answer.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
-      if (url.startsWith("/api/code-health/evidence/")) continue; // issued references are covered by code-health-reader.test.ts
       if (
         method === "POST" &&
         (url.startsWith("/api/flight/orders") ||
@@ -2938,10 +2911,6 @@ describe("local access", () => {
       }
       if (url === "/api/guard/check") {
         // the hook's run token is its only key (guard.test.ts); there is no cookie to need
-        expect((await post(url, json, body)).statusCode).toBe(401);
-        continue;
-      }
-      if (url === "/api/code-health/test-reports" || url === "/api/code-health/test-qa") {
         expect((await post(url, json, body)).statusCode).toBe(401);
         continue;
       }
@@ -3104,20 +3073,6 @@ describe("local access", () => {
       if (url.startsWith("/api/qa/uat/")) {
         // the placeholder PR is not in this fixture
         expect(r.statusCode).toBe(404);
-        continue;
-      }
-      if (url === "/api/repos/shop-app/map" || url === "/api/repos/shop-app/map/graph") {
-        // This fixture has no crew checkout to check.
-        expect(r.statusCode).toBe(503);
-        expect(r.json()).toEqual({ error: "map checkout unavailable" });
-        continue;
-      }
-      if (
-        url.startsWith("/api/code-health/recommendations") ||
-        url.startsWith("/api/code-health/overview")
-      ) {
-        // This local-access fixture has no operator token; these reads and decisions always require it.
-        expect(r.statusCode).toBe(401);
         continue;
       }
       expect(r.statusCode, `${method} ${url}`).toBe(200);
@@ -3361,7 +3316,6 @@ describe("local access", () => {
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
-            .replace("/design-previews/41/open", "/design-previews/:ticket/open")
             .replace("/previews/41/activity", "/previews/:pr/activity")
             .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
@@ -4959,764 +4913,6 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/site-builder")).json()).toEqual([]);
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
-
-  it("says in words why the map snapshot is unavailable, without git's command text", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw Error("fixture session missing");
-    session.checkout = dir;
-    const response = await get("/api/repos/shop-app/map");
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toEqual({
-      error: "map snapshot unavailable: git could not read the checkout",
-    });
-  });
-
-  it("serves a light map with an indexed graph only on demand, excluding observed loops", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw Error("fixture session missing");
-    session.checkout = mapCheckout(dir);
-    const response = await get("/api/repos/shop-app/map");
-    expect(response.statusCode).toBe(200);
-    expect(Buffer.byteLength(response.body)).toBeLessThan(60_000);
-    const raw = response.json();
-    expect(raw).not.toHaveProperty("imports");
-    expect(raw).not.toHaveProperty("hist");
-    expect(raw).toMatchObject({
-      repoId: "shop-app",
-      seq: 0,
-      conflicts: [],
-      conflictsUnchecked: [],
-      findings: [],
-      seats: [{ seat: "guido-1", context: null }],
-    });
-    const light = unpackMap(raw);
-    expect(light.tree).toContainEqual(
-      expect.objectContaining({ path: "packages/core/src/map.ts", lines: expect.any(Number) }),
-    );
-    const graphResponse = await get(`/api/repos/shop-app/map/graph?key=${raw.graphKey}`);
-    expect(graphResponse.statusCode).toBe(200);
-    const graph = graphResponse.json();
-    expect(
-      graph.imports.every((edge: unknown[]) => edge.length === 2 && edge.every(Number.isInteger)),
-    ).toBe(true);
-    const full = joinMapGraph(light, graph);
-    expect(full.imports).toContainEqual({
-      from: "packages/core/src/map.ts",
-      to: "packages/core/src/types.ts",
-    });
-    expect(full.imports).toContainEqual({
-      from: "apps/server/src/map/ring.ts",
-      to: "packages/core/src/types.ts",
-    });
-    expect(full.hist.prCount).toBe(0);
-    const cached = await app.inject({
-      method: "GET",
-      url: `/api/repos/shop-app/map/graph?key=${raw.graphKey}`,
-      headers: { "if-none-match": graphResponse.headers.etag as string },
-    });
-    expect(cached.statusCode).toBe(304);
-    expect((await get("/api/repos/shop-app/map/graph?key=old")).statusCode).toBe(409);
-    expect((await get("/api/repos/unknown/map")).statusCode).toBe(404);
-  });
-
-  it("keeps a 1,074-file repository under 60 KB with 4,616 graph edges and history excluded", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw Error("missing session");
-    session.checkout = mapCheckout(dir);
-    const tree = JSON.parse(
-      readFileSync(
-        new URL("../../../packages/core/test/fixtures/map-tree.json", import.meta.url),
-        "utf8",
-      ),
-    ) as { path: string; lines: number }[];
-    const imports = Array.from({ length: 4616 }, (_, i) => ({
-      from: tree[i % tree.length]?.path as string,
-      to: tree[(i + 1) % tree.length]?.path as string,
-    }));
-    const hist: Awaited<ReturnType<typeof mapTree>>["hist"] = {
-      since: NOW - 90 * DAY,
-      prCount: 600,
-      fixCount: 80,
-      files: Object.fromEntries(tree.map((_, i) => [i, [10, 2, NOW, [7, 8]]])),
-      coupling: [],
-    };
-    const a = buildApp({
-      config,
-      store,
-      bus,
-      now: () => clock,
-      mapTree: async () => ({ tree, imports, hist }),
-    });
-    try {
-      const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-      expect(response.statusCode).toBe(200);
-      expect(unpackMap(response.json()).tree).toHaveLength(1074);
-      expect(Buffer.byteLength(response.body)).toBeLessThan(60_000);
-      expect(response.json()).not.toHaveProperty("imports");
-      expect(response.json()).not.toHaveProperty("hist");
-      const graph = await a.inject({
-        method: "GET",
-        url: `/api/repos/shop-app/map/graph?key=${response.json().graphKey}`,
-      });
-      expect(graph.statusCode).toBe(200);
-      expect(graph.json().imports).toHaveLength(4616);
-      expect(graph.json().hist.files).toHaveProperty("1073");
-    } finally {
-      await a.close();
-    }
-  });
-
-  it("reuses the map payload while its inputs are unchanged and rebuilds when one changes", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
-    const checkout = mapCheckout(dir);
-    session.checkout = checkout;
-    const transcriptPath = join(dir, "cache.jsonl");
-    writeFileSync(transcriptPath, "");
-    store.upsertRun(run({ id: "cache-run", agentId: "guido-1", transcriptPath }));
-    store.setSeatSession({
-      seatId: "guido-1",
-      runId: "cache-run",
-      cliSessionId: null,
-      vendor: "claude",
-      state: "running",
-      reason: null,
-      worktree: dir,
-      updatedAt: NOW,
-    });
-    const a = buildApp({ config, store, bus, now: () => clock, supervisor: stubSupervisor() });
-    const builds = () => supervisorCalls.filter((c) => c[0] === "context").length;
-    const fetch = async () => {
-      const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-      expect(response.statusCode).toBe(200);
-      return response;
-    };
-    try {
-      const first = await fetch();
-      const built = builds();
-      expect(built).toBeGreaterThan(0);
-      expect((await fetch()).body).toBe(first.body);
-      expect(builds()).toBe(built);
-      // a ring delta
-      appendFileSync(
-        transcriptPath,
-        `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Grep", input: { pattern: "x" } }] } })}\n`,
-      );
-      await fetch();
-      expect(builds()).toBeGreaterThan(built);
-      const afterDelta = builds();
-      await fetch();
-      expect(builds()).toBe(afterDelta);
-      // a new commit on the default branch
-      writeFileSync(join(checkout, "added.ts"), "export const added = 1;\n");
-      const git = (...args: string[]) =>
-        execFileSync("git", [
-          "-C",
-          checkout,
-          "-c",
-          "user.name=Fixture",
-          "-c",
-          "user.email=fixture@example.invalid",
-          "-c",
-          "commit.gpgsign=false",
-          ...args,
-        ]);
-      git("add", ".");
-      git("commit", "-qm", "more");
-      git("update-ref", "refs/remotes/origin/main", "HEAD");
-      await fetch();
-      expect(builds()).toBeGreaterThan(afterDelta);
-      const afterCommit = builds();
-      // a seat change
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: "cache-run",
-        cliSessionId: null,
-        vendor: "claude",
-        state: "idle",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW + 5000,
-      });
-      clock += 5000;
-      await fetch();
-      expect(builds()).toBeGreaterThan(afterCommit);
-    } finally {
-      await a.close();
-    }
-  });
-
-  describe("the map's tree is built once per default-branch head", () => {
-    const commitOnDefault = (checkout: string, file: string) => {
-      const git = (...args: string[]) =>
-        execFileSync("git", [
-          "-C",
-          checkout,
-          "-c",
-          "user.name=Fixture",
-          "-c",
-          "user.email=fixture@example.invalid",
-          "-c",
-          "commit.gpgsign=false",
-          ...args,
-        ]);
-      writeFileSync(join(checkout, file), "export const added = 1;\n");
-      git("add", ".");
-      git("commit", "-qm", `add ${file}`);
-      git("update-ref", "refs/remotes/origin/main", "HEAD");
-    };
-    const openMap = (transcriptPath: string) => {
-      withCrew();
-      const session = config.crew?.sessions[0];
-      if (!session) throw new Error("fixture session missing");
-      const checkout = mapCheckout(dir);
-      session.checkout = checkout;
-      writeFileSync(transcriptPath, "");
-      store.upsertRun(run({ id: "tree-run", agentId: "guido-1", transcriptPath }));
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: "tree-run",
-        cliSessionId: null,
-        vendor: "claude",
-        state: "running",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      const builds: string[] = [];
-      const a = buildApp({
-        config,
-        store,
-        bus,
-        now: () => clock,
-        supervisor: stubSupervisor(),
-        // a slow build: a rebuild on every load would blow the 500 ms budget
-        mapTree: async (...args) => {
-          builds.push(args[0]);
-          await new Promise((r) => setTimeout(r, 600));
-          return await mapTree(...args);
-        },
-      });
-      return { a, builds, checkout };
-    };
-    it("builds the tree once however often the map loads, and again when the head moves", async () => {
-      const { a, builds, checkout } = openMap(join(dir, "tree.jsonl"));
-      try {
-        for (let i = 0; i < 3; i++) {
-          clock += 5000;
-          const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-          expect(r.statusCode).toBe(200);
-        }
-        expect(builds).toHaveLength(1);
-        commitOnDefault(checkout, "added.ts");
-        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-        expect(builds).toHaveLength(2);
-        expect(unpackMap(moved.json()).tree).toContainEqual(
-          expect.objectContaining({ path: "added.ts" }),
-        );
-      } finally {
-        await a.close();
-      }
-    });
-
-    it("answers the map in under 500 ms once the tree is cached", async () => {
-      const { a, builds } = openMap(join(dir, "fast.jsonl"));
-      try {
-        await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-        // past the whole-payload cache, so only the tree cache can keep this load fast
-        clock += 16_000;
-        const start = performance.now();
-        await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-        expect(performance.now() - start).toBeLessThan(500);
-        expect(builds).toHaveLength(1);
-      } finally {
-        await a.close();
-      }
-    });
-  });
-
-  it("does not build the map until a viewer requests it", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
-    session.checkout = mapCheckout(dir);
-    const transcriptPath = join(dir, "warm.jsonl");
-    writeFileSync(transcriptPath, "");
-    store.upsertRun(run({ id: "warm-run", agentId: "guido-1", transcriptPath }));
-    store.setSeatSession({
-      seatId: "guido-1",
-      runId: "warm-run",
-      cliSessionId: null,
-      vendor: "claude",
-      state: "running",
-      reason: null,
-      worktree: dir,
-      updatedAt: NOW,
-    });
-    const builds = () => supervisorCalls.filter((c) => c[0] === "context").length;
-    const start = () =>
-      buildApp({
-        config,
-        store,
-        bus,
-        now: () => clock,
-        supervisor: stubSupervisor(),
-        warmMap: true,
-      });
-    const warmed = start();
-    try {
-      await warmed.ready();
-      expect(builds()).toBe(0);
-      expect(
-        (await warmed.inject({ method: "GET", url: "/api/repos/shop-app/map" })).statusCode,
-      ).toBe(200);
-      expect(builds()).toBe(1);
-    } finally {
-      await warmed.close();
-    }
-    // A new hub also leaves the map cold until its first map request.
-    supervisorCalls = [];
-    const racing = start();
-    try {
-      await racing.ready();
-      expect(builds()).toBe(0);
-      const response = await racing.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-      expect(response.statusCode).toBe(200);
-      expect(builds()).toBe(1);
-    } finally {
-      await racing.close();
-    }
-  });
-
-  it("carries the repo's resolved area and hard-rule globs in the map snapshot", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    const repo = config.repos.find((r) => r.id === "shop-app");
-    if (!session || !repo) throw new Error("fixture session missing");
-    const checkout = mapCheckout(dir);
-    session.checkout = checkout;
-    const configured = {
-      ...DEFAULT_REPO_RULES,
-      areas: { "area:web": ["apps/web/**"] },
-      hardRules: ["config.example.yaml"],
-    };
-    repo.rules = configured;
-    const commitClaudeMd = (text: string) => {
-      writeFileSync(join(checkout, "CLAUDE.md"), text);
-      const git = (...args: string[]) =>
-        execFileSync("git", [
-          "-C",
-          checkout,
-          "-c",
-          "user.name=Fixture",
-          "-c",
-          "user.email=fixture@example.invalid",
-          "-c",
-          "commit.gpgsign=false",
-          ...args,
-        ]);
-      git("add", "CLAUDE.md");
-      git("commit", "-qm", "rules");
-      git("update-ref", "refs/remotes/origin/main", "HEAD");
-    };
-
-    // The committed CLAUDE.md wins over the configured rules.
-    commitClaudeMd(
-      '## Mission Control\n\n```yaml\nmc:\n  areas:\n    "area:core": ["packages/core/**"]\n  hard_rules: ["CLAUDE.md"]\n```\n',
-    );
-    const read = await get("/api/repos/shop-app/map");
-    expect(read.statusCode).toBe(200);
-    expect(read.json().rules).toEqual({
-      areas: { "area:core": ["packages/core/**"] },
-      hardRules: ["CLAUDE.md"],
-    });
-
-    // An explicit empty hard_rules list is sent as such.
-    commitClaudeMd(
-      '## Mission Control\n\n```yaml\nmc:\n  areas:\n    "area:core": ["packages/core/**"]\n  hard_rules: []\n```\n',
-    );
-    expect((await get("/api/repos/shop-app/map")).json().rules.hardRules).toEqual([]);
-
-    // A block that does not parse leaves the configured rules, and the map still answers.
-    commitClaudeMd("## Mission Control\n\nNo yaml fence here.\n");
-    const fallback = await get("/api/repos/shop-app/map");
-    expect(fallback.statusCode).toBe(200);
-    expect(fallback.json().rules).toEqual({
-      areas: configured.areas,
-      hardRules: configured.hardRules,
-    });
-  });
-
-  it("carries each seat's area and the hard rules the engine enforces in the map snapshot", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    const repo = config.repos.find((r) => r.id === "shop-app");
-    const seat = session?.seats[0];
-    if (!session || !repo || !seat) throw new Error("fixture session missing");
-    session.checkout = mapCheckout(dir);
-    seat.area = ["apps/web/**", "docs/**"];
-    repo.rules = { ...DEFAULT_REPO_RULES, hardRules: ["config.example.yaml"] };
-
-    // a standard repo's own list is the whole list
-    const standard = (await get("/api/repos/shop-app/map")).json();
-    expect(standard.seats[0].area).toEqual(["apps/web/**", "docs/**"]);
-    expect(standard.rules.hardRules).toEqual(["config.example.yaml"]);
-
-    // a superuser repo's narrower list still carries the defaults and the FLIGHT floor
-    repo.flightPowers = "superuser";
-    const superuser = (await get("/api/repos/shop-app/map")).json();
-    expect(superuser.rules.hardRules).toEqual(effectiveHardRules(repo.rules, "superuser"));
-    expect(superuser.rules.hardRules).toEqual(
-      expect.arrayContaining(["config.example.yaml", ...DEFAULT_HARD_RULES, "CLAUDE.md"]),
-    );
-
-    // a seat with no area sends an empty list
-    seat.area = [];
-    expect((await get("/api/repos/shop-app/map")).json().seats[0].area).toEqual([]);
-  });
-
-  for (const vendor of ["claude", "codex"] as const) {
-    it(`scopes FLIGHT ${vendor} activity to the current turn and selected repo`, async () => {
-      withCrew();
-      const session = config.crew?.sessions[0];
-      if (!session) throw new Error("fixture session missing");
-      session.checkout = mapCheckout(dir);
-      session.seats.push({
-        id: "flight-1",
-        role: "FLIGHT",
-        accountId: "claude-main",
-        model: "opus",
-        area: [],
-      });
-      const transcriptPath = join(dir, "flight.jsonl");
-      const call =
-        vendor === "claude"
-          ? {
-              type: "assistant",
-              message: {
-                content: [
-                  {
-                    type: "tool_use",
-                    id: "read",
-                    name: "Read",
-                    input: { file_path: join(session.checkout, "package.json") },
-                  },
-                ],
-              },
-            }
-          : {
-              method: "item/started",
-              params: {
-                item: {
-                  id: "read",
-                  type: "commandExecution",
-                  command: `cat ${join(session.checkout, "package.json")}`,
-                },
-              },
-            };
-      const elsewhere =
-        vendor === "claude"
-          ? {
-              type: "assistant",
-              message: {
-                content: [
-                  {
-                    type: "tool_use",
-                    id: "outside",
-                    name: "Read",
-                    input: { file_path: join(dir, "outside.ts") },
-                  },
-                ],
-              },
-            }
-          : {
-              method: "item/started",
-              params: {
-                item: {
-                  id: "outside",
-                  type: "commandExecution",
-                  command: `cat ${join(dir, "outside.ts")}`,
-                },
-              },
-            };
-      writeFileSync(join(dir, "outside.ts"), "outside\n");
-      writeFileSync(transcriptPath, `${JSON.stringify(call)}\n${JSON.stringify(elsewhere)}\n`);
-      store.upsertRun(run({ id: "flight-turn", agentId: "flight-1", transcriptPath, vendor }));
-      store.setSeatSession({
-        seatId: "flight-1",
-        runId: "flight-turn",
-        cliSessionId: null,
-        vendor,
-        state: "running",
-        reason: null,
-        worktree: null,
-        updatedAt: NOW,
-      });
-      const response = await get("/api/repos/shop-app/map");
-      expect(
-        response.json().seats.find((s: { seat: string }) => s.seat === "FLIGHT"),
-      ).toMatchObject({
-        ticket: null,
-        calls: [expect.objectContaining({ files: ["package.json"] })],
-      });
-      const end = vendor === "claude" ? { type: "result" } : { method: "turn/completed" };
-      appendFileSync(transcriptPath, `${JSON.stringify(end)}\n`);
-      const ended = await get("/api/repos/shop-app/map");
-      expect(ended.json().seats.find((s: { seat: string }) => s.seat === "FLIGHT")).toMatchObject({
-        calls: [],
-        scope: { read: [], modified: [] },
-        recent: [],
-      });
-    });
-  }
-
-  it("keeps aside churn after reassignment and drops it after merge", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
-    session.checkout = mapCheckout(dir);
-    const transcriptPath = join(dir, "aside.jsonl");
-    writeFileSync(transcriptPath, mapFixture("claude"));
-    store.upsertRun(
-      run({
-        id: "aside",
-        agentId: "guido-1",
-        transcriptPath,
-        branch: "aside-branch",
-        ticket: "shop-app#41",
-        ticketTitle: "Set-aside work",
-        loop: { ...NEW_LOOP, aside: { worktree: dir, wake: false } },
-      }),
-    );
-    store.upsertRun(run({ id: "next", agentId: "guido-1", startedAt: NOW + 1 }));
-    const response = await get("/api/repos/shop-app/map");
-    expect(response.json().seats[0].scope.modified).toEqual([
-      { file: "file.ts", add: 2, rem: 1, source: "churn" },
-    ]);
-    expect(response.json().seats[0].scope.read).toEqual([]);
-    // the set-aside branch still names the seat in conflicts and their unchecked notes
-    expect(response.json().seats[0].branches).toContain("aside-branch");
-    // the only changes are on the set-aside branch: the seat's line leads with its ticket and title
-    expect(response.json().seats[0]).toMatchObject({
-      ticket: 41,
-      title: "Set-aside work",
-      nowTicket: null,
-      tickets: { "aside-branch": 41 },
-      changedOn: ["aside-branch"],
-    });
-    store.upsertPullRequests(
-      "shop-app",
-      [
-        {
-          repoId: "shop-app",
-          number: 7,
-          title: "Fixture",
-          url: "https://example.invalid/pr",
-          branch: "aside-branch",
-          ticket: null,
-          state: "merged",
-          isDraft: false,
-          review: null,
-          ci: "passing",
-          createdAt: NOW,
-          updatedAt: NOW,
-          mergedAt: NOW,
-          mergeCommitSha: null,
-          headSha: null,
-          mergeable: null,
-          author: null,
-          assignees: [],
-          checks: [],
-          closingIssues: [],
-        },
-      ],
-      NOW,
-    );
-    const merged = (await get("/api/repos/shop-app/map")).json().seats[0];
-    expect(merged.scope.modified).toEqual([]);
-    expect(merged.branches).not.toContain("aside-branch");
-  });
-
-  it("flags a park from a run the operator stopped, so the map never calls it stuck", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
-    session.checkout = mapCheckout(dir);
-    store.upsertRun(
-      run({
-        id: "stopped-loop",
-        agentId: "guido-1",
-        loop: {
-          ...NEW_LOOP,
-          phase: "parked",
-          parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
-        },
-      }),
-    );
-    store.setRunEnded("stopped-loop", NOW, "ok", "operator");
-    expect((await get("/api/repos/shop-app/map")).json().seats[0].badges.waiting).toMatchObject({
-      kind: "parked",
-      reason: "run ended (stopped)",
-      stopped: true,
-    });
-  });
-
-  it("uses the loop park reason and its state age for waiting", async () => {
-    withCrew();
-    const session = config.crew?.sessions[0];
-    if (!session) throw new Error("fixture session missing");
-    session.checkout = mapCheckout(dir);
-    store.upsertRun(
-      run({
-        id: "parked-loop",
-        agentId: "guido-1",
-        loop: {
-          ...NEW_LOOP,
-          phase: "parked",
-          parked: { kind: "operator", reason: "Check the plan", ended: false },
-        },
-      }),
-    );
-    const response = await get("/api/repos/shop-app/map");
-    expect(response.json().seats[0].badges.waiting).toEqual({
-      kind: "parked",
-      reason: "Check the plan",
-      since: response.json().seats[0].since,
-      stopped: false,
-    });
-  });
-
-  for (const vendor of ["claude", "codex"] as const) {
-    it(`assembles ${vendor} map calls, churn, parsed tests and measured context`, async () => {
-      withCrew();
-      const session = config.crew?.sessions[0];
-      if (!session) throw new Error("fixture session missing");
-      session.checkout = mapCheckout(dir);
-      const transcriptPath = join(dir, "map.jsonl");
-      writeFileSync(join(dir, "file.ts"), "before\n");
-      const lines = mapFixture(vendor).trim().split("\n");
-      writeFileSync(transcriptPath, `${lines.join("\n")}\n`);
-      store.upsertRun(
-        run({ id: "map-run", agentId: "guido-1", transcriptPath, ticket: "shop-app#7" }),
-      );
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: "map-run",
-        cliSessionId: null,
-        vendor,
-        state: "running",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      const question = store.addQuestion({
-        agentId: "guido-1",
-        runId: "map-run",
-        text: "Which approach?",
-        at: NOW,
-      });
-      store.addQuestion({
-        agentId: "guido-1",
-        runId: "previous-run",
-        text: "Old question",
-        at: NOW - 1,
-      });
-      for (const round of [1, 2]) {
-        const reviewId = store.requestReview({
-          authorRunId: "map-run",
-          repoId: "shop-app",
-          seatId: "retro-1",
-          prNumber: 7,
-          sha: String(round).repeat(40),
-          epoch: 1,
-          attempt: round,
-          round,
-          at: NOW + round,
-        });
-        if (reviewId === null) throw new Error("fixture review missing");
-        store.setReviewState(reviewId, ["queued"], "running", {
-          at: NOW + round,
-          runId: `review-${round}`,
-        });
-        store.recordFindings(reviewId, `review-${round}`, {
-          verdict: { spec: "pass", quality: "fail" },
-          summary: "Check boundary",
-          findings: [
-            {
-              severity: round === 1 ? "Critical" : "Important",
-              file: "file.ts",
-              line: round,
-              summary: "Check input",
-              scenario: "Empty input",
-              fix: "Handle empty input",
-            },
-          ],
-          at: NOW + round,
-        });
-      }
-      const a = buildApp({ config, store, bus, now: () => clock, supervisor: stubSupervisor() });
-      try {
-        const response = await a.inject({ method: "GET", url: "/api/repos/shop-app/map" });
-        expect(response.statusCode).toBe(200);
-        expect(response.json().findings).toEqual([
-          expect.objectContaining({
-            seat: "guido-1",
-            ticket: 7,
-            round: 2,
-            severity: "Important",
-            line: 2,
-          }),
-        ]);
-        expect(response.json().seats[0].badges.questions).toEqual([
-          { id: question, from: "guido-1", to: "CAPCOM", ticket: 7, since: NOW },
-        ]);
-        expect(response.json().seats[0].badges.review).toMatchObject({
-          round: 2,
-          counts: { Critical: 0, Important: 1, Minor: 0 },
-        });
-        expect(response.json().seats[0]).toMatchObject({
-          seat: "guido-1",
-          ticket: 7,
-          context: { total: 10, window: 100 },
-          scope: { modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }] },
-          badges: {
-            tests: { runner: "vitest", status: "failed", passed: 2, failed: 1, editedSince: false },
-            failures: [expect.objectContaining({ refused: true })],
-          },
-        });
-        appendFileSync(transcriptPath, `${(lines[4] as string).replaceAll("denied", "pending")}\n`);
-        const active = (await a.inject({ method: "GET", url: "/api/repos/shop-app/map" })).json();
-        expect(active.seats[0].calls).toEqual([
-          expect.objectContaining({ files: ["file.ts"], since: expect.any(Number) }),
-        ]);
-        store.setSeatSession({
-          seatId: "guido-1",
-          runId: "map-run",
-          cliSessionId: null,
-          vendor,
-          state: "parked",
-          reason: "Waiting for input",
-          worktree: dir,
-          updatedAt: NOW,
-        });
-        clock += 2100;
-        const parked = (await a.inject({ method: "GET", url: "/api/repos/shop-app/map" })).json();
-        expect(parked.seats[0]).toMatchObject({
-          calls: [],
-          scope: { read: [], modified: [{ file: "file.ts", add: 2, rem: 1, source: "churn" }] },
-          badges: {
-            waiting: { kind: "parked", since: NOW, reason: "Waiting for input", stopped: false },
-          },
-        });
-      } finally {
-        await a.close();
-      }
-    });
-  }
   it("repos/:repoId/prs returns the stored pull requests, 404 for an unknown repo", async () => {
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([]);
     const pr = {
@@ -11290,86 +10486,5 @@ describe("lighter reads and compressed responses", () => {
       });
       expect(health.headers["content-encoding"]).toBeUndefined();
     });
-  });
-});
-
-describe("design preview routes", () => {
-  it("list and open need the operator token, and open answers 404 for a ticket with no stored preview", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "mc-dp-api-"));
-    const previews = new DesignPreviews({
-      root: join(dir, "store"),
-      port: 7440,
-      hubPort: 7420,
-      repoId: "shop-app",
-      prOf: () => null,
-    });
-    const a = buildApp({ config, store, bus, designPreviews: previews, operatorToken: "tok" });
-    try {
-      const key = { [OPERATOR_HEADER]: "tok" };
-      expect((await a.inject("/api/design-previews")).statusCode).toBe(401);
-      expect(
-        (
-          await a.inject({
-            method: "POST",
-            url: "/api/design-previews/1/open",
-            headers: json,
-            payload: {},
-          })
-        ).statusCode,
-      ).toBe(401);
-      expect((await a.inject({ url: "/api/design-previews", headers: key })).json()).toEqual([]);
-      const none = await a.inject({
-        method: "POST",
-        url: "/api/design-previews/1/open",
-        headers: { ...key, ...json },
-        payload: {},
-      });
-      expect(none.statusCode).toBe(404);
-      expect(none.json()).toEqual({ error: "No stored preview for this ticket." });
-    } finally {
-      await a.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("list and open name the repo each preview belongs to", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "mc-dp-api-"));
-    const dist = join(dir, "wt", "apps", "web", "dist");
-    mkdirSync(dist, { recursive: true });
-    writeFileSync(
-      join(dist, "index.html"),
-      "<!doctype html><html><head></head><body>x</body></html>",
-    );
-    const previews = new DesignPreviews({
-      root: join(dir, "store"),
-      port: 7440,
-      hubPort: 7420,
-      repoId: "shop-app",
-      prOf: () => null,
-    });
-    await previews.publish({
-      ticket: 1453,
-      branch: "feature/1453-x",
-      sha: "a".repeat(40),
-      worktree: join(dir, "wt"),
-    });
-    const a = buildApp({ config, store, bus, designPreviews: previews, operatorToken: "tok" });
-    try {
-      const key = { [OPERATOR_HEADER]: "tok" };
-      const list = (await a.inject({ url: "/api/design-previews", headers: key })).json();
-      expect(list).toHaveLength(1);
-      expect(list[0]).toMatchObject({ repoId: "shop-app", ticket: 1453 });
-      const open = await a.inject({
-        method: "POST",
-        url: "/api/design-previews/1453/open",
-        headers: { ...key, ...json },
-        payload: {},
-      });
-      expect(open.json()).toMatchObject({ repoId: "shop-app", ticket: 1453 });
-    } finally {
-      await previews.close();
-      await a.close();
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

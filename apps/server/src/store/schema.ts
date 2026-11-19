@@ -11,11 +11,6 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, started_at);
 -- Kept apart from runs so run queries stay small; written on its own change check.
 CREATE TABLE IF NOT EXISTS run_digests (run_id TEXT PRIMARY KEY, digest TEXT NOT NULL);
--- Map snapshot parts that never change for their key (a commit's tree and imports, a merge's files).
-CREATE TABLE IF NOT EXISTS map_cache (
-  kind TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
-  PRIMARY KEY (kind, scope, key)
-);
 -- HUD state changes that matter (#26 B14): into or out of a notable state.
 CREATE TABLE IF NOT EXISTS agent_events (
   agent_id TEXT NOT NULL, at INTEGER NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL,
@@ -63,18 +58,6 @@ CREATE TABLE IF NOT EXISTS escaped_defects (
   PRIMARY KEY (repo_id, issue_number, pr_number)
 );
 CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
--- A closed bug traced to the commit and PR that introduced it, and why it was missed; one row per bug.
-CREATE TABLE IF NOT EXISTS bug_escapes (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, filed_at INTEGER NOT NULL,
-  fix_pr INTEGER NOT NULL, commit_sha TEXT NOT NULL, introduced_pr INTEGER,
-  merged_at INTEGER NOT NULL, missed TEXT NOT NULL, PRIMARY KEY (repo_id, issue_number)
-);
--- When a bug's trace was last tried and failed, so a pass moves on to the bugs tried least recently.
-CREATE TABLE IF NOT EXISTS bug_escape_tries (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, tried_at INTEGER NOT NULL,
-  PRIMARY KEY (repo_id, issue_number)
-);
-CREATE INDEX IF NOT EXISTS bug_escapes_filed ON bug_escapes(filed_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)
@@ -88,24 +71,12 @@ CREATE TABLE IF NOT EXISTS prompt_sections (
   PRIMARY KEY (run_id, wake, section)
 );
 CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
-CREATE TABLE IF NOT EXISTS run_token_audit (
-  run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
-  median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
-  output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
-  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL,
-  timestamps_checked INTEGER NOT NULL DEFAULT 0
-);
 -- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
 CREATE TABLE IF NOT EXISTS mcp_tool_calls (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, run_id TEXT NOT NULL,
   tool TEXT NOT NULL, written INTEGER NOT NULL, returned INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
-CREATE TABLE IF NOT EXISTS run_token_calls (
-  run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
-  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL, at INTEGER,
-  PRIMARY KEY (run_id, idx)
-);
 CREATE TABLE IF NOT EXISTS controller_messages (
   message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL,
   cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, output INTEGER NOT NULL

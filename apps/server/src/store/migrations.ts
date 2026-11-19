@@ -10,7 +10,32 @@ export const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 /** Tables an older release made and this one does not use; an existing database drops them. */
-const RETIRED_TABLES = ["run_handoffs", "ticket_waits", "holds", "run_reads", "run_rereads"];
+const RETIRED_TABLES = [
+  "run_handoffs",
+  "ticket_waits",
+  "holds",
+  "run_reads",
+  "run_rereads",
+  // the code-health, Map, token-audit and bug-escape features
+  "map_cache",
+  "bug_escapes",
+  "bug_escape_tries",
+  "run_token_audit",
+  "run_token_calls",
+  "code_health_file_memberships",
+  "code_health_file_sizes",
+  "code_health_git_sources",
+  "code_health_merged_reviews",
+  "code_health_overview",
+  "code_health_recommendation_requests",
+  "code_health_recommendations",
+  "code_health_revisions",
+  "code_health_size_snapshots",
+  "code_health_size_sources",
+  "code_health_test_attempts",
+  "code_health_test_qa",
+  "code_health_test_reports",
+];
 
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
@@ -81,10 +106,6 @@ class Migrations {
     // A commit a run only follows, such as someone else's on top of its push (#2099).
     this.addColumn("run_commits", "followed", "INTEGER NOT NULL DEFAULT 0");
     // Token audit call times (#1646): audits stored before this have none until re-read.
-    this.addColumn("run_token_calls", "at", "INTEGER");
-    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("run_token_audit", "sessions", "TEXT NOT NULL DEFAULT '[]'");
-    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");

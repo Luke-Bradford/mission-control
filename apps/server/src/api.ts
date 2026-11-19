@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -16,13 +15,10 @@ import {
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
-  type BoardItem,
   type ChangedFiles,
   CI_TRIES,
   type CiRunsView,
   type CliAccountStatus,
-  CODE_HEALTH_TABS,
-  CODE_HEALTH_WINDOWS,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
@@ -63,7 +59,6 @@ import {
   DEFAULT_REPO_RULES,
   DRAFT_BAD_TARGET,
   ENGINE_TICK_MS,
-  effectiveHardRules,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
   FLIGHT_CONTROLLER_CHECK_PATHS,
@@ -96,10 +91,6 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
-  type MapGraph,
-  type MapLive,
-  type MapPayload,
-  type MapTree,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -122,7 +113,6 @@ import {
   type PullRequestSummary,
   type PullRequestView,
   pace5h,
-  packMapTree,
   percentile,
   QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
@@ -151,10 +141,6 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
-  TOKEN_AUDIT_DAYS_DEFAULT,
-  TOKEN_AUDIT_DAYS_MAX,
-  TOKEN_AUDIT_HOURS_MAX,
-  type TokenAuditView,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -168,7 +154,6 @@ import {
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
-  type FastifyBaseLogger,
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
@@ -228,11 +213,6 @@ import {
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { cleanCodeHealth } from "./code-health/clean.ts";
-import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
-import { RecommendationMutation } from "./code-health/recommendations.ts";
-import { TestQaProposal } from "./code-health/test-qa.ts";
-import { TEST_REPORT_BYTES_MAX, TestReport } from "./code-health/test-reports.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -311,10 +291,9 @@ import {
   TeamsSelection,
 } from "./config.ts";
 import type { CrewReloader } from "./crew-apply.ts";
-import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
-import { RepoRulesError, readRepoBlock, readRepoRules } from "./engine/rules.ts";
+import { RepoRulesError, readRepoBlock } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   askExternalReview,
@@ -374,10 +353,6 @@ import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
 import { loopTries } from "./loop/history.ts";
-import { MapConflicts } from "./map/conflicts.ts";
-import { CallRing, type RingSource } from "./map/ring.ts";
-import { mapSeats } from "./map/seats.ts";
-import { type MapPersist, mapHead, mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
@@ -465,7 +440,6 @@ import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/ma
 import { metricsView } from "./telemetry/metrics.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
-import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
@@ -555,14 +529,10 @@ export interface AppDeps {
   ticketRead?: SignoffDeps["readCard"];
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
-  /** Shared bounded reader; the MCP read handler can use this same instance. */
-  codeHealth?: CodeHealthReader;
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
   previewRepoId?: RepoId;
-  /** The hub's design previews (a branch's built app, shown with Demo data); absent on preview hubs. */
-  designPreviews?: DesignPreviews;
   /** A child preview reports browser activity to its parent without exposing an operator token. */
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
@@ -574,11 +544,6 @@ export interface AppDeps {
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
   reviewShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
-  mapRing?: CallRing;
-  /** Reads the map's file tree; default: git at the checkout. Tests count the builds. */
-  mapTree?: typeof mapTree;
-  /** Build each repo's map payload in the background once the app is ready (the hub's start). */
-  warmMap?: boolean;
   config: CcConfig;
   /** Cached Codex model catalogs, isolated by each account's CLI binding. */
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
@@ -957,12 +922,6 @@ const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
 /** An unchanged store, lock and login is not reconciled for notifications again before this. */
 const NOTIFICATION_REPEAT_MS = 60_000;
-/** Longest a map payload is reused: the backstop for fields that age without any input changing. */
-const MAP_CACHE_MS = 15_000;
-/** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
-const MAP_TREE_MS = 60 * 60_000;
-type MapTreeBuilt = { etag: string; tree: MapTree; graph: MapGraph };
-
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const qaReports =
@@ -982,250 +941,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       now: deps.now,
     });
   const now = deps.now ?? Date.now;
-  const codeHealth = deps.codeHealth ?? new CodeHealthReader(store, config, now);
   let transcriptFootprintCache: {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
-  const mapConflicts = new MapConflicts(undefined, {
-    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
-    put: (kind, scope, key, value, exclusive) =>
-      store.mapCachePut(kind, scope, key, value, exclusive),
-  });
-  const mapSources = new Map<string, RingSource>();
-  const mapRing = new CallRing(() => {
-    const sources: RingSource[] = [];
-    const recent = store.runsActiveSince(now() - 15 * 60_000);
-    for (const agent of configuredAgents(config)) {
-      if (agent.kind !== "crew") continue;
-      const seat = store.seatSession(agent.id);
-      const current = store.seatRun(agent.id);
-      const flight = agent.seat.role === "FLIGHT";
-      const runs = [
-        ...new Map(
-          [
-            ...(current ? [current] : []),
-            ...(!flight
-              ? [
-                  ...store.mapAsideRuns(agent.id),
-                  ...recent.filter((r) => r.agentId === agent.id && r.repoId === agent.repoId),
-                ]
-              : []),
-          ].map((r) => [r.id, r]),
-        ).values(),
-      ];
-      for (const run of runs) {
-        const repos = flight ? config.repos : config.repos.filter((r) => r.id === run.repoId);
-        for (const repo of repos) {
-          const id = flight ? `${run.id}:${repo.id}` : run.id;
-          const cwd = flight
-            ? config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout
-            : ((seat?.runId === run.id ? seat.worktree : null) ??
-              run.loop?.aside?.worktree ??
-              mapSources.get(id)?.cwd);
-          if (!cwd) continue;
-          const source: RingSource = {
-            id,
-            seat: agent.id,
-            repoId: repo.id,
-            cwd,
-            transcriptPath: run.transcriptPath,
-            vendor: run.vendor ?? seat?.vendor,
-            turnScoped: flight,
-            current: current?.id === run.id,
-          };
-          sources.push(source);
-          mapSources.set(id, source);
-        }
-      }
-    }
-    const active = new Set(sources.map((s) => s.id));
-    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
-    return sources;
-  });
-  let stopMapRing: (() => void) | undefined;
-  const mapStore: MapPersist = {
-    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
-    put: (kind, scope, key, value, exclusive) =>
-      store.mapCachePut(kind, scope, key, value, exclusive),
-  };
-  const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapPayload> }>();
-  const mapTrees = new Map<string, { key: string; at: number; built: Promise<MapTreeBuilt> }>();
-  const buildTree = deps.mapTree ?? mapTree;
-  /** The tree part for the default-branch `head`: built once, kept until an input of it moves. */
-  const mapTreeFor = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    head: string,
-    prs: PullRequestView[],
-    board: BoardItem[],
-  ): Promise<MapTreeBuilt> => {
-    // The tree reads only the head, the merged PRs and the bug-labelled tickets (the history),
-    // and the rules: nothing about the crew, so a seat moving never reaches this key.
-    const key = JSON.stringify([
-      head,
-      prs
-        .filter((p) => p.state === "merged" && p.mergeCommitSha)
-        .map((p) => [p.number, p.mergeCommitSha, p.mergedAt, p.branch, p.ticket]),
-      board.filter((item) => item.labels.includes("bug")).map((item) => item.issueNumber),
-      flightPowersOf(config, repo.id),
-      repo.rules,
-    ]);
-    const at = now();
-    const cached = mapTrees.get(repo.id);
-    if (cached && cached.key === key && at - cached.at < MAP_TREE_MS) return await cached.built;
-    const built = (async (): Promise<MapTreeBuilt> => {
-      const tree = await buildTree(checkout, "origin/HEAD", prs, board, at, mapStore);
-      const read = await readRepoRules(repo.github, checkout, repo.rules);
-      // Unreadable repo rules leave the configured ones: the map still draws.
-      const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
-      const graphKey = createHash("sha256")
-        .update(JSON.stringify([tree.tree, tree.imports, tree.hist]))
-        .digest("hex");
-      const indexes = new Map(tree.tree.map((file, index) => [file.path, index]));
-      const graph: MapGraph = {
-        key: graphKey,
-        imports: tree.imports.flatMap(({ from, to }) => {
-          const a = indexes.get(from),
-            b = indexes.get(to);
-          return a === undefined || b === undefined ? [] : [[a, b] as [number, number]];
-        }),
-        hist: tree.hist,
-      };
-      return {
-        etag: `"${createHash("sha256").update(key).digest("hex").slice(0, 32)}"`,
-        graph,
-        tree: {
-          repoId: repo.id,
-          ...tree,
-          rules: {
-            areas: rules.areas,
-            hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
-          },
-        },
-      };
-    })();
-    const entry = { key, at, built };
-    mapTrees.set(repo.id, entry);
-    built.catch(() => {
-      if (mapTrees.get(repo.id) === entry) mapTrees.delete(repo.id);
-    });
-    return await built;
-  };
-  /** The crew's rows for the map: the summary view, which builds no event timelines. */
-  const mapCrewRows = (repo: (typeof config.repos)[number]) => {
-    const lock = deps.lock?.state() ?? NO_LOCK;
-    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
-    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
-    const rows = crew(config, store, now(), lock, undefined, true)
-      .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
-      .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
-    return { rows, lock };
-  };
-  const buildMapLive = async (
-    checkout: string,
-    repoId: string,
-    crewRows: CrewRow[],
-    lock: typeof NO_LOCK,
-    prs: PullRequestView[],
-    log: FastifyBaseLogger,
-  ): Promise<MapLive> => {
-    const data = mapSeats(
-      crewRows,
-      store,
-      mapRing,
-      lock,
-      now(),
-      flightSeat(config)?.seat.id ?? null,
-    );
-    const seq = mapRing.sequence(repoId);
-    for (const seat of data.seats) {
-      const context = store.seatSession(
-        seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
-      )?.runId
-        ? await deps.supervisor
-            ?.contextUsage(
-              seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
-            )
-            .catch(() => null)
-        : null;
-      seat.context = context ? { total: context.total, window: context.window } : null;
-    }
-    const conflicts = await mapConflicts.check(checkout, prs);
-    for (const failure of conflicts.failures)
-      log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-    return {
-      ...data,
-      conflicts: conflicts.conflicts,
-      conflictsUnchecked: conflicts.unchecked,
-      seq,
-    };
-  };
-  /** Starts the ring on first use and brings it up to date: the live part reads from it. */
-  const mapRingReady = () => {
-    if (!stopMapRing) stopMapRing = mapRing.start();
-    mapRing.poll();
-  };
-  /** The tree part and its ETag: built once per default-branch head, however many ask. */
-  const mapTreePayload = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-  ): Promise<MapTreeBuilt> =>
-    await mapTreeFor(
-      repo,
-      checkout,
-      await mapHead(checkout),
-      store.pullRequests(repo.id),
-      store.board(repo.id),
-    );
-  /** The cached map payload, built (once, however many ask) when an input has changed. */
-  const mapPayloadFor = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    log: FastifyBaseLogger,
-  ): Promise<MapPayload> => {
-    const head = await mapHead(checkout);
-    mapRingReady();
-    const { rows: crewRows, lock } = mapCrewRows(repo);
-    const prs = store.pullRequests(repo.id);
-    const board = store.board(repo.id);
-    // reused until the default branch, the ring, the seats (rows and lock), the PRs, the
-    // board or the rules change; the time-driven fields (ages, context) get the backstop
-    const key = JSON.stringify([
-      head,
-      mapRing.revision(repo.id),
-      crewRows,
-      lock,
-      prs,
-      board,
-      flightPowersOf(config, repo.id),
-      repo.rules,
-    ]);
-    const at = now();
-    const cached = mapPayloads.get(repo.id);
-    if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS) return await cached.payload;
-    // the tree part is its own cache: a changed seat or ring rebuilds only the live part
-    const payload = (async (): Promise<MapPayload> => {
-      const [{ tree, graph }, live] = await Promise.all([
-        mapTreeFor(repo, checkout, head, prs, board),
-        buildMapLive(checkout, repo.id, crewRows, lock, prs, log),
-      ]);
-      return {
-        repoId: tree.repoId,
-        rules: tree.rules,
-        tree: packMapTree(tree.tree),
-        graphKey: graph.key,
-        ...live,
-      };
-    })();
-    const entry = { key, at, payload };
-    mapPayloads.set(repo.id, entry);
-    payload.catch(() => {
-      if (mapPayloads.get(repo.id) === entry) mapPayloads.delete(repo.id);
-    });
-    return await payload;
-  };
-
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountModels = new Map<string, AccountModels>();
   let localAccountUpdate: Promise<void> | null = null;
@@ -1781,7 +1500,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
-    stopMapRing?.();
     clearTimeout(notificationTimer);
     clearTimeout(repeatTimer);
     for (const end of [...streams]) end();
@@ -3740,68 +3458,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      /** Answers a map route for a known repo with a readable checkout; 404 / 503 otherwise. */
-      const mapRoute =
-        <T>(
-          read: (
-            repo: (typeof config.repos)[number],
-            checkout: string,
-            req: FastifyRequest<{ Params: { repoId: string } }>,
-            reply: FastifyReply,
-          ) => Promise<T>,
-        ) =>
-        async (
-          req: FastifyRequest<{ Params: { repoId: string } }>,
-          reply: FastifyReply,
-        ): Promise<T | FastifyReply> => {
-          const repo = config.repos.find((r) => r.id === req.params.repoId);
-          if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
-          try {
-            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
-              return reply.code(503).send({ error: "map checkout unavailable" });
-            }
-            return await read(repo, checkout, req, reply);
-          } catch (e) {
-            reply.log.warn(
-              { reason: e instanceof Error ? e.message : String(e) },
-              "map snapshot unavailable",
-            );
-            const message = e instanceof Error ? e.message : "";
-            // git's own failure text carries paths and flags; the page gets a plain sentence instead
-            const reason =
-              message.startsWith("Command failed") ||
-              message === "the checkout has no files at this commit"
-                ? "git could not read the checkout"
-                : message;
-            return reply.code(503).send({
-              error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
-            });
-          }
-        };
-
-      // The map snapshot: apps/web/src/qa/useRepoGraph.ts and the Setup repo list read it through RESOURCES.repoMap.
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map",
-        mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
-      );
-
-      // Reader: apps/web/src/qa/useRepoGraph.ts (lazy QA Impact and History analysis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/graph",
-        mapRoute(async (repo, checkout, req, reply) => {
-          const { graph } = await mapTreePayload(repo, checkout);
-          const expected = (req.query as { key?: string }).key;
-          if (expected !== undefined && expected !== graph.key)
-            return reply.code(409).send({ error: "Map graph changed; reload the map" });
-          const etag = `"${graph.key}"`;
-          reply.header("etag", etag).header("cache-control", "private, no-cache");
-          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          return graph;
-        }),
-      );
-
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
       // A list is the open PRs plus those updated in the last PR_LIST_DAYS (`?days=N` reaches
       // back further, `?all=1` is every one), each with its checks as name and state; `?detail=1`
@@ -3899,33 +3555,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
         return deps.previews?.list() ?? [];
       });
-
-      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you lists previews)
-      api.get("/design-previews", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        return deps.designPreviews?.list() ?? [];
-      });
-
-      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you opens one)
-      api.post<{ Params: { ticket: string } }>(
-        "/design-previews/:ticket/open",
-        async (req, reply) => {
-          if (
-            operatorToken !== undefined &&
-            !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-          )
-            return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-          const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
-          const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
-          if (view === null)
-            return reply.code(404).send({ error: "No stored preview for this ticket." });
-          return view;
-        },
-      );
 
       // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
       api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
@@ -4322,39 +3951,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
         );
       });
-      // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
-      api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
-        "/audit/tokens",
-        async (req, reply) => {
-          const { days: rawDays, hours: rawHours, shape } = req.query;
-          if (rawDays !== undefined && rawHours !== undefined) {
-            return reply.code(400).send({ error: "send days or hours, not both" });
-          }
-          if (shape !== undefined && shape !== "summary") {
-            return reply.code(400).send({ error: "shape must be summary" });
-          }
-          let view: TokenAuditView;
-          if (rawHours !== undefined) {
-            const hours = /^\d{1,2}$/.test(rawHours) ? Number(rawHours) : 0;
-            if (hours < 1 || hours > TOKEN_AUDIT_HOURS_MAX) {
-              return reply.code(400).send({
-                error: `hours must be a whole number from 1 to ${TOKEN_AUDIT_HOURS_MAX}`,
-              });
-            }
-            view = tokenAuditWindowView(store, config, now(), hours);
-          } else {
-            const raw = rawDays ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
-            const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-            if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
-              return reply
-                .code(400)
-                .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
-            }
-            view = tokenAuditView(store, config, now(), days);
-          }
-          return shape === "summary" ? tokenAuditSummary(view) : view;
-        },
-      );
       // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
@@ -5144,241 +4740,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return repos
           .flatMap((repo) => readDependencyChains(store, repo.id, at))
           .sort(compareDependencyChains);
-      });
-      const CodeHealthQuery = z.strictObject({
-        repo: z.string().trim().min(1).max(128),
-        window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
-        tab: z.enum(CODE_HEALTH_TABS).default("overview"),
-      });
-      const codeHealthOutput = async (value: unknown) =>
-        cleanCodeHealth(value, [
-          operatorToken ?? "",
-          ...(await (deps.knownSecrets?.() ?? Promise.resolve([]))),
-        ]);
-      const codeHealthFailure = (error: unknown, reply: FastifyReply) =>
-        reply.code(error instanceof CodeHealthReadError ? error.status : 503).send({
-          error:
-            error instanceof CodeHealthReadError
-              ? error.message
-              : "Code-health evidence could not be read. Retry collection or choose a shorter window.",
-        });
-      const codeHealthImportSecrets = async () => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          const known = await Promise.race([
-            deps.knownSecrets?.() ?? Promise.resolve([]),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error("Secret lookup unavailable")), 5000);
-            }),
-          ]);
-          return [operatorToken ?? "", ...known];
-        } finally {
-          clearTimeout(timer);
-        }
-      };
-      const testEvidenceAuth = async (req: FastifyRequest, reply: FastifyReply) => {
-        if (
-          operatorToken === undefined ||
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        if (deps.tokens?.resolve(bearer(req)) != null)
-          return reply.code(403).send({
-            error: "Test evidence imports require operator authority, not a seat identity.",
-          });
-      };
-      // Reader: docs/runbooks/code-health-test-evidence.md (operator imports result data only).
-      api.post(
-        "/code-health/test-reports",
-        {
-          bodyLimit: TEST_REPORT_BYTES_MAX,
-          onRequest: testEvidenceAuth,
-        },
-        async (req, reply) => {
-          const parsed = TestReport.safeParse(req.body);
-          if (!parsed.success)
-            return reply.code(400).send({ error: "Invalid version 1 test report." });
-          if (!config.repos.some((repo) => repo.id === parsed.data.repo))
-            return reply.code(404).send({ error: "Unknown code-health repo" });
-          try {
-            const known = await codeHealthImportSecrets();
-            const result = store.importCodeHealthTestReport(
-              parsed.data,
-              flightActor(req)?.seatId ?? config.operator.id,
-              now(),
-              known,
-            );
-            if (!result.reused) bus.emit("health");
-            return reply
-              .code(result.reused ? 200 : 201)
-              .header("cache-control", "no-store")
-              .send(result);
-          } catch (error) {
-            return codeHealthFailure(error, reply);
-          }
-        },
-      );
-      // Reader: docs/runbooks/code-health-test-evidence.md (links existing QA findings only).
-      api.post(
-        "/code-health/test-qa",
-        {
-          bodyLimit: 16384,
-          onRequest: testEvidenceAuth,
-        },
-        async (req, reply) => {
-          const body = TestQaProposal.safeParse(req.body);
-          if (!body.success) return reply.code(400).send({ error: "Invalid test QA proposal." });
-          if (!config.repos.some((repo) => repo.id === body.data.repo))
-            return reply.code(404).send({ error: "Unknown code-health repo" });
-          try {
-            const result = store.linkCodeHealthTestQa(
-              body.data,
-              flightActor(req)?.seatId ?? config.operator.id,
-              now(),
-              await codeHealthImportSecrets(),
-            );
-            if (!result.reused) bus.emit("health");
-            return reply
-              .code(result.reused ? 200 : 201)
-              .header("cache-control", "no-store")
-              .send(result);
-          } catch (error) {
-            return codeHealthFailure(error, reply);
-          }
-        },
-      );
-      // Reader: docs/runbook.md (the approved code-health dashboard's repo/window/tab summaries)
-      api.get("/code-health", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const parsed = CodeHealthQuery.safeParse(req.query);
-        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
-        reply.header("cache-control", "no-store");
-        try {
-          const { repo, window, tab } = parsed.data;
-          return await codeHealthOutput(codeHealth.read(repo, window, tab));
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (the Audit page's stored first-screen summary)
-      api.get("/code-health/overview", async (req, reply) => {
-        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const parsed = z
-          .strictObject({
-            repo: z.string().trim().min(1).max(128),
-            window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
-          })
-          .safeParse(req.query);
-        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
-        reply.header("cache-control", "no-store");
-        try {
-          const { view, changed } = codeHealth.overview(parsed.data.repo, parsed.data.window);
-          // Only a rebuild that changed what the page shows tells open pages to read again.
-          if (changed) bus.emit("health");
-          return await codeHealthOutput(view);
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
-      api.get("/code-health/evidence/:id", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const params = z.strictObject({ id: z.string().min(1).max(64) }).safeParse(req.params);
-        const parsed = z
-          .strictObject({
-            repo: z.string().trim().min(1).max(128),
-            cursor: z.string().min(1).max(5).optional(),
-          })
-          .safeParse(req.query);
-        if (!params.success || !parsed.success)
-          return reply.code(400).send({ error: "Invalid code-health evidence query" });
-        reply.header("cache-control", "no-store");
-        try {
-          return await codeHealthOutput(
-            codeHealth.evidence(parsed.data.repo, params.data.id, parsed.data.cursor),
-          );
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (bounded recommendation history, including accepted work and assessments)
-      api.get("/code-health/recommendations", async (req, reply) => {
-        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const query = z
-          .strictObject({
-            repo: z.string().min(1).max(128),
-            cursor: z
-              .string()
-              .regex(/^(0|[1-9][0-9]{0,5})$/)
-              .default("0"),
-          })
-          .safeParse(req.query);
-        if (!query.success || Number(query.data.cursor) % 50 !== 0)
-          return reply.code(400).send({ error: "Invalid recommendation history query" });
-        if (!config.repos.some((row) => row.id === query.data.repo))
-          return reply.code(404).send({ error: "Unknown code-health repo" });
-        reply.header("cache-control", "no-store");
-        try {
-          return await codeHealthOutput(
-            codeHealth.recommendationHistory(query.data.repo, Number(query.data.cursor)),
-          );
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (operator decisions on durable code-health recommendations)
-      api.post("/code-health/recommendations/:id", async (req, reply) => {
-        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const params = z
-          .strictObject({ id: z.string().regex(/^chr_[a-f0-9]{32}$/) })
-          .safeParse(req.params);
-        const query = z
-          .strictObject({ repo: z.string().trim().min(1).max(128) })
-          .safeParse(req.query);
-        const body = RecommendationMutation.safeParse(req.body);
-        if (!params.success || !query.success || !body.success)
-          return reply.code(400).send({ error: "Invalid recommendation decision" });
-        if (!config.repos.some((repo) => repo.id === query.data.repo))
-          return reply.code(404).send({ error: "Unknown code-health repo" });
-        reply.header("cache-control", "no-store");
-        try {
-          const cleaned = await codeHealthOutput(body.data);
-          if (JSON.stringify(cleaned) !== JSON.stringify(body.data))
-            return reply.code(400).send({
-              error: "Decision contains unsafe text or credentials. Remove it before retrying.",
-            });
-          if (
-            body.data.change.action === "assess" &&
-            !store.codeHealthDecisionRecorded(query.data.repo, body.data.requestId)
-          )
-            codeHealth.evidence(query.data.repo, body.data.change.evidenceId, undefined);
-          const result = store.decideCodeHealthRecommendation(
-            query.data.repo,
-            params.data.id,
-            body.data,
-            config.operator.id,
-            now(),
-            flightSeat(config)?.session.repoId === query.data.repo
-              ? flightSeat(config)?.seat.id
-              : undefined,
-          );
-          bus.emit("flight");
-          bus.emit("agents");
-          return await codeHealthOutput(result);
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
       });
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
@@ -7162,7 +6523,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     { prefix: API_PREFIX },
   );
 
-  app.addHook("onClose", async () => stopMapRing?.());
   return app;
 }
 

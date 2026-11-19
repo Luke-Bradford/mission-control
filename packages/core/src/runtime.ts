@@ -52,7 +52,6 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
-  MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
@@ -107,7 +106,6 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
 
 /** FLIGHT calls that inspect or keep notes, rather than changing the crew's state. */
 export const FLIGHT_NON_ACTING_TOOLS: readonly McToolName[] = [
-  MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.flightState,
   MC_TOOL_NAMES.screenshotHud,
@@ -143,7 +141,6 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.prBody,
-      MC_TOOL_NAMES.publishPreview,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -238,7 +235,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     model: "opus",
     mode: "read-only",
     loop: "plan",
-    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket, MC_TOOL_NAMES.codeHealth],
+    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
     here: hereOf("FAO"),
   },
 };
@@ -360,7 +357,6 @@ export const WRITER_TOOLS = [
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.prBody,
-  MC_TOOLS.publishPreview,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,

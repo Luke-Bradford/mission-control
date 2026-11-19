@@ -60,7 +60,6 @@ import {
 import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
-import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -266,60 +265,6 @@ describe("scheduler", () => {
       retention: TRANSCRIPT_RETENTION_DEFAULTS,
     });
     expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
-  });
-
-  it("runs the token audit before transcript maintenance, and maintenance runs if the audit throws", async () => {
-    const order: string[] = [];
-    const tokenAudit = vi.fn(async () => {
-      order.push("tokenAudit");
-      return { audited: 2, empty: 0, controllerSessions: 0 };
-    });
-    const transcripts = vi.fn(async () => {
-      order.push("transcripts");
-      return { gzipped: 0, deleted: 0, skippedLive: 0, failed: [] };
-    });
-    const log = vi.fn();
-    const s = createScheduler({
-      config,
-      store,
-      bus,
-      now: () => NOW,
-      collectors: stubs({ transcripts, tokenAudit }),
-      log,
-    });
-    await s.tick("transcripts");
-    expect(order).toEqual(["tokenAudit", "transcripts"]);
-    expect(tokenAudit).toHaveBeenCalledWith({ store, config, now: NOW });
-    expect(log).toHaveBeenCalledWith("token audit: 2 runs, 0 controller sessions");
-
-    order.length = 0;
-    tokenAudit.mockImplementationOnce(async () => {
-      order.push("tokenAudit");
-      throw new Error("disk gone");
-    });
-    await s.tick("transcripts");
-    expect(order).toEqual(["tokenAudit", "transcripts"]);
-    expect(log).toHaveBeenCalledWith("token audit failed: disk gone");
-  });
-
-  it("reads ended runs for the token audit every ten minutes, apart from the six-hourly transcripts pass", async () => {
-    vi.useFakeTimers();
-    const tokenAudit = vi.fn(async () => ({ audited: 0, empty: 0, controllerSessions: 0 }));
-    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
-    const s = createScheduler({
-      config,
-      store,
-      bus,
-      now: () => NOW,
-      collectors: stubs({ transcripts, tokenAudit }),
-    });
-    s.start();
-    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_FIRST_DELAY_MS);
-    expect(tokenAudit).toHaveBeenCalledTimes(1);
-    expect(transcripts).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_INTERVAL_MS);
-    expect(tokenAudit.mock.calls.length).toBeGreaterThanOrEqual(2);
-    s.stop();
   });
 
   it("starts transcript maintenance after one minute, then every six hours", async () => {
