@@ -1265,6 +1265,7 @@ describe("supervisor events (Plan 7a)", () => {
     it("keeps the exit reason when a session dies before it is ready", async () => {
       const listeners = new Set<(event: sessionDriver.SessionEvent) => void>();
       let alive = true;
+      let ready = () => {};
       const session: sessionDriver.CrewSession = {
         send: () => {},
         control: async () => ({}),
@@ -1280,9 +1281,8 @@ describe("supervisor events (Plan 7a)", () => {
         get alive() {
           return alive;
         },
-        ready: Promise.resolve().then(() => {
-          alive = false;
-          for (const listener of [...listeners]) listener({ kind: "exit", code: 7, signal: null });
+        ready: new Promise<void>((resolve) => {
+          ready = resolve;
         }),
         lines: 0,
         closeSent: Promise.resolve(),
@@ -1292,7 +1292,12 @@ describe("supervisor events (Plan 7a)", () => {
       const snaps = watchStored(sup);
       sup.start();
       try {
-        await refusal(sup.startRun("guido-1", 42));
+        const start = refusal(sup.startRun("guido-1", 42));
+        await until(() => expect(listeners).toHaveLength(1));
+        alive = false;
+        for (const listener of [...listeners]) listener({ kind: "exit", code: 7, signal: null });
+        ready();
+        await start;
         await until(() => expect(snaps).toHaveLength(1));
         expect(snaps[0]?.event).toMatchObject({ kind: "run-ended", endedBy: "exit" });
         expect(snaps[0]?.run).toMatchObject({ status: "failed", endedBy: "exit" });
