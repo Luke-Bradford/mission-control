@@ -226,7 +226,7 @@ function RecRow({
           onClick={onToggle}
         >
           <i aria-hidden="true">{open ? "▾" : "▸"}</i>
-          {title}
+          <span className="as-rtx">{title}</span>
         </button>
         <div className="as-why">
           <span className="as-src">{label(row.rule)}</span> · {row.observation}
@@ -956,7 +956,9 @@ export function AuditSummary({
                 >
                   {st.count === null ? "—" : st.count}
                 </b>
-                <span className="as-cap">{st.name}</span>
+                <span className="as-cap" title={st.name}>
+                  {st.name}
+                </span>
               </div>
             ))}
           </div>

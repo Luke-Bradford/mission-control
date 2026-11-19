@@ -663,7 +663,30 @@ it("lets an operator decide again on a row whose snooze has ended", async () => 
     expect((within(row).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false);
 });
 
-it("says plainly when a row beyond the top three has no evidence in the read", async () => {
+it("finds a row beyond the top three in the recorded history and shows its evidence", async () => {
+  const over = overviewFixture({ rows: 5 });
+  const fourth = over.rows[3];
+  const historyRef = fullRead(over).evidence[0];
+  setup(over, {
+    "/api/code-health/recommendations?repo=sample&cursor=0": {
+      recommendations: [],
+      nextCursor: "20",
+    },
+    "/api/code-health/recommendations?repo=sample&cursor=20": {
+      recommendations: [{ ...fourth, evidence: [historyRef] }],
+      nextCursor: null,
+    },
+  });
+  render(<CodeHealth />);
+  await ready();
+  fireEvent.click(rowButtons()[3]);
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  const dialog = await screen.findByRole("dialog", { name: "Recommendation evidence" });
+  expect(within(dialog).queryByText(/not in the current read/)).toBeNull();
+  expect(within(dialog).getAllByText(/Reported review cohort/).length).toBeGreaterThan(0);
+});
+
+it("says plainly when a row is in neither the full read nor the history", async () => {
   setup(overviewFixture({ rows: 5 }));
   render(<CodeHealth />);
   await ready();

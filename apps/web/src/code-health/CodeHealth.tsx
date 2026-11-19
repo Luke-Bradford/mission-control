@@ -9,6 +9,7 @@ import {
   type ConfigView,
 } from "@mc/core";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { apiOperatorGet } from "../api.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { AuditSummary, Verdict } from "./AuditSummary.tsx";
 import { CodeRisk } from "./CodeRisk.tsx";
@@ -109,14 +110,33 @@ export function CodeHealth() {
     if (!repo) return;
     const token = ++evidenceToken.current,
       scope = JSON.stringify([repo, window, "summary"]);
-    hub.read<CodeHealthView>(RESOURCES.codeHealth(repo, window, "overview")).then(
-      (full) => {
-        if (token !== evidenceToken.current || scope !== selection.current) return;
-        const row =
+    const current = () => token === evidenceToken.current && scope === selection.current;
+    // The full read carries evidence for only the top few rows; other rows are found in the recorded history.
+    const findInHistory = async (id: string) => {
+      let cursor = "0";
+      for (;;) {
+        const page = await apiOperatorGet<{
+          recommendations: CodeHealthRecommendation[];
+          nextCursor: string | null;
+        }>(RESOURCES.codeHealthHistory(repo, cursor).path);
+        if (!current()) return undefined;
+        const hit = page.recommendations.find((r) => r.id === id);
+        if (hit || page.nextCursor === null) return hit;
+        cursor = page.nextCursor;
+      }
+    };
+    hub
+      .read<CodeHealthView>(RESOURCES.codeHealth(repo, window, "overview"))
+      .then(async (full) => {
+        if (!current()) return;
+        let row =
           w.id !== undefined && full.data.tab === "overview"
             ? full.data.recommendations.find((r) => r.id === w.id)
             : undefined;
-        // The full read carries evidence for only the top few rows; say so for any other row.
+        if (w.id !== undefined && !row) {
+          row = await findInHistory(w.id);
+          if (!current()) return;
+        }
         setEvidence(
           w.id !== undefined && !row
             ? {
@@ -130,14 +150,13 @@ export function CodeHealth() {
                 coverage: full.coverage,
               },
         );
-      },
-      (error: unknown) => {
-        if (token !== evidenceToken.current || scope !== selection.current) return;
+      })
+      .catch((error: unknown) => {
+        if (!current()) return;
         setNotice(
           `Evidence could not be read: ${error instanceof Error ? error.message : String(error)} Refresh and try again.`,
         );
-      },
-    );
+      });
   };
   const generatedAt = summary ? overview?.generatedAt : view?.generatedAt,
     staleAfter = summary ? SUMMARY_STALE_MS : 120000,

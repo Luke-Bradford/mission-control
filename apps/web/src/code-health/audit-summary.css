@@ -245,7 +245,7 @@
   color: var(--muted);
 }
 .as-c-n {
-  width: 36px;
+  width: 44px;
 }
 .as-c-from {
   width: 72px;
@@ -276,6 +276,7 @@
   border-bottom-color: transparent;
 }
 .as-n {
+  white-space: nowrap;
   font: 600 var(--fs) / var(--lh-s) var(--mono);
   color: var(--fg-2);
 }
@@ -285,7 +286,8 @@
 }
 .as-rt {
   all: unset;
-  display: block;
+  display: flex;
+  min-width: 0;
   cursor: pointer;
   font-size: var(--fs);
   line-height: var(--lh-s);
@@ -302,7 +304,13 @@
   outline-offset: 1px;
   border-radius: 2px;
 }
+.as-rtx {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .as-rt i {
+  flex: none;
   font-style: normal;
   color: var(--muted);
   display: inline-block;
@@ -520,6 +528,10 @@
   border-left: 1px solid var(--line);
 }
 .as-cap {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   color: var(--muted);
@@ -717,6 +729,7 @@
   color: var(--muted);
   font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
   text-decoration: underline dotted;
+  white-space: nowrap;
 }
 .as-defbtn:hover {
   color: var(--accent);
@@ -757,12 +770,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.as-scroll .as-rec .as-rt {
+.as-scroll .as-rec .as-rtx {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.as-scroll .as-open .as-rt {
+.as-scroll .as-open .as-rtx {
   white-space: normal;
   overflow: visible;
 }

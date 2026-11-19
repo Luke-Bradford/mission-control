@@ -308,6 +308,20 @@ describeRendered("Audit first screen in a real browser", () => {
           expect(m.sideways).toBe(false);
           expect(m.panelsInside).toBe(true);
           if (options.rows === 50) expect(m.listScrolls).toBe(true);
+          if (options.rows === 50) {
+            // A rank number of two digits stays on one line.
+            const wrapped = await page.evaluate(
+              () =>
+                [...document.querySelectorAll<HTMLElement>(".as-do .as-n")]
+                  .filter((n) => {
+                    const lh = Number.parseFloat(getComputedStyle(n).lineHeight);
+                    return n.getBoundingClientRect().height > lh + 1;
+                  })
+                  .map((n) => n.textContent),
+              undefined,
+            );
+            expect(wrapped, "rank numbers broken across lines").toEqual([]);
+          }
           if ("longPath" in options) {
             expect(m.landingRows, "two landing rows fit").toBeGreaterThanOrEqual(2);
             const p = await page.evaluate(async () => {
@@ -427,6 +441,47 @@ describeRendered("Audit first screen in a real browser", () => {
           expect(m.clipped, "the disclosure text is not clipped").toBe(false);
           expect(m.text).toContain(`${m.label}:`);
           expect(m.text).toMatch(/no comparison|no change|up|down/);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
+  for (const colorScheme of ["dark", "light"] as const)
+    it(
+      `ends cut text in an ellipsis and keeps how buttons on one line at 1600x1000 in ${colorScheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/auditSummaryBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme,
+          api: api({ rows: 8, long: true }),
+        });
+        try {
+          await page.boxes(".as-rec");
+          await page.evaluate(() => document.fonts.ready.then(() => 0), undefined);
+          const m = await page.evaluate(() => {
+            const cut = (e: Element) => e.scrollWidth > e.clientWidth;
+            return {
+              titles: [...document.querySelectorAll(".as-rec:not(.as-open) .as-rtx")]
+                .filter(cut)
+                .map((e) => getComputedStyle(e).textOverflow),
+              cutTitles: [...document.querySelectorAll(".as-rec:not(.as-open) .as-rtx")].filter(cut)
+                .length,
+              tallButtons: [...document.querySelectorAll(".as-defbtn")]
+                .map((e) => e.getBoundingClientRect().height)
+                .filter((h) => h > 24),
+              caps: [...document.querySelectorAll(".as-cap")]
+                .filter((e) => e.scrollWidth > e.clientWidth + 1)
+                .map((e) => getComputedStyle(e).textOverflow),
+            };
+          }, undefined);
+          expect(m.cutTitles, "the long titles are cut").toBeGreaterThan(0);
+          expect(m.titles.every((t) => t === "ellipsis")).toBe(true);
+          expect(m.tallButtons, "how buttons stay one line").toEqual([]);
+          expect(m.caps.every((t) => t === "ellipsis")).toBe(true);
         } finally {
           await page.close();
         }
