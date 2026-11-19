@@ -1816,7 +1816,7 @@ describe("scheduler", () => {
         expect(store.notes().find((n) => n.key === FILE_SERVICE_RUNAWAY_KEY)).toBeUndefined();
         // a new hub process on the same database keeps the hour
         t += 10 * 60_000;
-        size = 600 * mb;
+        size = 1100 * mb;
         const again = vi.fn(restart);
         await make(
           () => size,
@@ -1898,7 +1898,17 @@ describe("scheduler", () => {
           await s.tick("machine");
         }
         expect(restart).not.toHaveBeenCalled();
-        // the first fresh reading: 210 MB is not growth of 160 MB within an hour
+        // a fresh 50 MB, then an hour and a half carried at 50 MB, then a fresh 210 MB: the
+        // carried minutes are not readings, so this is not 160 MB of growth within an hour
+        pending = true;
+        size = 50 * mb;
+        t += 60_000;
+        await s.tick("machine");
+        pending = false;
+        for (let i = 0; i < 90; i += 10) {
+          t += 10 * 60_000;
+          await s.tick("machine");
+        }
         pending = true;
         size = 210 * mb;
         t += 60_000;
@@ -1931,10 +1941,12 @@ describe("scheduler", () => {
           error: "a password is required",
           ...(opts.diagnose ? { diagnostics: "/data/diagnostics/first.txt" } : {}),
         }));
+        let gone = false;
         const s = make(
           () => size,
           () => t,
           restart,
+          () => (gone ? ["fseventsd: unrecognised top output"] : []),
         );
         const grow = async (minutes: number, to: number) => {
           t += minutes * 60_000;
@@ -1963,13 +1975,17 @@ describe("scheduler", () => {
         // growth pauses but the service still holds 700 MB: the alert stays
         await grow(61, 700);
         expect(item()).toBeDefined();
-        // a hand restart two minutes after a high reading: while fseventsd is gone the collector
-        // carries the last reading forward, then the new one is small
-        await grow(1, 900);
-        await grow(2, 900);
+        // a hand restart: while fseventsd is gone the collector fails to read it and carries the
+        // last figure, which neither restarts nor clears; then a fresh small reading clears it
+        const before = restart.mock.calls.length;
+        gone = true;
+        await grow(1, 700);
+        await grow(1, 700);
         expect(item()).toBeDefined();
+        gone = false;
         await grow(1, 8);
         expect(item()).toBeUndefined();
+        expect(restart.mock.calls.length).toBe(before);
       });
 
       it("clears an open alert when a later restart works", async () => {

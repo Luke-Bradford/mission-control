@@ -1001,10 +1001,11 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 }
 
 /**
- * Hub stops that only the operator clears, by note key or key prefix: machine capacity
- * (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
- * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
- * them to those modules' keys.
+ * Hub alerts that only the operator can act on, by note key or key prefix: machine capacity and a
+ * runaway file-change service (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and
+ * upgrade (cli-update.ts), the CLI auto-rollback (cli-auto.ts) and a seat's focus import
+ * (instructions/notices.ts). Most are stops the operator clears; the file-change alert holds
+ * nothing back and clears itself. hud.test.ts pins them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,

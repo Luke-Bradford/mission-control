@@ -135,12 +135,14 @@ import {
   FILE_SERVICE_CAPTURE_GAP_MS,
   FILE_SERVICE_CAPTURE_SETTING,
   FILE_SERVICE_RECURRING_RESTARTS,
+  FILE_SERVICE_RECURRING_WINDOW_MS,
   FILE_SERVICE_RESTART_ADVICE,
   FILE_SERVICE_RESTART_SETTING,
   FILE_SERVICE_RESTARTS_SETTING,
   FILE_SERVICE_RUNAWAY_KEY,
   FILE_SERVICE_SUDOERS_ADVICE,
   type FileServiceReading,
+  FSEVENTSD_HEALTHY_BYTES,
   FSEVENTSD_RUNAWAY_BYTES,
   FSEVENTSD_RUNAWAY_WINDOW_MS,
   fileServiceFault,
@@ -501,20 +503,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    * is the third in six hours; otherwise it stays until the service is back under the runaway size
    * with no recent run of restarts. Growth merely pausing does not clear it. Only readings actually
    * taken are judged, kept in memory, so after a hub restart growth needs fresh readings again (the
-   * stuck size acts on the first one).
+   * stuck size acts on the first one). `fileServiceReadings` holds the last hour of them.
    */
-  /** The last hour of `fseventsd` readings actually taken (an idle hub carries the figure). */
   const fileServiceReadings: FileServiceReading[] = [];
   const restartRunawayFileService = (at: number, fresh: number | null): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
-    if (fresh !== null && fresh > 0) fileServiceReadings.push({ at, bytes: fresh });
+    // a 0 is no reading (the collector found no number), never a size
+    const taken = fresh !== null && fresh > 0 ? fresh : null;
+    if (taken !== null) fileServiceReadings.push({ at, bytes: taken });
     while ((fileServiceReadings[0]?.at ?? at) < at - FSEVENTSD_RUNAWAY_WINDOW_MS)
       fileServiceReadings.shift();
     const open = (): boolean => store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+    // judged on the latest reading taken, never a carried figure
     const small = (): boolean => {
-      const size = store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS).at(-1)?.fileServiceBytes;
-      return typeof size === "number" && size > 0 && size < FSEVENTSD_RUNAWAY_BYTES;
+      const size = fileServiceReadings.at(-1)?.bytes;
+      return size !== undefined && size < FSEVENTSD_HEALTHY_BYTES;
     };
     const restarts = (until: number): number[] => {
       let list: unknown;
@@ -526,14 +530,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       return Array.isArray(list)
         ? list.filter(
             (v): v is number =>
-              typeof v === "number" && v <= until && until - v < FILE_SERVICE_CAPTURE_GAP_MS,
+              typeof v === "number" && v <= until && until - v < FILE_SERVICE_RECURRING_WINDOW_MS,
           )
         : [];
     };
     const recurring = (until: number): boolean =>
       restarts(until).length >= FILE_SERVICE_RECURRING_RESTARTS;
     // judged only when this minute's figure was read, on the readings actually taken
-    const runaway = fresh === null ? null : fileServiceRunaway(fileServiceReadings, at);
+    const runaway = taken === null ? null : fileServiceRunaway(fileServiceReadings, at);
     if (runaway === null) {
       if (open() && small() && !recurring(at)) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
       return;
@@ -546,7 +550,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     if (since(FILE_SERVICE_RESTART_SETTING) < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
     store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
     const diagnose = since(FILE_SERVICE_CAPTURE_SETTING) >= FILE_SERVICE_CAPTURE_GAP_MS;
-    if (diagnose) store.setSetting(FILE_SERVICE_CAPTURE_SETTING, String(at));
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
     const grew =
       runaway.toBytes - runaway.fromBytes >= FSEVENTSD_RUNAWAY_BYTES
@@ -555,6 +558,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const wasOpen = open();
     void restart(at, { diagnose })
       .then((r) => {
+        // a failed save does not use up the gap
+        if (typeof r.diagnostics === "string")
+          store.setSetting(FILE_SERVICE_CAPTURE_SETTING, String(at));
         const saved =
           r.diagnostics === undefined
             ? ""
@@ -580,7 +586,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
           else
             raise(
-              `${grew} The hub has restarted it ${recent.length} times in ${FILE_SERVICE_CAPTURE_GAP_MS / 3_600_000} hours and it keeps getting stuck again, so restarting is not fixing the cause. The captures of what was running are in the diagnostics folder beside the hub's database.`,
+              `${grew} The hub has restarted it ${recent.length} times in ${FILE_SERVICE_RECURRING_WINDOW_MS / 3_600_000} hours and it keeps getting stuck again, so restarting is not fixing the cause. The captures of what was running are in the diagnostics folder beside the hub's database.`,
             );
         } else if (!small()) {
           raise(
