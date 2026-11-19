@@ -1081,7 +1081,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "controller_unanswered",
   "seat_call",
   "question_changed",
-  "waste_alarm",
   "wake_stuck",
 ] as const;
 /** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
@@ -1090,6 +1089,7 @@ export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [
   "budget_unused",
   "wait_over",
   "stuck_pr",
+  "waste_alarm",
 ];
 export interface FlightSignal {
   checks?: string[];

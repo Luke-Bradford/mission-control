@@ -132,7 +132,6 @@ import {
   reviewEventKey,
   reviewFailedText,
   reviewFor,
-  reviewHeldParkText,
   reviewQueuedText,
   reviewRunStep,
   reviewStartedText,
@@ -169,7 +168,6 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { wakeDueAsideRun } from "./aside.ts";
@@ -2638,35 +2636,6 @@ export function createEngine(deps: EngineDeps): Engine {
     return ok;
   }
 
-  /**
-   * Parks the author run (kind `review`) whose queued review is held at the review-round limit, so
-   * FLIGHT can accept, rework or ask for a second review with `settle_park`. The parked run's next
-   * pass supersedes the held review. A run that is not in review on this review's head is left alone.
-   */
-  function parkForHeldReview(row: ReviewRow): Promise<void> {
-    return onChain(row.authorRunId, async () => {
-      const run = store.run(row.authorRunId);
-      const loop = run?.loop;
-      if (run === null || !loop || loop.phase !== "review" || loop.hold?.kind) return;
-      if (!reviewWanted(row) || loop.reviewWaivedSha === row.sha) return;
-      const reason = reviewHeldParkText(seatCallSign(row.seatId), row.sha, row.round);
-      const at = now();
-      store.setRunLoop(run.id, {
-        ...loop,
-        phase: "parked",
-        hold: parkHold(loop.hold, "review", reason, false),
-      });
-      store.addLoopEvent(
-        `${run.id}:${loop.epoch}:parked:review-held:${row.id}`,
-        run.id,
-        parkedEventText(reason),
-        at,
-      );
-      bus.emit("agents");
-      await pass(run.id);
-    });
-  }
-
   /** Ends the review's run when it has one that has not ended. */
   async function endReviewRun(row: ReviewRow, reason?: "superseded"): Promise<void> {
     if (row.runId === null) return;
@@ -2801,15 +2770,6 @@ export function createEngine(deps: EngineDeps): Engine {
     // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
     // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    // a change past its review rounds waits for FLIGHT's decision whatever the reviewer or machine
-    // is doing: park its run (as a failed review at the cap does) so FLIGHT can settle it. The
-    // parked run's pass supersedes the held review; it is not awaited, as that pass reads this one.
-    const heldRows = new Set<number>();
-    for (const row of store.reviewsIn(["queued"])) {
-      if (!reviewsHeld(store, row.authorRunId)) continue;
-      heldRows.add(row.id);
-      void parkForHeldReview(row);
-    }
     const machine = storedMachineCapacity(store, now(), capacityConfig);
     if (machine.blocked) {
       return;
@@ -2825,13 +2785,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
-      // a reviewer in a restart storm keeps its queued reviews; they wait, they do not fail
-      const storm = restartHold(store, seat.id);
       const queuedHere = store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id);
-      if (storm !== null) continue;
       for (const row of queuedHere) {
-        // held and parked above
-        if (heldRows.has(row.id)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
@@ -3300,27 +3255,6 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (next.hold?.worktree) next.hold = { ...next.hold, wake: true };
         checkBriefDispatch();
-        // a settle that sends the change back to review is FLIGHT's decision on the round cap: it
-        // closes the run's review-rounds hold, or the review would be held and dropped at once. A
-        // rework grants the review of the seat's next push: the hold closes at the live round, so
-        // that one round runs and a fail past it parks again.
-        const reopens =
-          opts?.action === "rereview" ||
-          (opts?.action === "rework" && (kind === "review" || kind === "review-ruling")) ||
-          opts?.action === "accept" ||
-          opts?.action === "second_review";
-        // only a rework of a run parked at the cap grants a review past it
-        const grant = opts?.action === "rework" && (kind === "review" || kind === "review-ruling");
-        if (by === "FLIGHT" && reopens) {
-          const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
-          if (settleReviewRounds(store, run, at, basis, grant))
-            store.addLoopEvent(
-              `${run.id}:review-rounds-resolved:${next.epoch}`,
-              run.id,
-              `review-rounds hold resolved by FLIGHT's ${opts?.action}`,
-              at,
-            );
-        }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);

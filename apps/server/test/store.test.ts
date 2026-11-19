@@ -4319,23 +4319,15 @@ describe("hub retention", () => {
         INSERT INTO hub_events (at,text) VALUES (0,'old');
         INSERT INTO drafts (target,kind,text,created_at,state) VALUES
           ('old','plan','old',0,'done'), ('pending','plan','pending',0,'pending');
-        INSERT INTO crew_errors (agent_id,text,at,acked) VALUES
-          ('seat','old',0,1), ('seat','unacked',0,0);
         INSERT INTO question_closures (key,ask_at,kind,reason,by,question,ticket,operator,at) VALUES
           ('ask:1',0,'returned','r','flight-1','q',NULL,1,0);`);
       for (let i = 0; i < 24; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
         { key: "open" },
       ]);
-      for (const table of [
-        "guard_hits",
-        "hub_events",
-        "drafts",
-        "crew_errors",
-        "question_closures",
-      ])
+      for (const table of ["guard_hits", "hub_events", "drafts", "question_closures"])
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual(
-          table === "drafts" || table === "crew_errors" ? { n: 1 } : { n: 0 },
+          table === "drafts" ? { n: 1 } : { n: 0 },
         );
       expect(db.prepare("SELECT state FROM board_moves").all()).toEqual([{ state: "pending" }]);
       // an answered question to FLIGHT is kept a year, not ninety days

@@ -58,7 +58,6 @@ import {
   type SchedulerDeps,
   waitedPrNumbers,
 } from "../src/scheduler.ts";
-import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import {
   FILE_SERVICE_RESTART_SETTING,
@@ -2189,9 +2188,6 @@ describe("scheduler", () => {
         }),
       });
       await s.tick("machine");
-      expect(openWasteAlarms(store).map((a) => [a.check, a.subject])).toEqual([
-        ["restart-storm", "guido-1"],
-      ]);
       expect(store.notes()).toEqual([]);
     });
 

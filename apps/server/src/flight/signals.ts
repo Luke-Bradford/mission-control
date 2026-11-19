@@ -35,14 +35,11 @@ import {
   seatDef,
   WAITING_OPERATOR_LABEL,
   WAKE_STUCK_KEY_SUFFIX,
-  WASTE_CHECK_TITLES,
-  WASTE_WAKES_FLIGHT,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../queue/dependencies.ts";
 import { ownsCard } from "../queue/ownership.ts";
-import { openWasteAlarms } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -709,19 +706,6 @@ export function flightSignals(i: {
       if (closure?.by === "hub")
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
-  }
-  // An alarm about one ticket going round wakes FLIGHT, once: left unsaid, a ticket in its third
-  // review round or its fourth run stands unseen. The spend alarms are stored; GET
-  // /api/waste serves the open ones.
-  for (const alarm of openWasteAlarms(store)) {
-    if (alarm.repoId !== repo) continue;
-    if (!WASTE_WAKES_FLIGHT.includes(alarm.check)) continue;
-    raise(
-      "waste_alarm",
-      String(alarm.id),
-      alarm.openedAt,
-      `${WASTE_CHECK_TITLES[alarm.check]}: ${alarm.evidence}`,
-    );
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {

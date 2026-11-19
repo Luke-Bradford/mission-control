@@ -18,6 +18,7 @@ const RETIRED_TABLES = [
   "run_rereads",
   "strays",
   "crew_errors",
+  "waste_alarms",
   "comms_repeats",
   // the code-health, Map, token-audit and bug-escape features
   "map_cache",

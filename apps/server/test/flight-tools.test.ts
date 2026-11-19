@@ -755,30 +755,6 @@ describe("move_review", () => {
     ]);
   });
 
-  it("resolve_waste_alarm lifts a hold with a recorded basis and refuses an alarm that is not open", async () => {
-    const id = store.waste.insertAlarm(
-      {
-        check: "retry-loop",
-        subject: "mc#7",
-        repoId: "mc",
-        ticket: "mc#7",
-        seatId: null,
-        runId: null,
-        level: 2,
-        evidence: "mc#7 is parked: 2 failed attempts.",
-      },
-      NOW,
-    );
-    const done = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
-    expect(done.isError).toBeUndefined();
-    expect(store.waste.alarms("WHERE id = ?", id)[0]).toMatchObject({
-      resolvedAt: expect.any(Number),
-      basis: "park it; take the next",
-    });
-    const again = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
-    expect(again.isError).toBe(true);
-  });
-
   it("moves a queued review while the target account's pace passes 100%: pace never holds it", async () => {
     const id = queuedReview();
     for (const [at, pct] of [
@@ -1385,7 +1361,6 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
-      "resolve_waste_alarm",
       "move_review",
       "resume_seat",
       "merge_pr",

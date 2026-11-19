@@ -379,7 +379,6 @@ import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
@@ -3598,27 +3597,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     basis: basisArg,
   });
 
-  const ResolveWasteAlarmArgs = z.strictObject({
-    alarm: z.number().int().positive(),
-    basis: basisArg,
-  });
-
   const superTools = [
-    superTool(
-      MC_TOOL_NAMES.resolveWasteAlarm,
-      "Close a retry-loop waste alarm's hold: the parked ticket may be dealt again. The alarm id is the key of the waste_alarm signal. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
-      ResolveWasteAlarmArgs,
-      "status",
-      async (a) => {
-        const at = now();
-        if (!resolveWasteAlarm(store, a.alarm, at, a.basis))
-          return fail("That waste alarm is not open.");
-        return { text: `Waste alarm ${a.alarm} closed; its hold is lifted.` };
-      },
-      z.toJSONSchema(ResolveWasteAlarmArgs),
-      // a hub-side hold: no GitHub write, so it does not need the engine
-      { engine: false },
-    ),
     superTool(
       MC_TOOL_NAMES.moveReview,
       "Move one queued review to a named review seat. The target account must not be at its usage stop. The basis is recorded. The queued review keeps its head, round and review model rule.",

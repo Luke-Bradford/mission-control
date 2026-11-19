@@ -176,7 +176,7 @@ import {
   type SeatQuestion,
 } from "./store/types.ts";
 import { usageQueries } from "./store/usage.ts";
-import { RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
+import { wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
   messageImprovements,
@@ -495,15 +495,9 @@ export class Store {
     return ticketPlanQueries(this.db);
   }
 
-  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  /** The spend report's and the retrospective's queries (spend/waste.ts). */
   get waste(): ReturnType<typeof wasteQueries> {
     return wasteQueries(this.db);
-  }
-
-  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
-  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
-  addResumeAttempt(runId: string, at: number): void {
-    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
