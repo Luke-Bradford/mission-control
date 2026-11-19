@@ -63,7 +63,7 @@ export const WASTE_THRESHOLDS = Object.freeze({
   /** Tickets opened in the window reach tickets closed (with at least this many opened). */
   churnWindowMs: DAY_MS,
   churnMinOpened: 5,
-  /** An event alarm (a rerun refused) stays open this long, then closes. */
+  /** An event alarm (a rerun) stays open this long, then closes. */
   eventOpenMs: DAY_MS,
 });
 
@@ -88,10 +88,10 @@ export const WASTE_WINDOW_MS: Record<WasteWindow, number> = { day: DAY_MS, week:
 export const WASTE_SPLIT_TITLE = /\b(?:half|halves|slice|slices|follow-?\s?ups?|part\s+\d+)\b/i;
 
 /** What a check does when it fires. */
-export type WasteAction = "refuse" | "park" | "stop-reviews" | "stop-restarts" | "alarm";
+export type WasteAction = "park" | "stop-reviews" | "stop-restarts" | "alarm";
 
 export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
-  "unchanged-rerun": "refuse",
+  "unchanged-rerun": "alarm",
   "retry-loop": "park",
   "review-rounds": "stop-reviews",
   "restart-storm": "stop-restarts",
@@ -107,7 +107,7 @@ export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
  * The alarms that wake FLIGHT, once each: work on one ticket that is going round, which a person
  * would otherwise find only by reading the log. The rest are stored and served by GET /api/waste.
  * Not here, and why: a review-rounds hold parks the run, and the park wakes FLIGHT; an unchanged
- * rerun and a restart storm are refused or held by the hub itself; clearance waiting counts hours,
+ * rerun is an alarm the Audit page shows and a restart storm is held by the hub itself; clearance waiting counts hours,
  * so a resolved one would wake FLIGHT again every hour; cost, coordination and churn are left out
  * by choice, as measures of spend for the Audit page.
  */

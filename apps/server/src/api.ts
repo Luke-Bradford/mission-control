@@ -350,7 +350,6 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
-import { rereadDenial } from "./guard/rereads.ts";
 import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
@@ -2800,7 +2799,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ) === "flight-full";
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
-            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             const command = body.data.tool_input?.command;
             // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
             // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
@@ -2875,28 +2873,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               cwd: body.data.cwd,
               rules: deps.repoRules,
             });
-          // a large file this run already read whole, unchanged, is not given again
-          if (verdict.kind === "allow") {
-            const reread = rereadDenial(
-              store,
-              { ...key, agentId: body.data.agent_id ?? "" },
-              store.seatSession(who.seatId)?.worktree ?? undefined,
-              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
-              now(),
-            );
-            if (reread !== null) return answer(reread);
-          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
-          // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
-          if (
-            verdict.kind === "allow" &&
-            body.data.tool_name === "Bash" &&
-            typeof command === "string"
-          ) {
-            const check = await checks?.lockedBy(who.runId, command);
-            if (check) verdict = { kind: "lock", command: check };
-          }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {
             if (body.data.tool_name !== "Bash" || typeof command !== "string") return;

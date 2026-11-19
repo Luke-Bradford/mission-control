@@ -225,6 +225,8 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     expect(by["retry-loop"]).toMatchObject({ subject: TICKET, ticket: TICKET, level: 3 });
     expect(by["unchanged-rerun"]).toMatchObject({ ticket: TICKET, level: 8 });
     expect(by["unchanged-rerun"]?.evidence).toContain(LINT);
+    const row = wasteReport(config, store, NOW).checks.find((c) => c.check === "unchanged-rerun");
+    expect(row).toMatchObject({ action: "alarm", fired: 1 });
     expect(ticketParked(store, TICKET)).toMatch(/3 failed attempts/);
     expect(ticketParked(store, "mc#1")).toBeNull();
   });

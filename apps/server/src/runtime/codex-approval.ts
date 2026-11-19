@@ -196,11 +196,6 @@ export function createCodexApprover(i: {
           verdict,
           typeof params.cwd === "string" ? params.cwd : undefined,
         );
-      // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
-      if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
-        const check = await i.checks?.lockedBy(i.runId, event.input.command);
-        if (check) verdict = { kind: "lock", command: check };
-      }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;

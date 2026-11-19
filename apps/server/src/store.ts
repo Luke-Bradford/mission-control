@@ -106,7 +106,6 @@ import {
   type QaFlowView,
   type QaReviewRoundView,
   type QuestionClosure,
-  type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -1738,73 +1737,7 @@ export class Store {
       | { digest: string }
       | undefined;
     if (!row) return null;
-    return this.withRereads(parseDigest(row.digest), this.rereads([runId]).get(runId));
-  }
-
-  private withRereads(d: RunDigest, r: RunDigest["rereads"]): RunDigest {
-    return r ? { ...d, rereads: r } : d;
-  }
-
-  /** Refused re-reads per run (those with any): how many, and the tokens they are estimated to have saved. */
-  private rereads(runIds: string[]): Map<string, NonNullable<RunDigest["rereads"]>> {
-    const out = new Map<string, NonNullable<RunDigest["rereads"]>>();
-    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
-      const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows = this.statement(
-        `SELECT run_id, count, tokens_saved FROM run_rereads WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
-      ).all(...ids) as { run_id: string; count: number; tokens_saved: number }[];
-      for (const r of rows) out.set(r.run_id, { count: r.count, tokensSaved: r.tokens_saved });
-    }
-    return out;
-  }
-
-  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
-  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
-    const r = this.db
-      .prepare(
-        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
-      )
-      .get(runId, agentId, path) as
-      | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
-      | undefined;
-    return (
-      r && {
-        size: r.size,
-        mtimeMs: r.mtime_ms,
-        compactions: r.compactions,
-        toolUseId: r.tool_use_id,
-        at: r.at,
-      }
-    );
-  }
-
-  /** Remembers the run's whole read of `path`, replacing an earlier one. */
-  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
-    this.db
-      .prepare(
-        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
-           compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
-      )
-      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
-  }
-
-  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
-  forgetRunRead(runId: string, toolUseId: string): void {
-    this.db
-      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
-      .run(runId, toolUseId);
-  }
-
-  /** Counts one refused re-read that saved about `tokens`. */
-  addReread(runId: string, tokens: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO run_rereads (run_id, count, tokens_saved) VALUES (?, 1, ?)
-         ON CONFLICT(run_id) DO UPDATE SET count = count + 1, tokens_saved = tokens_saved + excluded.tokens_saved`,
-      )
-      .run(runId, tokens);
+    return parseDigest(row.digest);
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
@@ -1815,10 +1748,6 @@ export class Store {
         `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
       ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
-    }
-    for (const [id, r] of this.rereads(runIds)) {
-      const d = out.get(id);
-      if (d) out.set(id, this.withRereads(d, r));
     }
     return out;
   }
@@ -2134,14 +2063,7 @@ export class Store {
             const values = runIds.map(({ id }) => id);
             if (values.length > 0) {
               const runMarks = values.map(() => "?").join(",");
-              for (const child of [
-                "run_commits",
-                "run_pushes",
-                "run_attempts",
-                "run_digests",
-                "run_reads",
-                "run_rereads",
-              ])
+              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);

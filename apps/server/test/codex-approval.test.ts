@@ -34,7 +34,16 @@ function approver(
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
     accounts: [],
-    repos: [{ id: "repo", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
+    repos: [
+      {
+        id: "repo",
+        github: "o/r",
+        project: 1,
+        statusMap: {},
+        autonomy: "draft",
+        fullSuite: ["pnpm -s test"],
+      },
+    ],
     loops: [],
     poll: { usageMinutes: 30, githubSeconds: 60 },
   };
@@ -333,7 +342,6 @@ describe("Codex check records", () => {
     const checks: CheckRecorder = {
       begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
       end: async () => {},
-      lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
       dropRun: () => {},
       lost: () => false,
       drops: () => [],
@@ -393,7 +401,7 @@ describe("Codex check records", () => {
     expect(tell).not.toHaveBeenCalled();
   });
 
-  it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
+  it("takes the test lock for a full suite but not a configured check, while another seat holds the lock", async () => {
     const { checks } = recorder();
     const lock = new TestLock();
     await lock.acquire(
@@ -404,9 +412,12 @@ describe("Codex check records", () => {
       signal(),
     );
     const h = approver("writer", [], undefined, checks, lock);
+    expect(
+      await h.approve(request("pnpm -s typecheck", { itemId: "item-8" }), undefined, signal()),
+    ).toBe("accept");
     const busy = new AbortController();
     const waiting = h.approve(
-      request("pnpm -s typecheck", { itemId: "item-9" }),
+      request("pnpm -s test", { itemId: "item-9" }),
       undefined,
       busy.signal,
     );
@@ -422,7 +433,7 @@ describe("Codex check records", () => {
     const holdLock = async () => {
       const lock = new TestLock();
       const key = { runId: "other", toolUseId: "x" };
-      await lock.acquire(key, "other-seat", "pnpm -s test:related", 1000, signal());
+      await lock.acquire(key, "other-seat", "pnpm -s test", 1000, signal());
       return { lock, key };
     };
     beforeEach(() => vi.useFakeTimers());
@@ -433,7 +444,7 @@ describe("Codex check records", () => {
       const { lock, key } = await holdLock();
       const h = approver("writer", [], undefined, checks, lock);
       const waiting = h.approve(
-        request("pnpm -s typecheck", { itemId: "item-20" }),
+        request("pnpm -s test", { itemId: "item-20" }),
         undefined,
         signal(),
       );
@@ -448,7 +459,7 @@ describe("Codex check records", () => {
       const tell = vi.fn();
       const h = approver("writer", [], undefined, checks, lock, false, tell);
       const waiting = h.approve(
-        request("pnpm -s typecheck", { itemId: "item-21" }),
+        request("pnpm -s test", { itemId: "item-21" }),
         undefined,
         signal(),
       );
@@ -457,7 +468,7 @@ describe("Codex check records", () => {
       expect(tell).toHaveBeenCalledTimes(1);
       expect(tell.mock.calls[0]?.[0]).toContain("The test lock is busy");
       expect(tell.mock.calls[0]?.[0]).toContain("OTHER-SEAT");
-      expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test:related");
+      expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test");
     });
   });
 

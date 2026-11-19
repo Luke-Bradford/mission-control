@@ -25,8 +25,6 @@ import {
   lockBusyText,
   MC_TOOLS,
   MCP_PATH,
-  REREAD_MIN_BYTES,
-  type RunDigest,
   TEST_LOCK_UNAVAILABLE_TEXT,
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
@@ -36,7 +34,7 @@ import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { runawayTrip } from "../src/flight/runaway.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import { type CheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
+import type { CheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -763,125 +761,21 @@ describe("POST /api/guard/check", () => {
     expect((await check(tokA, bash("inside", "git -C . log --oneline -3"))).body).toBe("{}");
   });
 
-  describe("a second whole read of a large unchanged file", () => {
-    let big: string;
-    beforeEach(() => {
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: null,
-        cliSessionId: null,
-        state: "idle",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      big = join(dir, "big.ts");
-      writeFileSync(big, "x".repeat(REREAD_MIN_BYTES));
+  it("lets a seat read a large unchanged file again", async () => {
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: null,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: dir,
+      updatedAt: NOW,
     });
-    const digest = (compactions: number): RunDigest => ({
-      toolCalls: 0,
-      turns: 0,
-      lastEventAt: null,
-      model: null,
-      contextTokens: null,
-      contextWindow: null,
-      liveTool: null,
-      tools: {},
-      subagents: [],
-      minuteTokens: [],
-      turnUsage: [],
-      background: [],
-      compactions,
-    });
-    const read = (id: string, input: Record<string, unknown> = { file_path: big }) =>
-      check(tokA, pre(id, "Read", input));
-
-    it("refuses it with the earlier read, and counts the tokens saved", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      const second = await read("r2");
-      expect(reason(second.body)).toContain("r1");
-      expect(reason((await read("r3")).body)).toContain("r1");
-      store.setDigest("run-a", digest(0));
-      const saved = { count: 2, tokensSaved: 2 * (REREAD_MIN_BYTES / 4) };
-      expect(store.digest("run-a")?.rereads).toEqual(saved);
-      expect(store.digests(["run-a"]).get("run-a")?.rereads).toEqual(saved);
-      expect(store.runRead("run-a", "", big)?.toolUseId).toBe("r1");
-      expect(store.guardHitCount("run-a")).toBe(0);
-    });
-
-    it("refuses a whole cat or sed -n p of it too", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect(reason((await check(tokA, bash("c1", `cat ${big}`))).body)).toContain("r1");
-      expect(reason((await check(tokA, bash("c2", "sed -n p big.ts"))).body)).toContain("r1");
-    });
-
-    it("passes a range", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect((await read("r2", { file_path: big, offset: 10, limit: 20 })).body).toBe("{}");
-      expect((await check(tokA, bash("c1", "sed -n '10,20p' big.ts"))).body).toBe("{}");
-    });
-
-    it("passes a changed file, and refuses its next unchanged read", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      writeFileSync(big, "y".repeat(REREAD_MIN_BYTES + 5));
-      expect((await read("r2")).body).toBe("{}");
-      expect(reason((await read("r3")).body)).toContain("r2");
-    });
-
-    it("forgets a read that failed, so its retry is not refused", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect((await check(tokA, post("r1", "PostToolUseFailure"))).body).toBe("{}");
-      expect((await read("r2")).body).toBe("{}");
-      expect(reason((await read("r3")).body)).toContain("r2");
-    });
-
-    it("keeps a read that succeeded", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect((await check(tokA, post("r1"))).body).toBe("{}");
-      expect(reason((await read("r2")).body)).toContain("r1");
-    });
-
-    it("passes a Read of another page range of the same file", async () => {
-      expect((await read("p1", { file_path: big, pages: "1-5" })).body).toBe("{}");
-      expect((await read("p2", { file_path: big, pages: "6-10" })).body).toBe("{}");
-    });
-
-    it("keeps a subagent's reads apart from the parent's", async () => {
-      const as = (id: string, agent?: string) =>
-        check(tokA, {
-          ...pre(id, "Read", { file_path: big }),
-          ...(agent ? { agent_id: agent } : {}),
-        });
-      expect((await as("s1", "sub-1")).body).toBe("{}");
-      expect((await as("m1")).body).toBe("{}");
-      expect((await as("s2", "sub-2")).body).toBe("{}");
-      expect(reason((await as("s3", "sub-1")).body)).toContain("s1");
-      expect(reason((await as("m2")).body)).toContain("m1");
-    });
-
-    it("passes a file under the threshold and another run's read", async () => {
-      const small = join(dir, "small.ts");
-      writeFileSync(small, "x".repeat(REREAD_MIN_BYTES - 1));
-      expect((await read("s1", { file_path: small })).body).toBe("{}");
-      expect((await read("s2", { file_path: small })).body).toBe("{}");
-      expect((await read("r1")).body).toBe("{}");
-      store.setSeatSession({
-        seatId: "guido-2",
-        runId: null,
-        cliSessionId: null,
-        state: "idle",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      expect((await check(tokB, pre("b1", "Read", { file_path: big }))).body).toBe("{}");
-    });
-
-    it("passes after a compaction dropped the earlier read from context", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      store.setDigest("run-a", digest(1));
-      expect((await read("r2")).body).toBe("{}");
-    });
+    const big = join(dir, "big.ts");
+    writeFileSync(big, "x".repeat(64 * 1024));
+    const read = (id: string) => check(tokA, pre(id, "Read", { file_path: big }));
+    expect((await read("r1")).body).toBe("{}");
+    expect((await read("r2")).body).toBe("{}");
   });
 
   it("serves the guard and MCP routes at the paths a seat is given", async () => {
@@ -1026,7 +920,6 @@ describe("POST /api/guard/check", () => {
   });
 
   describe("the check recorder", () => {
-    const CONFIGURED = ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test:related"];
     const spy = () => {
       const calls: unknown[][] = [];
       const options: unknown[] = [];
@@ -1036,7 +929,6 @@ describe("POST /api/guard/check", () => {
           options.push(o);
         },
         end: async (k, ok) => void calls.push(["end", k, ok]),
-        lockedBy: async (_run, c) => lockedCheck(c, CONFIGURED),
         dropRun: () => {},
         lost: () => false,
         drops: () => [],
@@ -1045,17 +937,21 @@ describe("POST /api/guard/check", () => {
       return { calls, checks, options };
     };
 
-    it("takes the test lock for a configured check: the second seat's typecheck waits for the first's", async () => {
+    it("lets two seats run a configured check at once: only a full suite takes the test lock", async () => {
       const { checks } = spy();
       await app.close();
       app = await build({ checks });
       expect((await check(tokA, bash("a1", "pnpm -s typecheck"))).body).toBe("{}");
-      expect(lock.state().holder).toMatchObject({ runId: "run-a", command: "pnpm -s typecheck" });
-      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      expect((await check(tokB, bash("b1", "pnpm -s typecheck"))).body).toBe("{}");
+      expect((await check(tokB, bash("b2", "pnpm -s lint"))).body).toBe("{}");
+      expect(lock.state().holder).toBeNull();
+      expect(lock.state().waiting).toHaveLength(0);
+      expect((await check(tokA, bash("a2", "pnpm -s test"))).body).toBe("{}");
+      expect(lock.state().holder).toMatchObject({ runId: "run-a", command: "pnpm -s test" });
+      const c = check(tokB, bash("b3", "pnpm -s test"));
       await until(() => lock.state().waiting.length === 1);
-      await check(tokA, post("a1"));
-      expect((await b).body).toBe("{}");
-      expect(lock.state().holder).toMatchObject({ runId: "run-b" });
+      await check(tokA, post("a2"));
+      expect((await c).body).toBe("{}");
     });
 
     it("allows a configured check to run again unchanged: the waste alarm reports it, the hook does not refuse", async () => {
@@ -1068,37 +964,16 @@ describe("POST /api/guard/check", () => {
       }
     });
 
-    it("takes the test lock for the related-tests check, however it is spelled, but not for a single test file", async () => {
-      const { checks } = spy();
-      await app.close();
-      app = await build({ checks });
-      expect((await check(tokA, bash("a1", "pnpm -s test:related"))).body).toBe("{}");
-      expect(lock.state().holder).toMatchObject({
-        runId: "run-a",
-        command: "pnpm -s test:related",
-      });
-      // a single test file runs at once while the related run holds the lock
-      expect(
-        (await check(tokB, bash("b0", "pnpm -s vitest run apps/server/test/a.test.ts"))).body,
-      ).toBe("{}");
-      expect(lock.state().waiting).toHaveLength(0);
-      const b = check(tokB, bash("b1", "pnpm run test:related"));
-      await until(() => lock.state().waiting.length === 1);
-      await check(tokA, post("a1"));
-      expect((await b).body).toBe("{}");
-      expect(lock.state().holder).toMatchObject({ runId: "run-b" });
-    });
-
     it("answers a check that waited too long with the busy text, and takes no lock for other commands", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       const { checks } = spy();
       await app.close();
       app = await build({ checks });
-      await check(tokA, bash("a1", "pnpm -s lint"));
-      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await check(tokA, bash("a1", "pnpm -s test"));
+      const b = check(tokB, bash("b1", "pnpm -s test"));
       await until(() => lock.state().waiting.length === 1);
       vi.advanceTimersByTime(LOCK_WAIT_MS);
-      expect(reason((await b).body)).toBe(lockBusyText("GUIDO-1", "pnpm -s lint"));
+      expect(reason((await b).body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
       expect((await check(tokB, bash("b2", "ls"))).body).toBe("{}");
     });
 
@@ -1132,10 +1007,10 @@ describe("POST /api/guard/check", () => {
       const { calls, checks } = spy();
       await app.close();
       app = await build({ checks });
-      await check(tokA, bash("a1", "pnpm -s lint"));
-      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await check(tokA, bash("a1", "pnpm -s test"));
+      const b = check(tokB, bash("b1", "pnpm -s test"));
       await until(() => lock.state().waiting.length === 1);
-      expect(calls).toEqual([["begin", { runId: "run-a", toolUseId: "a1" }, "pnpm -s lint"]]);
+      expect(calls).toEqual([["begin", { runId: "run-a", toolUseId: "a1" }, "pnpm -s test"]]);
       vi.advanceTimersByTime(LOCK_WAIT_MS);
       await b;
       expect(calls).toHaveLength(1);
@@ -1203,7 +1078,6 @@ describe("POST /api/guard/check", () => {
         end: async (_key, ok, exitCode) => {
           ends.push([ok, exitCode]);
         },
-        lockedBy: async () => null,
         dropRun: () => {},
         lost: () => false,
         drops: () => [],
@@ -1230,7 +1104,6 @@ describe("POST /api/guard/check", () => {
         end: async (_key, ok, exitCode) => {
           ends.push([ok, exitCode]);
         },
-        lockedBy: async () => null,
         dropRun: () => {},
         lost: () => false,
         drops: () => [],

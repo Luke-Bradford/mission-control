@@ -472,32 +472,6 @@ describe("the check recorder", () => {
     await r.begin(KEY, LINT);
     expect(lines).toHaveLength(1);
   });
-
-  it("names the check a call must take the test lock for, and records nothing for a call that waited", async () => {
-    const r = recorder();
-    expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
-    expect(await r.lockedBy("r1", "ls")).toBeNull();
-    // the related-tests run takes the lock by name, though the repo no longer lists it as a check
-    expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
-    expect(await r.lockedBy("r1", `${LINT} && ${TYPES} && pnpm -s test:related`)).toBe(LINT);
-    // refused while another seat held the lock: it began but never ended, so no failed row
-    await r.begin(KEY, TYPES);
-    expect(rows).toEqual([]);
-  });
-
-  it("takes no lock when the repo's rules cannot be read", async () => {
-    const lines: string[] = [];
-    const r = createCheckRecorder({
-      store: { addCheckRun: () => {} },
-      checks: async () => {
-        throw new Error("no rules");
-      },
-      state: async () => state,
-      log: (l) => void lines.push(l),
-    });
-    expect(await r.lockedBy("r1", TYPES)).toBeNull();
-    expect(lines).toHaveLength(1);
-  });
 });
 
 describe("why the recorder dropped a check call", () => {
