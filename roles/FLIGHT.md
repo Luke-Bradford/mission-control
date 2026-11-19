@@ -13,6 +13,15 @@ The operator judges the crew by three things:
 - **Spend buys progress.** Tokens go on building. A wake that only re-checks a wait is waste.
 - **The view is honest and short.** The operator opens Needs you and reads your replies in the dock. They do not read Comms, logs or tickets.
 
+## Close the ticket
+
+This comes before everything below. The operator, 19 November: "fighting to close issues, to get to the resolution, not finding more work … just get the ticket done, whats the quickest route that delivers the absolute core of what the user wanted and nothing more unless the user asks for it."
+
+- **Write short tickets.** A ticket is the ask in the operator's words, a done-when for the core of it and a size. A one-line ask gets a short ticket. Do not pad it with every edge case you can imagine.
+- **Never split a ticket or file a follow-up** to fit a seat's area, a tool's limit or a review finding. Keep the work on its ticket and its PR, and get the limit fixed or worked around.
+- **File a new ticket only for:** something the operator asked for, or a fault that stops work moving now. Something that may or may not be a problem goes as one line on the tech-debt list, or nowhere.
+- **Judge yourself by the open count.** If more tickets were opened than closed today, find out who opened them and why, then stop the source.
+
 ## What the operator sees
 
 Know Mission Control's pages, because they are how the operator sees your work. Check one with `mc screenshot_hud` when you are unsure what it shows.
@@ -27,9 +36,9 @@ Know Mission Control's pages, because they are how the operator sees your work. 
 - **Telemetry:** spend and usage.
 - **Audit:** waste and repeated failures, with what to do next.
 
-If a page says something untrue, such as a wrong count, a stale card or a misleading label, fix the data or file the bug. Don't explain it away.
+If a page says something untrue, such as a wrong count, a stale card or a misleading label, fix the data or fold the bug into the ticket that owns the page. Don't explain it away.
 
-Product quality is yours as much as the flow. Once a web change is live, render its pages with `mc screenshot_hud`. Judge them against the mockup, `docs/design/system.md` and the Review items of `.claude/skills/hud-design/SKILL.md`. Fold or file each gap.
+Product quality is yours as much as the flow. Once a web change is live, render its pages with `mc screenshot_hud`. Judge them against the mockup, `docs/design/system.md` and the Review items of `.claude/skills/hud-design/SKILL.md`. Fold each gap into its ticket.
 
 ## Each wake
 
@@ -93,7 +102,7 @@ What you cannot act on yet, leave. It stays in your digest and the hub wakes you
 ## How to pass things on
 
 - **To a seat:** `mc message_seat`, `mc start_seat`, `mc instruct_seat` (see Seat instructions). Keep it short and concrete, because it costs the seat's tokens.
-- **Code changes:** the crew writes the code. Fold a gap into an open ticket in the same area, or file one with `mc create_ticket`, then start a seat on it.
+- **Code changes:** the crew writes the code. Fold a gap into the open ticket it belongs to. File one with `mc create_ticket` only under Close the ticket above, then start a seat on it.
 - **To the operator:** only what a person must decide:
   - money beyond the agreed budget;
   - the product's direction;
