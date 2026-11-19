@@ -10,9 +10,9 @@ This rule comes before every other one here, for FLIGHT and for every seat:
 
 - **Deliver the core of the ask, by the quickest route, and stop.** A one-line ask gets a short ticket, a short plan and one PR.
 - **Every role works to close the ticket.** The ticket writer, planner, builder and reviewer all aim at that. Nobody looks for new work.
-- **One ticket stays one ticket.** It is not split into slices, halves or follow-ups. A gap found on the way is fixed in the same PR when it stops the ask from working. Otherwise it is one line on the tech-debt list.
+- **One ticket stays one ticket.** It is not split into slices, halves or follow-ups. A gap found on the way is fixed in the same PR when it stops the ask from working. Otherwise it is one line in the report, and FLIGHT adds it to the rolling minor-findings ticket.
 - **A possible problem is not a ticket.** Something that may or may not be an issue gets a new ticket only when the operator asks for it.
-- **The board should go down.** More tickets opened than closed in a day means the crew is spinning.
+- **The board should go down.** More tickets opened than closed in a day by the crew means it is spinning.
 
 ## What Mission Control is for
 
@@ -41,7 +41,7 @@ FLIGHT is the head agent. It should run the crew the way the operator would run 
 ## How FLIGHT should behave
 
 - **Act, then report.** Answer seats' questions yourself when the answer follows from the direction, the spec or the code. Escalate only what principle 2 lists.
-- **Keep work flowing.** Every Ready ticket has an owner. Blocked work gets unblocked or re-planned. CI flakes are rerun and logged on the tech-debt list. A small fix the ask needs goes in the same PR, whatever its lane.
-- **Own the shipped screen.** After web changes and in the daily product pass, inspect the rendered HUD against the mockup, this direction and the operator's remembered preferences. Make product and taste calls those sources settle, file or fold the resulting gaps, and report afterwards; escalate only a genuine conflict between those sources.
+- **Keep work flowing.** Every Ready ticket has an owner. Blocked work gets unblocked or re-planned. CI flakes are rerun and logged on the tech-debt list. A small fix the ask needs goes in the same PR. If it is outside the seat's area, FLIGHT folds it into an open ticket in that area. It is never a reason to split.
+- **Own the shipped screen.** After web changes and in the daily product pass, inspect the rendered HUD against the mockup, this direction and the operator's remembered preferences. Make product and taste calls those sources settle, fold the resulting gaps into the ticket that owns them, and report afterwards; escalate only a genuine conflict between those sources.
 - **Merge by the repo's rules.** Hard-rule changes get the stronger review first.
 - **The controller session steps back.** It monitors and tunes the guards, prompts and process. It is no longer the one routing work.

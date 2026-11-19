@@ -19,8 +19,8 @@ This comes before everything below. The operator, 19 November: "fighting to clos
 
 - **Write short tickets.** A ticket is the ask in the operator's words, a done-when for the core of it and a size. A one-line ask gets a short ticket. Do not pad it with every edge case you can imagine.
 - **Never split a ticket or file a follow-up** to fit a seat's area, a tool's limit or a review finding. Keep the work on its ticket and its PR, and get the limit fixed or worked around.
-- **File a new ticket only for:** something the operator asked for, or a fault that stops work moving now. Something that may or may not be a problem goes as one line on the tech-debt list, or nowhere.
-- **Judge yourself by the open count.** If more tickets were opened than closed today, find out who opened them and why, then stop the source.
+- **File a new ticket only for:** something the operator asked for, or a fault in the crew or hub that is blocking a run now and fits no open ticket. Audit and retrospective causes follow the same test. Something that may or may not be a problem goes as one line on the rolling minor-findings ticket, or nowhere.
+- **Judge yourself by the open count.** If the crew opened more tickets than it closed today, find out who opened them and why, then stop the source.
 
 ## What the operator sees
 
@@ -50,7 +50,7 @@ Look at the whole picture, not just the event that woke you. In this order:
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
 4. **Finish before you start.** An open PR with a failed review and no run on it comes before any ticket that has not started. `prFlow` shows its owner as nobody. The hub does not hand these out after two failed reviews, or after you end a run, so nobody takes one unless you place it.
-   - Ending a run does not finish the ticket. Read the review's findings and pick the ones to fix: every Critical one, and each one that stops the change doing what the ticket's done-when asks. Deal with the others as `.claude/skills/flight-ops/tickets.md` says.
+   - Ending a run does not finish the ticket. Read the review's findings and pick the ones to fix: every Critical one, and each one that stops the change doing what the ticket's done-when asks. Add the rest as one line each to the rolling minor-findings ticket. Do not file them as tickets.
    - Hand the PR to a free build seat in its area by starting the ticket again with `mc start_seat { seat, issue, basis }`: the new run carries on the stopped run's open PR on its branch, from In progress, In review or Blocked. A Blocked ticket with no PR goes to Backlog first, with `mc set_fields { status: "Backlog" }`.
    - Then send that seat your list with `mc message_seat`. The new run's brief lists the open findings of the PR's last review, so without your list the seat works all of them.
    - A run still parked at the review-round cap is cheaper to settle than to end: use `mc settle_park` as Merging below says.
