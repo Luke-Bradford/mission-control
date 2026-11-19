@@ -646,6 +646,29 @@ describe("guardDecision: gh, network", () => {
   );
 });
 
+describe("guardDecision: network and background work are allowed for a writer", () => {
+  it.each([
+    "curl -s https://example.test",
+    "wget https://example.test/file",
+    "sleep 30 &",
+    "nohup node server.js >out.log 2>&1 &",
+    "tmux new -d 'node server.js'",
+    "screen -dm node server.js",
+    "ssh host uptime",
+  ])("allows %s", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual({ kind: "allow" });
+  });
+  it("allows a background Bash call that is not a full suite", () => {
+    expect(guardDecision(bash("node server.js", { run_in_background: true }), writer)).toEqual({
+      kind: "allow",
+    });
+  });
+  it("still refuses a background full suite and a git write inside a launcher", () => {
+    expect(ruleOf(bash("pnpm -s test &"))).toBe("full-suite");
+    expect(ruleOf(bash("tmux new -d 'git push'"))).toBe("git-write");
+  });
+});
+
 describe("guardDecision: the full suite", () => {
   it("locks a suite with no path and allows one with a path", () => {
     expect(guardDecision(bash("pnpm -s vitest run"), writer)).toEqual({
