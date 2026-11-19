@@ -1,13 +1,16 @@
 # PR 1975 review evidence
 
-Rendered by FLIGHT, because the seat's sandbox can't start Chrome. Head: 8e0090d. Viewport at scale 1, no page scroll, FLIGHT rail collapsed in both the prototype and the head.
+Rendered by FLIGHT, because the seat's sandbox can't start Chrome. Head: 2ca2b94 (captured 19 Nov 2026, 01:37 UTC). Viewport at scale 1, no page scroll, FLIGHT rail collapsed in both the prototype and the head. The 8e0090d images this replaces are in git history.
 
 | Size | Prototype (unchanged `docs/prototype/audit/audit.html`, dark only) | Head, dark | Head, light |
 |---|---|---|---|
-| 1920×940 | `prototype-1920x940-dark.png` | `head-8e0090d-1920x940-dark.png` | `head-8e0090d-1920x940-light.png` |
-| 2560×1145 | `prototype-2560x1145-dark.png` | `head-8e0090d-2560x1145-dark.png` | `head-8e0090d-2560x1145-light.png` |
+| 1920×940 | `prototype-1920x940-dark.png` | `head-2ca2b94-1920x940-dark.png` | `head-2ca2b94-1920x940-light.png` |
+| 2560×1145 | `prototype-2560x1145-dark.png` | `head-2ca2b94-2560x1145-dark.png` | `head-2ca2b94-2560x1145-light.png` |
+| 1600×1000 | none | `head-2ca2b94-1600x1000-dark.png` | none |
 
 The prototype has only a dark theme, so its dark image pairs with both head themes.
+
+Do next titles, measured in the page at capture: at 1920 and 2560, all 10 collapsed titles fit whole inside their cell, so none needs an ellipsis. At 1600, 9 of the 10 titles are cut with a painted ellipsis (`Reduce review rounds for PR 20…`), and none reaches past its cell. Row 1 is open by default and wraps in full.
 
 Data: the head is served by a preview hub (`MC_NO_LOOP_WRITES=1`) on a copy of the live database. Demo data has only 3 ranked rows, and the done-when asks for at least 5 on the first screen, so live data is used. Data differences, not layout: the head shows 10 ranked rows (the prototype shows 8), all review-round proposals. New outside is empty because outside sources aren't collected yet (the prototype has 10 sample items). The window is 30 days, against 7 in the prototype.
 
