@@ -109,37 +109,35 @@ export function CodeHealth() {
     if (!repo) return;
     const token = ++evidenceToken.current,
       scope = JSON.stringify([repo, window, "summary"]);
-    hub
-      .read<CodeHealthView>(RESOURCES.codeHealth(repo, window, "overview"))
-      .then(
-        (full) => {
-          if (token !== evidenceToken.current || scope !== selection.current) return;
-          const row =
-            w.id !== undefined && full.data.tab === "overview"
-              ? full.data.recommendations.find((r) => r.id === w.id)
-              : undefined;
-          // The full read carries evidence for only the top few rows; say so for any other row.
-          setEvidence(
-            w.id !== undefined && !row
-              ? {
-                  title: w.title,
-                  refs: [],
-                  gap: "This row's evidence is not in the current read. Its source and why are shown on the row.",
-                }
-              : {
-                  title: w.title,
-                  refs: w.id === undefined ? [] : (row?.evidence ?? []),
-                  coverage: full.coverage,
-                },
-          );
-        },
-        (error: unknown) => {
-          if (token !== evidenceToken.current || scope !== selection.current) return;
-          setNotice(
-            `Evidence could not be read: ${error instanceof Error ? error.message : String(error)} Refresh and try again.`,
-          );
-        },
-      );
+    hub.read<CodeHealthView>(RESOURCES.codeHealth(repo, window, "overview")).then(
+      (full) => {
+        if (token !== evidenceToken.current || scope !== selection.current) return;
+        const row =
+          w.id !== undefined && full.data.tab === "overview"
+            ? full.data.recommendations.find((r) => r.id === w.id)
+            : undefined;
+        // The full read carries evidence for only the top few rows; say so for any other row.
+        setEvidence(
+          w.id !== undefined && !row
+            ? {
+                title: w.title,
+                refs: [],
+                gap: "This row's evidence is not in the current read. Its source and why are shown on the row.",
+              }
+            : {
+                title: w.title,
+                refs: w.id === undefined ? [] : (row?.evidence ?? []),
+                coverage: full.coverage,
+              },
+        );
+      },
+      (error: unknown) => {
+        if (token !== evidenceToken.current || scope !== selection.current) return;
+        setNotice(
+          `Evidence could not be read: ${error instanceof Error ? error.message : String(error)} Refresh and try again.`,
+        );
+      },
+    );
   };
   const generatedAt = summary ? overview?.generatedAt : view?.generatedAt,
     staleAfter = summary ? SUMMARY_STALE_MS : 120000,
