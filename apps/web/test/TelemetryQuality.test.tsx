@@ -80,7 +80,7 @@ function open(
     "/api/crew?shape=summary": { rows: [], firstRunToday: null },
     "/api/guard/hits?days=14": {
       hits: [],
-      counts: { "git-write": 12, network: 3, background: 0 },
+      counts: { "git-write": 12, "full-suite": 3 },
     },
     "/api/qa/flow?days=14": {
       days: 14,
@@ -232,7 +232,7 @@ describe("Telemetry, Quality tab", () => {
     const rows = [...document.querySelectorAll("#qGuard .hrow")].map((r) => r.textContent);
     expect(rows[0]).toContain("git-write");
     expect(rows[0]).toContain("12");
-    expect(rows[1]).toContain("network");
+    expect(rows[1]).toContain("full-suite");
     expect(document.getElementById("qRounds")?.textContent).toContain(
       "Test attempts: not collected yet.",
     );
