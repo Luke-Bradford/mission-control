@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
-import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import {
@@ -353,43 +352,6 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     ]);
     syncWasteAlarms(config, store, NOW + MIN);
     expect(ticketParked(store, TICKET)).toBeNull();
-  });
-});
-
-describe("unchanged rerun refusal", () => {
-  it("refuses the same check on the same commit with a clean tree, and records the refusal", async () => {
-    const r = run("guido-1", { ticket: "mc#9" });
-    store.upsertRun(r);
-    const recorder = createCheckRecorder({
-      store,
-      checks: async () => ["pnpm -s lint"],
-      state: async () => ({ head: "feedbeef00", clean: true }),
-      now: () => NOW,
-    });
-    expect(await recorder.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    checkOn(r.id, "pnpm -s lint", "feedbeef00", NOW - MIN, true);
-    expect(await recorder.rerun?.(r.id, "pnpm -s lint")).toMatch(
-      /Not run: pnpm -s lint already ran on commit feedbee and nothing has changed/,
-    );
-    // another command, or another head, is not a rerun
-    expect(await recorder.rerun?.(r.id, "pnpm -s typecheck")).toBeNull();
-    const moved = createCheckRecorder({
-      store,
-      checks: async () => ["pnpm -s lint"],
-      state: async () => ({ head: "0123456789", clean: true }),
-    });
-    expect(await moved.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    // a changed file (dirty tree) is not a rerun either
-    const dirty = createCheckRecorder({
-      store,
-      checks: async () => ["pnpm -s lint"],
-      state: async () => ({ head: "feedbeef00", clean: false }),
-    });
-    expect(await dirty.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    syncWasteAlarms(config, store, NOW);
-    expect(openWasteAlarms(store).map((a) => [a.check, a.runId, a.level])).toEqual([
-      ["unchanged-rerun", r.id, 1],
-    ]);
   });
 });
 

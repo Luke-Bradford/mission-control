@@ -369,31 +369,6 @@ describe("Codex check records", () => {
     ]);
   });
 
-  it("declines a configured check the recorder says is an unchanged rerun, and never starts its record", async () => {
-    const { begun, checks } = recorder();
-    checks.rerun = async (_run, c) => (c === "pnpm -s typecheck" ? "Not run: unchanged." : null);
-    const h = approver("writer", [], undefined, checks, new TestLock());
-    expect(
-      await h.approve(request("pnpm -s typecheck", { itemId: "item-3" }), undefined, signal()),
-    ).toBe("decline");
-    expect(begun).toEqual([]);
-  });
-
-  it("tells the seat the rerun text when an unchanged rerun is refused", async () => {
-    const { checks } = recorder();
-    checks.rerun = async () => "Not run: unchanged.";
-    const tell = vi.fn();
-    const h = approver("writer", [], undefined, checks, new TestLock(), false, tell);
-    const out = await h.approve(
-      request("pnpm -s typecheck", { itemId: "item-30" }),
-      undefined,
-      signal(),
-    );
-    expect(out).toBe("decline");
-    expect(tell).toHaveBeenCalledTimes(1);
-    expect(tell).toHaveBeenCalledWith("Not run: unchanged.");
-  });
-
   it("tells the seat the rule's text when a guard rule refuses", async () => {
     const tell = vi.fn();
     const h = approver("writer", [], undefined, undefined, new TestLock(), false, tell);

@@ -10,7 +10,6 @@ import {
   type Run,
   seatCallSign,
   seatDef,
-  unchangedRerunText,
   WASTE_ACTIONS,
   WASTE_CHECK_TITLES,
   WASTE_CHECKS,
@@ -517,18 +516,6 @@ export function settleReviewRounds(
       at,
     );
   return id !== undefined && store.waste.resolveAlarm(id, at, basis);
-}
-
-/** The refusal text for an unchanged rerun, and the record of it, for the hook. */
-export function refuseRerun(
-  store: Store,
-  run: { id: string },
-  command: string,
-  sha: string,
-  at: number,
-): string {
-  store.addRerunRefusal(run.id, command, sha, at);
-  return unchangedRerunText(command, sha);
 }
 
 /** FLIGHT or the operator closes a hold with a basis; false when the alarm is not open. */
