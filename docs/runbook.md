@@ -437,8 +437,7 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 - An alarm about one ticket going round wakes FLIGHT, once, through the `waste_alarm` signal: a
   retry loop (the dealer will not deal the parked ticket until FLIGHT resolves the alarm or its
   cause ends), failed review rounds at the limit, and runs per ticket. The wake comes at the
-  watch's next pass, not in a batch, unless FLIGHT's recent wakes for signals were mostly no-ops
-  (see Batching). The other alarms wake nobody: clearance waiting, cost without output,
+  watch's next pass, held to the 30-minute gap (see The wake gap). The other alarms wake nobody: clearance waiting, cost without output,
   coordination overhead and ticket churn are stored only; a review-rounds hold parks the run, and
   that park's Needs-you item wakes FLIGHT; a restart storm lifts when the hour's count falls
   back. Open alarms are served by `GET /api/waste` (a clearance wait from 24
@@ -1344,27 +1343,28 @@ off, the run has no open work to hold, or the hold is the operator's and the cal
 ### FLIGHT's wakes: reasons, calls, accountability and pace
 
 The watch checks every 5 minutes (and 20 seconds after a change) and wakes FLIGHT when a reason is new.
-Besides the older reasons (questions, items, free or stopped seats, parks FLIGHT may lift, PRs awaiting
-it, red main, flaky checks, hub errors), the sweep raises these signals, each told once.
+FLIGHT is woken for three things only: an operator message (`operator`, `owed`), a seat's question or call
+(`q`, `signals` of kind `seat_call`), and a failure the hub could not settle (a park FLIGHT rules on, a
+stopped seat, a red main, a hub error, a PR awaiting FLIGHT, a blocker). A change to the instructions, a
+plan of FLIGHT's own falling due, the daily retrospective and an arrival from another team wake it too,
+each at most once a day. The hub does the rest with its own timers and no FLIGHT tokens: CI state and PR
+flow (the engine tick), idle seats (the engine gives a free seat its next ticket; a seat idle over 30
+minutes writes a hub log line), and disk (the disk sweep). A free seat, a Ready ticket, a PR's CI turning
+green, a review queued or finished, a merge and a PR ready to merge are in `flight_state` for the
+next wake and wake nobody.
 
-Routine pipeline steps do not wake FLIGHT: a PR's CI turning green, a review queued or finished, a
-merge queued or done, a PR ready to merge, a park the engine clears alone, and a review that has waited
-under 10 minutes for its seat. They stay in `flight_state` (prs, mergeQueue, seats, reviewQueue) and
-wake FLIGHT only when a timed rule below says they have stood still (`old_park`, `merge_stalled`,
-`idle_seat`, or idle review seats with a review queued 10 minutes). Nothing re-wakes FLIGHT on a timer: it
-wakes only for activity (an operator message or tag, a seat's question or call, a hub check it could not
-settle, an error in its own work, a merge or clearance only it can give, a fact changing), plus the daily retrospective. Work that still waits on it, with no fact changed,
-stays silent. Each wake stores its reasons (the fact categories, e.g. `q`, `signals`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
-by reason and by hour over the last day.
+An operator message, a seat's question and a seat's call wake FLIGHT within the debounce (a message within 30 seconds of
+another wake, the others within 2 minutes). The last wake time is kept across a hub restart, so a restart does not repeat a wake for a failure that is still open. Every other reason waits until `FLIGHT_BATCH_MS` (30
+minutes) after the last wake, so failures wake FLIGHT twice an hour at most. Each wake stores its
+reasons (the fact categories, e.g. `q`, `signals`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
+by reason and by hour over the last day. Measure the wake rate from `flight_wakes`.
 
 **A free seat with open tickets (#1451).** The hub checks this itself, with no FLIGHT tokens: a free
 build seat, open tickets near its area (all open tickets, not only the 30 the digest lists; Backlog, Refinement or Ready; an area label that is the seat's,
 or none or several, which need triage). A ticket with no
-board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
-`idle` wake fact names it, one value for the whole idle spell, so FLIGHT is woken once, at 10 minutes, and not again for
-that spell (it is woken again when the seat starts and goes idle again). The wake tells FLIGHT to start what the repo's working list allows, and that a seat with nothing it may start stays idle. The hub records when each seat's
+board status counts as work to triage. Each seat is timed on its own. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
-line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
+line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`. An idle seat does not wake FLIGHT.
 A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
 security exceptions go to the operator, parked with a brief.
 
@@ -1403,11 +1403,11 @@ seat's ticket.
 
 **A reason FLIGHT leaves alone.** A wake lists what changed. FLIGHT acts on what it can and leaves the rest: nothing checks that each reason got a decision, and there is no wait to record. A reason left alone stays in the digest and does not wake FLIGHT again until its fact changes (a new head SHA, a stage change, a run ending); a timed check on the same thing (such as `item_stale`, `old_park` or `merge_stalled`) can still wake it once more. A seat's call FLIGHT leaves alone is told once and goes to nobody else: the seat calls again if it still needs an answer. A wait no longer keeps the engine from starting a seat on a stuck PR. What does is in the never-taken list under the stuck PR check; the one FLIGHT can set on a PR whose run has ended is a hold on the PR's Needs-you item (`hold_item`). To look at a PR again at a set time FLIGHT adds a planned `PR recheck` entry to its brief. A stored `wait_over` signal from before is dropped when the signals are read; a `flight:left` note still open is cleared, and the `flight.waits` setting deleted, when the watch starts.
 
-**What a free seat or an item wakes.** A free build seat, and the Ready tickets listed with it, wake FLIGHT only when a Ready ticket is in that seat's area (one `area:` label the seat covers, not held by another login). An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`). It has no target: FLIGHT logs no decision for what it leaves alone.
+**What an item wakes.** An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. A PR's own steps are not items for FLIGHT. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`). It has no target: FLIGHT logs no decision for what it leaves alone.
 
 **Ledger pointers and wake ids.** A ledger entry can carry `pointers` (`mc track`): each names a `pr` or `ticket` (`repo#n`), a `seat`, `repo`, `person` or `metric`. They live in `flight_pointers`, so a restart keeps them. The hub marks a pointer when its target changes: a stored PR's state, head, CI, review or draft flag, and a card's column or close. No agent runs for that. The wake digest's `moved` lists the pointers marked since FLIGHT last read them, once each; delivering a wake, or a `flight_state` read, stamps their `read_at`. Changes are ordered by a counter (`changed_seq`, `read_seq`), not by clock, so a change the poll stamped before FLIGHT's read still counts as unread. `track` refuses a target the hub could not mark: `<repo id>#<n>` for a pr or ticket, a seat in the session, a configured repo id, a GitHub login, a metric id. The store holds seat, repo, person and metric pointers too, but no hub event feeds them, so `track` accepts only `pr` and `ticket` pointers. The digest lists at most `FLIGHT_MOVED_LISTED` moved pointers (the rest wait, unread, for the next wake) and leaves out a PR pointer whose PR the digest's `prs` already lists and whose change `prs` shows (opened, a state, a new commit); that one is read with the wake. CI, review and draft changes are not in the `prs` entry, so they stay in `moved`. Each wake has an id, `<runId>:<n>` (0 is the start brief), kept on `flight_wakes.wake_id` and on every decision made in it (`flight_decisions.wake_id`).
 
-**Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a planned entry, a PR-flow time, an idle seat's next period, the end of the batch window), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
+**Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a planned entry, the end of the 30-minute gap), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
 
 ### FLIGHT adds a controller check to a ticket
 
@@ -2125,8 +2125,7 @@ shows them side by side.
 While it is on, the queue, FLIGHT's `start_seat` and a seat start all refuse a ticket that does not
 match or that arrives after the starts are used, naming the pace and the ticket. A start the
 operator makes by hand from the HUD is not held, but the same route called by FLIGHT through
-`mc operator` is. FLIGHT's state carries `pace`, and FLIGHT's wake facts leave out the tickets the
-pace refuses and the idle-seat fact, so held seats do not wake it all weekend. At the end time it stops applying without anyone
+`mc operator` is. FLIGHT's state carries `pace`, and A free or idle seat never wakes FLIGHT, so held seats do not wake it all weekend. At the end time it stops applying without anyone
 turning it off. An unreadable row counts as normal pace. `GET /api/overview` carries
 `pace` (`note`, `until`, `labels`, `maxStarts`, `startsLeft`) while it is on and `null` otherwise,
 for the Overview to show.
@@ -2743,7 +2742,7 @@ The live check starts the new version the way a real seat does (`checkCli` in `a
 - If no build seat of that vendor is configured, no run can break on that tool, and the old bare check applies instead (`claude -p --allowedTools=Read` or `codex exec --sandbox read-only` in an empty temp dir, same nonce read).
 A pass keeps the version, clears the pending record and records a `cli-update` item; the next seat run uses it. A failure (install, wrong version or check) puts the previous version back (skipped when the failed install changed nothing), holds the failed version until a newer one appears, records a `cli-update-failed` item and raises one Needs-you note (`cli-auto:<tool>:<version>`). If the previous version is not back, new runs stay held and the update stays pending: the next pass (or the hub after a restart, which re-holds runs at start) re-checks and retries the rollback. Each step writes a server log line starting `cli update <tool>:`. The job never touches the guard, the safety floor, CI workflows or the Mission Control block.
 
-**Batching.** A wake whose only new facts are routine (`t`, reviews, PR flow, or a PR item) waits until `FLIGHT_BATCH_MS` (30 minutes) after the last wake. The hub also learns categories that caused at least ten wakes in seven days and had no state-changing FLIGHT call more than 80% of the time. Learned facts ride with the next immediate wake, or go at the end of the window. Free and idle seats, releases, questions, operator messages, parks, ready PRs, a red main, seat calls, merges and lifts wake at once. The daily retrospective records wake reasons, riders, no-action share and the learned set. Settling a question or park, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. Other non-routine facts keep the 2-minute gap. The safety floor is never held back.
+**The wake gap.** An operator message, a seat's question, an instruction change, a plan falling due and the daily retrospective wake FLIGHT at once. Every other reason waits until `FLIGHT_BATCH_MS` (30 minutes) after the last wake, whatever its kind. The hub no longer learns which reasons to batch. Settling a question or park, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. A question or an instruction keeps the 2-minute gap. The safety floor is never held back.
 
 **Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list.
 

@@ -519,8 +519,6 @@ function deadlines(flow: FlightPrFlow | undefined) {
   );
 }
 
-export const prFlowWakeTimes = (flow: FlightPrFlow | undefined): number[] =>
-  deadlines(flow).map((d) => d.at);
 export const prFlowFacts = (flow: FlightPrFlow | undefined): string[] =>
   deadlines(flow)
     .filter((d) => d.at <= (flow?.generatedAt ?? 0))
