@@ -55,6 +55,7 @@ import {
   PR_SWEEP_FIRST_DELAY_MS,
   PR_SWEEP_MS,
   refreshOnSeatFree,
+  type SchedulerDeps,
   waitedPrNumbers,
 } from "../src/scheduler.ts";
 import { openWasteAlarms } from "../src/spend/waste.ts";
@@ -1751,53 +1752,128 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
-    it("restarts a runaway file-change service once an hour without holding the crew", async () => {
+    describe("a runaway file-change service", () => {
       const mb = 1024 ** 2;
-      let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
-      let size = 10 * mb;
-      const restartFileService = vi.fn(async () => ({
-        how: "sudo" as const,
-        diagnostics: "/data/diagnostics/fseventsd-x.txt",
-      }));
-      const s = createScheduler({
-        config,
-        store,
-        bus,
-        now: () => t,
-        restartFileService,
-        collectors: stubs({
-          machine: vi.fn(async (_p, _prev, at) => ({
-            sample: machineSample({
-              at,
-              memTotalBytes: 24 * 1024 ** 3,
-              swapUsedBytes: 1024 ** 3,
-              swapTotalBytes: 20 * 1024 ** 3,
-              memoryPressureFreePct: 44,
-              load1: 1,
-              fileServiceBytes: size,
-            }),
-            cpus: [],
-            errors: [],
-          })),
-        }),
+      const make = (
+        size: () => number,
+        clock: () => number,
+        restartFileService: SchedulerDeps["restartFileService"],
+      ) =>
+        createScheduler({
+          config,
+          store,
+          bus,
+          now: clock,
+          ...(restartFileService ? { restartFileService } : {}),
+          collectors: stubs({
+            machine: vi.fn(async (_p, _prev, at) => ({
+              sample: machineSample({
+                at,
+                memTotalBytes: 24 * 1024 ** 3,
+                swapUsedBytes: 1024 ** 3,
+                swapTotalBytes: 20 * 1024 ** 3,
+                memoryPressureFreePct: 44,
+                load1: 1,
+                fileServiceBytes: size(),
+              }),
+              cpus: [],
+              errors: [],
+            })),
+          }),
+        });
+
+      it("is restarted once an hour, across hub restarts, without holding the crew past the old 2 GB", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 2000 * mb;
+        const restart = vi.fn(async () => ({
+          how: "sudo" as const,
+          diagnostics: "/data/diagnostics/fseventsd-x.txt",
+        }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        await s.tick("machine");
+        expect(restart).not.toHaveBeenCalled();
+        t += 30 * 60_000;
+        size = 2300 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+        expect(restart).toHaveBeenCalledWith(expect.any(Number), { prompt: true });
+        await vi.waitFor(() =>
+          expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
+            expect.stringContaining("grew from 2000 MB to 2300 MB within an hour"),
+          ),
+        );
+        expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
+        expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+        // a new hub process on the same database keeps the hour
+        t += 10 * 60_000;
+        size = 2600 * mb;
+        const again = vi.fn(restart);
+        await make(
+          () => size,
+          () => t,
+          again,
+        ).tick("machine");
+        expect(again).not.toHaveBeenCalled();
       });
-      await s.tick("machine");
-      expect(restartFileService).not.toHaveBeenCalled();
-      t += 30 * 60_000;
-      size = 200 * mb;
-      await s.tick("machine");
-      await vi.waitFor(() => expect(restartFileService).toHaveBeenCalledTimes(1));
-      await vi.waitFor(() =>
-        expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
-          expect.stringContaining("grew from 10 MB to 200 MB within an hour"),
-        ),
-      );
-      expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
-      expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
-      t += 10 * 60_000;
-      size = 400 * mb;
-      await s.tick("machine");
-      expect(restartFileService).toHaveBeenCalledTimes(1);
+
+      it("raises a Needs-you item when it cannot be restarted, prompts again only after 12 hours, and clears when growth stops", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const restart = vi.fn(async () => ({
+          how: "not restarted" as const,
+          error: "sudo: a password is required; prompt: User canceled.",
+          diagnostics: null,
+        }));
+        const s = make(
+          () => size,
+          () => t,
+          restart,
+        );
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 300 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() =>
+          expect(store.notes().find((n) => n.key === "file-service-runaway")?.text).toContain(
+            "could not restart it (sudo: a password is required; prompt: User canceled.)",
+          ),
+        );
+        const item = store.notes().find((n) => n.key === "file-service-runaway")?.text ?? "";
+        expect(item).toContain("sudo killall fseventsd");
+        expect(item).toContain("NOPASSWD: /usr/bin/killall fseventsd");
+        t += 31 * 60_000;
+        size = 450 * mb;
+        await s.tick("machine");
+        expect(restart).toHaveBeenCalledTimes(1);
+        t += 30 * 60_000;
+        size = 700 * mb;
+        await s.tick("machine");
+        await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(2));
+        expect(restart).toHaveBeenLastCalledWith(expect.any(Number), { prompt: false });
+        // flat for an hour: no longer a runaway, so the item goes
+        t += 61 * 60_000;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === "file-service-runaway")).toBeUndefined();
+      });
+
+      it("is never touched on a hub without the restart wired (previews)", async () => {
+        let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+        let size = 10 * mb;
+        const s = make(
+          () => size,
+          () => t,
+          undefined,
+        );
+        await s.tick("machine");
+        t += 30 * 60_000;
+        size = 900 * mb;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === "file-service-runaway")).toBeUndefined();
+      });
     });
 
     it("tells the operator to restart the file-change service, and drops the item when it recovers", async () => {

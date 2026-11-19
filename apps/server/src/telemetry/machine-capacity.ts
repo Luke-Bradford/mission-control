@@ -26,8 +26,8 @@ export const SWAP_FILE_USED_HARD_PCT = 85;
 /** ...but only when that much swap is also a real share of physical RAM. */
 export const SWAP_FILE_MIN_PCT_OF_RAM = 50;
 /**
- * The file-change service (`fseventsd`) hurts the Mac once it holds this much: on 29 October it
- * made the Mac unusable at 7 GB. A runaway is caught and restarted long before this (see
+ * The file-change service (`fseventsd`) hurts the Mac near this size: on 29 October it made the
+ * Mac unusable at 7 GB, so this holds a little before that. A runaway is caught and restarted long before this (see
  * `fileServiceRunaway`); this hold is only the backstop for when that restart could not run.
  */
 export const FSEVENTSD_RSS_HARD_BYTES = 6 * 1024 ** 3;
@@ -38,8 +38,17 @@ export const FSEVENTSD_RSS_HARD_BYTES = 6 * 1024 ** 3;
  */
 export const FSEVENTSD_RUNAWAY_BYTES = 150 * 1024 ** 2;
 export const FSEVENTSD_RUNAWAY_WINDOW_MS = 60 * 60_000;
-/** The setting holding when the hub last restarted a runaway `fseventsd`. */
+/** The setting holding when the hub last tried to restart a runaway `fseventsd`. */
 export const FILE_SERVICE_RESTART_SETTING = "machine-capacity:fseventsd-restart-at";
+/** The setting holding when the hub last showed the administrator prompt for it. */
+export const FILE_SERVICE_PROMPT_SETTING = "machine-capacity:fseventsd-prompt-at";
+/** An unanswered prompt is not shown again for this long; a sudoers rule still restarts hourly. */
+export const FILE_SERVICE_PROMPT_GAP_MS = 12 * 60 * 60_000;
+/** The Needs-you item for a runaway the hub could not restart. */
+export const FILE_SERVICE_RUNAWAY_KEY = "file-service-runaway";
+/** The one sudoers line that lets the hub restart it unattended, and nothing else. */
+export const FILE_SERVICE_SUDOERS_ADVICE =
+  'To let the hub do this itself next time, run once: `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd && sudo chmod 440 /etc/sudoers.d/mc-fseventsd`. It allows only that one command; any program running as you could then restart fseventsd.';
 
 export interface FileServiceRunaway {
   fromBytes: number;
@@ -52,11 +61,13 @@ export function fileServiceRunaway(
   samples: readonly MachineSample[],
   now: number,
 ): FileServiceRunaway | null {
+  // 0 is the collector finding no fseventsd process (as just after a restart), not a size
   const recent = samples.filter(
     (s) =>
       s.at >= now - FSEVENTSD_RUNAWAY_WINDOW_MS &&
       s.at <= now &&
-      typeof s.fileServiceBytes === "number",
+      typeof s.fileServiceBytes === "number" &&
+      s.fileServiceBytes > 0,
   );
   const latest = recent.at(-1);
   if (latest === undefined || typeof latest.fileServiceBytes !== "number") return null;

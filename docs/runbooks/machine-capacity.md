@@ -28,11 +28,23 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
 - Two fixed stops (#1812), for the fault where the file-change service (`fseventsd`) swells and
   pushes memory into swap: swap used over 85% of the swap file when that swap is also over 50%
   of RAM (a small swap file that is nearly full is normal and does not block), and `fseventsd`
-  holding over 2 GB. The second reads its memory with compressed pages counted (`top`, run with
-  `pgrep` beside `ps` when the spawns above run), because `ps` RSS leaves compressed pages out.
-  The Needs-you item then says to run `sudo killall fseventsd` (about 15 seconds, no Mac
-  restart). At start the hub also writes `.metadata_never_index` into the crew worktrees folder
-  and the evidence folders so Spotlight stays out of them.
+  holding over 6 GB (it made the Mac unusable at 7 GB on 29 October). The second reads its memory
+  with compressed pages counted (`top`, run with `pgrep` beside `ps` when the spawns above run),
+  because `ps` RSS leaves compressed pages out. The Needs-you item then says to run
+  `sudo killall fseventsd` (about 15 seconds, no Mac restart). At start the hub also writes
+  `.metadata_never_index` into the crew worktrees folder and the evidence folders so Spotlight
+  stays out of them.
+- A runaway `fseventsd` is restarted long before that stop. Healthy, it stays flat under crew
+  work (5 to 13 MB through 100 to 230 runs a day, 13 to 18 November); in the stuck state seen on
+  18 November it kept every event and grew 150 to 317 MB an hour. When it grows 150 MB within an
+  hour, the live hub (never a preview) saves the process list and the fseventsd log to
+  `<data dir>/diagnostics/fseventsd-*.txt` (the latest 10 are kept), then restarts it at most once
+  an hour: through `sudo -n /usr/bin/killall fseventsd` when the operator has added the rule
+  below, else through the macOS administrator prompt, shown at most once in 12 hours. A restart
+  that fails raises a Needs-you item, which clears once the growth stops. The diagnostics are
+  what to read to find what tips it into that state. The rule that lets the hub restart it
+  unattended allows that one command only, for any program running as the operator:
+  `echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/killall fseventsd" | sudo tee /etc/sudoers.d/mc-fseventsd && sudo chmod 440 /etc/sudoers.d/mc-fseventsd`.
 - `load_window_min: 5` requires sustained load; `clear_after_min: 5` avoids start/stop churn.
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a

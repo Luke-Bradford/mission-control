@@ -346,8 +346,8 @@ export async function main(): Promise<void> {
     ...(preview
       ? {}
       : {
-          restartFileService: (at: number) =>
-            restartFileService(join(dirname(dbPath), "diagnostics"), at),
+          restartFileService: (at: number, opts: { prompt: boolean }) =>
+            restartFileService(join(dirname(dbPath), "diagnostics"), at, opts),
         }),
     hubDiskUse: () => {
       void hubDiskUse.read().catch(() => {});

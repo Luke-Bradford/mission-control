@@ -247,11 +247,7 @@ describe("machineCapacity", () => {
   });
 });
 
-describe("fileServiceRunaway", () => {
-  const mb = 1024 ** 2;
-  const at = (minutesAgo: number, bytes: number) =>
-    sample({ at: NOW - minutesAgo * 60_000, fileServiceBytes: bytes });
-
+describe("machineCapacity at 2.2 GB of fseventsd", () => {
   it("does not hold the crew for 2.2 GB on a Mac with headroom (19 November)", () => {
     const s = sample({
       fileServiceBytes: 2.2 * 1024 ** 3,
@@ -262,6 +258,12 @@ describe("fileServiceRunaway", () => {
     });
     expect(machineCapacity([s], NOW)).toEqual({ blocked: false, reason: null });
   });
+});
+
+describe("fileServiceRunaway", () => {
+  const mb = 1024 ** 2;
+  const at = (minutesAgo: number, bytes: number) =>
+    sample({ at: NOW - minutesAgo * 60_000, fileServiceBytes: bytes });
 
   it("finds the stuck state: 150 MB of growth within an hour", () => {
     expect(fileServiceRunaway([at(50, 12 * mb), at(20, 90 * mb), at(0, 170 * mb)], NOW)).toEqual({
@@ -280,7 +282,8 @@ describe("fileServiceRunaway", () => {
     expect(fileServiceRunaway([at(30, 2000 * mb), at(0, 6 * mb)], NOW)).toBeNull();
   });
 
-  it("needs readings of the service", () => {
+  it("needs readings of the service, and a 0 (no process found) is not one", () => {
     expect(fileServiceRunaway([sample({ at: NOW })], NOW)).toBeNull();
+    expect(fileServiceRunaway([at(10, 0), at(0, 160 * mb)], NOW)).toBeNull();
   });
 });

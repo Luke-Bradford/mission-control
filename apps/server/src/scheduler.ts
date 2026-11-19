@@ -127,8 +127,12 @@ import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
 import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
+  FILE_SERVICE_PROMPT_GAP_MS,
+  FILE_SERVICE_PROMPT_SETTING,
   FILE_SERVICE_RESTART_ADVICE,
   FILE_SERVICE_RESTART_SETTING,
+  FILE_SERVICE_RUNAWAY_KEY,
+  FILE_SERVICE_SUDOERS_ADVICE,
   FSEVENTSD_RUNAWAY_WINDOW_MS,
   fileServiceFault,
   fileServiceRunaway,
@@ -327,7 +331,7 @@ export interface SchedulerDeps {
    * Restarts a runaway `fseventsd` after saving what was running. Absent on previews and in unit
    * callers, which never touch a system service.
    */
-  restartFileService?: (at: number) => Promise<FileServiceRestart>;
+  restartFileService?: (at: number, opts: { prompt: boolean }) => Promise<FileServiceRestart>;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
@@ -479,31 +483,59 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let machineMinute = -1;
   /** The capacity guard held new starts at the last stored sample. */
   let machineBlocked = false;
-  /** A runaway `fseventsd` is restarted at most once an hour, across hub restarts. */
+  /**
+   * A runaway `fseventsd` is restarted at most once an hour, across hub restarts: silently through
+   * the operator's sudoers rule when there is one, else through the administrator prompt at most
+   * once in `FILE_SERVICE_PROMPT_GAP_MS`. A restart that fails raises a Needs-you item (FLIGHT
+   * sees it too), which clears once the growth stops.
+   */
   const restartRunawayFileService = (at: number): void => {
     const restart = deps.restartFileService;
     if (restart === undefined) return;
-    const last = Number(store.getSetting(FILE_SERVICE_RESTART_SETTING) ?? "0");
-    if (Number.isFinite(last) && at - last < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
     const runaway = fileServiceRunaway(store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS), at);
-    if (runaway === null) return;
+    if (runaway === null) {
+      if (store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY))
+        store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
+      return;
+    }
+    // a stored time ahead of now (the clock moved back) does not block restarts
+    const since = (key: string): number => {
+      const v = Number(store.getSetting(key) ?? "0");
+      return Number.isFinite(v) && v <= at ? at - v : Number.POSITIVE_INFINITY;
+    };
+    if (since(FILE_SERVICE_RESTART_SETTING) < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
+    const prompt = since(FILE_SERVICE_PROMPT_SETTING) >= FILE_SERVICE_PROMPT_GAP_MS;
     store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
+    if (prompt) store.setSetting(FILE_SERVICE_PROMPT_SETTING, String(at));
     const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
     const grew = `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it stays flat.`;
-    void restart(at)
+    void restart(at, { prompt })
       .then((r) => {
         const saved =
           r.diagnostics === null
             ? " Saving what was running failed."
             : ` What was running is saved in ${r.diagnostics}.`;
+        if (r.how === "not restarted") {
+          store.refreshNoteInEpisode({
+            key: FILE_SERVICE_RUNAWAY_KEY,
+            kind: "flag",
+            runId: null,
+            seatId: null,
+            repoId: null,
+            text: `${grew} The hub could not restart it (${r.error ?? "no reason given"}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
+            at: now(),
+          });
+        } else {
+          store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
+        }
         const done =
           r.how === "sudo"
             ? " The hub restarted it."
             : r.how === "prompt"
               ? " Restarted after the operator's password."
-              : " It was not restarted: the password prompt was declined or timed out.";
+              : ` It was not restarted: ${r.error ?? "no reason given"}.`;
         store.addHubEvent(`${grew}${done}${saved}`, now());
-        emit("machine");
+        emit("agents", "attention");
       })
       .catch((e: unknown) =>
         deps.log?.(`fseventsd restart: ${e instanceof Error ? e.message : String(e)}`),
