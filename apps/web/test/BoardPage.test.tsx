@@ -292,7 +292,7 @@ describe("columns", () => {
   it("shows a Waiting column with the reason and what frees each ticket, and no owner", async () => {
     // ticket 3349 is held, yet a seat has an open run on it and a reviewer is on its PR
     const working = crewRow({
-      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+      loop: { phase: "working", text: "Editing", prNumber: null, hold: null },
     });
     const retro = crewRow({
       id: "RETRO-1",
@@ -371,7 +371,7 @@ describe("columns", () => {
 describe("cards", () => {
   it("links an active loop card to its run trace", async () => {
     const active = crewRow({
-      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+      loop: { phase: "working", text: "Editing", prNumber: null, hold: null },
     });
     stub({
       shopApp: [todo(3349, { status: "In progress", state: "in progress" })],
@@ -1112,7 +1112,7 @@ describe("agent overlay and click", () => {
       phase: "working",
       text: "Working",
       prNumber: null,
-      parked: null,
+      hold: null,
       profile: "feature",
       step: "implement",
       tries: { n: 1, max: 3 },
@@ -1923,7 +1923,7 @@ describe("Pipeline stage links", () => {
                   phase: stage === "progress" && i % 2 ? "ci" : phase,
                   text: "Working",
                   prNumber: null,
-                  parked: null,
+                  hold: null,
                 },
               }),
             )

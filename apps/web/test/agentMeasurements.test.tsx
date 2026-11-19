@@ -10,7 +10,7 @@ import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { crewRow, MIN, NOW, run } from "./fixtures.ts";
 
-const row = crewRow({ loop: { phase: "working", text: "Editing", prNumber: null, parked: null } });
+const row = crewRow({ loop: { phase: "working", text: "Editing", prNumber: null, hold: null } });
 const attempt = (tokens: number | null | undefined, n: number): LoopTry => ({
   step: "working",
   fix: false,

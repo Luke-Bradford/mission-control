@@ -53,7 +53,7 @@ function WaitingOn({ view }: { view: AgentDetailView }) {
 /** Tickets the seat has open and is not working on; gone once a seat holds one ticket. */
 function AlsoOpen({ row }: { row: CrewRow }) {
   const queue = row.queue ?? [];
-  const aside = row.asideRuns ?? [];
+  const aside = row.offSeatRuns ?? [];
   if (queue.length === 0 && aside.length === 0) return null;
   return (
     <section className="panel side-open" aria-label="Also open">

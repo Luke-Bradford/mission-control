@@ -300,7 +300,7 @@ export function pipelineStage(
   const fallback = merged && requestedStage === undefined ? "merged" : null;
   if (item.closed) return fallback;
   const agent = cardAgent(item, crew);
-  const aside = crew.flatMap((row) => row.asideRuns ?? []).find((run) => run.ticket === ref);
+  const aside = crew.flatMap((row) => row.offSeatRuns ?? []).find((run) => run.ticket === ref);
   const loop =
     loops.find((view) => view.runId === (agent?.run?.id ?? aside?.runId))?.loop ??
     agent?.loop ??
