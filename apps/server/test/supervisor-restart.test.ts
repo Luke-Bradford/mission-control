@@ -608,6 +608,33 @@ describe("reattach after a restart", () => {
     expect(starts()).toEqual([]);
   });
 
+  it("ends an unheld running row when the hub starts", async () => {
+    const run = {
+      id: "orphan:20261020T000000Z",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running" as const,
+      sessionId: null,
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    };
+    store.upsertRun(run);
+    const { sup } = make();
+    sup.start();
+    await until(() =>
+      expect(store.run(run.id)).toMatchObject({ status: "failed", endedAt: expect.any(Number) }),
+    );
+  });
+
   it("marks a run whose worktree is gone in error", async () => {
     const { runId } = await leftActive();
     rmSync(join(root, "mc-crew", "guido-1-42"), { recursive: true, force: true });

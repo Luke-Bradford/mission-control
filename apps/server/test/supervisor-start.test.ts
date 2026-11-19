@@ -93,6 +93,7 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { runPathGrants } from "../src/repo/path-grants.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
+import * as checkouts from "../src/runtime/checkouts.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
@@ -2140,6 +2141,59 @@ describe("reused worktrees", () => {
     );
     expect(git(first.path, "rev-parse", "HEAD")).toBe(first.baseSha);
     expect(store.runs("guido-1", 10)).toEqual([]);
+  });
+
+  it("fails a carried-on run when cloning its checkout git directory fails", async () => {
+    const { sup } = make();
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockRejectedValue(new Error("clone failed"));
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const failed = store.runs("guido-1", 1)[0];
+      expect(failed).toMatchObject({ status: "failed" });
+      expect(failed?.endedAt).not.toBeNull();
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+      const carriedOn = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+      expect(carriedOn.branch).toBe(BRANCH);
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
   });
 
   it("reports an install refusal in the brief after recording the start merge", async () => {
