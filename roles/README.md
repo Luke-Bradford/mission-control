@@ -18,7 +18,7 @@ Each seat runs one role. A role is a prompt (this folder), plus defaults for its
 |---|---|---|
 | **AUDIT** | Auditor | Runs a nightly read-only report: why runs cost cycles, with a few evidence-backed proposals (#172). |
 | **NETWORK** | Researcher | Answers research tickets from code, docs and the web, citing every claim. |
-| **FIDO** | Architect | Plans changes that span areas, and splits them into per-area tickets. |
+| **FIDO** | Architect | Plans changes that span areas: one ticket, one PR. |
 | **SURGEON** | QA engineer | Writes and runs tests beyond the ticket's own: regression and end-to-end. |
 | **BOOSTER** | DevOps | Looks after CI, builds and releases. |
 
