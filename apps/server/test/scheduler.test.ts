@@ -1751,6 +1751,55 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it("restarts a runaway file-change service once an hour without holding the crew", async () => {
+      const mb = 1024 ** 2;
+      let t = Math.floor(NOW / 60_000) * 60_000 + 1000;
+      let size = 10 * mb;
+      const restartFileService = vi.fn(async () => ({
+        how: "sudo" as const,
+        diagnostics: "/data/diagnostics/fseventsd-x.txt",
+      }));
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        restartFileService,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              memTotalBytes: 24 * 1024 ** 3,
+              swapUsedBytes: 1024 ** 3,
+              swapTotalBytes: 20 * 1024 ** 3,
+              memoryPressureFreePct: 44,
+              load1: 1,
+              fileServiceBytes: size,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(restartFileService).not.toHaveBeenCalled();
+      t += 30 * 60_000;
+      size = 200 * mb;
+      await s.tick("machine");
+      await vi.waitFor(() => expect(restartFileService).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() =>
+        expect(store.hubEvents(0).map((e) => e.text)).toContainEqual(
+          expect.stringContaining("grew from 10 MB to 200 MB within an hour"),
+        ),
+      );
+      expect(store.hubEvents(0).at(-1)?.text).toContain("/data/diagnostics/fseventsd-x.txt");
+      expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+      t += 10 * 60_000;
+      size = 400 * mb;
+      await s.tick("machine");
+      expect(restartFileService).toHaveBeenCalledTimes(1);
+    });
+
     it("tells the operator to restart the file-change service, and drops the item when it recovers", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       let t = minute + 1000;

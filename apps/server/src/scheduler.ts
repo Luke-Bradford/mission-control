@@ -125,9 +125,13 @@ import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/bac
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
+import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
   FILE_SERVICE_RESTART_ADVICE,
+  FILE_SERVICE_RESTART_SETTING,
+  FSEVENTSD_RUNAWAY_WINDOW_MS,
   fileServiceFault,
+  fileServiceRunaway,
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
@@ -319,6 +323,11 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** What the hub holds on disk, as last measured; the disk flag names it. Null: not measured yet. */
   hubDiskUse?: () => DiskUse | null;
+  /**
+   * Restarts a runaway `fseventsd` after saving what was running. Absent on previews and in unit
+   * callers, which never touch a system service.
+   */
+  restartFileService?: (at: number) => Promise<FileServiceRestart>;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
@@ -470,6 +479,36 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let machineMinute = -1;
   /** The capacity guard held new starts at the last stored sample. */
   let machineBlocked = false;
+  /** A runaway `fseventsd` is restarted at most once an hour, across hub restarts. */
+  const restartRunawayFileService = (at: number): void => {
+    const restart = deps.restartFileService;
+    if (restart === undefined) return;
+    const last = Number(store.getSetting(FILE_SERVICE_RESTART_SETTING) ?? "0");
+    if (Number.isFinite(last) && at - last < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
+    const runaway = fileServiceRunaway(store.machineSamples(at - FSEVENTSD_RUNAWAY_WINDOW_MS), at);
+    if (runaway === null) return;
+    store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
+    const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
+    const grew = `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it stays flat.`;
+    void restart(at)
+      .then((r) => {
+        const saved =
+          r.diagnostics === null
+            ? " Saving what was running failed."
+            : ` What was running is saved in ${r.diagnostics}.`;
+        const done =
+          r.how === "sudo"
+            ? " The hub restarted it."
+            : r.how === "prompt"
+              ? " Restarted after the operator's password."
+              : " It was not restarted: the password prompt was declined or timed out.";
+        store.addHubEvent(`${grew}${done}${saved}`, now());
+        emit("machine");
+      })
+      .catch((e: unknown) =>
+        deps.log?.(`fseventsd restart: ${e instanceof Error ? e.message : String(e)}`),
+      );
+  };
   /**
    * Whether this machine reading may spawn commands. The swap and memory-pressure thresholds (the
    * swap hard limit always applies) need `sysctl` and `memory_pressure`, so a browser, a start
@@ -1408,6 +1447,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         const capacityConfig = deps.config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
         const capacity = storedMachineCapacity(store, at, capacityConfig);
         machineBlocked = capacity.blocked;
+        restartRunawayFileService(at);
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
             bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;

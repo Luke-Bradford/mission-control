@@ -25,8 +25,49 @@ export const SWAP_USED_HARD_PCT_OF_RAM = 90;
 export const SWAP_FILE_USED_HARD_PCT = 85;
 /** ...but only when that much swap is also a real share of physical RAM. */
 export const SWAP_FILE_MIN_PCT_OF_RAM = 50;
-/** The file-change service (`fseventsd`) is swollen once its resident size passes this. */
-export const FSEVENTSD_RSS_HARD_BYTES = 2 * 1024 ** 3;
+/**
+ * The file-change service (`fseventsd`) hurts the Mac once it holds this much: on 29 October it
+ * made the Mac unusable at 7 GB. A runaway is caught and restarted long before this (see
+ * `fileServiceRunaway`); this hold is only the backstop for when that restart could not run.
+ */
+export const FSEVENTSD_RSS_HARD_BYTES = 6 * 1024 ** 3;
+/**
+ * A healthy `fseventsd` stays flat under crew work: from 13 to 18 November it held 5 to 13 MB
+ * through 100 to 230 runs a day, and grew 31 MB in its busiest hour. In the stuck state seen on
+ * 18 November it kept every event and grew 150 to 317 MB an hour until restarted.
+ */
+export const FSEVENTSD_RUNAWAY_BYTES = 150 * 1024 ** 2;
+export const FSEVENTSD_RUNAWAY_WINDOW_MS = 60 * 60_000;
+/** The setting holding when the hub last restarted a runaway `fseventsd`. */
+export const FILE_SERVICE_RESTART_SETTING = "machine-capacity:fseventsd-restart-at";
+
+export interface FileServiceRunaway {
+  fromBytes: number;
+  toBytes: number;
+  sinceAt: number;
+}
+
+/** `fseventsd` grew by the runaway amount within the last hour of readings; null if it did not. */
+export function fileServiceRunaway(
+  samples: readonly MachineSample[],
+  now: number,
+): FileServiceRunaway | null {
+  const recent = samples.filter(
+    (s) =>
+      s.at >= now - FSEVENTSD_RUNAWAY_WINDOW_MS &&
+      s.at <= now &&
+      typeof s.fileServiceBytes === "number",
+  );
+  const latest = recent.at(-1);
+  if (latest === undefined || typeof latest.fileServiceBytes !== "number") return null;
+  let low: MachineSample | undefined;
+  for (const s of recent)
+    if (low === undefined || (s.fileServiceBytes ?? 0) < (low.fileServiceBytes ?? 0)) low = s;
+  if (low === undefined || typeof low.fileServiceBytes !== "number") return null;
+  return latest.fileServiceBytes - low.fileServiceBytes >= FSEVENTSD_RUNAWAY_BYTES
+    ? { fromBytes: low.fileServiceBytes, toBytes: latest.fileServiceBytes, sinceAt: low.at }
+    : null;
+}
 /** What a swollen file-change service costs to fix, for the Needs-you item. */
 export const FILE_SERVICE_RESTART_ADVICE =
   "Restart the file-change service: run `sudo killall fseventsd` in Terminal. macOS starts it again by itself; it takes about 15 seconds and the Mac does not restart.";
