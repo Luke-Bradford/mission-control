@@ -1448,8 +1448,8 @@ export class Store {
   }
 
   /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
-  mapAsideRuns(agentId: AgentId): Run[] {
-    return this.runQ.mapAsideRuns(agentId);
+  mapOffSeatRuns(agentId: AgentId): Run[] {
+    return this.runQ.mapOffSeatRuns(agentId);
   }
 
   /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
@@ -1529,8 +1529,8 @@ export class Store {
   }
 
   /** The runs that have not ended and are off their seat in review, oldest first. */
-  asideRuns(): Run[] {
-    return this.runQ.asideRuns();
+  offSeatRuns(): Run[] {
+    return this.runQ.offSeatRuns();
   }
 
   /** The tickets (`repo#n`) of the runs that have not ended. */
@@ -1549,7 +1549,7 @@ export class Store {
       found("SELECT 1 FROM queues WHERE taken_at IS NULL LIMIT 1") ||
       found("SELECT 1 FROM reviews WHERE state = ? LIMIT 1", "queued") ||
       found(
-        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.hold.worktree') IS NULL) LIMIT 1",
       )
     );
   }
@@ -2079,7 +2079,7 @@ export class Store {
     }
     const endedRun = `r.ended_at IS NOT NULL
       AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
-      AND json_extract(r.loop, '$.aside') IS NULL
+      AND json_extract(r.loop, '$.hold.worktree') IS NULL
       AND NOT EXISTS (SELECT 1 FROM reviews v
         WHERE (v.author_run_id = r.id OR v.run_id = r.id)
           AND (v.ended_at IS NULL OR v.state IN ('queued', 'starting', 'running')))`;
@@ -2808,7 +2808,7 @@ export class Store {
         `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
           COUNT(*) AS parks FROM run_attempts a
          WHERE a.kind = 'loop' AND a.at >= ? AND a.at <= ?
-           AND json_extract(a.data, '$.parked') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
+           AND json_extract(a.data, '$.hold.kind') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
         since,
         until,
       ) as unknown as AuditView["deathLoops"],

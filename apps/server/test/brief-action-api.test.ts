@@ -235,7 +235,7 @@ it.each(["review-resume", "review-rework"] as const)(
     store.setRunLoop("target", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "review", reason: "Findings", ended: false },
+      hold: { kind: "review", reason: "Findings", ended: false, worktree: null, wake: false },
     });
     const request = await brief(
       kind === "review-resume"
@@ -260,7 +260,7 @@ it("does not release a choice for replay after a rework message was stored but w
   store.setRunLoop("target", {
     ...NEW_LOOP,
     phase: "parked",
-    parked: { kind: "review", reason: "Findings", ended: false },
+    hold: { kind: "review", reason: "Findings", ended: false, worktree: null, wake: false },
   });
   const request = await brief({
     kind: "review-rework",
@@ -283,7 +283,7 @@ it("dispatches a run controller verdict with exact head and evidence, preserving
   store.setRunLoop("target", {
     ...NEW_LOOP,
     phase: "parked",
-    parked: { kind: "controller-check", reason: "Check", ended: false },
+    hold: { kind: "controller-check", reason: "Check", ended: false, worktree: null, wake: false },
     controllerCheck: { sha: SHA, from: "ci", pass: false },
     touches: { sha: SHA, paths: ["apps/server/src/flight/tools.ts"] },
   });
@@ -377,7 +377,7 @@ it("dispatches run UAT acceptance to the exact displayed PR head without supplyi
     ...NEW_LOOP,
     phase: "parked",
     prNumber: 7,
-    parked: { kind: "uat", reason: "Operator acceptance", ended: false },
+    hold: { kind: "uat", reason: "Operator acceptance", ended: false, worktree: null, wake: false },
     uat: { sha: SHA, from: "ci", accepted: false },
   });
   const request = await brief({
@@ -402,7 +402,13 @@ it.each(["hold", "release"] as const)(
     store.setRunLoop("target", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "merge-hold", reason: "Operator hold", ended: false },
+      hold: {
+        kind: "merge-hold",
+        reason: "Operator hold",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       mergeHold: { by: "CAPCOM", reason: "Fixture hold", at: AT },
     });
     const request = await brief({
@@ -458,7 +464,13 @@ describe("a held PR named by a Comms question", () => {
       ...NEW_LOOP,
       phase: "parked",
       prNumber,
-      parked: { kind: "merge-hold", reason: "Operator hold", ended: false },
+      hold: {
+        kind: "merge-hold",
+        reason: "Operator hold",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       mergeHold: { by: "CAPCOM", reason: "Fixture hold", at: AT },
     });
   };
@@ -584,7 +596,13 @@ it("1389 keeps explicit budget recovery bound to the displayed park and never de
   store.setRunLoop("target", {
     ...NEW_LOOP,
     phase: "parked",
-    parked: { kind: "budget", reason: "Fixture budget exhausted", ended: false },
+    hold: {
+      kind: "budget",
+      reason: "Fixture budget exhausted",
+      ended: false,
+      worktree: null,
+      wake: false,
+    },
   });
   const request = await brief({ kind: "run-resume", runId: "target", parkKind: "budget" });
   expect(store.briefs().get(KEY)?.defaultAt).toBeUndefined();
@@ -599,7 +617,13 @@ it("releases a no-effect refusal so a new request can retry the same decision", 
   store.setRunLoop("target", {
     ...NEW_LOOP,
     phase: "parked",
-    parked: { kind: "budget", reason: "Fixture budget exhausted", ended: false },
+    hold: {
+      kind: "budget",
+      reason: "Fixture budget exhausted",
+      ended: false,
+      worktree: null,
+      wake: false,
+    },
   });
   const request = await brief({ kind: "run-resume", runId: "target", parkKind: "budget" });
   let on = false;
@@ -620,7 +644,13 @@ it("keeps an uncertain effect unknown but lets an explicit acknowledgement clear
   store.setRunLoop("target", {
     ...NEW_LOOP,
     phase: "parked",
-    parked: { kind: "budget", reason: "Fixture budget exhausted", ended: false },
+    hold: {
+      kind: "budget",
+      reason: "Fixture budget exhausted",
+      ended: false,
+      worktree: null,
+      wake: false,
+    },
   });
   const request = await brief({ kind: "run-resume", runId: "target", parkKind: "budget" });
   const a = app({
@@ -654,7 +684,7 @@ it.each([false, true])(
     );
     store.setRunLoop("target", {
       ...NEW_LOOP,
-      aside: { worktree: "/fixture", wake: false, ask: id },
+      hold: { kind: null, reason: null, ended: false, worktree: "/fixture", wake: false, ask: id },
     });
     const old = required(store.seatSession("GUIDO-1"));
     store.setSeatSession({ ...old, runId: null });
@@ -705,7 +735,7 @@ it.each(["preserved-run hold", "seat stop"])(
     );
     store.setRunLoop("target", {
       ...NEW_LOOP,
-      aside: { worktree: "/fixture", wake: false, ask: id },
+      hold: { kind: null, reason: null, ended: false, worktree: "/fixture", wake: false, ask: id },
     });
     liveBriefSeat(store, "GUIDO-1", "replacement", AT + 1);
     if (guard === "preserved-run hold") {
@@ -753,7 +783,7 @@ it("retains uncertainty after an aside answer is stored but run reconciliation f
   );
   store.setRunLoop("target", {
     ...NEW_LOOP,
-    aside: { worktree: "/fixture", wake: false, ask: id },
+    hold: { kind: null, reason: null, ended: false, worktree: "/fixture", wake: false, ask: id },
   });
   store.setSeatSession({ ...required(store.seatSession("GUIDO-1")), runId: null });
   const reconcileRun = vi.fn(async () => {

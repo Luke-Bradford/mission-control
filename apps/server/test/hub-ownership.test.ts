@@ -629,7 +629,7 @@ describe("a closed PR alone", () => {
       store.setRunLoop("parked", {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "pr-closed", reason: "closed", ended: false },
+        hold: { kind: "pr-closed", reason: "closed", ended: false, worktree: null, wake: false },
       } as never);
       // a live run whose open PR is then closed: the engine parks it and moves no card
       store.upsertRun(run("watching", "feature/a-watching", "mc#22"));

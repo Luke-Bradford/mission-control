@@ -49,7 +49,9 @@ export function mapSeats(
       ? []
       : [
           ...(run ? [run] : []),
-          ...store.mapAsideRuns(row.id).filter((r) => r.id !== run?.id && r.repoId === row.repoId),
+          ...store
+            .mapOffSeatRuns(row.id)
+            .filter((r) => r.id !== run?.id && r.repoId === row.repoId),
         ]) {
       const done = runWork(candidate, ring, store);
       if (candidate === run) currentWork = done;
@@ -214,11 +216,11 @@ export function mapSeats(
               reason: safe(waiting.command),
               stopped: false,
             }
-          : row.loop?.parked
+          : row.loop?.hold?.reason
             ? {
                 kind: "parked",
                 since: row.stateSince,
-                reason: safe(row.loop.parked),
+                reason: safe(row.loop.hold.reason),
                 stopped: run?.endedBy === "operator",
               }
             : session?.state === "parked"

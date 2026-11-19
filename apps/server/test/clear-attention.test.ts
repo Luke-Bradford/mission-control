@@ -378,7 +378,10 @@ it("closes only the displayed seat question and stores notice for its preserved 
     at: AT - 10,
   });
   store.passQuestion(id, AT - 1);
-  store.setRunLoop(run.id, { ...NEW_LOOP, aside: { worktree: "/fixture", wake: false, ask: id } });
+  store.setRunLoop(run.id, {
+    ...NEW_LOOP,
+    hold: { kind: null, reason: null, ended: false, worktree: "/fixture", wake: false, ask: id },
+  });
   const another = store.addQuestion({
     agentId: "GUIDO-1",
     runId: run.id,

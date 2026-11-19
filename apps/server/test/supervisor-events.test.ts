@@ -297,7 +297,7 @@ describe("supervisor events (Plan 7a)", () => {
     lastRefusal: null,
     epoch: 0,
     budgetExtra: 0,
-    parked: null,
+    hold: null,
     touches: null,
     cardFor: null,
   };
@@ -523,7 +523,7 @@ describe("supervisor events (Plan 7a)", () => {
         ...NEW_LOOP,
         phase: "done",
         prNumber: 7,
-        parked: { kind: "silent", reason: "no report", ended: true },
+        hold: { kind: "silent", reason: "no report", ended: true, worktree: null, wake: false },
       });
       await sup.endRunByEngine(runId);
       expect(store.run(runId)?.noReport).toBeUndefined();
@@ -535,7 +535,7 @@ describe("supervisor events (Plan 7a)", () => {
       store.setRunLoop(runId, {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind, reason: "no report", ended: true },
+        hold: { kind, reason: "no report", ended: true, worktree: null, wake: false },
       });
       await sup.endRunByEngine(runId);
       expect(store.run(runId)?.noReport).toBeDefined();
@@ -1103,7 +1103,10 @@ describe("supervisor events (Plan 7a)", () => {
         transcriptPath: "",
         prs: [],
         summary: null,
-        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+        },
       };
       store.upsertRun(run);
       const seen = watchStored(sup);
@@ -1446,7 +1449,7 @@ describe("Codex lifecycle events", () => {
     expect(aside).not.toBeNull();
     store.setRunLoop(runId, {
       ...NEW_LOOP,
-      aside: { worktree: aside?.worktree ?? "", wake: true },
+      hold: { kind: null, reason: null, ended: false, worktree: aside?.worktree ?? "", wake: true },
     });
     expect(store.run(runId)?.sessionId).toBe("codex-thread-1");
     await first.sup.stopAll();

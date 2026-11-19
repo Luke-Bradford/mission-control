@@ -58,7 +58,10 @@ it("labels a blocked seat with an open run Waiting, with the note or else the pa
   const bare = seatRow({ hudState: "blocked", note: null, loop: null });
   const loop = {
     runId: r.id,
-    loop: { ...NEW_LOOP, parked: { kind: "review", reason: "Parked reason", ended: false } },
+    loop: {
+      ...NEW_LOOP,
+      hold: { kind: "review", reason: "Parked reason", ended: false, worktree: null, wake: false },
+    },
   } as unknown as RunLoopView;
   expect(view(bare, loop).awaiting).toMatchObject({ label: "Waiting", reason: "Parked reason" });
 });
@@ -113,7 +116,13 @@ it("shows every configured step, review tries/cap and the actual held phase", ()
     loop: {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "review", reason: "Findings remain", ended: false },
+      hold: {
+        kind: "review",
+        reason: "Findings remain",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
     },
     events: [],
     tries: [
@@ -305,7 +314,7 @@ it("does not invent completion or a pending verdict for unmeasured profile gates
       phase: "review",
       text: "Review",
       prNumber: 9,
-      parked: null,
+      hold: null,
       steps: [
         { name: "go/no-go", phase: null },
         { name: "reproduce", phase: null },
@@ -325,7 +334,7 @@ it.each(["ci", "retro", "main", "operator", "seat"] as const)(
   (wait) => {
     const row = seatRow({
       hudState: "idle",
-      loop: { phase: "ci", text: "Checks", prNumber: 9, parked: null, wait },
+      loop: { phase: "ci", text: "Checks", prNumber: 9, hold: null, wait },
     });
     save(row);
     expect(view(row).awaiting.label).not.toBe("Idle");
@@ -368,7 +377,7 @@ it.each([true, false])("keeps Error ahead of a review or parked loop (%s)", (par
 function reviewSubject() {
   const row = seatRow({
     review: { prNumber: 7, state: "open" },
-    loop: { phase: "review", text: "Review", prNumber: 7, parked: null },
+    loop: { phase: "review", text: "Review", prNumber: 7, hold: null },
   });
   const run = save(row);
   store.setRunLoop(run.id, { ...NEW_LOOP, phase: "review", prNumber: 7, epoch: 2 });

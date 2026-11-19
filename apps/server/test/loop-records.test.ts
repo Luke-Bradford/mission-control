@@ -52,7 +52,7 @@ const loop = (over: Partial<RunLoop> = {}): RunLoop => ({
   lastRefusal: "no",
   epoch: 2,
   budgetExtra: 3,
-  parked: { kind: "stall", reason: "idle", ended: false },
+  hold: { kind: "stall", reason: "idle", ended: false, worktree: null, wake: false },
   touches: { sha: "abc1234", paths: ["a/b.ts"] },
   cardFor: "ci:2",
   ...over,
@@ -73,8 +73,8 @@ describe("runs: loop and endedBy", () => {
       const plans = [
         "SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key LIMIT 500",
         "SELECT key FROM attention_notes WHERE run_id = 'r1' AND cleared_at IS NULL ORDER BY key",
-        "SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL AND json_extract(loop, '$.aside') IS NOT NULL ORDER BY started_at, seq LIMIT 200",
-        "SELECT * FROM runs WHERE agent_id = 'a1' AND json_extract(loop, '$.aside.worktree') > ''",
+        "SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL AND json_extract(loop, '$.hold.worktree') IS NOT NULL ORDER BY started_at, seq LIMIT 200",
+        "SELECT * FROM runs WHERE agent_id = 'a1' AND json_extract(loop, '$.hold.worktree') > ''",
         `SELECT * FROM (
           SELECT * FROM runs WHERE ended_at IS NULL
           UNION ALL

@@ -221,7 +221,7 @@ it("trims node_modules of a run set aside at review: no end, no seat, its PR ope
   store.setRunLoop("r10", {
     ...NEW_LOOP,
     phase: "review",
-    aside: { worktree: wt, wake: false },
+    hold: { kind: null, reason: null, ended: false, worktree: wt, wake: false },
   });
   prs("open", "mc/10", 10);
   expect(await tidyOf().tidyFinished(NOW)).toEqual({ removed: [], trimmed: ["r10"] });
@@ -232,7 +232,11 @@ it("trims node_modules of a run set aside at review: no end, no seat, its PR ope
 it("never removes a set-aside run's worktree, even when its PR has merged", async () => {
   const wt = worktree("guido-1-11", "mc/11");
   store.upsertRun({ ...run("r11", "mc/11"), endedAt: null, status: "running" });
-  store.setRunLoop("r11", { ...NEW_LOOP, phase: "review", aside: { worktree: wt, wake: false } });
+  store.setRunLoop("r11", {
+    ...NEW_LOOP,
+    phase: "review",
+    hold: { kind: null, reason: null, ended: false, worktree: wt, wake: false },
+  });
   prs("merged", "mc/11", 11);
   expect((await tidyOf().tidyFinished(NOW)).removed).toEqual([]);
   expect(existsSync(wt)).toBe(true);

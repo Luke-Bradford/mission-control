@@ -1,4 +1,4 @@
-import type { BoardItem } from "@mc/core";
+import { type BoardItem, liftPark } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { endedWorkOver, runSubjectGone } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
@@ -38,11 +38,12 @@ export function clearLeftovers(deps: { store: Store; config: CcConfig; now: numb
   for (const run of store.endedRunsWithHoldOrPark()) {
     const loop = run.loop;
     if (!loop || !runSubjectGone(config, store, run, boardOf)) continue;
-    const next = { ...loop, mergeHold: null, parked: null };
+    const next = { ...loop, mergeHold: null, hold: liftPark(loop.hold) };
     if (loop.phase === "parked") next.phase = "done";
     store.setRunLoop(run.id, next, now);
     if (loop.mergeHold) record(`released the merge hold on ended run ${run.id}: its work is over`);
-    if (loop.parked) record(`cleared the parked state on ended run ${run.id}: its work is over`);
+    if (loop.hold?.kind)
+      record(`cleared the parked state on ended run ${run.id}: its work is over`);
   }
   return cleared;
 }
