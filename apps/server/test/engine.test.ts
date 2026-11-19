@@ -7588,6 +7588,26 @@ describe("the engine runs reviews", () => {
         await grantedThenFailed();
       });
 
+      it("the granted review is round 3 in the next epoch, with the earlier rounds' reviews still reported", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        const two = need(reviewRows().find((r) => r.round === 2));
+        reported(two.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        const granted = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        // the numbers the report_findings tests ("after FLIGHT's rework settle") build by hand
+        expect(granted).toMatchObject({ round: 3, epoch: two.epoch + 1 });
+        expect(store.review(two.id)).toMatchObject({ state: "reported", epoch: two.epoch });
+      });
+
       it("a grant survives a new epoch started by something other than FLIGHT", async () => {
         need(config.repos[0]).flightPowers = "superuser";
         await toReview();

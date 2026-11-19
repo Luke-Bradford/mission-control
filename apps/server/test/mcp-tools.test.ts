@@ -5562,6 +5562,32 @@ describe("report_findings", () => {
       expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
     });
 
+    it("lets a round 1 of the new epoch resolve the earlier epoch's findings, as its brief says", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const next = store.requestReview({
+        authorRunId: RUN,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: "d".repeat(40),
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: NOW + 1,
+      }) as number;
+      store.setReviewState(next, ["queued"], "running", { at: NOW + 1, runId: "retro:e1r1" });
+      expect(await report(resolve({ pos: 0 }), reviewRun("retro:e1r1", next))).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(next)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("refuses resolutions from a run's very first review", async () => {
+      const refused = await report(resolve({ pos: 0 }));
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain("only allowed from round 2");
+    });
+
     it("still refuses a finding from neither the previous round nor the brief", async () => {
       const { three, run } = await setup();
       const refused = await report(resolve({ reviewId, pos: 0 }), run);

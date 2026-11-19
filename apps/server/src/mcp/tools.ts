@@ -2757,12 +2757,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     }
     let resolved: FindingResolution[] | undefined;
     if (resolutions !== undefined) {
-      if (review.round < 2)
-        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
       const previous = store
         .reviewsOfRun(review.authorRunId)
         .filter((r) => r.id < review.id && r.state === "reported")
         .at(-1);
+      // The gate follows the lookup the brief uses: a round 1 in a new epoch (after a rework settle
+      // or a rereview) has an earlier reported review, so it may resolve that review's findings.
+      if (previous === undefined && !isExternalReview(review))
+        return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
       // a reference without a review id is the previous round's finding at that position
       resolved = resolutions.map((resolution) => ({
         ...resolution,
