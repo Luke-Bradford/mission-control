@@ -1,14 +1,17 @@
 import {
+  CODE_HEALTH_OVERVIEW_TTL_MS,
   CODE_HEALTH_WINDOWS,
   type CodeHealthEvidenceRef,
+  type CodeHealthOverview,
   type CodeHealthRecommendation,
   type CodeHealthView,
   type CodeHealthWindow,
   type ConfigView,
 } from "@mc/core";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { apiOperatorGet } from "../api.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
-import { Panel } from "../hud/Panel.tsx";
+import { AuditSummary, Verdict } from "./AuditSummary.tsx";
 import { CodeRisk } from "./CodeRisk.tsx";
 import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dialogs.tsx";
 import { date, label } from "./format.ts";
@@ -17,10 +20,22 @@ import { TestHealth } from "./TestHealth.tsx";
 import { TokenAudit } from "./TokenAudit.tsx";
 import "./code-health.css";
 
+/** Views with their own scope: no repo or window applies, so no code-health read is made. */
+const OWN_SCOPE = new Set<string>(["tokens", "history"]);
 const Legacy = lazy(() =>
   import("../pages/LegacyAudit.tsx").then((m) => ({ default: m.LegacyAudit })),
 );
-const TABS = ["overview", "review", "risk", "test", "tokens"] as const;
+const TABS = ["summary", "review", "risk", "test", "tokens", "history"] as const;
+const TAB_LABEL: Record<(typeof TABS)[number], string> = {
+  summary: "Summary",
+  review: "Review quality",
+  risk: "Code risk",
+  test: "Test health",
+  tokens: "Tokens",
+  history: "Workflow history",
+};
+/** A stored summary older than its rebuild interval, plus the grace the full read gets, is shown as stale. */
+const SUMMARY_STALE_MS = CODE_HEALTH_OVERVIEW_TTL_MS + 120000;
 type Tab = (typeof TABS)[number];
 /** The shared operator question, with one bounded read for the selected repo/window/tab. */
 export function CodeHealth() {
@@ -35,7 +50,7 @@ export function CodeHealth() {
     [tab, setTab] = useState<Tab>(() =>
       new URLSearchParams(globalThis.window.location.search).get("tab") === "risk"
         ? "risk"
-        : "overview",
+        : "summary",
     );
   const [last, setLast] = useState<{ path: string; view: CodeHealthView }>(),
     [expired, setExpired] = useState(false);
@@ -43,11 +58,11 @@ export function CodeHealth() {
     title: string;
     refs: CodeHealthEvidenceRef[];
     coverage?: CodeHealthView["coverage"];
+    gap?: string;
   }>();
   const [action, setAction] = useState<{ row: CodeHealthRecommendation; kind: Action }>(),
     [notice, setNotice] = useState("");
-  const [history, setHistory] = useState(false),
-    [legacy, setLegacy] = useState(false);
+  const [history, setHistory] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null),
     tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
@@ -64,46 +79,122 @@ export function CodeHealth() {
       }
     }
   }, [config.data, repo]);
+  const summary = tab === "summary";
   const ref = useMemo(
-      () => (repo && tab !== "tokens" ? RESOURCES.codeHealth(repo, window, tab) : null),
+      () =>
+        repo && !OWN_SCOPE.has(tab) && tab !== "summary"
+          ? RESOURCES.codeHealth(repo, window, tab)
+          : null,
       [repo, window, tab],
     ),
     res = useResource<CodeHealthView>(ref);
+  // One shared subscription to the stored first-screen summary; the stream's health topic refreshes it.
+  const ovRef = useMemo(
+      () => (repo && summary ? RESOURCES.codeHealthOverview(repo, window) : null),
+      [repo, window, summary],
+    ),
+    ovRes = useResource<CodeHealthOverview>(ovRef);
+  const [lastOv, setLastOv] = useState<{ path: string; view: CodeHealthOverview }>();
   useEffect(() => {
     if (res.data && ref) setLast({ path: ref.path, view: res.data });
   }, [res.data, ref]);
+  useEffect(() => {
+    if (ovRes.data && ovRef) setLastOv({ path: ovRef.path, view: ovRes.data });
+  }, [ovRes.data, ovRef]);
   const view = res.data ?? (last?.path === ref?.path ? last?.view : undefined);
+  const overview = ovRes.data ?? (lastOv?.path === ovRef?.path ? lastOv?.view : undefined);
+  // The summary has no coverage list; its evidence and coverage come from the full read, fetched on demand.
+  // Each click reads the full view fresh, and applies it only if the repo, window and tab are unchanged.
+  const evidenceToken = useRef(0);
+  const readFull = (w: { title: string; id?: string }) => {
+    if (!repo) return;
+    const token = ++evidenceToken.current,
+      scope = JSON.stringify([repo, window, "summary"]);
+    const current = () => token === evidenceToken.current && scope === selection.current;
+    // The full read carries evidence for only the top few rows; other rows are found in the recorded history.
+    const findInHistory = async (id: string) => {
+      let cursor = "0";
+      for (;;) {
+        const page = await apiOperatorGet<{
+          recommendations: CodeHealthRecommendation[];
+          nextCursor: string | null;
+        }>(RESOURCES.codeHealthHistory(repo, cursor).path);
+        if (!current()) return undefined;
+        const hit = page.recommendations.find((r) => r.id === id);
+        if (hit || page.nextCursor === null) return hit;
+        cursor = page.nextCursor;
+      }
+    };
+    hub
+      .read<CodeHealthView>(RESOURCES.codeHealth(repo, window, "overview"))
+      .then(async (full) => {
+        if (!current()) return;
+        let row =
+          w.id !== undefined && full.data.tab === "overview"
+            ? full.data.recommendations.find((r) => r.id === w.id)
+            : undefined;
+        if (w.id !== undefined && !row) {
+          row = await findInHistory(w.id);
+          if (!current()) return;
+        }
+        setEvidence(
+          w.id !== undefined && !row
+            ? {
+                title: w.title,
+                refs: [],
+                gap: "This row's evidence is not in the current read. Its source and why are shown on the row.",
+              }
+            : {
+                title: w.title,
+                refs: w.id === undefined ? [] : (row?.evidence ?? []),
+                coverage: full.coverage,
+              },
+        );
+      })
+      .catch((error: unknown) => {
+        if (!current()) return;
+        setNotice(
+          `Evidence could not be read: ${error instanceof Error ? error.message : String(error)} Refresh and try again.`,
+        );
+      });
+  };
+  const generatedAt = summary ? overview?.generatedAt : view?.generatedAt,
+    staleAfter = summary ? SUMMARY_STALE_MS : 120000,
+    active = summary ? ovRes : res;
   useEffect(() => {
     setExpired(false);
-    if (!view) return;
+    if (generatedAt === undefined) return;
     const timer = setTimeout(
       () => setExpired(true),
-      Math.max(0, view.generatedAt + 120000 - Date.now()),
+      Math.max(0, generatedAt + staleAfter - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [view]);
+  }, [generatedAt, staleAfter]);
   const disconnected = !connected,
     stale =
       expired ||
-      (!!view && Date.now() >= view.generatedAt + 120000) ||
-      !!res.error ||
-      (view?.coverage.some(
-        (c) => c.state === "stale" || c.state === "disconnected" || c.state === "error",
-      ) ??
-        false);
+      (generatedAt !== undefined && Date.now() >= generatedAt + staleAfter) ||
+      !!active.error ||
+      (!summary &&
+        (view?.coverage.some(
+          (c) => c.state === "stale" || c.state === "disconnected" || c.state === "error",
+        ) ??
+          false));
   const configured = !!config.data?.repos.some((row) => row.id === repo) && !config.error;
   const currentSelection = JSON.stringify([repo, window, tab]),
     selection = useRef(currentSelection),
     currentAction = useRef(action);
   selection.current = currentSelection;
   currentAction.current = configured ? action : undefined;
-  const blocked = !configured || disconnected || stale || res.loading || !res.data;
+  const blocked = !configured || disconnected || stale || active.loading || !active.data;
+  const readRef = summary ? ovRef : ref;
   const retry = () => {
-    if (ref) hub.refetch(ref.path);
+    if (readRef) hub.refetch(readRef.path);
   };
   const changeScope = (next: () => void) => {
     setEvidence(undefined);
     setAction(undefined);
+    evidenceToken.current++;
     setNotice("");
     setHistory(false);
     next();
@@ -113,10 +204,7 @@ export function CodeHealth() {
     refs: CodeHealthEvidenceRef[],
     coverage?: CodeHealthView["coverage"],
   ) => setEvidence({ title, refs, coverage });
-  const review =
-    view && (view.data.tab === "overview" || view.data.tab === "review")
-      ? view.data.review
-      : undefined;
+  const review = view && view.data.tab === "review" ? view.data.review : undefined;
   const observed =
     view?.coverage.filter(
       (c) => c.source !== "recommendations" && c.observedFrom !== null && c.observedUntil !== null,
@@ -154,19 +242,28 @@ export function CodeHealth() {
     hub.refetch(RESOURCES.codeHealthHistory(repo).path);
     heading.current?.focus();
   };
+  const coverageButton = () => {
+    if (summary) readFull({ title: "Collection coverage" });
+    else if (view) inspect("Collection coverage", [], view.coverage);
+  };
   return (
     <section
       id="page-audit"
-      className={tab === "test" ? "code-health ch-test-page" : "code-health"}
+      className={
+        tab === "test" ? "code-health ch-test-page" : summary ? "code-health as-fit" : "code-health"
+      }
     >
       <div className="ch-heading">
-        <div>
-          <h1 ref={heading} tabIndex={-1}>
+        <div className="ch-title">
+          <h1 ref={heading} tabIndex={-1} className={summary && overview ? "sr-only" : undefined}>
             Audit
           </h1>
-          <p>Where should we invest in code health next?</p>
+          <p className={summary && overview ? "sr-only" : undefined}>
+            Where should we invest in code health next?
+          </p>
+          {summary && overview && <Verdict verdict={overview.verdict} />}
         </div>
-        <div className="ch-filters" hidden={tab === "tokens"}>
+        <div className="ch-filters" hidden={OWN_SCOPE.has(tab)}>
           <label>
             Repo
             <select
@@ -197,88 +294,92 @@ export function CodeHealth() {
           </fieldset>
         </div>
       </div>
-      <div className="ch-coverage" hidden={tab === "tokens"}>
-        <strong className={blocked ? "warn-t" : "ok-t"}>
-          {disconnected
-            ? reconnecting
-              ? "Disconnected"
-              : "Connecting"
-            : stale
-              ? "Stale snapshot"
-              : res.loading
-                ? "Loading"
-                : "Connected"}
-        </strong>
-        <span>
-          {view ? `Read ${date(view.generatedAt)}` : "Waiting for a bounded code-health read"}
-        </span>
-        {view && (
-          <>
-            <span>
-              Observed {shortDate(observedFrom)} to {shortDate(observedUntil)} UTC
-            </span>
-            <span>
-              Newest observation age at read:{" "}
-              {sourceAge === null
-                ? "not collected"
-                : sourceAge < 60
-                  ? `${sourceAge} min`
-                  : `${Math.floor(sourceAge / 60)} h`}
-            </span>
-            <span>Analysed SHA: {analysed.length ? analysed.join(", ") : "not collected"}</span>
-          </>
-        )}
-        {view && (
-          <button type="button" onClick={() => inspect("Collection coverage", [], view.coverage)}>
-            Inspect coverage
+      <div className="ch-bar">
+        <div className="ch-coverage" hidden={OWN_SCOPE.has(tab)}>
+          <strong className={blocked ? "warn-t" : "ok-t"}>
+            {disconnected
+              ? reconnecting
+                ? "Disconnected"
+                : "Connecting"
+              : stale
+                ? "Stale snapshot"
+                : active.loading
+                  ? "Loading"
+                  : "Connected"}
+          </strong>
+          <span>
+            {generatedAt !== undefined
+              ? `Read ${date(generatedAt)}`
+              : "Waiting for a bounded code-health read"}
+          </span>
+          {view && !summary && (
+            <>
+              <span>
+                Observed {shortDate(observedFrom)} to {shortDate(observedUntil)} UTC
+              </span>
+              <span>
+                Newest observation age at read:{" "}
+                {sourceAge === null
+                  ? "not collected"
+                  : sourceAge < 60
+                    ? `${sourceAge} min`
+                    : `${Math.floor(sourceAge / 60)} h`}
+              </span>
+              <span>Analysed SHA: {analysed.length ? analysed.join(", ") : "not collected"}</span>
+            </>
+          )}
+          {(summary ? !!overview : !!view) && (
+            <button type="button" onClick={coverageButton}>
+              Inspect coverage
+            </button>
+          )}
+          <button type="button" onClick={retry} disabled={!readRef || active.loading}>
+            Refresh
           </button>
-        )}
-        <button type="button" onClick={retry} disabled={!ref || res.loading}>
-          Refresh
-        </button>
-      </div>
-      <div role="tablist" aria-label="Code-health view" className="ch-tabs">
-        {TABS.map((t, i) => (
-          <button
-            type="button"
-            key={t}
-            ref={(el) => {
-              tabRefs.current[i] = el;
-            }}
-            role="tab"
-            id={`ch-tab-${t}`}
-            aria-selected={tab === t}
-            aria-controls="ch-panel"
-            tabIndex={tab === t ? 0 : -1}
-            onClick={() => changeScope(() => setTab(t))}
-            onKeyDown={(e) => {
-              let next: number | undefined;
-              if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
-              if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
-              if (e.key === "Home") next = 0;
-              if (e.key === "End") next = TABS.length - 1;
-              if (next !== undefined) {
-                e.preventDefault();
-                tabRefs.current[next]?.click();
-                tabRefs.current[next]?.focus();
-              }
-            }}
-          >
-            {t === "overview"
-              ? "Overview"
-              : t === "review"
-                ? "Review quality"
-                : t === "risk"
-                  ? "Code risk"
-                  : t === "test"
-                    ? "Test health"
-                    : "Tokens"}
-          </button>
-        ))}
-        <span className="ch-links">
-          <a href="/audit?tab=risk">Code risk in Audit</a>
-          <a href="/qa">PR readiness and tests in QA</a>
-        </span>
+        </div>
+        <div role="tablist" aria-label="Code-health view" className="ch-tabs">
+          {TABS.map((t, i) => {
+            const props = {
+              type: "button" as const,
+              role: "tab",
+              id: `ch-tab-${t}`,
+              "aria-selected": tab === t,
+              "aria-controls": "ch-panel",
+              tabIndex: tab === t ? 0 : -1,
+              ref: (el: HTMLButtonElement | null) => {
+                tabRefs.current[i] = el;
+              },
+              onClick: () => changeScope(() => setTab(t)),
+              onKeyDown: (e: React.KeyboardEvent) => {
+                let next: number | undefined;
+                if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
+                if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
+                if (e.key === "Home") next = 0;
+                if (e.key === "End") next = TABS.length - 1;
+                if (next !== undefined) {
+                  e.preventDefault();
+                  tabRefs.current[next]?.click();
+                  tabRefs.current[next]?.focus();
+                }
+              },
+            };
+            // The evidence capture finds this tab by its text (apps/server/test/qa-labels.test.ts).
+            return t === "history" ? (
+              <button key={t} {...props}>
+                Workflow history and earlier proposals
+              </button>
+            ) : (
+              <button key={t} {...props}>
+                {TAB_LABEL[t]}
+              </button>
+            );
+          })}
+          <span className="ch-links">
+            <a href="/audit?tab=risk">Code risk in Audit</a>
+            <a href="/qa">PR readiness and tests in QA</a>
+            <a href="/telemetry">Cost and flow context</a>
+          </span>
+        </div>
       </div>
       {notice && (
         <p role="status" className="ch-notice">
@@ -293,25 +394,45 @@ export function CodeHealth() {
           No repos are configured. Add a repo in Setup before collecting code-health evidence.
         </p>
       )}
-      {repo && res.loading && !view && (
+      {repo && active.loading && !(summary ? overview : view) && (
         <p role="status" className="ch-notice">
           Loading code-health observations…
         </p>
       )}
-      {res.error && (
+      {active.error && (
         <p role="alert" className="ch-notice">
-          Collection failed: {res.error.message} Refresh before making decisions.
+          Collection failed: {active.error.message} Refresh before making decisions.
         </p>
       )}
-      {view && blocked && (
+      {(summary ? overview : view) && blocked && (
         <p className="ch-notice">
           {disconnected
             ? "Connection is unavailable. The last snapshot remains inspectable; actions require reconnection."
             : "The snapshot needs a fresh read before a recommendation can be accepted, dismissed or snoozed."}
         </p>
       )}
-      <div id="ch-panel" role="tabpanel" aria-labelledby={`ch-tab-${tab}`} aria-busy={res.loading}>
+      <div
+        id="ch-panel"
+        role="tabpanel"
+        aria-labelledby={`ch-tab-${tab}`}
+        aria-busy={active.loading}
+      >
         {tab === "tokens" && <TokenAudit />}
+        {tab === "history" && (
+          <Suspense fallback={<p>Loading workflow history…</p>}>
+            <Legacy />
+          </Suspense>
+        )}
+        {overview && summary && (
+          <AuditSummary
+            key={`${repo}-${window}`}
+            overview={overview}
+            blocked={blocked}
+            onDecide={(row, kind) => setAction({ row, kind })}
+            onInspect={(row) => readFull({ title: "Recommendation evidence", id: row.id })}
+            onHistory={() => setHistory(true)}
+          />
+        )}
         {view && tab === "test" && view.data.tab === "test" && (
           <TestHealth
             data={view.data}
@@ -319,7 +440,7 @@ export function CodeHealth() {
             evidence={view.evidence}
             onInspect={inspect}
             onRecommendations={() => {
-              changeScope(() => setTab("overview"));
+              changeScope(() => setTab("summary"));
               tabRefs.current[0]?.focus();
             }}
           />
@@ -327,111 +448,32 @@ export function CodeHealth() {
         {view && tab === "risk" && view.data.tab === "risk" && (
           <CodeRisk data={view.data} window={window} coverage={view.coverage} onInspect={inspect} />
         )}
-        {view &&
-          review &&
-          (tab === "overview" && view.data.tab === "overview" ? (
-            <div className="ch-layout">
-              <Panel
-                title="Recommended next actions"
-                sub="Conservative 30-day triage; evidence precedes a decision"
-              >
-                <div className="ch-recommendations">
-                  {!view.data.recommendations.length && (
-                    <p>
-                      No open proposal meets the measured triage rules. Missing collection is
-                      described in coverage; this is not a healthy-repo verdict.
-                    </p>
-                  )}
-                  {view.data.recommendations.map((row, i) => (
-                    <article key={row.id} className="ch-recommendation">
-                      <div className="ch-kicker">
-                        {i + 1} · {label(row.rule)} <span>Proposed</span>
-                      </div>
-                      <ProposalText text={row.proposal} />
-                      <ReadableText text={row.observation} />
-                      <ReadableText text={row.uncertainty} secondary />
-                      <p className="ch-secondary">Rank: {row.rankingReason}</p>
-                      <p className="ch-secondary">
-                        Target: {row.target.direction} {row.target.metric}; baseline{" "}
-                        {row.target.baseline ?? "not measured"}.
-                      </p>
-                      <div className="ch-actions">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            inspect("Recommendation evidence", row.evidence, view.coverage)
-                          }
-                        >
-                          Inspect evidence
-                        </button>
-                        {(["accept", "dismiss", "snooze"] as const).map((kind) => (
-                          <button
-                            type="button"
-                            key={kind}
-                            disabled={blocked}
-                            onClick={() => setAction({ row, kind })}
-                          >
-                            {kind[0].toUpperCase() + kind.slice(1)}
-                          </button>
-                        ))}
-                      </div>
-                    </article>
-                  ))}
-                  <button type="button" onClick={() => setHistory(true)}>
-                    Recommendation history
-                  </button>
-                </div>
-              </Panel>
-              <div className="ch-stack">
-                <ReviewRounds
-                  review={review}
-                  onInspect={() =>
-                    inspect(
-                      "Reported review cohort",
-                      view.evidence.filter((e) => e.label === "Reported review cohort"),
-                    )
-                  }
-                />
-                <Comparison />
-              </div>
-            </div>
-          ) : (
-            <div className="ch-layout">
-              <ReviewRounds
+        {view && review && tab === "review" && (
+          <div className="ch-layout">
+            <ReviewRounds
+              review={review}
+              onInspect={() =>
+                inspect(
+                  "Reported review cohort",
+                  view.evidence.filter((e) => e.label === "Reported review cohort"),
+                )
+              }
+            />
+            <div className="ch-stack">
+              <Categories
                 review={review}
                 onInspect={() =>
                   inspect(
-                    "Reported review cohort",
-                    view.evidence.filter((e) => e.label === "Reported review cohort"),
+                    "Finding categories and resolutions",
+                    view.evidence.filter((e) => e.label === "Finding categories and resolutions"),
                   )
                 }
               />
-              <div className="ch-stack">
-                <Categories
-                  review={review}
-                  onInspect={() =>
-                    inspect(
-                      "Finding categories and resolutions",
-                      view.evidence.filter((e) => e.label === "Finding categories and resolutions"),
-                    )
-                  }
-                />
-                <Comparison />
-              </div>
+              <Comparison />
             </div>
-          ))}
+          </div>
+        )}
       </div>
-      <div className="ch-footer">
-        <a href="/telemetry">Cost and flow context</a>
-        <button type="button" aria-expanded={legacy} onClick={() => setLegacy(!legacy)}>
-          Workflow history and earlier proposals
-        </button>
-      </div>
-      {legacy && (
-        <Suspense fallback={<p>Loading workflow history…</p>}>
-          <Legacy />
-        </Suspense>
-      )}
       {evidence && (
         <EvidenceDialog
           key={`${repo}-${evidence.title}`}
@@ -462,34 +504,5 @@ export function CodeHealth() {
         />
       )}
     </section>
-  );
-}
-function ReadableText({ text, secondary = false }: { text: string; secondary?: boolean }) {
-  return text.length <= 220 ? (
-    <p className={secondary ? "ch-secondary" : undefined}>{text}</p>
-  ) : (
-    <details className="ch-long">
-      <summary>{text.slice(0, 160)}… Read full text</summary>
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded full-text region needs keyboard scrolling. */}
-      <section className="ch-full-text" tabIndex={0} aria-label="Full evidence text">
-        {text}
-      </section>
-    </details>
-  );
-}
-function ProposalText({ text }: { text: string }) {
-  return text.length <= 220 ? (
-    <h3>{text}</h3>
-  ) : (
-    <>
-      <h3>{text.slice(0, 180)}…</h3>
-      <details className="ch-long">
-        <summary>Read full proposed action</summary>
-        {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the bounded full-text region needs keyboard scrolling. */}
-        <section className="ch-full-text" tabIndex={0} aria-label="Full proposed action">
-          {text}
-        </section>
-      </details>
-    </>
   );
 }

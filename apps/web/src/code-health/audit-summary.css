@@ -1,0 +1,839 @@
+/* The Audit first screen. Tokens, fonts and Panel come from the HUD; only the page fit lives here.
+   Two columns need a page 1400 px wide; narrower, the columns stack and the page scrolls. */
+.code-health.as-fit {
+  --as-side: clamp(440px, 34vw, 600px);
+  --as-panel-head: 40px;
+  --as-out-max: 160px;
+  --as-plot: 64px;
+}
+@media (min-width: 2200px) {
+  .code-health.as-fit {
+    --as-side: 780px;
+  }
+}
+@media (min-height: 1100px) {
+  .code-health.as-fit {
+    --as-out-max: 300px;
+    --as-plot: 130px;
+  }
+}
+
+/* A desktop viewport holds the whole summary: the page does not scroll, its lists do. */
+@media (min-width: 1000px) and (min-height: 560px) {
+  .code-health.as-fit {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    min-height: 0;
+  }
+  /* The verdict is the first line under the nav, with Repo and the window control beside it. The
+     coverage line, view tabs and cross-links sit in one bar under the work. */
+  .code-health.as-fit .ch-heading {
+    flex-wrap: nowrap;
+    align-items: center;
+    order: 0;
+  }
+  .code-health.as-fit .ch-title {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .code-health.as-fit > .ch-notice,
+  .code-health.as-fit > [role="status"],
+  .code-health.as-fit > [role="alert"] {
+    order: 1;
+  }
+  .code-health.as-fit #ch-panel {
+    order: 2;
+  }
+  .code-health.as-fit .ch-bar {
+    order: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    flex-wrap: nowrap;
+  }
+  .code-health.as-fit .ch-bar .ch-tabs {
+    border-bottom: 0;
+    padding-bottom: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .code-health.as-fit .ch-bar .ch-links {
+    margin-left: var(--sp-4);
+  }
+  /* Title, sub and actions share one line, as in the prototype, instead of stacking. */
+  .code-health.as-fit .panel > .ph {
+    flex-direction: row;
+    align-items: baseline;
+    gap: var(--sp-1) var(--sp-3);
+    padding: var(--sp-1) var(--sp-4);
+  }
+  .code-health.as-fit #ch-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    /* On a short window the summary scrolls inside its panel; it never paints over the tab bar. */
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+}
+.as-cols,
+.as-col {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.as-scroll {
+  max-height: 420px;
+}
+/* Two columns when the page is wide enough for the ranked table beside the right-hand panels. */
+@container (min-width: 1400px) {
+  .as-cols {
+    flex: 1 1 auto;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) var(--as-side);
+  }
+  .as-col {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+  .as-do {
+    flex: 1 1 auto;
+  }
+  .as-outside,
+  .as-past {
+    flex: none;
+  }
+  /* How we build keeps its header, chart and five figures; the files list is the panel that gives
+     way, down to its header and two rows, and scrolls the rest. */
+  .as-files {
+    flex: 1 1 0;
+    min-height: calc(var(--as-panel-head) + 100px);
+  }
+  .as-build {
+    flex: none;
+  }
+  .as-scroll {
+    max-height: none;
+  }
+  .as-out {
+    max-height: var(--as-out-max);
+  }
+  /* All five figures show: the health table takes its natural height and the files list gives way. */
+  .as-hscroll {
+    max-height: none;
+    flex: none;
+  }
+  .as-pastrows {
+    max-height: 36px;
+  }
+  /* Always leave room for the header and a few file rows. */
+  .as-files .as-grow {
+    flex: 1 1 auto;
+    min-height: 100px;
+  }
+}
+
+.as-verdict {
+  margin: 0;
+  font-size: var(--fs-panel);
+  line-height: var(--lh-panel);
+  color: var(--fg-2);
+}
+.code-health p.as-verdict {
+  margin: 0;
+}
+.as-verdict b {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.as-do .act,
+.as-build .act {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.as-do .as-count {
+  color: var(--fg);
+}
+.as-scroll {
+  overflow: auto;
+  min-height: 0;
+  /* Spoken-only text inside a list is positioned against the list, so a long open row cannot
+     push it below the page and make the page scroll. */
+  position: relative;
+}
+.as-grow {
+  flex: 1 1 auto;
+}
+.as-scroll:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.code-health .as-empty {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.code-health .as-foot {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--line);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.as-link {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  min-height: 24px;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-s);
+}
+
+:where(.as-scroll) table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+:where(.as-scroll) thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  text-align: left;
+  padding: var(--sp-1) var(--sp-2);
+  white-space: nowrap;
+  box-shadow: inset 0 -1px 0 var(--line-2);
+}
+:where(.as-scroll) td {
+  /* The HUD table rule keeps cells on one line; titles and evidence here must wrap. */
+  white-space: normal;
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  overflow-wrap: anywhere;
+}
+:where(.as-scroll) th:first-child,
+:where(.as-scroll) td:first-child {
+  padding-left: var(--sp-4);
+}
+:where(.as-scroll) th:last-child,
+:where(.as-scroll) td:last-child {
+  padding-right: var(--sp-4);
+}
+:where(.as-scroll) .as-r {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.as-m {
+  color: var(--muted);
+}
+.as-c-n {
+  width: 44px;
+}
+.as-c-from {
+  width: 72px;
+}
+.as-c-meas {
+  width: 204px;
+}
+.as-c-dec {
+  width: 196px;
+}
+.as-c-act {
+  width: 204px;
+}
+@container (min-width: 2000px) {
+  .as-c-meas {
+    width: 300px;
+  }
+  .as-c-dec {
+    width: 200px;
+  }
+}
+
+.as-rec:hover > td,
+.as-scroll .as-open > td {
+  background: var(--surface-2);
+}
+.as-scroll .as-open > td {
+  border-bottom-color: transparent;
+}
+.as-n {
+  white-space: nowrap;
+  font: 600 var(--fs) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
+}
+.as-src {
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+}
+.as-rt {
+  all: unset;
+  display: grid;
+  grid-template-columns: var(--sp-4) minmax(0, 1fr);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  cursor: pointer;
+  font-size: var(--fs);
+  line-height: var(--lh-s);
+  font-weight: 500;
+  color: var(--fg);
+  overflow-wrap: anywhere;
+  min-height: 24px;
+}
+.as-rt:hover {
+  color: var(--accent);
+}
+.as-rt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+.as-rtx {
+  display: block;
+  min-width: 0;
+}
+.as-rt i {
+  font-style: normal;
+  color: var(--muted);
+  display: inline-block;
+  width: var(--sp-4);
+  font-size: var(--fs-micro);
+}
+.as-rt-static {
+  font-weight: 500;
+  color: var(--fg);
+}
+.as-why {
+  color: var(--fg-2);
+  padding-left: var(--sp-4);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.as-open .as-why {
+  display: none;
+}
+.as-meas .as-l {
+  display: block;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.as-meas .as-v {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  font-family: var(--mono);
+  color: var(--fg);
+}
+.as-unit {
+  color: var(--muted);
+}
+.as-scroll .as-dec b {
+  font-weight: 600;
+  color: var(--fg);
+}
+.as-scroll .as-dec b.as-you {
+  color: var(--warn);
+}
+.as-scroll .as-dec span {
+  color: var(--muted);
+}
+.as-acts {
+  display: flex;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+}
+.as-btn {
+  min-height: 24px;
+  min-width: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+.as-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.as-btn:disabled {
+  color: var(--muted);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+.as-pri {
+  color: var(--fg);
+}
+.as-done {
+  text-align: right;
+  color: var(--fg-2);
+}
+.as-done button {
+  all: unset;
+  display: block;
+  margin-left: auto;
+  color: var(--accent);
+  cursor: pointer;
+  padding: var(--sp-1) 0;
+  min-height: 16px;
+}
+.as-done button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.as-scroll .as-more > td {
+  background: var(--surface-2);
+  padding-top: 0;
+  padding-bottom: var(--sp-3);
+  padding-left: calc(var(--sp-4) + var(--sp-5));
+}
+.as-mg {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--sp-4);
+}
+.as-mg h3 {
+  margin: 0 0 var(--sp-1);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.code-health .as-mg p {
+  margin: 0 0 var(--sp-1);
+  color: var(--fg-2);
+}
+.as-mg .as-btn {
+  margin-top: var(--sp-1);
+}
+.as-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0 0 var(--sp-1);
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+}
+.as-steps li:not(:last-child)::after {
+  content: "›";
+  margin-left: var(--sp-2);
+  color: var(--line-2);
+}
+.as-steps li[aria-current="step"] {
+  color: var(--fg);
+  font-weight: 600;
+}
+.as-mg > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.as-so {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.as-plot {
+  padding: 0 var(--sp-4) var(--sp-1);
+}
+.as-plot svg {
+  display: block;
+  width: 100%;
+  height: var(--as-plot);
+  border-bottom: 1px solid var(--line-2);
+}
+.as-axis {
+  display: grid;
+  text-align: center;
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.as-plot rect.as-b1 {
+  fill: var(--accent-soft);
+  stroke: var(--accent);
+  stroke-width: 1px;
+}
+.as-b2 {
+  fill: var(--accent);
+}
+.as-b3 {
+  fill: var(--warn);
+}
+.as-plot rect.as-b0 {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1px;
+}
+.as-lg {
+  display: flex;
+  gap: var(--sp-3);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.as-lg i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: var(--sp-1);
+}
+.as-k0 {
+  border: 1px solid var(--muted);
+}
+.as-k1 {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+.as-k2 {
+  background: var(--accent);
+}
+.as-k3 {
+  background: var(--warn);
+}
+.as-fstate {
+  color: var(--warn);
+}
+.as-path {
+  font-family: var(--mono);
+}
+.as-fun {
+  display: flex;
+  flex-wrap: wrap;
+  border-block: 1px solid var(--line);
+}
+.as-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 var(--sp-2);
+  border-left: 1px solid var(--line);
+}
+.as-cap {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+}
+.as-fig {
+  display: block;
+  font: 600 var(--fs) / var(--lh-s) var(--mono);
+}
+.as-sub {
+  color: var(--muted);
+}
+.as-vd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+.as-lamp {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+}
+.as-l-ok {
+  background: var(--ok);
+  border-radius: 50%;
+}
+.as-l-warn {
+  background: var(--warn);
+  transform: rotate(45deg) scale(0.82);
+}
+.as-l-off {
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+}
+.as-c-so {
+  width: 140px;
+}
+.as-c-date {
+  width: 96px;
+}
+.as-c-fig {
+  width: 76px;
+}
+.as-c-hwin {
+  width: 96px;
+}
+.as-c-hchg {
+  width: 104px;
+}
+.as-c-chg {
+  width: 120px;
+}
+.as-c-out {
+  width: 116px;
+}
+.as-cell:first-child {
+  border-left: 0;
+  padding-left: var(--sp-4);
+}
+.as-scroll .as-rec > td {
+  padding-block: var(--sp-1);
+}
+.as-fmeta {
+  display: block;
+}
+.as-meas .as-unit {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* A figure reads on one line: its label, then unit and window muted beside it. */
+.as-fl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.as-flab {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-fl .as-fmeta {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-hrow .as-fdef {
+  display: block;
+}
+.as-days > summary {
+  cursor: pointer;
+  padding: 0 var(--sp-4);
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+}
+.as-days > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Merged-PR chart: a count scale beside the bars, and each day's count in a keyboard-reachable list. */
+.as-chart {
+  display: flex;
+  gap: var(--sp-2);
+}
+.as-chart .as-plot {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 0;
+}
+.as-yscale {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: var(--as-plot);
+  padding-left: var(--sp-4);
+  text-align: right;
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.as-daylist {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
+  max-height: 3.2em;
+  overflow: auto;
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.as-daylist ul {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-3);
+  list-style: none;
+}
+.as-daylist:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.as-dn {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* A file path stays on one line and shortens with an ellipsis, so every landing row is one row tall. */
+.as-files td.as-path {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.as-files .as-frow > td {
+  padding-block: var(--sp-1);
+}
+.code-health .as-pathbtn {
+  all: unset;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 24px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.as-pathbtn[aria-expanded="true"] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.as-pathbtn:hover {
+  color: var(--accent);
+}
+.as-pathbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 2px;
+}
+.code-health .as-defbtn {
+  all: unset;
+  margin-left: var(--sp-2);
+  min-height: 24px;
+  padding: 0 var(--sp-1);
+  cursor: pointer;
+  color: var(--muted);
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  text-decoration: underline dotted;
+  white-space: nowrap;
+}
+.as-defbtn:hover {
+  color: var(--accent);
+}
+.as-defbtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+
+/* Figure and file rows are compact so the right column leaves room for the file list. */
+.as-scroll .as-hrow > td,
+.as-scroll .as-prow > td {
+  padding-block: var(--sp-1);
+}
+/* The HUD gives every table row a minimum height; these compact rows size to their content. */
+.as-scroll tr.as-frow,
+.as-scroll tr.as-hrow,
+.as-scroll tr.as-prow {
+  height: auto;
+}
+
+/* Do next rows: 49 px tall, centred, at most two lines per cell, with a dot before the measure. */
+.as-scroll tr.as-rec {
+  height: 49px;
+}
+.as-scroll .as-rec > td {
+  vertical-align: middle;
+  padding-block: 0;
+  overflow: hidden;
+}
+.as-from {
+  color: var(--fg-2);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+.as-scroll .as-rec .as-dec div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-scroll .as-rec .as-rtx {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.as-scroll .as-open .as-rtx {
+  white-space: normal;
+  overflow: visible;
+}
+.as-meas .as-v {
+  flex-wrap: nowrap;
+  align-items: baseline;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.as-dot {
+  color: var(--accent);
+  /* A fallback font for the dot glyph must not stretch its row. */
+  display: inline-block;
+  line-height: var(--lh-micro);
+}
+.as-acts .as-btn {
+  padding: 0 var(--sp-3);
+  white-space: nowrap;
+}
+.code-health.as-fit th {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Measures and file rows: 32 px, figures centred, a state dot at the end, per-touch values over 1 in amber. */
+.as-scroll tr.as-hrow,
+.as-scroll tr.as-frow {
+  height: 32px;
+}
+.as-scroll .as-hrow > td,
+.as-scroll .as-frow > td {
+  vertical-align: middle;
+}
+.as-c-dotcol {
+  width: 40px;
+}
+.as-dotcell {
+  text-align: center;
+  line-height: var(--lh-micro);
+}
+.as-hot {
+  color: var(--warn);
+}
+
+.as-loop {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+
+/* The change cell is one line: a figure row stays about 32 px however long its words. */
+.as-scroll .as-chgcell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A missing now or target says so in plain, muted words. */
+.as-gap {
+  color: var(--muted);
+}

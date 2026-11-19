@@ -1,17 +1,19 @@
 import type {
   CodeHealthCoverage,
   CodeHealthEvidenceRef,
+  CodeHealthOverview,
   CodeHealthRecommendation,
   CodeHealthView,
   ConfigView,
 } from "@mc/core";
-import { OPERATOR_HEADER } from "@mc/core";
+import { CODE_HEALTH_OVERVIEW_TTL_MS, OPERATOR_HEADER } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
 import { CodeHealth } from "../src/code-health/CodeHealth.tsx";
 import { hub, streamStatus } from "../src/data.ts";
+import { overviewFixture } from "./codeHealthOverviewFixtures.ts";
 import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { testHealthFixture } from "./testHealthFixtures.ts";
@@ -101,10 +103,21 @@ function view(tab: "overview" | "review" = "overview", repo = "sample"): CodeHea
         : { tab, review: { ...review, rounds: [...review.rounds] } },
   };
 }
+/** The stored first-screen summary for one repo/window, carrying the same proposals as the full read. */
+function summary(repo = "sample", window: "7d" | "30d" = "30d"): CodeHealthOverview {
+  const rows = view("overview", repo).data;
+  return {
+    ...overviewFixture({ rows: 0, repo, window, generatedAt: NOW }),
+    rows: rows.tab === "overview" ? rows.recommendations.map((r) => ({ ...r, evidence: [] })) : [],
+  };
+}
 function setup(extra: Parameters<typeof stubFetch>[0] = {}) {
   return stubFetch({
     "/api/config": config,
     "/api/operator/bootstrap": { token: "fixture-token" },
+    "/api/code-health/overview?repo=sample&window=30d": summary(),
+    "/api/code-health/overview?repo=sample&window=7d": summary("sample", "7d"),
+    "/api/code-health/overview?repo=other&window=30d": summary("other"),
     "/api/code-health?repo=sample&window=30d&tab=overview": view(),
     "/api/code-health?repo=sample&window=30d&tab=review": view("review"),
     "/api/code-health?repo=sample&window=7d&tab=overview": view(),
@@ -164,9 +177,10 @@ it("fetches only the selected tab and uses keyboard tab navigation", async () =>
   const fetch = setup();
   render(<CodeHealth />);
   await ready();
-  expect(screen.getByText("70%")).toBeTruthy();
+  expect(screen.getByText("74%")).toBeTruthy();
   expect(fetch.mock.calls.some(([url]) => url.includes("tab=review"))).toBe(false);
-  fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), { key: "ArrowRight" });
+  expect(fetch.mock.calls.some(([url]) => url.includes("/api/code-health/overview"))).toBe(true);
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Summary" }), { key: "ArrowRight" });
   await screen.findByText("Recurring correction categories");
   expect(screen.getByRole("tab", { name: "Review quality" }).getAttribute("aria-selected")).toBe(
     "true",
@@ -241,8 +255,8 @@ it("loads Test health on demand and pages explicit exact-head attempts through a
   expect(screen.getByRole("button", { name: "7 days" }).getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Open recommendations" }));
   await screen.findByText("Inspect planning and corrections before extending the same work.");
-  expect(screen.getByRole("tab", { name: "Overview" }).getAttribute("aria-selected")).toBe("true");
-  expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Overview" }));
+  expect(screen.getByRole("tab", { name: "Summary" }).getAttribute("aria-selected")).toBe("true");
+  expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Summary" }));
   expect(screen.getByRole("button", { name: "7 days" }).getAttribute("aria-pressed")).toBe("true");
   expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });
@@ -378,7 +392,7 @@ it("pages evidence at 50 rows and restores focus when closed", async () => {
 });
 it("does not display the previous repo while a new scoped read fails", async () => {
   setup({
-    "/api/code-health?repo=other&window=30d&tab=overview": () => ({
+    "/api/code-health/overview?repo=other&window=30d": () => ({
       status: 503,
       body: { error: "Collection unavailable" },
     }),
@@ -404,10 +418,22 @@ it("names missing and empty collection without turning it into a health score", 
       observedUntil: null,
     },
   ];
-  setup({ "/api/code-health?repo=sample&window=30d&tab=overview": empty });
+  setup({
+    "/api/code-health?repo=sample&window=30d&tab=overview": empty,
+    "/api/code-health?repo=sample&window=30d&tab=review": {
+      ...empty,
+      data: { tab: "review", review: empty.data.review },
+    },
+    "/api/code-health/overview?repo=sample&window=30d": {
+      ...overviewFixture({ rows: 0, generatedAt: NOW }),
+    },
+  });
   render(<CodeHealth />);
   await screen.findByText(/No open proposal/);
-  expect(screen.getByText(/No reported reviews/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("tab", { name: "Review quality" }));
+  await screen.findByText(/No reported reviews/);
+  fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
+  await screen.findByText(/No open proposal/);
   fireEvent.click(screen.getByRole("button", { name: "Inspect coverage" }));
   await screen.findByText("named tests · not collected");
 });
@@ -583,12 +609,9 @@ it("ignores an old scope's completion without closing a newer action dialog", as
   expect((screen.getByRole("combobox", { name: "Repo" }) as HTMLSelectElement).value).toBe("other");
 });
 it("never enables an initially expired response in any committed render", async () => {
-  const expired = view();
-  expired.generatedAt = NOW - 180000;
-  expired.coverage = [
-    { ...coverage, observedUntil: expired.generatedAt, collectedAt: expired.generatedAt },
-  ];
-  setup({ "/api/code-health?repo=sample&window=30d&tab=overview": expired });
+  const expired = summary();
+  expired.generatedAt = NOW - CODE_HEALTH_OVERVIEW_TTL_MS - 180000;
+  setup({ "/api/code-health/overview?repo=sample&window=30d": expired });
   const states: { disabled: boolean; status: string }[] = [];
   render(
     <Profiler
