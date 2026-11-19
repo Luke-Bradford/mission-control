@@ -53,11 +53,10 @@ Approval and build owners come from the reconciliation section of #677 and the m
 | Board | [dependencies](../../../apps/web/mockups/dependencies/index.html) | Waits for the operator | #1196 |
 | Agent | [agent-density](../../mockups/2026-10/agent-density.html) | Approved 2 Nov | #1359–#1362 |
 | Trace | [run-trace](../../mockups/loops/run-trace.html) | Approved 26 Oct | See the loops README |
-| Map | [map-crew](../../../apps/web/mockups/map-crew/index.html) | Built | Built |
 | Comms | [comms README](../../mockups/comms/README.md), [6 Nov spec](2026-11-06-comms-needs-you-flight-design.md) | Approved 26 Oct, spec 6 Nov | Built |
 | QA | [pr-readiness](../../../apps/web/mockups/qa-pr-readiness/index.html), [uat](../../../apps/web/mockups/qa-uat/index.html), [dependencies](../../../apps/web/mockups/dependencies/index.html) | Waits for the operator | #1196 |
 | Telemetry | [telemetry](../../../apps/web/mockups/telemetry/index.html) | Waits for the operator | #1178 |
-| Audit | [code-health](../../../apps/web/mockups/code-health/index.html) | Approved | Builds filed |
+| Audit | [HUD prototype](../../prototype/mission-control-hud.html) | Approved (MVP mockup) | #1662 |
 | Setup — Accounts | [setup.dc.html](../../mockups/setup/setup.dc.html) | Approved 26 Oct | See the setup README |
 | Setup — Repos & seats | [setup-sessions-density](../../mockups/2026-10/setup-sessions-density.html) | Approved 2 Nov | #1359–#1362 |
 | Setup — Roles & guards | [setup-roles-guards](../../../apps/web/mockups/setup-roles-guards/index.html) | Waits for the operator | Server and web tickets, filed after approval |
