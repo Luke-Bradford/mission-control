@@ -182,7 +182,7 @@ describe("mapSeats", () => {
     ({
       seatSession: () => null,
       run: (id: string) => runs.find((r) => r.id === id) ?? null,
-      mapAsideRuns: () => aside,
+      mapOffSeatRuns: () => aside,
       pullRequests: () => prs,
       runsOnTicket: () => [],
       reviewsOfRun: () => [],

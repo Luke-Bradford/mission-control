@@ -508,7 +508,7 @@ export function telemetry(
       store.telemetryNoteEpisodes(agent.id, dayStart, now, kinds).flatMap((e): Interval[] => {
         const owner = e.runId === null ? null : store.run(e.runId);
         if (owner === null) return [e.interval];
-        if (owner.loop?.aside) return [];
+        if (owner.loop?.hold?.worktree) return [];
         const clipped: Interval = [
           Math.max(e.interval[0], owner.startedAt),
           Math.min(

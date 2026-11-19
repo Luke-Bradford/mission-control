@@ -468,7 +468,7 @@ const newestRun = (runs: readonly Run[]): Run | undefined =>
 
 /** Why a Blocked ticket is blocked: its run's parked reason, else the open tickets it waits on. */
 function blockedReason(item: Pick<BoardItem, "blockedBy">, run: Run | undefined): string {
-  const parked = run?.loop?.parked?.reason;
+  const parked = run?.loop?.hold?.reason;
   if (parked) return parked;
   const waits = item.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
   return waits.length ? `Waiting on ${waits.join(", ")}` : BLOCKED_NO_REASON_TEXT;

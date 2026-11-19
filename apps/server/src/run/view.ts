@@ -58,7 +58,7 @@ export function runPrs(
       ...(run.loop?.mergeHold && run.loop.prNumber === number
         ? { hold: { by: run.loop.mergeHold.by, reason: run.loop.mergeHold.reason } }
         : {}),
-      ...(run.loop?.parked?.kind === UAT_PARK &&
+      ...(run.loop?.hold?.kind === UAT_PARK &&
       run.loop.uat &&
       !run.loop.uat.accepted &&
       run.loop.prNumber === number

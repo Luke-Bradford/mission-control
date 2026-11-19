@@ -203,7 +203,16 @@ describe("loopTries", () => {
   it("stops an open try when the run ends, and passes Done after a merge", () => {
     const ended = run(
       { endedAt: at(5) },
-      { phase: "parked", parked: { kind: "ended", reason: "run ended (stopped)", ended: true } },
+      {
+        phase: "parked",
+        hold: {
+          kind: "ended",
+          reason: "run ended (stopped)",
+          ended: true,
+          worktree: null,
+          wake: false,
+        },
+      },
     );
     expect(loopTries(ended, [], null)).toEqual([
       {
@@ -289,7 +298,13 @@ it("shows the final charged CI failure when the engine parks at the limit", () =
       {
         phase: "parked",
         ciFails: 3,
-        parked: { kind: "ci", reason: "CI failed 3 times; last on abc", ended: false },
+        hold: {
+          kind: "ci",
+          reason: "CI failed 3 times; last on abc",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
     ),
     evs(REPORTED, parkedEventText("CI failed 3 times; last on abc")),

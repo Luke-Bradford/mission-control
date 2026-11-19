@@ -257,7 +257,7 @@ describe("crew", () => {
       ticket: null,
       ticketTitle: null,
       loop: null,
-      asideRuns: [],
+      offSeatRuns: [],
       queue: [],
       queuedMessages: 0,
       run: null,
@@ -1753,7 +1753,7 @@ describe("crew seats in the rows", () => {
         phase: "ci",
         text: "CI on abcdef1",
         prNumber: null,
-        parked: null,
+        hold: null,
         tries: { n: 1, max: 3, failures: 0, runs: 0 },
         wait: "ci",
       });
@@ -1762,7 +1762,7 @@ describe("crew seats in the rows", () => {
         phase: "review",
         text: "In review · PR #208",
         prNumber: 208,
-        parked: null,
+        hold: null,
         tries: { n: 1, max: 3 },
         wait: null,
       });
@@ -1770,14 +1770,20 @@ describe("crew seats in the rows", () => {
         "c1",
         loopOf({
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed 3 times", ended: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed 3 times",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         }),
       );
       expect(rowOf(c, "GUIDO-1")?.loop).toEqual({
         phase: "parked",
         text: "Blocked: CI failed 3 times",
         prNumber: null,
-        parked: "CI failed 3 times",
+        hold: { kind: "ci", reason: "CI failed 3 times", offSeat: false },
         tries: null,
         wait: "operator",
       });
@@ -1793,7 +1799,7 @@ describe("crew seats in the rows", () => {
         phase: "done",
         text: "Done · PR #9",
         prNumber: 9,
-        parked: null,
+        hold: null,
         tries: null,
         wait: null,
       });
@@ -1803,12 +1809,15 @@ describe("crew seats in the rows", () => {
       store.upsertRun(crewRun({ status: "ok", endedAt: NOW - MIN }));
       store.setRunLoop(
         "c1",
-        loopOf({ phase: "parked", parked: { kind: "ci", reason: "gave up", ended: true } }),
+        loopOf({
+          phase: "parked",
+          hold: { kind: "ci", reason: "gave up", ended: true, worktree: null, wake: false },
+        }),
       );
       expect(rowOf(c, "GUIDO-1")?.loop).toMatchObject({
         phase: "parked",
         text: "Blocked: gave up",
-        parked: "gave up",
+        hold: { kind: "ci", reason: "gave up", offSeat: false },
       });
     });
     it("a crew run without a loop has none", () => {
@@ -1821,24 +1830,24 @@ describe("crew seats in the rows", () => {
       store.upsertRun(run({ id: "l1", agentId: "shop-app-ta", repoId: "shop-app" }));
       store.setRunLoop("l1", loopOf({ phase: "review", prNumber: 3 }));
       expect(rowOf(withCrew(), "shop-app-ta")?.loop).toBeNull();
-      expect(rowOf(withCrew(), "shop-app-ta")?.asideRuns).toEqual([]);
+      expect(rowOf(withCrew(), "shop-app-ta")?.offSeatRuns).toEqual([]);
     });
 
     describe("set-aside runs", () => {
-      const aside = { worktree: "/wt", wake: false };
+      const aside = { kind: null, reason: null, ended: false, worktree: "/wt", wake: false };
       it("lists the seat's other set-aside runs; the held run is the row's", () => {
         const c = withCrew();
         store.upsertRun(
           crewRun({ id: "a", startedAt: NOW - 3 * MIN, ticket: "mission-control#5" }),
         );
-        store.setRunLoop("a", loopOf({ phase: "review", prNumber: 12, aside }));
+        store.setRunLoop("a", loopOf({ phase: "review", prNumber: 12, hold: aside }));
         store.upsertRun(crewRun({ id: "b", startedAt: NOW - MIN }));
         store.setRunLoop("b", loopOf({ phase: "working" }));
         store.setSeatSession(seat({ runId: "b" }));
         const row = rowOf(c, "GUIDO-1");
         expect(row?.run?.id).toBe("b");
-        expect(row?.asideRuns).toHaveLength(1);
-        expect(row?.asideRuns?.[0]).toMatchObject({
+        expect(row?.offSeatRuns).toHaveLength(1);
+        expect(row?.offSeatRuns?.[0]).toMatchObject({
           runId: "a",
           ticket: "mission-control#5",
           loop: { phase: "review", prNumber: 12 },
@@ -1847,16 +1856,16 @@ describe("crew seats in the rows", () => {
       it("a lone set-aside run the seat does not hold is the row's run, not an aside run", () => {
         const c = withCrew();
         store.upsertRun(crewRun({ id: "a" }));
-        store.setRunLoop("a", loopOf({ phase: "review", prNumber: 12, aside }));
+        store.setRunLoop("a", loopOf({ phase: "review", prNumber: 12, hold: aside }));
         store.setSeatSession(seat({ runId: null, state: "idle" }));
         const row = rowOf(c, "GUIDO-1");
         expect(row?.run?.id).toBe("a");
-        expect(row?.asideRuns).toEqual([]);
+        expect(row?.offSeatRuns).toEqual([]);
       });
     });
 
     describe("wait", () => {
-      const aside = { worktree: "/wt", wake: false };
+      const aside = { kind: null, reason: null, ended: false, worktree: "/wt", wake: false };
       const waitOf = (c: CcConfig, lock?: TestLockState) =>
         crew(c, store, NOW, lock).rows.find((r) => r.id === "GUIDO-1")?.loop?.wait;
       const start = (over: Partial<RunLoop>, runOver: Partial<Run> = {}) => {
@@ -1883,17 +1892,20 @@ describe("crew seats in the rows", () => {
         expect(waitOf(withCrew(), lock)).toBe("lock");
       });
       it("operator: the run is parked", () => {
-        start({ phase: "parked", parked: { kind: "ci", reason: "x", ended: false } });
+        start({
+          phase: "parked",
+          hold: { kind: "ci", reason: "x", ended: false, worktree: null, wake: false },
+        });
         expect(waitOf(withCrew())).toBe("operator");
       });
       it("seat: a set-aside run flagged to wake", () => {
-        start({ phase: "review", aside: { ...aside, wake: true } });
+        start({ phase: "review", hold: { ...aside, wake: true } });
         // a set-aside run has left its seat
         store.setSeatSession(seat({ runId: null, state: "idle" }));
         expect(waitOf(withCrew())).toBe("seat");
       });
       it("seat: the text names the ticket the seat is on, while it is on one", () => {
-        start({ phase: "review", aside: { ...aside, wake: true } });
+        start({ phase: "review", hold: { ...aside, wake: true } });
         const textOf = () =>
           crew(withCrew(), store, NOW).rows.find((r) => r.id === "GUIDO-1")?.loop?.waitText;
         // the seat is free: nothing holds the rework up
@@ -1902,7 +1914,7 @@ describe("crew seats in the rows", () => {
         store.upsertRun(crewRun({ id: "c2", ticket: "shop-app#12", startedAt: NOW - MIN }));
         store.setSeatSession(seat({ runId: "c2" }));
         const text = crew(withCrew(), store, NOW)
-          .rows.flatMap((r) => [r, ...(r.asideRuns ?? [])])
+          .rows.flatMap((r) => [r, ...(r.offSeatRuns ?? [])])
           .map((r) => (r as { loop?: { waitText?: string | null } }).loop?.waitText)
           .find((w) => w);
         expect(text).toBe("rework waiting on GUIDO-1 (behind #12)");
@@ -2709,7 +2721,13 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+          hold: {
+            kind: "ended",
+            reason: "run ended (stopped)",
+            ended: true,
+            worktree: null,
+            wake: false,
+          },
           mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - 21 * DAY },
         },
       });
@@ -2742,7 +2760,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
             ...NEW_LOOP,
             prNumber: 13,
             phase: "parked",
-            parked: parkedEnded,
+            hold: { ...parkedEnded, worktree: null, wake: false },
             mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - DAY },
           },
         }),
@@ -2750,13 +2768,13 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       const cleared = clearLeftovers({ store, config: withCrew(), now: NOW });
       expect(cleared).toHaveLength(3);
       expect(store.run("held")?.loop?.mergeHold).not.toBeNull();
-      expect(store.run("held")?.loop?.parked).not.toBeNull();
+      expect(store.run("held")?.loop?.hold?.kind).toBeTruthy();
       expect(store.question(id)).toMatchObject({ answeredAt: null });
       expect(store.openQuestions().map((q) => q.id)).not.toContain(id);
       expect(store.asideQuestions().map((q) => q.id)).toContain(id);
       const ended = store.run("c1")?.loop;
       expect(ended?.mergeHold).toBeNull();
-      expect(ended?.parked).toBeNull();
+      expect(ended?.hold?.kind ?? null).toBeNull();
       expect(store.endedRunsWithHoldOrPark().map((r) => r.id)).toEqual(["held"]);
       expect(store.run("live")?.loop?.mergeHold).not.toBeNull();
       expect(store.hubEvents(0).map((e) => e.text)).toEqual(
@@ -2875,7 +2893,13 @@ describe("the engine's notes in Needs you", () => {
         ...NEW_LOOP,
         phase: "parked",
         prNumber: 12,
-        parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+        hold: {
+          kind: "ended",
+          reason: "run ended (stopped)",
+          ended: true,
+          worktree: null,
+          wake: false,
+        },
         ...loop,
       },
       ...over,
@@ -3001,7 +3025,15 @@ describe("the engine's notes in Needs you", () => {
   it("keeps a park that is not ended, even with its PR merged", () => {
     endedRun(
       { endedAt: null, status: "running" },
-      { parked: { kind: "refused", reason: "Push refused.", ended: false } },
+      {
+        hold: {
+          kind: "refused",
+          reason: "Push refused.",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
+      },
     );
     note("blocked:r1:0", "blocked");
     pr12("merged");
@@ -4448,7 +4480,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "spent", ended: false },
+          hold: { kind: "budget", reason: "spent", ended: false, worktree: null, wake: false },
         } as RunLoop,
       }),
     );
@@ -4481,7 +4513,13 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         agentId: "guido-1",
         loop: {
           ...(store.run("r-budget")?.loop as RunLoop),
-          parked: { kind: "controller-check", reason: "check", ended: false },
+          hold: {
+            kind: "controller-check",
+            reason: "check",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         },
       }),
     );
@@ -4494,7 +4532,13 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         agentId: "guido-1",
         loop: {
           ...(store.run("r-budget")?.loop as RunLoop),
-          parked: { kind: "uat", reason: "waiting for your acceptance", ended: false },
+          hold: {
+            kind: "uat",
+            reason: "waiting for your acceptance",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         },
       }),
     );

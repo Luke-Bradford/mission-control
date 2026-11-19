@@ -124,7 +124,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
   }
   const failedAttempt = (r: Run): boolean =>
     r.status === "failed" ||
-    (r.loop?.parked != null && WASTE_FAILED_PARK_KINDS.includes(r.loop.parked.kind));
+    (r.loop?.hold?.kind != null && WASTE_FAILED_PARK_KINDS.includes(r.loop.hold.kind));
   const developer = (r: Run): boolean =>
     r.reviewId === null && agents.get(r.agentId)?.loop === "build";
   const retry = new Map<string, { failed: Run[]; resumed: { runId: string; n: number }[] }>();

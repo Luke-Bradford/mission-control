@@ -373,6 +373,7 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { withLegacyHoldFields } from "./legacy-hold.ts";
 import { loopTries } from "./loop/history.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -1007,7 +1008,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ...(current ? [current] : []),
             ...(!flight
               ? [
-                  ...store.mapAsideRuns(agent.id),
+                  ...store.mapOffSeatRuns(agent.id),
                   ...recent.filter((r) => r.agentId === agent.id && r.repoId === agent.repoId),
                 ]
               : []),
@@ -1021,7 +1022,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const cwd = flight
             ? config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout
             : ((seat?.runId === run.id ? seat.worktree : null) ??
-              run.loop?.aside?.worktree ??
+              run.loop?.hold?.worktree ??
               mapSources.get(id)?.cwd);
           if (!cwd) continue;
           const source: RingSource = {
@@ -1306,6 +1307,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   const requestErrors = new WeakMap<object, Error>();
+  // the web app still reads the old park and set-aside fields: fill them from `hold` (#2071)
+  app.addHook("preSerialization", async (_req, _reply, payload) => withLegacyHoldFields(payload));
   app.addHook("onError", async (req, _reply, error) => {
     requestErrors.set(req, error);
   });
@@ -2657,8 +2660,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const agent = agentById(id);
         if (agent?.kind !== "crew") return null;
         const checkout = config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout;
-        const worktree =
-          store.seatSession(id)?.worktree ?? store.seatRun(id)?.loop?.aside?.worktree;
+        const worktree = store.seatSession(id)?.worktree ?? store.seatRun(id)?.loop?.hold?.worktree;
         if (!checkout || !worktree) return null;
         const isDir = await stat(worktree).then(
           (st) => st.isDirectory(),
@@ -4899,7 +4901,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             named.passedAt !== null &&
             named.runId !== runId &&
             store.run(named.runId)?.endedAt === null &&
-            store.run(named.runId)?.loop?.aside != null
+            store.run(named.runId)?.loop?.hold?.worktree != null
               ? named
               : undefined;
           // A picked option is claimed before its text is sent, and tied to the stored message.
@@ -5733,16 +5735,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (deps.engine?.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
-        if (run.loop.parked?.kind === CONTROLLER_CHECK_PARK) {
+        if (run.loop.hold?.kind === CONTROLLER_CHECK_PARK) {
           return reply
             .code(409)
             .send({ error: `nothing to resume: ${CONTROLLER_CHECK_USE_ROUTE}` });
         }
-        if (run.loop.parked?.kind === UAT_PARK) {
+        if (run.loop.hold?.kind === UAT_PARK) {
           return reply.code(409).send({ error: `nothing to resume: ${UAT_USE_ROUTE}` });
         }
         const reviewWaiver =
-          run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+          run.loop.hold?.kind === "review" || run.loop.hold?.kind === "review-ruling";
         const by = flightActor(req) ? "FLIGHT" : "CAPCOM";
         checkBriefDispatch();
         const guard = boundBriefGuard();
@@ -6107,7 +6109,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 r.repoId === repo.id &&
                 r.endedAt === null &&
                 r.loop?.prNumber === n &&
-                r.loop.parked?.kind === UAT_PARK,
+                r.loop.hold?.kind === UAT_PARK,
             );
           if (run === undefined || !run.loop?.uat) {
             const target = await externalTarget(repo.id, n, body.data.sha, reply);
@@ -6210,7 +6212,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           if (deps.engine?.status().on !== true)
             return reply.code(409).send({ error: "the loop engine is off" });
-          const kind = run.loop.parked?.kind;
+          const kind = run.loop.hold?.kind;
           if (kind !== "review" && kind !== "review-ruling")
             return reply.code(409).send({ error: "rework is only available for review parks" });
           const knownSecrets = deps.knownSecrets ?? (async () => []);

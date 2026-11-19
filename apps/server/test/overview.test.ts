@@ -169,7 +169,13 @@ it("assigns one card per stage, including set-aside review and merging precedenc
   store.upsertRun(run(2));
   store.upsertRun(run(3, { loop: { ...NEW_LOOP, phase: "ci", prNumber: 103 } }));
   store.upsertRun(
-    run(4, { loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "", wake: false } } }),
+    run(4, {
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        hold: { kind: null, reason: null, ended: false, worktree: "", wake: false },
+      },
+    }),
   );
   store.upsertRun(
     run(5, { loop: { ...NEW_LOOP, phase: "review", merging: { sha: "sha", done: [] } } }),
@@ -920,7 +926,7 @@ it("puts a Blocked ticket in the blocked stage with its reason, not in building"
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "ask", reason: "needs a key", ended: false },
+        hold: { kind: "ask", reason: "needs a key", ended: false, worktree: null, wake: false },
       },
     }),
   );
@@ -1001,7 +1007,7 @@ it("reads a Blocked ticket's reason from a run older than the Overview window", 
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "ask", reason: "needs a key", ended: true },
+        hold: { kind: "ask", reason: "needs a key", ended: true, worktree: null, wake: false },
       },
     }),
   );
