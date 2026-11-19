@@ -623,10 +623,11 @@ describe("reattach after a restart", () => {
       ticket: "mc#42",
       costUsd: null,
       tokens: null,
-      transcriptPath: "",
+      transcriptPath: join(dir, "orphan.jsonl"),
       prs: [],
       summary: null,
     };
+    writeFileSync(run.transcriptPath, "{}\n");
     store.upsertRun(run);
     const { sup } = make();
     sup.start();

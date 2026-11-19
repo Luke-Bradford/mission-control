@@ -2690,11 +2690,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     reattaching = (async () => {
       const heldRunIds = new Set(store.liveSeatRuns().map(({ run }) => run.id));
       for (const run of store.runsActiveSince(0)) {
-        // A run saved before its seat session exists has the generated session id but no transcript.
-        const abandonedStart =
-          run.sessionId !== null &&
-          RUN_SESSION_ID.test(run.sessionId) &&
-          !existsSync(run.transcriptPath);
+        // A generated session id without a seat-session row was saved before its seat existed.
+        const abandonedStart = run.sessionId !== null && RUN_SESSION_ID.test(run.sessionId);
         if (
           run.endedAt !== null ||
           heldRunIds.has(run.id) ||
