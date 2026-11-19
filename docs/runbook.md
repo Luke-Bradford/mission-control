@@ -1382,11 +1382,8 @@ board poll; until it is read it counts as a wait.
 Every start path applies it: the engine's deal, a hand Start, FLIGHT's `start_seat`, `promote` and the
 queue reorder. The refusal names the wait and where its PR is ("waits on mc#1015 (PR 1033 in CI)").
 
-When the last wait of a ticket ends, the engine (each tick, `engine/dependencies.ts`) moves it from Blocked
-to Ready if it is otherwise complete (one area label, Done when, Size) and tells each of its open PRs' runs to
-merge main, once each. A step that fails or is refused is tried again after five minutes, for a day. FLIGHT's
-wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and `flight_state` and
-`GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
+When the last wait of a ticket ends, the hub does not move it: FLIGHT (or the operator) moves it from
+Blocked to Ready and has its open PRs merge main. `flight_state` and `GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
 it has waited. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
 `Depends on` line for that PR's ticket (or `After PR N`). The controller's own filing rule (`roles/FLIGHT.md`) is updated separately to ask for the same line.
 
