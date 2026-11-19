@@ -86,6 +86,7 @@ import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
@@ -2144,7 +2145,7 @@ describe("reused worktrees", () => {
   });
 
   it("fails a carried-on run when cloning its checkout git directory fails", async () => {
-    const { sup } = make();
+    const { sup, cfg } = make();
     sup.start();
     const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
     await sup.endRun("guido-1");
@@ -2192,6 +2193,32 @@ describe("reused worktrees", () => {
       expect(store.runsOnTicket("mc", "mc#42").every((run) => run.endedAt !== null)).toBe(true);
       cloneGit.mockRestore();
       upsertRun.mockRestore();
+      store.replaceBoard("mc", [boardCard(42, { labels: ["area:server"], status: "In progress" })]);
+      const startSeat = createFlightTools({
+        config: cfg,
+        store,
+        bus,
+        supervisor: sup,
+        login: "me",
+        engine: null,
+        rules: async () => DEFAULT_REPO_RULES,
+        fetchTicket: async () => TICKET,
+        board: {
+          move: async () => ({ ok: true, changed: true }),
+          read: async () => boardCard(42, { labels: ["area:server"], status: "In progress" }),
+        },
+        gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+        dbPath,
+        knownSecrets: async () => [],
+      }).find((tool) => tool.name === "start_seat");
+      if (startSeat === undefined) throw new Error("missing start_seat");
+      const carriedOn = await startSeat.call(
+        { seatId: "flight-1", runId: "flight-run" },
+        { seat: "guido-1", issue: 42, basis: "carry the open PR on" },
+      );
+      expect(carriedOn.isError).toBeUndefined();
+      const carriedRunId = store.seatSession("guido-1")?.runId;
+      expect(store.run(carriedRunId ?? "")?.branch).toBe(BRANCH);
     } finally {
       cloneGit.mockRestore();
       upsertRun.mockRestore();

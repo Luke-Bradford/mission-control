@@ -703,6 +703,7 @@ describe("reattach after a restart", () => {
     };
     writeFileSync(run.transcriptPath, "{}\n");
     store.upsertRun(run);
+    store.setSetting(`seat-session:${run.id}`, "recorded");
     const { sup } = make();
     sup.start();
     await until(() =>

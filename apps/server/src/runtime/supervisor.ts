@@ -895,7 +895,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   const transferKey = (runId: string) => `account-transfer:${runId}`;
-  const seatSessionKey = (runId: string) => `seat-session:${runId}`;
   function transferState(runId: string): AccountTransfer | null {
     const text = store.getSetting(transferKey(runId));
     return text === null ? null : (JSON.parse(text) as AccountTransfer);
@@ -1080,12 +1079,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     };
     const next = { ...prev, ...patch, seatId, updatedAt: now() };
     store.setSeatSession(next);
-    if (
-      next.runId !== null &&
-      ACTIVE_SEAT_STATES.includes(next.state) &&
-      (store.run(next.runId)?.sessionId ?? null) !== null
-    )
-      store.setSetting(seatSessionKey(next.runId), "recorded");
     bus.emit("agents");
   }
 
@@ -2297,7 +2290,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         log(`could not remove run files of ${runId}: temp root changed`);
         return;
       }
-      store.deleteSetting(seatSessionKey(runId));
     } catch (e) {
       log(`could not remove run files of ${runId}: ${errText(e)}`);
     }
@@ -2701,13 +2693,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     reattaching = (async () => {
       const heldRunIds = new Set(store.liveSeatRuns().map(({ run }) => run.id));
       for (const run of store.runsActiveSince(0)) {
-        // A supervisor-owned generated session with no recorded seat session was saved before its
-        // seat existed. Observed loops use their own transcript paths and never record a seat.
+        // A supervisor-owned generated session with no seat session was saved before its seat
+        // existed. Observed loops use their own transcript paths and never have a crew session.
         const abandonedStart =
           run.transcriptPath === crewTranscriptPath(deps.dbPath, run.id) &&
           run.sessionId !== null &&
-          RUN_SESSION_ID.test(run.sessionId) &&
-          store.getSetting(seatSessionKey(run.id)) === null;
+          RUN_SESSION_ID.test(run.sessionId);
         if (
           run.endedAt !== null ||
           heldRunIds.has(run.id) ||
