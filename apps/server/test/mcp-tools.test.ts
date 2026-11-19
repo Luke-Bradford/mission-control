@@ -5481,7 +5481,7 @@ describe("report_findings", () => {
     });
   });
 
-  it("binds a positional resolution to the latest reported review of the same epoch", async () => {
+  it("binds a positional resolution to the latest reported review of the run", async () => {
     const mk = (epoch: number, round: number, at: number) =>
       store.requestReview({
         authorRunId: RUN,
@@ -5516,6 +5516,59 @@ describe("report_findings", () => {
     expect(store.reviewResolutions(second)).toEqual([
       { reviewId: later, pos: 0, outcome: "fixed" },
     ]);
+  });
+
+  describe("after FLIGHT's rework settle bumps the epoch", () => {
+    // round 1 and 2 ran at epoch 0 (round 2 holds a finding); the settle started round 3 at epoch 1
+    const setup = async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const mk = (epoch: number, round: number, at: number) =>
+        store.requestReview({
+          authorRunId: RUN,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 9,
+          sha: String(at).padEnd(40, "c"),
+          epoch,
+          attempt: 2,
+          round,
+          at,
+        }) as number;
+      const two = mk(0, 2, NOW + 1);
+      store.setReviewState(two, ["queued"], "running", { at: NOW + 1, runId: "retro:r2" });
+      expect(await report(args({ findings: [finding()] }), reviewRun("retro:r2", two))).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      const three = mk(1, 3, NOW + 2);
+      store.setReviewState(three, ["queued"], "running", { at: NOW + 2, runId: "retro:r3" });
+      return { two, three, run: reviewRun("retro:r3", three) };
+    };
+    const resolve = (findingRef: { reviewId?: number; pos: number }) =>
+      args({ verdict: passing, findings: [], resolutions: [{ findingRef, outcome: "fixed" }] });
+
+    it("resolves the previous round's finding given by position alone", async () => {
+      const { two, three, run } = await setup();
+      expect(await report(resolve({ pos: 0 }), run)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("resolves the previous round's finding given with its review id", async () => {
+      const { two, three, run } = await setup();
+      expect(await report(resolve({ reviewId: two, pos: 0 }), run)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("still refuses a finding from neither the previous round nor the brief", async () => {
+      const { three, run } = await setup();
+      const refused = await report(resolve({ reviewId, pos: 0 }), run);
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain("findings must be from the previous round");
+      expect(store.reviewResolutions(three)).toEqual([]);
+    });
   });
 
   it("rejects a positional and an explicit reference to the same prior finding", async () => {

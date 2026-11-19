@@ -4720,9 +4720,7 @@ export class Store {
         // earlier heads, but only those its brief listed: a review does not accept what it never saw.
         if (author === externalReviewKey(repoId, prNumber)) {
           const previous = this.reviewsOfRun(author)
-            .filter(
-              (x) => x.id < reviewId && x.epoch === Number(row.epoch) && x.state === "reported",
-            )
+            .filter((x) => x.id < reviewId && x.state === "reported")
             .at(-1);
           const resolveListed = this.db.prepare(
             `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?

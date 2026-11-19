@@ -2761,7 +2761,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         return { text: `${MC_BAD_ARGS}resolutions: only allowed from round 2`, isError: true };
       const previous = store
         .reviewsOfRun(review.authorRunId)
-        .filter((r) => r.id < review.id && r.epoch === review.epoch && r.state === "reported")
+        .filter((r) => r.id < review.id && r.state === "reported")
         .at(-1);
       // a reference without a review id is the previous round's finding at that position
       resolved = resolutions.map((resolution) => ({
