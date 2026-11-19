@@ -1975,17 +1975,18 @@ describe("scheduler", () => {
         // growth pauses but the service still holds 700 MB: the alert stays
         await grow(61, 700);
         expect(item()).toBeDefined();
-        // a hand restart: while fseventsd is gone the collector fails to read it and carries the
-        // last figure, which neither restarts nor clears; then a fresh small reading clears it
+        // figures the hub did not read neither clear nor restart: a small one does not clear the
+        // alert over the last reading taken (700 MB), and a stuck-looking one does not restart it
         const before = restart.mock.calls.length;
         gone = true;
-        await grow(1, 700);
-        await grow(1, 700);
+        await grow(1, 8);
         expect(item()).toBeDefined();
+        await grow(61, 2300);
+        expect(restart.mock.calls.length).toBe(before);
+        // a fresh small reading clears it
         gone = false;
         await grow(1, 8);
         expect(item()).toBeUndefined();
-        expect(restart.mock.calls.length).toBe(before);
       });
 
       it("clears an open alert when a later restart works", async () => {

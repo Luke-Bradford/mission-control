@@ -47,8 +47,12 @@ export const FSEVENTSD_STUCK_BYTES = 1024 ** 3;
 export const FILE_SERVICE_CAPTURE_GAP_MS = 6 * 60 * 60_000;
 /** This many restarts within `FILE_SERVICE_RECURRING_WINDOW_MS` means restarting is not fixing it. */
 export const FILE_SERVICE_RECURRING_RESTARTS = 3;
+/** The window for `FILE_SERVICE_RECURRING_RESTARTS`; independent of the capture gap. */
 export const FILE_SERVICE_RECURRING_WINDOW_MS = 6 * 60 * 60_000;
-/** A reading under this is a healthy service again, so an open alert may clear. */
+/**
+ * A reading under this is a healthy service again, so an open alert may clear. A size, unlike
+ * `FSEVENTSD_RUNAWAY_BYTES` (an amount of growth); equal today by choice, not by necessity.
+ */
 export const FSEVENTSD_HEALTHY_BYTES = 150 * 1024 ** 2;
 /** The setting holding when the hub last saved diagnostics. */
 export const FILE_SERVICE_CAPTURE_SETTING = "machine-capacity:fseventsd-capture-at";

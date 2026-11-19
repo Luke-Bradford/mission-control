@@ -503,7 +503,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    * is the third in six hours; otherwise it stays until the service is back under the runaway size
    * with no recent run of restarts. Growth merely pausing does not clear it. Only readings actually
    * taken are judged, kept in memory, so after a hub restart growth needs fresh readings again (the
-   * stuck size acts on the first one). `fileServiceReadings` holds the last hour of them.
+   * stuck size acts on the first one). `fileServiceReadings` holds the last hour of them, so an open
+   * alert on an idle hub waits for a fresh reading to clear rather than trusting a carried one.
    */
   const fileServiceReadings: FileServiceReading[] = [];
   const restartRunawayFileService = (at: number, fresh: number | null): void => {
