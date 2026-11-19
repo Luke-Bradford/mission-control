@@ -1058,6 +1058,16 @@ describe("POST /api/guard/check", () => {
       expect(lock.state().holder).toMatchObject({ runId: "run-b" });
     });
 
+    it("allows a configured check to run again unchanged: the waste alarm reports it, the hook does not refuse", async () => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      for (const id of ["a1", "a2", "a3"]) {
+        expect((await check(tokA, bash(id, "pnpm -s lint"))).body).toBe("{}");
+        await check(tokA, post(id));
+      }
+    });
+
     it("takes the test lock for the related-tests check, however it is spelled, but not for a single test file", async () => {
       const { checks } = spy();
       await app.close();

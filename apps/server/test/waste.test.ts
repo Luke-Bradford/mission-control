@@ -229,6 +229,30 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     expect(ticketParked(store, "mc#1")).toBeNull();
   });
 
+  describe("a rerun on one commit", () => {
+    const unchanged = (command: string) =>
+      openWasteAlarms(store).filter((a) => a.check === "unchanged-rerun" && a.evidence.includes(command));
+    const start = () => {
+      const r = run("guido-1", { ticket: TICKET, startedAt: NOW - HOUR, status: "ok" });
+      store.upsertRun(r);
+      return r.id;
+    };
+    it("raises an alarm for a pass followed by a failed rerun", () => {
+      const id = start();
+      checkOn(id, LINT, SHA, NOW - 10 * MIN, true);
+      checkOn(id, LINT, SHA, NOW - 5 * MIN, false);
+      syncWasteAlarms(config, store, NOW);
+      expect(unchanged(LINT)).toHaveLength(1);
+    });
+    it("allows one retry after an initial failure", () => {
+      const id = start();
+      checkOn(id, LINT, SHA, NOW - 10 * MIN, false);
+      checkOn(id, LINT, SHA, NOW - 5 * MIN, true);
+      syncWasteAlarms(config, store, NOW);
+      expect(unchanged(LINT)).toHaveLength(0);
+    });
+  });
+
   it("stays parked until FLIGHT resolves it, and a worse level raises it again", () => {
     replay();
     syncWasteAlarms(config, store, NOW);
