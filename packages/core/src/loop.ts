@@ -460,6 +460,24 @@ const prRef = (pr: number | null): string => (pr === null ? "the PR" : `PR #${pr
 export const readyMarkedText = (pr: number | null): string => `marked ${prRef(pr)} ready`;
 export const mergedText = (pr: number | null): string => `merged ${prRef(pr)} (merge commit)`;
 export const closedIssueText = (issue: number): string => `closed #${issue}`;
+export const leftOpenText = (issue: number): string =>
+  `left #${issue} open: the PR is part of the ticket`;
+
+/**
+ * Whether a merged PR's body names ticket `issue` of `repo` (`owner/name`) only as a part of it
+ * ("Part of #N", "Refs #N", any case) and never with a closing keyword (Closes, Fixes, Resolves).
+ * A bare `#N` is this repo's; `owner/name#N` counts only when it is this repo. A body that names
+ * the ticket not at all is not part-only: the engine closes the ticket as before.
+ */
+export function prIsPartOf(body: string, repo: string, issue: number): boolean {
+  const mine = (words: string): boolean =>
+    [
+      ...body.matchAll(
+        new RegExp(`\\b(?:${words})\\b:?\\s+(?:([\\w.-]+/[\\w.-]+))?#${issue}(?!\\d)`, "gi"),
+      ),
+    ].some((m) => m[1] === undefined || m[1].toLowerCase() === repo.toLowerCase());
+  return mine("part\\s+of|refs?|references?") && !mine("close[sd]?|fix(?:e[sd])?|resolve[sd]?");
+}
 export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
 export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;
 export const localNotDeletedText = (branch: string, why: string): string =>

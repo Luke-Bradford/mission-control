@@ -649,10 +649,10 @@ function buildCrew(
       phase: run.loop.phase,
       text: loopText(ticket, run.loop),
       prNumber: run.loop.prNumber,
-      hold: run.loop.hold
+      hold: run.loop.hold && (run.loop.phase === "parked" || run.loop.hold.worktree)
         ? {
-            kind: run.loop.hold.kind,
-            reason: run.loop.hold.reason,
+            kind: run.loop.phase === "parked" ? run.loop.hold.kind : null,
+            reason: run.loop.phase === "parked" ? run.loop.hold.reason : null,
             offSeat: !!run.loop.hold.worktree,
           }
         : null,

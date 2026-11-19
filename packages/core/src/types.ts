@@ -284,6 +284,8 @@ export interface RunLoop {
     /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
     webChanged?: boolean;
   } | null;
+  /** The merged PR was only part of the ticket: the ticket was left open and its card is not Done's. */
+  leftOpen?: boolean;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
   /** Saved before issue creation; an interrupted write must be reconciled before retrying. */

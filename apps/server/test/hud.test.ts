@@ -1804,6 +1804,19 @@ describe("crew seats in the rows", () => {
         wait: null,
       });
     });
+    it("does not carry a lifted park into a done crew loop", () => {
+      const c = withCrew();
+      store.upsertRun(crewRun());
+      store.setSeatSession(seat({}));
+      store.setRunLoop(
+        "c1",
+        loopOf({
+          phase: "done",
+          hold: { kind: "uat", reason: "waits", ended: false, worktree: null, wake: false },
+        }),
+      );
+      expect(rowOf(c, "GUIDO-1")?.loop?.hold).toBeNull();
+    });
     it("a parked-ended loop on an ended run still carries its reason", () => {
       const c = withCrew();
       store.upsertRun(crewRun({ status: "ok", endedAt: NOW - MIN }));
