@@ -286,7 +286,10 @@
 }
 .as-rt {
   all: unset;
-  display: block;
+  display: grid;
+  grid-template-columns: var(--sp-4) minmax(0, 1fr);
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   cursor: pointer;
   font-size: var(--fs);
@@ -305,12 +308,10 @@
   border-radius: 2px;
 }
 .as-rtx {
-  display: inline-block;
-  vertical-align: top;
-  max-width: calc(100% - var(--sp-4));
+  display: block;
+  min-width: 0;
 }
 .as-rt i {
-  vertical-align: top;
   font-style: normal;
   color: var(--muted);
   display: inline-block;

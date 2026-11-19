@@ -473,6 +473,15 @@ describeRendered("Audit first screen in a real browser", () => {
                 .map((e) => getComputedStyle(e).textOverflow),
               cutTitles: [...document.querySelectorAll(".as-rec:not(.as-open) .as-rtx")].filter(cut)
                 .length,
+              // The title control stays inside its cell, so its own ellipsis is what shows.
+              outside: [...document.querySelectorAll(".as-rec:not(.as-open) .as-rt")]
+                .filter((b) => {
+                  const cell = b.closest("td")?.getBoundingClientRect();
+                  const x = b.querySelector(".as-rtx")?.getBoundingClientRect();
+                  const r = b.getBoundingClientRect();
+                  return !cell || !x || r.right > cell.right + 1 || x.right > r.right + 1;
+                })
+                .map((b) => b.textContent),
               tallButtons: [...document.querySelectorAll(".as-defbtn")]
                 .map((e) => e.getBoundingClientRect().height)
                 .filter((h) => h > 24),
@@ -483,6 +492,7 @@ describeRendered("Audit first screen in a real browser", () => {
           }, undefined);
           expect(m.cutTitles, "the long titles are cut").toBeGreaterThan(0);
           expect(m.titles.every((t) => t === "ellipsis")).toBe(true);
+          expect(m.outside, "titles stay inside their cell").toEqual([]);
           expect(m.tallButtons, "how buttons stay one line").toEqual([]);
           expect(m.caps.every((t) => t === "ellipsis")).toBe(true);
         } finally {
