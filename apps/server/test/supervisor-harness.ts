@@ -302,7 +302,6 @@ function make(
     fetchTicket?: FetchTicket;
     flightEnvironment?: SupervisorDeps["flightEnvironment"];
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
-    fileContext?: SupervisorDeps["fileContext"];
     command?: string;
     /** The fake CLI script to run in place of fake-claude.mjs. */
     fake?: string;
@@ -316,7 +315,6 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
-    importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
     evidence?: import("../src/pr-evidence/capture.ts").ReviewEvidenceDeps;
     rolesDir?: string;
     node?: string;
@@ -396,7 +394,6 @@ function make(
     ...(over.externalReviewSubject === undefined
       ? {}
       : { externalReviewSubject: over.externalReviewSubject }),
-    fileContext: over.fileContext,
     ...(over.claim === undefined ? {} : { claim: over.claim }),
     ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
     ...(over.inbox === undefined ? {} : { inbox: over.inbox }),
@@ -412,7 +409,6 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
-    ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
     ...(over.evidence === undefined ? {} : { evidence: over.evidence }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,

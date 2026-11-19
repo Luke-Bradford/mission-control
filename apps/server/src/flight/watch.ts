@@ -59,7 +59,6 @@ import { wakePieces } from "../telemetry/prompt-cost.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
-  batchedCategories,
   deliveredFacts,
   type FlightWakeSnapshot,
   flightLive,
@@ -68,7 +67,7 @@ import {
   flightWake,
   flightWakes,
   idleSeatLine,
-  immediateCategories,
+  lastRecordedWake,
   markItemsShown,
   markPointersShown,
   markPrsShown,
@@ -78,12 +77,11 @@ import {
   recordFlightWake,
   recordNextFlightWake,
   recordWakeReasons,
-  routineOnly,
   trackIdleSeat,
   unreadOperatorComms,
+  urgentChange,
   wakeFacts,
 } from "./state.ts";
-import { batchedWakeReasons } from "./wake-actions.ts";
 
 export interface FlightWatchDeps {
   config: CcConfig;
@@ -168,7 +166,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let handover: { runId: string; at: number } | null = null;
   let lastFacts = "";
   let lastWakeAt = 0;
-  let learnedBatches: { at: number; set: ReadonlySet<string> } | null = null;
+  /** A hub restart keeps the failure gap: the last wake comes back from the stored record. */
+  let wakeRestored = false;
   let delivered: { runId: string; snapshot: FlightWakeSnapshot } | null = null;
   /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
   let lastTurnEndAt = 0;
@@ -329,14 +328,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const found = flightSeat(config);
     if (found === null) return;
     const t = now();
-    if (learnedBatches === null || t - learnedBatches.at >= FLIGHT_HOUR_MS) {
-      try {
-        learnedBatches = { at: t, set: new Set(batchedWakeReasons(store, t)) };
-      } catch (e) {
-        log(`flight wake batches: ${e instanceof Error ? e.message : e}`);
-        learnedBatches = { at: t, set: new Set() };
-      }
-    }
     try {
       const state = flightState({
         config,
@@ -373,14 +364,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     const id = found.seat.id;
     const t = now();
-    if (learnedBatches === null || t - learnedBatches.at >= FLIGHT_HOUR_MS) {
-      try {
-        learnedBatches = { at: t, set: new Set(batchedWakeReasons(store, t)) };
-      } catch (e) {
-        log(`flight wake batches: ${e instanceof Error ? e.message : e}`);
-        learnedBatches = { at: t, set: new Set() };
-      }
-    }
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
     let added = false;
@@ -551,7 +534,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         const woke = causes.length > 0 ? causes : ["initial"];
         recordFlightWake(store, found.session.repoId, t, woke);
         recordWakeReasons(store, runId, t, woke, flightWakeId(runId, 0));
-        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         if (said.startsWith(WASTE_HELD_PREFIX)) {
@@ -633,6 +616,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       }
       return;
     }
+    if (!wakeRestored) {
+      wakeRestored = true;
+      lastWakeAt = Math.max(lastWakeAt, lastRecordedWake(store, found.session.repoId));
+    }
     prepareDaily(t);
     const state = flightState({
       config,
@@ -646,7 +633,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);
-    recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, lastWakeAt, t));
+    recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t));
     // FLIGHT's writes are stopped until the operator lifts the breaker: a wake could only idle
     if (state.breaker.tripped) {
       // what the breaker is holding back is not delivered: a lift alone wakes FLIGHT
@@ -655,28 +642,19 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     // only things that went away since the last wake (a question answered, a message read) tell FLIGHT nothing new
     if (onlySettled(lastFacts, wake)) lastFacts = wake;
-    // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
-    const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
-    const routine =
-      wake !== lastFacts && listed && routineOnly(lastFacts, wake, learnedBatches.set);
-    const batched = routine && t < batchEnds;
-    if (batched) {
-      later(batchEnds - t);
-      recordNextFlightWake(
-        store,
-        found.session.repoId,
-        nextWakeAt(state, lastWakeAt, t, batchEnds),
-      );
-    }
     // only a changed fact wakes FLIGHT: a wait, or work it has not got to, stays silent until it changes
-    const due = wake !== lastFacts && listed && !batched;
+    const due = wake !== lastFacts && listed;
+    // an operator message, a seat's question and the like wake FLIGHT at once; a failure waits out the gap
+    const urgent = urgentChange(lastFacts, wake);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
-    const wakeGap =
-      (state.wake?.operator?.length ?? 0) > 0
+    const gap = urgent
+      ? (state.wake?.operator?.length ?? 0) > 0
         ? FLIGHT_OPERATOR_WAKE_GAP_MS
-        : FLIGHT_MIN_WAKE_GAP_MS;
-    if (due && t - since < wakeGap) {
-      later(since + wakeGap - t);
+        : FLIGHT_MIN_WAKE_GAP_MS
+      : FLIGHT_BATCH_MS;
+    if (due && t - since < gap) {
+      later(since + gap - t);
+      recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, since + gap));
       return;
     }
     if (due) {
@@ -685,23 +663,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
       );
-      const changed = changedWakeFacts(lastFacts, wake);
-      // A learned category rides with an immediate wake, but teaches the learned set only when it
-      // causes a wake itself at the end of the batch window.
-      const immediate = immediateCategories(lastFacts, wake);
-      const rode = routine ? [] : batchedCategories(lastFacts, wake, learnedBatches.set);
-      const rider = (category: string) => rode.includes(category.replace(/ \(\d+\)$/, ""));
-      const causes = changed.filter((category) => !rider(category));
+      const causes = changedWakeFacts(lastFacts, wake);
       if (
-        (await supervisor.send(
-          runId,
-          wakeKey(runId, n + 1),
-          wakeLine(state, digest, [...causes, ...rode]),
-          {
-            wake: n + 1,
-            pieces: wakePieces(digest),
-          },
-        )) === "sent"
+        (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes), {
+          wake: n + 1,
+          pieces: wakePieces(digest),
+        })) === "sent"
       ) {
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
@@ -713,18 +680,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         recordFlightWake(store, found.session.repoId, t, woke);
-        recordWakeReasons(
-          store,
-          runId,
-          t,
-          woke,
-          flightWakeId(runId, n + 1),
-          rode,
-          immediate.filter((category) =>
-            woke.some((cause) => cause.replace(/ \(\d+\)$/, "") === category),
-          ),
-        );
-        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
+        recordWakeReasons(store, runId, t, woke, flightWakeId(runId, n + 1));
+        recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t));
       }
     } else if (!listed) {
       lastFacts = wake;

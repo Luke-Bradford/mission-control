@@ -301,7 +301,6 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     } else if (loop === "build" && r.reviewId === null) devUsd += r.costUsd;
   }
   if (flightSeat !== null && flightUsd > devUsd && flightUsd >= t.coordinationMinUsd) {
-    const controller = q.controllerTokens(dayAgo);
     out.push({
       check: "coordination-overhead",
       subject: flightSeat,
@@ -310,7 +309,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
       seatId: flightSeat,
       runId: null,
       level: Math.floor(flightUsd),
-      evidence: `In the last day ${seatCallSign(flightSeat)} spent ${usd(flightUsd)} and the developers ${usd(devUsd)}.${controller > 0 ? ` The controller used ${controller} tokens (its cost is not recorded, so it is not in the split).` : ""}`,
+      evidence: `In the last day ${seatCallSign(flightSeat)} spent ${usd(flightUsd)} and the developers ${usd(devUsd)}.`,
     });
   }
 

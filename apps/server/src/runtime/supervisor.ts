@@ -162,7 +162,6 @@ import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
-import { mapTree } from "../map/snapshot.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -175,7 +174,6 @@ import { cleanText } from "../repo/clean.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../repo/path-grants.ts";
 import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
-import { reviewReach } from "../review/reach.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import { restartHold, ticketParked } from "../spend/waste.ts";
 import {
@@ -482,8 +480,6 @@ export interface SupervisorDeps {
     repo: CcConfig["repos"][number],
     review: import("@mc/core").ReviewRow,
   ) => Promise<ExternalReviewSubject | null>;
-  /** Optional redacted file observations, read locally without starting any seat. */
-  fileContext?: (repoId: string, body: string) => Promise<string | null>;
   /** Assigns the hub's own login to the issue, when a run starts on it (any repo, `merge` or `draft`). */
   claim?: (repo: CcConfig["repos"][number], n: number) => Promise<void>;
   /** false: `MC_NO_CREW=1`, or no `crew` config. */
@@ -520,8 +516,6 @@ export interface SupervisorDeps {
   inbox?: (seatId: string, runId: string) => InboxContext;
   /** Opens a preview of a web PR's head for its review run and closes it when the run ends. */
   reviewPreviews?: ReviewPreviews;
-  /** The default branch's import edges for a clone; tests replace it, the hub reads the map tree. */
-  importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
 }
 
 export interface InboxContext {
@@ -1450,16 +1444,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       });
     }
   }
-
-  /** The map tree's import edges at the default branch, cached per commit in the store. */
-  const defaultImportGraph = async (checkout: string) =>
-    (
-      await mapTree(checkout, "origin/HEAD", [], [], Date.now(), {
-        get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
-        put: (kind, scope, key, value, exclusive) =>
-          store.mapCachePut(kind, scope, key, value, exclusive),
-      })
-    ).imports;
 
   function inClone<T>(checkout: string, fn: () => Promise<T>): Promise<T> {
     const prev = cloneQueues.get(checkout) ?? Promise.resolve();
@@ -3598,10 +3582,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               ? { skipped: `Size ${card.size}` }
               : undefined;
       const title = ticket.title;
-      const fileContext =
-        planner && info.seat.role === "FAO" && !ticket.bodyTruncated
-          ? await deps.fileContext?.(info.repo.id, ticket.body)
-          : null;
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // A CheckoutError goes out as it is: the route answers it with its own status (R26).
       // The repo's CLAUDE.md and index as origin's default branch has them, never the worktree.
@@ -3868,7 +3848,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         issue,
         title,
         body: ticket.body,
-        fileContext,
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
@@ -4442,7 +4421,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const prev =
         store
           .reviewsOfRun(review.authorRunId)
-          .filter((r) => r.id < reviewId && r.epoch === review.epoch && r.state === "reported")
+          .filter((r) => r.id < reviewId && r.state === "reported")
           .at(-1) ?? null;
       // A CheckoutError goes out as it is: the route answers it with its own status.
       const { scratch, inputs, repoDocs, references, screenshots, signedPlan, planMockupFiles } =
@@ -4589,12 +4568,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // An ended run's PR: its earlier heads' reviews belong to the crew run, so the findings still
       // open there are not in `prev`.
       const olderFindings = external ? openOlderFindings(store, review, prev?.id ?? null) : [];
-      // The files that import the change: a missing graph leaves the line out, never the review.
-      const changedPaths = store.prFilePaths(info.repo.id, review.prNumber);
-      const reach = await (deps.importGraph ?? defaultImportGraph)(info.session.checkout).then(
-        (edges) => reviewReach(edges, changedPaths),
-        () => null,
-      );
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
@@ -4620,7 +4593,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         signedOffPlan: signedPlan,
         planMockupFiles,
         ...(olderFindings.length > 0 ? { olderFindings } : {}),
-        ...(reach === null ? {} : { reach }),
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],

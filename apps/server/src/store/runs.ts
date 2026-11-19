@@ -186,17 +186,6 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       return out;
     },
 
-    /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
-    mapOffSeatRuns(agentId: AgentId): Run[] {
-      return (
-        db
-          .prepare(
-            "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.hold.worktree') > ''",
-          )
-          .all(agentId) as Row[]
-      ).map(toRun);
-    },
-
     /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
     runBranches(repoId: RepoId): Set<string> {
       const rows = statement(
