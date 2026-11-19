@@ -8728,7 +8728,7 @@ describe("the first loop's engine", () => {
     expect((await get("/api/runs/nobody/loop")).statusCode).toBe(404);
   });
 
-  it("keeps deprecated park and set-aside fields at the API boundary", async () => {
+  it("sends only the hold, not the old park and set-aside fields", async () => {
     withCrew();
     const hold = {
       kind: "review",
@@ -8739,18 +8739,17 @@ describe("the first loop's engine", () => {
     };
     store.upsertRun(run({ id: "held", agentId: "guido-1" }));
     store.setRunLoop("held", { ...NEW_LOOP, phase: "parked", hold });
-    expect((await get("/api/runs/held/loop")).json().loop).toMatchObject({
-      hold,
-      parked: { kind: "review", reason: "x", ended: false },
-      aside: { worktree: "/w", wake: true },
-    });
+    const sent = (await get("/api/runs/held/loop")).json().loop;
+    expect(sent).toMatchObject({ hold });
+    expect(sent).not.toHaveProperty("parked");
+    expect(sent).not.toHaveProperty("aside");
 
     store.upsertRun(run({ id: "current", agentId: "guido-1", startedAt: NOW + 1 }));
     store.setRunLoop("current", { ...NEW_LOOP, phase: "working" });
     const row = (await get("/api/crew")).json<Crew>().rows.find((r) => r.id === "guido-1");
     expect(row?.offSeatRuns).toHaveLength(1);
-    expect(row?.asideRuns).toEqual(row?.offSeatRuns);
-    expect(row?.loop?.parked).toBeNull();
+    expect(row).not.toHaveProperty("asideRuns");
+    expect(row?.loop).not.toHaveProperty("parked");
   });
 
   it("omits toolStarts from /api/crew digests", async () => {

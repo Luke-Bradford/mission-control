@@ -498,6 +498,8 @@ describe("Store", () => {
       aside: { worktree: "/w", wake: true, ask: 3 },
     });
     write("plain", { ...bare, parked: null, aside: null });
+    raw.exec("CREATE INDEX runs_loop_aside ON runs(id)");
+    raw.exec("CREATE INDEX runs_agent_aside_worktree ON runs(id)");
     raw.close();
 
     const reopened = new Store(path);
