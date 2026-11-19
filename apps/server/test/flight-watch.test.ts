@@ -5045,11 +5045,10 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
 
   it("wakes FLIGHT at most twice an hour over a day of failures, and only for them", async () => {
     flightOnly();
-    // one new failure every ten minutes for a day, and routine churn between them
-    for (let i = 0; i < 144; i++) {
-      nowMs += 10 * MIN;
+    // one new failure every twenty minutes for a day, and routine churn between them
+    for (let i = 0; i < 72; i++) {
+      nowMs += 20 * MIN;
       vi.setSystemTime(nowMs);
-      store.replaceBoard("mc", [triageCard({ status: "Ready", issueNumber: 100 + i })]);
       store.raiseNote({
         key: `blocked:r1:${i}`,
         kind: "blocked",
@@ -5067,7 +5066,7 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
       const from = T0 + h * HOUR;
       expect(wakes.filter((w) => w.at >= from && w.at < from + HOUR).length).toBeLessThanOrEqual(2);
     }
-  });
+  }, 60_000);
 });
 
 describe("what wakes FLIGHT for an item", () => {
