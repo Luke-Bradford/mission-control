@@ -8944,6 +8944,23 @@ describe("QA board data", () => {
       hours: 3,
       basis: "events",
     });
+    for (const bad of [
+      "days=0",
+      "days=366",
+      "days=1.5",
+      "days=abc",
+      "days=1&days=2",
+      "hours=0",
+      "hours=25",
+      "hours=2.5",
+      "hours=x",
+      "hours=1&days=1",
+      "shape=full",
+    ])
+      expect((await get(`/api/audit/tokens?${bad}`)).statusCode, bad).toBe(400);
+    expect((await get("/api/audit/tokens?days=366")).json()).toEqual({
+      error: "days must be a whole number from 1 to 365",
+    });
   });
 
   it("serves the QA flow figures with the registry's definitions", async () => {

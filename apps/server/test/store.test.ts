@@ -280,17 +280,18 @@ describe("Store", () => {
   });
 
   it("drops the tables of the removed code-health, Map, token-audit and bug-escape features", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "mc-retired-")), "hub.db");
-    const first = new Store(path);
-    const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
-    for (const table of [
+    const RETIRED_FIXTURE = [
       "map_cache",
       "code_health_overview",
       "run_token_audit",
       "bug_escapes",
       "controller_messages",
-    ])
-      raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
+      "controller_files",
+    ];
+    const path = join(mkdtempSync(join(tmpdir(), "mc-retired-")), "hub.db");
+    const first = new Store(path);
+    const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
+    for (const table of RETIRED_FIXTURE) raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
     first.close();
     const second = new Store(path);
     const names = (
@@ -299,14 +300,7 @@ describe("Store", () => {
         .all() as { name: string }[]
     ).map((r) => r.name);
     second.close();
-    for (const table of [
-      "map_cache",
-      "code_health_overview",
-      "run_token_audit",
-      "bug_escapes",
-      "controller_messages",
-    ])
-      expect(names).not.toContain(table);
+    for (const table of RETIRED_FIXTURE) expect(names).not.toContain(table);
   });
 
   it("close releases the database: the store cannot be used after", () => {
