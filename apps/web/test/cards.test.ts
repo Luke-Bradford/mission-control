@@ -476,9 +476,18 @@ describe("cardIdle", () => {
   });
 
   it("a card whose last PR is closed says so with its date, in any open column", () => {
-    const closed = prView({ state: "closed", updatedAt: at + DAY_MS });
+    const closed = {
+      ...prView({ state: "closed", updatedAt: at + 4 * DAY_MS }),
+      closedAt: at + DAY_MS,
+    };
     expect(idle("Blocked", closed)).toBe("PR closed 16 Oct, nothing open");
     expect(idle("In progress", closed)).toBe("PR closed 16 Oct, nothing open");
+  });
+
+  it("gives no date for a closed PR until its close time is known, never its last update", () => {
+    expect(idle("Blocked", prView({ state: "closed", updatedAt: at }))).toBe(
+      "PR closed, nothing open",
+    );
   });
 
   it("says nothing when a run, a reviewer or an open PR is on the card, or it is not started", () => {

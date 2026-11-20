@@ -63,7 +63,7 @@ describeRendered("Board cards with nothing working on them, rendered", () => {
       );
       const by = Object.fromEntries(lines.map((l) => [l.ref, l.text]));
       expect(by["shop-app#1"]).toMatch(/^Nobody on it since \d+ \w+$/);
-      expect(by["shop-app#2"]).toMatch(/^PR closed \d+ \w+, nothing open/);
+      expect(by["shop-app#2"]).toMatch(/^PR closed, nothing open/);
       expect(by["shop-app#3"]).toMatch(/^Nobody on it since/);
       expect(by["shop-app#4"]).not.toMatch(/Nobody|nothing open/);
       expect(JSON.stringify(by)).not.toContain("Handed off");

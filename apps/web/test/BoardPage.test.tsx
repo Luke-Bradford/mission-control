@@ -844,7 +844,7 @@ describe("cards", () => {
     });
     await open();
     const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
-    expect(within(c).getByText(/^PR closed .+, nothing open$/)).toBeTruthy();
+    expect(within(c).getByText("PR closed, nothing open")).toBeTruthy();
     expect(within(c).queryByText("Closed")).toBeNull();
   });
 
