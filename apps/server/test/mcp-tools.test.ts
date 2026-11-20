@@ -4347,10 +4347,10 @@ describe("report_evidence", () => {
   const report = (note: unknown, ctx: McToolContext = CTX) =>
     tool("report_evidence", ev).call(ctx, note === undefined ? {} : { note });
   /** A committed change, one tick after the last thing that happened. */
-  const committed = async (rel = "apps/a.ts", text = `${clock}\n`) => {
+  const committed = async (rel = "apps/a.ts", text = `${clock}\n`, ctx: McToolContext = CTX) => {
     clock += 1000;
     write(rel, text);
-    const r = await commit(`feat: ${rel}`, ev);
+    const r = await commit(`feat: ${rel}`, ev, ctx);
     expect(r.text).toMatch(/^Committed /);
     return head();
   };
@@ -4852,25 +4852,64 @@ describe("report_evidence", () => {
     expect(store.evidenceCount(RUN)).toBe(2);
   });
 
-  it("refuses unchanged evidence for the head FLIGHT holds, naming the required fix", async () => {
+  it("refuses unchanged evidence on FLIGHT's held head after the run is handed off", async () => {
     const sha = await reviewedHead();
-    setLoop({
-      phase: "working",
-      mergeHold: {
-        by: "FLIGHT",
-        reason: "Add a regression test for the handoff before re-pushing this head.",
-        at: clock,
-      },
+    store.upsertRun(
+      run({
+        id: "guido-1:old",
+        endedAt: clock,
+        status: "ok",
+        loop: {
+          ...LOOP,
+          mergeHold: {
+            by: "FLIGHT",
+            reason: "Add a regression test for the handoff before re-pushing this head.",
+            at: clock,
+            sha,
+          },
+        },
+      }),
+    );
+    const nextRun = "guido-2:replacement";
+    store.upsertRun(
+      run({
+        id: nextRun,
+        agentId: "guido-2",
+        seq: 2,
+        loop: {
+          ...LOOP,
+          mergeHold: {
+            by: "FLIGHT",
+            reason: "Add a regression test for the handoff before re-pushing this head.",
+            at: clock,
+            sha,
+          },
+        },
+      }),
+    );
+    store.setSeatSession({
+      seatId: "guido-2",
+      runId: nextRun,
+      cliSessionId: "cli-2",
+      state: "running",
+      reason: null,
+      worktree: wt,
+      updatedAt: clock,
     });
+    const nextCtx: McToolContext = { seatId: "guido-2", runId: nextRun };
 
-    const result = await report("The existing head is ready to send again.");
+    const result = await report("The existing head is ready to send again.", nextCtx);
 
     expect(result.isError).toBe(true);
     expect(result.text).toContain(
       "Add a regression test for the handoff before re-pushing this head.",
     );
-    expect(store.evidenceCount(RUN)).toBe(1);
+    expect(store.evidenceCount(nextRun)).toBe(0);
     expect(store.runPush(RUN)?.sha).toBe(sha);
+    await committed("web/b.ts", undefined, nextCtx);
+    expect(await report("The revised head is ready.", nextCtx)).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
   });
 
   it("refuses the sha CI last failed on, and takes a newer commit", async () => {

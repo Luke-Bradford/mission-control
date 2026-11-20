@@ -322,7 +322,14 @@ export interface RunLoop {
    * A hold on the run's merge by FLIGHT or the controller (CAPCOM): the engine does not merge
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
-  mergeHold?: { by: "FLIGHT" | "CAPCOM"; reason: string; at: number; from?: LoopPhase } | null;
+  mergeHold?: {
+    by: "FLIGHT" | "CAPCOM";
+    reason: string;
+    at: number;
+    /** The PR head FLIGHT or CAPCOM held; an author must move beyond it before reporting again. */
+    sha?: string;
+    from?: LoopPhase;
+  } | null;
   /** The fresh CLI sessions the run started for a fix (a retired trial), oldest first; the token audit reads old ones. */
   fixSessions?: { sessionId: string; at: number; reason: "ci" | "review" }[];
 }

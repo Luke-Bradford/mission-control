@@ -3772,7 +3772,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                       )
                       .slice(0, 10);
               const handoffReason =
-                prior?.mergeHold?.by === "FLIGHT" ? cleanText(prior.mergeHold.reason, 1500) : null;
+                priorRun.ticket === null
+                  ? null
+                  : (store
+                      .flightDecisionsOnTicket(priorRun.ticket, [priorRun.id], 20)
+                      .find(
+                        (decision) =>
+                          decision.kind === "end" && decision.targetRunId === priorRun.id,
+                      )?.basis ?? null);
               if (
                 priorRun.summary === null &&
                 evidence === undefined &&
