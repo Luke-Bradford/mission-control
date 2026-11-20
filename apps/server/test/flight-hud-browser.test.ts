@@ -8,7 +8,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Run, type SeatSessionRow } from "@mc/core";
+import type { Run, SeatSessionRow } from "@mc/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
