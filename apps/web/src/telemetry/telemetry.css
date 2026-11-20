@@ -987,6 +987,68 @@
   flex: none;
 }
 
+/* Ticket identifiers and measures stay available at narrow desktop widths; the board title takes
+   the remaining space and can be expanded by keyboard for its full value. */
+.tickets-panel .tw {
+  overflow-x: clip;
+}
+
+.tickets-panel table {
+  table-layout: fixed;
+}
+
+.tickets-panel .ticket-ref-column {
+  width: 168px;
+}
+
+.tickets-panel .ticket-size-column {
+  width: 48px;
+}
+
+.tickets-panel .ticket-merged-column,
+.tickets-panel .ticket-cycle-column,
+.tickets-panel .ticket-cost-column {
+  width: 64px;
+}
+
+.tickets-panel td:first-child a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tickets-panel .ticket-title-cell {
+  white-space: normal;
+}
+
+.ticket-title-disclosure {
+  min-width: 0;
+}
+
+.ticket-title-disclosure summary {
+  display: -webkit-box;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.ticket-title-disclosure summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ticket-title-full {
+  display: none;
+  margin-top: var(--sp-1);
+  overflow-wrap: anywhere;
+}
+
+.ticket-title-disclosure[open] .ticket-title-full {
+  display: block;
+}
+
 /* cost and tokens */
 .spend-stack {
   display: flex;

@@ -646,6 +646,14 @@ export function ThroughputTable({
         ) : (
           <div className="pb tw">
             <table>
+              <colgroup>
+                <col className="ticket-ref-column" />
+                <col />
+                <col className="ticket-size-column" />
+                <col className="ticket-merged-column" />
+                <col className="ticket-cycle-column" />
+                <col className="ticket-cost-column" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Ticket</th>
@@ -669,7 +677,16 @@ export function ThroughputTable({
                           k.ticket
                         )}
                       </td>
-                      <td>{k.title ?? "Title not on board"}</td>
+                      <td className="ticket-title-cell">
+                        {k.title === null || k.title === undefined ? (
+                          "Title not on board"
+                        ) : (
+                          <details className="ticket-title-disclosure">
+                            <summary aria-label={`Show full title: ${k.title}`}>{k.title}</summary>
+                            <span className="ticket-title-full">{k.title}</span>
+                          </details>
+                        )}
+                      </td>
                       <td>{k.size ?? DASH}</td>
                       <td className="r num">
                         {k.mergedAt !== null && tz ? dayMonth(k.mergedAt, tz) : DASH}

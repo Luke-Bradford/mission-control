@@ -15,6 +15,8 @@ import { crewTelemetry, crewTelemetryApi } from "./telemetryCrewFixture.ts";
 const { renderAt } = browserSession();
 const evidence = process.env.MC_QA_EVIDENCE_DIR;
 const DAY = 24 * HOUR;
+const LONG_TITLE =
+  "Telemetry throughput ticket with a deliberately long board-card title that must remain readable without hiding the merged date, cycle time, or cost";
 
 function throughputApi(): Record<string, unknown> {
   const base = crewTelemetryApi();
@@ -22,7 +24,7 @@ function throughputApi(): Record<string, unknown> {
   const days = (data.throughput as { day: string }[]).map((d) => d.day);
   const tickets = Array.from({ length: 24 }, (_, i) => ({
     ticket: `mission-control#${1900 + i}`,
-    title: `Telemetry ticket ${1900 + i}`,
+    title: i === 0 ? LONG_TITLE : `Telemetry ticket ${1900 + i}`,
     size: (["XS", "S", "M", "L", "XL"] as const)[i % 5],
     readyAt: NOW - (7 - (i % 7)) * DAY - 30 * HOUR,
     startedAt: null,
@@ -153,5 +155,108 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
         BROWSER_TEST_TIMEOUT_MS,
       );
     }
+  }
+
+  it(
+    "keeps every Tickets field reachable at 1280px and discloses a long title by keyboard",
+    async () => {
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1280,
+        height: 1000,
+        colorScheme: "dark",
+        api: api(),
+        search: "?path=/telemetry%3Ftab%3Dthroughput%26view%3Dtable",
+      });
+      try {
+        await ready(page);
+        const table = await page.evaluate(() => {
+          const panel = document.querySelector("#tTickets") as HTMLElement;
+          const panelBox = panel.getBoundingClientRect();
+          const headers = [...panel.querySelectorAll("th")].map((header) => {
+            const box = header.getBoundingClientRect();
+            return { text: header.textContent, left: box.left, right: box.right };
+          });
+          const row = panel.querySelector("tbody tr") as HTMLElement;
+          const values = [...row.querySelectorAll("td")].map((cell) => {
+            const box = cell.getBoundingClientRect();
+            return { text: cell.textContent, left: box.left, right: box.right };
+          });
+          return {
+            panelLeft: panelBox.left,
+            panelRight: panelBox.right,
+            headers,
+            values,
+          };
+        }, undefined);
+        expect(page.errors()).toEqual([]);
+        expect(table.headers.map((header) => header.text)).toEqual([
+          "Ticket",
+          "Title",
+          "Size",
+          "Merged",
+          "Cycle",
+          "~Cost",
+        ]);
+        for (const field of [...table.headers, ...table.values]) {
+          expect(field.left).toBeGreaterThanOrEqual(table.panelLeft);
+          expect(field.right).toBeLessThanOrEqual(table.panelRight + 1);
+        }
+        await page.evaluate(() => {
+          (
+            document.querySelector(
+              '.ticket-title-disclosure summary[aria-label*="Telemetry throughput"]',
+            ) as HTMLElement
+          ).focus();
+        }, undefined);
+        await page.press("Enter");
+        const disclosure = await page.evaluate(() => {
+          const title = document.querySelector(
+            '.ticket-title-disclosure:has(summary[aria-label*="Telemetry throughput"])',
+          ) as HTMLDetailsElement;
+          return { open: title.open, text: title.textContent };
+        }, undefined);
+        expect(disclosure.open).toBe(true);
+        expect(disclosure.text).toContain(LONG_TITLE);
+        if (evidence) {
+          mkdirSync(evidence, { recursive: true });
+          await page.screenshot(join(evidence, "telemetry-throughput-table-1280x1000-dark.png"));
+        }
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  for (const scheme of ["dark", "light"] as const) {
+    it(
+      `renders the Tickets table at 1600x1000, ${scheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme: scheme,
+          api: api(),
+          search: "?path=/telemetry%3Ftab%3Dthroughput%26view%3Dtable",
+        });
+        try {
+          await ready(page);
+          expect(page.errors()).toEqual([]);
+          expect(await page.box("#tTickets")).toBeDefined();
+          expect(await page.boxes("#tTickets th")).toHaveLength(6);
+          if (evidence) {
+            mkdirSync(evidence, { recursive: true });
+            await page.screenshot(
+              join(evidence, `telemetry-throughput-table-1600x1000-${scheme}.png`),
+            );
+          }
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
   }
 });
