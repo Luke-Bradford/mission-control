@@ -965,7 +965,7 @@ describe("POST /api/guard/check", () => {
       expect((await c).body).toBe("{}");
     });
 
-    it("allows a configured check to run again unchanged: the waste alarm reports it, the hook does not refuse", async () => {
+    it("allows a configured check to run again unchanged: the hook does not refuse", async () => {
       const { checks } = spy();
       await app.close();
       app = await build({ checks });

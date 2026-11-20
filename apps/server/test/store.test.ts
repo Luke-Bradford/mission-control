@@ -498,6 +498,8 @@ describe("Store", () => {
       aside: { worktree: "/w", wake: true, ask: 3 },
     });
     write("plain", { ...bare, parked: null, aside: null });
+    raw.exec("CREATE INDEX runs_loop_aside ON runs(id)");
+    raw.exec("CREATE INDEX runs_agent_aside_worktree ON runs(id)");
     raw.close();
 
     const reopened = new Store(path);
@@ -532,6 +534,22 @@ describe("Store", () => {
       .all();
     expect(indexes).toEqual([]);
     again.close();
+  });
+
+  it("drops the flight_wakes columns the wake no longer writes", () => {
+    const old = join(dir, "wake-columns.sqlite");
+    const db = new DatabaseSync(old);
+    db.exec(
+      "CREATE TABLE flight_wakes (run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, wake_id TEXT, rode TEXT, immediate TEXT, PRIMARY KEY (run_id, at))",
+    );
+    db.close();
+    new Store(old).close();
+    const after = new DatabaseSync(old);
+    const columns = (
+      after.prepare("PRAGMA table_info(flight_wakes)").all() as { name: string }[]
+    ).map((c) => c.name);
+    after.close();
+    expect(columns).toEqual(["run_id", "at", "reasons", "wake_id"]);
   });
 
   it("removes the retired handoff tables from old and fresh databases", () => {

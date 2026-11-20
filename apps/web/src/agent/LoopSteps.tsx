@@ -63,8 +63,8 @@ export function EndAsideButton({ row, runId }: { row: CrewRow; runId: string }) 
 
 /** End run for a run set aside in review (its PR in review, its seat free); nothing otherwise. */
 function EndAsideRun({ row, runId }: { row: CrewRow; runId: string }) {
-  const aside = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop?.aside;
-  return aside ? <EndAsideButton row={row} runId={runId} /> : null;
+  const hold = useResource<{ loop: RunLoop | null }>(RESOURCES.runLoop(runId)).data?.loop?.hold;
+  return hold?.worktree ? <EndAsideButton row={row} runId={runId} /> : null;
 }
 
 /** A step's mark on screen: the engine's, or "fail" for the held step of a failure park. */
@@ -91,8 +91,8 @@ function currentReason(
 ) {
   if (loop.phase === "parked") {
     const note = parkNote(
-      runLoop?.parked?.reason ?? loop.parked ?? loop.text,
-      runLoop?.parked?.kind,
+      runLoop?.hold?.reason ?? loop.hold?.reason ?? loop.text,
+      runLoop?.hold?.kind,
       runLoop?.pushFor,
       blockingOf(events, runLoop?.pushFor),
     );
@@ -234,7 +234,7 @@ export function LoopSteps({
         {steps.map((step, i) => {
           const held = marks[i] as StepMark;
           const mark: ShownMark =
-            held === "held" && isFailedPark(runLoop.parked?.kind) ? "fail" : held;
+            held === "held" && isFailedPark(runLoop.hold?.kind) ? "fail" : held;
           const current = mark === "cur" || mark === "held" || mark === "fail";
           const own = step.phase === null ? [] : stepTries(tries, step.phase);
           const count = own.filter((t) => !t.fix).length;
@@ -281,7 +281,7 @@ export function LoopSteps({
               {!current && last && <div className="vfail">last: {last.code}</div>}
               {current && prRef}
               {open && (
-                <Tries tries={own} now={now} parkKind={current ? runLoop.parked?.kind : null} />
+                <Tries tries={own} now={now} parkKind={current ? runLoop.hold?.kind : null} />
               )}
               {checks.length > 0 && (
                 <div style={{ marginTop: "var(--sp-1)" }}>

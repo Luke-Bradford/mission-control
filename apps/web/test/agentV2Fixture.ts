@@ -53,7 +53,7 @@ export function populatedAgentView(): AgentDetailView {
       phase: "parked",
       text: "Review findings remain",
       prNumber: 77,
-      parked: "One keyboard check remains",
+      hold: { kind: "review", reason: "One keyboard check remains", offSeat: false },
       profile: "feature",
     },
   });

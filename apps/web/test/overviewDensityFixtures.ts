@@ -751,7 +751,7 @@ export function demoLoop() {
     phase: "working" as const,
     text: "Building",
     prNumber: null,
-    parked: null,
+    hold: null,
     profile: "feature",
     step: "build",
     steps: [

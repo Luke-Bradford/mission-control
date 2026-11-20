@@ -7,13 +7,25 @@ import {
   type BriefReadState,
   CREW_PAUSE_SETTING,
   hudColumnOf,
+  type RunHold,
 } from "@mc/core";
 import { pendingRunApproval } from "../attention/subjects.ts";
 import { flightQuestionMessageId } from "../comms/question.ts";
 import type { CcConfig } from "../config.ts";
 import { externalMergeHold, externalPrControl } from "../external-pr-control.ts";
-import { oldAside, oldParked } from "../legacy-hold.ts";
 import type { Store } from "../store.ts";
+
+// FLIGHT's brief keeps its `parked` and `aside` keys: they are its tool contract.
+const parkedOf = (hold: RunHold | null | undefined) =>
+  hold?.kind != null ? { kind: hold.kind, reason: hold.reason ?? "", ended: hold.ended } : null;
+const asideOf = (hold: RunHold | null | undefined) =>
+  hold?.worktree
+    ? {
+        worktree: hold.worktree,
+        wake: hold.wake,
+        ...(hold.ask !== undefined ? { ask: hold.ask } : {}),
+      }
+    : null;
 
 const canonical = (value: unknown): unknown =>
   Array.isArray(value)
@@ -120,7 +132,7 @@ export function briefSourceRevision(
         ticket: run.ticket,
         status: run.status,
         endedAt: run.endedAt,
-        parked: oldParked(run.loop?.hold ?? null),
+        parked: parkedOf(run.loop?.hold ?? null),
         mergeHold: run.loop?.mergeHold ?? null,
         controllerCheckRequired: run.loop?.controllerCheckRequired ?? false,
         controllerCheck: run.loop?.controllerCheck ?? null,
@@ -140,7 +152,7 @@ export function briefSourceRevision(
             ? {
                 phase: run.loop.phase,
                 epoch: run.loop.epoch,
-                parked: oldParked(run.loop.hold),
+                parked: parkedOf(run.loop.hold),
                 prNumber: run.loop.prNumber,
                 touches: run.loop.touches,
                 gate: run.loop.gate,
@@ -157,7 +169,7 @@ export function briefSourceRevision(
                 flightReworks: run.loop.flightReworks,
                 flightReworkGrantEpoch: run.loop.flightReworkGrantEpoch,
                 awayBugDecision: run.loop.awayBugDecision,
-                aside: oldAside(run.loop.hold),
+                aside: asideOf(run.loop.hold),
                 merging: run.loop.merging,
                 mainMerge: run.loop.mainMerge,
               }

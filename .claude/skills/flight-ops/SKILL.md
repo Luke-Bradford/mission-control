@@ -62,7 +62,7 @@ Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`,
 | an evidence hold on a web PR (`screenshot`, `capture`) that never parks | the capture keeps failing on the head | read why it fails; send the seat the fix with `mc message_seat`, or end the set-aside run with `mc end_run` and restart the ticket |
 | merged, not live | auto-Update held (hard-rule change) or a stale version cache | run the Update with `mc operator` when the hub is idle, then check the hub answers |
 
-For a stop not listed here, find its text with `rg -F '<text>' apps/server/src packages/core/src`, read what clears it, and act. Write what you learned with `mc remember { kind: "playbook", … }`. If the skill itself should change, file a ticket.
+For a stop not listed here, find its text with `rg -F '<text>' apps/server/src packages/core/src`, read what clears it, and act. Write what you learned with `mc remember { kind: "playbook", … }`. If the skill itself should change, add it to the rolling minor-findings ticket.
 
 ## Dependencies and conflicts
 

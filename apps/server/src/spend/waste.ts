@@ -188,7 +188,6 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     });
   };
   for (const r of q.repeatedChecks(rerunSince)) note(r, r.n - 1);
-  for (const r of q.refusedReruns(rerunSince)) note(r, r.n);
   out.push(...reruns.values());
 
   // Review rounds: a change past two rounds.

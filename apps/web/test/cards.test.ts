@@ -302,7 +302,7 @@ describe("statusOutOfDateTitle", () => {
   });
 });
 
-const L = { phase: "working", text: "Working", prNumber: null, parked: null } as const;
+const L = { phase: "working", text: "Working", prNumber: null, hold: null } as const;
 
 describe("cardStep", () => {
   it("a looped run shows its template, step and try", () => {
@@ -401,6 +401,28 @@ describe("pipelineStage", () => {
     const prs = [pr({ mergedAt: NOW - 1000 })];
     expect(pipelineStage(boardItem(), [agent], prs, NOW, today, [])).toBe("building");
     expect(pipelineStage(boardItem(), [agent], prs, NOW, today, [], "merged")).toBe("merged");
+  });
+
+  it.each([
+    ["ci", "checks"],
+    ["review", "review"],
+    ["parked", "building"],
+  ] as const)("uses an off-seat run in %s for its ticket's %s stage", (phase, stage) => {
+    const target = boardItem();
+    const agent = crewRow({
+      ticket: "shop-app#999",
+      loop: { phase: "working", text: "Working elsewhere", prNumber: null, hold: null },
+      offSeatRuns: [
+        {
+          runId: "r-target",
+          ticket: ticketRef(target),
+          ticketTitle: "Target ticket",
+          loop: { phase, text: `Held at ${phase}`, prNumber: null, hold: null },
+        },
+      ],
+    });
+
+    expect(pipelineStage(target, [agent], [], NOW, today, [])).toBe(stage);
   });
 });
 

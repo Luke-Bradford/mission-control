@@ -180,7 +180,7 @@ import {
   type Stray,
 } from "./store/types.ts";
 import { usageQueries } from "./store/usage.ts";
-import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
+import { RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
   messageImprovements,
@@ -505,10 +505,6 @@ export class Store {
   }
 
   /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
-  addRerunRefusal(runId: string, command: string, sha: string, at: number): void {
-    this.appendAttempt(runId, RERUN_REFUSED_ATTEMPT, at, { command, sha, at });
-  }
-
   /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
   addResumeAttempt(runId: string, at: number): void {
     this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
@@ -3877,9 +3873,7 @@ export class Store {
         // earlier heads, but only those its brief listed: a review does not accept what it never saw.
         if (author === externalReviewKey(repoId, prNumber)) {
           const previous = this.reviewsOfRun(author)
-            .filter(
-              (x) => x.id < reviewId && x.epoch === Number(row.epoch) && x.state === "reported",
-            )
+            .filter((x) => x.id < reviewId && x.state === "reported")
             .at(-1);
           const resolveListed = this.db.prepare(
             `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
@@ -4799,24 +4793,6 @@ export class Store {
           exitCode: (r.exit_code as number | null) ?? null,
           at: r.at as number,
         };
-  }
-
-  /** The newest results (a pass, or a failure with an exit code) of `command` by this run on `headSha`. */
-  latestCheckResults(
-    runId: string,
-    command: string,
-    headSha: string,
-    limit: number,
-  ): { ok: boolean; exitCode: number | null }[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT ok, exit_code FROM check_runs
-           WHERE run_id = ? AND command = ? AND head_sha = ? AND (ok = 1 OR exit_code IS NOT NULL)
-           ORDER BY at DESC, id DESC LIMIT ?`,
-        )
-        .all(runId, command, headSha, limit) as Row[]
-    ).map((r) => ({ ok: r.ok === 1, exitCode: (r.exit_code as number | null) ?? null }));
   }
 
   /** The newest result this run recorded for `command`, regardless of commit. */

@@ -243,11 +243,6 @@ export interface RunLoop {
    * while the web app's fixtures predate it (the web ticket makes it required again).
    */
   hold?: RunHold | null;
-  /**
-   * @deprecated The old park record, filled from `hold` where the API sends a loop to the web app.
-   * Nothing in the server or core reads it.
-   */
-  parked?: { kind: string; reason: string; ended: boolean } | null;
   /** Hard-rule files in the pushed sha's diff. */
   touches: {
     sha: string;
@@ -263,11 +258,6 @@ export interface RunLoop {
   reviewReplyTo?: number | null;
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
-  /**
-   * @deprecated The old set-aside record, filled from `hold` where the API sends a loop to the web
-   * app. Nothing in the server or core reads it.
-   */
-  aside?: { worktree: string; wake: boolean; ask?: number } | null;
   /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed
@@ -1063,8 +1053,6 @@ export interface CrewLoop {
   prNumber: number | null;
   /** The run's hold, else null. */
   hold?: CrewHold | null;
-  /** @deprecated The park reason while `phase` is `parked`, else null; the API fills it from `hold`. */
-  parked?: string | null;
   /** The name of the run's template profile; absent on a run without one. */
   profile?: string;
   /** The profile's step for the phase; null when parked, done or no step has the phase. */
@@ -1092,9 +1080,6 @@ export interface CrewQueueItem {
   /** 1 is the next the seat takes. */
   pos: number;
 }
-
-/** @deprecated The old name of `CrewOffSeatRun`, for the web app until it reads that. */
-export type CrewAsideRun = CrewOffSeatRun;
 
 /** A run its seat has moved on from (in review, off the seat). */
 export interface CrewOffSeatRun {
@@ -1177,8 +1162,6 @@ export interface CrewRow {
   loop: CrewLoop | null;
   /** Crew: the seat's off-seat runs other than `run`, oldest first; [] for a loop row. */
   offSeatRuns?: CrewOffSeatRun[];
-  /** @deprecated Same list as `offSeatRuns`; the API fills it for the web app until it reads that. */
-  asideRuns?: CrewOffSeatRun[];
   /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
   queue?: CrewQueueItem[];
   /**
@@ -1237,11 +1220,9 @@ export type CrewSummaryDigest = Pick<
 >;
 
 /** A crew row as the Overview reads it: state, ticket, loop step, tokens and cost, without the event timelines or the whole digest. */
-export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns" | "offSeatRuns"> & {
+export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "offSeatRuns"> & {
   digest: CrewSummaryDigest | null;
   offSeatRuns?: Omit<CrewOffSeatRun, "events">[];
-  /** @deprecated Same list as `offSeatRuns`. */
-  asideRuns?: Omit<CrewOffSeatRun, "events">[];
 };
 
 /** `GET /api/crew?shape=summary`. */

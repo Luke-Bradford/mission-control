@@ -99,7 +99,7 @@ it("shows every configured step, review tries/cap and the actual held phase", ()
       phase: "parked",
       text: "Held",
       prNumber: 7,
-      parked: "Findings remain",
+      hold: { kind: null, reason: "Findings remain", offSeat: false },
       steps: [
         { name: "plan", phase: null },
         { name: "Build", phase: "working" },
@@ -366,7 +366,14 @@ it.each([true, false])("keeps Error ahead of a review or parked loop (%s)", (par
     hudState: "error",
     sourceError: "CLI failed",
     reviewing: parked ? null : { prNumber: 7, sha: "abc", ref: null },
-    loop: parked ? { phase: "parked", text: "Held", prNumber: 7, parked: "Review" } : null,
+    loop: parked
+      ? {
+          phase: "parked",
+          text: "Held",
+          prNumber: 7,
+          hold: { kind: null, reason: "Review", offSeat: false },
+        }
+      : null,
   });
   save(row);
   const detail = view(row);
@@ -460,7 +467,14 @@ it("carries an approved review across the recorded main merge and keeps a waiver
 });
 
 it("freezes an ended parked run's attempt age at its recorded end", () => {
-  const row = seatRow({ loop: { phase: "parked", text: "Held", prNumber: 7, parked: "Review" } });
+  const row = seatRow({
+    loop: {
+      phase: "parked",
+      text: "Held",
+      prNumber: 7,
+      hold: { kind: null, reason: "Review", offSeat: false },
+    },
+  });
   const run = save(row);
   store.upsertRun({ ...run, endedAt: NOW, status: "ok" });
   const loop: RunLoopView = {

@@ -564,7 +564,7 @@ export const defaultAppliedText = (label: string, ask: string): string =>
 
 /** A crew row cut down to what the Overview reads (see `CrewSummaryRow`). */
 export function crewRowSummary(row: CrewRow): CrewSummaryRow {
-  const { events: _events, digest, offSeatRuns, asideRuns: _legacy, ...rest } = row;
+  const { events: _events, digest, offSeatRuns, ...rest } = row;
   return {
     ...rest,
     digest:

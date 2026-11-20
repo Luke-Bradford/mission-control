@@ -90,6 +90,11 @@ class Migrations {
   }
 
   /** Adds `column` to `table` when it is missing. */
+  private whenColumnPresent(table: string, column: string, fn: () => void): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[];
+    if (columns.some((c) => c.name === column)) fn();
+  }
+
   private addColumn(table: string, column: string, type: string): void {
     this.whenColumnMissing(table, column, () =>
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`),
@@ -112,8 +117,11 @@ class Migrations {
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
-    this.addColumn("flight_wakes", "rode", "TEXT");
-    this.addColumn("flight_wakes", "immediate", "TEXT");
+    // the wake no longer records what rode along or was handled at once
+    for (const column of ["rode", "immediate"])
+      this.whenColumnPresent("flight_wakes", column, () =>
+        this.db.exec(`ALTER TABLE flight_wakes DROP COLUMN ${column}`),
+      );
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );
@@ -246,9 +254,11 @@ class Migrations {
       ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
-    // A run's park and set-aside records fold into one `hold` (#2071). Both old keys go, so a
-    // second open finds nothing to change (and takes no write lock); the indexes on the old paths
-    // go with them. The rows are read again inside the write-locked transaction.
+    // Migration only: a run's old park and set-aside records fold into one `hold` (#2071), so a
+    // database that skipped the release that folded them keeps its parks. Nothing else reads the
+    // old keys. Both go, so a second open finds nothing to change (and takes no write lock); the
+    // indexes on the old paths go with them. The rows are read again inside the write-locked
+    // transaction.
     const unfolded = `SELECT id, loop FROM runs
            WHERE json_type(loop, '$.parked') IS NOT NULL OR json_type(loop, '$.aside') IS NOT NULL`;
     if (this.db.prepare(`${unfolded} LIMIT 1`).get() !== undefined) {

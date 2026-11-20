@@ -51,6 +51,7 @@ import {
   NO_FAILED_RUN,
   READY_UNDO_FAILED,
   REVIEW_STATUS_FAILED,
+  runPrBody,
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
@@ -202,6 +203,29 @@ describe("openPr", () => {
       body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
     });
   });
+
+  it.each(["Part of #7: stage 3.", "This is part of #7.", "PART OF #7"])(
+    "ends the body with Part of, and no closing keyword, when the note says %j",
+    async (note) => {
+      ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+      tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+      await createPublisher(deps()).openPr(run(), TICKET, note);
+      const pr = tools.openDraftPr.mock.calls[0]?.[2] as { body: string };
+      expect(pr.body.endsWith("\n\nPart of #7.")).toBe(true);
+      expect(pr.body).not.toMatch(/closes/i);
+    },
+  );
+
+  it.each(["Part of #8.", "Part of #70", "Did part of the work.", "Fixes #7"])(
+    "keeps the closing line when the note says %j",
+    async (note) => {
+      ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+      tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+      await createPublisher(deps()).openPr(run(), TICKET, note);
+      const pr = tools.openDraftPr.mock.calls[0]?.[2] as { body: string };
+      expect(pr.body.endsWith("\n\nCloses #7.")).toBe(true);
+    },
+  );
 
   it("cuts a note that would take the body past the limit, and keeps the closing line", async () => {
     ghAnswers = [list()];
@@ -1800,12 +1824,39 @@ describe("postMinorFindings", () => {
     expect(lines).toContain(minorMoreLine(1));
   });
 
+  it("builds the body from the latest note: a later Part of report ends the body Part of", async () => {
+    store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
+    answer();
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
+    expect(posted?.trimEnd().split("\n").at(-3)).toBe("Part of #7.");
+  });
+
   it("drops the section when there are no minors", async () => {
     const rv = review([]);
     answer();
     await createPublisher(deps()).postMinorFindings(R, rv);
     expect(posted).not.toContain(MINOR_HEADING);
     expect(posted).toContain("Closes #7.");
+  });
+
+  it("swaps the minor section of a staged seat body and leaves one Part of line, last", async () => {
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: `Seat rewrite.\n\n${MINOR_HEADING}\n\nold intro\n\n- \`a.ts\` — old\n\nPart of #7.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("old intro");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
+    expect(posted?.trimEnd().split("\n").at(-3)).toBe("Part of #7.");
+    expect(posted?.match(/Opened by/g)).toHaveLength(1);
   });
 
   it("keeps a body the seat rewrote with pr_body, and swaps only the hub's section", async () => {
@@ -2667,6 +2718,12 @@ describe("merge steps", () => {
         ["issue", "view", "7", "--repo=o/mc", "--json", "state"],
         ["issue", "close", "7", "--repo=o/mc", "--reason=completed"],
       ]);
+    });
+
+    it("leaves the issue open for the body the hub writes from a Part of note", async () => {
+      ghAnswers = [prBody(runPrBody(TICKET, "Part of #7: stage 3.", null, true))];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true, left: true });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view"]);
     });
 
     it("closes an issue the PR body does not name", async () => {

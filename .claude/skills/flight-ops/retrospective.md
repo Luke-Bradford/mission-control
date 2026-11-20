@@ -24,7 +24,7 @@ At 03:00 in the operator's timezone, the hub sends a daily `retrospective` fact,
 Screen-facing share is touching / (merged - unknown), with the unknown count reported separately. It is n/a without `apps/web` or any classifiable merges. Costs use the existing metrics' lifetime totals for runs active in that window. Do not invent missing measurements.
 
 Use it to write lasting lessons:
-1. Read the day's decisions for every block you could not clear in the wake you found it, and file a ticket for each cause, checking existing tickets first.
+1. Read the day's decisions for every block you could not clear in the wake you found it, and fold each cause into an existing ticket. File a new one only when Close the ticket in `roles/FLIGHT.md` allows it.
 2. For up to three other items, write lessons, file tickets or act with your tools.
 3. Log a one-paragraph summary with `mc log_decision`, citing measures and actions.
 

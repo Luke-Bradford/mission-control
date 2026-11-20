@@ -187,7 +187,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
           ...new Set(
             rows.flatMap((row) => [
               ...(row.run?.status === "running" ? [row.run.id] : []),
-              ...(row.asideRuns ?? []).map((run) => run.runId),
+              ...(row.offSeatRuns ?? []).map((run) => run.runId),
             ]),
           ),
         ].map((id) => RESOURCES.runLoop(id)),

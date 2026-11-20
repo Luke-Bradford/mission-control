@@ -66,7 +66,8 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
 }
 
 /**
- * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
+ * The configured check a shell command runs, even inside a chain or a pipe. It serves the test
+ * lock (the related-tests check) and the note that says why a chained check was not counted. The guard's shell parser reads the
  * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
@@ -146,8 +147,7 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun"> &
-    Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
+  store: Pick<Store, "addCheckRun">;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */

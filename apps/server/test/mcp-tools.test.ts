@@ -3699,6 +3699,14 @@ describe("push and draft_pr", () => {
       );
     });
 
+    it("adds no closing line to a body that ends Part of the run's issue", async () => {
+      await pushed();
+      await pr("feat: x", "Stage 2.\n\nPart of #42.");
+      expect(ghCalls()[1]?.body).toBe(
+        "Stage 2.\n\nPart of #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
+    });
+
     it("refuses before a push, and after a commit the push has not sent", async () => {
       const text = { text: "Push first: the PR shows what is on origin.", isError: true };
       expect(await pr("feat: x", "body")).toEqual(text);
@@ -3840,6 +3848,44 @@ describe("push and draft_pr", () => {
       expect(body).toContain(MINORS.trimEnd());
       expect(body).toContain("Closes #42.");
       expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("keeps a staged body's Part of line last, with no closing line", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view({ body: `#42\n\n## What changed\n\nold\n\n${MINORS}\nPart of #42.\n` }));
+      await edit("New text.\n\nPart of #42.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).toBe(
+        `New text.\n\n${MINORS.trimEnd()}\n\nPart of #42.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      );
+    });
+
+    it.each(["Stage 3, part of #42.", "New text.\n\nPart of #42"])(
+      "keeps a staged PR staged when the seat's text %j does not end with the marker",
+      async (text) => {
+        store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+        ghState(
+          view({
+            body: `#42\n\n## What changed\n\nPart of #42: stage 3.\n\n${MINORS}\nPart of #42.\n`,
+          }),
+        );
+        await edit(text);
+        const body = edits()[0]?.body ?? "";
+        expect(body).not.toContain("Closes #42.");
+        expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
+      },
+    );
+
+    it("reads the run's latest note, not the first, to see a PR is staged", async () => {
+      store.addEvidence(RUN, "Done.", Date.now() - 1000);
+      store.addEvidence(RUN, "Part of #42: stage 2.", Date.now());
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("Stage 2 text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).not.toContain("Closes #42.");
+      expect(body.match(/Part of #42\./g)).toHaveLength(1);
+      expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
     });
 
     it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {
@@ -4433,6 +4479,27 @@ describe("report_evidence", () => {
     });
   });
 
+  it("keeps a decimal test duration instead of refusing the report", async () => {
+    await committed();
+    expect(
+      await tool("report_evidence", ev).call(CTX, {
+        note: "tested",
+        tests: [
+          {
+            command: "pnpm -s vitest run apps/a.test.ts",
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            duration: 12.6,
+          },
+        ],
+      }),
+    ).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.latestEvidence(RUN)).toMatchObject({
+      tests: [expect.objectContaining({ duration: 12.6 })],
+    });
+  });
+
   it("records build-seat test runs and tests added", async () => {
     await committed();
     expect(
@@ -4547,7 +4614,7 @@ describe("report_evidence", () => {
             properties: {
               command: { type: "string", minLength: 1 },
               passed: { type: "integer", minimum: 0 },
-              duration: { type: "integer", minimum: 0 },
+              duration: { type: "number", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
             },
             required: ["command", "passed", "failed", "skipped", "duration"],
             additionalProperties: false,
@@ -5296,7 +5363,7 @@ describe("report_findings", () => {
     });
   });
 
-  it("binds a positional resolution to the latest reported review of the same epoch", async () => {
+  it("binds a positional resolution to the latest reported review of the run", async () => {
     const mk = (epoch: number, round: number, at: number) =>
       store.requestReview({
         authorRunId: RUN,
@@ -5331,6 +5398,85 @@ describe("report_findings", () => {
     expect(store.reviewResolutions(second)).toEqual([
       { reviewId: later, pos: 0, outcome: "fixed" },
     ]);
+  });
+
+  describe("after FLIGHT's rework settle bumps the epoch", () => {
+    // round 1 and 2 ran at epoch 0 (round 2 holds a finding); the settle started round 3 at epoch 1
+    const setup = async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const mk = (epoch: number, round: number, at: number) =>
+        store.requestReview({
+          authorRunId: RUN,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 9,
+          sha: String(at).padEnd(40, "c"),
+          epoch,
+          attempt: 2,
+          round,
+          at,
+        }) as number;
+      const two = mk(0, 2, NOW + 1);
+      store.setReviewState(two, ["queued"], "running", { at: NOW + 1, runId: "retro:r2" });
+      expect(await report(args({ findings: [finding()] }), reviewRun("retro:r2", two))).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      const three = mk(1, 3, NOW + 2);
+      store.setReviewState(three, ["queued"], "running", { at: NOW + 2, runId: "retro:r3" });
+      return { two, three, run: reviewRun("retro:r3", three) };
+    };
+    const resolve = (findingRef: { reviewId?: number; pos: number }) =>
+      args({ verdict: passing, findings: [], resolutions: [{ findingRef, outcome: "fixed" }] });
+
+    it("resolves the previous round's finding given by position alone", async () => {
+      const { two, three, run } = await setup();
+      expect(await report(resolve({ pos: 0 }), run)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("resolves the previous round's finding given with its review id", async () => {
+      const { two, three, run } = await setup();
+      expect(await report(resolve({ reviewId: two, pos: 0 }), run)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("lets a round 1 of the new epoch resolve the earlier epoch's findings, as its brief says", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const next = store.requestReview({
+        authorRunId: RUN,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: "d".repeat(40),
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: NOW + 1,
+      }) as number;
+      store.setReviewState(next, ["queued"], "running", { at: NOW + 1, runId: "retro:e1r1" });
+      expect(await report(resolve({ pos: 0 }), reviewRun("retro:e1r1", next))).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(next)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("refuses resolutions from a run's very first review", async () => {
+      const refused = await report(resolve({ pos: 0 }));
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain("only allowed from round 2");
+    });
+
+    it("still refuses a finding from neither the previous round nor the brief", async () => {
+      const { three, run } = await setup();
+      const refused = await report(resolve({ reviewId, pos: 0 }), run);
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain("findings must be from the previous round");
+      expect(store.reviewResolutions(three)).toEqual([]);
+    });
   });
 
   it("rejects a positional and an explicit reference to the same prior finding", async () => {

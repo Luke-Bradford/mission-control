@@ -3511,6 +3511,14 @@ describe("FLIGHT settles a ruling", () => {
 
   it("accepts a ruling whose same head went green on its own, with no re-run asked for", async () => {
     await ruled();
+    config.crew?.sessions[0]?.seats.push({
+      id: RETRO,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
     setPr({
       ci: "passing",
       checks: [
@@ -3527,9 +3535,60 @@ describe("FLIGHT settles a ruling", () => {
     expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
     expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, hold: null });
     expect(h.rulingReruns).toEqual([]);
+    expect(store.reviewsOfRun(RUN)).toContainEqual(expect.objectContaining({ sha: SHA }));
     expect(h.sent).toContainEqual(
       expect.objectContaining({ text: expect.stringContaining("your ruling is accepted") }),
     );
+  });
+
+  it("names the missing required check when the same head is not done and nothing runs", async () => {
+    await ruled();
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing repo");
+    repo.requiredChecks = ["server", "e2e"];
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA, waiting: ["e2e"] });
+    expect(h.rulingReruns).toEqual([]);
+  });
+
+  it("accepts a same head that went green after FLIGHT's re-run failed and the author ruled again", async () => {
+    await ruled();
+    await accept();
+    h.rerunStates = [{ ok: true, outcome: "failed" }];
+    await accept();
+    setLoop({
+      phase: "parked",
+      hold: { kind: "ruling", reason: "ruled again", ended: false, worktree: null, wake: false },
+    });
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 3,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
+    expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, hold: null });
+    expect(loopOf().rulingRerun ?? null).toBeNull();
+    expect(h.rulingReruns).toHaveLength(1);
   });
 
   it("answers pending, and asks for no re-run, while the same head's checks run", async () => {
@@ -3547,7 +3606,7 @@ describe("FLIGHT settles a ruling", () => {
         },
       ],
     });
-    expect(await accept()).toEqual({ kind: "pending", sha: SHA });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA, waiting: ["server"] });
     expect(h.rulingReruns).toEqual([]);
     expect(loopOf().phase).toBe("parked");
   });
@@ -7586,6 +7645,26 @@ describe("the engine runs reviews", () => {
 
       it("rework grants one more round: the next push's review runs, and a fail parks at the cap again", async () => {
         await grantedThenFailed();
+      });
+
+      it("the granted review is round 3 in the next epoch, with the earlier rounds' reviews still reported", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        reported(first().id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_B);
+        const two = need(reviewRows().find((r) => r.round === 2));
+        reported(two.id, [finding("Important")]);
+        await h.engine.reconcileRun(RUN);
+        await push(SHA_C);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        await push(SHA_D);
+        const granted = need(reviewRows().find((r) => r.sha === SHA_D && r.state === "running"));
+        // the numbers the report_findings tests ("after FLIGHT's rework settle") build by hand
+        expect(granted).toMatchObject({ round: 3, epoch: two.epoch + 1 });
+        expect(store.review(two.id)).toMatchObject({ state: "reported", epoch: two.epoch });
       });
 
       it("a grant survives a new epoch started by something other than FLIGHT", async () => {
