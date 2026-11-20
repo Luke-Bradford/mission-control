@@ -146,6 +146,7 @@ const list =
       number: number;
       createdAt: string;
       closingIssuesReferences?: { number: number; url?: string }[];
+      body?: string;
     }[]
   ) =>
   () => ({
@@ -420,6 +421,62 @@ describe("openPr", () => {
       expect(tools.openDraftPr).not.toHaveBeenCalled();
     });
 
+    it("adopts the single open PR whose body says Part of the run's ticket", async () => {
+      ghAnswers = [
+        list({
+          number: 29,
+          createdAt: "2026-10-20T10:00:00Z",
+          closingIssuesReferences: [],
+          body: "Stage 6a.\n\nPart of #7.",
+        }),
+      ];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: true,
+        prNumber: 29,
+      });
+      expect(tools.openDraftPr).not.toHaveBeenCalled();
+    });
+
+    it("refuses a Part of PR for another ticket, or one that only starts with the number", async () => {
+      for (const body of ["Part of #8.", "Part of #70.", "Part of #7x", "Apart of #7"]) {
+        ghAnswers = [
+          list({
+            number: 29,
+            createdAt: "2026-10-20T10:00:00Z",
+            closingIssuesReferences: [],
+            body,
+          }),
+        ];
+        expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+          ok: false,
+          text: EARLIER_PR_OPEN,
+        });
+      }
+    });
+
+    it("refuses a Part of PR that another run on the ticket has recorded", async () => {
+      store.upsertRun(
+        run({
+          id: "r0",
+          agentId: "other-seat",
+          startedAt: START - 1_000,
+          loop: { ...NEW_LOOP, prNumber: 29 },
+        }),
+      );
+      ghAnswers = [
+        list({
+          number: 29,
+          createdAt: "2026-10-20T10:00:00Z",
+          closingIssuesReferences: [],
+          body: "Part of #7.",
+        }),
+      ];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+      });
+    });
+
     it("refuses a PR on the branch that closes another ticket", async () => {
       ghAnswers = [
         list({
@@ -535,7 +592,7 @@ describe("openPr: the branch has moved on, and a PR that cannot be named", () =>
       "--repo=o/mc",
       `--head=${BRANCH}`,
       "--state=open",
-      "--json=number,createdAt,closingIssuesReferences",
+      "--json=number,createdAt,closingIssuesReferences,body",
     ]);
   });
 

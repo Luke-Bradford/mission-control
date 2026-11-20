@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
-  BACKGROUND_SUITE_TEXT,
   DEFAULT_REPO_RULES,
   FLIGHT_RUNAWAY,
   GUARD_BODY_LIMIT,
@@ -164,6 +163,19 @@ describe("TestLock", () => {
       expect(lock.state().holder).not.toBeNull();
       lock.release({ runId: "A", toolUseId: "a2" });
       expect(lock.state().holder).toBeNull();
+    });
+
+    it("restores a pinned hold as pinned: only releaseRun frees it", async () => {
+      const key = { runId: "A", toolUseId: "a1" };
+      await lock.acquire(key, "s-A", "pnpm -s test", 1000, live());
+      lock.pin(key);
+      const next = new TestLock({ now: () => 6000, holds: store });
+      next.restore(store.lockHolds());
+      expect(next.state().holder?.runId).toBe("A");
+      next.release(key);
+      expect(next.state().holder?.runId).toBe("A");
+      next.releaseRun("A");
+      expect(next.state().holder).toBeNull();
     });
   });
 
@@ -782,10 +794,10 @@ describe("POST /api/guard/check", () => {
   it.each([
     "printf 'pnpm -s test\\n' | crontab -",
     `echo 'do shell script "pnpm -s test"' | osascript`,
-  ])("refuses a full suite fed to a launcher on stdin, with no lock taken: %s", async (command) => {
+  ])("takes the lock for a full suite fed to a launcher on stdin: %s", async (command) => {
     const r = await check(tokA, bash("l1", command));
-    expect(reason(r.body)).toBe(BACKGROUND_SUITE_TEXT);
-    expect(lock.state().holder).toBeNull();
+    expect(r.body).toBe("{}");
+    expect(lock.state().holder).not.toBeNull();
   });
 
   it("serves the guard and MCP routes at the paths a seat is given", async () => {
@@ -965,6 +977,21 @@ describe("POST /api/guard/check", () => {
       expect((await c).body).toBe("{}");
     });
 
+    it.each([
+      ["pnpm run test:related &", undefined],
+      ["pnpm run test:related", true],
+    ])("keeps the lock of a related-tests run left in the background: %s", async (command, bg) => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, pre("a1", "Bash", { command, run_in_background: bg }));
+      expect(lock.state().holder?.runId).toBe("run-a");
+      await check(tokA, { ...post("a1"), tool_input: { command }, exit_code: 0 });
+      expect(lock.state().holder?.runId).toBe("run-a");
+      lock.releaseRun("run-a");
+      expect(lock.state().holder).toBeNull();
+    });
+
     it("allows a configured check to run again unchanged: the hook does not refuse", async () => {
       const { checks } = spy();
       await app.close();
@@ -1125,6 +1152,48 @@ describe("POST /api/guard/check", () => {
     });
     expect(store.lockRuns(0)[0]?.outcome).toBe("done");
     expect(ends).toEqual([[false, null]]);
+  });
+
+  it("keeps the lock after a call left in the background, until the turn ends", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        lockedBy: () => null,
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        dropRun: () => {},
+        lost: () => false,
+        drops: () => [],
+        pending: () => [],
+      },
+    });
+    // a foreground call whose Bash timeout moved it to the background: the Post says so
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, {
+      ...post("a1", "PostToolUse"),
+      tool_input: { command: "pnpm -s test" },
+      exit_code: null,
+      background: true,
+    });
+    expect(ends).toEqual([[false, null]]);
+    expect(lock.state().holder?.seatId).toBe("guido-1");
+    expect(store.lockRuns(0).every((r) => r.outcome !== "pass")).toBe(true);
+    // a suite started in the background holds it from the start, whatever its call reports
+    lock.releaseRun("run-a");
+    expect(lock.state().holder).toBeNull();
+    await check(tokA, pre("a2", "Bash", { command: "pnpm -s test &" }));
+    await check(tokA, {
+      ...post("a2", "PostToolUse"),
+      tool_input: { command: "pnpm -s test &" },
+      exit_code: 0,
+    });
+    expect(lock.state().holder?.seatId).toBe("guido-1");
+    lock.releaseRun("run-a");
+    expect(lock.state().holder).toBeNull();
   });
 
   it("hands the hook's exit code to the check recorder (#1411)", async () => {
@@ -1524,6 +1593,15 @@ describe("hookMain", () => {
       exit_code: 0,
       tool_input: { command: "ls" },
     });
+  });
+
+  it("tells the hub a Bash call moved to the background on its timeout is no exit", async () => {
+    const stdin = stdinFor({
+      hook_event_name: "PostToolUse",
+      tool_response: { interrupted: false, backgroundTaskId: "b1", timedOutAfterMs: 120000 },
+    });
+    await hookMain(stdin, [tokenFile, URL_OK], answer(200, "{}"));
+    expect(JSON.parse(posts[0]?.body ?? "")).toMatchObject({ exit_code: null, background: true });
   });
 
   it("answers a Bash call over 64 KiB itself, without posting: a decision, exit 0", async () => {

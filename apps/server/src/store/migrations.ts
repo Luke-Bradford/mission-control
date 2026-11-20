@@ -117,6 +117,8 @@ class Migrations {
     this.addColumn("pull_requests", "is_cross_repository", "INTEGER");
     // A commit a run only follows, such as someone else's on top of its push (#2099).
     this.addColumn("run_commits", "followed", "INTEGER NOT NULL DEFAULT 0");
+    // a hold kept past its calls (a suite left running in the background) survives a restart
+    this.addColumn("test_lock_holds", "pinned", "INTEGER NOT NULL DEFAULT 0");
     // Token audit call times (#1646): audits stored before this have none until re-read.
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");

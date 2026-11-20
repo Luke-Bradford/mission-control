@@ -129,6 +129,7 @@ import {
   type RunLoopView,
   type RunView,
   reviewStatusOf,
+  runsInBackground,
   type StreamEvent,
   seatCallSign,
   seatDef,
@@ -781,6 +782,8 @@ const GuardCheckBody = z.strictObject({
   agent_id: z.string().min(1).max(256).optional(),
   cwd: z.string().max(4096).optional(),
   exit_code: z.number().int().min(0).nullable().optional(),
+  /** The call left its command running in the background (a Post hook only). */
+  background: z.literal(true).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
@@ -2522,6 +2525,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             // the hook sends a null exit code for an interrupted or background call: unknown, so
             // it neither passes the lock row nor counts toward the push gate
             const unknown = body.data.exit_code === null;
+            // a command left running keeps the lock until the turn ends, whatever its call reports
+            if (body.data.background) lock?.pin(key);
             lock?.release(key, failed ? true : wrapped || unknown ? undefined : false);
             await checks?.end(key, !failed && !unknown, body.data.exit_code ?? null);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
@@ -2599,7 +2604,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             typeof command === "string"
           ) {
             const related = checks?.lockedBy(command);
-            if (related) verdict = { kind: "lock", command: related };
+            if (related)
+              verdict = runsInBackground(command, body.data.tool_input?.run_in_background === true)
+                ? { kind: "lock", command: related, background: true }
+                : { kind: "lock", command: related };
           }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {
@@ -2653,6 +2661,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               res.once("close", () => {
                 if (!delivered) lock.release(key);
               });
+              // a suite left running in the background holds the lock until the turn ends
+              if (verdict.background) lock.pin(key);
               await startCheck();
               return answer();
             }

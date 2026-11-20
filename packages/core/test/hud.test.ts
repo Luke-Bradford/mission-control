@@ -604,7 +604,8 @@ describe("guard and test lock copy", () => {
     );
     expect(RUNTIME_LIMITS).toHaveLength(3);
     for (const limit of RUNTIME_LIMITS) expect(GUARD_NOTE).toContain(limit);
-    expect(GUARD_NOTE).toContain("no network");
+    expect(GUARD_NOTE).toContain("may use the network");
+    expect(GUARD_NOTE).not.toContain("no network");
     expect(GUARD_NOTE).toContain("a full suite run with & or nohup");
     expect(GUARD_NOTE).toContain("FLIGHT runs with full access");
     expect(GUARD_NOTE).toContain("separate from the refusal counts above");

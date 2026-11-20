@@ -679,7 +679,7 @@ What each seat's process starts with:
     cannot poison dependencies used by another seat or by the hub.
     but are not an isolation boundary: one seat's code can change another seat's store.
 
-  The sandbox has no network, and the secret scan at push time is the backstop for anything a seat
+  The Claude sandbox allows the network (never loopback or link-local: the hub stays unreachable); curl, wget and WebSearch work, but WebFetch is denied because it runs outside the sandbox proxy; a Codex seat's profile keeps the network off, because its domain rules cannot keep loopback closed in every spelling. The secret scan at push time is the backstop for anything a seat
   copies into its branch.
 - **The repo's CLAUDE.md from the base.** The prompt file takes `CLAUDE.md` from origin's default
   branch as the run started, read from hash-verified objects, never from the worktree the seat
@@ -879,7 +879,7 @@ validation commands, named in the brief, not an allowlist. What holds a seat is 
 hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/2026-10-26-outcome-based-seat-guards.md)):
 
 - **Sandbox:** no secrets, no home folder and no other seat's worktree (OS sandbox for Claude, the
-  permission profile for Codex), and no network.
+  permission profile for Codex), and no loopback: a Claude seat may use the network, a Codex seat stays offline.
 - **Area:** a writer's Edit and Write stay in its area and off the protected files, and `mc commit`
   refuses changes outside it; shell commands can touch other files in the worktree, so the seat
   reverts those before committing. FLIGHT and a read-only RETRO cannot write their checkout; a
@@ -890,7 +890,7 @@ hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/
 - **GitHub:** no `gh` at all; GitHub goes through Mission Control. A seat rewrites its own open
   PR's body with `mc pr_body { body }` (the same text checks as the opened PR; the engine's
   minor-findings section is kept; refused for a PR that is not the run's).
-- **Full suites:** the repo's `full_suite` commands and the related-tests check (`pnpm -s test:related`, however spelled) take the shared test lock, one seat at a time. A full suite run with `&` or `nohup`, in a multiplexer that starts a session (`tmux new`, `screen -dm`), or handed to a launcher (`launchctl`, `at`, `batch`, `systemd-run`, `daemonize`, `start-stop-daemon`, `osascript`, `open`, `crontab`, `ssh -f`) is refused: it would outlive the lock. Other background commands are not refused. The repo's `mc.checks` commands (lint, typecheck) do not take the lock unless `full_suite` lists them: two seats may run them at once. A check that waited is not recorded as failed. The hub keeps, in memory, why it did not count a check call it saw start (a pipe or extra command in the chain, a dirty tree at the start or end, the head moving, the turn ending first, a background call, a call killed at its Bash timeout, an unreadable clone), and `mc push` puts that reason in its refusal; with no reason it says the hub saw no start (it may have restarted). A run of one test file takes no lock. A related-tests run can take most of the suite's time, so a seat runs a check in the foreground with the Bash `timeout` parameter at 2700000 (45 minutes; the seat's `BASH_MAX_TIMEOUT_MS` allows it, and the CLI's own limit without it is 10 minutes): the default is two minutes, and a killed call has no exit code. The wait for the lock is not part of that time. A seat holding the lock is shown as stalled only after 10 minutes of silence since it took the lock; a running Claude check writes a heartbeat every 30 seconds. A seat waiting for the lock is refused after 10 minutes and runs the same check again, unchanged. A passing call that ran longer than two minutes is recorded like any other.
+- **Full suites:** the repo's `full_suite` commands and the related-tests check (`pnpm -s test:related`, however spelled) take the shared test lock, one seat at a time. A full suite run with `&` or `nohup`, with `run_in_background`, in a multiplexer that starts a session (`tmux new`, `screen -dm`), or handed to a launcher (`launchctl`, `at`, `batch`, `systemd-run`, `daemonize`, `start-stop-daemon`, `osascript`, `open`, `crontab`, `ssh -f`) takes the lock like a foreground one and waits for its turn to start, and then keeps the lock until the seat's turn ends (the hub cannot see a background process end), so a second suite does not start beside it. A call the CLI moves to the background when its Bash timeout runs out is treated the same way and is never counted as a passed check. Seats may use the network and run background commands. The repo's `mc.checks` commands (lint, typecheck) do not take the lock unless `full_suite` lists them: two seats may run them at once. A check that waited is not recorded as failed. The hub keeps, in memory, why it did not count a check call it saw start (a pipe or extra command in the chain, a dirty tree at the start or end, the head moving, the turn ending first, a background call, a call killed at its Bash timeout, an unreadable clone), and `mc push` puts that reason in its refusal; with no reason it says the hub saw no start (it may have restarted). A run of one test file takes no lock. A related-tests run can take most of the suite's time, so a seat runs a check in the foreground with the Bash `timeout` parameter at 2700000 (45 minutes; the seat's `BASH_MAX_TIMEOUT_MS` allows it, and the CLI's own limit without it is 10 minutes): the default is two minutes, and a killed call has no exit code. The wait for the lock is not part of that time. A seat holding the lock is shown as stalled only after 10 minutes of silence since it took the lock; a running Claude check writes a heartbeat every 30 seconds. A seat waiting for the lock is refused after 10 minutes and runs the same check again, unchanged. A passing call that ran longer than two minutes is recorded like any other.
   This covers the commands the guard sees; a process a seat starts some other way is not covered.
 - **Unreadable lines:** a command line the guard cannot read to the end is refused.
 
@@ -1009,7 +1009,7 @@ Setup's board action also creates the board's fields and the repo's type labels,
     doesn't see it, its call just takes longer) for up to 10 minutes.
   - After 10 minutes the seat is told who holds the lock, and to run the command with a test file
     path instead.
-  - A full suite in the background is refused.
+  - A full suite in the background takes the lock the same way and keeps it until the seat's turn ends.
   - Each entry must be a command seats may run, or the config is refused at start-up.
   - The lock box on Overview and the header's `Lock:` show who holds the lock and who waits.
 - **`crew.deny_read`** (default `[]`) lists absolute folders that code a seat runs may not read.
