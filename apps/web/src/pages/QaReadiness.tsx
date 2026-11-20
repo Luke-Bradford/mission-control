@@ -100,10 +100,7 @@ function CurrentQaReadiness() {
     [prs],
   );
   const review = useMemo(
-    () =>
-      prs
-        .filter((p) => !p.uat)
-        .sort((a, b) => a.createdAt - b.createdAt || a.number - b.number),
+    () => prs.filter((p) => !p.uat).sort((a, b) => a.createdAt - b.createdAt || a.number - b.number),
     [prs],
   );
   const params = new URLSearchParams(search);

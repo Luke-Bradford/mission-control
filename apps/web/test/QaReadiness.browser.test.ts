@@ -60,7 +60,9 @@ describeRendered("QA acceptance queue in a browser", () => {
       expect(
         rows.every(
           (row) =>
-            row.y >= list.y && row.y + row.height <= list.y + list.height && row.y + row.height <= 940,
+            row.y >= list.y &&
+            row.y + row.height <= list.y + list.height &&
+            row.y + row.height <= 940,
         ),
       ).toBe(true);
       await page.close();
