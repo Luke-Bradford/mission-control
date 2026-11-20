@@ -33,6 +33,8 @@ interface Holder {
   since: number;
   /** The run's calls that hold it; the lock is free once the last one is released. */
   calls: Set<string>;
+  /** A call left a suite running after it returned: the hold lasts until `releaseRun`. */
+  pinned?: true;
 }
 
 interface Waiter {
@@ -147,12 +149,23 @@ export class TestLock {
    */
   release(key: LockKey, failed?: boolean): void {
     const h = this.holder;
+    if (h?.pinned && h.runId === key.runId) return;
     if (h === null || h.runId !== key.runId || !h.calls.delete(key.toolUseId)) return;
     this.store((s) => s.deleteLockHold(key.runId, key.toolUseId, this.now(), failed));
     if (h.calls.size === 0) {
       this.grantNext();
       this.onChange();
     }
+  }
+
+  /**
+   * The call `key` leaves a suite running in the background: the run keeps the lock until its turn
+   * ends (`releaseRun`), whatever its calls report meanwhile. A call that holds nothing is ignored.
+   */
+  pin(key: LockKey): void {
+    const h = this.holder;
+    if (h === null || h.runId !== key.runId || !h.calls.has(key.toolUseId)) return;
+    h.pinned = true;
   }
 
   /** The run ended or was interrupted: frees its hold and drops its waiting calls. */

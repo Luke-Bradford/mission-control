@@ -527,8 +527,27 @@ async function listenOnLoopback(): Promise<{
  * curl the hub's bootstrap route with the forged header (#956). It prints `ran`, then the HTTP code
  * and curl's exit code (`000rc=7`: no connection; `rc=126`/`127`: curl never started).
  */
-const loopbackProbe = (port: number) =>
-  `echo ran; /usr/bin/curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/api/operator/bootstrap -H 'sec-fetch-site: same-origin'; echo "rc=$?"`;
+const loopbackProbe = (port: number, hosts: readonly string[] = ["127.0.0.1"]) =>
+  `echo ran; ${hosts
+    .map(
+      (h) =>
+        `/usr/bin/curl -s -m 3 -o /dev/null -w '%{http_code}' http://${h}:${port}/api/operator/bootstrap -H 'Host: 127.0.0.1' -H 'sec-fetch-site: same-origin'; echo "rc=$?"`,
+    )
+    .join("; ")}`;
+
+/**
+ * Every spelling a seat could use for this Mac: the number, the short and decimal forms, the
+ * IPv4-mapped IPv6 form, a trailing-dot name and a public name that resolves to 127.0.0.1. The seat
+ * tests send them all, and none may reach the hub.
+ */
+const LOOPBACK_SPELLINGS = [
+  "127.0.0.1",
+  "2130706433",
+  "127.1",
+  "[::ffff:127.0.0.1]",
+  "localhost.",
+  "localtest.me",
+] as const;
 
 /**
  * Run a process to its end and return what it printed. Never sync: the stand-in hub lives in this
@@ -616,7 +635,7 @@ describe.skipIf(codexCli === null)("a Codex seat cannot reach the hub on loopbac
             "--",
             "/bin/sh",
             "-c",
-            loopbackProbe(hub.port),
+            loopbackProbe(hub.port, LOOPBACK_SPELLINGS),
           ],
           {
             cwd: l.cwd,
@@ -669,7 +688,7 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
       const store = crewPnpmStoreDir(tempRoot, "seat");
       mkdirSync(store, { recursive: true });
       const hub = await listenOnLoopback();
-      api = await startFakeAnthropic(loopbackProbe(hub.port));
+      api = await startFakeAnthropic(loopbackProbe(hub.port, LOOPBACK_SPELLINGS));
       const settings = crewSandboxSettings(input, mode, { command: "/usr/bin/true", timeoutS: 5 });
       let output = "";
       try {

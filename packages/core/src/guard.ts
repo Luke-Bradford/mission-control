@@ -122,7 +122,7 @@ export interface GuardContext {
 export type GuardVerdict =
   | { kind: "allow" }
   /** Take the test lock; `command` is the configured full-suite entry that matched. */
-  | { kind: "lock"; command: string }
+  | { kind: "lock"; command: string; background?: true }
   | { kind: "deny"; rule: GuardRule; text: string };
 
 /** The node the guard hook runs under: a stable path, never a Cellar one. */
@@ -2279,12 +2279,17 @@ export function guardDecision(
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
   let expandedCwd = false;
-  for (const { argv, braces, indirectGit, directories: wrapperDirectories = [] } of lineCommands(
-    e.input.command ?? "",
-    walk,
-  )) {
+  let backgrounded = e.input.run_in_background === true;
+  for (const {
+    argv,
+    braces,
+    indirectGit,
+    background,
+    directories: wrapperDirectories = [],
+  } of lineCommands(e.input.command ?? "", walk)) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
+    if (background) backgrounded = true;
     if (program === TOO_LONG) {
       return { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
     }
@@ -2429,7 +2434,10 @@ export function guardDecision(
   if (gitEnvDenied) return deny("git-env", "git environment override");
   if (githubDenied !== null) return deny("gh-cli", githubDenied);
   if (lock === null) return { kind: "allow" };
-  return { kind: "lock", command: lock };
+  // a suite that keeps running after its call returns holds the lock until the seat's turn ends
+  return walk.lineBackground || backgrounded
+    ? { kind: "lock", command: lock, background: true }
+    : { kind: "lock", command: lock };
 }
 
 export const SECRET_KINDS = [

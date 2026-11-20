@@ -858,8 +858,8 @@ export const SEAT_SANDBOX_ENV = "MC_SEAT_SANDBOX";
  * - Bash returns to the worktree after each command, so a `cd` never moves the working directory
  *   the rules and `--restricted` resolve against (#41);
  * - background Bash is allowed (`run_in_background`, a timeout that moves a command to the
- *   background). Such a call fires its PostToolUse at once, so a suite started that way holds the
- *   test lock only until it starts;
+ *   background). Such a call fires its PostToolUse at once, so the hub keeps the test lock of a
+ *   suite started that way until the seat's turn ends, and never counts it as a passed check;
  * - subprocess credential scrub: Claude removes recognized credentials from Bash, hooks and
  *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls. It
  *   also forces the permission mode to `default`, so a seat's tools must be listed with

@@ -222,6 +222,8 @@ export function createCodexApprover(i: {
           );
           return refuse("full-suite", busy);
         }
+        // a suite left running in the background holds the lock until the turn ends
+        if (verdict.background) i.lock.pin(key);
       }
     }
     if (signal.aborted) return refuse("codex-allowlist");

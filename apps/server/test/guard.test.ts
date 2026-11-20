@@ -1126,6 +1126,48 @@ describe("POST /api/guard/check", () => {
     expect(ends).toEqual([[false, null]]);
   });
 
+  it("keeps the lock after a call left in the background, until the turn ends", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        lockedBy: () => null,
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        dropRun: () => {},
+        lost: () => false,
+        drops: () => [],
+        pending: () => [],
+      },
+    });
+    // a foreground call whose Bash timeout moved it to the background: the Post says so
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, {
+      ...post("a1", "PostToolUse"),
+      tool_input: { command: "pnpm -s test" },
+      exit_code: null,
+      background: true,
+    });
+    expect(ends).toEqual([[false, null]]);
+    expect(lock.state().holder?.seatId).toBe("guido-1");
+    expect(store.lockRuns(0).every((r) => r.outcome !== "pass")).toBe(true);
+    // a suite started in the background holds it from the start, whatever its call reports
+    lock.releaseRun("run-a");
+    expect(lock.state().holder).toBeNull();
+    await check(tokA, pre("a2", "Bash", { command: "pnpm -s test &" }));
+    await check(tokA, {
+      ...post("a2", "PostToolUse"),
+      tool_input: { command: "pnpm -s test &" },
+      exit_code: 0,
+    });
+    expect(lock.state().holder?.seatId).toBe("guido-1");
+    lock.releaseRun("run-a");
+    expect(lock.state().holder).toBeNull();
+  });
+
   it("hands the hook's exit code to the check recorder (#1411)", async () => {
     lock = new TestLock({ now: () => NOW, holds: store });
     await app.close();
@@ -1523,6 +1565,15 @@ describe("hookMain", () => {
       exit_code: 0,
       tool_input: { command: "ls" },
     });
+  });
+
+  it("tells the hub a Bash call moved to the background on its timeout is no exit", async () => {
+    const stdin = stdinFor({
+      hook_event_name: "PostToolUse",
+      tool_response: { interrupted: false, backgroundTaskId: "b1", timedOutAfterMs: 120000 },
+    });
+    await hookMain(stdin, [tokenFile, URL_OK], answer(200, "{}"));
+    expect(JSON.parse(posts[0]?.body ?? "")).toMatchObject({ exit_code: null, background: true });
   });
 
   it("answers a Bash call over 64 KiB itself, without posting: a decision, exit 0", async () => {

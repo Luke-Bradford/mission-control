@@ -674,10 +674,23 @@ describe("guardDecision: the full suite", () => {
     expect(ruleOf(bash("pnpm -s vitest run apps/x.test.ts"))).toBe("allow");
     expect(ruleOf(bash("pnpm -s lint"))).toBe("allow");
   });
+  it.each(["pnpm -s test &", "nohup pnpm -s test &", "tmux new -d 'pnpm -s test'"])(
+    "marks the locked suite %s as background, so its hold outlasts the call",
+    (c) => {
+      expect(guardDecision(bash(c), writer)).toMatchObject({ kind: "lock", background: true });
+    },
+  );
+  it("does not mark a foreground suite as background", () => {
+    expect(guardDecision(bash("pnpm -s test"), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+    });
+  });
   it("locks a suite started with run_in_background", () => {
     expect(guardDecision(bash("pnpm -s test", { run_in_background: true }), writer)).toEqual({
       kind: "lock",
       command: "pnpm -s test",
+      background: true,
     });
   });
   it.each([
@@ -1330,7 +1343,7 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
 
 describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested multiplexers", () => {
   const tooLong = { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
-  const background = { kind: "lock", command: "pnpm -s test" };
+  const background = { kind: "lock", command: "pnpm -s test", background: true };
   const timed = (c: string) => {
     const t0 = performance.now();
     const v = guardDecision(bash(c), writer);
@@ -2547,6 +2560,7 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
     expect(guardDecision(bash("watch tmux new -d 'pnpm -s test'"), writer)).toEqual({
       kind: "lock",
       command: "pnpm -s test",
+      background: true,
     });
   });
 

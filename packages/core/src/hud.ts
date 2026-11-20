@@ -525,7 +525,7 @@ export const GUARD_NONE_TEXT = "Guard: nothing blocked this week.";
 /** Limits set when each seat starts, not refusals the guard records: the refusal counts leave them out. */
 export const RUNTIME_LIMITS = [
   "Build and review seats may use the network, except this Mac's own services (loopback); the web fetch and web search tools are off",
-  "Seats may run background tasks; a full suite run with & or nohup, or handed to a launcher, still takes the test lock",
+  "Seats may run background tasks; a full suite run with & or nohup, or handed to a launcher, still takes the test lock and keeps it until the seat's turn ends",
   "FLIGHT runs with full access, network included",
 ] as const;
 export const GUARD_NOTE = `The guard catches agent mistakes and ordinary spellings, not deliberate evasion. Limits set when each seat starts, separate from the refusal counts above: ${RUNTIME_LIMITS.join("; ")}.`;
