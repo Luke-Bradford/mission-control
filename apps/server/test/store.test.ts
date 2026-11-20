@@ -2044,19 +2044,15 @@ describe("Store", () => {
       it("ranks by findings per touch before cutting to the limit", () => {
         store.upsertRun(run({ id: "author", startedAt: 100 }));
         const many = Array.from({ length: 55 }, (_, i) => `src/busy${i}.ts`);
+        // busy files: 2 findings in 10 touches (0.2); the rare file: 1 finding in 1 touch (1.0)
         const prs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
           mergedPr(n, 150, {
-            files: [...many, "src/rare.ts"].map((path) => ({ path, changeType: "modified" })),
+            files: (n === 1 ? [...many, "src/rare.ts"] : many).map((path) => ({
+              path,
+              changeType: "modified",
+            })),
           }),
         );
-        // busy files: 2 findings in 10 touches (0.2); the rare file: 1 finding in 10 touches (0.1) is
-        // lower, so give it one touch only by listing it in a single PR
-        prs.forEach((p, i) => {
-          if (i > 0)
-            p.files = (p.files as { path: string }[]).filter(
-              (f) => f.path !== "src/rare.ts",
-            ) as never;
-        });
         store.upsertPullRequests("repo", prs, 200);
         round("author", 1, [
           ...many.flatMap((f) => [finding(f), finding(f)]),
