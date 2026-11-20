@@ -423,7 +423,7 @@ describe("renderHudWithPlaywright", () => {
       ...options(fake.playwright),
       operatorToken: "side-secret",
     });
-    const api = await fake.request("GET", "http://127.0.0.1:7420/api/code-health");
+    const api = await fake.request("GET", "http://127.0.0.1:7420/api/board");
     expect(api.continued).toHaveBeenCalledWith({
       headers: { accept: "application/json", [OPERATOR_HEADER]: "side-secret" },
     });
