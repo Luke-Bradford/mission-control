@@ -79,20 +79,21 @@ afterEach(() => {
 });
 
 describe("QA page when nothing waits", () => {
-  it("counts only the review rows that are ready to inspect", async () => {
+  it("counts and lists review rows at every CI state", async () => {
     rows = [
       pr(1, null),
       pr(2, null),
-      pr(3, null),
-      pr(4, null),
-      pr(5, null, "pending"),
-      pr(6, null, "pending"),
+      pr(3, null, "pending"),
+      pr(4, null, "pending"),
+      pr(5, null, "failing"),
+      pr(6, null, "failing"),
     ];
     serve();
     render(<QaReadiness />);
-    expect(await screen.findByText("0 in UAT · 4 in review")).toBeTruthy();
-    expect(screen.getAllByRole("link", { name: /Change [1-4]/ })).toHaveLength(4);
-    expect(screen.queryByRole("link", { name: /Change [5-6]/ })).toBeNull();
+    expect(await screen.findByText("0 in UAT · 6 in review")).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: /Change [1-6]/ })).toHaveLength(6);
+    expect(screen.getAllByText("pending")).toHaveLength(2);
+    expect(screen.getAllByText("failing")).toHaveLength(2);
   });
   it("opens no PR and says so in one line", async () => {
     rows = [pr(3, null)];

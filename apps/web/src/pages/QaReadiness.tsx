@@ -102,7 +102,7 @@ function CurrentQaReadiness() {
   const review = useMemo(
     () =>
       prs
-        .filter((p) => !p.uat && p.ci === "passing")
+        .filter((p) => !p.uat)
         .sort((a, b) => a.createdAt - b.createdAt || a.number - b.number),
     [prs],
   );
@@ -423,7 +423,7 @@ function Detail({
             }
           />
         )}
-        {pageChanges === false && <p>No page changes</p>}
+        {pageChanges === false && <p className="uat-queue-none">No page changes</p>}
         <div className="uat-grid-two uat-tests-grid">
           <Tests data={data} checks={fullPr?.checks ?? []} />
           <Panel title="Rework timeline">

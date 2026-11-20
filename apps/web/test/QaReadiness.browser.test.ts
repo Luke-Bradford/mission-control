@@ -3,7 +3,11 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
+import {
+  qaAcceptanceFixture,
+  qaQuietReviewFixture,
+  qaReviewQueueFixture,
+} from "./qaAcceptanceFixture.ts";
 
 const SHOTS =
   process.env.MC_QA_EVIDENCE_DIR ?? join(process.env.TMPDIR ?? "/tmp", "qa-acceptance-shots");
@@ -11,7 +15,7 @@ const { renderAt } = browserSession();
 const fixture = qaAcceptanceFixture;
 describeRendered("QA acceptance queue in a browser", () => {
   it(
-    "keeps a long queue scrollable without clipping its titles",
+    "keeps a long queue in the page flow without clipping its titles",
     async () => {
       const page = await renderAt({
         page: "test/qaReadinessBrowser.html",
@@ -21,13 +25,43 @@ describeRendered("QA acceptance queue in a browser", () => {
         api: fixture(50),
       });
       const rows = await page.boxes(".uat-queue-row");
-      expect(rows).toHaveLength(50);
+      expect(rows).toHaveLength(54);
       expect(await page.unclipped(".uat-queue-row")).not.toContain(false);
       expect(
         await page.evaluate(() => {
           const list = document.querySelector(".uat-queue-group ul");
-          return !!list && list.scrollHeight > list.clientHeight;
+          return !!list && list.scrollHeight === list.clientHeight;
         }, null),
+      ).toBe(true);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+  it(
+    "keeps six mixed-CI review rows visible at 1920x940",
+    async () => {
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width: 1920,
+        height: 940,
+        search: "?repo=mission-control&pr=1011",
+        colorScheme: "light",
+        api: qaReviewQueueFixture(),
+      });
+      const list = await page.box("[aria-label='Pull requests in review']");
+      expect(
+        await page.evaluate(
+          () => document.querySelector(".uat-queue .sub")?.textContent?.trim(),
+          null,
+        ),
+      ).toBe("0 in UAT · 6 in review");
+      const rows = await page.boxes(".uat-queue-row");
+      expect(rows).toHaveLength(6);
+      expect(
+        rows.every(
+          (row) =>
+            row.y >= list.y && row.y + row.height <= list.y + list.height && row.y + row.height <= 940,
+        ),
       ).toBe(true);
       await page.close();
     },
@@ -73,6 +107,38 @@ describeRendered("QA acceptance queue in a browser", () => {
       await page.click(".uat-actions .uat-send");
       expect(await page.unclipped(".uat-send-form")).toEqual([true]);
       await page.screenshot(join(SHOTS, `qa-uat-send-back-${width}x${height}-${theme}.png`));
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+  it.each(
+    [
+      { width: 1920, height: 940 },
+      { width: 2560, height: 1145 },
+    ].flatMap(({ width, height }) =>
+      ["light", "dark"].map((theme) => ({ width, height, theme: theme as "light" | "dark" })),
+    ),
+  )(
+    "shows no page changes at $width×$height in $theme",
+    async ({ width, height, theme }) => {
+      mkdirSync(SHOTS, { recursive: true });
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width,
+        height,
+        search: "?repo=mission-control&pr=1011",
+        colorScheme: theme,
+        api: qaQuietReviewFixture(),
+      });
+      await page.box(".qa-report-current .uat-queue-none");
+      expect(
+        await page.evaluate(
+          () => document.querySelector(".qa-report-current .uat-queue-none")?.textContent?.trim(),
+          null,
+        ),
+      ).toBe("No page changes");
+      expect(await page.evaluate(() => !!document.querySelector(".uat-pairs"), null)).toBe(false);
+      await page.screenshot(join(SHOTS, `qa-no-page-changes-${width}x${height}-${theme}.png`));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

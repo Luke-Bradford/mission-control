@@ -178,3 +178,28 @@ export function qaAcceptanceFixture(count = 3) {
     },
   };
 }
+
+/** A review-only queue keeps every CI state visible beside the selected PR's details. */
+export function qaReviewQueueFixture() {
+  const fixture = qaAcceptanceFixture(1);
+  const queue = fixture["/api/qa/queue"];
+  const seed = queue.prs[0];
+  queue.prs = ["passing", "passing", "pending", "pending", "failing", "failing"].map(
+    (ci, index) => ({
+      ...seed,
+      number: 1011 + index,
+      title: `Review ${1011 + index}: ${LONG}`,
+      uat: undefined,
+      ci,
+    }),
+  );
+  return fixture;
+}
+
+/** The selected review PR changes only server code, so page evidence remains quiet. */
+export function qaQuietReviewFixture() {
+  const fixture = qaReviewQueueFixture();
+  const path = `/api/qa/uat/mission-control/1011?head=${SHA}`;
+  fixture[path] = { ...fixture[path], files: ["apps/server/src/api.ts"] };
+  return fixture;
+}
