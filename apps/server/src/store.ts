@@ -4017,7 +4017,7 @@ export class Store {
       .map(([file, n]) => ({ file, findings: n, touches: touched.get(file) ?? 0 }))
       .filter((r) => r.findings > 0)
       .sort((a, b) => {
-        if ((a.touches > 0) !== (b.touches > 0)) return a.touches > 0 ? -1 : 1;
+        if (a.touches > 0 !== b.touches > 0) return a.touches > 0 ? -1 : 1;
         const ratio = a.touches > 0 ? b.findings * a.touches - a.findings * b.touches : 0;
         return ratio || b.findings - a.findings || a.file.localeCompare(b.file);
       })
