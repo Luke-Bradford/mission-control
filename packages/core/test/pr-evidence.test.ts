@@ -21,8 +21,6 @@ import {
 
 const ALL = [
   ...Object.keys(HUD_PAGE_PATHS),
-  "readiness",
-  "hotspots",
   "setup_repos",
   "setup_loops",
   "setup_accounts",
@@ -37,13 +35,9 @@ describe("prEvidenceAffectedPages", () => {
     expect(
       prEvidenceAffectedPages(["apps/web/src/pages/MapPage.tsx", "apps/web/src/comms/older.ts"]),
     ).toEqual(["map", "comms"]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/Audit.tsx"])).toEqual([
-      "audit",
-      "readiness",
-      "hotspots",
-    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Audit.tsx"])).toEqual(["audit"]);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/QaReadiness.tsx"])).toEqual(["qa"]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaHotspots.tsx"])).toEqual(["hotspots"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaHotspots.tsx"])).toEqual(["qa"]);
     expect(prEvidenceAffectedPages(["apps/web/src/setup/Accounts.tsx"])).toEqual([
       "setup",
       "setup_repos",
@@ -261,12 +255,8 @@ describe("prEvidenceUncatalogued: a page no screenshot can show", () => {
   it("maps the pages that have an address, and aliases to their host page", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/pages/Needs.tsx"])).toEqual(["needs"]);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/CommsChartPage.tsx"])).toEqual(ALL);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual([
-      "audit",
-      "readiness",
-      "hotspots",
-    ]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["hotspots"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual(["audit"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["qa"]);
   });
 
   it("lifts the hold when the PR also changes the catalogue, which the hub reads from main", () => {

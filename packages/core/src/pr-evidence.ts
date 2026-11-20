@@ -9,11 +9,8 @@ export const EVIDENCE_SCHEMES = ["light", "dark"] as const;
 export type EvidenceScheme = (typeof EVIDENCE_SCHEMES)[number];
 /** The viewport of every evidence screenshot. */
 export const EVIDENCE_VIEWPORT = { width: 1600, height: 1000 } as const;
-/** Audit has three independent views; a shot of its default tab cannot prove the others. */
 export const EVIDENCE_PAGE_PATHS = {
   ...HUD_PAGE_PATHS,
-  readiness: "/audit?evidence-tab=readiness",
-  hotspots: "/audit?evidence-tab=hotspots",
   setup_repos: "/setup/repos",
   setup_loops: "/setup/loops",
   setup_accounts: "/setup/accounts",
@@ -90,8 +87,8 @@ const PAGE_DIRS: Record<string, EvidencePage> = {
 const PAGE_ALIASES: Record<string, EvidencePage> = {
   qareadiness: "qa",
   "qa-readiness": "qa",
-  qahotspots: "hotspots",
-  "qa-hotspots": "hotspots",
+  qahotspots: "qa",
+  "qa-hotspots": "qa",
   legacyaudit: "audit",
 };
 
@@ -150,10 +147,6 @@ export function prEvidenceAffectedPages(
   const hit = new Set<EvidencePage>();
   const add = (page: EvidencePage) => {
     hit.add(page);
-    if (page === "audit") {
-      hit.add("readiness");
-      hit.add("hotspots");
-    }
     if (page === "setup") for (const p of EVIDENCE_PAGES) if (p.startsWith("setup_")) hit.add(p);
   };
   for (const path of paths) {
@@ -308,17 +301,6 @@ export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string)
     ...demoLines,
   ].join("\n");
 }
-
-/**
- * The labels the evidence capture clicks on the Audit page. The page renders them and the capture
- * finds its controls by them, so each lives here once; a rename on either side then fails a test
- * (apps/server/test/qa-labels.test.ts) instead of timing out a live capture.
- */
-export const QA_VIEW_LABEL = "QA view";
-export const QA_DISCLOSURE_LABEL = "Workflow history and earlier proposals";
-/** The button text of each Audit tab a capture selects. */
-export const QA_TAB_LABELS = { readiness: "PR readiness", hotspots: "Hotspots" } as const;
-export type QaTab = keyof typeof QA_TAB_LABELS;
 
 /**
  * What the Demo render relies on in the web app: the sessionStorage key that turns Demo on, and the

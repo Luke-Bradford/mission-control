@@ -8,13 +8,7 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  QA_DISCLOSURE_LABEL,
-  QA_TAB_LABELS,
-  QA_VIEW_LABEL,
-  type Run,
-  type SeatSessionRow,
-} from "@mc/core";
+import { type Run, type SeatSessionRow } from "@mc/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -76,50 +70,6 @@ const html = (body: string, script = "") => {
 let hub: Awaited<ReturnType<typeof listen>>;
 let other: Awaited<ReturnType<typeof listen>>;
 const ready: string[] = [];
-/** What the fixture Audit page was clicked on: the disclosure, then a tab. */
-const clicks: string[] = [];
-
-/**
- * The Audit page as the capture sees it, built from the shared labels: the QA view with its tabs
- * is drawn 1.2 s after load (a lazy page), behind a disclosure button unless `old` (the older
- * baseline, which shows the view at once). A click is reported to /api/click.
- */
-const auditScript = (old: boolean, tall: boolean): string => `
-if (${tall}) {
-  // a block taller than the 1000 px viewport above the view, as Code Health is on the real page
-  const filler = document.createElement('div');
-  filler.style.height = '1500px';
-  document.querySelector('main').append(filler);
-}
-const report = (what) => fetch('/api/click?what=' + encodeURIComponent(what));
-const drawView = () => {
-  // as on the real page: a small control in a toolbar, inside a section with a long tab body
-  const section = document.createElement('section');
-  const toolbar = document.createElement('div');
-  const view = document.createElement('span');
-  view.setAttribute('role', 'group');
-  view.setAttribute('aria-label', ${JSON.stringify(QA_VIEW_LABEL)});
-  for (const label of ${JSON.stringify(Object.values(QA_TAB_LABELS))}) {
-    const tab = document.createElement('button');
-    tab.textContent = label;
-    tab.setAttribute('aria-pressed', 'false');
-    tab.onclick = () => { tab.setAttribute('aria-pressed', 'true'); report('tab:' + label); };
-    view.append(tab);
-  }
-  toolbar.append(view);
-  const body = document.createElement('div');
-  body.style.height = '2000px';
-  section.append(toolbar, body);
-  document.querySelector('main').append(section);
-  window.addEventListener('scroll', () => report('top:' + Math.round(section.getBoundingClientRect().top)));
-};
-setTimeout(() => {
-  if (${old}) return drawView();
-  const open = document.createElement('button');
-  open.textContent = ${JSON.stringify(QA_DISCLOSURE_LABEL)};
-  open.onclick = () => { report('disclosure'); drawView(); };
-  document.querySelector('main').append(open);
-}, 1200);`;
 
 const startServers = async (): Promise<void> => {
   other = await listen((_req, res) => res.end("off-hub"));
@@ -145,16 +95,6 @@ const startServers = async (): Promise<void> => {
         );
       case "/api/slow":
         return void setTimeout(() => res.end("{}"), 600);
-      case "/audit":
-        return send(
-          html(
-            "<h1>Audit</h1>",
-            auditScript(url.searchParams.has("old"), url.searchParams.has("tall")),
-          ),
-        );
-      case "/api/click":
-        clicks.push(url.searchParams.get("what") ?? "");
-        return void res.end("{}");
       case "/api/beacon":
         ready.push(url.search);
         return void res.end("{}");
@@ -271,41 +211,6 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
       expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
       // the beacon is sent only after the placeholder was replaced; the capture came after it
       expect(ready).toEqual(["?page=map"]);
-    }, 90_000);
-
-    it("opens the Audit disclosure, once the lazy page has drawn it, and selects the tab", async () => {
-      for (const [tab, label] of Object.entries(QA_TAB_LABELS)) {
-        clicks.length = 0;
-        const png = await render(`/audit?evidence-tab=${tab}`);
-        expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
-        expect(clicks.filter((c) => c === "disclosure" || c.startsWith("tab:"))).toEqual([
-          "disclosure",
-          `tab:${label}`,
-        ]);
-      }
-    }, 150_000);
-
-    it("scrolls the QA section to the top of the viewport, below a block taller than the viewport", async () => {
-      clicks.length = 0;
-      await render("/audit?evidence-tab=readiness&tall=1");
-      await expect
-        .poll(() =>
-          Number(
-            clicks
-              .filter((c) => c.startsWith("top:"))
-              .at(-1)
-              ?.slice(4) ?? 9999,
-          ),
-        )
-        .toBeLessThan(200);
-    }, 90_000);
-
-    it("selects the tab without the disclosure on an older baseline that shows the view at once", async () => {
-      clicks.length = 0;
-      await render("/audit?evidence-tab=hotspots&old=1");
-      expect(clicks.filter((c) => c === "disclosure" || c.startsWith("tab:"))).toEqual([
-        `tab:${QA_TAB_LABELS.hotspots}`,
-      ]);
     }, 90_000);
 
     it("refuses a redirect off the hub and never reaches the other server", async () => {
