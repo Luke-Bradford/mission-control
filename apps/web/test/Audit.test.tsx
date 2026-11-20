@@ -235,27 +235,29 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
     expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
   }
   expect(
-    screen.getByRole("link", { name: "Long runner · 9h 0m · run/alpha" }).getAttribute("href"),
+    screen.getByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ }).getAttribute("href"),
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(screen.getByRole("link", { name: /PR #701/i }).getAttribute("href")).toBe(
     "/board/mission-control",
   );
   expect(
-    screen.getByRole("link", { name: "Death loop · 4 parks · run/death" }).getAttribute("href"),
+    screen.getByRole("link", { name: "Death loop · 4 parks · retro-cx" }).getAttribute("href"),
   ).toBe("/agent/retro-cx?trace=run%2Fdeath");
   expect(
-    screen.getByRole("link", { name: "Rework · 3 rounds · run/rework" }).getAttribute("href"),
+    screen.getByRole("link", { name: "Rework · 3 rounds · guido-cx" }).getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Frework");
   expect(
     screen
-      .getByRole("link", { name: "Guard refusal · no-network · 8 · run/alpha" })
+      .getByRole("link", { name: "Guard refusal · no-network · 8 · inco-cx" })
       .getAttribute("href"),
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(
     screen
-      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · run/expensive" })
+      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · guido-cx" })
       .getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Fexpensive");
+  for (const link of screen.getAllByRole("link"))
+    expect(link.textContent, "no raw run id in link text").not.toMatch(/run\//);
   expect(screen.getByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
   expect(
     screen.getByText(
@@ -389,7 +391,7 @@ it("does not present stale, observed-loop, or FLIGHT watch runs as improvements"
   });
   render(<Audit />);
 
-  await screen.findByRole("link", { name: "Long runner · 9h 0m · run/alpha" });
+  await screen.findByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ });
   expect(screen.queryByText(/run\/stale/)).toBeNull();
   expect(screen.queryByText(/run\/observed/)).toBeNull();
   expect(screen.queryByText(/run\/watch/)).toBeNull();

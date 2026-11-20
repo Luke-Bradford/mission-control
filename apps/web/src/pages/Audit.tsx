@@ -22,6 +22,10 @@ type AuditData = Omit<AuditView, "longRunners"> & {
   longRunners: (AuditView["longRunners"][number] & { actionable?: boolean })[];
 };
 
+/** A run's start as the operator's local date and time, for naming a run without its internal id. */
+const startedLabel = (at: number): string =>
+  `started ${new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+
 const changes = (s: AuditPrSize): number => s.additions + s.deletions;
 const logPercentOfMax = (value: number, max: number): number =>
   (Math.log1p(value) / Math.log1p(max)) * 100;
@@ -129,14 +133,17 @@ function Improvements({
   const findings = [
     ...actionable(audit.longRunners.filter((row) => row.actionable !== false)).map((x) => ({
       label: `Long runner · ${elapsed(x.durationMs)}`,
+      started: startedLabel(x.startedAt),
       row: x,
     })),
     ...actionable(audit.deathLoops).map((x) => ({
       label: `Death loop · ${x.parks ?? 0} parks`,
+      started: null,
       row: x,
     })),
     ...actionable(audit.reworkRounds).map((x) => ({
       label: `Rework · ${plural(x.rounds ?? 0, "round")}`,
+      started: null,
       row: x,
     })),
   ];
@@ -147,18 +154,18 @@ function Improvements({
           <RunLink
             key={`${x.label}:${x.row.runId}`}
             row={x.row}
-          >{`${x.label} · ${x.row.runId}`}</RunLink>
+          >{`${x.label} · ${x.row.agentId}${x.started ? ` · ${x.started}` : ""}`}</RunLink>
         ))}
         {actionable(audit.refusals).map((x) => (
           <RunLink key={`${x.agentId}:${x.runId}:${x.rule}`} row={x}>
-            {`Guard refusal · ${x.rule} · ${x.count}${x.runId ? ` · ${x.runId}` : ""}`}
+            {`Guard refusal · ${x.rule} · ${x.count} · ${x.agentId}`}
           </RunLink>
         ))}
         {actionable(audit.spendOutliers).map((x) => (
           <RunLink
             key={x.runId}
             row={x}
-          >{`Spend outlier · ${x.ticket ?? "no ticket"} · ${cost(x.costUsd)} · ${x.runId}`}</RunLink>
+          >{`Spend outlier · ${x.ticket ?? "no ticket"} · ${cost(x.costUsd)} · ${x.agentId}`}</RunLink>
         ))}
         {findings.length +
           actionable(audit.refusals).length +
