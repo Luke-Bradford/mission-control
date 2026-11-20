@@ -200,6 +200,20 @@ describe("hudRenderRequest", () => {
 });
 
 describe("renderHudWithPlaywright", () => {
+  it("photographs Audit with a legacy evidence-tab without waiting for a QA view or clicking", async () => {
+    for (const tab of ["readiness", "hotspots"]) {
+      const url = `http://127.0.0.1:7420/audit?evidence-tab=${tab}`;
+      const fake = fakePlaywright({ pageUrl: url });
+      // the page has no QA view or disclosure: waiting for either would time out
+      fake.page.waitForSelector.mockImplementation(async (selector: string) => {
+        if (selector.includes("QA view") || selector.includes("Workflow history"))
+          throw Object.assign(new Error("Timeout 30000ms exceeded."), { name: "TimeoutError" });
+      });
+      await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
+      expect(fake.page.click).not.toHaveBeenCalled();
+      expect(fake.page.screenshot).toHaveBeenCalledOnce();
+    }
+  });
   it("opens the page in the colour scheme it is asked for, and in none when it is not", async () => {
     const dark = fakePlaywright();
     await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
