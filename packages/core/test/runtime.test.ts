@@ -141,6 +141,21 @@ describe("crewCliArgs", () => {
     expect(a).not.toContain("Bash(wget:*)");
   });
 
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "defines WebFetch and WebSearch for a %s seat and does not disallow them",
+    (mode) => {
+      const a = crewCliArgs({ ...base, mode });
+      const tools = a[a.indexOf("--tools") + 1].split(",");
+      const denied = a.slice(a.indexOf("--disallowedTools") + 1);
+      for (const t of ["WebFetch", "WebSearch"]) {
+        expect(tools).toContain(t);
+        expect(denied).not.toContain(t);
+      }
+      expect(DENIED_TOOLS).not.toContain("WebFetch");
+      expect(DENIED_TOOLS).not.toContain("WebSearch");
+    },
+  );
+
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
     // FLIGHT decides fix or park on a waste alarm; without this grant a review it holds never runs
@@ -178,9 +193,13 @@ describe("crewCliArgs", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
-    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
+    expect(w[w.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebFetch,WebSearch",
+    );
     const r = crewCliArgs({ ...base, mode: "read-only" });
-    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill");
+    expect(r[r.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,TodoWrite,Bash,Skill,WebFetch,WebSearch",
+    );
   });
 
   it("lets every seat invoke the repo's skills from a read-only plugin folder (#1051)", () => {
@@ -946,7 +965,9 @@ describe("scratch mode", () => {
     ]) {
       expect(allowed).not.toContain(t);
     }
-    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
+    expect(a[a.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebFetch,WebSearch",
+    );
   });
 
   it("scratch allows exactly its tools, Edit and Write anchored to the worktree", () => {
@@ -960,6 +981,8 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
+      "WebFetch",
+      "WebSearch",
       "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",

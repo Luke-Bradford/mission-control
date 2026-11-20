@@ -14,7 +14,6 @@ import {
   isProtectedPath,
   MC_MCP_SERVER,
   pathInArea,
-  SEAT_DENIED_HOSTS,
   sandboxReadDenies,
   tomlString,
 } from "@mc/core";
@@ -110,11 +109,9 @@ export function codexSeatConfig(
     // this says so explicitly rather than rely on that default (docs/spikes/2026-10-24-codex-seat-confinement.md).
     grant(CODEX_PROJECT_DIR, "read"),
     `[permissions.${CODEX_SEAT_PROFILE}.network]`,
-    "enabled = true",
-    `[permissions.${CODEX_SEAT_PROFILE}.network.domains]`,
-    // the whole internet except this Mac's own services (the hub trusts loopback callers)
-    `${tomlString("*")} = ${tomlString("allow")}`,
-    ...SEAT_DENIED_HOSTS.map((host) => `${tomlString(host)} = ${tomlString("deny")}`),
+    // Off, unlike a Claude seat: Codex's domain rules cannot keep loopback closed in every spelling
+    // (127.1, 2130706433, a public name that resolves to 127.0.0.1), and the hub trusts loopback callers
+    "enabled = false",
     "",
   ].join("\n");
 }

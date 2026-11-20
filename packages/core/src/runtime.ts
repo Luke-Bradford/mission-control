@@ -332,6 +332,8 @@ export const WRITER_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebFetch",
+  "WebSearch",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.prBody,
@@ -351,6 +353,8 @@ export const READONLY_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebFetch",
+  "WebSearch",
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -369,6 +373,8 @@ export const SCRATCH_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebFetch",
+  "WebSearch",
   MC_TOOLS.callFlight,
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
@@ -397,8 +403,19 @@ export const WRITER_BUILTINS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebFetch",
+  "WebSearch",
 ] as const;
-export const READONLY_BUILTINS = ["Read", "Grep", "Glob", "TodoWrite", "Bash", "Skill"] as const;
+export const READONLY_BUILTINS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "TodoWrite",
+  "Bash",
+  "Skill",
+  "WebFetch",
+  "WebSearch",
+] as const;
 
 /** Where a repo keeps its skills; the hub builds a seat's plugin folder from this path at the run's commit. */
 export const SKILLS_DIR = ".claude/skills";
@@ -499,7 +516,7 @@ export const FLIGHT_FULL_BUILTINS = [
 
 /**
  * No git writes and no GitHub writes from a crew process: commits, pushes and PRs go
- * through the mc tools. Network is open (curl and wget work in Bash); the CLI's own web tools stay off. `git add` and `git commit` could only fail in the sandbox now; denying
+ * through the mc tools. Network is open: curl, wget, WebFetch and WebSearch work. `git add` and `git commit` could only fail in the sandbox now; denying
  * them by name says so before they run.
  */
 export const DENIED_TOOLS = [
@@ -517,8 +534,6 @@ export const DENIED_TOOLS = [
   // sandbox's denyRead on Library/Keychains
   "Bash(security:*)",
   "Bash(/usr/bin/security:*)",
-  "WebFetch",
-  "WebSearch",
   "Task",
 ] as const;
 

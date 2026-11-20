@@ -2432,10 +2432,13 @@ export function guardDecision(
       githubDenied ??= ghText(args);
     }
     // a suite handed to a launcher, started in the background or in a multiplexer still takes the lock
+    const launched = launchedSuite(argv, e.input.command ?? "", ctx.fullSuite);
     const suite =
-      launchedSuite(argv, e.input.command ?? "", ctx.fullSuite) ??
+      launched ??
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
+    // a launcher runs its suite after this call returns, so the hold must outlive the call
+    if (launched !== null) backgrounded = true;
     if (suite !== null) lock ??= suite;
   }
   if (gitEnvDenied) return deny("git-env", "git environment override");

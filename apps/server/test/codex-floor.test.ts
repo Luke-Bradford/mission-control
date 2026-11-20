@@ -15,7 +15,6 @@ import {
   codexLineCommands,
   PNPM_STORE_ENV,
   SANDBOX_DENY_READ_HOME,
-  SEAT_DENIED_HOSTS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
@@ -170,11 +169,8 @@ describe("codexSeatConfig", () => {
     expect(config).toContain(
       '[permissions.mc_seat.filesystem.":workspace_roots"]\n"."="write"\n".git"="read"\n".codex"="read"',
     );
-    expect(config).toContain("[permissions.mc_seat.network]\nenabled = true");
-    // the internet is open, this Mac's own services (the hub on loopback) are not
-    expect(config).toContain('[permissions.mc_seat.network.domains]\n"*" = "allow"');
-    for (const host of SEAT_DENIED_HOSTS) expect(config).toContain(`"${host}" = "deny"`);
-    expect(SEAT_DENIED_HOSTS).toContain("127.0.0.0/8");
+    // Codex's network stays off: its domain rules cannot keep the hub's loopback closed
+    expect(config).toContain("[permissions.mc_seat.network]\nenabled = false");
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
   });
 

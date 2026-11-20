@@ -713,7 +713,7 @@ What each seat's process starts with:
     cannot poison dependencies used by another seat or by the hub.
     but are not an isolation boundary: one seat's code can change another seat's store.
 
-  The sandbox allows the network (never loopback or link-local: the hub stays unreachable), and the secret scan at push time is the backstop for anything a seat
+  The Claude sandbox allows the network (never loopback or link-local: the hub stays unreachable); a Codex seat's profile keeps the network off, because its domain rules cannot keep loopback closed in every spelling. The secret scan at push time is the backstop for anything a seat
   copies into its branch.
 - **The repo's CLAUDE.md from the base.** The prompt file takes `CLAUDE.md` from origin's default
   branch as the run started, read from hash-verified objects, never from the worktree the seat
@@ -913,7 +913,7 @@ validation commands, named in the brief, not an allowlist. What holds a seat is 
 hard gates (spec: [`2026-10-26-outcome-based-seat-guards.md`](superpowers/specs/2026-10-26-outcome-based-seat-guards.md)):
 
 - **Sandbox:** no secrets, no home folder and no other seat's worktree (OS sandbox for Claude, the
-  permission profile for Codex), and no network.
+  permission profile for Codex), and no loopback: a Claude seat may use the network, a Codex seat stays offline.
 - **Area:** a writer's Edit and Write stay in its area and off the protected files, and `mc commit`
   refuses changes outside it; shell commands can touch other files in the worktree, so the seat
   reverts those before committing. FLIGHT and a read-only RETRO cannot write their checkout; a

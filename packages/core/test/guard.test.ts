@@ -1295,6 +1295,19 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each([
+    "launchctl submit -l x -- pnpm -s test",
+    "echo 'pnpm -s test' | at now",
+    "batch <<< 'pnpm -s test'",
+    "ssh -f host pnpm -s test",
+    "printf 'pnpm -s test\\n' | crontab -",
+  ])("keeps the lock past the call for a suite a launcher runs later: %s", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
+    });
+  });
+  it.each([
     "crontab -l",
     "launchctl list",
     "ssh host pnpm -s test",

@@ -597,9 +597,11 @@ describe("the loopback probe itself", () => {
   });
 });
 
-// The Codex seat's network is open but not to loopback: its profile denies those hosts, and the hub
-// refuses a thread whose thread/start does not report `sandbox.networkAccess:true`
-// (apps/server/src/runtime/codex-session.ts). This runs the probe through the seat's own profile.
+// The Codex seat's live sandbox state has network off: the hub refuses a thread whose
+// thread/start does not report `sandbox.networkAccess:false` (apps/server/src/runtime/codex-session.ts),
+// and the spike's app-server turn saw `curl http://127.0.0.1:7420/` fail with exit 7
+// (docs/spikes/2026-10-24-codex-seat-confinement.md). This runs the probe through the seat's own
+// profile, whose `[permissions.<profile>.network] enabled = false` `codex sandbox -P` applies.
 describe.skipIf(codexCli === null)("a Codex seat cannot reach the hub on loopback (#956)", () => {
   let l: Layout;
   beforeEach(() => {

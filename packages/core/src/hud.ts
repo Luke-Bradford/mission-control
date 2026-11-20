@@ -524,7 +524,7 @@ export const guardSummary = (total: number, fresh: number): string =>
 export const GUARD_NONE_TEXT = "Guard: nothing blocked this week.";
 /** Limits set when each seat starts, not refusals the guard records: the refusal counts leave them out. */
 export const RUNTIME_LIMITS = [
-  "Build and review seats may use the network, except this Mac's own services (loopback); the web fetch and web search tools are off",
+  "Claude seats may use the network, except this Mac's own services (loopback); Codex seats stay offline",
   "Seats may run background tasks; a full suite run with & or nohup, or handed to a launcher, still takes the test lock and keeps it until the seat's turn ends",
   "FLIGHT runs with full access, network included",
 ] as const;
