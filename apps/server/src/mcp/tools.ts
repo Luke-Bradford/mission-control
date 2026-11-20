@@ -2613,7 +2613,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       const ciRuling = currentLoop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
       if (!fresh && !reviewReply && !refusedRetry && !ciRuling) {
         const hold = currentLoop.mergeHold;
-        if (hold?.by === "FLIGHT" && newest?.sha === pushed?.sha && newest.at <= hold.at)
+        if (
+          hold?.by === "FLIGHT" &&
+          newest !== null &&
+          newest.sha === pushed?.sha &&
+          newest.at <= hold.at
+        )
           return { text: evidenceFlightHoldText(hold.reason), isError: true };
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
