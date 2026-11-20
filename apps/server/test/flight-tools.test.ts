@@ -2498,7 +2498,7 @@ describe("start_seat", () => {
             number: 9,
             title: "t",
             url: "u",
-            branch: "feature/7-x",
+            branch: "hand/9-x",
             ticket: "mc#7",
             state: "open",
             isDraft: false,
@@ -2517,7 +2517,7 @@ describe("start_seat", () => {
       expect(startCalls).toEqual([]);
     });
 
-    it("starts a ticket whose open PR an ended run recorded, and still refuses one no run recorded", async () => {
+    it("starts a ticket whose open PR an ended run recorded", async () => {
       const pr = {
         repoId: "mc",
         number: 9,
@@ -2537,7 +2537,6 @@ describe("start_seat", () => {
       };
       store.upsertPullRequests("mc", [pr], NOW);
       board(sc(7, { labels: ["area:server"], status: "In progress" }));
-      expect(await start()).toEqual(refused(wrongColumnText("mc#7", "In progress")));
       store.upsertRun(
         run("r-old", "guido-2", {
           repoId: "mc",
@@ -2546,6 +2545,42 @@ describe("start_seat", () => {
           status: "failed",
           loop: { ...NEW_LOOP, prNumber: 9 },
         }),
+      );
+      const r = (await start()) as { isError?: boolean };
+      expect(r.isError).toBeUndefined();
+      expect(startCalls.length).toBe(1);
+    });
+
+    it("carries on an open PR on the ticket's branch that no run recorded, unless a run is live", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      store.upsertRun(run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: null }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
+      store.upsertRun(
+        run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: NOW, status: "failed" }),
       );
       const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
