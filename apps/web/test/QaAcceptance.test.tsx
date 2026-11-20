@@ -204,6 +204,7 @@ describe("QA acceptance", () => {
     },
   );
   it("distinguishes a failed evidence read from a genuine missing capture and offers retry", async () => {
+    details = { ...details, files: ["apps/web/src/App.tsx"] };
     evidenceFails = true;
     await ready();
     expect(await screen.findByText(/Screenshot evidence is unavailable/)).toBeTruthy();
