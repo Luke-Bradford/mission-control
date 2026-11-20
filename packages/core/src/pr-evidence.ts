@@ -153,7 +153,8 @@ export function prEvidenceAffectedPages(
   const add = (page: EvidencePage) => {
     hit.add(page);
     for (const family of ["setup", "telemetry"])
-      if (page === family) for (const p of EVIDENCE_PAGES) if (p.startsWith(`${family}_`)) hit.add(p);
+      if (page === family)
+        for (const p of EVIDENCE_PAGES) if (p.startsWith(`${family}_`)) hit.add(p);
   };
   for (const path of paths) {
     if (!path.startsWith(WEB_PREFIX) || TEST_FILE.test(path)) continue;
