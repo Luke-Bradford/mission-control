@@ -52,7 +52,7 @@ it.each(Array.from({ length: 25 }, (_, i) => i + 1))(
     expect(states).toContain("stalled");
     expect(states).toContain("stopped");
     expect(states).toContain("error");
-    expect(rows().some((r) => r.loop?.parked?.startsWith("merge held by"))).toBe(true);
+    expect(rows().some((r) => r.loop?.hold?.reason?.startsWith("merge held by"))).toBe(true);
     expect(rows().some((r) => r.loop?.tries?.n === 2 && r.loop.step === "review")).toBe(true);
     expect(rows().find((r) => r.run?.status === "failed")?.hudState).toBe("error");
     expect((s.api["/api/limits"] as LimitRow[]).some((l) => l.used >= l.stopAt)).toBe(true);

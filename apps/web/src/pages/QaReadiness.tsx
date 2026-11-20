@@ -321,18 +321,19 @@ function Detail({
     path: `/api/repos/${enc(pr.repoId)}/prs/${pr.number}?head=${enc(pr.headSha ?? "")}`,
     topic: "boards",
   });
+  const detailMatches = detail.data?.sha === pr.headSha;
+  const fullMatches = full.data?.headSha === pr.headSha;
+  const data = detailMatches ? detail.data : undefined;
+  const fullPr = fullMatches ? full.data : undefined;
+  const pageChanges = data?.files?.some((file) => file.startsWith("apps/web/"));
   const evidence = useResource<EvidenceManifest>(
-    pr.headSha
+    pr.headSha && pageChanges === true
       ? {
           path: `/api/prs/${pr.number}/evidence?repo=${enc(pr.repoId)}&sha=${enc(pr.headSha)}`,
           topic: QA_TOPICS,
         }
       : null,
   );
-  const detailMatches = detail.data?.sha === pr.headSha;
-  const fullMatches = full.data?.headSha === pr.headSha;
-  const data = detailMatches ? detail.data : undefined;
-  const fullPr = fullMatches ? full.data : undefined;
   const moved =
     (detail.data !== undefined && !detailMatches) || (full.data !== undefined && !fullMatches);
   const disabled =
@@ -408,16 +409,19 @@ function Detail({
         awaiting={awaiting}
         ticket={pr.ticket}
       >
-        <Pairs
-          pr={pr}
-          manifest={pairs}
-          loading={evidence.loading}
-          error={
-            evidence.error instanceof ApiError && evidence.error.status === 404
-              ? null
-              : evidence.error
-          }
-        />
+        {pageChanges === true && (
+          <Pairs
+            pr={pr}
+            manifest={pairs}
+            loading={evidence.loading}
+            error={
+              evidence.error instanceof ApiError && evidence.error.status === 404
+                ? null
+                : evidence.error
+            }
+          />
+        )}
+        {pageChanges === false && <p className="uat-queue-none">No page changes</p>}
         <div className="uat-grid-two uat-tests-grid">
           <Tests data={data} checks={fullPr?.checks ?? []} />
           <Panel title="Rework timeline">
@@ -452,20 +456,17 @@ function Detail({
           <div className="pb uat-stack">
             <p>
               {data?.files?.length
-                ? `${plural(data.files.length, "changed file")}. Review code risk in Audit.`
+                ? plural(data.files.length, "changed file")
                 : "Changed paths have not been captured."}
             </p>
             {data?.files?.length ? (
-              <>
-                <ul className="uat-files">
-                  {data.files.slice(0, 6).map((file) => (
-                    <li key={file} title={file}>
-                      {file}
-                    </li>
-                  ))}
-                </ul>
-                <a href="/audit?tab=risk">Open code risk in Audit</a>
-              </>
+              <ul className="uat-files">
+                {data.files.slice(0, 6).map((file) => (
+                  <li key={file} title={file}>
+                    {file}
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </div>
         </Panel>

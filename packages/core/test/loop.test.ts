@@ -848,7 +848,7 @@ describe("state step", () => {
       reconcile(
         snap(
           { costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } },
-          { phase: "parked", parked },
+          { phase: "parked", hold: { ...parked, worktree: null, wake: false } },
         ),
       ).loop.hold,
     ).toMatchObject({ ...parked, ended: true });

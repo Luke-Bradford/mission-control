@@ -49,18 +49,6 @@ describe("Demo sub-views", () => {
     expect(document.body.textContent).toMatch(/PR #/);
   });
 
-  it("QA: opens Audit code risk for a PR's files", async () => {
-    await at("/qa");
-    await clickText(/open code risk in audit/i);
-    clean();
-  });
-
-  it.each([/code risk/i, /test health/i, /review quality/i])("Audit tab %s", async (name) => {
-    await at("/audit");
-    await clickText(name);
-    clean();
-  });
-
   it("Flight: status, doing now, blockers and recent decisions on one page", async () => {
     await at("/flight");
     await waitFor(() => {
@@ -153,22 +141,6 @@ describe("Demo pages keep moving where a person looks", () => {
 });
 
 describe("Demo choices end in data", () => {
-  it("Audit: every repository", async () => {
-    await at("/audit");
-    const select = await waitFor(() => {
-      const found = [...document.querySelectorAll<HTMLSelectElement>("main select")].find((e) =>
-        [...e.options].some((o) => o.value === "site-builder"),
-      );
-      if (!found) throw new Error("no repo picker");
-      return found;
-    });
-    for (const option of [...select.options]) {
-      await act(async () => void fireEvent.change(select, { target: { value: option.value } }));
-      await settle();
-      clean();
-    }
-  });
-
   it("QA history: every repository, and a saved report's link", async () => {
     await at("/qa?view=history");
     const select = await waitFor(() => {

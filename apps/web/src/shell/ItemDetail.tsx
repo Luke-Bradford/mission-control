@@ -49,7 +49,6 @@ import {
   useImageViewer,
 } from "../needs/Materials.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
-import { PreviewOpener } from "../needs/PreviewFrame.tsx";
 import { titleOf } from "../needs/QuestionBand.tsx";
 import {
   CATCH_UP_LABEL,
@@ -359,7 +358,6 @@ export function ItemDetail({
   if (key === null) return null;
   const p = page ? "needs" : "ds";
   const flightSeat = flight === undefined ? undefined : flight.seat;
-  const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
   const briefBlock = (
     <div className="pb" id={`${p}Brief`}>
       {!item || holding ? (
@@ -583,7 +581,6 @@ export function ItemDetail({
             {answerBlock}
             {replyBlock}
           </div>
-          {previewBlock}
           <PlanAndMockups item={item} open={viewer.open} {...materials} />
           {viewer.element}
           <Pictures item={item} />
@@ -607,7 +604,6 @@ export function ItemDetail({
   }
   return (
     <>
-      {previewBlock}
       {briefBlock}
       {answerBlock}
       {replyBlock}

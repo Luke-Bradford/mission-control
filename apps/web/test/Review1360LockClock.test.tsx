@@ -21,7 +21,7 @@ it("updates the accessible State lock-wait duration without rebuilding the roste
   const row = seatRow({
     id: "lock-review",
     hudState: "running",
-    loop: { phase: "working", text: "Working", prNumber: null, parked: null, wait: "lock" },
+    loop: { phase: "working", text: "Working", prNumber: null, hold: null, wait: "lock" },
   });
   const fetch = stubFetch({
     "/api/crew?shape=summary": { rows: [row], firstRunToday: null },
@@ -65,7 +65,7 @@ it("updates set-aside lock-wait details while the current seat is idle without r
     id: "aside-clock",
     hudState: "idle",
     run: null,
-    asideRuns: [
+    offSeatRuns: [
       {
         runId: "aside-wait",
         ticket: "shop-app#100",
@@ -74,7 +74,7 @@ it("updates set-aside lock-wait details while the current seat is idle without r
           phase: "working",
           text: "Waiting for checks",
           prNumber: null,
-          parked: null,
+          hold: null,
           wait: "lock",
         },
       },

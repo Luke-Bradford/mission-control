@@ -2472,7 +2472,7 @@ describe("start_seat", () => {
             number: 9,
             title: "t",
             url: "u",
-            branch: "feature/7-x",
+            branch: "hand/9-x",
             ticket: "mc#7",
             state: "open",
             isDraft: false,
@@ -2491,7 +2491,7 @@ describe("start_seat", () => {
       expect(startCalls).toEqual([]);
     });
 
-    it("starts a ticket whose open PR an ended run recorded, and still refuses one no run recorded", async () => {
+    it("starts a ticket whose open PR an ended run recorded", async () => {
       const pr = {
         repoId: "mc",
         number: 9,
@@ -2511,7 +2511,6 @@ describe("start_seat", () => {
       };
       store.upsertPullRequests("mc", [pr], NOW);
       board(sc(7, { labels: ["area:server"], status: "In progress" }));
-      expect(await start()).toEqual(refused(wrongColumnText("mc#7", "In progress")));
       store.upsertRun(
         run("r-old", "guido-2", {
           repoId: "mc",
@@ -2523,7 +2522,74 @@ describe("start_seat", () => {
       );
       const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
+      expect(startCalls).toEqual([["guido-1", 7, undefined]]);
+    });
+
+    it("carries on an open PR on the ticket's branch that no run recorded, unless a run is live", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: false,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      store.upsertRun(run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: null }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
+      store.upsertRun(
+        run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: NOW, status: "failed" }),
+      );
+      const r = (await start()) as { isError?: boolean };
+      expect(r.isError).toBeUndefined();
       expect(startCalls.length).toBe(1);
+    });
+
+    it("does not carry on an open PR from a fork, even on a feature branch name", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: true,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In review" }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
     });
   });
 });
@@ -3161,6 +3227,14 @@ describe("accept_ruling", () => {
     for (let i = 0; i < 8; i++) await call("accept_ruling", A());
     expect(store.flightDecisions(0, 5).filter((d) => d.kind === "hub")).toEqual([]);
     expect(store.getSetting("flight.runaway-events")).toBeNull();
+  });
+
+  it("names the checks CI still waits on when no re-run is going", async () => {
+    rulingImpl = async () => ({ kind: "pending", sha: SHA, waiting: ["e2e"] });
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "CI on aaaaaaa is not done: e2e still pending or not reported. Nothing was re-run.",
+    });
+    expect(decisions()).toEqual([]);
   });
 
   it("passes the engine's refusals on", async () => {

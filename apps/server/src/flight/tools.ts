@@ -48,6 +48,7 @@ import {
   CREATE_NO_REPO,
   CREW_LANES,
   type CrewPause,
+  checksPendingText,
   ciLogText,
   ciNoCheckText,
   ciNoFailedText,
@@ -1596,7 +1597,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
     // the PR a stopped run opened: no run holds it now, so a new run picks it up on its branch
-    const ownPr = (p: { number: number }): boolean =>
+    // or one opened by hand on the ticket's own branch, which no run recorded
+    const ownPr = (p: {
+      number: number;
+      branch: string;
+      isCrossRepository?: boolean | null;
+    }): boolean =>
+      (p.isCrossRepository === false &&
+        new RegExp(`^feature/${issue}(?:-[^/]+)?$`).test(p.branch)) ||
       store
         .runsOnTicket(repo.id, ref)
         .some((r) => r.endedAt !== null && r.reviewId == null && r.loop?.prNumber === p.number);
@@ -1938,7 +1946,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           rulingRefusedText(call, sha7(r.sha)),
         );
       case "pending":
-        return { text: rerunPendingText(sha7(r.sha)) };
+        return {
+          text:
+            r.waiting === undefined
+              ? rerunPendingText(sha7(r.sha))
+              : checksPendingText(sha7(r.sha), r.waiting),
+        };
       case "not":
         return fail(notAcceptedText(r.text));
     }

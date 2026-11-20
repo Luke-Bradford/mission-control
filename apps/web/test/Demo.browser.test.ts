@@ -77,7 +77,7 @@ const PAGES: PageCase[] = [
   { name: "Comms", at: "/comms/crew", minText: 2000 },
   { name: "QA", at: "/qa", minText: 500 },
   { name: "Telemetry", at: "/telemetry", minText: 2000 },
-  { name: "Audit", at: "/audit", minText: 1000 },
+  { name: "Audit", at: "/audit", minText: 300 },
   ...SETUP_TABS.map((tab) => ({ name: `Setup ${tab}`, at: `/setup/${tab}`, minText: 100 })),
 ];
 
@@ -114,7 +114,6 @@ describeRendered("Demo, rendered", () => {
   it.each([
     ["needs-you", "/needs-you/demo-design-signoff", 2000],
     ["agents", "/agent", 800],
-    ["comms-chart", "/comms/chart", 100],
   ] as const)(
     "%s fills a 1920x940 window with demo data",
     async (name, at, minText) => {

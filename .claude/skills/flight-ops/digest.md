@@ -20,7 +20,7 @@ Read this when a wake's format is unclear, or before you call `mc flight_state`.
 
 ## What each list holds
 
-- **Signals** wake you once per key. Told signals whose conditions still hold stay in state, marked `told`. When you file a ticket for one, quote its evidence: check or test, head SHA, run, ticket or source. Track unresolved work in your ledger.
+- **Signals** wake you once per key. Told signals whose conditions still hold stay in state, marked `told`. When Close the ticket in `roles/FLIGHT.md` allows a ticket for one, quote its evidence: check or test, head SHA, run, ticket or source. Track unresolved work in your ledger.
 - **Tickets.** Backlog and Refinement candidates carry `#n title`, or `#n [untrusted] title` for untrusted authors, unless ready to start. Read them with `mc read_ticket` or `mc list_tickets` before acting.
 - **`triage`** holds new Backlog and Refinement tickets, finished plans and resolved dependencies (`seats-and-board.md`).
 - **`items`** holds what waits for triage, oldest first, each with `triageRemainingMs` (`triage.md`).

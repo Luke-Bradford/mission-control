@@ -102,17 +102,6 @@ it("draws a link per pair with both directions together, and its title row has A
   expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: /^Open/i })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Tokens" })).toBeNull();
-  expect(screen.getByRole("link", { name: /full screen/i }).getAttribute("href")).toBe(
-    "/comms/chart",
-  );
-});
-
-it("opens the chart on its own address, keeping the filter", async () => {
-  window.history.replaceState(null, "", "/comms/crew?focus=seat:guido-1");
-  stubFetch({ "/api/comms/links": { links: [] }, ...quiet });
-  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
-  const full = await screen.findByRole("link", { name: /full screen/i });
-  expect(full.getAttribute("href")).toBe("/comms/chart?focus=seat%3Aguido-1");
 });
 
 it("narrows to the seat from the URL, with a chip and a Clear that drops it", async () => {

@@ -748,6 +748,10 @@ export const rerunStartedDecision = (call: string, sha7: string): string =>
 export const rerunStartedText = (call: string, sha7: string): string =>
   rerunStartedDecision(call, sha7) + RECORDED;
 export const rerunPendingText = (sha7: string): string => `The re-run on ${sha7} is still going.`;
+export const checksPendingText = (sha7: string, names: string[]): string =>
+  names.length > 0
+    ? `CI on ${sha7} is not done: ${names.join(", ")} still pending or not reported. Nothing was re-run.`
+    : `CI on ${sha7} is not done: some checks have not reported. Nothing was re-run.`;
 export const rulingAcceptedDecision = (call: string, sha7: string): string =>
   `Re-run passed on ${sha7}: ${call}'s ruling is accepted.`;
 export const rulingAcceptedText = (call: string, sha7: string): string =>

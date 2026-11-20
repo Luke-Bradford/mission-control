@@ -58,7 +58,6 @@ function api() {
       (Object.keys(GUARD_RULES) as GuardRule[]).map((rule, i) => [rule, 40 - i]),
     ),
   };
-  routes["/api/qa/flow?days=14"] = { days: 14, escapedDefects: [] };
   return routes;
 }
 

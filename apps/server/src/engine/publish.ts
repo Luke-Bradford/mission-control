@@ -30,10 +30,13 @@ import {
   minorIssueTitle,
   minorLine,
   minorMoreLine,
+  noteIsPartOf,
   parseMinorFindings,
   pathInArea,
+  prClosesLine,
   prIsPartOf,
   prNotRunsText,
+  prPartOfLine,
   REVIEW_STATUS_CONTEXT,
   type ReviewStatusState,
   type Run,
@@ -619,20 +622,23 @@ export function ciLogBody(log: string, max: number): string {
   return out.join("\n");
 }
 
-/** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */
+/** The run's PR body as the hub writes it; `section` goes between "What changed" and the closing line ("Part of #n." when the note says so). */
 export function runPrBody(
   ticket: { issue: number; title: string },
   note: string,
   section: string | null,
   withTitle: boolean,
 ): string {
+  const end = noteIsPartOf(note, ticket.issue)
+    ? prPartOfLine(ticket.issue)
+    : prClosesLine(ticket.issue);
   const heading = `#${ticket.issue}${withTitle ? ` — ${ticket.title}` : ""}`;
   const extra = section === null ? "" : `${section}\n\n`;
-  const around = `${heading}\n\n## What changed\n\n\n\n${extra}Closes #${ticket.issue}.`;
+  const around = `${heading}\n\n## What changed\n\n\n\n${extra}${end}`;
   const room = Math.max(0, MC_PR_BODY_MAX - around.length);
   // the note is cut, never the closing line, to keep the body inside what GitHub takes
   const shown = note.length > room ? `${note.slice(0, Math.max(0, room - 1))}…` : note;
-  return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}Closes #${ticket.issue}.`;
+  return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}${end}`;
 }
 
 /** Each repo's last merge call: merges in one repo run one at a time. */
@@ -830,6 +836,66 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return out;
   }
 
+  /** The jobs of a run that have already failed; none when gh could not say. */
+  async function failedJobs(repo: string, runId: number): Promise<{ id: number; name: string }[]> {
+    const viewed = await deps.gh(["run", "view", `--repo=${repo}`, String(runId), "--json=jobs"], {
+      cwd: cwd(),
+    });
+    if (viewed.code !== 0) return [];
+    const parsed = JSON.parse(viewed.stdout) as { jobs?: unknown } | null;
+    if (!Array.isArray(parsed?.jobs)) return [];
+    return parsed.jobs.flatMap((j: unknown) => {
+      const x = j as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+      return x !== null &&
+        x.conclusion === "failure" &&
+        typeof x.databaseId === "number" &&
+        Number.isSafeInteger(x.databaseId)
+        ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "job")).replace(/\t/g, " ") }]
+        : [];
+    });
+  }
+
+  /** A failed run's `--log-failed`, or null when gh could not read it. */
+  async function failedLog(
+    repo: string,
+    f: { id: number; attempt: number | null },
+  ): Promise<string | null> {
+    const viewed = await deps.gh(
+      [
+        "run",
+        "view",
+        `--repo=${repo}`,
+        String(f.id),
+        ...(f.attempt === null ? [] : [`--attempt=${f.attempt}`]),
+        "--log-failed",
+      ],
+      { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
+    );
+    return viewed.code === 0 ? viewed.stdout : null;
+  }
+
+  /**
+   * The logs of failed jobs, each line led by its job's name as `--log-failed` leads it; null when
+   * none could be read.
+   */
+  async function jobsLog(
+    repo: string,
+    jobs: { id: number; name: string }[],
+  ): Promise<string | null> {
+    const lines: string[] = [];
+    let read = false;
+    for (const j of jobs) {
+      const got = await deps.gh(["api", `repos/${repo}/actions/jobs/${j.id}/logs`], {
+        cwd: cwd(),
+        maxBuffer: CI_LOG_MAX_BUFFER,
+      });
+      if (got.code !== 0) continue;
+      read = true;
+      for (const l of got.stdout.split("\n")) lines.push(`${j.name}\t-\t${l}`);
+    }
+    return read ? lines.join("\n") : null;
+  }
+
   /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
   const unfetchable = new Map<string, number>();
   const FETCH_RETRY_MS = 30_000;
@@ -928,7 +994,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (prNumber === null || repo === undefined || issue === null) {
         return { ok: false, text: prNotRunsText(0), transient: false };
       }
-      const note = deps.store.evidenceNotes(run.id)[0]?.note ?? "";
+      const note = deps.store.latestEvidence(run.id)?.note ?? "";
       const title =
         run.ticketTitle ??
         deps.store.board(run.repoId).find((b) => b.issueNumber === issue)?.title ??
@@ -1041,7 +1107,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
         const runs: unknown = JSON.parse(listed.stdout);
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
-        const failed: { id: number; name: string; attempt: number | null; rerun: boolean }[] = [];
+        const failed: {
+          id: number;
+          name: string;
+          attempt: number | null;
+          rerun: boolean;
+          /** The failed jobs of a run still going: its own log is not readable until it completes. */
+          jobs?: { id: number; name: string }[];
+        }[] = [];
         for (const r of runs) {
           const x = r as {
             databaseId?: unknown;
@@ -1064,7 +1137,16 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               : null;
           if (x.conclusion === "failure") {
             failed.push({ id: x.databaseId, name, attempt, rerun: false });
-          } else if (x.status !== "completed" && attempt !== null && attempt > 1) {
+          } else if (typeof x.status === "string" && x.status !== "completed") {
+            // one shard can fail while the rest of the run goes on: gh's --log-failed reads nothing
+            // until the run completes, but a finished job's own log can be read now. A re-run's own
+            // failed job comes before the attempt it re-runs.
+            const jobs = await failedJobs(repo, x.databaseId);
+            if (jobs.length > 0) {
+              failed.push({ id: x.databaseId, name, attempt, rerun: false, jobs });
+              continue;
+            }
+            if (attempt === null || attempt <= 1) continue;
             // a run being re-run has no conclusion yet: the attempt before it may be the one that
             // failed, but a re-run can also start from a green attempt
             const before = await deps.gh(
@@ -1095,25 +1177,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             f.attempt === null
               ? name
               : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
-          const head = `${named}:\n`;
+          const head = `${f.jobs === undefined ? named : f.attempt === null ? `${name} (still running)` : `${name} (attempt ${f.attempt}, still running)`}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
           const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
           const room = share - byteLength(head);
           if (room <= 0) continue; // no room for a header with anything under it
-          const viewed = await deps.gh(
-            [
-              "run",
-              "view",
-              `--repo=${repo}`,
-              String(f.id),
-              ...(f.attempt === null ? [] : [`--attempt=${f.attempt}`]),
-              "--log-failed",
-            ],
-            { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
-          );
-          if (viewed.code !== 0) return CI_LOG_UNREADABLE;
-          const body = ciLogBody(cleanLog(viewed.stdout).trimEnd(), room);
+          const log = f.jobs === undefined ? await failedLog(repo, f) : await jobsLog(repo, f.jobs);
+          if (log === null) return CI_LOG_UNREADABLE;
+          const body = ciLogBody(cleanLog(log).trimEnd(), room);
           if (body === "") continue;
           const section = head + body;
           budget -= byteLength(section) + (sections.length > 0 ? SEPARATOR_BYTES : 0);

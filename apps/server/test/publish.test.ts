@@ -51,6 +51,7 @@ import {
   NO_FAILED_RUN,
   READY_UNDO_FAILED,
   REVIEW_STATUS_FAILED,
+  runPrBody,
 } from "../src/engine/publish.ts";
 import { createGh, type GhRunner } from "../src/mcp/gh.ts";
 import { editRunPrBody, type McToolsDeps } from "../src/mcp/tools.ts";
@@ -202,6 +203,29 @@ describe("openPr", () => {
       body: "#7 — Fix the thing\n\n## What changed\n\nChanged it.\n\nCloses #7.",
     });
   });
+
+  it.each(["Part of #7: stage 3.", "This is part of #7.", "PART OF #7"])(
+    "ends the body with Part of, and no closing keyword, when the note says %j",
+    async (note) => {
+      ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+      tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+      await createPublisher(deps()).openPr(run(), TICKET, note);
+      const pr = tools.openDraftPr.mock.calls[0]?.[2] as { body: string };
+      expect(pr.body.endsWith("\n\nPart of #7.")).toBe(true);
+      expect(pr.body).not.toMatch(/closes/i);
+    },
+  );
+
+  it.each(["Part of #8.", "Part of #70", "Did part of the work.", "Fixes #7"])(
+    "keeps the closing line when the note says %j",
+    async (note) => {
+      ghAnswers = [list(), list({ number: 31, createdAt: "2026-10-21T10:30:00Z" })];
+      tools.openDraftPr.mockResolvedValueOnce({ text: OPENED });
+      await createPublisher(deps()).openPr(run(), TICKET, note);
+      const pr = tools.openDraftPr.mock.calls[0]?.[2] as { body: string };
+      expect(pr.body.endsWith("\n\nCloses #7.")).toBe(true);
+    },
+  );
 
   it("cuts a note that would take the body past the limit, and keeps the closing line", async () => {
     ghAnswers = [list()];
@@ -679,12 +703,13 @@ describe("ciExcerpt", () => {
           { databaseId: 12, name: "lint", conclusion: "success", status: "completed", attempt: 1 },
         ]),
       }),
+      () => ({ code: 0, stdout: JSON.stringify({ jobs: [] }) }),
       () => ({ code: 0, stdout: JSON.stringify({ conclusion: "failure" }) }),
       () => ({ code: 0, stdout: "boom\n" }),
     ];
     const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
     expect(out).toBe("test (attempt 1, which failed; a re-run is going):\nboom");
-    expect(ghCalls[1]).toEqual([
+    expect(ghCalls[2]).toEqual([
       "run",
       "view",
       "--repo=o/mc",
@@ -692,7 +717,7 @@ describe("ciExcerpt", () => {
       "--attempt=1",
       "--json=conclusion",
     ]);
-    expect(ghCalls[2]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
+    expect(ghCalls[3]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
   });
 
   it("says no failed run when a re-run started from a successful attempt", async () => {
@@ -703,6 +728,7 @@ describe("ciExcerpt", () => {
           { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 2 },
         ]),
       }),
+      () => ({ code: 0, stdout: JSON.stringify({ jobs: [] }) }),
       () => ({ code: 0, stdout: JSON.stringify({ conclusion: "success" }) }),
     ];
     expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
@@ -723,7 +749,7 @@ describe("ciExcerpt", () => {
     expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=2", "--log-failed"]);
   });
 
-  it("says no failed run for a first attempt that is still running", async () => {
+  it("says no failed run for a first attempt that is still running with no failed job", async () => {
     ghAnswers = [
       () => ({
         code: 0,
@@ -731,8 +757,107 @@ describe("ciExcerpt", () => {
           { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 1 },
         ]),
       }),
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({ jobs: [{ databaseId: 5, name: "a", status: "in_progress" }] }),
+      }),
     ];
     expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
+  });
+
+  it("reads the failed job of a re-run's current attempt, not the attempt it re-runs", async () => {
+    const log = (name: string) =>
+      [
+        `2026-11-20T01:50:08.0000000Z  FAIL  s.test.ts > ${name}`,
+        "2026-11-20T01:50:08.0000001Z AssertionError: expected 1 to be 2",
+        "2026-11-20T01:50:08.0000002Z  ❯ test/s.test.ts:12:5",
+      ].join("\n");
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "CI", conclusion: "", status: "in_progress", attempt: 2 },
+        ]),
+      }),
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            { databaseId: 501, name: "server (1)", status: "completed", conclusion: "failure" },
+            { databaseId: 502, name: "server (2)", status: "in_progress" },
+          ],
+        }),
+      }),
+      () => ({ code: 0, stdout: log("current") }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out.startsWith("CI (attempt 2, still running):\n")).toBe(true);
+    expect(out).toContain("FAIL  s.test.ts > current");
+    expect(out).toContain("AssertionError: expected 1 to be 2");
+    expect(out).toContain("❯ test/s.test.ts:12:5");
+    expect(ghCalls.some((c) => c.includes("--attempt=1"))).toBe(false);
+  });
+
+  describe("a saved server-process shard log", () => {
+    // gh run view 44654955207 --log-failed, as gh printed it: job, step and timestamp prefixes, colours
+    const logFailed = readFileSync(
+      join(import.meta.dirname, "fixtures", "ci-shard-1of4.log"),
+      "utf8",
+    );
+    const JOB = "server-process (1)";
+    // a job's own log (the jobs API): no job or step columns
+    const raw = logFailed
+      .split("\n")
+      .filter((l) => l.startsWith(`${JOB}\t`))
+      .map((l) => l.split("\t").slice(2).join("\t"))
+      .join("\n");
+    const holdsFailure = (out: string) => {
+      expect(out).toMatch(
+        /FAIL .*apps\/server\/test\/supervisor-restart\.test\.ts > Codex restart > a second hub restart does not take a Codex run back twice \(#1912\)/,
+      );
+      expect(out).toContain("AssertionError: expected [] to have a length of 1 but got +0");
+      expect(out).toContain("❯ apps/server/test/supervisor-restart.test.ts:2172:74");
+      expect(out).not.toContain("\x1b");
+    };
+
+    it("names the FAIL test, its assertion and its source line from a completed run", async () => {
+      ghAnswers = [
+        runs({ databaseId: 11, name: "CI", conclusion: "failure" }),
+        () => ({ code: 0, stdout: logFailed }),
+      ];
+      const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+      holdsFailure(out);
+      expect(out).toContain(`[${JOB}]`);
+    });
+
+    it("gives the same lines while other jobs of the run are still going", async () => {
+      ghAnswers = [
+        () => ({
+          code: 0,
+          stdout: JSON.stringify([
+            { databaseId: 11, name: "CI", conclusion: "", status: "in_progress", attempt: 1 },
+          ]),
+        }),
+        () => ({
+          code: 0,
+          stdout: JSON.stringify({
+            jobs: [
+              { databaseId: 501, name: JOB, status: "completed", conclusion: "failure" },
+              { databaseId: 502, name: "server-process (2)", status: "in_progress" },
+              { databaseId: 503, name: "lint", status: "completed", conclusion: "success" },
+            ],
+          }),
+        }),
+        () => ({ code: 0, stdout: raw }),
+      ];
+      const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+      holdsFailure(out);
+      expect(out.startsWith("CI (attempt 1, still running):\n")).toBe(true);
+      expect(out).toContain(`[${JOB}]`);
+      expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--json=jobs"]);
+      expect(ghCalls[2]).toEqual(["api", "repos/o/mc/actions/jobs/501/logs"]);
+      expect(ghCalls).toHaveLength(3);
+    });
   });
 
   it("strips colour codes and control characters, and caps the size", async () => {
@@ -1800,12 +1925,39 @@ describe("postMinorFindings", () => {
     expect(lines).toContain(minorMoreLine(1));
   });
 
+  it("builds the body from the latest note: a later Part of report ends the body Part of", async () => {
+    store.addEvidence(R.id, "Part of #7: stage 2.", START + 1000);
+    answer();
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
+    expect(posted?.trimEnd().split("\n").at(-3)).toBe("Part of #7.");
+  });
+
   it("drops the section when there are no minors", async () => {
     const rv = review([]);
     answer();
     await createPublisher(deps()).postMinorFindings(R, rv);
     expect(posted).not.toContain(MINOR_HEADING);
     expect(posted).toContain("Closes #7.");
+  });
+
+  it("swaps the minor section of a staged seat body and leaves one Part of line, last", async () => {
+    answer(
+      JSON.stringify({
+        headRefName: BRANCH,
+        state: "OPEN",
+        body: `Seat rewrite.\n\n${MINOR_HEADING}\n\nold intro\n\n- \`a.ts\` — old\n\nPart of #7.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      }),
+    );
+    await createPublisher(deps()).postMinorFindings(R, review([minor("first")]));
+    expect(posted).toContain("- `a.ts:3` — first");
+    expect(posted).not.toContain("old intro");
+    expect(posted).not.toContain("Closes #7.");
+    expect(posted?.match(/Part of #7\./g)).toHaveLength(1);
+    expect(posted?.trimEnd().split("\n").at(-3)).toBe("Part of #7.");
+    expect(posted?.match(/Opened by/g)).toHaveLength(1);
   });
 
   it("keeps a body the seat rewrote with pr_body, and swaps only the hub's section", async () => {
@@ -2667,6 +2819,12 @@ describe("merge steps", () => {
         ["issue", "view", "7", "--repo=o/mc", "--json", "state"],
         ["issue", "close", "7", "--repo=o/mc", "--reason=completed"],
       ]);
+    });
+
+    it("leaves the issue open for the body the hub writes from a Part of note", async () => {
+      ghAnswers = [prBody(runPrBody(TICKET, "Part of #7: stage 3.", null, true))];
+      expect(await publisher().closeIssue(R)).toEqual({ ok: true, left: true });
+      expect(ghCalls.map((c) => c[1])).toEqual(["view"]);
     });
 
     it("closes an issue the PR body does not name", async () => {

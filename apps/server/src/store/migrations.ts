@@ -258,9 +258,11 @@ class Migrations {
       ["loop_kind", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
-    // A run's park and set-aside records fold into one `hold` (#2071). Both old keys go, so a
-    // second open finds nothing to change (and takes no write lock); the indexes on the old paths
-    // go with them. The rows are read again inside the write-locked transaction.
+    // Migration only: a run's old park and set-aside records fold into one `hold` (#2071), so a
+    // database that skipped the release that folded them keeps its parks. Nothing else reads the
+    // old keys. Both go, so a second open finds nothing to change (and takes no write lock); the
+    // indexes on the old paths go with them. The rows are read again inside the write-locked
+    // transaction.
     const unfolded = `SELECT id, loop FROM runs
            WHERE json_type(loop, '$.parked') IS NOT NULL OR json_type(loop, '$.aside') IS NOT NULL`;
     if (this.db.prepare(`${unfolded} LIMIT 1`).get() !== undefined) {

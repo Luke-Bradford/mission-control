@@ -538,6 +538,11 @@ export const MC_PR_UNCLOSED =
 export const prAlreadyOpenText = (url: string): string => `A PR is already open: ${url}`;
 /** Added to a PR body that does not name the run's issue. */
 export const prClosesLine = (issue: number): string => `Closes #${issue}.`;
+/** Ends a PR body whose note says it is only a stage of its ticket: the merge leaves the ticket open. */
+export const prPartOfLine = (issue: number): string => `Part of #${issue}.`;
+/** Whether a report note says the PR is part of ticket `issue` ("Part of #n", any case). */
+export const noteIsPartOf = (note: string, issue: number): boolean =>
+  new RegExp(`\\bpart\\s+of\\s+#${issue}(?!\\d)`, "i").test(note);
 /** The last line of every PR body the hub opens. */
 export const prOpenedByLine = (call: string): string => `Opened by ${call} (Mission Control).`;
 /** gh failed (or timed out) listing or opening the PR. */

@@ -141,9 +141,6 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
-  TOKEN_AUDIT_DAYS_DEFAULT,
-  TOKEN_AUDIT_DAYS_MAX,
-  TOKEN_AUDIT_HOURS_MAX,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -354,7 +351,6 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { withLegacyHoldFields } from "./legacy-hold.ts";
 import { loopTries } from "./loop/history.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -399,12 +395,6 @@ import {
   QueueReorderError,
   resolveQueueReorder,
 } from "./queue/queue-reorder.ts";
-import {
-  removedCodeHealthOverview,
-  removedCodeHealthView,
-  removedTokenAudit,
-  removedWindow,
-} from "./removed-stubs.ts";
 import { cleanText } from "./repo/clean.ts";
 import {
   changedFiles,
@@ -1034,8 +1024,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
 
   const requestErrors = new WeakMap<object, Error>();
-  // the web app still reads the old park and set-aside fields: fill them from `hold` (#2071)
-  app.addHook("preSerialization", async (_req, _reply, payload) => withLegacyHoldFields(payload));
   app.addHook("onError", async (req, _reply, error) => {
     requestErrors.set(req, error);
   });
@@ -3961,55 +3949,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
         );
       });
-      // Stubs for the web cut (it deletes these with the pages that read them): the pages keep
-      // loading, empty, until then.
-      // Reader: apps/web/src/code-health/CodeHealth.tsx (the Audit summary tab; empty until the web cut)
-      api.get<{ Querystring: { repo?: string; window?: string } }>(
-        "/code-health/overview",
-        async (req) =>
-          removedCodeHealthOverview(
-            String(req.query.repo ?? ""),
-            removedWindow(req.query.window),
-            now(),
-          ),
-      );
-      // Reader: apps/web/src/code-health/CodeHealth.tsx (the Audit tabs; empty until the web cut)
-      api.get<{ Querystring: { repo?: string; window?: string; tab?: string } }>(
-        "/code-health",
-        async (req) =>
-          removedCodeHealthView(
-            String(req.query.repo ?? ""),
-            removedWindow(req.query.window),
-            req.query.tab,
-            now(),
-          ),
-      );
-      // Reader: apps/web/src/code-health/TokenAudit.tsx (the Tokens tab; empty until the web cut)
-      api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
-        "/audit/tokens",
-        async (req, reply) => {
-          const { days: rawDays, hours: rawHours, shape } = req.query;
-          if (rawDays !== undefined && rawHours !== undefined)
-            return reply.code(400).send({ error: "send days or hours, not both" });
-          if (shape !== undefined && shape !== "summary")
-            return reply.code(400).send({ error: "shape must be summary" });
-          if (rawHours !== undefined) {
-            const hours = /^\d{1,2}$/.test(rawHours) ? Number(rawHours) : 0;
-            if (hours < 1 || hours > TOKEN_AUDIT_HOURS_MAX)
-              return reply.code(400).send({
-                error: `hours must be a whole number from 1 to ${TOKEN_AUDIT_HOURS_MAX}`,
-              });
-            return removedTokenAudit(TOKEN_AUDIT_DAYS_DEFAULT, hours, now());
-          }
-          const raw = rawDays ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
-          const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-          if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX)
-            return reply
-              .code(400)
-              .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
-          return removedTokenAudit(days, null, now());
-        },
-      );
       // Reader: docs/runbook.md#spend-report (spend per merged change and the building share; the Audit page reads it)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {

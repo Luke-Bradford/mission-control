@@ -15,8 +15,8 @@ export interface ReviewPark {
 
 /** The only parks whose Resume action waives the findings on the reviewed head. */
 export function reviewPark(loop: RunLoop | null | undefined): ReviewPark | null {
-  if (!loop?.parked || !REVIEW_PARK_KINDS.has(loop.parked.kind) || !loop.pushFor) return null;
-  return { sha: loop.pushFor, reason: loop.parked.reason };
+  if (!loop?.hold || !REVIEW_PARK_KINDS.has(loop.hold.kind ?? "") || !loop.pushFor) return null;
+  return { sha: loop.pushFor, reason: loop.hold.reason ?? "" };
 }
 
 export const reviewParkSha = (park: ReviewPark): string => shortSha(park.sha);

@@ -82,41 +82,6 @@ function open(
       hits: [],
       counts: { "git-write": 12, "full-suite": 3 },
     },
-    "/api/qa/flow?days=14": {
-      days: 14,
-      escapedDefects: [
-        {
-          repoId: "shop-app",
-          issueNumber: 41,
-          prNumber: 30,
-          via: "file",
-          filedAt: NOW - DAY,
-          mergedAt: NOW - 3 * DAY,
-          seat: "dev-1",
-          model: null,
-        },
-        {
-          repoId: "shop-app",
-          issueNumber: 42,
-          prNumber: 31,
-          via: "commit",
-          filedAt: NOW - DAY,
-          mergedAt: NOW - 3 * DAY,
-          seat: "dev-1",
-          model: null,
-        },
-        {
-          repoId: "shop-app",
-          issueNumber: 43,
-          prNumber: 32,
-          via: "pr",
-          filedAt: NOW - DAY,
-          mergedAt: NOW - 3 * DAY,
-          seat: "dev-1",
-          model: null,
-        },
-      ],
-    },
   };
   for (const r of ["1h", "6h", "24h", "7d"]) routes[`/api/telemetry?range=${r}`] = data;
   Object.assign(routes, over);
@@ -241,21 +206,6 @@ describe("Telemetry, Quality tab", () => {
     );
   });
 
-  it("lists escaped defects in the Table view", async () => {
-    open("&view=table");
-    await waitFor(() => expect(screen.getByRole("link", { name: "shop-app#41" })).toBeTruthy());
-    expect(screen.getByRole("link", { name: "shop-app#41" }).getAttribute("href")).toBe(
-      "/tickets/shop-app/41",
-    );
-    const table = screen.getByRole("table", { name: "Escaped defects" });
-    expect(within(table).getByText("How it was linked")).toBeTruthy();
-    expect(within(table).getByText("Names the PR")).toBeTruthy();
-    expect(within(table).getByText("Names a commit of the PR")).toBeTruthy();
-    expect(within(table).getByText("Touches a file only this PR changed")).toBeTruthy();
-    for (const via of ["pr", "commit", "file"])
-      expect(within(table).queryByText(new RegExp(`^${via}$`))).toBeNull();
-  });
-
   it("gives each missing summary figure its reason, on focus and in its name", async () => {
     open(
       "",
@@ -301,18 +251,5 @@ describe("Telemetry, Quality tab", () => {
     expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(panel.textContent).not.toContain("Loading…");
     expect(document.getElementById("qCi")).not.toBeNull();
-  });
-
-  it("says a failed escaped-defects read did not load, with a retry", async () => {
-    open("&view=table", {
-      "/api/qa/flow?days=14": () => ({ status: 500, body: { error: "down" } }),
-    });
-    const panel = await waitFor(() => {
-      const p = document.getElementById("qEscaped") as HTMLElement;
-      expect(within(p).getByRole("alert").textContent).toContain("did not load");
-      return p;
-    });
-    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
-    expect(panel.textContent).not.toContain("Loading…");
   });
 });

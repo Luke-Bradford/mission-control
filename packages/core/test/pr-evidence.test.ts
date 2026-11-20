@@ -21,8 +21,6 @@ import {
 
 const ALL = [
   ...Object.keys(HUD_PAGE_PATHS),
-  "readiness",
-  "hotspots",
   "setup_repos",
   "setup_loops",
   "setup_accounts",
@@ -37,13 +35,9 @@ describe("prEvidenceAffectedPages", () => {
     expect(
       prEvidenceAffectedPages(["apps/web/src/pages/MapPage.tsx", "apps/web/src/comms/older.ts"]),
     ).toEqual(["map", "comms"]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/Audit.tsx"])).toEqual([
-      "audit",
-      "readiness",
-      "hotspots",
-    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Audit.tsx"])).toEqual(["audit"]);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/QaReadiness.tsx"])).toEqual(["qa"]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaHotspots.tsx"])).toEqual(["hotspots"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/QaHotspots.tsx"])).toEqual(["qa"]);
     expect(prEvidenceAffectedPages(["apps/web/src/setup/Accounts.tsx"])).toEqual([
       "setup",
       "setup_repos",
@@ -209,6 +203,26 @@ describe("withSection", () => {
   });
 });
 
+describe("withSection on a staged body ending Part of", () => {
+  const body = "#9 — Title\n\n## What changed\n\nDid it.\n\nPart of #9.";
+  const section = `${EVIDENCE_HEADING}\n\nline`;
+
+  it("puts the section before the Part of line", () => {
+    expect(withSection(body, EVIDENCE_HEADING, section)).toBe(
+      `#9 — Title\n\n## What changed\n\nDid it.\n\n${section}\n\nPart of #9.`,
+    );
+  });
+
+  it("stops sectionOf before the Part of line, and removal restores the body", () => {
+    const set = withSection(body, EVIDENCE_HEADING, section);
+    expect(sectionOf(set, EVIDENCE_HEADING)).toBe(section);
+    expect(withSection(set, EVIDENCE_HEADING, null)).toBe(body);
+    const twice = withSection(set, EVIDENCE_HEADING, `${EVIDENCE_HEADING}\n\nnew`);
+    expect(twice.endsWith("\n\nPart of #9.")).toBe(true);
+    expect(twice.match(/Part of #9\./g)).toHaveLength(1);
+  });
+});
+
 describe("evidenceSectionText", () => {
   it("links each pair's before, after and diff under the head sha", () => {
     const text = evidenceSectionText(manifest(), "http://127.0.0.1:7421");
@@ -241,12 +255,8 @@ describe("prEvidenceUncatalogued: a page no screenshot can show", () => {
   it("maps the pages that have an address, and aliases to their host page", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/pages/Needs.tsx"])).toEqual(["needs"]);
     expect(prEvidenceAffectedPages(["apps/web/src/pages/CommsChartPage.tsx"])).toEqual(ALL);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual([
-      "audit",
-      "readiness",
-      "hotspots",
-    ]);
-    expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["hotspots"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual(["audit"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["qa"]);
   });
 
   it("lifts the hold when the PR also changes the catalogue, which the hub reads from main", () => {

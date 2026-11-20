@@ -70,7 +70,7 @@ describe("standup", () => {
             step: "implement",
             text: "Working",
             prNumber: null,
-            parked: null,
+            hold: null,
           },
         }),
         crewRow({
@@ -78,7 +78,7 @@ describe("standup", () => {
           ticket: "shop-app#5",
           hudState: "stalled",
           run: { ...RUN, seq: 7 },
-          loop: { phase: "ci", step: null, text: "CI", prNumber: null, parked: null },
+          loop: { phase: "ci", step: null, text: "CI", prNumber: null, hold: null },
         }),
       ],
       needsYou: needsYouItems([
