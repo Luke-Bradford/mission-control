@@ -3511,6 +3511,14 @@ describe("FLIGHT settles a ruling", () => {
 
   it("accepts a ruling whose same head went green on its own, with no re-run asked for", async () => {
     await ruled();
+    config.crew?.sessions[0]?.seats.push({
+      id: RETRO,
+      role: "RETRO",
+      mode: "scratch",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
     setPr({
       ci: "passing",
       checks: [
@@ -3527,9 +3535,60 @@ describe("FLIGHT settles a ruling", () => {
     expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
     expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, hold: null });
     expect(h.rulingReruns).toEqual([]);
+    expect(store.reviewsOfRun(RUN)).toContainEqual(expect.objectContaining({ sha: SHA }));
     expect(h.sent).toContainEqual(
       expect.objectContaining({ text: expect.stringContaining("your ruling is accepted") }),
     );
+  });
+
+  it("names the missing required check when the same head is not done and nothing runs", async () => {
+    await ruled();
+    const repo = config.repos[0];
+    if (repo === undefined) throw new Error("missing repo");
+    repo.requiredChecks = ["server", "e2e"];
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 1,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA, waiting: ["e2e"] });
+    expect(h.rulingReruns).toEqual([]);
+  });
+
+  it("accepts a same head that went green after FLIGHT's re-run failed and the author ruled again", async () => {
+    await ruled();
+    await accept();
+    h.rerunStates = [{ ok: true, outcome: "failed" }];
+    await accept();
+    setLoop({
+      phase: "parked",
+      hold: { kind: "ruling", reason: "ruled again", ended: false, worktree: null, wake: false },
+    });
+    setPr({
+      ci: "passing",
+      checks: [
+        {
+          name: "server",
+          kind: "check",
+          state: "passing",
+          conclusion: "SUCCESS",
+          attempt: 3,
+          url: null,
+        },
+      ],
+    });
+    expect(await accept()).toEqual({ kind: "accepted", sha: SHA });
+    expect(loopOf()).toMatchObject({ phase: "review", ciFailedSha: null, hold: null });
+    expect(loopOf().rulingRerun ?? null).toBeNull();
+    expect(h.rulingReruns).toHaveLength(1);
   });
 
   it("answers pending, and asks for no re-run, while the same head's checks run", async () => {
@@ -3547,7 +3606,7 @@ describe("FLIGHT settles a ruling", () => {
         },
       ],
     });
-    expect(await accept()).toEqual({ kind: "pending", sha: SHA });
+    expect(await accept()).toEqual({ kind: "pending", sha: SHA, waiting: ["server"] });
     expect(h.rulingReruns).toEqual([]);
     expect(loopOf().phase).toBe("parked");
   });

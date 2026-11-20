@@ -437,7 +437,7 @@ export interface Engine {
 
 export type AcceptRulingResult =
   | { kind: "rerun"; sha: string }
-  | { kind: "pending"; sha: string }
+  | { kind: "pending"; sha: string; waiting?: string[] }
   | { kind: "accepted"; sha: string }
   | { kind: "refused"; sha: string }
   | { kind: "not"; text: string };
@@ -4055,7 +4055,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const at = now();
         const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
-        if (rerun === null) {
+        if (rerun === null || rerun.outcome !== "pending") {
           // the failure may already be cleared by a re-run from GitHub or a person
           const repo = config.repos.find((r) => r.id === run.repoId);
           const checks = (pr.checks ?? []).filter(
@@ -4072,7 +4072,16 @@ export function createEngine(deps: EngineDeps): Engine {
               verdict.pending.length > 0 ||
               verdict.missing.length > 0 ||
               checks.some((check) => check.state === "pending");
-            if (stillPending) return { kind: "pending", sha };
+            if (stillPending) {
+              const waiting = [
+                ...new Set([
+                  ...verdict.pending,
+                  ...verdict.missing,
+                  ...checks.filter((check) => check.state === "pending").map((check) => check.name),
+                ]),
+              ];
+              return { kind: "pending", sha, waiting };
+            }
             if (pr.ci === "passing") {
               store.setRunLoop(run.id, {
                 ...loop,
@@ -4084,6 +4093,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 transient: 0,
                 lastRefusal: null,
                 unparkedAt: at,
+                rulingRerun: null,
               });
               store.addLoopEvent(
                 `${run.id}:${loop.epoch}:ruling-cleared:${sha}`,
@@ -4093,7 +4103,7 @@ export function createEngine(deps: EngineDeps): Engine {
               );
               await send(
                 run.id,
-                `ruling-cleared:${run.id}:${sha}`,
+                `ruling-cleared:${run.id}:${loop.epoch}:${sha}`,
                 `CI is green on ${sha.slice(0, 7)} after a re-run, so your ruling is accepted. Review is queued.`,
               );
               bus.emit("agents");
@@ -4101,6 +4111,11 @@ export function createEngine(deps: EngineDeps): Engine {
               await pass(run.id);
               return { kind: "accepted", sha };
             }
+          }
+          if (rerun !== null) {
+            return not(
+              `${sha.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
+            );
           }
           const r = await publisher.rerunRuling(github, sha);
           if (!r.ok) return not(r.text);
@@ -4116,11 +4131,6 @@ export function createEngine(deps: EngineDeps): Engine {
           );
           bus.emit("agents");
           return { kind: "rerun", sha };
-        }
-        if (rerun.outcome !== "pending") {
-          return not(
-            `${sha.slice(0, 7)} was already re-run once; pass this ruling to the operator`,
-          );
         }
         const state = await publisher.rerunState(github, sha, rerun.runs);
         if (!state.ok) return not(state.text);

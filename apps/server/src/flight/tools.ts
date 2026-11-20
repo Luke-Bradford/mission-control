@@ -48,6 +48,7 @@ import {
   CREATE_NO_REPO,
   CREW_LANES,
   type CrewPause,
+  checksPendingText,
   ciLogText,
   ciNoCheckText,
   ciNoFailedText,
@@ -1940,7 +1941,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           rulingRefusedText(call, sha7(r.sha)),
         );
       case "pending":
-        return { text: rerunPendingText(sha7(r.sha)) };
+        return {
+          text:
+            r.waiting === undefined
+              ? rerunPendingText(sha7(r.sha))
+              : checksPendingText(sha7(r.sha), r.waiting),
+        };
       case "not":
         return fail(notAcceptedText(r.text));
     }
