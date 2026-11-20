@@ -5,7 +5,8 @@ import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 
-const SHOTS = process.env.MC_QA_EVIDENCE_DIR ?? join(process.env.TMPDIR ?? "/tmp", "qa-acceptance-shots");
+const SHOTS =
+  process.env.MC_QA_EVIDENCE_DIR ?? join(process.env.TMPDIR ?? "/tmp", "qa-acceptance-shots");
 const { renderAt } = browserSession();
 const fixture = qaAcceptanceFixture;
 describeRendered("QA acceptance queue in a browser", () => {
