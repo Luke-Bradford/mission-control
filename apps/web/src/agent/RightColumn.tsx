@@ -12,6 +12,7 @@ import { HandoffPanel } from "./HandoffPanel.tsx";
 import { usePlan } from "./plan.ts";
 import { RunsPanel } from "./RunsPanel.tsx";
 import { Queue } from "./SideTabs.tsx";
+import { TokensPerTurn } from "./TokensPerTurn.tsx";
 
 const RECENT_RUNS = 5;
 
@@ -52,7 +53,7 @@ function WaitingOn({ view }: { view: AgentDetailView }) {
 /** Tickets the seat has open and is not working on; gone once a seat holds one ticket. */
 function AlsoOpen({ row }: { row: CrewRow }) {
   const queue = row.queue ?? [];
-  const aside = row.asideRuns ?? [];
+  const aside = row.offSeatRuns ?? [];
   if (queue.length === 0 && aside.length === 0) return null;
   return (
     <section className="panel side-open" aria-label="Also open">
@@ -196,7 +197,7 @@ function SetupTab({ row }: { row: CrewRow }) {
   );
 }
 
-type Tab = "plan" | "runs" | "setup";
+type Tab = "plan" | "runs" | "tokens" | "setup";
 
 /** The right column: what the seat waits on, its other tickets, and Plan, Recent runs and Setup. */
 export function RightColumn({ view }: { view: AgentDetailView }) {
@@ -211,13 +212,14 @@ export function RightColumn({ view }: { view: AgentDetailView }) {
   const options = [
     ...(hasPlan ? [{ value: "plan" as const, label: "Plan" }] : []),
     { value: "runs" as const, label: "Recent runs" },
+    { value: "tokens" as const, label: "Tokens" },
     { value: "setup" as const, label: "Setup" },
   ];
   return (
     <div className="side">
       <WaitingOn view={view} />
       <AlsoOpen row={row} />
-      <section className="panel side-tabs" aria-label="Plan, recent runs and setup">
+      <section className="panel side-tabs" aria-label="Plan, recent runs, tokens and setup">
         <div className="ph">
           <Seg
             label="Seat details"
@@ -229,6 +231,7 @@ export function RightColumn({ view }: { view: AgentDetailView }) {
         <div className="pb side-body">
           {tab === "plan" && <PlanTab tasks={tasks} />}
           {tab === "runs" && <RunsTab row={row} />}
+          {tab === "tokens" && <TokensPerTurn key={`tokens:${row.id}`} row={row} />}
           {tab === "setup" && <SetupTab row={row} />}
         </div>
       </section>

@@ -297,7 +297,7 @@ describe("supervisor events (Plan 7a)", () => {
     lastRefusal: null,
     epoch: 0,
     budgetExtra: 0,
-    parked: null,
+    hold: null,
     touches: null,
     cardFor: null,
   };
@@ -523,7 +523,7 @@ describe("supervisor events (Plan 7a)", () => {
         ...NEW_LOOP,
         phase: "done",
         prNumber: 7,
-        parked: { kind: "silent", reason: "no report", ended: true },
+        hold: { kind: "silent", reason: "no report", ended: true, worktree: null, wake: false },
       });
       await sup.endRunByEngine(runId);
       expect(store.run(runId)?.noReport).toBeUndefined();
@@ -535,10 +535,40 @@ describe("supervisor events (Plan 7a)", () => {
       store.setRunLoop(runId, {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind, reason: "no report", ended: true },
+        hold: { kind, reason: "no report", ended: true, worktree: null, wake: false },
       });
       await sup.endRunByEngine(runId);
       expect(store.run(runId)?.noReport).toBeDefined();
+    });
+
+    it("a stopped ticket carries on in another seat: files kept, the old seat's pointer cleared", async () => {
+      const m = make({
+        extraSeat: {
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          effort: "high",
+          area: ["apps/**"],
+        },
+      });
+      m.sup.start();
+      const first = await m.sup.startRun("guido-1", 42);
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const wt = join(root, "mc-crew", "guido-1-42");
+      writeFileSync(join(wt, "wip.txt"), "wip\n");
+      store.setRunLoop(first.runId, { ...NEW_LOOP, phase: "ci", prNumber: 9 });
+      await m.sup.endRunByEngine(first.runId);
+      expect(store.seatSession("guido-1")?.worktree).toBe(wt);
+      const next = await m.sup.startRun("guido-2", 42);
+      await until(() => expect(seatState("guido-2")).toBe("idle"));
+      expect(next.branch).toBe(first.branch);
+      expect(store.seatSession("guido-2")?.worktree).toBe(wt);
+      expect(store.seatSession("guido-1")?.worktree).toBeNull();
+      expect(readFileSync(join(wt, "wip.txt"), "utf8")).toBe("wip\n");
+      // the same branch means the earlier run's PR is the one the new run continues (publish.test.ts)
+      expect(store.run(next.runId)?.branch).toBe(store.run(first.runId)?.branch);
+      await m.sup.stopAll();
     });
 
     it("ends the run ok, endedBy engine, leaves the seat idle and preserves unfinished work", async () => {
@@ -557,7 +587,6 @@ describe("supervisor events (Plan 7a)", () => {
         runId: null,
       });
       expect(readFileSync(join(wt, "wip.txt"), "utf8")).toBe("wip\n");
-      expect(store.openHandoff("mc", "mc#42")).toMatchObject({ runId, worktree: wt });
       // the branch keeps the run's commits
       expect(git(clone, "branch", "--list", BRANCH)).toContain(BRANCH);
       // the seat can start again
@@ -639,7 +668,6 @@ describe("supervisor events (Plan 7a)", () => {
       expect(seatState("guido-1")).toBe("idle");
       expect(store.seatSession("guido-1")?.runId).toBeNull();
       expect(existsSync(join(root, "mc-crew", "guido-1-42"))).toBe(true);
-      expect(store.openHandoff("mc", "mc#42")?.runId).toBe(runId);
       await sup.stopAll();
       release();
     });
@@ -655,6 +683,141 @@ describe("supervisor events (Plan 7a)", () => {
     it("leaves the loop off a run started without one", async () => {
       const { runId } = await idleRun();
       expect(store.run(runId)?.loop).toBeUndefined();
+    });
+
+    it("keeps unresolved durable gates when a stopped ticket starts again", async () => {
+      store.upsertRun({
+        id: "stopped-ticket",
+        agentId: "former-seat",
+        repoId: "mc",
+        seq: 1,
+        startedAt: 1,
+        endedAt: 2,
+        status: "failed",
+        sessionId: null,
+        model: null,
+        branch: BRANCH,
+        ticket: "mc#42",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "/tmp/stopped-ticket.log",
+        prs: [],
+        summary: "Fix the review findings.",
+        reviewId: null,
+        loop: {
+          ...LOOP,
+          mergeHold: { by: "CAPCOM", reason: "Wait for acceptance.", at: 1 },
+          controllerCheck: { sha: "a".repeat(40), from: "review", pass: false },
+          uat: { sha: "b".repeat(40), from: "review", accepted: false },
+          awaitingFlight: "c".repeat(40),
+        },
+      });
+
+      const { runId } = await idleRun({ loop: LOOP });
+
+      expect(store.run(runId)?.loop).toMatchObject({
+        mergeHold: { by: "CAPCOM", reason: "Wait for acceptance." },
+        controllerCheck: { pass: false },
+        uat: { accepted: false },
+        awaitingFlight: "c".repeat(40),
+      });
+    });
+
+    it("carries on the last review's open findings and reachable commits", async () => {
+      const first = make({
+        extraSeat: {
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          effort: "high",
+          area: ["apps/**"],
+        },
+      });
+      first.sup.start();
+      const priorLoop = { ...LOOP, phase: "ci" as const, prNumber: 9 };
+      const priorStart = await first.sup.startRun("guido-1", 42, { loop: priorLoop });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const worktree = store.seatSession("guido-1")?.worktree;
+      if (worktree === null || worktree === undefined) throw new Error("missing worktree");
+      writeFileSync(join(worktree, "continued.txt"), "continued\n");
+      git(worktree, "add", "continued.txt");
+      git(worktree, "commit", "-qm", "continued work");
+      const head = git(worktree, "rev-parse", "HEAD");
+      await first.sup.endRunByEngine(priorStart.runId);
+      const prior = store.run(priorStart.runId);
+      if (prior === null) throw new Error("missing prior run");
+      store.upsertRun({
+        ...prior,
+        summary: "Earlier summary",
+        loop: priorLoop,
+      });
+      store.addEvidence(priorStart.runId, "Earlier evidence", 2);
+      store.addRunCommit({
+        runId: priorStart.runId,
+        repoId: "mc",
+        branch: BRANCH,
+        sha: head,
+        at: 2,
+      });
+      store.addRunCommit({
+        runId: priorStart.runId,
+        repoId: "mc",
+        branch: BRANCH,
+        sha: "f".repeat(40),
+        at: 3,
+      });
+      const review = store.requestReview({
+        authorRunId: priorStart.runId,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: head,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 4,
+      });
+      if (review === null) throw new Error("missing review");
+      store.setReviewState(review, ["queued"], "running", { runId: "retro:review", at: 4 });
+      const finding = (severity: "Critical" | "Important" | "Minor", file: string) => ({
+        severity,
+        file,
+        line: 1,
+        summary: `${file} summary`,
+        scenario: "test",
+        fix: `${file} fix`,
+      });
+      const findings = [
+        finding("Important", "important.ts"),
+        finding("Critical", "critical.ts"),
+        finding("Minor", "minor.ts"),
+        finding("Important", "resolved.ts"),
+        ...Array.from({ length: 10 }, (_, n) => finding("Important", `extra-${n}.ts`)),
+      ];
+      store.recordFindings(review, "retro:review", {
+        verdict: { spec: "fail", quality: "pass" },
+        summary: "findings",
+        findings,
+        resolutions: [{ findingRef: { reviewId: review, pos: 3 }, outcome: "fixed" }],
+        at: 5,
+      });
+      expect(store.latestReportedReview("mc", 9)?.id).toBe(review);
+      expect(store.findingsOf(review).find((entry) => entry.file === "critical.ts")).toMatchObject({
+        state: "open",
+        resolution: undefined,
+      });
+
+      const { runId } = await first.sup.startRun("guido-2", 42, { loop: LOOP });
+      await until(() => expect(userLines()).toHaveLength(2));
+      const brief = userLines()[1] as string;
+      expect(brief).toContain("## Continue the earlier run");
+      expect(brief.indexOf("critical.ts")).toBeLessThan(brief.indexOf("important.ts"));
+      expect(brief).not.toContain("minor.ts");
+      expect(brief).not.toContain("resolved.ts");
+      expect(brief).not.toContain("extra-9.ts");
+      expect(store.runCommits(runId)).toContain(head);
+      expect(store.runCommits(runId)).not.toContain("f".repeat(40));
     });
   });
 
@@ -940,7 +1103,10 @@ describe("supervisor events (Plan 7a)", () => {
         transcriptPath: "",
         prs: [],
         summary: null,
-        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+        },
       };
       store.upsertRun(run);
       const seen = watchStored(sup);
@@ -1283,7 +1449,7 @@ describe("Codex lifecycle events", () => {
     expect(aside).not.toBeNull();
     store.setRunLoop(runId, {
       ...NEW_LOOP,
-      aside: { worktree: aside?.worktree ?? "", wake: true },
+      hold: { kind: null, reason: null, ended: false, worktree: aside?.worktree ?? "", wake: true },
     });
     expect(store.run(runId)?.sessionId).toBe("codex-thread-1");
     await first.sup.stopAll();

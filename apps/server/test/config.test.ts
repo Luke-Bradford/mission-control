@@ -157,17 +157,12 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 });
   });
 
-  it("reads audit.controller_sessions, defaulting to off, and refuses unknown audit keys", () => {
-    expect(loadConfig(EXAMPLE).audit).toEqual({ controllerSessions: false });
-    const on = tmpConfig((y) => `${y}\naudit:\n  controller_sessions: true\n`);
-    expect(loadConfig(on).audit).toEqual({ controllerSessions: true });
-    const where = tmpConfig(
+  it("accepts audit.controller_sessions and controller_checkout but ignores them, and refuses unknown audit keys", () => {
+    expect(loadConfig(EXAMPLE).audit).toEqual({});
+    const old = tmpConfig(
       (y) => `${y}\naudit:\n  controller_sessions: true\n  controller_checkout: /Users/op/repo\n`,
     );
-    expect(loadConfig(where).audit).toEqual({
-      controllerSessions: true,
-      controllerCheckout: "/Users/op/repo",
-    });
+    expect(loadConfig(old).audit).toEqual({});
     const bad = tmpConfig((y) => `${y}\naudit:\n  other: 1\n`);
     expect(() => loadConfig(bad)).toThrow(ConfigError);
   });
@@ -178,7 +173,6 @@ describe("loadConfig", () => {
         `${y}\naudit:\n  question_wait_minutes: 30\n  controller_wait_minutes: 60\n  ticket_text_factor: 2.5\n  notice_repeats: 4\n`,
     );
     expect(loadConfig(set).audit).toEqual({
-      controllerSessions: false,
       thresholds: {
         questionWaitMs: 30 * 60_000,
         controllerWaitMs: 60 * 60_000,
@@ -486,7 +480,6 @@ describe("crew", () => {
     maxOpen?: string;
     lane?: string;
     laneDefault?: string;
-    fixSessionTrial?: string;
     transcripts?: string;
     /** `crew.roles` entries, one `NAME: {…}` per line. */
     roles?: string[];
@@ -506,7 +499,6 @@ crew:
   ${opts.maxOpen === undefined ? "" : `max_open_runs_per_seat: ${opts.maxOpen}`}
   ${opts.lane === undefined ? "" : `lane: ${opts.lane}`}
   ${opts.laneDefault === undefined ? "" : `lane_default: ${opts.laneDefault}`}
-  ${opts.fixSessionTrial === undefined ? "" : `fix_session_trial: ${opts.fixSessionTrial}`}
   ${opts.transcripts === undefined ? "" : `transcripts: ${opts.transcripts}`}
 ${opts.roles === undefined ? "" : `  roles:\n${opts.roles.map((r) => `    ${r}`).join("\n")}`}
   sessions:
@@ -610,10 +602,12 @@ ${seats.join("\n")}
     expect(fails(crewText({ laneDefault: '"yes"' })).path).toBe("crew.laneDefault");
   });
 
-  it("defaults the fix-session trial switch to false and rejects a non-boolean", () => {
-    expect(load(crewText({})).crew?.fixSessionTrial).toBe(false);
-    expect(load(crewText({ fixSessionTrial: "true" })).crew?.fixSessionTrial).toBe(true);
-    expect(fails(crewText({ fixSessionTrial: '"yes"' })).path).toBe("crew.fixSessionTrial");
+  it("still loads a config that sets the retired fix_session_trial, and ignores it", () => {
+    for (const v of ["true", "false"]) {
+      const text = crewText({}).replace("\ncrew:\n", `\ncrew:\n  fix_session_trial: ${v}\n`);
+      expect(text).toContain(`fix_session_trial: ${v}`);
+      expect(load(text).crew).not.toHaveProperty("fixSessionTrial");
+    }
   });
 
   it("rejects overlapping writer areas", () => {
@@ -744,6 +738,18 @@ ${seats.join("\n")}
       });
       expect(cfg.crew?.roles?.SCOUT).toMatchObject({ model: "haiku", here: "crew member" });
       expect(crewSeatGrants(cfg, "scout-1")).toEqual([]);
+    });
+
+    it("a role that lists the retired code_health or publish_preview tool still loads, without it", () => {
+      const cfg = load(
+        crewText({
+          roles: [
+            "SCOUT: { prompt: roles/SCOUT.md, model: haiku, mode: read-only, loop: plan, tools: [report_plan, read_ticket, code_health, publish_preview] }",
+          ],
+          seats: [modelless("scout-1", "SCOUT")],
+        }),
+      );
+      expect(cfg.crew?.roles?.SCOUT?.tools).toEqual(["report_plan", "read_ticket"]);
     });
 
     it("replacing a built-in", () => {

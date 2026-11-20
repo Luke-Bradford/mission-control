@@ -1,7 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
-import { TrafficChart } from "../src/comms/TrafficChart.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { crewRow, item, seatRow } from "./fixtures.ts";
@@ -458,36 +457,6 @@ it("does not turn hub notices into live messages", async () => {
     ).toBeTruthy(),
   );
   expect(within(traffic).queryByText("Hub notice")).toBeNull();
-});
-
-it("labels traffic buckets by their start in the operator's timezone", async () => {
-  stubFetch({ "/api/config": { operator: { timezone: "Asia/Kolkata" } } });
-  // UTC-hour buckets start at :30 in a half-hour zone.
-  const start = Date.UTC(2026, 9, 28, 0);
-  const hours = Array.from({ length: 24 }, (_, index) => ({
-    hour: start + index * 60 * 60 * 1000,
-    total: index === 3 ? 4 : 0,
-    part: 0,
-  }));
-  render(
-    <TrafficChart
-      hours={hours}
-      label="Traffic"
-      totalLabel="All messages"
-      partLabel="With CAPCOM"
-      emptyText="None"
-      live
-    />,
-  );
-  await waitFor(() =>
-    expect([...document.querySelectorAll(".comms-chart-tick")].map((el) => el.textContent)).toEqual(
-      ["05:30", "17:30", "now"],
-    ),
-  );
-  expect(document.querySelectorAll(".comms-hour title")[3]?.textContent).toBe(
-    "08:30 · 4 messages · 0 with capcom",
-  );
-  expect(document.querySelector(".comms-chart-now.live")).not.toBeNull();
 });
 
 it("shows each sender's message-length p95 and count against the limit, flagging long ones", async () => {

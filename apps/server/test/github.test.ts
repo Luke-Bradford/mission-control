@@ -1503,6 +1503,23 @@ describe("parseChecks", () => {
     expect(queued).not.toHaveProperty("startedAt");
     expect(status).not.toHaveProperty("completedAt");
   });
+
+  it("gives a run still waiting in GitHub's queue no start, though GitHub dates it from creation", () => {
+    const at = "2026-11-18T16:15:20Z";
+    const rollup = {
+      contexts: {
+        nodes: [
+          { ...checkRun("q", null), status: "QUEUED", startedAt: at },
+          { ...checkRun("w", null), status: "WAITING", startedAt: at },
+          { ...checkRun("r", null), startedAt: at },
+        ],
+      },
+    };
+    const [queued, waiting, running] = parseChecks(rollup);
+    expect(queued).not.toHaveProperty("startedAt");
+    expect(waiting).not.toHaveProperty("startedAt");
+    expect(running).toMatchObject({ startedAt: Date.parse(at) });
+  });
 });
 
 describe("collectGithub pull requests", () => {
@@ -1637,6 +1654,24 @@ describe("collectGithub pull requests", () => {
       state: "open",
     });
     expect(by.get(12)).toMatchObject({ state: "closed", review: "requested", ci: "pending" });
+  });
+
+  it("reads whether each PR comes from a fork and stores it", async () => {
+    const { gql, calls } = stub({
+      prPages: [
+        prPage([
+          pull(1, { isCrossRepository: false }),
+          pull(2, { isCrossRepository: true }),
+          pull(3, { isCrossRepository: "yes" }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(calls.find((c) => c.q.includes("query PullRequests"))?.q).toContain("isCrossRepository");
+    const by = new Map(prs().map((p) => [p.number, p]));
+    expect(by.get(1)?.isCrossRepository).toBe(false);
+    expect(by.get(2)?.isCrossRepository).toBe(true);
+    expect(by.get(3)?.isCrossRepository).toBeUndefined();
   });
 
   it("stores the head commit's sha and the mergeable state, null when GitHub gives neither", async () => {
@@ -1961,7 +1996,7 @@ describe("sweepPullRequests", () => {
     await sweepPullRequests(repo, store, gql, NOW, true);
     expect(calls).toHaveLength(1);
     expect(calls[0]?.q).toContain("defaultBranchRef");
-    expect(calls[0]?.q).toContain("contexts(first: 10)");
+    expect(calls[0]?.q).toContain("contexts(first: 50)");
     expect(JSON.parse(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`) ?? "null")).toEqual({
       sha: "main-sha",
       ci: "failing",

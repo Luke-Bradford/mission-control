@@ -98,7 +98,7 @@ const run = (over: Partial<Run> = {}): Run => ({
     ...NEW_LOOP,
     phase: "working",
     prNumber: 12,
-    aside: { worktree: "/tmp/preserved", wake: false },
+    hold: { kind: null, reason: null, ended: false, worktree: "/tmp/preserved", wake: false },
   },
   ...over,
 });

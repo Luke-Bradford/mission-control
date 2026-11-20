@@ -95,10 +95,13 @@ export function Kpis({
   t,
   live = true,
   filtered = false,
+  only,
 }: {
   t: Telemetry | undefined;
   live?: boolean;
   filtered?: boolean;
+  /** The tile keys to show; the whole row when absent. */
+  only?: readonly string[];
 }) {
   const nameOf = useSeatName();
   const metrics = useMetrics();
@@ -226,9 +229,11 @@ export function Kpis({
   ];
   return (
     <div className="kpis">
-      {tiles.map((k) => (
-        <Kpi key={k.key} tile={k} />
-      ))}
+      {tiles
+        .filter((k) => !only || only.includes(k.key))
+        .map((k) => (
+          <Kpi key={k.key} tile={k} />
+        ))}
     </div>
   );
 }

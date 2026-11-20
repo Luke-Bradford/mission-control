@@ -62,7 +62,7 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
     return sessions.find((s) => s.seats.some((x) => x.id === run.agentId)) ?? sessions[0];
   };
   /** Set aside at review: not ended, but no seat runs it. */
-  const isAside = (r: Run): boolean => r.endedAt === null && r.loop?.aside != null;
+  const isAside = (r: Run): boolean => r.endedAt === null && r.loop?.hold?.worktree != null;
   /** The run's ticket (`repo#number`) is Done on the board: its work is finished, PR or not. */
   const ticketDone = (run: Run): boolean => {
     const m = /^(.+)#([1-9][0-9]*)$/.exec(run.ticket ?? "");

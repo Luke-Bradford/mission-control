@@ -5,7 +5,10 @@ import {
   errorText,
   type MapSnapshot,
   type NewRepo,
+  PLAN_SIGNOFFS,
+  type PlanSignoff,
   type RepoPreview,
+  type RepoRulesView,
   type SeatInput,
 } from "@mc/core";
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -39,6 +42,11 @@ const EMPTY_GUIDANCE: Guidance = {
   labelMode: "any",
   avoid: [],
   direction: "",
+};
+const PLAN_SIGNOFF_LABELS: Record<PlanSignoff, string> = {
+  every: "Every ticket",
+  larger: "Larger work only",
+  never: "Never",
 };
 
 /** Configuration only: cards do not make board, queue, or live-seat reads. */
@@ -125,18 +133,33 @@ function RepoCard({
   const [open, setOpen] = useState(false);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
+  // A closed card is summary-only. Read its editable rules when the operator opens it.
+  const rules = useResource<RepoRulesView>(open ? RESOURCES.repoRules(repo.id) : null);
+  const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
+    setPlanSignOff((rules.data?.rules.plan_signoff?.value as PlanSignoff | undefined) ?? "never");
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
     setAccount(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
-  }, [repo, config.accounts]);
+  }, [repo, config.accounts, rules.data]);
   const save = async () => {
     setSaving(true);
     try {
+      const savedPlanSignoff = rules.data?.rules.plan_signoff;
+      // This write uses the version read with the rules. Do it before /setup can rewrite config.yaml.
+      if (savedPlanSignoff && rules.data && planSignOff !== savedPlanSignoff.value) {
+        await apiPost(ACTIONS.repoRules(repo.id), {
+          base: rules.data.base,
+          rules: { plan_signoff: planSignOff },
+        });
+      }
       const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
         defaultAccountId: account || null,
         guidance,
       });
+      if (savedPlanSignoff) {
+        hub.refetch(RESOURCES.repoRules(repo.id).path);
+      }
       toast(`Saved ${repo.id}. Backup: ${result.backup}.`);
       hub.refetch(RESOURCES.config.path);
     } catch (error) {
@@ -180,6 +203,21 @@ function RepoCard({
                 ))}
               </select>
             </label>
+            {rules.data?.rules.plan_signoff && (
+              <label>
+                Plan sign-off
+                <select
+                  value={planSignOff}
+                  onChange={(e) => setPlanSignOff(e.target.value as PlanSignoff)}
+                >
+                  {PLAN_SIGNOFFS.map((v) => (
+                    <option key={v} value={v}>
+                      {PLAN_SIGNOFF_LABELS[v]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               Checkout folder
               <input value={session?.checkout ?? ""} readOnly placeholder="Observed repo" />

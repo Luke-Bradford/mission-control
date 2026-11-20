@@ -39,6 +39,7 @@ export const EVERYWHERE: LinkRule[] = [
   rule(/^Agents$/, /^\/agent$/, "Header tab."),
   rule(/^Comms$/, /^\/comms$/, "Header tab."),
   rule(/^QA$/, /^\/qa$/, "Header tab."),
+  rule(/^Planner$/, /^\/planner$/, "Header tab."),
   rule(/^Telemetry$/, /^\/telemetry$/, "Header tab."),
   rule(/^Audit$/, /^\/audit$/, "Header tab."),
   rule(/^Open FLIGHT's full view$/, /^\/flight$/, "The dock's summary leads to the FLIGHT page."),
@@ -105,7 +106,7 @@ export const LINK_MAP: Record<
     rules: [
       rule(/^FLIGHT chat$/, /^\/comms$/, "FLIGHT's conversation in Comms."),
       rule(
-        /^(Decision|Question|Plan|Escalation)/,
+        /^(Decision|Question|Plan(?!ner)|Escalation)/,
         /^\/needs-you\/[^/]+$/,
         "A waiting item opens beside the list, with its context, pictures, recommendation and options.",
       ),
@@ -242,10 +243,52 @@ export const LINK_MAP: Record<
       rule(/^Open saved report for /, /^\/qa\?repo=[\w-]+&pr=\d+&report=\w+$/, "A saved report."),
     ],
   },
+  planner: {
+    routes: ["/planner", "/planner?view=history"],
+    rules: [
+      rule(/^To plan and sign off$/, /^\/planner$/, "The plans waiting for a decision."),
+      rule(/^History$/, /^\/planner\?view=history$/, "Past plans."),
+      rule(
+        /[\w-]+#\d+$/,
+        /^\/planner(\?view=history&|\?)plan=[\w-]+$/,
+        "A plan in the list opens beside it.",
+      ),
+    ],
+  },
   telemetry: {
     routes: ["/telemetry"],
     rules: [
       rule(/^\d+$/, /^\/comms#cGuard$/, "A guard count opens the Comms line that explains it."),
+      rule(/^Crew health: /, /^\/needs-you$/, "The verdict leads to what waits on the operator."),
+      rule(/^Waiting on you: /, /^\/needs-you$/, "Seat questions are on the Needs you list."),
+      rule(/^Seats running: /, /^\/$/, "Running seats are on the Overview."),
+      rule(/^Merged: /, /^\/board$/, "Merged PRs are the Board's merged stage."),
+      rule(
+        /^(Review rounds per PR|RETRO findings per PR|PRs sent back): /,
+        /^\/audit$/,
+        "Review figures are on the Audit page.",
+      ),
+      rule(/^Tightest quota: /, /^\/telemetry\?tab=cost$/, "Quota used is on the Cost tab."),
+      rule(/^Machine: /, /^\/telemetry\?tab=machine$/, "CPU and memory are on the Machine tab."),
+      rule(
+        /^(Running|Waiting|Parked|Idle|Stalled|Blocked|Error|Stopped) seats: /,
+        /^\/agent$/,
+        "A state count leads to the Agents page, where the seats are.",
+      ),
+      rule(/^[\w-]+ working share: /, /^\/agent\/[\w-]+$/, "A seat's share opens its Agent page."),
+      rule(/^Table$/, /^\/telemetry\?view=table$/, "The Table view of the same tab."),
+      rule(
+        /^Cost and tokens$/,
+        /^\/telemetry\?tab=cost$/,
+        "A tab is in the URL, so it can be linked.",
+      ),
+      rule(
+        /^Throughput$/,
+        /^\/telemetry\?tab=throughput$/,
+        "A tab is in the URL, so it can be linked.",
+      ),
+      rule(/^Quality$/, /^\/telemetry\?tab=quality$/, "A tab is in the URL, so it can be linked."),
+      rule(/^Machine$/, /^\/telemetry\?tab=machine$/, "A tab is in the URL, so it can be linked."),
     ],
   },
   audit: {
@@ -262,9 +305,15 @@ export const LINK_MAP: Record<
     ),
     rules: [
       rule(
-        /^(Accounts|Repos & seats|Loops|Roles|Sources|Safety|Sessions)$/,
+        /^(Accounts|Repos & seats|Loops|Roles & guards|Sources|Safety|Sessions)$/,
         /^\/setup\/\w+$/,
         "A Setup tab.",
+      ),
+      rule(/^\d+ seats?$/, /^\/setup\/sessions$/, "A role's seats open Setup sessions."),
+      rule(
+        /^Edit [\w-]+ on Sessions$/,
+        /^\/setup\/sessions\?edit=[\w%-]+$/,
+        "A seat's Edit link opens its form on Setup sessions.",
       ),
       rule(
         /^[a-z]+-\d+.*(whole checkout|read-only)/,
@@ -284,8 +333,6 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/App.tsx": "page: header tabs, skip link, legacy redirects",
   "src/agent/IdentityBand.tsx": "page: Setup sessions, the ticket",
   "src/agent/Instruments.tsx": "page: Audit rows of the seat",
-  "src/agent/Overview.tsx": "page: ticket, QA, Board, trace, seat",
-  "src/agent/Picker.tsx": "page: another seat",
   "src/agent/RightColumn.tsx": "page: trace, Setup, next move",
   "src/agent/RunTrace.tsx": "page: back to the seat",
   "src/agent/RunsPanel.tsx": "page: trace, hand-off run",
@@ -346,6 +393,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Flight.tsx": "page: legacy hash to Needs you",
   "src/pages/LegacyAudit.tsx": "page: seat, trace, board",
   "src/pages/Needs.tsx": "page: first item",
+  "src/pages/Planner.tsx": "page: the plan list; the Planner views",
   "src/pages/QaReadiness.tsx": "page: QA, Audit; external: preview",
   "src/pages/Setup.tsx": "page: Setup tabs",
   "src/pages/TicketPage.tsx": "page: back to Board",
@@ -355,6 +403,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/qa/TicketQaReports.tsx": "page: permanent report",
   "src/qa/frees.tsx": "page: ticket, FLIGHT chains",
   "src/router.ts": "the router itself",
+  "src/setup/Roles.tsx": "page: Setup sessions (a role's seats, a seat's form)",
   "src/setup/Sessions.tsx": "page: seat",
   "src/shell/AwayDigest.tsx": "page: its item; pane",
   "src/shell/DemoSwitch.tsx": "page: the same page, Demo on or off",
@@ -363,5 +412,10 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/shell/ItemDetail.tsx": "pane: the item's seat, its decision",
   "src/shell/keys.ts": "page: g-key shortcuts",
   "src/shell/overlays.ts": "pane: openItem itself",
+  "src/pages/Telemetry.tsx": "page: the same page, another tab or view",
+  "src/telemetry/CrewTab.tsx": "page: Agents, a seat's Agent page, Needs you, Overview",
   "src/telemetry/Kpis.tsx": "page: the KPI's source",
+  "src/telemetry/QualityTab.tsx": "page: the Guard drawer, a ticket page, the Audit page",
+  "src/telemetry/ThroughputTab.tsx": "page: the Board, a ticket's page",
+  "src/telemetry/Stat.tsx": "page: Needs you, Board, Overview, another Telemetry tab",
 };

@@ -6,20 +6,23 @@ import {
   type PullRequestView,
   type Run,
   type RunLoop,
+  WASTE_CHECKS,
   WASTE_THRESHOLDS,
+  type WasteCheck,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
-import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import {
   openWasteAlarms,
+  resolvedReviewRound,
   resolveWasteAlarm,
   restartHold,
   reviewsHeld,
+  settleReviewRounds,
   syncWasteAlarms,
   ticketParked,
   wasteReport,
@@ -116,6 +119,8 @@ const mergedPr = (number: number, branch: string, mergedAt: number): PullRequest
 const checkOn = (runId: string, command: string, sha: string, at: number, ok = false) =>
   store.addCheckRun({ runId, command, headSha: sha, ok, exitCode: ok ? 0 : 1, at });
 
+const REVIEW_ROUNDS: WasteCheck = "review-rounds";
+
 describe("restart storm (7 November replay)", () => {
   it("raises an alarm within the minute tick and stops that agent's restarts", () => {
     // about 300 FLIGHT sessions in five hours: here the last hour's worth, one start a few minutes
@@ -130,6 +135,49 @@ describe("restart storm (7 November replay)", () => {
     expect(restartHold(store, "flight-1")).toMatch(/restart storm|started 12 times/);
     // another agent is unaffected
     expect(restartHold(store, "guido-1")).toBeNull();
+  });
+
+  it("does not count reviews that were reported, but counts failed ones", () => {
+    const starts = WASTE_THRESHOLDS.restartStormStarts + 1;
+    // Every review run ends "ok" (the engine writes it so); the review's own state tells them apart.
+    const review = (seatId: string, i: number, end: "reported" | "failed"): void => {
+      const at = NOW - i * MIN;
+      const id = store.requestReview({
+        authorRunId: `author-${seatId}-${i}`,
+        repoId: "mc",
+        seatId,
+        prNumber: 100 + i,
+        sha: "h",
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at,
+      });
+      if (id === null) throw new Error("review not created");
+      const r = run(seatId, { startedAt: at, status: "ok", reviewId: id });
+      store.upsertRun(r);
+      store.setReviewState(id, ["queued"], "running", { at, runId: r.id });
+      if (end === "reported")
+        store.recordFindings(id, r.id, {
+          verdict: { spec: "pass", quality: "pass" },
+          summary: "ok",
+          findings: [],
+          at,
+        });
+      else store.setReviewState(id, ["running"], "failed", { at, failure: "silent" });
+    };
+    for (let i = 0; i < starts; i++) review("retro-1", i, "reported");
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store)).toEqual([]);
+    expect(restartHold(store, "retro-1")).toBeNull();
+
+    for (let i = 0; i < starts; i++) review("retro-2", i, "failed");
+    for (let i = 0; i < starts; i++)
+      store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN, status: "failed" }));
+    syncWasteAlarms(config, store, NOW);
+    expect(restartHold(store, "retro-2")).not.toBeNull();
+    expect(restartHold(store, "guido-1")).not.toBeNull();
+    expect(restartHold(store, "retro-1")).toBeNull();
   });
 
   it("does not fire at the limit, and closes when the hour's count falls back", () => {
@@ -163,7 +211,7 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
       store.upsertRun(r);
       store.setRunLoop(r.id, {
         phase: "parked",
-        parked: { kind: "stuck", reason: "no progress", ended: true },
+        hold: { kind: "stuck", reason: "no progress", ended: true, worktree: null, wake: false },
       } as RunLoop);
       last = r.id;
     }
@@ -177,8 +225,36 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     expect(by["retry-loop"]).toMatchObject({ subject: TICKET, ticket: TICKET, level: 3 });
     expect(by["unchanged-rerun"]).toMatchObject({ ticket: TICKET, level: 8 });
     expect(by["unchanged-rerun"]?.evidence).toContain(LINT);
+    const row = wasteReport(config, store, NOW).checks.find((c) => c.check === "unchanged-rerun");
+    expect(row).toMatchObject({ action: "alarm", fired: 1 });
     expect(ticketParked(store, TICKET)).toMatch(/3 failed attempts/);
     expect(ticketParked(store, "mc#1")).toBeNull();
+  });
+
+  describe("a rerun on one commit", () => {
+    const unchanged = (command: string) =>
+      openWasteAlarms(store).filter(
+        (a) => a.check === "unchanged-rerun" && a.evidence.includes(command),
+      );
+    const start = () => {
+      const r = run("guido-1", { ticket: TICKET, startedAt: NOW - HOUR, status: "ok" });
+      store.upsertRun(r);
+      return r.id;
+    };
+    it("raises an alarm for a pass followed by a failed rerun", () => {
+      const id = start();
+      checkOn(id, LINT, SHA, NOW - 10 * MIN, true);
+      checkOn(id, LINT, SHA, NOW - 5 * MIN, false);
+      syncWasteAlarms(config, store, NOW);
+      expect(unchanged(LINT)).toHaveLength(1);
+    });
+    it("allows one retry after an initial failure", () => {
+      const id = start();
+      checkOn(id, LINT, SHA, NOW - 10 * MIN, false);
+      checkOn(id, LINT, SHA, NOW - 5 * MIN, true);
+      syncWasteAlarms(config, store, NOW);
+      expect(unchanged(LINT)).toHaveLength(0);
+    });
   });
 
   it("stays parked until FLIGHT resolves it, and a worse level raises it again", () => {
@@ -192,6 +268,76 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN, status: "failed" }));
     syncWasteAlarms(config, store, NOW + 3 * MIN);
     expect(ticketParked(store, TICKET)).not.toBeNull();
+  });
+
+  describe("the restarted-after-park alarm", () => {
+    const restarted = () =>
+      openWasteAlarms(store).filter(
+        (a) => a.check === "ticket-churn" && a.subject.endsWith(":restarted"),
+      );
+    const decide = (at: number, kind: "re-plan" | "note", about: string) =>
+      store.addFlightDecision({
+        at,
+        kind,
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        about,
+        decision: "d",
+        basis: "b",
+      });
+    const parked = () => {
+      replay();
+      syncWasteAlarms(config, store, NOW);
+    };
+
+    it("opens when the ticket restarts with no re-plan logged", () => {
+      parked();
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      decide(NOW + MIN, "note", `${TICKET} revived`);
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("stays quiet when a re-plan for the ticket came after the alarm and before the run", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toEqual([]);
+    });
+
+    it("opens when the re-plan has the same timestamp as the restart", () => {
+      parked();
+      decide(NOW + 2 * MIN, "re-plan", `${TICKET}: re-planned after the park`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 3 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("ignores a re-plan for another ticket, one before the alarm, or one after the run", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", "mc#15960 re-planned");
+      decide(NOW - HOUR, "re-plan", `${TICKET} re-planned`);
+      decide(NOW + 5 * MIN, "re-plan", `${TICKET} re-planned`);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN }));
+      syncWasteAlarms(config, store, NOW + 6 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
+
+    it("opens again for a second restart after the revived run ends", () => {
+      parked();
+      decide(NOW + MIN, "re-plan", `${TICKET} re-planned`);
+      store.upsertRun(
+        run("guido-1", { ticket: TICKET, startedAt: NOW + 2 * MIN, endedAt: NOW + 10 * MIN }),
+      );
+      syncWasteAlarms(config, store, NOW + 11 * MIN);
+      expect(restarted()).toEqual([]);
+      store.upsertRun(run("guido-1", { ticket: TICKET, startedAt: NOW + 20 * MIN }));
+      syncWasteAlarms(config, store, NOW + 21 * MIN);
+      expect(restarted()).toHaveLength(1);
+    });
   });
 
   it("counts three carry-on resumes without a report", () => {
@@ -237,43 +383,6 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
   });
 });
 
-describe("unchanged rerun refusal", () => {
-  it("refuses the same check on the same commit with a clean tree, and records the refusal", async () => {
-    const r = run("guido-1", { ticket: "mc#9" });
-    store.upsertRun(r);
-    const recorder = createCheckRecorder({
-      store,
-      checks: async () => ["pnpm -s lint"],
-      state: async () => ({ head: "feedbeef00", clean: true }),
-      now: () => NOW,
-    });
-    expect(await recorder.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    checkOn(r.id, "pnpm -s lint", "feedbeef00", NOW - MIN, true);
-    expect(await recorder.rerun?.(r.id, "pnpm -s lint")).toMatch(
-      /Not run: pnpm -s lint already ran on commit feedbee and nothing has changed/,
-    );
-    // another command, or another head, is not a rerun
-    expect(await recorder.rerun?.(r.id, "pnpm -s typecheck")).toBeNull();
-    const moved = createCheckRecorder({
-      store,
-      checks: async () => ["pnpm -s lint"],
-      state: async () => ({ head: "0123456789", clean: true }),
-    });
-    expect(await moved.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    // a changed file (dirty tree) is not a rerun either
-    const dirty = createCheckRecorder({
-      store,
-      checks: async () => ["pnpm -s lint"],
-      state: async () => ({ head: "feedbeef00", clean: false }),
-    });
-    expect(await dirty.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    syncWasteAlarms(config, store, NOW);
-    expect(openWasteAlarms(store).map((a) => [a.check, a.runId, a.level])).toEqual([
-      ["unchanged-rerun", r.id, 1],
-    ]);
-  });
-});
-
 describe("review rounds", () => {
   const request = (authorRunId: string, round: number) =>
     store.requestReview({
@@ -298,12 +407,65 @@ describe("review rounds", () => {
     // held at once, before the next scan
     expect(reviewsHeld(store, r.id)).toBe(true);
     syncWasteAlarms(config, store, NOW);
-    const alarm = openWasteAlarms(store).find((a) => a.check === "review-rounds");
+    const alarm = openWasteAlarms(store).find((a) => a.check === REVIEW_ROUNDS);
     expect(alarm).toMatchObject({ subject: r.id, level: 3 });
     resolveWasteAlarm(store, alarm?.id ?? 0, NOW, "fix: one more round");
     expect(reviewsHeld(store, r.id)).toBe(false);
     request(r.id, 4);
     expect(reviewsHeld(store, r.id)).toBe(true);
+  });
+});
+
+describe("settleReviewRounds", () => {
+  const blockingRound = (authorRunId: string, round: number) => {
+    const id = store.requestReview({
+      authorRunId,
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 4,
+      sha: `sha${round}`,
+      epoch: round,
+      attempt: 1,
+      round,
+      at: NOW - MIN,
+    });
+    if (id === null) throw new Error("fixture review missing");
+    store.setReviewState(id, ["queued"], "running", { at: NOW - MIN, runId: `rev-${round}` });
+    store.recordFindings(id, `rev-${round}`, {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "x",
+      findings: [
+        { severity: "Important", file: "f.ts", line: 1, summary: "s", scenario: "c", fix: "f" },
+      ],
+      at: NOW - MIN,
+    });
+  };
+  const at2 = (): Run => {
+    const r = run("guido-1", { ticket: "mc#5" });
+    store.upsertRun(r);
+    blockingRound(r.id, 1);
+    blockingRound(r.id, 2);
+    return r;
+  };
+
+  it("settles nothing when no hold stands and no grant is given", () => {
+    const r = at2();
+    expect(settleReviewRounds(store, r, NOW, "basis", false)).toBe(false);
+    expect(store.waste.alarms("WHERE check_id = ?", REVIEW_ROUNDS)).toEqual([]);
+  });
+
+  it("a grant resolves the hold at the round the next review gets", () => {
+    const r = at2();
+    expect(settleReviewRounds(store, r, NOW, "one more round", true)).toBe(true);
+    expect(resolvedReviewRound(store, r.id)).toBe(3);
+    // the next review is round 3: it runs
+    expect(reviewsHeld(store, r.id)).toBe(false);
+  });
+
+  it("settles nothing when that round is already resolved", () => {
+    const r = at2();
+    expect(settleReviewRounds(store, r, NOW, "one more round", true)).toBe(true);
+    expect(settleReviewRounds(store, r, NOW, "again", true)).toBe(false);
   });
 });
 
@@ -333,7 +495,7 @@ describe("review rounds on a sliced ticket", () => {
       });
     syncWasteAlarms(config, store, NOW);
     expect(reviewsHeld(store, r.id)).toBe(true);
-    expect(openWasteAlarms(store).find((a) => a.check === "review-rounds")).toMatchObject({
+    expect(openWasteAlarms(store).find((a) => a.check === REVIEW_ROUNDS)).toMatchObject({
       subject: r.id,
       level: 3,
     });
@@ -600,52 +762,26 @@ describe("the read route's report", () => {
 });
 
 describe("FLIGHT's activity per day on the read route", () => {
-  const wait = (at: number) =>
-    store.addFlightDecision({
-      at,
-      kind: "wait",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: "mc#1: waiting on CI",
-      decision: "waiting",
-      basis: "b",
-    });
   const tokens = (n: number) => ({ input: n, output: 0, cacheRead: 0, cacheCreate: 0 });
 
-  it("counts wakes, waits and FLIGHT's share of tokens in each 24-hour bucket", () => {
+  it("counts wakes and FLIGHT's share of tokens in each 24-hour bucket", () => {
     store.upsertRun(run("flight-1", { startedAt: NOW - 2 * HOUR, tokens: tokens(300) }));
     store.upsertRun(run("guido-1", { startedAt: NOW - 3 * HOUR, tokens: tokens(700) }));
     store.upsertRun(run("flight-1", { startedAt: NOW - 30 * HOUR, tokens: tokens(100) }));
     for (const at of [NOW - HOUR, NOW - 2 * HOUR, NOW - 3 * HOUR, NOW - 30 * HOUR])
       store.addFlightWake("r1", at, ["q"]);
-    for (const at of [NOW - HOUR, NOW - 30 * HOUR, NOW - 31 * HOUR]) wait(at);
-    // a decision that is not a wait is not counted
-    store.addFlightDecision({
-      at: NOW - HOUR,
-      kind: "note",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: "a",
-      decision: "d",
-      basis: "b",
-    });
     const days = wasteReport(config, store, NOW).flight;
     expect(days).toHaveLength(14);
     expect(days.at(-1)?.since).toBe(NOW - DAY);
     expect(days.at(-1)).toMatchObject({
       wakes: 3,
-      waits: 1,
       flightTokens: 300,
       totalTokens: 1000,
     });
     expect(days.at(-1)?.tokenShare).toBeCloseTo(0.3);
-    expect(days.at(-2)).toMatchObject({ wakes: 1, waits: 2, flightTokens: 100, totalTokens: 100 });
+    expect(days.at(-2)).toMatchObject({ wakes: 1, flightTokens: 100, totalTokens: 100 });
     expect(days.at(-2)?.tokenShare).toBe(1);
-    expect(days[0]).toMatchObject({ wakes: 0, waits: 0, totalTokens: 0, tokenShare: null });
+    expect(days[0]).toMatchObject({ wakes: 0, totalTokens: 0, tokenShare: null });
   });
 });
 
@@ -695,14 +831,18 @@ describe("an external PR's reviews", () => {
       });
     syncWasteAlarms(config, store, NOW);
     expect(reviewsHeld(store, "external-pr:mc#7")).toBe(false);
-    expect(openWasteAlarms(store).filter((a) => a.check === "review-rounds")).toEqual([]);
+    expect(openWasteAlarms(store).filter((a) => a.check === REVIEW_ROUNDS)).toEqual([]);
   });
 });
 
 describe("the waste_alarm FLIGHT signal", () => {
-  it("is raised once for an open alarm and stays told across ticks", () => {
-    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));
+  it("is raised once for an alarm that parks a ticket and stays told across ticks", () => {
+    for (let i = 0; i < 2; i++)
+      store.upsertRun(
+        run("guido-1", { ticket: "mc#1596", startedAt: NOW - (i + 1) * HOUR, status: "failed" }),
+      );
     syncWasteAlarms(config, store, NOW);
+    expect(ticketParked(store, "mc#1596")).not.toBeNull();
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const read = (at: number) =>
@@ -718,13 +858,42 @@ describe("the waste_alarm FLIGHT signal", () => {
     expect(next[0]?.told).toBe(true);
   });
 
-  it("does not wake FLIGHT for an unchanged rerun the hook already refused", () => {
+  it.each(WASTE_CHECKS)("%s wakes FLIGHT only if it is on the list of alarms that do", (check) => {
+    store.waste.insertAlarm(
+      {
+        check,
+        subject: `s:${check}`,
+        repoId: "mc",
+        ticket: "mc#1596",
+        seatId: null,
+        runId: null,
+        level: 1,
+        evidence: `evidence for ${check}`,
+      },
+      NOW,
+    );
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const raised = flightSignals({ config, store, session, seats: [], now: NOW }).signals.filter(
+      (s) => s.kind === "waste_alarm",
+    );
+    expect(raised.map((s) => s.evidence)).toEqual(
+      ["retry-loop", "failed-review-rounds", "runs-per-ticket"].includes(check)
+        ? [expect.stringContaining(`evidence for ${check}`)]
+        : [],
+    );
+  });
+
+  it("does not wake FLIGHT for an alarm the hub handles itself", () => {
     const r = run("guido-1", { ticket: "mc#1596" });
     store.upsertRun(r);
-    for (let i = 0; i < 3; i++)
-      store.addRerunRefusal(r.id, "pnpm -s lint", "abc1234def", NOW - i * MIN);
+    for (let i = 0; i < 3; i++) checkOn(r.id, "pnpm -s lint", "abc1234def", NOW - i * MIN, true);
+    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-2", { startedAt: NOW - i * MIN }));
     syncWasteAlarms(config, store, NOW);
-    expect(openWasteAlarms(store).map((a) => a.check)).toContain("unchanged-rerun");
+    const open = openWasteAlarms(store).map((a) => a.check);
+    expect(open).toContain("unchanged-rerun");
+    expect(open).toContain("restart-storm");
+    expect(open).not.toContain("retry-loop");
     const session = config.crew?.sessions[0];
     if (session === undefined) throw new Error("no session");
     const signals = flightSignals({ config, store, session, seats: [], now: NOW }).signals;

@@ -117,6 +117,7 @@ describe("Header", () => {
       "Agents",
       "Comms",
       "QA",
+      "Planner",
       "Telemetry",
       "Audit",
     ]);
@@ -128,6 +129,7 @@ describe("Header", () => {
       "/agent",
       "/comms",
       "/qa",
+      "/planner",
       "/telemetry",
       "/audit",
     ]);

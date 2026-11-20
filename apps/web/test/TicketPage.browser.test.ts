@@ -4,7 +4,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { ticketQaReportFixture } from "./qaReportFixture.ts";
+import { mockPng } from "./materialsFixture.ts";
+import { qaReportAssets, ticketQaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "ticket-page-shots");
@@ -194,5 +195,122 @@ describeRendered("The ticket page in a browser", () => {
       }
     },
     BROWSER_TEST_TIMEOUT_MS * 4,
+  );
+
+  it(
+    "keeps the signed-off mockup and retained QA result screenshots visible for comparison",
+    async () => {
+      mkdirSync(SHOTS, { recursive: true });
+      const report = ticketQaReportFixture();
+      const wide = (name: string) => `https://evidence.example/${name}.svg`;
+      const mockup = `/api/attention-material-assets/${"a".repeat(64)}`;
+      report.visual.pairs = [
+        ...report.visual.pairs,
+        { ...report.visual.pairs[0], label: "Ticket · 1920×940 · dark" },
+      ];
+      for (const [index, pair] of report.visual.pairs.entries())
+        pair.after.url = wide(`after-${index}`);
+      const image = (fill: string) => ({
+        contentType: "image/svg+xml",
+        body: `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000"><rect width="1600" height="1000" fill="${fill}"/></svg>`,
+      });
+      const page = await renderAt({
+        page: "test/ticketBrowser.html",
+        width: 1920,
+        height: 940,
+        api: {
+          "/api/tickets/shop-app/3349": {
+            ...SCENARIOS.closedQa,
+            plan: {
+              repoId: "shop-app",
+              issue: 3349,
+              ref: "shop-app#3349",
+              title: "Quote cache",
+              state: "signed-off",
+              marked: true,
+              asks: "Keep quotes responsive.",
+              proposal: "Use the signed-off cache design.",
+              mockups: [
+                {
+                  id: "a".repeat(64),
+                  url: mockup,
+                  caption: "Quote cache mockup at 1600×1000",
+                  mediaType: "image/png",
+                },
+              ],
+              sizeEstimate: "M",
+              risks: "Cache invalidation needs careful review.",
+              note: null,
+              requestedAt: 1,
+              plannedAt: 1,
+              decidedAt: 1,
+            },
+          },
+          "/api/config": {
+            operator: { timezone: "UTC" },
+            repos: [{ id: "shop-app", github: "octo-org/shop-app" }],
+          },
+          "/api/qa-reports?repoId=shop-app&prNumber=40": { reports: [report] },
+        },
+        assets: {
+          ...qaReportAssets(),
+          [mockup]: { contentType: "image/png", body: mockPng(190) },
+          [wide("after-0")]: image("#789"),
+          [wide("after-1")]: image("#678"),
+        },
+      });
+      try {
+        await page.boxes(".plan-beside .needs-frame img");
+        await page.boxes(".plan-built-shots img");
+        await page.evaluate(() => document.querySelector(".plan-beside")?.scrollIntoView(), null);
+        expect(
+          await page.evaluate(async () => {
+            const images = [
+              ...document.querySelectorAll<HTMLImageElement>(
+                ".plan-beside .needs-frame img, .plan-built-shots img",
+              ),
+            ];
+            const start = performance.now();
+            while (
+              images.some((img) => !img.complete || img.naturalWidth < 1600) &&
+              performance.now() - start < 2000
+            )
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            const plan = document.querySelector(".plan-beside")?.getBoundingClientRect();
+            const timeline = document.querySelector(".tk-timeline")?.getBoundingClientRect();
+            return (
+              document.documentElement.scrollWidth <= window.innerWidth &&
+              images.length === 3 &&
+              images.every((img) => {
+                const section = img.closest("section");
+                const image = img.getBoundingClientRect();
+                const bounds = section?.getBoundingClientRect();
+                return (
+                  img.naturalWidth === 1600 &&
+                  img.naturalHeight === 1000 &&
+                  image.width > 150 &&
+                  image.height > 100 &&
+                  image.height <= window.innerHeight * 0.3 + 1 &&
+                  !!bounds &&
+                  image.right <= bounds.right + 0.5 &&
+                  !!plan &&
+                  image.bottom <= plan.bottom + 0.5
+                );
+              }) &&
+              !!plan &&
+              !!timeline &&
+              timeline.top >= plan.bottom
+            );
+          }, null),
+        ).toBe(true);
+        expect(
+          await page.reachable(".plan-beside .needs-picture button, .plan-built-shots a"),
+        ).not.toContain(false);
+        await page.screenshot(join(SHOTS, "ticket-plan-comparison-1920x940-light.png"));
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
   );
 });

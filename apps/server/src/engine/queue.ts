@@ -31,6 +31,7 @@ import {
   PACE_HELD_PREFIX,
   type Profile,
   paceRefusal,
+  planHolds,
   priorityRank,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
@@ -154,7 +155,7 @@ export function seatMayTake(
 ): boolean {
   if (pausedSeat(store, seatId, null)) return false;
   if (wakeDueAsideRun(store, seatId) !== undefined) return false;
-  const open = store.asideRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
+  const open = store.offSeatRuns().filter((r) => r.agentId === seatId && r.loop?.phase !== "done");
   if (open.length >= maxOpenRuns) return false;
   const row = store.seatSession(seatId);
   if (row === null) return true;
@@ -281,6 +282,8 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       const ref = refOf(repoId, card.issueNumber);
       readyRefs.add(ref);
       if (failed.has(`${TAKE_FAILED_KEY_PREFIX}${ref}`)) continue;
+      // a plan the operator has not signed off holds the card out of every queue
+      if (planHolds(rules.planSignoff, store.plans.get(repoId, card.issueNumber))) continue;
       // the card's template profile says whether it needs a plan; fails closed like an unreadable
       // body: an unreadable profiles file, or a stored override naming no profile, deals nothing
       const chosen = chooseRunProfile(
@@ -526,6 +529,16 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   }
   if (restartHold(store, seatId) !== null) {
     store.untake(seatId, repoId, issue);
+    return;
+  }
+  // the setting or the plan may have changed since the card was queued: read both again; fails
+  // closed on unreadable rules
+  const live = await deps.rules(repoId);
+  if (
+    live instanceof RepoRulesError ||
+    planHolds(live.planSignoff, store.plans.get(repoId, issue))
+  ) {
+    store.dropQueued(seatId, repoId, issue);
     return;
   }
   const away = activeAway(store, deps.now(), config.operator.timezone);

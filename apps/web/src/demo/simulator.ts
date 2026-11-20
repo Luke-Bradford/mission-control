@@ -267,7 +267,7 @@ function work(s: DemoState, at: number) {
       phase: phase.phase,
       text: phase.text,
       step: phase.step,
-      parked: phase.phase === "parked" ? phase.text : null,
+      hold: phase.phase === "parked" ? { kind: "lock", reason: phase.text, offSeat: false } : null,
       wait: phase.wait,
       tries:
         phase.step === "review"
@@ -574,7 +574,7 @@ const INCIDENTS: readonly Incident[] = [
             ...row.loop,
             phase: "parked",
             text: `Blocked: ${HELD}`,
-            parked: HELD,
+            hold: { kind: "merge", reason: HELD, offSeat: false },
             wait: null,
           };
       });

@@ -8,6 +8,7 @@ import {
   hasDoneWhenSection,
   hudColumnOf,
   type PullRequestView,
+  planHolds,
   prCarries,
   type RepoRules,
   type TicketView,
@@ -97,7 +98,9 @@ async function release(
       if (rules instanceof Error || ticket === null) {
         failed = true;
       } else {
+        const held = planHolds(rules.planSignoff, store.plans.get(repo.id, issue));
         const complete =
+          !held &&
           areaLabelsOf(rules, card).length === 1 &&
           rules.needs.every((n) =>
             n === "done_when" ? hasDoneWhenSection(ticket.body) : card.size !== null,
@@ -110,7 +113,27 @@ async function release(
               column: "Ready",
             })
           : { ok: true as const, changed: false };
-        if (moved.ok) {
+        if (held) {
+          const state = store.plans.get(repo.id, issue)?.state;
+          if (state === "awaiting-signoff") {
+            // a plan waiting for the operator: the card stays Blocked and its release is tried
+            // again, so it moves once the plan is signed off
+            failed = true;
+          } else {
+            // no plan yet (or one sent back): the card goes to Backlog, where FLIGHT can send it to
+            // the planner and start one; Blocked would leave it with no way to get a plan
+            const back = await d.move({
+              runId: releaseMoveRunId(released.ref),
+              repoId: repo.id,
+              issue,
+              column: "Backlog",
+            });
+            if (back.ok) {
+              patchReleased(store, repo.id, released.ref, released.at, { moved: true });
+              if (back.changed) d.pollGithub?.();
+            } else failed = true;
+          }
+        } else if (moved.ok) {
           patchReleased(store, repo.id, released.ref, released.at, { moved: true });
           if (moved.changed) d.pollGithub?.();
         } else failed = true;

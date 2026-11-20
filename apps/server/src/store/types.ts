@@ -65,19 +65,6 @@ export interface FlightBriefRow {
   updatedBy: string;
 }
 
-/** A card FLIGHT holds in Backlog behind an open PR. */
-export interface Hold {
-  ref: string;
-  waitsOn: number;
-  basis: string;
-  at: number;
-  releasedAt: number | null;
-  /** The stored board has shown the card in Backlog since the hold; until then a Ready card is just stale. */
-  seen: boolean;
-  /** The PR state FLIGHT was last woken for on this hold, or null. */
-  toldState: string | null;
-}
-
 /** One path a refused commit had outside the seat's area. */
 export interface Stray {
   key: string;

@@ -453,7 +453,7 @@ describe("Setup › Loops templates", () => {
     phase: "working",
     text: "Working",
     prNumber: null,
-    parked: null,
+    hold: null,
     profile: "feature",
     step: "implement",
   };

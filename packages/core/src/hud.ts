@@ -522,8 +522,13 @@ export function escalationKind(e: Pick<Escalation, "kind" | "source">): Attentio
 export const guardSummary = (total: number, fresh: number): string =>
   `Guard: ${total} blocked command${total === 1 ? "" : "s"}${fresh > 0 ? `, ${fresh} new` : ""} (for information)`;
 export const GUARD_NONE_TEXT = "Guard: nothing blocked this week.";
-export const GUARD_NOTE =
-  "The guard catches agent mistakes and ordinary spellings, not deliberate evasion.";
+/** Limits set when each seat starts, not refusals the guard records: the refusal counts leave them out. */
+export const RUNTIME_LIMITS = [
+  "Build and review seats have no network: their sandbox allows no domains, and web fetch and web search are off",
+  "Claude seats cannot start background tool calls, and Codex seats have no such limit; a full suite run with & or nohup, or handed to a launcher, is still refused",
+  "FLIGHT runs with full access, network included",
+] as const;
+export const GUARD_NOTE = `The guard catches agent mistakes and ordinary spellings, not deliberate evasion. Limits set when each seat starts, separate from the refusal counts above: ${RUNTIME_LIMITS.join("; ")}.`;
 
 /** The test lock, as the Overview box, Setup and the header say it. */
 export const LOCK_FREE_TEXT = "No full-suite run in progress.";
@@ -559,7 +564,7 @@ export const defaultAppliedText = (label: string, ask: string): string =>
 
 /** A crew row cut down to what the Overview reads (see `CrewSummaryRow`). */
 export function crewRowSummary(row: CrewRow): CrewSummaryRow {
-  const { events: _events, digest, asideRuns, ...rest } = row;
+  const { events: _events, digest, offSeatRuns, ...rest } = row;
   return {
     ...rest,
     digest:
@@ -575,9 +580,9 @@ export function crewRowSummary(row: CrewRow): CrewSummaryRow {
             contextWindow: digest.contextWindow,
             compactions: digest.compactions,
           },
-    ...(asideRuns === undefined
+    ...(offSeatRuns === undefined
       ? {}
-      : { asideRuns: asideRuns.map(({ events: _aside, ...run }) => run) }),
+      : { offSeatRuns: offSeatRuns.map(({ events: _aside, ...run }) => run) }),
   };
 }
 

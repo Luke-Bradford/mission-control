@@ -158,7 +158,6 @@ describe("the route table", () => {
     const routes = await registeredRoutes();
     expect(routes.length).toBeGreaterThan(30);
     expect(routes).toContain("GET /api/crew");
-    expect(routes).toContain("GET /api/repos/:repoId/map");
     expect(routes).toContain("GET /api/activity");
     expect(routes).toContain("GET /api/away/digest");
     expect(routes).toContain("GET /api/stream");
@@ -188,8 +187,6 @@ describe("the route table", () => {
     expect(routes).toContain("POST /api/queue/reorder/:key");
     expect(routes).toContain("GET /api/runs/:id/attempts");
     expect(routes).toContain("GET /api/attention/:key");
-    expect(routes).toContain("GET /api/attention/:key/discussion");
-    expect(routes).toContain("POST /api/attention/:key/discussion");
     expect(routes).toContain("GET /api/comms/:id");
     expect(routes).toContain("POST /api/comms/:id/read");
     expect(routes).toContain("GET /api/comms/crew");

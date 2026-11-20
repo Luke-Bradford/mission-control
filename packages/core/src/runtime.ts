@@ -52,13 +52,10 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
-  MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.logDecision,
-  MC_TOOL_NAMES.waitOn,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
-  MC_TOOL_NAMES.reassignTicket,
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.instructSeat,
   MC_TOOL_NAMES.revokeInstruction,
@@ -66,6 +63,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.flightState,
   MC_TOOL_NAMES.screenshotHud,
   MC_TOOL_NAMES.promote,
+  MC_TOOL_NAMES.sendToPlanner,
   MC_TOOL_NAMES.endRun,
   MC_TOOL_NAMES.resumeSeat,
   MC_TOOL_NAMES.acceptRuling,
@@ -121,7 +119,6 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.prBody,
-      MC_TOOL_NAMES.publishPreview,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -216,7 +213,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     model: "opus",
     mode: "read-only",
     loop: "plan",
-    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket, MC_TOOL_NAMES.codeHealth],
+    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
     here: hereOf("FAO"),
   },
 };
@@ -283,6 +280,9 @@ export function modeOfSeat(seat: { role: string; mode?: ConfigSeatMode; def?: Se
  * skills (docs/spikes/2026-10-29-seat-skills.md). Its job, keeping the operator's own commands out,
  * is done by `--restricted` (no user, project or local settings) and by `--plugin-dir`, whose folder
  * the hub builds from the repo commit with skills only: no hooks, bin or MCP config.
+ *
+ * FLIGHT's profile drops `--restricted` (it needs Bash and the whole filesystem) and keeps the
+ * operator's set-up out with `--setting-sources project,local` instead (`crewCliArgs`).
  */
 export const CREW_ISOLATION_FLAGS = ["--restricted", "--strict-mcp-config"] as const;
 
@@ -335,7 +335,6 @@ export const WRITER_TOOLS = [
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.prBody,
-  MC_TOOLS.publishPreview,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -1062,20 +1061,13 @@ const POST_HOOK_MATCHER = "Bash";
 /**
  * The `hooks` block (spike 2026-10-21): the guard before every tool call
  * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
- * a call that holds the test lock releases it, and when the seat stops (Stop), which may carry it on.
+ * a call that holds the test lock releases it.
  */
 function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
   const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
-  // exit 2 from a Stop hook blocks the stop: a Stop that gets no verdict must let the stop stand
-  const stopCommand = hook.command.replace(/ \|\| exit 2$/, " || true");
   const out = {} as Record<GuardHookEvent, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) {
-    // a Stop has no tool to match: the CLI ignores a matcher there, so none is written
-    out[e] = [
-      e === "Stop"
-        ? { hooks: [{ ...run, command: stopCommand }] }
-        : { matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] },
-    ];
+    out[e] = [{ matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] }];
   }
   if (hook.trim !== undefined) {
     out.PostToolUse.push({
@@ -1357,9 +1349,23 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
-    // Keep the guard hooks and the controller's tools and filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+    // Keep the guard hooks and the whole filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
     // (CREW_CLI_ENV, every Claude seat) makes the CLI force the permission mode back to `default`,
     // so bypassPermissions would be ignored and FLIGHT's hub tools refused: list them.
+    // Only the built-ins the role uses are defined to the model, and nothing of the operator's own
+    // Claude set-up is loaded (user settings and their installed plugins, with those plugins'
+    // skills, agents and hooks; user-level skills; the user CLAUDE.md), as for every other seat:
+    // all of it was re-read on every model call. The repo's own settings and CLAUDE.md and the
+    // hub's `--settings`, `--plugin-dir` and `--mcp-config` still apply. A name in the list the
+    // installed CLI does not have (TodoWrite, WebFetch on 2.1.322) defines nothing.
+    args.splice(
+      args.indexOf("--settings"),
+      0,
+      "--tools",
+      FLIGHT_FULL_BUILTINS.join(","),
+      "--setting-sources",
+      "project,local",
+    );
     args.splice(
       args.indexOf("--append-system-prompt-file"),
       0,

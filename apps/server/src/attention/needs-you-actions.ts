@@ -12,6 +12,7 @@ import {
   NOT_NOW_REFUSED,
   notNowComment,
   OWNER_OPERATOR,
+  planHolds,
   type RepoRules,
   type TicketView,
   ticketClosedReason,
@@ -29,7 +30,6 @@ import type { Move, MoveResult } from "../github/board.ts";
 import { ensureLabels } from "../github/setup.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { prTextProblem, readKnown } from "../mcp/tools.ts";
-import { recordRunHandoff } from "../run/handoffs.ts";
 import { parseTicket } from "../run/view.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { crewDir } from "../store/crew-paths.ts";
@@ -191,7 +191,7 @@ async function once(key: string, act: () => Promise<ActionResult>): Promise<Acti
   }
 }
 
-/** Ends the run that waits on the question (if it is live) and records its handoff. */
+/** Ends the run that waits on the question, if it is live. */
 async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
   const run = c.store.run(runId);
   if (run === null) return;
@@ -199,11 +199,9 @@ async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
     if (c.supervisor === undefined) throw new Error("the crew is off");
     if (c.store.seatSession(run.agentId)?.runId === run.id)
       await c.supervisor.endRun(run.agentId, { hold: false });
-    else if (run.loop?.aside) await c.supervisor.endAsideRun(run.id);
+    else if (run.loop?.hold?.worktree) await c.supervisor.endAsideRun(run.id);
     else throw new Error("the run is not on its seat");
   }
-  const ended = c.store.run(runId);
-  if (ended !== null) recordRunHandoff(c.store, ended, null);
 }
 
 /**
@@ -525,7 +523,10 @@ export const answerSetAside = (
         card !== undefined &&
         !card.closed &&
         hudColumnOf(card) === "Backlog" &&
-        !otherLiveRun(c.store, repoId, ref, null)
+        !otherLiveRun(c.store, repoId, ref, null) &&
+        // a ticket the repo holds for plan sign-off stays in Backlog until its plan is signed off
+        // (and so does one whose rules cannot be read)
+        !(await planBlocksReady(c, repoId, issue))
       ) {
         const moved = await c.board.move({ runId: question.runId, repoId, issue, column: "Ready" });
         if (!moved.ok) {
@@ -550,6 +551,16 @@ export const answerSetAside = (
     c.bus.emit("agents");
     return { ok: true };
   });
+
+/** Whether the repo's plan sign-off setting holds the ticket out of Ready; unreadable rules hold it. */
+async function planBlocksReady(
+  c: Pick<NeedsYouContext, "rules" | "store">,
+  repoId: string,
+  issue: number,
+): Promise<boolean> {
+  const rules = await c.rules(repoId);
+  return rules instanceof Error || planHolds(rules.planSignoff, c.store.plans.get(repoId, issue));
+}
 
 /**
  * Takes `waiting:operator` off every open card that is outside the Backlog: someone moved it, so the

@@ -17,18 +17,20 @@ import { hhmm, minutesAgo, mss, percent } from "../fmt.ts";
 import { AgentTag, agentColor } from "../hud/AgentTag.tsx";
 import { Legend } from "../hud/charts/Hover.tsx";
 import { LineChart, type LineSeries } from "../hud/charts/LineChart.tsx";
-import { Panel } from "../hud/Panel.tsx";
 import { MachinePanel } from "../overview/MachinePanel.tsx";
 import { QuotaPanel } from "../overview/QuotaPanel.tsx";
 import "../overview/overview.css";
 import { chartAnnotations } from "./annotations.ts";
 import { DASH, indexOf, NOT_TRACKED, type Scope } from "./common.ts";
 import { MachineReadout } from "./MachineReadout.tsx";
+import { TPanel as Panel, useShows } from "./TPanel.tsx";
 
 const MINUTE_MS = 60_000;
 
 /** Capacity (catalogue 2.6.5): quota per account window, machine load; the test lock waits. */
 export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
+  const showQuota = useShows("quotaP");
+  const showMachine = useShows("machP");
   const nameOf = useSeatName();
   const now = useSecond();
   const tz = useTz();
@@ -192,8 +194,8 @@ export function CapacityGroup({ t, scope }: { t: Telemetry | undefined; scope: S
   return (
     <div className="tgrid">
       {/* The complete readers the Overview summarises in its Tokens panel and Mac row. */}
-      <QuotaPanel />
-      <MachinePanel />
+      {showQuota && <QuotaPanel />}
+      {showMachine && <MachinePanel />}
       <Panel id="tQuota" title="Quota used" sub="each account window, 100% is the limit">
         {!t ? (
           <p className="pb s muted">{scope.wait}</p>

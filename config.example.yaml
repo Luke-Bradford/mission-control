@@ -1,5 +1,7 @@
 operator:
-  github_logins: [] # GitHub logins FLIGHT may assign on superuser repos
+  # The operator's GitHub logins. FLIGHT may assign them on superuser repos, and a commit one of
+  # them (or the account gh acts as) pushes on top of a seat's PR is followed, not parked as stuck.
+  github_logins: []
   # The operator's id (default "operator").
   id: operator
   timezone: UTC

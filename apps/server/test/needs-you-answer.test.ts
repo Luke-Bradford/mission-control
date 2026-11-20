@@ -5,6 +5,7 @@ import {
   type BoardItem,
   DEFAULT_REPO_RULES,
   OPERATOR_HEADER,
+  type RepoRules,
   type Run,
   type TicketView,
   WAITING_OPERATOR_LABEL,
@@ -16,6 +17,7 @@ import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
 import { commsInboxContext } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
+import { RepoRulesError } from "../src/engine/rules.ts";
 import type { Move } from "../src/github/board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";
@@ -127,6 +129,8 @@ function asideQuestion(ticket = "mc#7", runId = "r-guido", agentId = "guido-1"):
   return id;
 }
 
+let rulesNow: RepoRules | RepoRulesError = DEFAULT_REPO_RULES;
+
 const gh: GhRunner = async (args) => {
   ghCalls.push(args);
   return { code: 0, stdout: "", stderr: "" };
@@ -161,7 +165,7 @@ const app = () =>
           return { ok: true, changed: true };
         },
       },
-      rules: async () => DEFAULT_REPO_RULES,
+      rules: async () => rulesNow,
       fetchTicket: async (_repo, n) => ({ number: n }) as unknown as TicketView,
     },
   });
@@ -180,6 +184,7 @@ beforeEach(() => {
   ghCalls = [];
   moves = [];
   messaged = [];
+  rulesNow = DEFAULT_REPO_RULES;
   store.replaceBoard("mc", [card(7), card(8)]);
 });
 afterEach(() => {
@@ -243,6 +248,41 @@ describe("a question set aside with Not now", () => {
       expect((await a.inject("/api/tickets/mc/7/set-aside")).json()).toEqual([]);
       // a second answer finds nothing to answer
       expect((await answer(a, 7, id, "Again")).statusCode).toBe(409);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it.each([
+    { setting: "every", marked: false, moves: false },
+    { setting: "larger", marked: true, moves: false },
+    { setting: "larger", marked: false, moves: true },
+    { setting: "never", marked: true, moves: true },
+  ] as const)(
+    "plan sign-off $setting (FLIGHT marked: $marked): answering moves the card to Ready: $moves",
+    async ({ setting, marked, moves: moves_ }) => {
+      rulesNow = { ...DEFAULT_REPO_RULES, planSignoff: setting };
+      if (marked) store.plans.request("mc", 7, NOW);
+      const id = asideQuestion();
+      const a = app();
+      try {
+        const res = await answer(a, 7, id, "Use lane 2.");
+        expect(res.statusCode).toBe(200);
+        expect(store.question(id)?.answeredAt).toBe(NOW);
+        expect(moves).toHaveLength(moves_ ? 1 : 0);
+      } finally {
+        await a.close();
+      }
+    },
+  );
+
+  it("keeps the card in Backlog, with the answer delivered, when the repo's rules cannot be read", async () => {
+    rulesNow = new RepoRulesError("no rules");
+    const id = asideQuestion();
+    const a = app();
+    try {
+      expect((await answer(a, 7, id, "Use lane 2.")).statusCode).toBe(200);
+      expect(moves).toEqual([]);
     } finally {
       await a.close();
     }

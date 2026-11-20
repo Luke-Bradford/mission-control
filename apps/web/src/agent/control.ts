@@ -29,7 +29,7 @@ export function stoppedReason(row: CrewRow, now: number, tz: string | null): str
   if (row.hudState !== "stopped") return null;
   if (row.crewPause) return row.crewPause.reason;
   if (row.stop) return stopLine(row.stop, now, tz);
-  return row.note ?? row.loop?.parked ?? "Stopped by you.";
+  return row.note ?? row.loop?.hold?.reason ?? "Stopped by you.";
 }
 
 /** "last output 4m ago", or null when the seat has never produced any. */
@@ -64,7 +64,7 @@ export function runOutcome(run: Pick<RunView, "status" | "loop">): {
       return { word: "finished", kind: "finished" };
     case "blocked":
       return {
-        word: run.loop?.parked ? `parked: ${run.loop.parked}` : "parked",
+        word: run.loop?.hold?.reason ? `parked: ${run.loop.hold.reason}` : "parked",
         kind: "parked",
       };
     case "failed":

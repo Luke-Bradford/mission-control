@@ -209,6 +209,26 @@ describe("withSection", () => {
   });
 });
 
+describe("withSection on a staged body ending Part of", () => {
+  const body = "#9 — Title\n\n## What changed\n\nDid it.\n\nPart of #9.";
+  const section = `${EVIDENCE_HEADING}\n\nline`;
+
+  it("puts the section before the Part of line", () => {
+    expect(withSection(body, EVIDENCE_HEADING, section)).toBe(
+      `#9 — Title\n\n## What changed\n\nDid it.\n\n${section}\n\nPart of #9.`,
+    );
+  });
+
+  it("stops sectionOf before the Part of line, and removal restores the body", () => {
+    const set = withSection(body, EVIDENCE_HEADING, section);
+    expect(sectionOf(set, EVIDENCE_HEADING)).toBe(section);
+    expect(withSection(set, EVIDENCE_HEADING, null)).toBe(body);
+    const twice = withSection(set, EVIDENCE_HEADING, `${EVIDENCE_HEADING}\n\nnew`);
+    expect(twice.endsWith("\n\nPart of #9.")).toBe(true);
+    expect(twice.match(/Part of #9\./g)).toHaveLength(1);
+  });
+});
+
 describe("evidenceSectionText", () => {
   it("links each pair's before, after and diff under the head sha", () => {
     const text = evidenceSectionText(manifest(), "http://127.0.0.1:7421");

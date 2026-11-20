@@ -22,6 +22,7 @@ import {
   MC_TOOL_NAMES,
   OLDER_FINDINGS_MAX,
   profileRouteText,
+  type QaPlan,
   REVIEW_DIFF_FILE,
   REVIEW_NOTES_MAX,
   REVIEW_SINCE_FILE,
@@ -31,7 +32,6 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import type { ReviewReach } from "../review/reach.ts";
 import { readBaseFile } from "./checkouts.ts";
 import { crewGitBytes, overflowed } from "./git.ts";
 import type { RepoSkills } from "./skills.ts";
@@ -82,10 +82,12 @@ export interface BriefInput {
   profileNames?: readonly string[];
   /** Quoted porcelain status from a reused ticket worktree. */
   leftoverChanges?: readonly string[];
-  /** Redacted, bounded observations for explicitly declared ticket files. */
-  fileContext?: string | null;
   /** The ticket's answered questions, newest first; the brief lists ten at most. */
   decisions?: readonly { question: string; answer: string }[];
+  /** Bounded work that a stopped run left for this ticket's replacement seat. */
+  continuation?: string | null;
+  /** The note the operator sent this ticket's plan back with: a planner's brief carries it. */
+  planNote?: string | null;
 }
 
 /** How many of a ticket's answered questions a run's start brief lists. */
@@ -132,6 +134,9 @@ const READONLY_CLOSE = `You read and report; you cannot commit, push or open PRs
 /** A planner's last line: no branch, and it ends by `report_plan`, which Mission Control acts on. */
 const PLANNER_CLOSE =
   "You are in a fresh checkout of the default branch, with no branch of your own: read only, change nothing. Read the ticket and the code it touches, then call mc report_plan once with the plan. The plan needs a ### Tests part with one entry for each item under the ticket's ## Done when, naming the test to write first and the file it goes in. Mission Control checks every file path the plan names against this checkout and refuses the plan, naming what to fix, unless the same line says the plan creates the file (write new or create on that line); fix it and call report_plan again. Mission Control adds a plan that passes to the ticket under ## Plan, where the developer's brief carries it, and ends this run. Ask FLIGHT with mc ask_flight only for a decision you cannot make from the ticket and the code.";
+/** What a planner also gives report_plan: the parts the operator reads on the Planner tab. */
+const PLANNER_PARTS =
+  "Give report_plan the parts the operator reads on the Planner tab too: summary (what the ticket asks, in a few lines), size_estimate, risks, and mockups (paths of PNG, JPEG or WebP pictures in this checkout, each with a caption) for anything the operator will see. The operator may sign the plan off or send it back with a note.";
 const WORK_UNTIL_DONE =
   "There is no turn or time limit. Work until the ticket is done or you are truly blocked; if blocked, name the blocker.";
 const PLAN_UNTIL_RECORDED =
@@ -204,7 +209,7 @@ export function ticketBrief(i: BriefInput): string {
   const profile = profileLines(i);
   const last =
     i.loop === "plan"
-      ? `${PLANNER_CLOSE} ${PLAN_UNTIL_RECORDED}`
+      ? `${PLANNER_CLOSE} ${PLANNER_PARTS} ${PLAN_UNTIL_RECORDED}`
       : `You are working in a checkout of branch ${i.branch}. ${scope} ${writer ? WRITER_CLOSE : READONLY_CLOSE} ${WORK_UNTIL_DONE}`;
   // The note goes first: a cut inside an open code fence would swallow a note placed after it.
   return [
@@ -215,6 +220,17 @@ export function ticketBrief(i: BriefInput): string {
     "",
     ...(profile.length > 0 ? [...profile, ""] : []),
     ...decisionsSection(i.decisions),
+    ...(i.continuation === null || i.continuation === undefined
+      ? []
+      : ["## Continue the earlier run", "", wrapExternalText(i.continuation), ""]),
+    ...(i.loop === "plan" && i.planNote
+      ? [
+          "## The operator sent your last plan back",
+          "Write the plan again with this note in mind; Mission Control replaces the old plan.",
+          wrapExternalText(i.planNote),
+          "",
+        ]
+      : []),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
     ...(writer
@@ -223,14 +239,6 @@ export function ticketBrief(i: BriefInput): string {
         ]
       : []),
     last,
-    ...(i.role === "FAO" && i.loop === "plan" && i.fileContext
-      ? [
-          "",
-          "## Relevant file evidence",
-          "Use this evidence within the declared ticket scope. Existing approval and action rules apply.",
-          wrapExternalText(i.fileContext.slice(0, 4000)),
-        ]
-      : []),
     ...((i.leftoverChanges?.length ?? 0) > 0
       ? [
           "",
@@ -247,6 +255,35 @@ export function ticketBrief(i: BriefInput): string {
         ]
       : []),
   ].join("\n");
+}
+
+/** The plan the operator signed off, as a reviewer reads it. Mockups are named; the reviewer cannot open them. */
+function signedOffPlanLines(
+  plan: QaPlan,
+  mockupFiles: readonly { path: string; caption: string }[],
+): string[] {
+  return [
+    "## The plan the operator signed off",
+    "",
+    ...(plan.asks === null ? [] : [`What the ticket asks: ${plan.asks}`, ""]),
+    "What was proposed:",
+    wrapExternalText(plan.proposal ?? ""),
+    ...(plan.sizeEstimate === null ? [] : ["", `Size estimate: ${plan.sizeEstimate}`]),
+    ...(plan.risks === null ? [] : ["", `Complications and risks: ${plan.risks}`]),
+    ...(mockupFiles.length === 0
+      ? plan.mockups.length === 0
+        ? []
+        : [
+            "",
+            `Mockups shown to the operator (not available as files): ${plan.mockups.map((m) => m.caption).join("; ")}`,
+          ]
+      : [
+          "",
+          "Mockups shown to the operator (open each with the Read tool and compare it with the screenshots of what was built):",
+          ...mockupFiles.map((m) => `- ${m.path}: ${m.caption}`),
+        ]),
+    "",
+  ];
 }
 
 export interface ReviewBriefInput {
@@ -296,79 +333,12 @@ export interface ReviewBriefInput {
   preview?: boolean;
   /** The PR changed untrusted dependency inputs, so this review has no installed branch packages. */
   installNote?: string;
-  /** The PR's changed files and the default branch's files that import them; absent when unknown. */
-  reach?: ReviewReach;
+  /** The plan the operator signed off for the ticket, to check the work against. */
+  signedOffPlan?: QaPlan | null;
+  /** The signed-off mockups copied into the scratch copy, by path. */
+  planMockupFiles?: readonly { path: string; caption: string }[];
   /** An ended run's PR: blocking findings still open from the PR's earlier reviews. */
   olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
-}
-
-/** The longest a fresh fix session's handoff brief is, in characters. */
-export const FIX_SESSION_BRIEF_MAX = 12_000;
-/** The most Done-when lines the handoff lists. */
-const FIX_BRIEF_DONE_WHEN_MAX = 8;
-/** The newest report notes the handoff carries, and the longest each is. */
-const FIX_BRIEF_NOTES = 2;
-const FIX_BRIEF_NOTE_MAX = 1_500;
-/** The setting that holds a run's handoff until its first line is written. */
-export const fixBriefKey = (runId: string): string => `fix-session.brief:${runId}`;
-
-export interface FixSessionBriefInput
-  extends Omit<BriefInput, "body" | "bodyTruncated" | "bodyLength"> {
-  reason: "ci" | "review";
-  prNumber: number | null;
-  headSha: string;
-  /** The Done-when answers of the run's latest report. */
-  doneWhen: readonly DoneWhenEntry[];
-  /** The run's report notes, oldest first. */
-  notes: readonly string[];
-}
-
-/**
- * The first turn of a fresh session for a fix (#1643): where the work stands, in a bounded form.
- * The earlier conversation is not loaded; the branch, worktree, commits, evidence and PR are the
- * run's own. The fix itself (the CI excerpt or the findings) follows in the same turn.
- */
-export function fixSessionBrief(i: FixSessionBriefInput): string {
-  const ran =
-    i.commands.length === 0
-      ? `No repository validation commands are configured. You may still use ordinary local commands to inspect and complete the work inside the sandbox.${fullSuiteText(i.fullSuite)}`
-      : `Configured validation commands: ${codeList(i.commands)}. You may also use ordinary local commands to inspect and complete the work inside the sandbox.${fullSuiteText(i.fullSuite)}`;
-  const profile = profileLines(i);
-  const head = [
-    `Fresh session for ${i.call}: the earlier session's conversation is not loaded. This run's branch, worktree, commits, evidence and PR are unchanged.`,
-    `You are ${i.call}, the ${i.here} on ${i.repo}. Ticket ${i.repo}#${i.issue}: ${i.title}`,
-    "Read the ticket and its plan with mc read_ticket before changing code. Run git status and git log -5 to see where the work stands; do not repeat finished steps.",
-    `Branch ${i.branch}, PR ${i.prNumber ?? "none"}, pushed head ${i.headSha}.`,
-    i.reason === "ci"
-      ? "The next message gives the CI failure to fix."
-      : "The next message gives the review findings to fix.",
-    ...(profile.length > 0 ? ["", ...profile] : []),
-    ran,
-    scopeLine(i),
-    ...(i.decisions !== undefined && i.decisions.length > 0
-      ? ["", ...decisionsSection(i.decisions)]
-      : []),
-  ].join("\n");
-  const done = i.doneWhen
-    .slice(0, FIX_BRIEF_DONE_WHEN_MAX)
-    .map((d) => `${d.line}. ${d.status}: ${d.text} (${d.evidence})`)
-    .join("\n");
-  const notes = (n: number): string =>
-    i.notes
-      .slice(-n)
-      .map((t) => Array.from(t).slice(0, FIX_BRIEF_NOTE_MAX).join(""))
-      .join(NOTES_SEPARATOR);
-  const tail = (n: number): string =>
-    [
-      ...(done === "" ? [] : ["Done when, as last reported:", wrapExternalText(done)]),
-      ...(n > 0 && i.notes.length > 0 ? ["Latest report notes:", wrapExternalText(notes(n))] : []),
-    ].join("\n");
-  // cut notes first: the newest alone, then none
-  for (const n of [FIX_BRIEF_NOTES, 1, 0]) {
-    const text = [head, tail(n)].filter((x) => x !== "").join("\n\n");
-    if (text.length <= FIX_SESSION_BRIEF_MAX) return text;
-  }
-  return head.slice(0, FIX_SESSION_BRIEF_MAX);
 }
 
 const NOTES_SEPARATOR = "\n\n---\n\n";
@@ -399,20 +369,6 @@ function evidenceLine(p: EvidencePair, dir: string): string {
   const count = p.regions.length === 1 ? "1 region" : `${p.regions.length} regions`;
   const files = EVIDENCE_KINDS.map((k) => `${dir}/${evidenceImageName(p.page, p.scheme, k)}`);
   return `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${count} (${where}${more})`} — ${files.join(", ")}`;
-}
-
-const listWith = (shown: readonly string[], more: number): string =>
-  `${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
-
-/** The brief's lines on what the change touches and what imports it. */
-function reachLines(reach: ReviewReach | undefined): string[] {
-  if (reach === undefined) return [];
-  return [
-    `- Files changed (${reach.changed.length + reach.changedMore}): ${listWith(reach.changed, reach.changedMore)}.`,
-    reach.importers.length + reach.importersMore === 0
-      ? "- No file in the default branch imports them."
-      : `- Files that import them (${reach.importers.length + reach.importersMore}): ${listWith(reach.importers, reach.importersMore)}. Check these still work with the change.`,
-  ];
 }
 
 /** RETRO's first message: the PR, what it has to read, how to review, the ticket and the notes. */
@@ -459,7 +415,6 @@ export function reviewBrief(i: ReviewBriefInput): string {
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,
         ]
       : []),
-    ...reachLines(i.reach),
     `- Below: the ticket and the author's report notes${i.prevFindings.length > 0 ? ", and the findings and reply from the last review" : ""}.`,
     "",
     "How to review:",
@@ -477,6 +432,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
     "3. Report every finding at every severity; do not filter. Critical: wrong behaviour, data loss, a security hole or an opened gate. Important: a real bug in a likely case, a missing test for new behaviour, a ticket requirement not met. Minor: anything else worth fixing.",
     "4. Give each finding its file and line, a one-line summary, a failure scenario (the inputs or steps, and what goes wrong) and a concrete correction outcome within the ticket's scope and constraints. If recomposition is needed, explain the violated requirement.",
     "5. Call mc report_findings once with every finding, verdict, checked coverage, worksWell, limitations and followUps (each with disposition and ticket when deferred). List test commands with reported counts; attach at, exitCode and evidence only when you have receipts. Give visualReason only for a nonvisual change. Keep the returned immutable QA report permalink in handoffs. Missing evidence is recorded as incomplete. Then stop.",
+    ...(i.signedOffPlan
+      ? [
+          "6. The operator signed off a plan for this ticket (below). Check whether the work matches it: the proposal, and any mockup against what was built. Where it does not, report an Important finding and say so in your summary; where it does, say that.",
+        ]
+      : []),
     "If something outside this review blocks you, call FLIGHT with mc call_flight { reason, ref } rather than guessing; it wakes within 5 minutes.",
     "",
     `## Ticket ${i.repo}#${i.issue}`,
@@ -506,6 +466,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
           "",
         ]
       : []),
+    ...(i.signedOffPlan ? signedOffPlanLines(i.signedOffPlan, i.planMockupFiles ?? []) : []),
     "## The author's report notes, oldest first",
     "",
     notes.text === "" ? "(none)" : notes.text,

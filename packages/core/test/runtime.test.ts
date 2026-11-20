@@ -97,10 +97,13 @@ const asArgv = (tools: readonly string[]) =>
   tools.map((t) => (t === "Edit" || t === "Write" ? `${t}(//mc/wt/guido-1/**)` : t));
 
 describe("crewCliArgs", () => {
-  it("gives FLIGHT controller tools without a sandbox, preserving guard hooks", () => {
+  it("gives FLIGHT its listed tools without a sandbox or the operator's settings, preserving guard hooks", () => {
     const args = crewCliArgs({ ...base, mode: "read-only", profile: "flight-full" });
-    for (const flag of ["--tools", "--disallowedTools", "--restricted"])
-      expect(args).not.toContain(flag);
+    for (const flag of ["--disallowedTools", "--restricted"]) expect(args).not.toContain(flag);
+    // Only the listed built-ins are defined to the model, and the operator's user settings (their
+    // installed plugins) are not loaded: both would add to every FLIGHT session's fixed start.
+    expect(args[args.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
+    expect(args[args.indexOf("--setting-sources") + 1]).toBe("project,local");
     // The credential scrub forces the CLI's permission mode to `default`, so a bypass flag does
     // nothing and FLIGHT's tools must be listed, or every hub tool call is refused.
     expect(CREW_CLI_ENV.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
@@ -262,7 +265,6 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
-      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
@@ -318,7 +320,6 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       prBody: "mcp__mc__pr_body",
-      publishPreview: "mcp__mc__publish_preview",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",
@@ -336,17 +337,14 @@ describe("the allowlist in phase 2b", () => {
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
       callFlight: "mcp__mc__call_flight",
-      waitOn: "mcp__mc__wait_on",
       reportEvidence: "mcp__mc__report_evidence",
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
-      codeHealth: "mcp__mc__code_health",
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
-      reassignTicket: "mcp__mc__reassign_ticket",
       messageSeat: "mcp__mc__message_seat",
       instructSeat: "mcp__mc__instruct_seat",
       revokeInstruction: "mcp__mc__revoke_instruction",
@@ -357,6 +355,7 @@ describe("the allowlist in phase 2b", () => {
       commsPin: "mcp__mc__comms_pin",
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
+      sendToPlanner: "mcp__mc__send_to_planner",
       endRun: "mcp__mc__end_run",
       resumeSeat: "mcp__mc__resume_seat",
       acceptRuling: "mcp__mc__accept_ruling",
@@ -693,7 +692,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "plan",
-        tools: ["report_plan", "read_ticket", "code_health"],
+        tools: ["report_plan", "read_ticket"],
         here: "planner: writes each ticket's plan for the developers",
       },
       FLIGHT: {
@@ -702,13 +701,10 @@ describe("crew constants", () => {
         mode: "read-only",
         loop: "watch",
         tools: [
-          "code_health",
           "log_decision",
-          "wait_on",
           "read_ticket",
           "answer_question",
           "start_seat",
-          "reassign_ticket",
           "message_seat",
           "instruct_seat",
           "revoke_instruction",
@@ -716,6 +712,7 @@ describe("crew constants", () => {
           "flight_state",
           "screenshot_hud",
           "promote",
+          "send_to_planner",
           "end_run",
           "resume_seat",
           "accept_ruling",
@@ -776,7 +773,7 @@ describe("seatDef", () => {
     expect(seatDef({ role: "RETRO" })).toMatchObject({ mode: "read-only", loop: "none" });
     expect(seatDef({ role: "FAO" })).toMatchObject({
       loop: "plan",
-      mcTools: ["report_plan", "read_ticket", "code_health"],
+      mcTools: ["report_plan", "read_ticket"],
     });
   });
 
@@ -838,13 +835,10 @@ describe("mc tool grants", () => {
 
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
     expect(FLIGHT_TOOLS).toEqual([
-      "code_health",
       "log_decision",
-      "wait_on",
       "read_ticket",
       "answer_question",
       "start_seat",
-      "reassign_ticket",
       "message_seat",
       "instruct_seat",
       "revoke_instruction",
@@ -852,6 +846,7 @@ describe("mc tool grants", () => {
       "flight_state",
       "screenshot_hud",
       "promote",
+      "send_to_planner",
       "end_run",
       "resume_seat",
       "accept_ruling",
@@ -1207,14 +1202,10 @@ describe("crew sandbox and scoped edits", () => {
       const entry = (matcher: string) => [
         { matcher, hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
       ];
-      const stopCommand = base.hook.command.replace(/ \|\| exit 2$/, " || true");
-      expect(stopCommand).not.toBe(base.hook.command);
       expect(j.hooks).toEqual({
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
-        // exit 2 from a Stop blocks the stop: its command ends `|| true`, not `|| exit 2`
-        Stop: [{ hooks: [{ type: "command", command: stopCommand, timeout: 630 }] }],
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }

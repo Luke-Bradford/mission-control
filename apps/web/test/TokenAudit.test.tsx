@@ -148,7 +148,7 @@ it("says when the hub is not recording controller sessions, and shows them when 
   );
 });
 
-it("opens as the last tab of Audit, reached with End, without a code-health read", async () => {
+it("opens as the tab before Workflow history, reached by keyboard, without a code-health read", async () => {
   const fetch = stubFetch({
     "/api/config": { operator: { id: "operator" }, repos: [{ id: "sample", github: "x/sample" }] },
     "/api/code-health?repo=sample&window=30d&tab=overview": {
@@ -159,7 +159,10 @@ it("opens as the last tab of Audit, reached with End, without a code-health read
   });
   const { CodeHealth } = await import("../src/code-health/CodeHealth.tsx");
   render(<CodeHealth />);
-  fireEvent.keyDown(await screen.findByRole("tab", { name: "Overview" }), { key: "End" });
+  fireEvent.keyDown(await screen.findByRole("tab", { name: "Summary" }), { key: "End" });
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Workflow history and earlier proposals" }), {
+    key: "ArrowLeft",
+  });
   expect(screen.getByRole("tab", { name: "Tokens" }).getAttribute("aria-selected")).toBe("true");
   await screen.findByRole("list", { name: "Token figures" });
   expect(fetch.mock.calls.some(([url]) => String(url).includes("tab=tokens"))).toBe(false);

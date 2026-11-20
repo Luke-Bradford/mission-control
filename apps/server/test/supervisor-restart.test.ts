@@ -1695,7 +1695,13 @@ describe("a seat keeps running through a restart", () => {
     expect(aside).not.toBeNull();
     store.setRunLoop(runId, {
       ...NEW_LOOP,
-      aside: { worktree: aside?.worktree ?? "", wake: false },
+      hold: {
+        kind: null,
+        reason: null,
+        ended: false,
+        worktree: aside?.worktree ?? "",
+        wake: false,
+      },
     });
     const saved = store.getSetting(`codex-tmp:${runId}`);
     if (saved === null) throw new Error("missing Codex temp root");

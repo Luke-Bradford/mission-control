@@ -2,7 +2,7 @@ import type { AgentDetailView } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { hub, RESOURCES, RUNS_LIMIT } from "../src/data.ts";
-import { percent } from "../src/fmt.ts";
+import { kTokens, percent } from "../src/fmt.ts";
 import { contextCapacity } from "../src/overview/ContextCapacity.tsx";
 import { Agent } from "../src/pages/Agent.tsx";
 import { agentDraftKey } from "../src/storage.ts";
@@ -45,7 +45,7 @@ it("lays out the roster, identity band, instruments, activity and right column",
   expect(screen.getByRole("region", { name: "Instruments" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Activity" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Waiting on" })).toBeTruthy();
-  expect(screen.getByRole("region", { name: "Plan, recent runs and setup" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Plan, recent runs, tokens and setup" })).toBeTruthy();
   // What this replaces is gone.
   expect(screen.queryByText("Ask → result → next")).toBeNull();
   expect(screen.queryByRole("region", { name: "Next move" })).toBeNull();
@@ -251,12 +251,59 @@ it("opens on Recent runs when no run is in progress, and Setup links to Setup", 
   view.row.run = null;
   view.row.hudState = "idle";
   setup(view);
-  const side = await screen.findByRole("region", { name: "Plan, recent runs and setup" });
+  const side = await screen.findByRole("region", { name: "Plan, recent runs, tokens and setup" });
   expect(
     within(side).getByRole("button", { name: "Recent runs" }).getAttribute("aria-pressed"),
   ).toBe("true");
   fireEvent.click(within(side).getByRole("button", { name: "Setup" }));
   expect(within(side).getByRole("link", { name: "Edit in Setup" })).toBeTruthy();
+});
+
+const TURNS = [
+  { input: 300, output: 120, cacheRead: 9000 },
+  { input: 280, output: 400, cacheRead: 12_000 },
+];
+
+it("shows tokens per turn for the seat's latest run on its Tokens tab", async () => {
+  const view = populatedAgentView();
+  const id = view.row.id;
+  const { fetch } = setup(view, {
+    [RESOURCES.telemetry("1h", id).path]: { turnUsage: [{ agentId: id, turns: TURNS }] },
+  });
+  const side = await screen.findByRole("region", {
+    name: "Plan, recent runs, tokens and setup",
+  });
+  fireEvent.click(within(side).getByRole("button", { name: "Tokens" }));
+  await within(side).findByText(`${id} · latest run · tokens per turn`);
+  // two turns × three kinds
+  expect(side.querySelectorAll("path.bar")).toHaveLength(6);
+  expect([...side.querySelectorAll(".legend span")].map((x) => x.textContent)).toEqual([
+    "input",
+    "output",
+    "cache read",
+  ]);
+  const hits = within(side).getByRole("img").querySelectorAll("rect.hit");
+  TURNS.forEach((turn, i) => {
+    fireEvent.pointerEnter(hits[i] as Element);
+    expect(side.querySelector(".tip")?.textContent).toBe(
+      `turn ${i + 1}cache read${kTokens(turn.cacheRead)}output${kTokens(turn.output)}input${kTokens(turn.input)}`,
+    );
+  });
+  // asked for this seat only
+  expect(fetch).toHaveBeenCalledWith(`/api/telemetry?range=1h&agent=${id}`, expect.anything());
+});
+
+it("says so when the seat has no turns recorded", async () => {
+  const view = populatedAgentView();
+  const id = view.row.id;
+  setup(view, {
+    [RESOURCES.telemetry("1h", id).path]: { turnUsage: [{ agentId: id, turns: [] }] },
+  });
+  const side = await screen.findByRole("region", {
+    name: "Plan, recent runs, tokens and setup",
+  });
+  fireEvent.click(within(side).getByRole("button", { name: "Tokens" }));
+  await within(side).findByText(`No turns recorded for ${id} yet.`);
 });
 
 it("the context percent is the Overview's figure for the same seat", async () => {

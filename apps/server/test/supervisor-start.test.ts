@@ -38,6 +38,7 @@ import {
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   estimateTokens,
+  FLIGHT_FULL_BUILTINS,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -336,7 +337,7 @@ describe("startRun eligibility", () => {
   });
 
   it("0: refuses a closed card", async () => {
-    onBoard(boardCard(42, { closed: true }));
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
     await refused(422, startClosedText("mc#42"));
   });
 
@@ -492,6 +493,50 @@ describe("startRun eligibility", () => {
       await refused(422, grantRefusedText("mc#42", ["package.json"]), {
         fetchTicket: ticketWith({ body: BODY }),
       });
+    });
+
+    it("starts a Paths: line of files and globs in the seat's area with no grant", async () => {
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({
+          body: "Paths: apps/server/src/telemetry/**, apps/server/src/a.ts\n",
+        }),
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it.each(["apps/server", "apps/*"])(
+      "starts Paths: globs under the area %s with no grant",
+      async (guidoArea) => {
+        const { sup } = make({
+          rules: withRules(),
+          guidoArea: [guidoArea],
+          fetchTicket: ticketWith({ body: "Paths: apps/server/src/**, apps/server/**\n" }),
+        });
+        sup.start();
+        const { runId } = await sup.startRun("guido-1", 42);
+        expect(runPathGrants(store, runId)).toEqual([]);
+      },
+    );
+
+    it("refuses an outside glob with the text it always had", async () => {
+      await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
+      });
+    });
+
+    it("asks FLIGHT only for the outside file of a mixed Paths: line", async () => {
+      const body = "Paths: apps/server/src/**, package.json\n";
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body }),
+      });
+      approve();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({ body }) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual(["package.json"]);
     });
 
     it("starts a ticket with no Paths: line holding no grant", async () => {
@@ -666,7 +711,11 @@ describe("startRun", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
-      loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/older", wake: true } },
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        hold: { kind: null, reason: null, ended: false, worktree: "/w/older", wake: true },
+      },
     });
     const pause = { seats: "all" as const, reason: "Hold other work", at: 1, by: "operator" };
     writeCrewPause(store, pause, 1);
@@ -694,7 +743,7 @@ describe("startRun", () => {
     const error = await refusal(sup.startRun("guido-1", 42));
     expect(error.status).toBe(409);
     expect(error.message).toContain("mc#41");
-    expect(store.run(older)?.loop?.aside?.wake).toBe(true);
+    expect(store.run(older)?.loop?.hold?.wake).toBe(true);
   });
 
   it("binds a run-bound pause exception at the actual pre-launch run boundary", async () => {
@@ -821,6 +870,63 @@ describe("startRun", () => {
     await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
       message: ticketHasRunText("mc#42"),
     });
+  });
+
+  it("starts a fresh stage after its merged PR has expired from the live cache", async () => {
+    git(clone, "branch", BRANCH);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged stage",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 50,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      100,
+    );
+    store.sweepPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 2,
+          title: "Another PR",
+          url: "u",
+          branch: "feature/43-another",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      101,
+    );
+
+    const { sup } = make();
+    sup.start();
+    const out = await sup.startRun("guido-1", 42);
+
+    expect(store.pullRequests("mc").map((p) => p.number)).toEqual([2]);
+    expect(out.branch).toBe(`${BRANCH}-stage-2`);
   });
 
   it("remakes a worktree recorded before a store restart, clearing only after installation", async () => {
@@ -1706,6 +1812,36 @@ describe("startRun", () => {
     await first;
   });
 
+  it("reserves a ticket while a competing writer starts", async () => {
+    let release = () => {};
+    const fetched = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sup, fetchTicket } = make({
+      fetchTicket: async () => {
+        await fetched;
+        return TICKET;
+      },
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    const first = sup.startRun("guido-1", 42);
+    await until(() => expect(fetchTicket).toHaveBeenCalledTimes(1));
+    const second = refusal(sup.startRun("guido-2", 42));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchTicket).toHaveBeenCalledTimes(1);
+    const error = await second;
+    expect(error.status).toBe(409);
+    release();
+    await first;
+  });
+
   it("busy() names a start held in its checkout, so Update refuses it", async () => {
     const { sup } = make();
     sup.start();
@@ -2082,6 +2218,50 @@ describe("endRun", () => {
     expect(store.run(runId)?.status).toBe("ok");
   });
 
+  it("removes a stopped ticket worktree after its card closes", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
+  });
+
+  it("removes a stopped ticket worktree after its branch PR merges", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 1,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
+  });
+
   it("with hold, stops the seat and keeps it out of rotation", async () => {
     const { sup } = make();
     sup.start();
@@ -2391,7 +2571,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token
@@ -2885,14 +3065,16 @@ describe("repo guidance at launch", () => {
       );
   });
 
-  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+  it("starts FLIGHT unsandboxed with its listed tools and without the operator's settings", async () => {
     const { sup } = make({ extraSeat: FLIGHT });
     sup.start();
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    for (const flag of ["--restricted", "--tools", "--disallowedTools", "--permission-mode"])
+    for (const flag of ["--restricted", "--disallowedTools", "--permission-mode"])
       expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
@@ -3304,18 +3486,18 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
   });
 
-  it.each([
-    ["git commit -m x", "git-write"],
-    ["sleep 1 &", "background"],
-  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
-    const { sup } = codex({ command });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await untilCodex(() => expect(decision()).toBe("decline"));
-    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
-    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRunByEngine(runId);
-  });
+  it.each([["git commit -m x", "git-write"]] as const)(
+    "sends %s to the shared %s outcome guard",
+    async (command, rule) => {
+      const { sup } = codex({ command });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await untilCodex(() => expect(decision()).toBe("decline"));
+      expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
+      await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it.each([
     { name: "uncorrelated mc", server: MC_MCP_SERVER, correlated: false },
@@ -3636,7 +3818,10 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   store.upsertRun({ ...run, endedAt: null, status: "running" });
   store.setRunLoop(run.id, {
     ...NEW_LOOP,
-    aside: {
+    hold: {
+      kind: null,
+      reason: null,
+      ended: false,
       worktree: join(root, "mc-crew", "guido-1-42"),
       wake: true,
     },
@@ -3644,7 +3829,7 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   const error = await refusal(sup.wakeRun(run.id));
   expect(error.status).toBe(409);
   expect(store.run(run.id)?.endedAt).toBeNull();
-  expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
+  expect(store.run(run.id)?.loop?.hold?.wake).toBe(true);
   expect(recorded()).toEqual([]);
 });
 

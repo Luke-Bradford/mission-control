@@ -56,7 +56,7 @@ export async function dispatchRoutineBriefAction(
     if (
       action.kind === "answer" &&
       questionId !== undefined &&
-      store.run(action.runId)?.loop?.aside?.ask === questionId
+      store.run(action.runId)?.loop?.hold?.ask === questionId
     ) {
       if (!deps.bus) throw new BriefActionRefused(503, "Answer storage is unavailable.");
       try {

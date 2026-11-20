@@ -252,7 +252,7 @@ export const evidenceImageName = (
 /** Whether `name` is one a capture can have stored; anything else is never turned into a path. */
 export const isEvidenceImageName = (name: string): boolean => IMAGE_NAME.test(name);
 
-const CLOSES = /^Closes #\d+\.$/;
+const CLOSES = /^(?:Closes|Part of) #\d+\.$/;
 const isHeading = (line: string): boolean => /^## /.test(line);
 
 /** The `heading` section of a PR body (the heading line included), or null when it has none. */

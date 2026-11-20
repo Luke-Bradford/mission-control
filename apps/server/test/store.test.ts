@@ -279,19 +279,65 @@ describe("Store", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
-    const s = new Store(":memory:");
-    s.mapCachePut("tree", "checkout", "a", "1", true);
-    s.mapCachePut("tree", "other", "z", "9", true);
-    s.mapCachePut("merge", "", "m", "[]", false);
-    expect(s.mapCacheGet("tree", "checkout", "a")).toBe("1");
-    s.mapCachePut("tree", "checkout", "b", "2", true);
-    expect(s.mapCacheGet("tree", "checkout", "a")).toBeNull();
-    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("2");
-    expect(s.mapCacheGet("tree", "other", "z")).toBe("9");
-    expect(s.mapCacheGet("merge", "", "m")).toBe("[]");
-    s.mapCachePut("tree", "checkout", "b", "3", true);
-    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("3");
+  it("drops the tables of the removed code-health, Map, token-audit and bug-escape features", () => {
+    const RETIRED_FIXTURE = [
+      "map_cache",
+      "code_health_overview",
+      "run_token_audit",
+      "bug_escapes",
+      "controller_messages",
+      "controller_files",
+    ];
+    const path = join(mkdtempSync(join(tmpdir(), "mc-retired-")), "hub.db");
+    const first = new Store(path);
+    const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
+    for (const table of RETIRED_FIXTURE) raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
+    // the old release's trigger on a kept table writes into a retired one
+    raw.exec(`CREATE TABLE code_health_revisions (repo_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0);
+      CREATE TRIGGER code_health_pull_requests_insert AFTER INSERT ON pull_requests BEGIN
+        INSERT INTO code_health_revisions (repo_id, version) SELECT NEW.repo_id, 1 WHERE NEW.repo_id IS NOT NULL
+        ON CONFLICT(repo_id) DO UPDATE SET version = version + 1;
+      END`);
+    first.close();
+    const second = new Store(path);
+    const rows = (type: string) =>
+      (
+        (second as unknown as { rawDb: DatabaseSync }).rawDb
+          .prepare("SELECT name FROM sqlite_master WHERE type = ?")
+          .all(type) as { name: string }[]
+      ).map((r) => r.name);
+    const names = rows("table");
+    for (const table of [...RETIRED_FIXTURE, "code_health_revisions"])
+      expect(names).not.toContain(table);
+    expect(rows("trigger").filter((n) => n.startsWith("code_health"))).toEqual([]);
+    expect(() =>
+      second.upsertPullRequests(
+        "r",
+        [
+          {
+            repoId: "r",
+            number: 2,
+            title: "t",
+            url: "u",
+            branch: "b",
+            ticket: null,
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: 1,
+            updatedAt: 1,
+            mergedAt: null,
+            headSha: "sha",
+            mergeable: null,
+            author: null,
+            assignees: [],
+          },
+        ],
+        2,
+      ),
+    ).not.toThrow();
+    second.close();
   });
 
   it("close releases the database: the store cannot be used after", () => {
@@ -434,6 +480,111 @@ describe("Store", () => {
     new Store(old); // re-opening is a no-op
   });
 
+  it("folds a stored park and set-aside into one hold when the database opens", () => {
+    const path = join(dir, "fold-hold.sqlite");
+    new Store(path).close();
+    const store0 = new Store(path);
+    store0.upsertRun(run({ id: "held", seq: 1, startedAt: 1000 }));
+    store0.upsertRun(run({ id: "plain", seq: 2, startedAt: 2000 }));
+    store0.close();
+    const raw = new DatabaseSync(path);
+    const write = (id: string, loop: object) =>
+      raw.prepare("UPDATE runs SET loop = ? WHERE id = ?").run(JSON.stringify(loop), id);
+    const { hold: _hold, ...bare } = NEW_LOOP;
+    write("held", {
+      ...bare,
+      phase: "parked",
+      parked: { kind: "review", reason: "x", ended: false },
+      aside: { worktree: "/w", wake: true, ask: 3 },
+    });
+    write("plain", { ...bare, parked: null, aside: null });
+    raw.exec("CREATE INDEX runs_loop_aside ON runs(id)");
+    raw.exec("CREATE INDEX runs_agent_aside_worktree ON runs(id)");
+    raw.close();
+
+    const reopened = new Store(path);
+    expect(reopened.run("held")?.loop?.hold).toEqual({
+      kind: "review",
+      reason: "x",
+      ended: false,
+      worktree: "/w",
+      wake: true,
+      ask: 3,
+    });
+    expect(reopened.run("plain")?.loop?.hold).toBeNull();
+    expect(reopened.offSeatRuns().map((r) => r.id)).toEqual(["held"]);
+    reopened.close();
+    const check = new DatabaseSync(path);
+    const types = check
+      .prepare(
+        "SELECT json_type(loop, '$.parked') AS parked, json_type(loop, '$.aside') AS aside FROM runs",
+      )
+      .all() as { parked: string | null; aside: string | null }[];
+    expect(types).toEqual([
+      { parked: null, aside: null },
+      { parked: null, aside: null },
+    ]);
+    const before = check.prepare("SELECT id, loop FROM runs ORDER BY id").all();
+    check.close();
+    new Store(path).close(); // a second open changes nothing
+    const again = new DatabaseSync(path);
+    expect(again.prepare("SELECT id, loop FROM runs ORDER BY id").all()).toEqual(before);
+    const indexes = again
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'runs_%aside%'")
+      .all();
+    expect(indexes).toEqual([]);
+    again.close();
+  });
+
+  it("drops the flight_wakes columns the wake no longer writes", () => {
+    const old = join(dir, "wake-columns.sqlite");
+    const db = new DatabaseSync(old);
+    db.exec(
+      "CREATE TABLE flight_wakes (run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, wake_id TEXT, rode TEXT, immediate TEXT, PRIMARY KEY (run_id, at))",
+    );
+    db.close();
+    new Store(old).close();
+    const after = new DatabaseSync(old);
+    const columns = (
+      after.prepare("PRAGMA table_info(flight_wakes)").all() as { name: string }[]
+    ).map((c) => c.name);
+    after.close();
+    expect(columns).toEqual(["run_id", "at", "reasons", "wake_id"]);
+  });
+
+  it("removes the retired handoff tables from old and fresh databases", () => {
+    const old = join(dir, "retired-tables.sqlite");
+    const db = new DatabaseSync(old);
+    const retired = ["run_handoffs", "ticket_waits", "holds", "run_reads", "run_rereads"];
+    for (const table of retired) {
+      db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+      db.exec(`CREATE INDEX ${table}_value ON ${table}(value)`);
+      db.prepare(`INSERT INTO ${table} VALUES (?, ?)`).run(`${table}-row`, "kept until upgrade");
+    }
+    db.close();
+
+    const migrated = new Store(old);
+    expect(migrated.getSetting("missing")).toBeNull();
+    migrated.close();
+    const after = new DatabaseSync(old);
+    const left = after
+      .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')")
+      .all() as {
+      name: string;
+    }[];
+    expect(
+      left.filter((r) => retired.some((t) => r.name === t || r.name.startsWith(`${t}_`))),
+    ).toEqual([]);
+    after.close();
+
+    const reopened = new Store(old);
+    expect(reopened.getSetting("missing")).toBeNull();
+    reopened.close();
+    const fresh = new Store(join(dir, "fresh.sqlite"));
+    expect(fresh.getSetting("missing")).toBeNull();
+    fresh.close();
+  });
+
   it("runs returns newest first and respects the limit", () => {
     store.upsertRun(run({ id: "a", seq: 1, startedAt: 1 }));
     store.upsertRun(run({ id: "b", seq: 2, startedAt: 2 }));
@@ -567,7 +718,7 @@ describe("Store", () => {
     const path = join(dir, "flow.sqlite");
     const old = new Store(path);
     old.deleteSetting("flow-ready-start-v1");
-    const issue = { repoId: "r", number: 1, size: null, startAt: 10, doneAt: 20 };
+    const issue = { repoId: "r", number: 1, size: null, title: "A title", startAt: 10, doneAt: 20 };
     const pr = { repoId: "r", number: 2, mergedAt: 20, firstPushCi: null };
     old.replaceFlow("r", [issue], [pr]);
     old.close();
@@ -792,24 +943,6 @@ describe("Store", () => {
         other.close();
       }
     });
-  });
-
-  it("keeps a ticket wait separately from the GitHub board state", () => {
-    store.setTicketWait({
-      repoId: "r1",
-      issue: 1,
-      reason: "CI is running",
-      freesWhen: "CI finishes",
-      at: 1000,
-    });
-
-    expect(store.ticketWait("r1", 1)).toEqual({
-      reason: "CI is running",
-      freesWhen: "CI finishes",
-      at: 1000,
-    });
-    store.clearTicketWait("r1", 1);
-    expect(store.ticketWait("r1", 1)).toBeNull();
   });
 
   it("migrates an old board_items table, defaulting the new columns", () => {
@@ -1195,6 +1328,7 @@ describe("Store", () => {
       headSha: "0123abc",
       mergeCommitSha: "merge-sha",
       mergeable: "MERGEABLE" as const,
+      isCrossRepository: false,
       author: "octo",
       assignees: ["a", "b"],
       checks: [],
@@ -1627,13 +1761,21 @@ describe("Store", () => {
     store.upsertRun(run({ id: "outside", startedAt: 99, model: "old", promptHash: "old" }));
     store.setRunLoop(
       "timeline",
-      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "one", ended: false } },
+      {
+        ...NEW_LOOP,
+        phase: "parked",
+        hold: { kind: "ci", reason: "one", ended: false, worktree: null, wake: false },
+      },
       120,
     );
     store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 130);
     store.setRunLoop(
       "timeline",
-      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "two", ended: false } },
+      {
+        ...NEW_LOOP,
+        phase: "parked",
+        hold: { kind: "ci", reason: "two", ended: false, worktree: null, wake: false },
+      },
       140,
     );
     store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 210);
@@ -1773,12 +1915,16 @@ describe("Store", () => {
       store.upsertRun(run({ id: "outside", agentId: "a3", startedAt: 20, costUsd: 99 }));
       store.setRunLoop(
         "cheap2",
-        { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "x", ended: false } },
+        {
+          ...NEW_LOOP,
+          phase: "parked",
+          hold: { kind: "ci", reason: "x", ended: false, worktree: null, wake: false },
+        },
         150,
       );
       store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 150 });
       store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 151 });
-      store.addGuardHit({ agentId: "a2", runId: null, rule: "network", text: "t", at: 152 });
+      store.addGuardHit({ agentId: "a2", runId: null, rule: "unreadable", text: "t", at: 152 });
       const id = store.requestReview({
         authorRunId: "cheap1",
         repoId: "repo",
@@ -1802,7 +1948,7 @@ describe("Store", () => {
       ]);
       expect(audit.refusals).toEqual([
         { agentId: "a2", runId: "cheap2", rule: "read-only", count: 2 },
-        { agentId: "a2", runId: null, rule: "network", count: 1 },
+        { agentId: "a2", runId: null, rule: "unreadable", count: 1 },
       ]);
       expect(audit.spendOutliers).toEqual([
         { runId: "dear", agentId: "a3", ticket: "repo#9", costUsd: 9 },
@@ -1841,12 +1987,12 @@ describe("Store", () => {
         store.addGuardHit({
           agentId: "spiky",
           runId: "r",
-          rule: "network",
+          rule: "unreadable",
           text: "t",
           at: 100 + i,
         });
       }
-      store.addGuardHit({ agentId: "calm", runId: "r", rule: "network", text: "t", at: 100 });
+      store.addGuardHit({ agentId: "calm", runId: "r", rule: "unreadable", text: "t", at: 100 });
       store.setSetting(
         `${FLIGHT_SIGNALS_SETTING}:repo`,
         JSON.stringify({
@@ -2472,6 +2618,21 @@ describe("Store", () => {
       expect(titles()).toEqual([[2, "t2"]]);
     });
 
+    it("keeps merged branch history after the live PR cache expires", () => {
+      store.upsertPullRequests(
+        "r1",
+        [
+          pr(1, { branch: "feature/42-x", state: "merged", mergedAt: 50 }),
+          pr(3, { branch: "feature/43-open" }),
+        ],
+        100,
+      );
+      store.sweepPullRequests("r1", [pr(2)], 101);
+      expect(store.pullRequests("r1").map((p) => p.number)).toEqual([2]);
+      expect(store.mergedPullRequestBranches("r1")).toEqual(["feature/42-x"]);
+      expect(store.mergedPullRequestBranches("other")).toEqual([]);
+    });
+
     it("is not a change when only the read time moves", () => {
       store.upsertPullRequests("r1", [pr(1)], 100);
       expect(store.upsertPullRequests("r1", [pr(1)], 200)).toBe(false);
@@ -2577,6 +2738,7 @@ describe("Store", () => {
       size: "S",
       startAt: 10,
       doneAt: 100,
+      title: null,
     });
     expect(store.flowPrs(200)).toEqual([
       { repoId: "r1", number: 8, mergedAt: 300, firstPushCi: null },
@@ -2690,8 +2852,8 @@ describe("seat sessions", () => {
   });
 
   it("hasPendingStart: a queued ticket, a queued review or a live run; not a set-aside run", () => {
-    const aside = { worktree: "/w/x", wake: false };
-    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, aside } }));
+    const aside = { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, hold: aside } }));
     expect(store.hasPendingStart()).toBe(false);
     expect(store.hasActiveRun()).toBe(false);
     store.upsertRun(run({ id: "live", seq: 2, ticket: "repo#2", loop: { ...NEW_LOOP } }));
@@ -2715,16 +2877,28 @@ describe("seat sessions", () => {
     expect(store.hasPendingStart()).toBe(true);
   });
 
-  it("asideRuns: unended runs with an aside, oldest first", () => {
-    const aside = { worktree: "/w/x", wake: false };
-    store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, aside } }));
-    store.upsertRun(run({ id: "a", seq: 1, startedAt: 1000, loop: { ...NEW_LOOP, aside } }));
+  it("offSeatRuns: unended runs that have left their seat, oldest first", () => {
+    const aside = {
+      kind: null,
+      reason: null,
+      ended: false,
+      worktree: "/w/x",
+      wake: false,
+    };
+    store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, hold: aside } }));
+    store.upsertRun(run({ id: "a", seq: 1, startedAt: 1000, loop: { ...NEW_LOOP, hold: aside } }));
     store.upsertRun(run({ id: "none", seq: 3, startedAt: 3000, loop: NEW_LOOP }));
     store.upsertRun(run({ id: "plain", seq: 4, startedAt: 4000 }));
     store.upsertRun(
-      run({ id: "ended", seq: 5, startedAt: 500, endedAt: 600, loop: { ...NEW_LOOP, aside } }),
+      run({
+        id: "ended",
+        seq: 5,
+        startedAt: 500,
+        endedAt: 600,
+        loop: { ...NEW_LOOP, hold: aside },
+      }),
     );
-    expect(store.asideRuns().map((r) => r.id)).toEqual(["a", "b"]);
+    expect(store.offSeatRuns().map((r) => r.id)).toEqual(["a", "b"]);
   });
 
   it("round-trips a row and upserts on the seat id", () => {
@@ -2794,12 +2968,12 @@ describe("guard hits", () => {
   it("records a hit with its id and lists hits since a time, newest first", () => {
     const a = store.addGuardHit(hit({ at: 10 * DAY }));
     const b = store.addGuardHit(
-      hit({ at: 11 * DAY, rule: "network", text: "x: curl", runId: null }),
+      hit({ at: 11 * DAY, rule: "unreadable", text: "x: curl", runId: null }),
     );
     store.addGuardHit(hit({ at: 2 * DAY }));
     expect(b).toBeGreaterThan(a);
     expect(store.guardHits(4 * DAY)).toEqual([
-      { id: b, ...hit({ at: 11 * DAY, rule: "network", text: "x: curl", runId: null }) },
+      { id: b, ...hit({ at: 11 * DAY, rule: "unreadable", text: "x: curl", runId: null }) },
       { id: a, ...hit({ at: 10 * DAY }) },
     ]);
   });
@@ -2808,12 +2982,11 @@ describe("guard hits", () => {
     const now = 20 * DAY;
     store.addGuardHit(hit({ at: now - DAY }));
     store.addGuardHit(hit({ at: now - 2 * DAY }));
-    store.addGuardHit(hit({ at: now - 3 * DAY, rule: "network" }));
+    store.addGuardHit(hit({ at: now - 3 * DAY, rule: "unreadable" }));
     store.addGuardHit(hit({ at: now - 8 * DAY, rule: "read-only" }));
     // a hit stored under a rule since retired (github-write) is listed but not counted
     store.addGuardHit(hit({ at: now - DAY, rule: "github-write" as GuardRule }));
     expect(store.guardHitCounts(now - 7 * DAY)).toEqual({
-      background: 0,
       "git-write": 2,
       "git-env": 0,
       "codex-allowlist": 0,
@@ -2822,16 +2995,15 @@ describe("guard hits", () => {
       "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
-      network: 1,
       "repo-rules": 0,
-      unreadable: 0,
+      unreadable: 1,
       secret: 0,
     });
   });
 
   it("counts only the given run's hits", () => {
     store.addGuardHit(hit({ runId: "run-a" }));
-    store.addGuardHit(hit({ runId: "run-a", rule: "network" }));
+    store.addGuardHit(hit({ runId: "run-a", rule: "unreadable" }));
     store.addGuardHit(hit({ runId: "run-b" }));
     store.addGuardHit(hit({ runId: null }));
     expect(store.guardHitCount("run-a")).toBe(2);
@@ -3295,6 +3467,38 @@ describe("liveSeatRuns and branchCommitSpan", () => {
     c("r2", "sha3");
     expect(store.branchCommitSpan("repo", "feature/1-x")).toEqual({ first: "sha1", last: "sha3" });
     expect(store.branchCommitSpan("repo", "feature/2-y")).toBeNull();
+  });
+
+  describe("a followed commit (someone else's, on top of the run's push)", () => {
+    const add = (sha: string, at: number, followed: boolean) =>
+      store.addRunCommit({ runId: "r1", repoId: "repo", branch: "feature/1-x", sha, at, followed });
+    beforeEach(() => {
+      store.upsertRun(run({ id: "r1", agentId: "a" }));
+      add("own", 10, false);
+      add("theirs", 20, true);
+    });
+
+    it("is left out of the authored-commit queries and metrics", () => {
+      expect(store.commitsSince(0)).toEqual([{ agentId: "a", n: 1 }]);
+      expect(store.telemetryCommits(0, 100).map((c) => c.sha)).toEqual(["own"]);
+      expect(store.commitsOnBranch("repo", "feature/1-x").map((c) => c.sha)).toEqual(["own"]);
+      expect(store.runCommitsSince(0).map((c) => c.sha)).toEqual(["own"]);
+    });
+
+    it("is left out of commits per run (HUD work and telemetry), and of the seat's quiet-turn count", () => {
+      expect(store.authoredCommitCount("r1")).toBe(1);
+      expect(store.newestAuthoredCommit("r1")).toEqual({ sha: "own", at: 10 });
+    });
+
+    it("still counts as the run's newest commit, its commits, and the branch's last", () => {
+      expect(store.newestRunCommit("r1")).toEqual({ sha: "theirs", at: 20 });
+      expect(store.runCommits("r1")).toEqual(["own", "theirs"]);
+      expect(store.followedCommits("r1")).toEqual(new Set(["theirs"]));
+      expect(store.branchCommitSpan("repo", "feature/1-x")).toEqual({
+        first: "own",
+        last: "theirs",
+      });
+    });
   });
 });
 
@@ -3894,40 +4098,6 @@ describe("telemetry store aggregates", () => {
   });
 });
 
-describe("item discussions", () => {
-  it("keeps interleaved versions, retries and late replies across restart", () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    const b = store.ensureDiscussion("note:b", "v1");
-    store.askDiscussion(a.id, "ask-a", "Why?", 1);
-    store.askDiscussion(b.id, "ask-b", "Which?", 2);
-    store.markDiscussionSent(b.id, "ask-b");
-    store.askDiscussion(a.id, "ask-a", "Why?", 1);
-    store.addComms({ at: 3, from: "flight", to: "operator", ticket: null, text: "Global" });
-    const next = store.ensureDiscussion("note:a", "v2");
-    expect(next.messages).toEqual([]);
-    expect(store.replyDiscussion(a.id, "ask-a", "reply-a", "Evidence", 4)).toBe(true);
-    expect(store.replyDiscussion(b.id, "ask-a", "wrong", "Wrong", 5)).toBe(false);
-    store.close();
-    store = new Store(join(dir, "mc.sqlite"));
-    expect(store.discussion("note:a", a.id)?.messages.map((m) => m.text)).toEqual([
-      "Why?",
-      "Evidence",
-    ]);
-    expect(store.discussion("note:b", b.id)?.messages.map((m) => m.text)).toEqual(["Which?"]);
-    expect(store.discussion("note:a", b.id)).toBeNull();
-    expect(store.discussionSent(b.id, "ask-b")).toBe(true);
-    expect(store.replyDiscussion(a.id, "ask-a", "reply-a", "Evidence", 4)).toBe(true);
-    expect(store.discussion("note:a", a.id)?.messages).toHaveLength(2);
-    expect(() => store.askDiscussion(a.id, "ask-a", "Changed", 6)).toThrow();
-  });
-
-  it("bounds a thread without moving messages to another item", () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    for (let n = 0; n < 150; n++) store.askDiscussion(a.id, `ask-${n}`, "Question", n);
-    expect(store.discussion("note:a", a.id)?.messages).toHaveLength(100);
-  });
-});
-
 it("retains complete and legacy briefs across restart without inventing checked sources", () => {
   const legacy = {
     key: "note:legacy",
@@ -4275,7 +4445,16 @@ describe("hub retention", () => {
                 id === "parked"
                   ? { ...NEW_LOOP, phase: "parked" }
                   : id === "aside"
-                    ? { ...NEW_LOOP, aside: { worktree: "x", wake: false } }
+                    ? {
+                        ...NEW_LOOP,
+                        hold: {
+                          kind: null,
+                          reason: null,
+                          ended: false,
+                          worktree: "x",
+                          wake: false,
+                        },
+                      }
                     : null,
             }),
           );
@@ -4636,7 +4815,11 @@ it("retains named CI attempts, findings, parks, waits and linked reviewer usage"
   store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci" }, 1600);
   store.setRunLoop(
     "r1",
-    { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "verify failed", ended: false } },
+    {
+      ...NEW_LOOP,
+      phase: "parked",
+      hold: { kind: "ci", reason: "verify failed", ended: false, worktree: null, wake: false },
+    },
     1700,
   );
   store.setRunLoop("r1", { ...NEW_LOOP, phase: "done" }, 1800);
@@ -4657,7 +4840,7 @@ it("retains named CI attempts, findings, parks, waits and linked reviewer usage"
   expect(history.find((a) => a.runId === "review-run")?.data.tokens).toEqual(tokens);
   expect(history.find((a) => a.data.findings)?.data.findings).toEqual(findings);
   expect(history.find((a) => a.kind === "wait-end")?.data).toEqual({ on: "ci", durationMs: 100 });
-  expect(history.find((a) => a.data.parked)?.data.parked).toMatchObject({
+  expect(history.find((a) => a.data.hold)?.data.hold).toMatchObject({
     reason: "verify failed",
   });
 });

@@ -181,8 +181,6 @@ export interface CrewConfig {
   lane?: CrewLane;
   /** Also start cards with no lane label. Loaded: always set (default false). */
   laneDefault?: boolean;
-  /** Run the fix-session trial (#1643): developer runs woken for a fix split into two arms. Loaded: always set (default false). */
-  fixSessionTrial?: boolean;
   /** The built-in roles plus `crew.roles`. Loaded: always set. */
   roles?: Record<string, RoleDef>;
   sessions: CrewSessionConfig[];
@@ -236,13 +234,8 @@ export type TeamsConfig = z.infer<typeof TeamsConfig>;
 
 export interface CcConfig {
   sources?: { teams?: TeamsConfig };
-  /**
-   * Token audit options. `controllerSessions` (default off): read usage numbers of controller
-   * sessions from the operator's Claude Code folder for `controllerCheckout` (default: the hub's own checkout).
-   */
+  /** Audit options. */
   audit?: {
-    controllerSessions: boolean;
-    controllerCheckout?: string;
     /** Message-problem thresholds for Audit; each left out takes `AUDIT_THRESHOLD_DEFAULTS`. */
     thresholds?: Partial<AuditThresholds>;
   };
@@ -485,6 +478,7 @@ const seatCommand = z.string().superRefine((e, ctx) => {
 const percent = z.number().min(0).max(100);
 const modelName = z.string().regex(MODEL_NAME, "must match /^[A-Za-z0-9][A-Za-z0-9._\\[\\]-]*$/");
 export const seatEffort = z.string().min(1);
+const RETIRED_MC_TOOLS: readonly unknown[] = ["code_health", "publish_preview"];
 const MC_TOOL_VALUES = Object.values(MC_TOOL_NAMES) as [McToolName, ...McToolName[]];
 /** A `crew.roles` entry; `here` is optional and falls back to the `ROLES` row's. */
 const roleSchema = z.strictObject({
@@ -492,7 +486,13 @@ const roleSchema = z.strictObject({
   model: modelName,
   mode: z.enum(CREW_MODES),
   loop: z.enum(LOOP_KINDS),
-  tools: z.array(z.enum(MC_TOOL_VALUES)).default([]),
+  // code_health and publish_preview are retired tools: a role that still lists them loads, without them
+  tools: z
+    .preprocess(
+      (v) => (Array.isArray(v) ? v.filter((t) => !RETIRED_MC_TOOLS.includes(t)) : v),
+      z.array(z.enum(MC_TOOL_VALUES)),
+    )
+    .default([]),
   here: z
     .string()
     .refine(
@@ -605,14 +605,16 @@ const fileSchema = z
     }),
     audit: z
       .strictObject({
-        controller_sessions: z.boolean().default(false),
+        // The token audit's controller-session reader is gone; these two stay accepted, and
+        // ignored, so an existing config.yaml still loads.
+        controller_sessions: z.boolean().optional(),
         controller_checkout: nonEmpty.optional(),
         question_wait_minutes: z.number().int().min(1).max(10_080).optional(),
         controller_wait_minutes: z.number().int().min(1).max(10_080).optional(),
         ticket_text_factor: z.number().min(1.1).max(100).optional(),
         notice_repeats: z.number().int().min(2).max(100).optional(),
       })
-      .default({ controller_sessions: false }),
+      .default({}),
     updates: z
       .strictObject({
         hub: z.enum(HUB_UPDATES).default("off"),
@@ -686,7 +688,8 @@ const fileSchema = z
         max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
         lane_default: z.boolean().default(false),
-        fix_session_trial: z.boolean().default(false),
+        /** Retired with the fix-session trial: still accepted so an existing config loads; ignored. */
+        fix_session_trial: z.boolean().optional(),
         roles: z.record(z.string(), roleSchema).default({}),
         sessions: z.array(
           z.strictObject({
@@ -800,10 +803,6 @@ const fileSchema = z
         boardMinutes: f.poll.board_minutes,
       },
       audit: {
-        controllerSessions: f.audit.controller_sessions,
-        ...(f.audit.controller_checkout === undefined
-          ? {}
-          : { controllerCheckout: f.audit.controller_checkout }),
         ...auditThresholdsOf(f.audit),
       },
       updates: { hub: f.updates.hub, cli: f.updates.cli },
@@ -833,7 +832,6 @@ const fileSchema = z
               maxOpenRunsPerSeat: f.crew.max_open_runs_per_seat,
               ...(f.crew.lane === undefined ? {} : { lane: f.crew.lane }),
               laneDefault: f.crew.lane_default,
-              fixSessionTrial: f.crew.fix_session_trial,
               roles: {
                 ...BUILTIN_ROLES,
                 ...Object.fromEntries(

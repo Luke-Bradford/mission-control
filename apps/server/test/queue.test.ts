@@ -32,7 +32,7 @@ import { USAGE_STALE_MAX_MS } from "../src/collectors/usage-claude.ts";
 import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
 import { ProfilesError } from "../src/config/profiles.ts";
 import type { CcConfig } from "../src/config.ts";
-import { reworkDueBesides, wakeDueAsideRun } from "../src/engine/aside.ts";
+import { wakeDueAsideRun } from "../src/engine/aside.ts";
 import {
   accountAtStop,
   accountHoldsNewWork,
@@ -280,7 +280,7 @@ const setAsideRuns = (agentId: string) => {
   const loop = {
     ...NEW_LOOP,
     phase: "review" as const,
-    aside: { worktree: "/w/x", wake: false },
+    hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
   };
   store.upsertRun(run({ id: "r-a", agentId, ticket: `${REPO}#8`, loop }));
   store.upsertRun(run({ id: "r-b", agentId, ticket: `${REPO}#9`, startedAt: NOW + 1, loop }));
@@ -315,6 +315,54 @@ beforeEach(() => {
 afterEach(() => {
   store.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("plan sign-off hold", () => {
+  const parts = { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] };
+  const withSetting = (planSignoff: "every" | "larger" | "never"): RepoRules => ({
+    ...RULES,
+    planSignoff,
+  });
+
+  it.each([
+    ["every", "no plan", null, [] as number[]],
+    ["every", "awaiting sign-off", "wait", []],
+    ["every", "signed off", "signed", [1]],
+    ["larger", "marked, awaiting plan", "marked", []],
+    ["larger", "unmarked", null, [1]],
+    ["never", "awaiting sign-off", "wait", [1]],
+  ] as const)("%s, %s: queued %j", async (setting, _name, plan, expected) => {
+    store.replaceBoard(REPO, [card(1)]);
+    rules = withSetting(setting);
+    if (plan === "marked") store.plans.request(REPO, 1, NOW);
+    if (plan === "wait") store.plans.file(REPO, 1, parts, false, NOW);
+    if (plan === "signed") {
+      store.plans.file(REPO, 1, parts, false, NOW);
+      store.plans.approve(REPO, 1, NOW);
+    }
+    await refill();
+    expect(issues(SERVER)).toEqual(expected);
+  });
+
+  it("a setting turned on after the card was queued stops the start", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    rules = withSetting("never");
+    await refill();
+    expect(issues(SERVER)).toEqual([1]);
+    rules = withSetting("every");
+    await take();
+    expect(started).toEqual([]);
+    expect(issues(SERVER)).toEqual([]);
+  });
+
+  it("a plan sent to the tab after the card was queued stops the start", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    rules = withSetting("larger");
+    await refill();
+    store.plans.request(REPO, 1, NOW);
+    await take();
+    expect(started).toEqual([]);
+  });
 });
 
 describe("refillQueues", () => {
@@ -1111,7 +1159,10 @@ describe("takeNext", () => {
   });
 
   it("rework first: an idle seat with a run waiting on rework takes nothing", async () => {
-    const aside = (wake: boolean) => ({ ...NEW_LOOP, aside: { worktree: "/w/x", wake } });
+    const aside = (wake: boolean) => ({
+      ...NEW_LOOP,
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake },
+    });
     store.upsertRun(
       run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: aside(false) }),
     );
@@ -1131,7 +1182,10 @@ describe("takeNext", () => {
   });
 
   it("rework first: a free seat with a rework due and Ready tickets takes the rework, not a ticket", async () => {
-    const aside = (wake: boolean) => ({ ...NEW_LOOP, aside: { worktree: "/w/x", wake } });
+    const aside = (wake: boolean) => ({
+      ...NEW_LOOP,
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake },
+    });
     store.upsertRun(
       run({ id: "r-aside", agentId: SERVER, ticket: `${REPO}#9`, loop: aside(true) }),
     );
@@ -1143,19 +1197,23 @@ describe("takeNext", () => {
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-aside");
   });
 
-  it("rework first: two reworks come back oldest first, and a run displaced mid-build after both", () => {
-    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
+  it("a stale wake flag on the run the seat is on does not hold up the seat's next ticket", () => {
+    // the hub restarted after waking the run and before it cleared its aside: the run is on its seat
+    const aside = {
+      ...NEW_LOOP,
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: true },
+    };
+    store.upsertRun(run({ id: "r-on-seat", agentId: SERVER, ticket: `${REPO}#9`, loop: aside }));
+    seatRow("running", "r-on-seat");
+    expect(wakeDueAsideRun(store, SERVER)).toBeUndefined();
+  });
+
+  it("rework first: two reworks come back oldest first", () => {
+    const aside = {
+      ...NEW_LOOP,
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: true },
+    };
     const at = (n: number) => NOW - n * 60_000;
-    // the displaced one is the oldest, but has no push: it waits behind both reworks
-    store.upsertRun(
-      run({
-        id: "r-displaced",
-        agentId: SERVER,
-        ticket: `${REPO}#7`,
-        startedAt: at(30),
-        loop: { ...aside, phase: "working" },
-      }),
-    );
     for (const [id, n, started] of [
       ["r-younger", 8, at(10)],
       ["r-older", 9, at(20)],
@@ -1166,40 +1224,11 @@ describe("takeNext", () => {
       store.setRunPush({ runId: id, sha: "a".repeat(40), at: NOW });
     }
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-older");
-    store.setRunLoop("r-older", { ...aside, aside: { worktree: "/w/x", wake: false } });
+    store.setRunLoop("r-older", {
+      ...aside,
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+    });
     expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-younger");
-    store.setRunLoop("r-younger", { ...aside, aside: { worktree: "/w/x", wake: false } });
-    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-displaced");
-  });
-
-  it("rework first: a pushed run displaced with a refused commit waits behind the rework, and keeps its worktree", () => {
-    const aside = { ...NEW_LOOP, aside: { worktree: "/w/x", wake: true } };
-    const at = (n: number) => NOW - n * 60_000;
-    // the refused run is the oldest, but waits behind the rework it made way for
-    store.upsertRun(
-      run({
-        id: "r-refused",
-        agentId: SERVER,
-        ticket: `${REPO}#7`,
-        startedAt: at(30),
-        loop: {
-          ...aside,
-          phase: "ci",
-          aside: { worktree: "/w/refused", wake: true, displaced: true },
-        },
-      }),
-    );
-    store.setRunPush({ runId: "r-refused", sha: "a".repeat(40), at: NOW });
-    store.upsertRun(
-      run({ id: "r-rework", agentId: SERVER, ticket: `${REPO}#9`, startedAt: at(10), loop: aside }),
-    );
-    store.setRunPush({ runId: "r-rework", sha: "b".repeat(40), at: NOW });
-    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-rework");
-    // the refused run does not hold up the rework (two reworks never displace each other)
-    expect(reworkDueBesides(store, store.run("r-rework") as Run)).toBe(false);
-    store.setRunLoop("r-rework", { ...aside, aside: { worktree: "/w/x", wake: false } });
-    expect(wakeDueAsideRun(store, SERVER)?.id).toBe("r-refused");
-    expect(store.run("r-refused")?.loop?.aside?.worktree).toBe("/w/refused");
   });
 
   it("rework first: blocking findings on the sha the pushed head carries hold the seat", async () => {
@@ -1208,7 +1237,7 @@ describe("takeNext", () => {
     const loop = (carry: { from: string; to: string } | null) => ({
       ...NEW_LOOP,
       phase: "review" as const,
-      aside: { worktree: "/w/x", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
       carry,
     });
     store.upsertRun(
@@ -1253,7 +1282,7 @@ describe("takeNext", () => {
           ...NEW_LOOP,
           phase: "ci",
           prNumber: 12,
-          aside: { worktree: "/w/x", wake: false },
+          hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
           rerun: { sha: SHA, at: NOW - 1, runs: [] },
         },
       }),
@@ -1296,7 +1325,7 @@ describe("takeNext", () => {
     const loop = {
       ...NEW_LOOP,
       phase: "review" as const,
-      aside: { worktree: "/w/x", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
     };
     store.upsertRun(run({ id: "r-a", agentId: SERVER, ticket: `${REPO}#8`, loop }));
     expect(seatMayTake(store, SERVER)).toBe(true);

@@ -30,9 +30,13 @@ import {
   minorIssueTitle,
   minorLine,
   minorMoreLine,
+  noteIsPartOf,
   parseMinorFindings,
   pathInArea,
+  prClosesLine,
+  prIsPartOf,
   prNotRunsText,
+  prPartOfLine,
   REVIEW_STATUS_CONTEXT,
   type ReviewStatusState,
   type Run,
@@ -110,6 +114,10 @@ export const UPDATE_UP_TO_DATE = "the branch already contains main";
 export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
+/** A fast-forward's answer; `installNote` is a refusal or failure of the install that followed it. */
+export type FastForwardResult =
+  | { ok: true; installNote?: string; commits?: number }
+  | { ok: false; text: string; transient: boolean };
 export type OpenPrResult =
   | {
       ok: true;
@@ -175,6 +183,12 @@ export interface ReviewPrSnapshot {
   mergeCommitSha: string | null;
 }
 
+/** origin's default branch and its tip, as one `ls-remote` read them. */
+export interface OriginTip {
+  defaultBranch: string;
+  mainSha: string;
+}
+
 export interface Publisher {
   /** An authoritative read, independent of the collector's snapshot. */
   reviewPr(run: Run, number: number): Promise<ReviewPrSnapshot | null>;
@@ -185,6 +199,14 @@ export interface Publisher {
   ): Promise<{ ok: true; sha: string } | { ok: false; text: string; transient: boolean }>;
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
+  /**
+   * Whether the pushes that took the run's branch from `ancestor` to `head` were all made by one of
+   * `logins` or the account gh acts as, read from GitHub's push activity for the branch. False
+   * when the read fails or the chain of pushes is not whole.
+   */
+  pushesFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
+  /** A run has ended: what the publisher kept for it is let go. */
+  runEnded(runId: string): void;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
   /** Opens the run's draft PR, or finds the one it already opened. */
@@ -230,14 +252,20 @@ export interface Publisher {
     mergeCommitSha?: string,
     baseSha?: string,
   ): Promise<string[]>;
+  /** origin's default branch and tip now (one `ls-remote`), for a caller that shares it across runs. */
+  originTip(
+    run: Run,
+  ): Promise<({ ok: true } & OriginTip) | { ok: false; text: string; transient: boolean }>;
   /**
-   * The merge gate's reads for `sha`. origin's tip is read every call; when `known` is for the same
-   * sha and tip, it is returned without the rest of the reads.
+   * The merge gate's reads for `sha`. origin's tip is read every call unless `tip` (a read the
+   * caller shares) is given; when `known` is for the same sha and tip, it is returned without the
+   * rest of the reads.
    */
   gateFacts(
     run: Run,
     sha: string,
     known?: (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean }) | null,
+    tip?: OriginTip,
   ): Promise<GateResult>;
   /**
    * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
@@ -249,13 +277,19 @@ export interface Publisher {
    * a refusal when the worktree cannot be read.
    */
   worktreeChanges(run: Run, worktree: string): Promise<string[] | Refusal>;
+  /**
+   * Fast-forwards `worktree` to `sha`, a commit someone else pushed on top of the run's push
+   * (fetching it when needed). A worktree that is not behind `sha` on the same line, or that
+   * the move would overwrite, is left as it is and refused.
+   */
+  fastForward(run: Run, worktree: string, sha: string): Promise<FastForwardResult>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
   markDraft(run: Run): Promise<PublishResult>;
   /** Merges the run's PR with a merge commit, only if its head is `sha`. */
   merge(run: Run, sha: string): Promise<PublishResult>;
   /** Closes the run's issue as completed, if the merge did not. */
-  closeIssue(run: Run): Promise<PublishResult>;
+  closeIssue(run: Run): Promise<PublishResult & { left?: boolean }>;
   fileMinorFindings(
     run: Run,
     prNumber: number,
@@ -588,20 +622,23 @@ export function ciLogBody(log: string, max: number): string {
   return out.join("\n");
 }
 
-/** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */
+/** The run's PR body as the hub writes it; `section` goes between "What changed" and the closing line ("Part of #n." when the note says so). */
 export function runPrBody(
   ticket: { issue: number; title: string },
   note: string,
   section: string | null,
   withTitle: boolean,
 ): string {
+  const end = noteIsPartOf(note, ticket.issue)
+    ? prPartOfLine(ticket.issue)
+    : prClosesLine(ticket.issue);
   const heading = `#${ticket.issue}${withTitle ? ` — ${ticket.title}` : ""}`;
   const extra = section === null ? "" : `${section}\n\n`;
-  const around = `${heading}\n\n## What changed\n\n\n\n${extra}Closes #${ticket.issue}.`;
+  const around = `${heading}\n\n## What changed\n\n\n\n${extra}${end}`;
   const room = Math.max(0, MC_PR_BODY_MAX - around.length);
   // the note is cut, never the closing line, to keep the body inside what GitHub takes
   const shown = note.length > room ? `${note.slice(0, Math.max(0, room - 1))}…` : note;
-  return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}Closes #${ticket.issue}.`;
+  return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}${end}`;
 }
 
 /** Each repo's last merge call: merges in one repo run one at a time. */
@@ -799,6 +836,20 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     return out;
   }
 
+  /** `run:sha` of heads `isDescendant` could not fetch, and when; asked for again after a pause. */
+  const unfetchable = new Map<string, number>();
+  const FETCH_RETRY_MS = 30_000;
+  /** `run:push:head` to whether the pushes between them were all by an allowed account. */
+  const pushChains = new Map<string, { ok: boolean; at: number }>();
+  /** The login gh acts as, once read. */
+  let ghUser: string | undefined;
+  async function ghLogin(): Promise<string[]> {
+    if (ghUser === undefined) {
+      const me = await ghJson(["api", "user"], "user");
+      if (!isRefusal(me) && typeof me.login === "string") ghUser = me.login;
+    }
+    return ghUser === undefined ? [] : [ghUser];
+  }
   return {
     async push(run) {
       const r = await pushRun(deps, run.id);
@@ -815,25 +866,27 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (open === null) return { ok: false, text: MC_PR_FAILED, transient: true };
       const mine = open.find((p) => p.createdAt >= run.startedAt);
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
-      // A restarted seat keeps its branch. It may therefore continue its own ended run's PR, and
-      // so may the seat that took that run over by handoff, but never adopts a PR merely because
-      // it happens to be open on that branch.
-      const receivedFrom = deps.store.receivedHandoff(run.id)?.runId;
-      const adopted = open.find((p) =>
-        deps.store
-          .runsOnTicket(run.repoId, run.ticket ?? "")
-          .some(
-            (earlier) =>
-              earlier.id !== run.id &&
-              (earlier.agentId === run.agentId || earlier.id === receivedFrom) &&
-              earlier.startedAt < run.startedAt &&
-              earlier.endedAt !== null &&
-              earlier.endedAt <= run.startedAt &&
-              earlier.loop?.prNumber === p.number,
-          ),
-      );
+      // A ticket passes from run to run (restart, reassignment, handover) and the branch stays. A
+      // run adopts the open PR an earlier ended run on the same ticket recorded, however many
+      // runs back, while no other run on the ticket is live (start_seat's rule). It never adopts a
+      // PR merely because it happens to be open on that branch.
+      const onTicket = deps.store.runsOnTicket(run.repoId, run.ticket ?? "");
+      const othersLive = onTicket.some((other) => other.id !== run.id && other.endedAt === null);
+      const adopted = othersLive
+        ? undefined
+        : open.find((p) =>
+            onTicket.some(
+              (earlier) =>
+                earlier.id !== run.id &&
+                earlier.branch === run.branch &&
+                earlier.startedAt < run.startedAt &&
+                earlier.endedAt !== null &&
+                earlier.endedAt <= run.startedAt &&
+                earlier.loop?.prNumber === p.number,
+            ),
+          );
       if (adopted !== undefined) return { ok: true, prNumber: adopted.number };
-      // A PR opened outside any run (by the controller, or by a seat with no handoff) has no run
+      // A PR opened outside any run (by the controller, or by a seat with no run) has no run
       // that recorded it. It is this run's when it is the only one open on the branch, it closes
       // this run's ticket, and no other run on the ticket has recorded it.
       const lone = open.length === 1 ? open[0] : undefined;
@@ -881,7 +934,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (prNumber === null || repo === undefined || issue === null) {
         return { ok: false, text: prNotRunsText(0), transient: false };
       }
-      const note = deps.store.evidenceNotes(run.id)[0]?.note ?? "";
+      const note = deps.store.latestEvidence(run.id)?.note ?? "";
       const title =
         run.ticketTitle ??
         deps.store.board(run.repoId).find((b) => b.issueNumber === issue)?.title ??
@@ -982,33 +1035,87 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     async ciExcerpt(repo, sha) {
       try {
         const listed = await deps.gh(
-          ["run", "list", `--repo=${repo}`, `--commit=${sha}`, "--json=databaseId,name,conclusion"],
+          [
+            "run",
+            "list",
+            `--repo=${repo}`,
+            `--commit=${sha}`,
+            "--json=databaseId,name,conclusion,status,attempt",
+          ],
           { cwd: cwd() },
         );
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
         const runs: unknown = JSON.parse(listed.stdout);
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
-        const failed = runs.flatMap((r: unknown) => {
-          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
-          return x?.conclusion === "failure" &&
-            typeof x.databaseId === "number" &&
-            Number.isSafeInteger(x.databaseId)
-            ? [{ id: x.databaseId, name: typeof x.name === "string" ? x.name : "CI" }]
-            : [];
-        });
+        const failed: { id: number; name: string; attempt: number | null; rerun: boolean }[] = [];
+        for (const r of runs) {
+          const x = r as {
+            databaseId?: unknown;
+            name?: unknown;
+            conclusion?: unknown;
+            status?: unknown;
+            attempt?: unknown;
+          } | null;
+          if (
+            x === null ||
+            typeof x.databaseId !== "number" ||
+            !Number.isSafeInteger(x.databaseId)
+          ) {
+            continue;
+          }
+          const name = typeof x.name === "string" ? x.name : "CI";
+          const attempt =
+            typeof x.attempt === "number" && Number.isSafeInteger(x.attempt) && x.attempt > 0
+              ? x.attempt
+              : null;
+          if (x.conclusion === "failure") {
+            failed.push({ id: x.databaseId, name, attempt, rerun: false });
+          } else if (x.status !== "completed" && attempt !== null && attempt > 1) {
+            // a run being re-run has no conclusion yet: the attempt before it may be the one that
+            // failed, but a re-run can also start from a green attempt
+            const before = await deps.gh(
+              [
+                "run",
+                "view",
+                `--repo=${repo}`,
+                String(x.databaseId),
+                `--attempt=${attempt - 1}`,
+                "--json=conclusion",
+              ],
+              { cwd: cwd() },
+            );
+            if (before.code !== 0) return CI_LOG_UNREADABLE;
+            const state: unknown = JSON.parse(before.stdout);
+            if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
+              failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
+            }
+          }
+        }
         if (failed.length === 0) return NO_FAILED_RUN;
         // bytes, not characters: what is left of CI_EXCERPT_MAX, separators and headers included
         let budget = CI_EXCERPT_MAX;
         const sections: string[] = [];
         for (const f of failed) {
-          const head = `${cleanLog(f.name).slice(0, RUN_NAME_MAX)}:\n`;
+          const name = cleanLog(f.name).slice(0, RUN_NAME_MAX);
+          const named =
+            f.attempt === null
+              ? name
+              : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
+          const head = `${named}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
           const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
           const room = share - byteLength(head);
           if (room <= 0) continue; // no room for a header with anything under it
           const viewed = await deps.gh(
-            ["run", "view", `--repo=${repo}`, String(f.id), "--log-failed"],
+            [
+              "run",
+              "view",
+              `--repo=${repo}`,
+              String(f.id),
+              ...(f.attempt === null ? [] : [`--attempt=${f.attempt}`]),
+              "--log-failed",
+            ],
             { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
           );
           if (viewed.code !== 0) return CI_LOG_UNREADABLE;
@@ -1127,11 +1234,85 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async isDescendant(run, ancestor, head) {
       if (!SHA.test(ancestor) || !SHA.test(head)) return false;
-      const result = await inGit(run, async (g) => ({
-        ok: true as const,
-        descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
-      }));
+      const result = await inGit(run, async (g) => {
+        // a commit someone else pushed is not in the clone yet
+        // (one that could not be fetched is asked for again after a short pause, not every poll)
+        const key = `${run.id}:${head}`;
+        const nowMs = (deps.now ?? Date.now)();
+        const failedAt = unfetchable.get(key);
+        if (
+          !(await have(g, head)) &&
+          (failedAt === undefined || nowMs - failedAt >= FETCH_RETRY_MS)
+        ) {
+          const got = await g(["fetch", "--no-tags", "origin", head]).then(
+            () => true,
+            () => false,
+          );
+          if (got) unfetchable.delete(key);
+          else unfetchable.set(key, nowMs);
+        }
+        return {
+          ok: true as const,
+          descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
+        };
+      });
       return result.ok && result.descends;
+    },
+
+    async pushesFrom(run, ancestor, head, logins) {
+      const repo = repoOf(run);
+      const branch = ownBranch(run);
+      if (repo === undefined || branch === null || !SHA.test(ancestor) || !SHA.test(head))
+        return false;
+      // A proven chain does not change. A "no" may be GitHub's activity lagging behind the PR
+      // poll, so it is kept only for a short pause and then read again; a failed read is not kept.
+      const key = `${run.id}:${ancestor}:${head}`;
+      const nowMs = (deps.now ?? Date.now)();
+      const known = pushChains.get(key);
+      if (known !== undefined && (known.ok || nowMs - known.at < FETCH_RETRY_MS)) return known.ok;
+      const listed = await ghJson(
+        [
+          "api",
+          `repos/${repo}/activity?ref=${encodeURIComponent(`refs/heads/${branch}`)}&activity_type=push&per_page=100`,
+        ],
+        "activity",
+      );
+      if (isRefusal(listed) || !Array.isArray(listed)) return false;
+      // the account gh acts as is always the operator's, whatever aliases are configured
+      const allowed = [...logins, ...(await ghLogin())].map((l) => l.toLowerCase());
+      if (allowed.length === 0) return false;
+      type Push = { before?: unknown; after?: unknown; actor?: { login?: unknown } | null };
+      const pushes = listed as Push[];
+      // Who pushed is GitHub's own record; a commit's committer or author is whatever its maker
+      // wrote. The head follows the push only when every push from the run's own to the head was
+      // made by an allowed account.
+      let tip = head;
+      let ok = false;
+      for (let hops = 0; hops <= pushes.length; hops++) {
+        if (tip === ancestor) {
+          ok = true;
+          break;
+        }
+        const push = pushes.find((p) => p.after === tip);
+        const actor = push?.actor?.login;
+        if (
+          push === undefined ||
+          typeof actor !== "string" ||
+          !allowed.includes(actor.toLowerCase()) ||
+          typeof push.before !== "string"
+        )
+          break;
+        tip = push.before;
+      }
+      pushChains.set(key, { ok, at: nowMs });
+      return ok;
+    },
+
+    runEnded(runId) {
+      const prefix = `${runId}:`;
+      for (const key of [...unfetchable.keys()])
+        if (key.startsWith(prefix)) unfetchable.delete(key);
+      for (const key of [...pushChains.keys()]) if (key.startsWith(prefix)) pushChains.delete(key);
     },
 
     async reviewPr(run, number) {
@@ -1209,10 +1390,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       });
     },
 
-    async gateFacts(run, sha, known) {
+    originTip(run) {
+      return inGit(run, async (g) => {
+        const { defaultBranch, mainSha } = await originNow(g, null);
+        return { ok: true, defaultBranch, mainSha };
+      });
+    },
+
+    async gateFacts(run, sha, known, tip) {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
-        const { defaultBranch, mainSha } = await originNow(g, null);
+        const { defaultBranch, mainSha } = tip ?? (await originNow(g, null));
         if (known?.sha === sha && known.mainSha === mainSha && known.webChanged !== undefined) {
           const { containsMain, hubOnly, strays, missionControlChanged, webChanged } = known;
           return {
@@ -1460,6 +1648,62 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             if (e[0] === "R" || e[0] === "C") i++;
           }
           return paths;
+        });
+      } catch (e) {
+        return transient(`git failed: ${errText(e)}`);
+      }
+    },
+
+    async fastForward(run, worktree, sha) {
+      if (!SHA.test(sha)) return final("not a commit sha");
+      if (run.branch === null) return final(MERGE_NOT_RUN_BRANCH);
+      const place = seatPlace(deps.config, run.agentId);
+      if (place === null) return final(MERGE_NO_SEAT);
+      const git = deps.git ?? crewGit;
+      const checkout = place.session.checkout;
+      try {
+        return await deps.inClone(checkout, async (): Promise<PublishResult> => {
+          const common = await realpath(join(checkout, ".git"));
+          const gitDir = await adminDirOf(common, worktree);
+          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+          const g: G = (a) => git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+          // only the run's own branch moves; another branch, or a detached HEAD, is left alone
+          const head = await g(["symbolic-ref", "--quiet", "HEAD"]).then(
+            (s) => s.trim(),
+            () => null,
+          );
+          if (run.branch === null || head !== `refs/heads/${run.branch}`) {
+            return final(MERGE_NOT_RUN_BRANCH);
+          }
+          if (!(await have(g, sha))) await g(["fetch", "--no-tags", "origin", sha]);
+          if (!(await have(g, sha))) return final("the new commit could not be fetched");
+          if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {
+            return final("the branch has diverged from the PR's head; it was not changed");
+          }
+          const before = (await g(["rev-parse", "--verify", "HEAD"])).trim();
+          await g(["merge", "--ff-only", "--quiet", sha]);
+          // the moved-in commits may change the lockfile: the worktree's install follows them
+          const gc: G = (a) =>
+            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          let installNote: string | undefined;
+          try {
+            const { defaultBranch, mainSha } = await originNow(gc, null);
+            await fetchMain(gc, defaultBranch, mainSha);
+            installNote = await installAfterSync(
+              checkout,
+              { path: worktree, gitDir, branch: run.branch, baseSha: mainSha },
+              before,
+              deps.config.crew?.worktrees ?? "",
+            );
+          } catch (e) {
+            installNote = `dependencies may have changed; install not run: ${errText(e)}`;
+          }
+          const counted = Number((await g(["rev-list", "--count", `${before}..${sha}`])).trim());
+          return {
+            ok: true,
+            ...(Number.isSafeInteger(counted) ? { commits: counted } : {}),
+            ...(installNote ? { installNote } : {}),
+          };
         });
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);
@@ -1788,6 +2032,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const repo = repoOf(run);
       const issue = issueOf(run);
       if (repo === undefined || issue === null) return final(MERGE_NO_PR);
+      const prNumber = run.loop?.prNumber ?? null;
+      if (prNumber !== null) {
+        // a PR that is only part of the ticket leaves it open
+        const pr = await ghJson(
+          ["pr", "view", String(prNumber), `--repo=${repo}`, "--json=body"],
+          "pr view",
+        );
+        if (isRefusal(pr)) return pr;
+        if (typeof pr.body === "string" && prIsPartOf(pr.body, repo, issue))
+          return { ok: true, left: true };
+      }
       const view = await ghJson(
         ["issue", "view", String(issue), `--repo=${repo}`, "--json", "state"],
         "issue view",

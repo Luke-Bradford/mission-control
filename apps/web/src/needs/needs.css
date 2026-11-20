@@ -203,6 +203,18 @@
   gap: var(--sp-3);
 }
 
+/* The narrow-desktop header gives status controls their own row. Keep the active decision and
+   its stopped-FLIGHT recovery control together in the remaining first-screen pane. */
+@media (min-width: 1000px) and (max-width: 1399px) {
+  .needs-main {
+    padding-block: var(--sp-2);
+    gap: var(--sp-2);
+  }
+  .needs-main .composer {
+    padding-block: var(--sp-1);
+  }
+}
+
 .needs-side {
   display: flex;
   flex-direction: column;
@@ -227,37 +239,19 @@
   resize: vertical;
 }
 
-/* The conversation box takes the whole row; its Ask FLIGHT button sits on the row below. */
-.needs-side .composer textarea {
-  flex: 1 0 100%;
-  min-width: 0;
-  resize: vertical;
-}
-
-/* The side column is the conversation alone, filling its height. */
-.needs-side .item-conversation.page {
+/* The side column is the FLIGHT thread alone, filling its height: its heading, its log, its box. */
+.needs-side .flight-thread {
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 
-.needs-side .item-conversation.page > .bsec {
-  margin: var(--sp-2) var(--sp-3) 0;
-}
-
-.needs-side .needs-log {
+.needs-side .flight-thread-log {
   flex: 1 0 280px;
   min-height: 280px;
-  overflow: auto;
 }
 
-.needs-side .dmsg .txt {
+.needs-side .flight-thread-message > div {
   max-width: 72ch;
-}
-
-.needs-side .dmsg .txt .md p {
-  white-space: pre-wrap;
 }
 
 /* Under 1100 px of detail width the columns stack and the band stays in view */
@@ -280,7 +274,7 @@
     border-left: 0;
     border-top: 1px solid var(--line);
   }
-  .needs-side .needs-log {
+  .needs-side .flight-thread-log {
     flex: 1 1 auto;
     min-height: 48px;
   }

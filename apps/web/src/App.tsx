@@ -75,6 +75,7 @@ const Telemetry = lazy(() =>
   import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
 );
 const Audit = lazy(() => import("./pages/Audit.tsx").then((m) => ({ default: m.Audit })));
+const Planner = lazy(() => import("./pages/Planner.tsx").then((m) => ({ default: m.Planner })));
 const QaReadiness = lazy(() =>
   import("./pages/QaReadiness.tsx").then((m) => ({ default: m.QaReadiness })),
 );
@@ -272,6 +273,7 @@ const PAGE_TITLES: Record<Route["page"], string> = {
   commsChart: "Comms",
   telemetry: "Telemetry",
   qa: "QA",
+  planner: "Planner",
   audit: "Audit",
   setup: "Setup",
 };
@@ -387,6 +389,9 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "qa":
       page = <QaReadiness />;
+      break;
+    case "planner":
+      page = <Planner />;
       break;
     case "setup":
       page = <Setup tab={r.tab} />;

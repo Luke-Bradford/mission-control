@@ -15,7 +15,6 @@ import {
   COMMS_MC,
   eligibleToStart,
   FLIGHT_STUCK_PR_MS,
-  FLIGHT_WAITS_SETTING,
   type FlightPrFlow,
   NEW_LOOP,
   type RepoId,
@@ -87,41 +86,7 @@ export const stuckPrRepo = (config: CcConfig, repoId: RepoId): boolean =>
   );
 
 /**
- * The issue or PR number a `wait_on` target names, in any spelling FLIGHT uses (`mc#7`, `7`, `#7`,
- * `PR 7`, `pull 7`, `ticket 7`, `issue 7`); null for another repo's ref or a target with no number.
- * Signals read their wait targets with it too, so there is one list of spellings.
- */
-export function waitTargetNumber(repo: string, target: string): number | null {
-  const t = target.trim();
-  const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(t)?.[1];
-  if (n !== undefined) return Number(n);
-  const ref = /^([\w.-]+)#(\d+)$/.exec(t);
-  return ref !== null && ref[1] === repo ? Number(ref[2]) : null;
-}
-
-/** Whether a FLIGHT wait still running is on this PR or its ticket, by any name it goes by. */
-function flightWaitsOn(
-  store: Store,
-  repo: string,
-  prNumber: number,
-  issue: number,
-  now: number,
-): boolean {
-  let waits: Record<string, { until?: number }> = {};
-  try {
-    waits = JSON.parse(store.getSetting(FLIGHT_WAITS_SETTING) || "{}");
-  } catch {
-    return false;
-  }
-  return Object.entries(waits).some(([target, w]) => {
-    if ((w.until ?? 0) <= now) return false;
-    const n = waitTargetNumber(repo, target);
-    return n === prNumber || n === issue;
-  });
-}
-
-/**
- * The open crew PRs that are stuck now, whatever the wait: conflicting with main, or with red CI,
+ * The open crew PRs that are stuck now: conflicting with main, or with red CI,
  * with no run working on them and nobody holding them. `since` says how long.
  */
 export function stuckPrs(i: {
@@ -136,7 +101,6 @@ export function stuckPrs(i: {
   const seen = readSeen(store);
   const open = store.openPullRequests(repoId);
   const board = store.board(repoId);
-  const ticketHolds = new Set(store.activeHolds().map((h) => h.ref));
   const attentionHolds = Object.entries(holds(store)).filter(([, h]) => h.releasedAt === undefined);
   const out: StuckPr[] = [];
   for (const pr of open) {
@@ -155,7 +119,7 @@ export function stuckPrs(i: {
     // a merge hold from the operator or FLIGHT outlives the run that made it
     const latest = [...runs].sort((a, b) => b.startedAt - a.startedAt)[0];
     if (latest?.loop?.mergeHold) continue;
-    // two failed reviews, or a run FLIGHT ended: the call is FLIGHT's, however long its wait ran
+    // two failed reviews, or a run FLIGHT ended: the call is FLIGHT's
     if (
       store
         .reviewsOfPr(repoId, pr.number)
@@ -173,9 +137,7 @@ export function stuckPrs(i: {
         .some((d) => d.kind === "end")
     )
       continue;
-    if (ticketHolds.has(pr.ticket)) continue;
     if (attentionHolds.some(([key]) => key.startsWith(`pr:${repoId}#${pr.number}:`))) continue;
-    if (flightWaitsOn(store, repoId, pr.number, issue, now)) continue;
     const card = board.find((c) => c.issueNumber === issue);
     if (card === undefined || card.closed || card.labels.includes(WAITING_OPERATOR_LABEL)) continue;
     if (ticketParked(store, pr.ticket) !== null) continue;
@@ -438,8 +400,9 @@ async function startOnStuckPr(
     });
     if (refusal !== null) continue;
     const text = stuckLineText(pr);
+    let started: { runId: string };
     try {
-      await deps.supervisor.startRun(seat.id, pr.issue, {
+      started = await deps.supervisor.startRun(seat.id, pr.issue, {
         loop: { ...NEW_LOOP, pendingLine: { key: stuckLineKey(pr), text } },
       });
     } catch (e) {
@@ -454,6 +417,7 @@ async function startOnStuckPr(
       senderKind: "hub",
       to: seat.id,
       ticket: pr.ticket,
+      targetRunId: started.runId,
       text,
     });
     deps.log?.(`stuck PR #${pr.number} (${pr.ticket}): ${seat.id} took it (${pr.kind})`);

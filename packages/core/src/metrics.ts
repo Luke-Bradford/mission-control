@@ -258,7 +258,7 @@ const openLoopPark = (row: MetricRow): boolean =>
 /** Parked by a rate limit: it resumes on its own. */
 const rateLimited = (row: MetricRow): boolean =>
   (row.hudState === "parked" && RATE_LIMIT_PARK.test(row.note ?? "")) ||
-  (openLoopPark(row) && RATE_LIMIT_PARK.test(row.loop?.parked ?? ""));
+  (openLoopPark(row) && RATE_LIMIT_PARK.test(row.loop?.hold?.reason ?? ""));
 
 export const isAgentWorking = (row: MetricRow): boolean => row.hudState === "running";
 

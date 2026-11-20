@@ -13,6 +13,7 @@ import {
   crewDetailPath,
   crewSummaryPath,
   dockStreamPath,
+  FLOW_DAYS,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
   type MapPayload,
@@ -78,6 +79,7 @@ const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
+const PLAN_TOPICS: readonly Topic[] = ["boards", "plans"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 type PageDocument = {
@@ -128,10 +130,6 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
-  discussion: (key: string, id = ""): ResourceRef => ({
-    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
-    topic: "attention",
-  }),
   /** One item's conversation: the messages sent from it and their replies, from Comms. */
   itemThread: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/thread`,
@@ -141,6 +139,11 @@ export const RESOURCES = {
   attentionMaterials: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/materials`,
     topic: "attention",
+  }),
+  /** Plans to sign off and past ones; every repo's when `repoId` is empty. */
+  plans: (repoId = ""): ResourceRef => ({
+    path: `/api/plans${repoId ? `?repoId=${enc(repoId)}` : ""}`,
+    topic: PLAN_TOPICS,
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
   answeredAttention: { path: "/api/attention/answered", topic: "attention" },
@@ -200,6 +203,11 @@ export const RESOURCES = {
   codeHealth: (repo: string, window = "30d", tab = "overview"): ResourceRef => ({
     path: `/api/code-health?repo=${enc(repo)}&window=${enc(window)}&tab=${enc(tab)}`,
     topic: ["agents", "boards", "flight", "health"],
+  }),
+  /** The Audit first screen: one stored summary, refetched only when the server says it changed. */
+  codeHealthOverview: (repo: string, window = "30d"): ResourceRef => ({
+    path: `/api/code-health/overview?repo=${enc(repo)}&window=${enc(window)}`,
+    topic: "health",
   }),
   codeHealthEvidence: (repo: string, id: string, cursor = "0"): ResourceRef => ({
     path: `/api/code-health/evidence/${enc(id)}?repo=${enc(repo)}&cursor=${enc(cursor)}`,
@@ -277,6 +285,11 @@ export const RESOURCES = {
     path: prListPath(repoId),
     topic: "boards",
   }),
+  /** One retained PR, including older work which the default list no longer returns. */
+  pr: (repoId: string, number: number): ResourceRef => ({
+    path: `/api/repos/${enc(repoId)}/prs/${number}`,
+    topic: "boards",
+  }),
   // Runs git in the worktree on each fetch, so it is fetched once per visit.
   files: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/files`,
@@ -294,6 +307,10 @@ export const RESOURCES = {
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
+  /** Guard blocks over the Quality tab's fixed window. */
+  guardHitsFlow: { path: `/api/guard/hits?days=${FLOW_DAYS}`, topic: "guard" },
+  /** The QA board's flow figures (escaped defects) over the Quality tab's fixed window. */
+  qaFlow: { path: `/api/qa/flow?days=${FLOW_DAYS}`, topic: ["boards", "guard"] },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
   allAccountModels: { path: "/api/accounts/models", topic: "config" },
   accountModels: (id: string): ResourceRef => ({
@@ -310,6 +327,11 @@ export const RESOURCES = {
   }),
   repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
+  /** One repo's rules with where each value comes from (Setup › Roles & guards). */
+  repoRules: (id: string): ResourceRef => ({
+    path: `/api/repos/${enc(id)}/rules`,
+    topic: "config",
+  }),
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },
   // Run-derived: refetched when runs change.
@@ -352,7 +374,7 @@ export const RESOURCES = {
     path: `/api/agents/${enc(agentId)}/runs?limit=${RUNS_LIMIT}`,
     topic: "agents",
   }),
-  /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.aside` is set while it is off its seat. */
+  /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.hold` says why it waits. */
   runHandoff: (runId: string): ResourceRef => ({
     path: `/api/runs/${enc(runId)}/handoff`,
     topic: "agents",
@@ -426,14 +448,21 @@ export const ACTIONS = {
   /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
   onboardRepo: "/api/repos/onboard",
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
+  approvePlan: (repoId: string, issue: number | string) =>
+    `/api/plans/${enc(repoId)}/${issue}/approve`,
+  /** Body `{ note }`. */
+  sendBackPlan: (repoId: string, issue: number | string) =>
+    `/api/plans/${enc(repoId)}/${issue}/send-back`,
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
+  /** Body `{ base, rules }`; saves the editable repo rules. */
+  repoRules: (repoId: string) => `/api/repos/${enc(repoId)}/rules`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => RESOURCES.boardSetup(repoId).path,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
-  /** Body `{ text, interrupt? }`. */
+  /** Body `{ text, interrupt?, question?, itemKey?, choice? }`; `choice` is a picked option: `{ briefAt, option }`. */
   seatMessage: (seatId: string) => `/api/seats/${enc(seatId)}/message`,
   /** Body `{}`. */
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,

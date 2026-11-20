@@ -19,7 +19,6 @@ FLIGHT works through these checks each wake. Its role prompt (`roles/FLIGHT.md`)
 | A run waiting on the controller's check | its ticket's Controller check holds it | the controller checks it and records the verdict at once | controller (`controller-check`) | no ticket: the controller's own step |
 | FLIGHT asks the controller | an item FLIGHT keeps for itself that names the controller | act within 15 min | controller (`controller-ask`) | #1182 |
 | FLIGHT notes for the controller | a FLIGHT "Missing power … For the controller" note | act on it, or log the power on #765 | controller (`flight-note`) | #1180 (FLIGHT gets the power) |
-| Work that builds on an open PR | a ticket whose base code is in an unmerged PR | hold it with `promote { to: "Backlog", waits_on: <PR> }`, and promote it when the PR merges | FLIGHT, by hand | #1195 |
 
 ## Review and deployment handoffs
 

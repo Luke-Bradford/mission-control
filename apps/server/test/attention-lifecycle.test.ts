@@ -102,7 +102,13 @@ it("keeps an ended budget run's operator-briefed Comms question visible", () => 
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "budget", reason: "Operator decision", ended: true },
+        hold: {
+          kind: "budget",
+          reason: "Operator decision",
+          ended: true,
+          worktree: null,
+          wake: false,
+        },
       },
     }),
   );

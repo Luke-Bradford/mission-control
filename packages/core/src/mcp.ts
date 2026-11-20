@@ -10,22 +10,18 @@ export const MC_TOOL_NAMES = {
   commit: "commit",
   syncMain: "sync_main",
   prBody: "pr_body",
-  publishPreview: "publish_preview",
   push: "push",
   draftPr: "draft_pr",
   askFlight: "ask_flight",
   callFlight: "call_flight",
-  waitOn: "wait_on",
   reportEvidence: "report_evidence",
   reportFindings: "report_findings",
   restoreFile: "restore_file",
   reportPlan: "report_plan",
   logDecision: "log_decision",
   readTicket: "read_ticket",
-  codeHealth: "code_health",
   answerQuestion: "answer_question",
   startSeat: "start_seat",
-  reassignTicket: "reassign_ticket",
   messageSeat: "message_seat",
   instructSeat: "instruct_seat",
   revokeInstruction: "revoke_instruction",
@@ -36,6 +32,7 @@ export const MC_TOOL_NAMES = {
   commsPin: "comms_pin",
   flightState: "flight_state",
   promote: "promote",
+  sendToPlanner: "send_to_planner",
   endRun: "end_run",
   resumeSeat: "resume_seat",
   moveReview: "move_review",
@@ -89,22 +86,18 @@ export const MC_TOOLS = {
   commit: mcTool(MC_TOOL_NAMES.commit),
   syncMain: mcTool(MC_TOOL_NAMES.syncMain),
   prBody: mcTool(MC_TOOL_NAMES.prBody),
-  publishPreview: mcTool(MC_TOOL_NAMES.publishPreview),
   push: mcTool(MC_TOOL_NAMES.push),
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
   askFlight: mcTool(MC_TOOL_NAMES.askFlight),
   callFlight: mcTool(MC_TOOL_NAMES.callFlight),
-  waitOn: mcTool(MC_TOOL_NAMES.waitOn),
   reportEvidence: mcTool(MC_TOOL_NAMES.reportEvidence),
   reportFindings: mcTool(MC_TOOL_NAMES.reportFindings),
   restoreFile: mcTool(MC_TOOL_NAMES.restoreFile),
   reportPlan: mcTool(MC_TOOL_NAMES.reportPlan),
   logDecision: mcTool(MC_TOOL_NAMES.logDecision),
   readTicket: mcTool(MC_TOOL_NAMES.readTicket),
-  codeHealth: mcTool(MC_TOOL_NAMES.codeHealth),
   answerQuestion: mcTool(MC_TOOL_NAMES.answerQuestion),
   startSeat: mcTool(MC_TOOL_NAMES.startSeat),
-  reassignTicket: mcTool(MC_TOOL_NAMES.reassignTicket),
   messageSeat: mcTool(MC_TOOL_NAMES.messageSeat),
   instructSeat: mcTool(MC_TOOL_NAMES.instructSeat),
   revokeInstruction: mcTool(MC_TOOL_NAMES.revokeInstruction),
@@ -115,6 +108,7 @@ export const MC_TOOLS = {
   commsPin: mcTool(MC_TOOL_NAMES.commsPin),
   flightState: mcTool(MC_TOOL_NAMES.flightState),
   promote: mcTool(MC_TOOL_NAMES.promote),
+  sendToPlanner: mcTool(MC_TOOL_NAMES.sendToPlanner),
   endRun: mcTool(MC_TOOL_NAMES.endRun),
   resumeSeat: mcTool(MC_TOOL_NAMES.resumeSeat),
   moveReview: mcTool(MC_TOOL_NAMES.moveReview),
@@ -425,10 +419,9 @@ const CHECKS_ADVICE =
 export const CHECK_BASH_TIMEOUT_DEFAULT_MS = 120_000;
 /**
  * The `timeout` a seat gives a check call, and the most the CLI lets a call ask for
- * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, and a
- * branch that touches a widely imported file can never finish its related tests inside it (#1398).
- * 45 minutes is above the 39.5 minutes CI's five test jobs add up to on c2bea393, setup included,
- * and on a healthy Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
+ * (`BASH_MAX_TIMEOUT_MS` in `CREW_CLI_ENV`). Without that variable the CLI's limit is 600 s, which a
+ * suite a ticket asks for can pass (#1398). 45 minutes covers a full local suite, and on a healthy
+ * Claude CLI a hung check holds the test lock for no longer than that. A wait for the test lock does not
  * count: it happens in the PreToolUse hook, before the CLI starts the command's clock.
  */
 export const CHECK_BASH_TIMEOUT_MS = 45 * 60_000;
@@ -439,6 +432,7 @@ export const CHECK_DROP_REASONS = [
   "dirty-end",
   "head-moved",
   "turn-ended",
+  "session-lost",
   "background",
   "timeout",
   "unreadable",
@@ -470,6 +464,8 @@ export const checkDropText = (d: CheckDrop): string => {
       return `a commit moved the head during the call (it started on ${sha7(d.head)}), so it was not counted. Run the check again at this commit.`;
     case "turn-ended":
       return `the turn ended before the call reported its end (it started on ${sha7(d.head)}), so it was not counted. Run the check again and wait for it.`;
+    case "session-lost":
+      return `the earlier check session disappeared before it reported an exit code (it started on ${sha7(d.head)}), so it was not counted. Run the check again; do not keep polling the lost session.`;
     case "background":
       return `the call went to the background (on ${sha7(d.head)}), so its result was not counted. Run it in the foreground.`;
     case "timeout":
@@ -544,6 +540,11 @@ export const MC_PR_UNCLOSED =
 export const prAlreadyOpenText = (url: string): string => `A PR is already open: ${url}`;
 /** Added to a PR body that does not name the run's issue. */
 export const prClosesLine = (issue: number): string => `Closes #${issue}.`;
+/** Ends a PR body whose note says it is only a stage of its ticket: the merge leaves the ticket open. */
+export const prPartOfLine = (issue: number): string => `Part of #${issue}.`;
+/** Whether a report note says the PR is part of ticket `issue` ("Part of #n", any case). */
+export const noteIsPartOf = (note: string, issue: number): boolean =>
+  new RegExp(`\\bpart\\s+of\\s+#${issue}(?!\\d)`, "i").test(note);
 /** The last line of every PR body the hub opens. */
 export const prOpenedByLine = (call: string): string => `Opened by ${call} (Mission Control).`;
 /** gh failed (or timed out) listing or opening the PR. */
