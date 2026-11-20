@@ -4851,6 +4851,11 @@ export class Store {
    * One held call ended. `failed` is the Post hook event (PostToolUseFailure): the hold's outcome is
    * `fail` when any of its calls failed, else `pass`; with no event (undefined) it is `done`.
    */
+  /** The run's hold lasts until it ends: a restart restores it as such. */
+  pinLockHolds(runId: string): void {
+    this.db.prepare("UPDATE test_lock_holds SET pinned = 1 WHERE run_id = ?").run(runId);
+  }
+
   deleteLockHold(runId: string, toolUseId: string, at = Date.now(), failed?: boolean): void {
     this.db
       .prepare("DELETE FROM test_lock_holds WHERE run_id = ? AND tool_use_id = ?")
@@ -4971,6 +4976,7 @@ export class Store {
       seatId: r.seat_id as string,
       command: r.command as string,
       since: r.since as number,
+      ...(r.pinned === 1 ? { pinned: true } : {}),
     }));
   }
 

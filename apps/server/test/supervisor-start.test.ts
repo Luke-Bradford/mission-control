@@ -1128,7 +1128,6 @@ describe("startRun", () => {
       "TERM",
       "BASH_MAX_TIMEOUT_MS",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
-      "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
       SEAT_SANDBOX_ENV,
@@ -1155,8 +1154,8 @@ describe("startRun", () => {
     expect(env.GIT_COMMITTER_NAME).toBeUndefined();
     // Bash returns to the worktree after every command, so a `cd` never moves the rules (#41)
     expect(env.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe("1");
-    // a timed-out suite is killed, not moved to the background still holding the test lock
-    expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    // background Bash is on: seats may run background tasks
+    expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBeUndefined();
     expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();

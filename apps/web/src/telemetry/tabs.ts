@@ -9,23 +9,20 @@ export interface TabDef {
   /** A window the tab's figures are fixed to; the Range buttons are hidden while it shows. */
   fixed: string | null;
   filters: readonly TelemetryFilter[];
-  /** The tab's own panels are built; false shows the "coming" note over the earlier panels. */
-  built: boolean;
 }
 
 /** The five tabs, in the order the tab bar shows them (the router owns the ids and their order). */
 export const TAB_DEFS: readonly TabDef[] = [
-  { id: "crew", label: "Crew", fixed: null, filters: ["agent"], built: true },
+  { id: "crew", label: "Crew", fixed: null, filters: ["agent"] },
   {
     id: "cost",
     label: "Cost and tokens",
     fixed: null,
     filters: ["agent", "account", "ticket"],
-    built: true,
   },
-  { id: "throughput", label: "Throughput", fixed: "Last 14 days", filters: [], built: true },
-  { id: "quality", label: "Quality", fixed: "Last 14 days", filters: [], built: true },
-  { id: "machine", label: "Machine", fixed: null, filters: [], built: false },
+  { id: "throughput", label: "Throughput", fixed: "Last 14 days", filters: [] },
+  { id: "quality", label: "Quality", fixed: "Last 14 days", filters: [] },
+  { id: "machine", label: "Machine", fixed: null, filters: [] },
 ];
 
 export const tabDef = (id: TelemetryTab): TabDef => TAB_DEFS.find((t) => t.id === id) as TabDef;

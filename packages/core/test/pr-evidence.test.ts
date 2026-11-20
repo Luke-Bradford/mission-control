@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_HEADING,
+  EVIDENCE_PAGE_PATHS,
   type EvidenceManifest,
   evidenceDemoImageName,
   evidenceDemoMissing,
@@ -27,9 +28,27 @@ const ALL = [
   "setup_roles",
   "setup_sources",
   "setup_access",
+  "telemetry_cost",
+  "telemetry_throughput",
+  "telemetry_quality",
+  "telemetry_machine",
 ];
 
 describe("prEvidenceAffectedPages", () => {
+  it("photographs every Telemetry tab when a Telemetry file changes", () => {
+    const tabs = [
+      "telemetry",
+      "telemetry_cost",
+      "telemetry_throughput",
+      "telemetry_quality",
+      "telemetry_machine",
+    ];
+    expect(prEvidenceAffectedPages(["apps/web/src/telemetry/MachineTab.tsx"])).toEqual(tabs);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Telemetry.tsx"])).toEqual(tabs);
+    expect(EVIDENCE_PAGE_PATHS.telemetry_throughput).toBe("/telemetry?tab=throughput");
+    expect(EVIDENCE_PAGE_PATHS.telemetry_machine).toBe("/telemetry?tab=machine");
+  });
+
   it("maps changed paths to pages; whole app on hud.css", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/board/Card.tsx"])).toEqual(["board"]);
     expect(

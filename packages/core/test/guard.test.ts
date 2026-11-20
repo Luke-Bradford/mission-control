@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_SUITE_TEXT,
   closesIssue,
   codexCommand,
   DETACHED_HEAD,
@@ -644,6 +643,7 @@ describe("guardDecision: gh, network", () => {
 
 describe("guardDecision: network and background work are allowed for a writer", () => {
   it.each([
+    "curl -sI https://example.com",
     "curl -s https://example.test",
     "wget https://example.test/file",
     "sleep 30 &",
@@ -659,8 +659,8 @@ describe("guardDecision: network and background work are allowed for a writer", 
       kind: "allow",
     });
   });
-  it("still refuses a background full suite and a git write inside a launcher", () => {
-    expect(ruleOf(bash("pnpm -s test &"))).toBe("full-suite");
+  it("locks a background full suite and still refuses a git write inside a launcher", () => {
+    expect(ruleOf(bash("pnpm -s test &"))).toBe("lock");
     expect(ruleOf(bash("tmux new -d 'git push'"))).toBe("git-write");
   });
 });
@@ -674,11 +674,23 @@ describe("guardDecision: the full suite", () => {
     expect(ruleOf(bash("pnpm -s vitest run apps/x.test.ts"))).toBe("allow");
     expect(ruleOf(bash("pnpm -s lint"))).toBe("allow");
   });
-  it("denies a background suite with the foreground text", () => {
+  it.each(["pnpm -s test &", "nohup pnpm -s test &", "tmux new -d 'pnpm -s test'"])(
+    "marks the locked suite %s as background, so its hold outlasts the call",
+    (c) => {
+      expect(guardDecision(bash(c), writer)).toMatchObject({ kind: "lock", background: true });
+    },
+  );
+  it("does not mark a foreground suite as background", () => {
+    expect(guardDecision(bash("pnpm -s test"), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+    });
+  });
+  it("locks a suite started with run_in_background", () => {
     expect(guardDecision(bash("pnpm -s test", { run_in_background: true }), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: "Run the full suite in the foreground: it holds the test lock.",
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
     });
   });
   it.each([
@@ -687,12 +699,8 @@ describe("guardDecision: the full suite", () => {
     "pnpm -s test & wait",
     "nohup pnpm -s vitest run >out.log &",
     `bash -c "pnpm -s test &"`,
-  ])("denies %s (a background suite returns at once) with the foreground text", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: "Run the full suite in the foreground: it holds the test lock.",
-    });
+  ])("locks %s (a suite in the background still takes the test lock)", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each([
     "pnpm -s test && echo ok",
@@ -1062,12 +1070,8 @@ describe("guard fix round 5 (Task 5 review)", () => {
     "setsid -f pnpm -s vitest run",
     "coproc { pnpm -s test; }",
     "coproc SUITE { pnpm -s test; }",
-  ])("denies %s (a background run) with the foreground text", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: BACKGROUND_SUITE_TEXT,
-    });
+  ])("locks %s (a suite in the background still takes the test lock)", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each(["coproc git push", "setsid git push", "coproc NAME { git push; }"])(
     "denies %s as git-write",
@@ -1160,12 +1164,8 @@ describe("guard fix round 6 (Task 5 re-review): zsh groups, wrappers, brace expa
     "tmux new -d 'pnpm -s test'",
     "tmux new-session -d -s x pnpm -s test",
     "tmux new-window 'pnpm -s vitest run'",
-  ])("denies %s (a background run) with the foreground text", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: BACKGROUND_SUITE_TEXT,
-    });
+  ])("locks %s (a suite in the background still takes the test lock)", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each(["tmux new -d 'git push'", "screen -dm git push"])("denies %s as git-write", (c) => {
     expect(ruleOf(bash(c))).toBe("git-write");
@@ -1189,8 +1189,8 @@ describe("guard fix round 6 (Task 5 re-review): zsh groups, wrappers, brace expa
   it.each([
     ["coproc NAME if git push; then :; fi", "git-write"],
     ["coproc S until git push; do :; done", "git-write"],
-    ["coproc S while pnpm -s test; do :; done", "full-suite"],
-    ["coproc S if pnpm -s test; then :; fi", "full-suite"],
+    ["coproc S while pnpm -s test; do :; done", "lock"],
+    ["coproc S if pnpm -s test; then :; fi", "lock"],
   ])("skips coproc's NAME before a compound keyword: %s", (c, rule) => {
     expect(ruleOf(bash(c))).toBe(rule);
   });
@@ -1210,7 +1210,7 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     expect(v).toEqual(tooLong);
   });
   it.each([
-    ["20 tmux words and a suite", `${"tmux ".repeat(20)}pnpm -s test`, "full-suite"],
+    ["20 tmux words and a suite", `${"tmux ".repeat(20)}pnpm -s test`, "lock"],
     ["18 `tmux a` pairs and a push", `${"tmux a ".repeat(18)}git push`, "git-write"],
     // `tmux tmux …`: an unknown tmux command may start a session
     ["2000 tmux words", "tmux ".repeat(2000), "unreadable"], // past the budget: too long
@@ -1271,13 +1271,9 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     });
   });
   it.each(["/usr/bin/nohup pnpm -s test &", "/opt/homebrew/bin/tmux new -d 'pnpm -s test'"])(
-    "denies the background run %s with the foreground text",
+    "locks the background run %s",
     (c) => {
-      expect(guardDecision(bash(c), writer)).toEqual({
-        kind: "deny",
-        rule: "full-suite",
-        text: BACKGROUND_SUITE_TEXT,
-      });
+      expect(guardDecision(bash(c), writer).kind).toBe("lock");
     },
   );
 
@@ -1295,9 +1291,21 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     `echo 'do shell script "pnpm -s test"' | osascript`,
     "launchctl submit -l x -- pnpm -s test:related",
     "systemd-run --user node --experimental-strip-types scripts/check-related.ts",
-  ])("denies a full suite handed to a launcher: %s", (c) => {
-    const d = guardDecision(bash(c), writer);
-    expect(d).toEqual({ kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT });
+  ])("locks a full suite handed to a launcher: %s", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
+  });
+  it.each([
+    "launchctl submit -l x -- pnpm -s test",
+    "echo 'pnpm -s test' | at now",
+    "batch <<< 'pnpm -s test'",
+    "ssh -f host pnpm -s test",
+    "printf 'pnpm -s test\\n' | crontab -",
+  ])("keeps the lock past the call for a suite a launcher runs later: %s", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
+    });
   });
   it.each([
     "crontab -l",
@@ -1340,15 +1348,15 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
       expect(ruleOf(bash(c))).toBe("lock");
     },
   );
-  it("still denies the suite a multiplexer runs", () => {
-    expect(ruleOf(bash("tmux new -d 'pnpm -s test'"))).toBe("full-suite");
-    expect(ruleOf(bash("coproc pnpm -s test; ls"))).toBe("full-suite");
+  it("still locks the suite a multiplexer runs", () => {
+    expect(ruleOf(bash("tmux new -d 'pnpm -s test'"))).toBe("lock");
+    expect(ruleOf(bash("coproc pnpm -s test; ls"))).toBe("lock");
   });
 });
 
 describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested multiplexers", () => {
   const tooLong = { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
-  const background = { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
+  const background = { kind: "lock", command: "pnpm -s test", background: true };
   const timed = (c: string) => {
     const t0 = performance.now();
     const v = guardDecision(bash(c), writer);
@@ -1445,7 +1453,7 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
   });
 
   // M3, M4, M5
-  it("denies a suite in an env -S script under coproc as background", () => {
+  it("locks a suite in an env -S script under coproc", () => {
     expect(guardDecision(bash("coproc env -S 'pnpm -s test'"), writer)).toEqual(background);
   });
   it("keeps a parameter expansion inside its word", () => {
@@ -2490,7 +2498,7 @@ describe("program names compare case-insensitively (PR #143 I1b)", () => {
     expect(splitCommands("Env GIT push")).toEqual([["git", "push"]]);
   });
   it("matches a full-suite entry whatever the case of its program", () => {
-    expect(ruleOf(bash("PNPM -s test", { run_in_background: true }))).toBe("full-suite");
+    expect(ruleOf(bash("PNPM -s test", { run_in_background: true }))).toBe("lock");
   });
 });
 
@@ -2563,9 +2571,9 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
       command: "pnpm -s test",
     });
     expect(guardDecision(bash("watch tmux new -d 'pnpm -s test'"), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: BACKGROUND_SUITE_TEXT,
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
     });
   });
 
