@@ -2146,7 +2146,15 @@ describe("reused worktrees", () => {
   });
 
   it("fails a carried-on run when cloning its checkout git directory fails", async () => {
-    const { sup, cfg } = make();
+    const { sup, cfg } = make({
+      extraSeat: {
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      },
+    });
     sup.start();
     const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
     await sup.endRun("guido-1");
@@ -2242,6 +2250,61 @@ describe("reused worktrees", () => {
       expect(carriedOn.isError ? carriedOn.text : undefined).toBeUndefined();
       const carriedRunId = store.seatSession("guido-1")?.runId;
       expect(store.run(carriedRunId ?? "")?.branch).toBe(BRANCH);
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
+  });
+
+  it("leaves a start's run active for the next hub when the hub stops during it", async () => {
+    const { sup } = make();
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockImplementation(async () => {
+            void sup.stopAll();
+            throw new Error("clone failed");
+          });
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const left = store.runs("guido-1", 1)[0];
+      expect(left?.id).not.toBe(first.runId);
+      expect(left).toMatchObject({ status: "running", endedAt: null });
     } finally {
       cloneGit.mockRestore();
       upsertRun.mockRestore();

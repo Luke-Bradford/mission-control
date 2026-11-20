@@ -3773,7 +3773,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let startFailed = false;
       let l: Live | undefined;
       const failStartedRun = (error: unknown) => {
-        if (startFailed || store.run(runId)?.endedAt != null) return;
+        // a hub stop leaves the run active for the next hub to resume, as it does every other run
+        if (startFailed || stopping || store.run(runId)?.endedAt != null) return;
         startFailed = true;
         log(`${seatId}: could not start: ${errText(error)}`);
         const at = now();
