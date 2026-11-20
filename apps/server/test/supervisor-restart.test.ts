@@ -29,6 +29,7 @@ import { createFlightWatch } from "../src/flight/watch.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { rolePrompt } from "../src/runtime/brief.ts";
+import * as checkouts from "../src/runtime/checkouts.ts";
 import * as keeper from "../src/runtime/keeper.ts";
 import {
   CLI_PID_FILE,
@@ -48,6 +49,7 @@ import {
   crewMcpPath,
   crewPromptPath,
   crewTokenPath,
+  crewTranscriptPath,
 } from "../src/store/crew-paths.ts";
 import { createQuietGate, crewRefusal } from "../src/update.ts";
 import { sleep } from "../src/util.ts";
@@ -113,6 +115,78 @@ describe("the CLI update hold", () => {
     hold.release();
     await sup.startRun("fao-1", 43);
     expect(store.runs("fao-1", 1)).toHaveLength(1);
+  });
+
+  it("leaves a start in progress alone when a CLI hold is released", async () => {
+    const hold = new CliHold();
+    const { sup } = make({ cliHold: hold });
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP, prNumber: 1 } });
+    await sup.endRun("guido-1");
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    let release = () => {};
+    const cloneGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalCloneGit = checkouts.cloneGitDir;
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir").mockImplementation(async (...args) => {
+      await cloneGate;
+      return await originalCloneGit(...args);
+    });
+    try {
+      const start = sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+      await until(() => expect(cloneGit).toHaveBeenCalled());
+      const run = store.runs("guido-1", 1).find(({ id }) => id !== first.runId);
+      if (run === undefined) throw new Error("missing in-progress run");
+      const orphan = {
+        ...run,
+        id: "orphan-release:20261020T000000Z",
+        agentId: "orphan",
+        transcriptPath: crewTranscriptPath(dbPath, "orphan-release:20261020T000000Z"),
+      };
+      writeFileSync(orphan.transcriptPath, "{}\n");
+      store.upsertRun(orphan);
+      hold.hold("held");
+      hold.release();
+      await until(() =>
+        expect(store.run(orphan.id)).toMatchObject({
+          status: "failed",
+          endedAt: expect.any(Number),
+        }),
+      );
+      expect(store.run(run.id)).toMatchObject({ status: "running", endedAt: null });
+      release();
+      const started = await start;
+      expect(store.seatSession("guido-1")).toMatchObject({
+        runId: started.runId,
+        state: expect.stringMatching(/^(starting|running)$/),
+      });
+    } finally {
+      release();
+      cloneGit.mockRestore();
+    }
   });
 
   it("refuses a start the hold caught during its checkout, and records no run", async () => {
@@ -610,6 +684,110 @@ describe("reattach after a restart", () => {
     expect(store.run(run.id)?.status).toBe("failed");
     expect(store.run(run.id)?.endedAt).not.toBeNull();
     expect(starts()).toEqual([]);
+  });
+
+  it("ends an unheld running row when the hub starts", async () => {
+    const run = {
+      id: "orphan:20261020T000000Z",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running" as const,
+      sessionId: "11111111-2222-4333-8444-555555555555",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: crewTranscriptPath(dbPath, "orphan:20261020T000000Z"),
+      prs: [],
+      summary: null,
+    };
+    writeFileSync(run.transcriptPath, "{}\n");
+    store.upsertRun(run);
+    store.setSetting(`seat-session:${run.id}`, "recorded");
+    const { sup } = make();
+    sup.start();
+    await until(() =>
+      expect(store.run(run.id)).toMatchObject({ status: "failed", endedAt: expect.any(Number) }),
+    );
+  });
+
+  it("leaves a run set aside alone when the hub starts, though no seat row holds it", async () => {
+    const id = "aside:20261020T000000Z";
+    const run = {
+      id,
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running" as const,
+      sessionId: "11111111-2222-4333-8444-555555555555",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: crewTranscriptPath(dbPath, id),
+      prs: [],
+      summary: null,
+      loop: {
+        ...NEW_LOOP,
+        hold: {
+          kind: null,
+          reason: null,
+          ended: false,
+          worktree: join(root, "mc-crew", "guido-1-42"),
+          wake: false,
+        },
+      },
+    };
+    writeFileSync(run.transcriptPath, "{}\n");
+    store.upsertRun(run);
+    const { sup } = make();
+    sup.start();
+    await sup.stopAll();
+    expect(store.run(id)).toMatchObject({ status: "running", endedAt: null });
+  });
+
+  it("leaves an observed loop's running row alone when the hub starts", async () => {
+    const run = {
+      id: "ta-loop:20261020T000000Z",
+      agentId: "ta-loop",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running" as const,
+      sessionId: "11111111-2222-4333-8444-555555555555",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: join(dir, "ta-loop.jsonl"),
+      prs: [],
+      summary: null,
+    };
+    writeFileSync(run.transcriptPath, "{}\n");
+    store.upsertRun(run);
+    const orphan = {
+      ...run,
+      id: "orphan-check:20261020T000000Z",
+      agentId: "guido-1",
+      transcriptPath: crewTranscriptPath(dbPath, "orphan-check:20261020T000000Z"),
+    };
+    writeFileSync(orphan.transcriptPath, "{}\n");
+    store.upsertRun(orphan);
+    const { sup } = make();
+    sup.start();
+    await until(() =>
+      expect(store.run(orphan.id)).toMatchObject({ status: "failed", endedAt: expect.any(Number) }),
+    );
+    expect(store.run(run.id)).toMatchObject({ status: "running", endedAt: null });
   });
 
   it("marks a run whose worktree is gone in error", async () => {

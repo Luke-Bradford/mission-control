@@ -2548,7 +2548,7 @@ describe("start_seat", () => {
       );
       const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
-      expect(startCalls.length).toBe(1);
+      expect(startCalls).toEqual([["guido-1", 7, undefined]]);
     });
 
     it("carries on an open PR on the ticket's branch that no run recorded, unless a run is live", async () => {
