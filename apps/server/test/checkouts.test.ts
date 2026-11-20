@@ -1634,6 +1634,20 @@ describe("ticket checkout recovery", () => {
     ).toMatchObject({ branch: `${BRANCH}-stage-2`, created: true });
   });
 
+  it("starts a fresh stage branch when the branch's tip is already in origin's default branch", async () => {
+    git(clone, "checkout", "-q", "-b", BRANCH);
+    commit(clone, { "done.txt": "x\n" });
+    git(clone, "checkout", "-q", "main");
+    git(clone, "merge", "-q", "--no-ff", "-m", "merge", BRANCH);
+    git(clone, "push", "-q", "origin", "main");
+
+    // the merged-PR history does not list it
+    expect(await prepareCheckout(input())).toMatchObject({
+      branch: `${BRANCH}-stage-2`,
+      created: true,
+    });
+  });
+
   it("reuses a ticket branch with an open PR", async () => {
     git(clone, "branch", BRANCH);
 
