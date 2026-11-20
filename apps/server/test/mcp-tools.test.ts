@@ -4852,6 +4852,25 @@ describe("report_evidence", () => {
     expect(store.evidenceCount(RUN)).toBe(2);
   });
 
+  it("refuses unchanged evidence for the head FLIGHT holds, naming the required fix", async () => {
+    const sha = await reviewedHead();
+    setLoop({
+      phase: "working",
+      mergeHold: {
+        by: "FLIGHT",
+        reason: "Add a regression test for the handoff before re-pushing this head.",
+        at: clock,
+      },
+    });
+
+    const result = await report("The existing head is ready to send again.");
+
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Add a regression test for the handoff before re-pushing this head.");
+    expect(store.evidenceCount(RUN)).toBe(1);
+    expect(store.runPush(RUN)?.sha).toBe(sha);
+  });
+
   it("refuses the sha CI last failed on, and takes a newer commit", async () => {
     const failed = await committed();
     setLoop({ ciFailedSha: failed });

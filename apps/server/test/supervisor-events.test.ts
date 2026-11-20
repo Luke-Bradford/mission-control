@@ -735,7 +735,16 @@ describe("supervisor events (Plan 7a)", () => {
         },
       });
       first.sup.start();
-      const priorLoop = { ...LOOP, phase: "ci" as const, prNumber: 9 };
+      const priorLoop = {
+        ...LOOP,
+        phase: "ci" as const,
+        prNumber: 9,
+        mergeHold: {
+          by: "FLIGHT" as const,
+          reason: "Fix the missing regression before sending this head back to review.",
+          at: 1,
+        },
+      };
       const priorStart = await first.sup.startRun("guido-1", 42, { loop: priorLoop });
       await until(() => expect(seatState("guido-1")).toBe("idle"));
       const worktree = store.seatSession("guido-1")?.worktree;
@@ -812,6 +821,7 @@ describe("supervisor events (Plan 7a)", () => {
       await until(() => expect(userLines()).toHaveLength(2));
       const brief = userLines()[1] as string;
       expect(brief).toContain("## Continue the earlier run");
+      expect(brief).toContain("Fix the missing regression before sending this head back to review.");
       expect(brief.indexOf("critical.ts")).toBeLessThan(brief.indexOf("important.ts"));
       expect(brief).not.toContain("minor.ts");
       expect(brief).not.toContain("resolved.ts");

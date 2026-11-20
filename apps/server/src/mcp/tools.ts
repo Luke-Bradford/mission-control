@@ -46,6 +46,7 @@ import {
   doneWhenCount,
   doneWhenMissingText,
   EVIDENCE_HEADING,
+  evidenceFlightHoldText,
   EVIDENCE_IN_CI,
   EVIDENCE_NO_COMMIT,
   EVIDENCE_NO_LOOP,
@@ -2611,6 +2612,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         reported.id === currentLoop.reportedEvidenceId;
       const ciRuling = currentLoop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
       if (!fresh && !reviewReply && !refusedRetry && !ciRuling) {
+        const hold = currentLoop.mergeHold;
+        if (hold?.by === "FLIGHT" && newest?.sha === pushed?.sha && newest.at <= hold.at)
+          return { text: evidenceFlightHoldText(hold.reason), isError: true };
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 

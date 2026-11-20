@@ -170,6 +170,9 @@ export const pathsText = (paths: readonly string[]): string => {
 /** No commit since the last report, or the newest commit is the one CI failed on. */
 export const EVIDENCE_NO_COMMIT =
   "Not recorded: there is no new commit since your last report (or CI already failed on your newest one). Commit your change with mc commit, then report again. A note that starts with Ruling: needs no commit.";
+/** A held head cannot return to review until its author makes the requested change. */
+export const evidenceFlightHoldText = (reason: string): string =>
+  `Not recorded: FLIGHT holds this PR: ${reason}. Make a new commit that addresses this, then report evidence again.`;
 /** The note would notify or reference something on GitHub, or holds a secret (`what` says which). */
 export const evidenceTextText = (what: string): string =>
   `Not recorded: the note is posted to GitHub and must not notify anyone, reference another item or hold a secret (${what}); reword it, then report again. ${REFERENCE_ADVICE}`;
