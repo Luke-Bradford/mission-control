@@ -4479,6 +4479,27 @@ describe("report_evidence", () => {
     });
   });
 
+  it("keeps a decimal test duration instead of refusing the report", async () => {
+    await committed();
+    expect(
+      await tool("report_evidence", ev).call(CTX, {
+        note: "tested",
+        tests: [
+          {
+            command: "pnpm -s vitest run apps/a.test.ts",
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            duration: 12.6,
+          },
+        ],
+      }),
+    ).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.latestEvidence(RUN)).toMatchObject({
+      tests: [expect.objectContaining({ duration: 12.6 })],
+    });
+  });
+
   it("records build-seat test runs and tests added", async () => {
     await committed();
     expect(
@@ -4593,7 +4614,7 @@ describe("report_evidence", () => {
             properties: {
               command: { type: "string", minLength: 1 },
               passed: { type: "integer", minimum: 0 },
-              duration: { type: "integer", minimum: 0 },
+              duration: { type: "number", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
             },
             required: ["command", "passed", "failed", "skipped", "duration"],
             additionalProperties: false,
