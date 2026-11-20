@@ -142,17 +142,15 @@ describe("crewCliArgs", () => {
   });
 
   it.each(["writer", "read-only", "scratch"] as const)(
-    "defines WebFetch and WebSearch for a %s seat and does not disallow them",
+    "defines WebSearch for a %s seat and keeps WebFetch denied",
     (mode) => {
       const a = crewCliArgs({ ...base, mode });
       const tools = a[a.indexOf("--tools") + 1].split(",");
       const denied = a.slice(a.indexOf("--disallowedTools") + 1);
-      for (const t of ["WebFetch", "WebSearch"]) {
-        expect(tools).toContain(t);
-        expect(denied).not.toContain(t);
-      }
-      expect(DENIED_TOOLS).not.toContain("WebFetch");
-      expect(DENIED_TOOLS).not.toContain("WebSearch");
+      expect(tools).toContain("WebSearch");
+      expect(denied).not.toContain("WebSearch");
+      expect(tools).not.toContain("WebFetch");
+      expect(denied).toContain("WebFetch");
     },
   );
 
@@ -194,12 +192,10 @@ describe("crewCliArgs", () => {
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
     expect(w[w.indexOf("--tools") + 1]).toBe(
-      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebFetch,WebSearch",
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
     );
     const r = crewCliArgs({ ...base, mode: "read-only" });
-    expect(r[r.indexOf("--tools") + 1]).toBe(
-      "Read,Grep,Glob,TodoWrite,Bash,Skill,WebFetch,WebSearch",
-    );
+    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill,WebSearch");
   });
 
   it("lets every seat invoke the repo's skills from a read-only plugin folder (#1051)", () => {
@@ -966,7 +962,7 @@ describe("scratch mode", () => {
       expect(allowed).not.toContain(t);
     }
     expect(a[a.indexOf("--tools") + 1]).toBe(
-      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebFetch,WebSearch",
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
     );
   });
 
@@ -981,7 +977,6 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
-      "WebFetch",
       "WebSearch",
       "mcp__mc__call_flight",
       "mcp__mc__report_findings",

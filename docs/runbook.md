@@ -713,7 +713,7 @@ What each seat's process starts with:
     cannot poison dependencies used by another seat or by the hub.
     but are not an isolation boundary: one seat's code can change another seat's store.
 
-  The Claude sandbox allows the network (never loopback or link-local: the hub stays unreachable); a Codex seat's profile keeps the network off, because its domain rules cannot keep loopback closed in every spelling. The secret scan at push time is the backstop for anything a seat
+  The Claude sandbox allows the network (never loopback or link-local: the hub stays unreachable); curl, wget and WebSearch work, but WebFetch is denied because it runs outside the sandbox proxy; a Codex seat's profile keeps the network off, because its domain rules cannot keep loopback closed in every spelling. The secret scan at push time is the backstop for anything a seat
   copies into its branch.
 - **The repo's CLAUDE.md from the base.** The prompt file takes `CLAUDE.md` from origin's default
   branch as the run started, read from hash-verified objects, never from the worktree the seat
