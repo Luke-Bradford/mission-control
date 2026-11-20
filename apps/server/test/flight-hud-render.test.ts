@@ -5,7 +5,6 @@ import {
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
-  QA_DISCLOSURE_LABEL,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -201,138 +200,17 @@ describe("hudRenderRequest", () => {
 });
 
 describe("renderHudWithPlaywright", () => {
-  it("captures the old Audit readiness view when main predates the QA route", async () => {
-    const url = "http://127.0.0.1:7420/qa";
-    const fake = fakePlaywright({ pageUrl: "http://127.0.0.1:7420/audit" });
-    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
-    expect(fake.page.goto).toHaveBeenCalledTimes(2);
-    expect(fake.page.click).toHaveBeenCalledWith(
-      '[aria-label="QA view"] button:text-is("PR readiness")',
-      expect.anything(),
-    );
-  });
-  it("waits for the old baseline's Audit page to be ready before it reads the QA view", async () => {
-    const url = "http://127.0.0.1:7420/qa";
-    const fake = fakePlaywright({ pageUrl: "http://127.0.0.1:7420/audit" });
-    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
-    const afterRedirect = fake.order.slice(fake.order.lastIndexOf("goto"));
-    expect(afterRedirect).toEqual([
-      "goto",
-      "hudReady",
-      "main",
-      "pageReady",
-      "main",
-      "click",
-      "main",
-      "pageReady",
-      `scroll section:has([aria-label="QA view"])`,
-    ]);
-    // the QA view or its disclosure was waited for (the page may still be drawing) before the
-    // view was counted, and with the view present the disclosure was not clicked
-    const waited = fake.page.waitForSelector.mock.calls.map((c) => c[0]);
-    expect(waited).toContain(`[aria-label="QA view"], button:text-is("${QA_DISCLOSURE_LABEL}")`);
-    expect(fake.page.click).toHaveBeenCalledTimes(1);
-  });
-  it("says which selector never appeared when the render times out", async () => {
-    const url = "http://127.0.0.1:7420/audit?evidence-tab=readiness";
-    const fake = fakePlaywright({ pageUrl: url });
-    fake.page.waitForSelector.mockImplementation(async (selector: string) => {
-      if (selector.startsWith('[aria-label="QA view"],'))
-        throw Object.assign(new Error("Timeout 30000ms exceeded."), { name: "TimeoutError" });
-    });
-    await expect(
-      renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright)),
-    ).rejects.toThrow(
-      /timed out: the \d+ ms deadline expired while waiting for \[aria-label="QA view"\], button:text-is\("Workflow history and earlier proposals"\) \(attached\)\./,
-    );
-  });
-  it("says which click timed out", async () => {
-    const url = "http://127.0.0.1:7420/audit?evidence-tab=hotspots";
-    const fake = fakePlaywright({ pageUrl: url });
-    fake.page.click.mockRejectedValue(
-      Object.assign(new Error("Timeout"), { name: "TimeoutError" }),
-    );
-    await expect(
-      renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright)),
-    ).rejects.toThrow(
-      /while waiting for click \[aria-label="QA view"\] button:text-is\("Hotspots"\)\./,
-    );
-  });
-  it("scrolls the section that holds the QA control to the top, after the tab settles and before the shot", async () => {
-    const url = "http://127.0.0.1:7420/audit?evidence-tab=readiness";
-    const fake = fakePlaywright({ pageUrl: url });
-    fake.page.screenshot.mockImplementation(async () => {
-      fake.order.push("screenshot");
-      return Buffer.from("png");
-    });
-    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
-    const scroll = fake.order.findIndex((step) => step.startsWith("scroll "));
-    expect(fake.order[scroll]).toBe('scroll section:has([aria-label="QA view"])');
-    expect(scroll).toBeGreaterThan(fake.order.lastIndexOf("click"));
-    expect(scroll).toBeGreaterThan(fake.order.lastIndexOf("pageReady", scroll - 1));
-    expect(scroll).toBeLessThan(fake.order.indexOf("screenshot"));
-  });
-  it("scrolls the control itself when an older baseline has no section around it", async () => {
-    const url = "http://127.0.0.1:7420/audit?evidence-tab=hotspots";
-    const fake = fakePlaywright({ pageUrl: url });
-    fake.page.locator.mockImplementation((selector: string) => {
-      const locator: FakeLocator = {
-        count: async () => (selector.startsWith("section:") ? 0 : 1),
-        last: () => locator,
-        evaluate: async () => {
-          fake.order.push(`scroll ${selector}`);
-        },
-      };
-      return locator;
-    });
-    await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
-    expect(fake.order).toContain('scroll [aria-label="QA view"]');
-  });
-  it("selects non-default Audit views before capturing them", async () => {
-    for (const [tab, label] of [
-      ["readiness", "PR readiness"],
-      ["hotspots", "Hotspots"],
-    ]) {
+  it("photographs Audit with a legacy evidence-tab without waiting for a QA view or clicking", async () => {
+    for (const tab of ["readiness", "hotspots"]) {
       const url = `http://127.0.0.1:7420/audit?evidence-tab=${tab}`;
       const fake = fakePlaywright({ pageUrl: url });
-      await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
-      expect(fake.page.click).toHaveBeenCalledWith(
-        `[aria-label="QA view"] button:text-is("${label}")`,
-        expect.anything(),
-      );
-      expect(fake.order.indexOf("click")).toBeGreaterThan(fake.order.indexOf("pageReady"));
-      expect(fake.page.screenshot).toHaveBeenCalledOnce();
-    }
-  });
-  it("opens the Audit workflow-history disclosure first when the QA view control is behind it", async () => {
-    for (const [tab, label] of [
-      ["readiness", "PR readiness"],
-      ["hotspots", "Hotspots"],
-    ]) {
-      const url = `http://127.0.0.1:7420/audit?evidence-tab=${tab}`;
-      const fake = fakePlaywright({ pageUrl: url });
-      let open = false;
-      fake.page.click.mockImplementation(async (selector: string) => {
-        fake.order.push(`click:${selector}`);
-        if (selector.includes("Workflow history")) open = true;
-        else if (!open) throw new Error("clicked a control that is not on the page");
-      });
-      Object.assign(fake.page, {
-        locator: vi.fn(() => {
-          const locator: FakeLocator = {
-            count: async () => (open ? 1 : 0),
-            last: () => locator,
-            evaluate: async () => {},
-          };
-          return locator;
-        }),
+      // the page has no QA view or disclosure: waiting for either would time out
+      fake.page.waitForSelector.mockImplementation(async (selector: string) => {
+        if (selector.includes("QA view") || selector.includes("Workflow history"))
+          throw Object.assign(new Error("Timeout 30000ms exceeded."), { name: "TimeoutError" });
       });
       await renderHudWithPlaywright(url, hudRenderRequest(url), options(fake.playwright));
-      const clicks = fake.order.filter((step) => step.startsWith("click:"));
-      expect(clicks).toEqual([
-        `click:button:text-is("${QA_DISCLOSURE_LABEL}")`,
-        `click:[aria-label="QA view"] button:text-is("${label}")`,
-      ]);
+      expect(fake.page.click).not.toHaveBeenCalled();
       expect(fake.page.screenshot).toHaveBeenCalledOnce();
     }
   });
