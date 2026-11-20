@@ -182,6 +182,12 @@ export interface AuditView {
     promptHash: string | null;
   }[];
   prSizes: { prs: AuditPrSize[]; outliers: AuditPrSize[] };
+  /**
+   * Every PR merged in range, counted per UTC day (`day` is the day's start), oldest first. Unlike
+   * `prSizes` it is never cut, so its total is the range's merge count. The server always sets it;
+   * optional so web fixtures built before it type-check.
+   */
+  mergedPerDay?: { day: number; merged: number }[];
   /** Long back-and-forth between two seats on one ticket. */
   chatter: { from: string; to: string; ticket: string; rounds: number }[];
   /** Checks that failed, then passed on the same head; kept for FLIGHT_SIGNAL_KEEP_MS only. */

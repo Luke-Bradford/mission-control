@@ -105,6 +105,10 @@ const AUDIT = {
       },
     ],
   },
+  mergedPerDay: [
+    { day: NOW - 3 * 24 * HOUR, merged: 70 },
+    { day: NOW - 24 * HOUR, merged: 50 },
+  ],
   modelPromptTimeline: [],
   questions: { asked: 7, answered: 5, answerMs: HOUR },
   chatter: [{ from: "inco-cx", to: "retro-cx", ticket: "mission-control#862", rounds: 12 }],
@@ -175,7 +179,7 @@ it("leads with a one-sentence verdict, then ranked rows with a number now, a tar
   expect(screen.getByText(/changes to make in the last 30d\./)).toBeTruthy();
   const rows = document.querySelectorAll("tr.rec");
   expect(rows.length).toBeGreaterThanOrEqual(5);
-  const all = [...rows].map((r) => r.querySelector(".audit-rt")?.getAttribute("title"));
+  const all = [...rows].map((r) => r.querySelector(".audit-rt")?.textContent);
   expect(new Set(all).size).toBe(all.length);
   for (const r of rows) {
     expect(r.querySelector(".meas .v")?.textContent).toMatch(/\d+ → \d+ /);
@@ -341,4 +345,68 @@ it("asks for the new range when it changes", async () => {
   await vi.waitFor(() =>
     expect(fetch).toHaveBeenCalledWith("/api/audit?range=7d", expect.anything()),
   );
+});
+
+it("counts every merge in the chart and says what it covers", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "How we build" });
+  // 120 merges are served although the PR list is cut to 50.
+  expect(
+    screen.getByRole("img", { name: /one bar per day, 120 in all, most 70 in one bar/ }),
+  ).toBeTruthy();
+  expect(screen.getByText("Merged PRs").nextSibling?.textContent).toBe("120");
+  expect(screen.getByText(/120 in 30 days, all counted/)).toBeTruthy();
+});
+
+it("does not call a failed waste read zero alarms", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      longRunners: [],
+      deathLoops: [],
+      reworkRounds: [],
+      refusals: [],
+      refusalsByRule: [],
+      refusalSpikes: [],
+      spendOutliers: [],
+      questions: { asked: 0, answered: 0, answerMs: null },
+      chatter: [],
+      flakes: [],
+      prSizes: { prs: [], outliers: [] },
+    },
+    "/api/waste": () => ({ status: 500, body: { error: "waste unavailable" } }),
+  });
+  render(<Audit />);
+  expect(await screen.findByText(/Could not load waste alarms: waste unavailable/)).toBeTruthy();
+  expect(screen.queryByText(/Nothing in the last 30d is past a limit/)).toBeNull();
+  expect(screen.getByText(/No other change is called for in the last 30d/)).toBeTruthy();
+  expect(screen.getByText(/Waste alarms are not loaded, so there may be more/)).toBeTruthy();
+  const before = vi.mocked(fetch).mock.calls.filter((c) => c[0] === "/api/waste").length;
+  fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0] as HTMLElement);
+  await vi.waitFor(() =>
+    expect(vi.mocked(fetch).mock.calls.filter((c) => c[0] === "/api/waste").length).toBeGreaterThan(
+      before,
+    ),
+  );
+});
+
+it("keeps recommendation results separate from prompt and model comparisons", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "What past recommendations achieved" });
+  expect(
+    screen.getByText(/No proposal is stored, so no recommendation has a result to show/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/not recommendation results and do not show what caused a change/),
+  ).toBeTruthy();
+});
+
+it("shows a row's whole title in its open detail and an end-of-list cue", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  const first = document.querySelector("tr.rec .audit-rt")?.textContent;
+  expect(document.querySelector(".audit-fulltitle")?.textContent).toBe(first?.replace(/^[▸▾]/, ""));
+  expect(screen.getByText(/End of list: \d+ rows\./)).toBeTruthy();
 });

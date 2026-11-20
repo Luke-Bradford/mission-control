@@ -1897,6 +1897,10 @@ describe("Store", () => {
         changedFiles: 2,
       });
       expect(prSizes.outliers.map((p) => p.number)).toEqual([2]);
+      // Every merge in range is counted per day, sized or not, and the count is not cut.
+      const { mergedPerDay } = store.audit(100, 200) as unknown as AuditView;
+      expect(mergedPerDay?.reduce((n, d) => n + d.merged, 0)).toBe(3);
+      expect(mergedPerDay).toEqual([{ day: 0, merged: 3 }]);
       expect((store.audit(300, 400) as unknown as AuditView).prSizes).toEqual({
         prs: [],
         outliers: [],

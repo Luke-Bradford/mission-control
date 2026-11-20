@@ -70,6 +70,7 @@
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   flex: 1 1 auto;
 }
 
@@ -155,9 +156,10 @@
 
 .audit-rt {
   all: unset;
-  display: block;
   box-sizing: border-box;
   max-width: 100%;
+  display: block;
+  min-height: var(--sp-5);
   cursor: pointer;
   font-size: var(--fs);
   line-height: var(--lh);
@@ -365,4 +367,59 @@
   .audit-mg {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* The lists scroll inside their panels; a scrollbar that stays on screen says so. */
+.audit-scroll::-webkit-scrollbar {
+  width: var(--sp-3);
+  height: var(--sp-3);
+}
+
+.audit-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-2);
+  border-radius: var(--sp-2);
+  border: 2px solid var(--surface);
+}
+
+.audit-scroll::-webkit-scrollbar-track {
+  background: var(--surface-2);
+}
+
+.audit-end {
+  text-align: center;
+  color: var(--muted);
+}
+
+.audit-fulltitle {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs);
+  line-height: var(--lh);
+  font-weight: 500;
+  color: var(--fg);
+  white-space: normal;
+}
+
+.audit-retry {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  min-height: var(--sp-5);
+  padding: 0 var(--sp-2);
+  cursor: pointer;
+}
+
+.audit-axis {
+  display: flex;
+  justify-content: space-between;
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+
+.audit-sub {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-4);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
 }

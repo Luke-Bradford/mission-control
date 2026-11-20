@@ -77,6 +77,15 @@ describeRendered("Audit first screen in a browser", () => {
           const box = await page.box(panel);
           expect(box.y + box.height).toBeLessThanOrEqual(height);
         }
+        for (const toggle of await page.boxes(".audit-rt")) {
+          expect(toggle.height).toBeGreaterThanOrEqual(24);
+        }
+        // The list keeps a scrollbar gutter on screen, so a cut list shows that it scrolls.
+        const gutter = await page.evaluate(() => {
+          const el = document.querySelector(".audit-next .audit-scroll");
+          return el ? el.getBoundingClientRect().width - el.clientWidth : 0;
+        }, null);
+        expect(gutter).toBeGreaterThan(0);
         const scrolls = await page.evaluate(
           () => document.documentElement.scrollHeight > window.innerHeight,
           null,

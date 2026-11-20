@@ -83,6 +83,26 @@ describe("auditActions", () => {
     expect(auditVerdict(rows)).toMatchObject({ count: rows.length, first: rows[0]?.title });
   });
 
+  it("shows run ids as seat and date, with working links, never raw", () => {
+    const a = {
+      ...alarm(9, "cost-without-output", "guido-1:20261117T102236Z@0123456789abcdef"),
+      seatId: null,
+      runId: null,
+      evidence: "Run guido-1:20261117T102236Z cost 3x the median.",
+    };
+    const [row] = auditActions(base, [a], new Set());
+    const text = [
+      row?.why,
+      ...(row?.evidence ?? []),
+      ...(row?.links.map((l) => l.label) ?? []),
+    ].join("|");
+    expect(text).not.toMatch(/\d{8}T\d{6}Z/);
+    expect(row?.evidence[0]).toBe(
+      "guido-1 run of 17 Nov 10:22 UTC at commit 0123456: Run guido-1 run of 17 Nov 10:22 UTC cost 3x the median.",
+    );
+    expect(row?.links[0]).toMatchObject({ agentId: "guido-1", runId: "guido-1:20261117T102236Z" });
+  });
+
   it("leaves out closed and resolved alarms and excluded seats", () => {
     const closed = { ...alarm(3, "restart-storm", "guido-1"), closedAt: 5 };
     const resolved = { ...alarm(4, "ticket-churn", "mc"), resolvedAt: 5 };

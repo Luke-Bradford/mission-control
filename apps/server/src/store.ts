@@ -2083,6 +2083,12 @@ export class Store {
         prs,
         outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
       },
+      mergedPerDay: rows(
+        `SELECT (merged_at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS merged FROM pr_history
+         WHERE merged_at >= ? AND merged_at <= ? GROUP BY day ORDER BY day`,
+        since,
+        until,
+      ) as unknown as NonNullable<AuditView["mergedPerDay"]>,
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),

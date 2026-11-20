@@ -81,6 +81,18 @@ const HOUR_MS = 3_600_000;
 const hours = (ms: number): string => `${(ms / HOUR_MS).toFixed(1)} h`;
 const times = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** A run id: its seat, then its start as `YYYYMMDDThhmmssZ`. */
+const RUN_ID = /([a-z][\w-]*):(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})\d{2}Z/;
+
+/** Text with each run id as "seat run of 17 Nov 10:22 UTC" and each commit after `@` as a short sha. */
+export const plainIds = (text: string): string =>
+  text
+    .replace(new RegExp(RUN_ID.source, "g"), (_m, seat, _y, mo, d, h, mi) => {
+      return `${seat} run of ${Number(d)} ${MONTHS[Number(mo) - 1] ?? mo} ${h}:${mi} UTC`;
+    })
+    .replace(/@([0-9a-f]{7,40})\b/g, (_m, sha: string) => ` at commit ${sha.slice(0, 7)}`);
+
 /** A guard rule as the Guard drawer words it; a rule no longer listed shows as stored. */
 const ruleText = (rule: string): string =>
   Object.hasOwn(GUARD_RULES, rule) ? GUARD_RULES[rule as keyof typeof GUARD_RULES] : rule;
@@ -159,7 +171,7 @@ export function auditActions(
       id: `waste:${check}`,
       source: "Waste",
       title: WASTE_ACTION_TITLES[check],
-      why: `${times(rows.length, "open alarm")}: ${rows[0]?.evidence ?? ""}`,
+      why: `${times(rows.length, "open alarm")}: ${plainIds(rows[0]?.evidence ?? "")}`,
       measure: {
         label: "Open alarms",
         now: rows.length,
@@ -170,11 +182,17 @@ export function auditActions(
       },
       decider: "FLIGHT",
       deciderNote: "the alarm waits on FLIGHT or the operator",
-      evidence: rows.slice(0, DETAIL_LINES).map((a) => `${a.subject}: ${a.evidence}`),
+      evidence: rows
+        .slice(0, DETAIL_LINES)
+        .map((a) => `${plainIds(a.subject)}: ${plainIds(a.evidence)}`),
       caveat: "An alarm marks spend that bought no progress; it does not say the work was wrong.",
-      links: rows.flatMap((a) =>
-        a.seatId ? [{ label: a.subject, agentId: a.seatId, runId: a.runId }] : [],
-      ),
+      links: rows.slice(0, DETAIL_LINES).flatMap((a) => {
+        const run = RUN_ID.exec(`${a.runId ?? ""} ${a.subject} ${a.evidence}`);
+        const seat = a.seatId ?? run?.[1] ?? null;
+        return seat === null
+          ? []
+          : [{ label: plainIds(a.subject), agentId: seat, runId: a.runId ?? run?.[0] ?? null }];
+      }),
     });
   }
 

@@ -8,7 +8,7 @@ import {
   type WasteReport,
 } from "@mc/core";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, useResource } from "../data.ts";
 import { cost, elapsed, percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
@@ -73,6 +73,12 @@ function AuditDashboard() {
     () => (audit && config ? auditActions(audit, wasteRes.data?.alarms ?? [], excluded) : []),
     [audit, config, wasteRes.data, excluded],
   );
+  // A missing waste read is not "no alarms": the list and verdict say they may be incomplete.
+  const waste: WasteState = wasteRes.data
+    ? { kind: "ok" }
+    : wasteRes.error
+      ? { kind: "error", message: wasteRes.error.message }
+      : { kind: "loading" };
 
   return (
     <div className={res.data === undefined && audit ? "audit-page refetching" : "audit-page"}>
@@ -86,23 +92,47 @@ function AuditDashboard() {
           configError={configRes.error}
           stale={staleRange ? last?.range : undefined}
           range={range}
+          waste={waste}
         />
         <Seg label="Range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>
       {audit && (
         <div className="audit-cols">
           <div className="audit-col">
-            <DoNext actions={actions} classified={config !== undefined} audit={audit} />
+            <DoNext
+              actions={actions}
+              classified={config !== undefined}
+              audit={audit}
+              waste={waste}
+            />
             <NewOutside />
           </div>
           <div className="audit-col">
             <HowWeBuild audit={audit} waste={wasteRes.data} wasteError={wasteRes.error} />
             <WhereFindingsLand audit={audit} />
-            <Past changes={audit.changes} />
+            <Past changes={audit.changes} range={range} />
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+type WasteState = { kind: "ok" } | { kind: "loading" } | { kind: "error"; message: string };
+
+const wasteNotice = (w: WasteState): string | null =>
+  w.kind === "ok"
+    ? null
+    : w.kind === "loading"
+      ? "Waste alarms are still loading, so this list may be incomplete."
+      : `Could not load waste alarms: ${w.message}. This list may be incomplete.`;
+
+function WasteRetry({ waste }: { waste: WasteState }) {
+  if (waste.kind !== "error") return null;
+  return (
+    <button type="button" className="audit-retry" onClick={() => hub.refetch(RESOURCES.waste.path)}>
+      Retry
+    </button>
   );
 }
 
@@ -115,6 +145,7 @@ function Verdict({
   configError,
   stale,
   range,
+  waste,
 }: {
   audit: AuditData | undefined;
   actions: AuditAction[];
@@ -124,6 +155,7 @@ function Verdict({
   configError: Error | null;
   stale: AuditRange | undefined;
   range: AuditRange;
+  waste: WasteState;
 }) {
   if (loading) return <p className="audit-verdict-text">Loading audit…</p>;
   if (error)
@@ -140,8 +172,10 @@ function Verdict({
   const v = auditVerdict(actions);
   return (
     <p className="audit-verdict-text">
-      {v.count === 0 ? (
+      {v.count === 0 && waste.kind === "ok" ? (
         <b>Nothing in the last {range} is past a limit.</b>
+      ) : v.count === 0 ? (
+        <b>No other change is called for in the last {range}.</b>
       ) : (
         <>
           <b>
@@ -149,6 +183,12 @@ function Verdict({
           </b>{" "}
           {v.you} wait{v.you === 1 ? "s" : ""} on you, {v.flight} on FLIGHT. First: {v.first}.
         </>
+      )}
+      {wasteNotice(waste) && (
+        <span className="warn-t">
+          {" "}
+          {wasteNotice(waste)} <WasteRetry waste={waste} />
+        </span>
       )}
       {stale && (
         <span className="warn-t">
@@ -175,10 +215,12 @@ function DoNext({
   actions,
   classified,
   audit,
+  waste,
 }: {
   actions: AuditAction[];
   classified: boolean;
   audit: AuditData;
+  waste: WasteState;
 }) {
   const [filter, setFilter] = useState<DeciderFilter>("all");
   const [open, setOpen] = useState<string | null | undefined>(undefined);
@@ -197,12 +239,19 @@ function DoNext({
       actions={<Seg label="Decider" options={FILTER_OPTIONS} value={filter} onChange={setFilter} />}
     >
       <div className="audit-scroll">
+        {waste.kind === "error" && shown.length > 0 && (
+          <p className="s warn-t audit-foot">
+            {wasteNotice(waste)} <WasteRetry waste={waste} />
+          </p>
+        )}
         {shown.length === 0 ? (
           <p className="s fg2 audit-empty">
             {!classified
               ? "Waiting for the crew list."
               : actions.length === 0
-                ? "No change is called for in this range."
+                ? waste.kind === "ok"
+                  ? "No change is called for in this range."
+                  : "No other change is called for. Waste alarms are not loaded, so there may be more."
                 : "No row for this decider."}
           </p>
         ) : (
@@ -228,7 +277,6 @@ function DoNext({
                           type="button"
                           className="audit-rt"
                           aria-expanded={isOpen}
-                          title={a.title}
                           onClick={() => setOpen(isOpen ? null : a.id)}
                         >
                           <i aria-hidden="true">{isOpen ? "▾" : "▸"}</i>
@@ -252,6 +300,7 @@ function DoNext({
                     {isOpen && (
                       <tr className="more">
                         <td colSpan={5}>
+                          <p className="audit-fulltitle">{a.title}</p>
                           <div className="audit-mg">
                             <div>
                               <h3>Evidence</h3>
@@ -295,6 +344,9 @@ function DoNext({
             Counts marked ≥ come from a list the hub cut to its first 50.
           </p>
         )}
+        {shown.length > 0 && (
+          <p className="s fg2 audit-foot audit-end">End of list: {plural(shown.length, "row")}.</p>
+        )}
       </div>
     </Panel>
   );
@@ -317,24 +369,30 @@ function NewOutside() {
 
 const dayStart = (ms: number): number => Math.floor(ms / DAY_MS) * DAY_MS;
 
-/** Merged PRs per bucket across the range, oldest first; the hub keeps the newest 50. */
-function mergedBuckets(audit: AuditData): { start: number; merged: number }[] {
+/** Merged PRs per bucket across the range, oldest first, from the hub's uncut per-day counts. */
+function mergedBuckets(audit: AuditData): {
+  buckets: { start: number; merged: number }[];
+  days: number;
+} {
   const days = Math.max(1, Math.ceil((audit.range.until - audit.range.since) / DAY_MS));
   const size = Math.ceil(days / CHART_BARS);
   const end = dayStart(audit.range.until);
   const bars = Math.ceil(days / size);
-  const out = Array.from({ length: bars }, (_, i) => ({
+  const buckets = Array.from({ length: bars }, (_, i) => ({
     start: end - (bars - 1 - i) * size * DAY_MS,
     merged: 0,
   }));
-  const first = out[0]?.start ?? 0;
-  for (const pr of audit.prSizes.prs) {
-    if (pr.mergedAt < first) continue;
-    const bar = out[Math.min(bars - 1, Math.floor((pr.mergedAt - first) / (size * DAY_MS)))];
-    if (bar) bar.merged += 1;
+  const first = buckets[0]?.start ?? 0;
+  for (const d of audit.mergedPerDay ?? []) {
+    const bar =
+      buckets[Math.max(0, Math.min(bars - 1, Math.floor((d.day - first) / (size * DAY_MS))))];
+    if (bar) bar.merged += d.merged;
   }
-  return out;
+  return { buckets, days: size };
 }
+
+const axisDate = (ms: number): string =>
+  new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -352,10 +410,10 @@ function HowWeBuild({
   waste: WasteReport | undefined;
   wasteError: Error | null;
 }) {
-  const buckets = mergedBuckets(audit);
+  const { buckets, days: bucketDays } = mergedBuckets(audit);
   const max = Math.max(1, ...buckets.map((b) => b.merged));
-  const merged = audit.prSizes.prs.length;
-  const cut = audit.capped?.["prSizes.prs"];
+  const served = audit.mergedPerDay !== undefined;
+  const merged = (audit.mergedPerDay ?? []).reduce((n, d) => n + d.merged, 0);
   const rounds = audit.reviewRounds?.prs ?? [];
   const reviewed = rounds.reduce((n, r) => n + r.count, 0);
   const past1 = rounds.filter((r) => r.rounds >= 2).reduce((n, r) => n + r.count, 0);
@@ -366,7 +424,11 @@ function HowWeBuild({
   const week = waste?.spend.find((s) => s.window === "week");
   const wasteNote = wasteError ? "not loaded" : "loading";
   const rows: { label: string; value: string; sub: string }[] = [
-    { label: "Merged PRs", value: String(merged), sub: cut ? `newest of ${cut}` : "in range" },
+    {
+      label: "Merged PRs",
+      value: served ? String(merged) : "–",
+      sub: served ? "all merges in range" : "not served by this hub",
+    },
     {
       label: "Reviewed PRs past round 1",
       value: reviewed === 0 ? "–" : percent((past1 / reviewed) * 100),
@@ -405,13 +467,21 @@ function HowWeBuild({
   const h = 40;
   const bw = w / buckets.length;
   return (
-    <Panel title="How we build" sub="merged PRs per day" className="audit-health">
+    <Panel
+      title="How we build"
+      sub={
+        served
+          ? `merged PRs, one bar per ${bucketDays === 1 ? "day" : `${bucketDays} days`} · ${merged} in ${audit.range.until - audit.range.since >= DAY_MS ? Math.round((audit.range.until - audit.range.since) / DAY_MS) : 1} days, all counted`
+          : "merged PRs per day are not served by this hub"
+      }
+      className="audit-health"
+    >
       <div className="audit-plot">
         <svg
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label={`Merged PRs per ${buckets.length > 1 && audit.range.until - audit.range.since > CHART_BARS * DAY_MS ? "bucket" : "day"}, most ${max}`}
+          aria-label={`Merged PRs, one bar per ${bucketDays === 1 ? "day" : `${bucketDays} days`}, ${merged} in all, most ${max} in one bar`}
         >
           {buckets.map((b, i) => (
             <rect
@@ -423,6 +493,11 @@ function HowWeBuild({
             />
           ))}
         </svg>
+        <div className="audit-axis">
+          <span>{axisDate(buckets[0]?.start ?? 0)}</span>
+          <span>most {served ? max : "–"} in a bar</span>
+          <span>{axisDate(buckets[buckets.length - 1]?.start ?? 0)}</span>
+        </div>
       </div>
       <div className="audit-scroll audit-hscroll">
         <table className="audit-table">
@@ -481,41 +556,45 @@ function WhereFindingsLand({ audit }: { audit: AuditData }) {
   );
 }
 
-function Past({ changes }: { changes: AuditChange[] }) {
+function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange }) {
   const pct = (r: number | null) => percent(r == null ? null : r * 100);
   return (
     <Panel
       title="What past recommendations achieved"
-      sub="prompt and model changes, the week before and after"
+      sub="proposals and their outcomes are not collected"
       className="audit-past"
     >
       <div className="audit-scroll audit-fscroll">
-        {changes.length === 0 ? (
-          <p className="s fg2 audit-empty">
-            No prompt or model change in this range. Proposals are not stored, so no decided
-            recommendation has a result to show.
-          </p>
-        ) : (
-          <table className="audit-table">
-            <tbody>
-              {changes.map((x) => (
-                <tr key={`${x.agentId}:${x.at}:${x.kind}`} className="hrow audit-change">
-                  <td className="lab">
-                    <b>{new Date(x.at).toLocaleDateString("en-GB")}</b> ·{" "}
-                    {x.kind === "prompt" ? "Prompt" : "Model"} change · {x.from ?? "none"} → {x.to}{" "}
-                    · {x.agentId}
-                  </td>
-                  <td className="sub">
-                    merged {x.before.merged} → {x.after.merged} · review fail{" "}
-                    {pct(x.before.reviewFailRate)} → {pct(x.after.reviewFailRate)} · median cost{" "}
-                    {cost(x.before.medianCostPerMergedTicket)} →{" "}
-                    {cost(x.after.medianCostPerMergedTicket)} · rework {x.before.reworkRounds} →{" "}
-                    {x.after.reworkRounds}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <p className="s fg2 audit-empty">
+          No proposal is stored, so no recommendation has a result to show.
+        </p>
+        {changes.length > 0 && (
+          <>
+            <h3 className="audit-sub">
+              Prompt and model changes in the last {range}: a week before and after. These are not
+              recommendation results and do not show what caused a change.
+            </h3>
+            <table className="audit-table">
+              <tbody>
+                {changes.map((x) => (
+                  <tr key={`${x.agentId}:${x.at}:${x.kind}`} className="hrow audit-change">
+                    <td className="lab">
+                      <b>{new Date(x.at).toLocaleDateString("en-GB")}</b> ·{" "}
+                      {x.kind === "prompt" ? "Prompt" : "Model"} change · {x.from ?? "none"} →{" "}
+                      {x.to} · {x.agentId}
+                    </td>
+                    <td className="sub">
+                      merged {x.before.merged} → {x.after.merged} · review fail{" "}
+                      {pct(x.before.reviewFailRate)} → {pct(x.after.reviewFailRate)} · median cost{" "}
+                      {cost(x.before.medianCostPerMergedTicket)} →{" "}
+                      {cost(x.after.medianCostPerMergedTicket)} · rework {x.before.reworkRounds} →{" "}
+                      {x.after.reworkRounds}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
         )}
       </div>
     </Panel>
