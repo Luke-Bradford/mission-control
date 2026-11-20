@@ -193,6 +193,8 @@ export function Telemetry() {
   const setTab = (next: TelemetryTab) => navigate(telemetryPath(next, view));
   const setView = (next: TelemetryView) => navigate(telemetryPath(tab, next));
 
+  // The lock table reads the lock's own routes, so it shows whether or not telemetry has loaded.
+  const lockTable = tab === "machine" && view === "table";
   const stale = t !== undefined && res.error !== null;
   const disconnected = !connection.connected && connection.reconnecting;
   const age = updatedAt.current === null ? null : Date.now() - updatedAt.current;
@@ -305,7 +307,7 @@ export function Telemetry() {
           aria-labelledby={tabId(tab)}
           aria-busy={refetching || (t === undefined && res.error === null)}
         >
-          {state ? (
+          {state && !lockTable ? (
             <div className="grid" data-state={state}>
               <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
             </div>
