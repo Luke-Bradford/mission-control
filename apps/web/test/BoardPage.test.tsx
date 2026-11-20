@@ -780,6 +780,17 @@ describe("cards", () => {
     expect(within(c).getByText("Merged")).toBeTruthy();
   });
 
+  it("an open docs PR beside a merged code PR keeps the card from reading idle", async () => {
+    stub({
+      shopApp: [todo(3349, { status: "In Progress" })],
+      prs: [pr({ number: 1, branch: "docs/3349-spec" }), pr({ number: 2, state: "merged" })],
+    });
+    await open();
+    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+    expect(within(c).getByText("PR #2")).toBeTruthy();
+    expect(within(c).queryByText(/^Nobody on it/)).toBeNull();
+  });
+
   it("PR line: CI pill from CI_PILL, no review pill on a plain open PR", async () => {
     stub({
       shopApp: [todo(3349, { status: "In review", state: "review" })],
