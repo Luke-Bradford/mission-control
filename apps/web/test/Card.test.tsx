@@ -183,7 +183,7 @@ it("a card whose PR is closed shows the idle line, not a bare Closed badge", () 
       queued={null}
       reviewer={null}
       pr={prView({ state: "closed" })}
-      idle="PR closed 16 Oct, nothing open"
+      idle="PR closed, nothing open"
       mine={false}
       unacked={false}
       outcome="Closed"
@@ -192,6 +192,6 @@ it("a card whose PR is closed shows the idle line, not a bare Closed badge", () 
       you={null}
     />,
   );
-  expect(screen.getByText("PR closed 16 Oct, nothing open")).toBeTruthy();
+  expect(screen.getByText("PR closed, nothing open")).toBeTruthy();
   expect(screen.queryByText("Closed")).toBeNull();
 });
