@@ -1043,7 +1043,7 @@ Setup's board action also creates the board's fields and the repo's type labels,
     doesn't see it, its call just takes longer) for up to 10 minutes.
   - After 10 minutes the seat is told who holds the lock, and to run the command with a test file
     path instead.
-  - A full suite in the background is refused.
+  - A full suite in the background takes the lock the same way; the lock is freed when the call returns.
   - Each entry must be a command seats may run, or the config is refused at start-up.
   - The lock box on Overview and the header's `Lock:` show who holds the lock and who waits.
 - **`crew.deny_read`** (default `[]`) lists absolute folders that code a seat runs may not read.
