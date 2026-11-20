@@ -1004,8 +1004,8 @@
 
 .tickets-panel td:first-child a {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 .tickets-panel .ticket-title-cell {

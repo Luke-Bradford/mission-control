@@ -17,13 +17,14 @@ const evidence = process.env.MC_QA_EVIDENCE_DIR;
 const DAY = 24 * HOUR;
 const LONG_TITLE =
   "Telemetry throughput ticket with a deliberately long board-card title that must remain readable without hiding the merged date, cycle time, or cost";
+const LONG_TICKET = "repository-with-a-schema-length-name-that-must-remain-visible#1900";
 
 function throughputApi(): Record<string, unknown> {
   const base = crewTelemetryApi();
   const data = crewTelemetry();
   const days = (data.throughput as { day: string }[]).map((d) => d.day);
   const tickets = Array.from({ length: 24 }, (_, i) => ({
-    ticket: `mission-control#${1900 + i}`,
+    ticket: i === 0 ? LONG_TICKET : `mission-control#${1900 + i}`,
     title: i === 0 ? LONG_TITLE : `Telemetry ticket ${1900 + i}`,
     size: (["XS", "S", "M", "L", "XL"] as const)[i % 5],
     readyAt: NOW - (7 - (i % 7)) * DAY - 30 * HOUR,
@@ -170,7 +171,7 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
       });
       try {
         await ready(page);
-        const table = await page.evaluate(() => {
+        const table = await page.evaluate((longTicket) => {
           const panel = document.querySelector("#tTickets") as HTMLElement;
           const panelBox = panel.getBoundingClientRect();
           const headers = [...panel.querySelectorAll("th")].map((header) => {
@@ -182,13 +183,19 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
             const box = cell.getBoundingClientRect();
             return { text: cell.textContent, left: box.left, right: box.right };
           });
+          const ticket = [...panel.querySelectorAll("tbody a")].find(
+            (link) => link.textContent === longTicket,
+          ) as HTMLElement;
           return {
             panelLeft: panelBox.left,
             panelRight: panelBox.right,
             headers,
             values,
+            ticketText: ticket.textContent,
+            ticketClientWidth: ticket.clientWidth,
+            ticketScrollWidth: ticket.scrollWidth,
           };
-        }, undefined);
+        }, LONG_TICKET);
         expect(page.errors()).toEqual([]);
         expect(table.headers.map((header) => header.text)).toEqual([
           "Ticket",
@@ -202,6 +209,8 @@ describeRendered("Telemetry, Throughput tab, in a browser", () => {
           expect(field.left).toBeGreaterThanOrEqual(table.panelLeft);
           expect(field.right).toBeLessThanOrEqual(table.panelRight + 1);
         }
+        expect(table.ticketText).toBe(LONG_TICKET);
+        expect(table.ticketScrollWidth).toBeLessThanOrEqual(table.ticketClientWidth + 1);
         await page.evaluate(() => {
           (
             document.querySelector(
