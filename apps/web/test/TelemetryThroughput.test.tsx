@@ -58,6 +58,15 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
           mergedAt: NOW - DAY,
           doneAt: NOW - DAY + HOUR,
         },
+        {
+          ticket: "shop#11",
+          title: "Keep ticket history for fourteen days",
+          size: "M",
+          readyAt: NOW - 11 * DAY,
+          startedAt: null,
+          mergedAt: NOW - 10 * DAY,
+          doneAt: NOW - 10 * DAY + HOUR,
+        },
         { ticket: "shop#14", readyAt: NOW - DAY, startedAt: null, mergedAt: null, doneAt: null },
       ],
       ticketsInProgress: days.map((day, i) => ({
@@ -90,7 +99,7 @@ async function open(
     },
     "/api/crew?shape=summary": { rows: [crewRow({ id: "studio" })], firstRunToday: null },
   };
-  routes["/api/telemetry?range=14d"] = data;
+  routes["/api/telemetry?range=7d"] = data;
   routes["/api/telemetry?range=24h"] = {
     ...data,
     series: { ...(data.series as object), tickets: [] } as never,
@@ -125,10 +134,10 @@ afterEach(() => {
 });
 
 describe("Telemetry, Throughput tab", () => {
-  it("loads the 14-day per-ticket series whatever range Crew last used", async () => {
+  it("uses the server's 14-day ticket series whatever range Crew last used", async () => {
     const fetch = await open(tel());
-    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=14d", expect.anything());
-    expect(panel("tCycleTicket").querySelectorAll("svg circle.dot")).toHaveLength(2);
+    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=7d", expect.anything());
+    expect(panel("tCycleTicket").querySelectorAll("svg circle.dot")).toHaveLength(3);
   });
 
   it("drops a hidden Crew agent filter before loading the unscoped Throughput table", async () => {
@@ -150,7 +159,7 @@ describe("Telemetry, Throughput tab", () => {
     );
     act(() => navigate("/telemetry?tab=throughput&view=table"));
     await waitFor(() => expect(panel("tTickets")).toBeTruthy());
-    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=14d", expect.anything());
+    expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=7d", expect.anything());
     expect(within(panel("tTickets")).getByRole("table").textContent).toContain("~$18.60");
   });
 
@@ -195,7 +204,7 @@ describe("Telemetry, Throughput tab", () => {
     await open(tel());
     const cycle = panel("tCycleTicket");
     expect(within(cycle).getByText(/last 14 days/)).toBeTruthy();
-    expect(cycle.querySelectorAll("svg circle.dot")).toHaveLength(2);
+    expect(cycle.querySelectorAll("svg circle.dot")).toHaveLength(3);
     expect(cycle.querySelectorAll("svg .cycle-line")).toHaveLength(2);
     expect(cycle.querySelector(".legend")?.textContent).toMatch(/p50/);
     expect(cycle.querySelector(".legend")?.textContent).toMatch(/p85/);
@@ -235,15 +244,14 @@ describe("Telemetry, Throughput tab", () => {
     expect(panel("tCycleTicket").querySelector("svg")).toBeNull();
   });
 
-  it("draws cycle time by size as p50 to p85 ranges, and says so for a size with no tickets", async () => {
+  it("derives cycle time by size from the ticket series", async () => {
     await open(tel());
     const size = panel("tCycleSize");
     const rows = [...size.querySelectorAll("li")].map((li) => li.textContent);
-    expect(rows[0]).toContain("S");
-    expect(rows[0]).toContain("4.0 h–9.0 h");
-    expect(rows[2]).toContain("p50 20 h");
-    expect(rows[3]).toContain("no tickets");
-    expect(size.querySelectorAll(".rng")).toHaveLength(2);
+    expect(rows.find((row) => row?.includes("S · 1 ticket"))).toContain("p50 25 h");
+    expect(rows.find((row) => row?.includes("M · 1 ticket"))).toContain("p50 25 h");
+    expect(rows.find((row) => row?.includes("no size · 1 ticket"))).toContain("p50 25 h");
+    expect(size.querySelectorAll(".rng")).toHaveLength(0);
   });
 
   it("steps through tickets in progress and leaves out the days before collection", async () => {
@@ -287,7 +295,7 @@ describe("Telemetry, Throughput tab", () => {
       "~Cost",
     ]);
     const rows = table.querySelectorAll("tbody tr");
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain("shop#13");
     expect(rows[0]?.textContent).toContain("Title not on board");
     expect(rows[0]?.textContent).toContain("—");
@@ -296,6 +304,7 @@ describe("Telemetry, Throughput tab", () => {
     expect(rows[1]?.textContent).toContain("S");
     expect(rows[1]?.textContent).toContain("25 h");
     expect(rows[1]?.textContent).toContain("~$18.60");
+    expect(rows[2]?.textContent).toContain("shop#11");
     expect(panel("tTickets").textContent).not.toMatch(/not shown yet|not in the payload/);
     expect(document.getElementById("tMerged")).toBeNull();
   });

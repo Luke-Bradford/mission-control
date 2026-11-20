@@ -3,7 +3,6 @@ import {
   FLOW_DAYS,
   formatHours,
   NO_SIZE,
-  TELEMETRY_RANGES,
   TICKET_SIZES,
   type Telemetry,
 } from "@mc/core";
@@ -21,8 +20,8 @@ import { Cell, Stat, type StatSpec } from "./Stat.tsx";
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 /** The per-ticket series covers the longest range the server serves: its dots span this window. */
-export const TICKET_SERIES_RANGE = "14d" as const;
-const TICKET_DAYS = TELEMETRY_RANGES[TICKET_SERIES_RANGE] / (24 * 60);
+export const TICKET_SERIES_RANGE = "7d" as const;
+const TICKET_DAYS = FLOW_DAYS;
 const CHART_H = 140;
 const CHART_MIN_H = 120;
 const MS_PER_HOUR_FIGURE = HOUR_MS;
@@ -454,8 +453,6 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
           <p className="pnote">
             Each bar runs from p50 to p85; the mark is p50. The axis is 0 to {top} hours. p85 shows
             from {CYCLE_TIME_MIN_FOR_P85} tickets.
-            {t?.cycleTime.excluded > 0 &&
-              ` ${t.cycleTime.excluded} done tickets left out: no Ready entry.`}
           </p>
         </div>
       )}
