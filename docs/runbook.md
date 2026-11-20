@@ -452,6 +452,11 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   question. Reviews of an external PR are never held by the rounds check.
 - A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
   killed by an alarm; the hold bites at the next start, resume of a review, or restart.
+- The Audit page is one screen: a verdict, then "Do next" (one ranked row per cause, from
+  `GET /api/audit` and the open alarms here, built by `auditActions` in `packages/core`), "New
+  outside", "How we build", "Where findings land" and "What past recommendations achieved". Each row
+  shows a number now, a target that comes from an existing limit (or zero), and who decides. No
+  proposal is stored, so a row has no accept step or review date; the last panels say what is not collected.
 - `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged
   change and the share spent on building (developer runs); every open alarm; and, per check, its
   threshold, how often it fired in the week and how many of those later saw a merge. A cost is

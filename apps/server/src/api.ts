@@ -3950,7 +3950,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
         );
       });
-      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it for Do next and How we build)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;

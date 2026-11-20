@@ -1,4 +1,4 @@
-import { AUDIT_PR_OUTLIER_LINES, type AuditView, type ConfigView } from "@mc/core";
+import type { AuditView, ConfigView, WasteAlarm, WasteReport } from "@mc/core";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import "../src/hud.css";
@@ -8,9 +8,46 @@ import { stubFetch } from "./fetchStub.ts";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.UTC(2026, 9, 28, 12);
-const auditChangeWith = (text: string) => (_: string, element: Element | null) =>
-  element?.classList.contains("audit-change") === true &&
-  element.textContent?.includes(text) === true;
+
+const alarm = (id: number, check: WasteAlarm["check"], subject: string): WasteAlarm => ({
+  id,
+  check,
+  subject,
+  repoId: "mission-control",
+  ticket: subject,
+  seatId: "guido-cx",
+  runId: `run/${id}`,
+  level: 1,
+  evidence: `evidence for ${subject}`,
+  openedAt: NOW - HOUR,
+  closedAt: null,
+  resolvedAt: null,
+  basis: null,
+});
+const WASTE: WasteReport = {
+  at: NOW,
+  spend: ["day", "week"].map((window, i) => ({
+    window: window as "day" | "week",
+    since: NOW - (i + 1) * 24 * HOUR,
+    merged: 4,
+    costUsd: 20,
+    runs: 8,
+    runsWithCost: 8,
+    tokens: 1000,
+    perMergeUsd: i === 0 ? 5 : 6.5,
+    perMergeTokens: 250,
+    buildingShareUsd: i === 0 ? 0.5 : 0.62,
+    buildingShareTokens: 0.5,
+    vendors: [],
+  })),
+  alarms: [
+    alarm(1, "retry-loop", "mission-control#10"),
+    alarm(2, "retry-loop", "mission-control#11"),
+  ],
+  checks: [],
+  flight: [],
+  counts: null,
+};
 
 const AUDIT = {
   range: { since: NOW - 30 * 24 * HOUR, until: NOW },
@@ -106,7 +143,7 @@ const CONFIG = {
 
 beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(NOW);
-  stubFetch({ "/api/audit?range=30d": AUDIT, "/api/config": CONFIG });
+  stubFetch({ "/api/audit?range=30d": AUDIT, "/api/config": CONFIG, "/api/waste": WASTE });
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -117,17 +154,102 @@ it("shows loading until the initial range arrives", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: string) =>
-      input === "/api/config"
-        ? Promise.resolve(new Response(JSON.stringify(CONFIG), { status: 200 }))
-        : new Promise<Response>((done) => {
+      input === "/api/audit?range=30d"
+        ? new Promise<Response>((done) => {
             resolve = done;
-          }),
+          })
+        : Promise.resolve(
+            new Response(JSON.stringify(input === "/api/waste" ? WASTE : CONFIG), { status: 200 }),
+          ),
     ),
   );
   render(<Audit />);
   expect(screen.getByText("Loading audit…")).toBeTruthy();
   await act(async () => resolve(new Response(JSON.stringify(AUDIT), { status: 200 })));
-  expect(await screen.findByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
+  expect(await screen.findByRole("heading", { level: 2, name: "Do next" })).toBeTruthy();
+});
+
+it("leads with a one-sentence verdict, then ranked rows with a number now, a target and a decider", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  expect(screen.getByText(/changes to make in the last 30d\./)).toBeTruthy();
+  const rows = document.querySelectorAll("tr.rec");
+  expect(rows.length).toBeGreaterThanOrEqual(5);
+  const all = [...rows].map((r) => r.querySelector(".audit-rt")?.getAttribute("title"));
+  expect(new Set(all).size).toBe(all.length);
+  for (const r of rows) {
+    expect(r.querySelector(".meas .v")?.textContent).toMatch(/\d+ → \d+ /);
+    expect(r.querySelector(".dec b")?.textContent).toMatch(/^(FLIGHT|You)$/);
+  }
+  // Waste alarms are grouped into one row, ranked first.
+  expect(rows[0]?.textContent).toContain("Fix what makes a ticket fail again and again");
+  expect(rows[0]?.querySelector(".meas .v")?.textContent).toBe("2 → 0 alarms");
+});
+
+it("opens the first row, toggles rows, and filters by decider", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  const buttons = () =>
+    screen.getAllByRole("button").filter((b) => b.classList.contains("audit-rt"));
+  expect(buttons()[0]?.getAttribute("aria-expanded")).toBe("true");
+  expect(screen.getByText("What this does not show")).toBeTruthy();
+  fireEvent.click(buttons()[1] as HTMLElement);
+  expect(buttons()[0]?.getAttribute("aria-expanded")).toBe("false");
+  expect(buttons()[1]?.getAttribute("aria-expanded")).toBe("true");
+
+  fireEvent.click(
+    within(screen.getByRole("group", { name: "Decider" })).getByRole("button", { name: "You" }),
+  );
+  const you = document.querySelectorAll("tr.rec");
+  expect(you.length).toBeGreaterThan(0);
+  for (const r of you) expect(r.querySelector(".dec b")?.textContent).toBe("You");
+});
+
+it("links each row's detail to the seat and run, in words rather than raw ids", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  const link = screen.getAllByRole("link", { name: "mission-control#10" })[0];
+  expect(link?.getAttribute("href")).toBe("/agent/guido-cx?trace=run%2F1");
+  for (const a of screen.getAllByRole("link"))
+    expect(a.textContent, "no raw run id in link text").not.toMatch(/run\//);
+});
+
+it("fills the right-hand panels from the audit and the waste report", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  for (const name of [
+    "New outside",
+    "How we build",
+    "Where findings land",
+    "What past recommendations achieved",
+  ])
+    expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
+  expect(screen.getByText("~$5.00 day · ~$6.50 week")).toBeTruthy();
+  expect(screen.getByText("50% day · 62% week")).toBeTruthy();
+  expect(
+    screen.getByText(/Prompt change · before → after · inco-cx/).parentElement?.textContent,
+  ).toContain("merged 1 → 3 · review fail 50% → 0% · median cost ~$2.00 → ~$1.00 · rework 1 → 0");
+  expect(screen.getByText(/Nothing is collected from outside sources yet/)).toBeTruthy();
+  expect(screen.queryByRole("tab")).toBeNull();
+});
+
+it("leaves out stale, observed-loop and FLIGHT watch runs", async () => {
+  hub.clear();
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/waste": WASTE,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      longRunners: [
+        { ...AUDIT.longRunners[0], runId: "run/stale", actionable: false },
+        { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
+        { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
+      ],
+    } as AuditView,
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  expect(document.querySelector('[title^="Split the work that keeps one run open"]')).toBeNull();
 });
 
 it("fails closed while crew classification is loading or unavailable", async () => {
@@ -141,37 +263,27 @@ it("fails closed while crew classification is loading or unavailable", async () 
             resolveConfig = done;
           })
         : Promise.resolve(
-            new Response(
-              JSON.stringify({
-                ...AUDIT,
-                longRunners: [
-                  ...AUDIT.longRunners,
-                  { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
-                  { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
-                ],
-              }),
-              { status: 200 },
-            ),
+            new Response(JSON.stringify(input === "/api/waste" ? WASTE : AUDIT), { status: 200 }),
           ),
     ),
   );
   render(<Audit />);
-
   expect(await screen.findByText("Loading crew classification…")).toBeTruthy();
-  expect(screen.queryByText(/run\/(observed|watch)/)).toBeNull();
+  expect(document.querySelectorAll("tr.rec")).toHaveLength(0);
   await act(async () =>
     resolveConfig(new Response(JSON.stringify({ error: "config unavailable" }), { status: 500 })),
   );
   expect(
     await screen.findByText("Could not load crew classification: config unavailable"),
   ).toBeTruthy();
-  expect(screen.queryByText(/run\/(observed|watch)/)).toBeNull();
+  expect(document.querySelectorAll("tr.rec")).toHaveLength(0);
 });
 
-it("renders empty audit panels and an initial API failure", async () => {
+it("says plainly when there is nothing to do, and reports an API failure", async () => {
   hub.clear();
   stubFetch({
     "/api/config": CONFIG,
+    "/api/waste": { ...WASTE, alarms: [] },
     "/api/audit?range=30d": {
       range: { since: NOW - 30 * 24 * HOUR, until: NOW },
       longRunners: [],
@@ -192,9 +304,8 @@ it("renders empty audit panels and an initial API failure", async () => {
     } satisfies AuditView,
   });
   const empty = render(<Audit />);
-  await screen.findByText("Unanswered questions · 0");
-  expect(screen.getAllByText("No findings in this range.")).toHaveLength(3);
-  expect(screen.getAllByText("Not collected yet.")).toHaveLength(1);
+  expect(await screen.findByText("Nothing in the last 30d is past a limit.")).toBeTruthy();
+  expect(screen.getByText("No change is called for in this range.")).toBeTruthy();
   empty.unmount();
 
   hub.clear();
@@ -209,218 +320,25 @@ it("labels retained evidence as stale and reports a failed newly-selected range"
   hub.clear();
   stubFetch({
     "/api/audit?range=30d": AUDIT,
+    "/api/config": CONFIG,
+    "/api/waste": WASTE,
     "/api/audit?range=7d": () => ({ status: 500, body: { error: "audit unavailable" } }),
   });
   render(<Audit />);
-  await screen.findByText(auditChangeWith("Prompt change · before → after"));
-
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
   fireEvent.click(
     within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "7d" }),
   );
-  expect(await screen.findByText("Could not load audit: audit unavailable")).toBeTruthy();
-  expect(screen.getByText("Showing 30d data while 7d is unavailable.")).toBeTruthy();
+  expect(await screen.findByText(/Showing 30d data while 7d is unavailable\./)).toBeTruthy();
 });
 
-it("renders the audit panels, links each trace, and keeps the selected range shared", async () => {
+it("asks for the new range when it changes", async () => {
   render(<Audit />);
-
-  await screen.findByRole("heading", { level: 1, name: "Audit" });
-  for (const name of [
-    "Improvements to consider",
-    "PR size",
-    "Prompt & model changes",
-    "Things to check",
-    "SURGEON proposals",
-  ]) {
-    expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
-  }
-  expect(
-    screen
-      .getByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ })
-      .getAttribute("href"),
-  ).toBe("/agent/inco-cx?trace=run%2Falpha");
-  expect(screen.getByRole("link", { name: /PR #701/i }).getAttribute("href")).toBe(
-    "/board/mission-control",
-  );
-  expect(
-    screen.getByRole("link", { name: "Death loop · 4 parks · retro-cx" }).getAttribute("href"),
-  ).toBe("/agent/retro-cx?trace=run%2Fdeath");
-  expect(
-    screen.getByRole("link", { name: "Rework · 3 rounds · guido-cx" }).getAttribute("href"),
-  ).toBe("/agent/guido-cx?trace=run%2Frework");
-  expect(
-    screen
-      .getByRole("link", {
-        name: "Guard refusal · Full test suites only through Mission Control (one at a time) · 8 · inco-cx",
-      })
-      .getAttribute("href"),
-  ).toBe("/agent/inco-cx?trace=run%2Falpha");
-  expect(
-    screen
-      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · guido-cx" })
-      .getAttribute("href"),
-  ).toBe("/agent/guido-cx?trace=run%2Fexpensive");
-  for (const link of screen.getAllByRole("link"))
-    expect(link.textContent, "no raw run id or rule key in link text").not.toMatch(
-      /run\/|full-suite/,
-    );
-  expect(screen.getByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
-  expect(
-    screen.getByText(
-      auditChangeWith(
-        "effect · merged 1 → 3 · review fail 50% → 0% · median cost ~$2.00 → ~$1.00 · rework 1 → 0",
-      ),
-    ),
-  ).toBeTruthy();
-  expect(screen.getByText(auditChangeWith("Model change · gpt-5.6 → gpt-6"))).toBeTruthy();
-  expect(
-    screen.getByText(
-      auditChangeWith(
-        "effect · merged 4 → 2 · review fail 25% → — · median cost ~$4.00 → — · rework 2 → 5",
-      ),
-    ),
-  ).toBeTruthy();
-  expect(screen.getByText("Unanswered questions · 2")).toBeTruthy();
-  expect(
-    screen.getByText("Chatter · inco-cx ↔ retro-cx · mission-control#862 · 12 rounds"),
-  ).toBeTruthy();
-  expect(screen.getByText("Flake · web:unit/Audit · 3")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Guard refusal spike · 12" }).getAttribute("href")).toBe(
-    "/agent/retro-cx",
-  );
-  expect(
-    screen.getByText(
-      "Guard refusal spike · Full test suites only through Mission Control (one at a time) · 8",
-    ),
-  ).toBeTruthy();
-
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
   fireEvent.click(
     within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "7d" }),
   );
   await vi.waitFor(() =>
     expect(fetch).toHaveBeenCalledWith("/api/audit?range=7d", expect.anything()),
   );
-});
-
-it("scales PR bars, applies the fixed outlier threshold, and names repos across the range", async () => {
-  hub.clear();
-  stubFetch({
-    "/api/config": CONFIG,
-    "/api/audit?range=30d": {
-      ...AUDIT,
-      prSizes: {
-        prs: [
-          {
-            ...AUDIT.prSizes.prs[0],
-            repoId: "small-repo",
-            number: 1,
-            additions: 665_702,
-            deletions: 0,
-          },
-          {
-            ...AUDIT.prSizes.prs[1],
-            repoId: "other-repo",
-            number: 2,
-            additions: 2_833,
-            deletions: 0,
-          },
-          {
-            ...AUDIT.prSizes.prs[0],
-            repoId: "small-repo",
-            number: 3,
-            additions: 799,
-            deletions: 0,
-          },
-        ],
-        // The client must not label a below-threshold row merely because a stale payload says so.
-        outliers: [
-          {
-            ...AUDIT.prSizes.prs[0],
-            repoId: "small-repo",
-            number: 1,
-            additions: 665_702,
-            deletions: 0,
-          },
-          {
-            ...AUDIT.prSizes.prs[1],
-            repoId: "other-repo",
-            number: 2,
-            additions: 2_833,
-            deletions: 0,
-          },
-          {
-            ...AUDIT.prSizes.prs[0],
-            repoId: "small-repo",
-            number: 3,
-            additions: 799,
-            deletions: 0,
-          },
-        ],
-      },
-    } satisfies AuditView,
-  });
-  const { container } = render(<Audit />);
-
-  await screen.findByText(
-    `Log scale · ${AUDIT_PR_OUTLIER_LINES.toLocaleString()}+ changed lines are outliers.`,
-  );
-  const bars = container.querySelectorAll<HTMLElement>(".audit-bar");
-  const [widestBar, smallerBar] = bars;
-  if (!widestBar || !smallerBar) throw new Error("expected two PR size bars");
-  const widest = window.getComputedStyle(widestBar).width;
-  const smaller = window.getComputedStyle(smallerBar).width;
-  expect(widest).toBe("100%");
-  expect(Number.parseFloat(smaller)).toBeCloseTo(
-    (Math.log1p(2_833) / Math.log1p(665_702)) * 100,
-    8,
-  );
-  expect(screen.getByText(/665,702 lines · outlier/)).toBeTruthy();
-  expect(screen.getByText(/2,833 lines · outlier/)).toBeTruthy();
-  expect(
-    [...container.querySelectorAll(".audit-size")].find((row) =>
-      row.textContent?.includes("799 lines"),
-    )?.textContent,
-  ).not.toContain("outlier");
-  expect(screen.getByText("small-repo · PR #1")).toBeTruthy();
-  expect(screen.getByText("other-repo · PR #2")).toBeTruthy();
-});
-
-it("does not present stale, observed-loop, or FLIGHT watch runs as improvements", async () => {
-  hub.clear();
-  stubFetch({
-    "/api/config": CONFIG,
-    "/api/audit?range=30d": {
-      ...AUDIT,
-      longRunners: [
-        ...AUDIT.longRunners,
-        { ...AUDIT.longRunners[0], runId: "run/stale", actionable: false },
-        { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
-        { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
-      ],
-    } as AuditView,
-  });
-  render(<Audit />);
-
-  await screen.findByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ });
-  expect(screen.queryByText(/run\/stale/)).toBeNull();
-  expect(screen.queryByText(/run\/observed/)).toBeNull();
-  expect(screen.queryByText(/run\/watch/)).toBeNull();
-});
-
-it("sizes a one-line PR as 1 line", async () => {
-  hub.clear();
-  stubFetch({
-    "/api/config": CONFIG,
-    "/api/audit?range=30d": {
-      ...AUDIT,
-      prSizes: {
-        prs: [
-          { ...AUDIT.prSizes.prs[0], repoId: "small-repo", number: 4, additions: 1, deletions: 0 },
-        ],
-        outliers: [],
-      },
-    } satisfies AuditView,
-  });
-  render(<Audit />);
-  expect(await screen.findByText(/^1 line$/)).toBeTruthy();
 });
