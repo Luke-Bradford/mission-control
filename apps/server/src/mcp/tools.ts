@@ -2611,13 +2611,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         reported !== null &&
         reported.id === currentLoop.reportedEvidenceId;
       const ciRuling = currentLoop.phase === "working" && note.startsWith(EVIDENCE_RULING_PREFIX);
+      const hold = currentLoop.mergeHold;
+      if (!ciRuling && hold?.by === "FLIGHT" && hold.sha !== undefined) {
+        const head = (await git(live.worktree, ["rev-parse", "HEAD"], common, { gitDir })).trim();
+        if (head === hold.sha) return { text: evidenceFlightHoldText(hold.reason), isError: true };
+      }
       if (!fresh && !reviewReply && !refusedRetry && !ciRuling) {
-        const hold = currentLoop.mergeHold;
-        if (hold?.by === "FLIGHT" && hold.sha !== undefined) {
-          const head = (await git(live.worktree, ["rev-parse", "HEAD"], common, { gitDir })).trim();
-          if (head === hold.sha)
-            return { text: evidenceFlightHoldText(hold.reason), isError: true };
-        }
         return { text: EVIDENCE_NO_COMMIT, isError: true };
       }
 

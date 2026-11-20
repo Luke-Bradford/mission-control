@@ -4897,6 +4897,14 @@ describe("report_evidence", () => {
       updatedAt: clock,
     });
     const nextCtx: McToolContext = { seatId: "guido-2", runId: nextRun };
+    for (const commit of store.commitsOnBranch("mc", BRANCH))
+      store.addRunCommit({
+        runId: nextRun,
+        repoId: "mc",
+        branch: BRANCH,
+        sha: commit.sha,
+        at: commit.at,
+      });
 
     const result = await report("The existing head is ready to send again.", nextCtx);
 
