@@ -446,7 +446,9 @@ const ReportedTestArgs = z.strictObject({
   passed: z.int().min(0),
   failed: z.int().min(0),
   skipped: z.int().min(0),
-  duration: z.int().min(0),
+  // Reviewers copy the runner's figure ("12.4s"); a whole-number rule refused the report and
+  // cost a whole review run each time, so a decimal is accepted as it is.
+  duration: z.number().min(0).max(Number.MAX_SAFE_INTEGER),
   at: z.int().min(0).max(8_640_000_000_000_000).optional(),
   exitCode: z.int().min(-255).max(65535).nullable().optional(),
   evidence: text(12000).optional(),
@@ -521,7 +523,7 @@ const ReportedTestSchema = {
     passed: { type: "integer", minimum: 0 },
     failed: { type: "integer", minimum: 0 },
     skipped: { type: "integer", minimum: 0 },
-    duration: { type: "integer", minimum: 0 },
+    duration: { type: "number", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
     at: { type: "integer", minimum: 0 },
     exitCode: { type: ["integer", "null"], minimum: -255, maximum: 65535 },
     evidence: { type: "string", minLength: 1, maxLength: 12000 },
