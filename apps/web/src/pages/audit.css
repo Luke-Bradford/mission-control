@@ -23,8 +23,8 @@
   margin: 0;
   flex: 1;
   min-width: 0;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--fs-panel);
+  line-height: var(--lh-panel);
   color: var(--fg-2);
 }
 
@@ -145,7 +145,7 @@
 }
 
 .audit-table .rec > td {
-  padding-block: 6px;
+  padding-block: var(--sp-1);
 }
 
 .rec .n {
@@ -187,7 +187,7 @@
 }
 
 .audit-why {
-  padding-left: 14px;
+  padding-left: var(--sp-4);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   color: var(--fg-2);
@@ -246,8 +246,8 @@
 }
 
 .audit-table .more > td {
-  padding-block: 0 10px;
-  padding-left: calc(var(--sp-4) + 32px);
+  padding-block: 0 var(--sp-3);
+  padding-left: calc(var(--sp-4) + var(--sp-6));
 }
 
 .audit-mg {
@@ -257,7 +257,7 @@
 }
 
 .audit-mg h3 {
-  margin: 0 0 2px;
+  margin: 0 0 var(--sp-1);
   font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
 }
