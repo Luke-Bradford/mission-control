@@ -10,7 +10,7 @@ import {
   spread,
   Tip,
   useChartCursor,
-  useChartWidth,
+  useChartSize,
   useGradientId,
   XAxis,
 } from "./Hover.tsx";
@@ -44,9 +44,12 @@ export function LineChart({
   label,
   xLabels,
   at,
-  height = 170,
+  height: minHeight = 170,
+  fill = false,
   live = false,
   format = percent,
+  xAxis = true,
+  stack = false,
 }: {
   series: LineSeries[];
   bands?: { from: number; to: number; label: string }[];
@@ -65,12 +68,19 @@ export function LineChart({
   /** The tooltip heading for a sample time. */
   at: (ms: number) => string;
   height?: number;
+  /** Take the height the panel gives the chart (never under `height`), instead of `height` itself. */
+  fill?: boolean;
   /** `to` is now and moving: the cursor pulses. */
   live?: boolean;
   /** Value formatter for axes, readouts and the accessible summary. */
   format?: (value: number) => string;
+  /** False leaves out the time labels, for a chart that shares the axis of the one below it. */
+  xAxis?: boolean;
+  /** Each series is drawn on top of the ones before it, so the top line is their sum; readouts stay each series' own. */
+  stack?: boolean;
 }) {
-  const [ref, w] = useChartWidth(560);
+  const [ref, w, measured] = useChartSize(560, minHeight);
+  const height = fill ? Math.max(minHeight, measured) : minHeight;
   const gid = useGradientId();
   const [localHover, setLocalHover] = useState<number | null>(null);
   const cursor = useChartCursor();
@@ -83,7 +93,7 @@ export function LineChart({
   const x0 = PAD.l;
   const x1 = w - PAD.r;
   const yTop = PAD.t;
-  const yBottom = height - PAD.b;
+  const yBottom = height - (xAxis ? PAD.b : PAD.t);
   const X = (t: number): number => x0 + ((t - from) / span) * (x1 - x0);
   const Y = (v: number): number => yTop + (1 - Math.min(v, max) / max) * (yBottom - yTop);
 
@@ -94,6 +104,20 @@ export function LineChart({
       (best, p) => (best === undefined || Math.abs(p.at - t) < Math.abs(best.at - t) ? p : best),
       undefined,
     );
+
+  // Where each series is drawn: its own values, or its values added to the series under it.
+  const drawn: LineSeries[] = stack
+    ? series.map((s, i) => ({
+        ...s,
+        points: s.points.map((p, j) => ({
+          at: p.at,
+          v:
+            p.v === null
+              ? null
+              : p.v + series.slice(0, i).reduce((sum, lower) => sum + (lower.points[j]?.v ?? 0), 0),
+        })),
+      }))
+    : series;
 
   const path = (s: LineSeries): string => {
     let d = "";
@@ -175,6 +199,7 @@ export function LineChart({
       <svg
         viewBox={`0 0 ${w} ${height}`}
         width="100%"
+        height={fill ? height : undefined}
         preserveAspectRatio="xMinYMin meet"
         role="img"
         aria-label={aria}
@@ -259,7 +284,7 @@ export function LineChart({
             />
           ))}
         </defs>
-        {series.map((s, i) => (
+        {drawn.map((s, i) => (
           <g key={s.id}>
             {areas(s).map((d) => (
               <path key={d} className="area" d={d} fill={`url(#${gid}-${i})`} />
@@ -286,14 +311,18 @@ export function LineChart({
             ))}
           </g>
         ))}
-        <XAxis y={yBottom} x0={x0} x1={x1} at={spread(x0, x1, 4)} />
+        {xAxis && <XAxis y={yBottom} x0={x0} x1={x1} at={spread(x0, x1, 4)} />}
         <NowCursor x={x1} y1={yTop} y2={yBottom} live={live} />
-        <text className="ct" x={x0} y={height - 3} textAnchor="start">
-          {xLabels[0]}
-        </text>
-        <text className="ct now" x={x1} y={height - 3} textAnchor="end">
-          {xLabels[1]}
-        </text>
+        {xAxis && (
+          <>
+            <text className="ct" x={x0} y={height - 3} textAnchor="start">
+              {xLabels[0]}
+            </text>
+            <text className="ct now" x={x1} y={height - 3} textAnchor="end">
+              {xLabels[1]}
+            </text>
+          </>
+        )}
         {hover !== null && (
           <line
             className="xhair"
