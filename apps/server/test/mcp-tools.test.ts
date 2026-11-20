@@ -4866,7 +4866,9 @@ describe("report_evidence", () => {
     const result = await report("The existing head is ready to send again.");
 
     expect(result.isError).toBe(true);
-    expect(result.text).toContain("Add a regression test for the handoff before re-pushing this head.");
+    expect(result.text).toContain(
+      "Add a regression test for the handoff before re-pushing this head.",
+    );
     expect(store.evidenceCount(RUN)).toBe(1);
     expect(store.runPush(RUN)?.sha).toBe(sha);
   });
