@@ -200,6 +200,6 @@ export function qaReviewQueueFixture() {
 export function qaQuietReviewFixture() {
   const fixture = qaReviewQueueFixture();
   const path = `/api/qa/uat/mission-control/1011?head=${SHA}`;
-  fixture[path] = { ...fixture[path], files: ["apps/server/src/api.ts"] };
+  Object.assign(fixture[path], { files: ["apps/server/src/api.ts"] });
   return fixture;
 }
