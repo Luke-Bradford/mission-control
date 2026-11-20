@@ -15,6 +15,7 @@ import {
   type CardRework,
   cardAgent,
   cardColumn,
+  cardIdle,
   cardNeeds,
   cardPr,
   cardQueue,
@@ -77,6 +78,7 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
   const agent = waits ? null : cardAgent(item, ctx.crew);
   const pr = cardPr(item, prs);
   const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
+  const reviewer = col === "Done" || waits ? null : cardReviewer(item, pr, ctx.crew);
   const check = pr?.check ? flowChip(pr.check, ctx.flow.get(flowKey(pr.repoId, pr.number))) : null;
   const facts = ctx.rework.get(ticketRef(item));
   return {
@@ -85,8 +87,9 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
     agent,
     step: agent ? cardStep(agent) : null,
     queued: agent ? null : cardQueue(item, ctx.crew),
-    reviewer: col === "Done" || waits ? null : cardReviewer(item, pr, ctx.crew),
+    reviewer,
     pr,
+    idle: cardIdle(item, col, pr, agent !== null, reviewer !== null, ctx.tz),
     checkLabel: check?.label ?? null,
     checkTone: check?.tone ?? null,
     checkingSeat: pr?.check?.kind === "checking" ? pr.check.seat : undefined,

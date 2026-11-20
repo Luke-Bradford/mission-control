@@ -104,6 +104,8 @@ export interface CardProps {
   checkingSeat?: string;
   checkingSince?: number;
   checkReason?: string | null;
+  /** Why nothing is working on it (`cardIdle`); null while something is. */
+  idle?: string | null;
   /** Something on this card waits on you. */
   mine: boolean;
   unacked: boolean;
@@ -140,6 +142,7 @@ export const Card = memo(function Card({
   queued,
   reviewer,
   pr,
+  idle = null,
   checkLabel,
   checkTone,
   checkingSeat,
@@ -222,13 +225,20 @@ export const Card = memo(function Card({
       ) : (
         // the review-state pill says who is checking or what the PR waits on; without one, the line does
         col === "In review" &&
-        !checkLabel && (
+        !checkLabel &&
+        !idle && (
           <span key="rev" className="xs muted">
             {NO_REVIEWER}
           </span>
         )
       )),
+    col !== "Done" && idle && (
+      <span key="idle" className="xs muted">
+        {idle}
+      </span>
+    ),
     col !== "Done" &&
+      !idle &&
       (pr ? (
         <PrLine
           key="pr"

@@ -12,6 +12,7 @@ import { needsYouItems } from "../src/attention.ts";
 import {
   cardAgent,
   cardColumn,
+  cardIdle,
   cardNeeds,
   cardPr,
   cardQueue,
@@ -32,7 +33,7 @@ import {
   ticketRef,
   waitingText,
 } from "../src/board/cards.ts";
-import { boardItem, crewRow, HOUR, item, itemWithoutOwner, NOW } from "./fixtures.ts";
+import { boardItem, crewRow, HOUR, item, itemWithoutOwner, NOW, prView } from "./fixtures.ts";
 
 const DAY = 86_400_000;
 const RUN = crewRow().run as NonNullable<CrewRow["run"]>;
@@ -455,6 +456,43 @@ describe("reworkLabel", () => {
     );
     expect(reworkLabel(facts, { ready: true, onTicket: false, pr: null })).toBe(
       "Reviewed · 1 blocker",
+    );
+  });
+});
+
+describe("cardIdle", () => {
+  const DAY_MS = 86_400_000;
+  const at = Date.UTC(2026, 9, 15, 12, 0);
+  const at2 = (status: string) => boardItem({ status, updatedAt: at });
+  const idle = (
+    col: Parameters<typeof cardIdle>[1],
+    pr: PullRequestView | null,
+    over: { agent?: boolean; reviewer?: boolean } = {},
+  ) => cardIdle(at2(col), col, pr, over.agent ?? false, over.reviewer ?? false, "UTC");
+
+  it("an In progress or In review card with no run and no PR says nobody is on it", () => {
+    expect(idle("In progress", null)).toBe("Nobody on it since 15 Oct");
+    expect(idle("In review", null)).toBe("Nobody on it since 15 Oct");
+  });
+
+  it("a card whose last PR is closed says so with its date, in any open column", () => {
+    const closed = prView({ state: "closed", updatedAt: at + DAY_MS });
+    expect(idle("Blocked", closed)).toBe("PR closed 16 Oct, nothing open");
+    expect(idle("In progress", closed)).toBe("PR closed 16 Oct, nothing open");
+  });
+
+  it("says nothing when a run, a reviewer or an open PR is on the card, or it is not started", () => {
+    expect(idle("In progress", null, { agent: true })).toBeNull();
+    expect(idle("In review", null, { reviewer: true })).toBeNull();
+    expect(idle("In progress", prView())).toBeNull();
+    expect(idle("In review", prView({ state: "merged" }))).toBeNull();
+    expect(idle("Ready", null)).toBeNull();
+    expect(idle("Done", prView({ state: "closed" }))).toBeNull();
+  });
+
+  it("drops the date, not the line, while the timezone is unknown", () => {
+    expect(cardIdle(at2("In progress"), "In progress", null, false, false, null)).toBe(
+      "Nobody on it",
     );
   });
 });

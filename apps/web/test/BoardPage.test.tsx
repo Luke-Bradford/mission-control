@@ -765,8 +765,9 @@ describe("cards", () => {
     const one = card(container, "shop-app#1") as HTMLElement;
     const two = card(container, "shop-app#2") as HTMLElement;
     expect(within(one).getByText("Unassigned · FLIGHT will offer it to an agent")).toBeTruthy();
-    expect(within(two).getByText("No reviewer on it now")).toBeTruthy();
-    expect(within(two).getByText(NO_PR_YET)).toBeTruthy();
+    expect(within(two).getByText(/^Nobody on it/)).toBeTruthy();
+    expect(within(two).queryByText("No reviewer on it now")).toBeNull();
+    expect(within(two).queryByText(NO_PR_YET)).toBeNull();
     expect(one.textContent).not.toContain("—");
     expect(two.textContent).not.toContain("—");
   });
@@ -836,14 +837,15 @@ describe("cards", () => {
     expect(c.textContent).not.toMatch(/CI /);
   });
 
-  it("a closed, unmerged PR keeps its Closed pill", async () => {
+  it("a closed, unmerged PR says it closed and nothing is open, with no Closed pill", async () => {
     stub({
       shopApp: [todo(3349, { status: "In review", state: "review" })],
       prs: [pr({ state: "closed" })],
     });
     await open();
     const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
-    expect(within(c).getByText("Closed").className).toBe("pill plain");
+    expect(within(c).getByText(/^PR closed .+, nothing open$/)).toBeTruthy();
+    expect(within(c).queryByText("Closed")).toBeNull();
   });
 
   it("the card shows the code PR, not the spec PR on the same ticket", async () => {

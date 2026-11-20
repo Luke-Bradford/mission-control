@@ -17,7 +17,7 @@ import {
 } from "@mc/core";
 import { type NeedsYou, sortNeeds, youAction } from "../attention.ts";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
-import { plural } from "../fmt.ts";
+import { dayMonth, plural } from "../fmt.ts";
 
 const DAY = 86_400_000;
 
@@ -157,6 +157,28 @@ export function cardColumn(item: BoardItem): BoardColumn {
   const col = hudColumnOf(item);
   if (item.waiting && col !== "Done") return WAITING_COLUMN;
   return NOT_STARTED.includes(col) && firstBlocker(item) !== null ? "Blocked" : col;
+}
+
+/**
+ * The one line that says why a card nothing is working on is where it is: its last PR was closed
+ * with nothing open, or nobody has it in a column that expects work. Null while a run or a
+ * reviewer is on it, an open or merged PR carries it, or it is not started. `pr` is `cardPr`'s
+ * pick, so a closed one means no open PR. The PR has no closed date of its own: its last update is it.
+ */
+export function cardIdle(
+  item: Pick<BoardItem, "updatedAt">,
+  col: BoardColumn,
+  pr: PullRequestView | null,
+  hasAgent: boolean,
+  hasReviewer: boolean,
+  tz: string | null,
+): string | null {
+  if (col === "Done" || col === WAITING_COLUMN || hasAgent || hasReviewer) return null;
+  const on = (ms: number) => (tz === null ? "" : ` ${dayMonth(ms, tz)}`);
+  if (pr?.state === "closed") return `PR closed${on(pr.updatedAt)}, nothing open`;
+  if (pr === null && (col === "In progress" || col === "In review"))
+    return tz === null ? "Nobody on it" : `Nobody on it since${on(item.updatedAt)}`;
+  return null;
 }
 
 const HOUR = 3_600_000;
