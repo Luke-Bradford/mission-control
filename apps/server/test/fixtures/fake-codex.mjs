@@ -117,7 +117,7 @@ rl.on("line", (line) => {
       approvalPolicy: "untrusted",
       approvalsReviewer: "user",
       activePermissionProfile: { id: "mc_seat" },
-      sandbox: { type: "workspaceWrite", networkAccess: false },
+      sandbox: { type: "workspaceWrite", networkAccess: true },
       instructionSources: [],
     };
     if (params.sandbox === "danger-full-access") result.sandbox = { type: "dangerFullAccess" };
@@ -129,7 +129,7 @@ rl.on("line", (line) => {
     if (bad === "approvalPolicy") result.approvalPolicy = "never";
     if (bad === "approvalsReviewer") result.approvalsReviewer = "guardian_subagent";
     if (bad === "activePermissionProfile") result.activePermissionProfile.id = "other";
-    if (bad === "networkAccess") result.sandbox.networkAccess = true;
+    if (bad === "networkAccess") result.sandbox.networkAccess = false;
     if (bad === "instructionSources") result.instructionSources = ["AGENTS.md"];
     const badField =
       handshakes > 1 ? (configured.badReattachField ?? configured.badField) : configured.badField;

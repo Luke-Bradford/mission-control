@@ -15,6 +15,7 @@ import {
   codexLineCommands,
   PNPM_STORE_ENV,
   SANDBOX_DENY_READ_HOME,
+  SEAT_DENIED_HOSTS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
@@ -169,7 +170,11 @@ describe("codexSeatConfig", () => {
     expect(config).toContain(
       '[permissions.mc_seat.filesystem.":workspace_roots"]\n"."="write"\n".git"="read"\n".codex"="read"',
     );
-    expect(config).toContain("[permissions.mc_seat.network]\nenabled = false");
+    expect(config).toContain("[permissions.mc_seat.network]\nenabled = true");
+    // the internet is open, this Mac's own services (the hub on loopback) are not
+    expect(config).toContain('[permissions.mc_seat.network.domains]\n"*" = "allow"');
+    for (const host of SEAT_DENIED_HOSTS) expect(config).toContain(`"${host}" = "deny"`);
+    expect(SEAT_DENIED_HOSTS).toContain("127.0.0.0/8");
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
   });
 
@@ -505,6 +510,13 @@ describe("Codex seat floor", () => {
     "pwd |& head",
   ])("refuses unfinished commands and every redirection: %j", (script) => {
     expect(codexLineCommands(script)).toBeNull();
+  });
+
+  it("accepts a command line that starts a background task", () => {
+    expect(codexLineCommands("sleep 30 &")).toEqual([
+      expect.objectContaining({ argv: ["sleep", "30"] }),
+    ]);
+    expect(codexLineCommands("node server.js & curl -sI https://example.com")).not.toBeNull();
   });
 
   it("passes the whole script on when the CLI's amendment names one segment", () => {

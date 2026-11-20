@@ -958,7 +958,7 @@ export type InstallRunner = (
   },
 ) => Promise<unknown>;
 
-/** The sandbox has no network, so dependencies are installed here, without running package code. */
+/** Dependencies are installed here by the hub, without running package code, so a seat never runs an install script. */
 async function install(
   tool: InstallTool,
   path: string,

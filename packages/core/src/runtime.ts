@@ -498,8 +498,8 @@ export const FLIGHT_FULL_BUILTINS = [
 ] as const;
 
 /**
- * No git writes, no GitHub writes and no network from a crew process: commits, pushes and PRs go
- * through the mc tools. `git add` and `git commit` could only fail in the sandbox now; denying
+ * No git writes and no GitHub writes from a crew process: commits, pushes and PRs go
+ * through the mc tools. Network is open (curl and wget work in Bash); the CLI's own web tools stay off. `git add` and `git commit` could only fail in the sandbox now; denying
  * them by name says so before they run.
  */
 export const DENIED_TOOLS = [
@@ -513,8 +513,6 @@ export const DENIED_TOOLS = [
   "Bash(git diff --output*)",
   "Bash(git log --output*)",
   "Bash(git show --output*)",
-  "Bash(curl:*)",
-  "Bash(wget:*)",
   // typed calls only; code a seat writes and runs is kept off the login keychain file by the
   // sandbox's denyRead on Library/Keychains
   "Bash(security:*)",
@@ -859,10 +857,9 @@ export const SEAT_SANDBOX_ENV = "MC_SEAT_SANDBOX";
  * Env every crew process gets:
  * - Bash returns to the worktree after each command, so a `cd` never moves the working directory
  *   the rules and `--restricted` resolve against (#41);
- * - no background Bash: otherwise a Bash timeout moves the command to the background and fires a
- *   successful PostToolUse while it keeps running, which would free the test lock early, and
- *   `run_in_background` returns at once (spike 2026-10-21). With it off, a timeout kills the
- *   command and `run_in_background` is refused before any hook;
+ * - background Bash is allowed (`run_in_background`, a timeout that moves a command to the
+ *   background). Such a call fires its PostToolUse at once, so a suite started that way holds the
+ *   test lock only until it starts;
  * - subprocess credential scrub: Claude removes recognized credentials from Bash, hooks and
  *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls. It
  *   also forces the permission mode to `default`, so a seat's tools must be listed with
@@ -876,7 +873,6 @@ export const CREW_CLI_ENV = {
   [SEAT_SANDBOX_ENV]: "1",
   BASH_MAX_TIMEOUT_MS: String(CHECK_BASH_TIMEOUT_MS),
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
-  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
   DISABLE_AUTOUPDATER: "1",
 } as const;
@@ -1141,9 +1137,22 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
 }
 
 /**
+ * What a seat's network may not reach: the hub and every other service on this Mac's loopback, and
+ * the link-local range (cloud metadata). The hub's own routes trust loopback callers more than the
+ * open internet, so opening the network does not open these.
+ */
+export const SEAT_DENIED_HOSTS = [
+  "localhost",
+  "127.0.0.0/8",
+  "::1",
+  "0.0.0.0",
+  "169.254.0.0/16",
+] as const;
+
+/**
  * The `--settings` JSON for a seat: the guard hook, and the sandbox around every Bash it runs. The
  * sandbox writes only inside the working directory (a writer's) and temp dirs, never the clone's
- * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
+ * or the worktree's git dir; the network is open, and no escape hatch. `failIfUnavailable` stops the seat
  * rather than run unsandboxed.
  */
 export function crewSandboxSettings(
@@ -1175,7 +1184,8 @@ export function crewSandboxSettings(
       allowUnsandboxedCommands: false,
       // Defaults to true: every Bash not explicitly denied would be allowed, bypassing the allowlist.
       autoAllowBashIfSandboxed: false,
-      network: { allowedDomains: [] },
+      // a bare "*" matches every host: seats may reach the network
+      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
       filesystem: {
         // Nothing under a git dir. When the cwd is a linked worktree the CLI itself opens most of
         // the clone's git dir to sandboxed Bash; an explicit denyWrite on the whole

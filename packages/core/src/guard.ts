@@ -131,9 +131,6 @@ export const DEFAULT_CREW_NODE = "/opt/homebrew/bin/node";
 /** What a seat is told to run instead of a full suite. */
 export const FREE_SUITE_HINT = "the same command with a test file path";
 
-export const BACKGROUND_SUITE_TEXT =
-  "Run the full suite in the foreground: it holds the test lock.";
-
 /**
  * The largest CLI hook `timeout` the spike saw honoured: 660 s waited, no cap found
  * (docs/spikes/2026-10-21-mc-tools-guard.md, "Largest hook timeout").
@@ -300,7 +297,7 @@ const SHELL_KEYWORDS = new Set([
 const BACKGROUND_WRAPPERS = new Set(["coproc", "setsid"]);
 /**
  * Programs that hand a command to something else to run later or elsewhere: a full suite named in
- * one would load the Mac outside the test lock, so it is refused like a backgrounded one. `ssh` counts
+ * one still takes the test lock (it waits for its turn to start). `ssh` counts
  * only with `-f` (go to background); `at` and `batch` read the command from stdin.
  */
 const LAUNCHERS = new Set([
@@ -317,21 +314,24 @@ const LAUNCHERS = new Set([
 const STDIN_LAUNCHERS = new Set(["at", "batch", "crontab", "osascript"]);
 /** The related-tests check runs the suite as a child process, so it counts as a full suite here. */
 const RELATED_SUITE = /\btest:related\b|check-related\.ts/;
-function launchesSuite(
+/** The full-suite command a launcher hands on, or null when it is not a launcher or names none. */
+function launchedSuite(
   argv: readonly string[],
   command: string,
   fullSuite: readonly string[],
-): boolean {
+): string | null {
   const [program, ...args] = argv;
-  if (program === undefined) return false;
+  if (program === undefined) return null;
   const launcher =
     LAUNCHERS.has(program) || (program === "ssh" && args.some((a) => /^-[A-Za-z]*f/.test(a)));
-  if (!launcher) return false;
+  if (!launcher) return null;
   // these also read what to run from stdin (`printf ... | crontab -`, `osascript` fed a script), so
   // the whole line is searched; `crontab -l` and `-r` only show or clear the table
-  if (program === "crontab" && args.some((a) => /^-[A-Za-z]*[lr]/.test(a))) return false;
+  if (program === "crontab" && args.some((a) => /^-[A-Za-z]*[lr]/.test(a))) return null;
   const text = STDIN_LAUNCHERS.has(program) ? command : argv.join(" ");
-  return RELATED_SUITE.test(text) || fullSuite.some((entry) => text.includes(entry.trim()));
+  return (
+    fullSuite.find((entry) => text.includes(entry.trim())) ?? RELATED_SUITE.exec(text)?.[0] ?? null
+  );
 }
 /** Terminal multiplexers: any command they are given runs detached, in the background. */
 const MULTIPLEXERS = new Set(["screen", "tmux"]);
@@ -1077,13 +1077,12 @@ class Reader {
         if (this.walk.codex) {
           endWord();
           if (c !== "\n" && cur.argv.length === 0) throw new Unreadable();
-          if ((c === "&" && next !== "&") || (c === "|" && next === "&")) throw new Unreadable();
+          if (c === "|" && next === "&") throw new Unreadable();
           pipe = c === "|" && next !== "|";
           endSegment();
-          if (c === "|" || c === "&") {
-            needsCommand = true;
-            if (next === c) i++;
-          }
+          // a lone `&` starts a background task and needs no command after it
+          if (c === "|" || (c === "&" && next === "&")) needsCommand = true;
+          if ((c === "|" || c === "&") && next === c) i++;
           continue;
         }
         const top = closers[closers.length - 1];
@@ -1558,13 +1557,12 @@ function lineCommands(cmd: string, walk: Walk): Cmd[] {
   }
 }
 
-/** The Codex walk preserves exact argv and refuses empty or background command lines. */
+/** The Codex walk preserves exact argv and refuses empty command lines. */
 export function codexLineCommands(script: string): Cmd[] | null {
   const walk = newWalk();
   walk.codex = true;
   const parsed = lineCommands(script, walk);
-  return walk.lineBackground ||
-    parsed.length === 0 ||
+  return parsed.length === 0 ||
     parsed.some(({ argv }) => argv[0] === UNREADABLE_LINE || argv[0] === TOO_LONG)
     ? null
     : parsed;
@@ -2275,9 +2273,6 @@ export function guardDecision(
   }
   if (e.tool !== "Bash") return { kind: "allow" };
   let lock: string | null = null;
-  let backgroundSuite = false;
-  let launchedSuite = false;
-  const backgroundCommand = e.input.run_in_background === true;
   let gitEnvDenied = false;
   let githubDenied: string | null = null;
   const walk = newWalk();
@@ -2286,7 +2281,6 @@ export function guardDecision(
   let expandedCwd = false;
   for (const {
     argv,
-    background,
     braces,
     indirectGit,
     directories: wrapperDirectories = [],
@@ -2427,21 +2421,15 @@ export function guardDecision(
     } else if (program === "gh") {
       githubDenied ??= ghText(args);
     }
-    if (launchesSuite(argv, e.input.command ?? "", ctx.fullSuite)) launchedSuite = true;
+    // a suite handed to a launcher, started in the background or in a multiplexer still takes the lock
     const suite =
+      launchedSuite(argv, e.input.command ?? "", ctx.fullSuite) ??
       matchedSuite(argv, ctx.fullSuite) ??
       (braces === true ? suiteOfProgram(program, ctx.fullSuite) : null);
-    if (suite !== null) {
-      if (backgroundCommand || background) backgroundSuite = true;
-      lock ??= suite;
-    }
+    if (suite !== null) lock ??= suite;
   }
   if (gitEnvDenied) return deny("git-env", "git environment override");
   if (githubDenied !== null) return deny("gh-cli", githubDenied);
-  // A suite in the background returns at once while it keeps running: it would leave the lock early.
-  if (launchedSuite || (lock !== null && (backgroundSuite || walk.lineBackground))) {
-    return { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
-  }
   if (lock === null) return { kind: "allow" };
   return { kind: "lock", command: lock };
 }

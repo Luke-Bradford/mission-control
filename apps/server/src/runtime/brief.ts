@@ -146,7 +146,7 @@ const SELF_PLAN =
 
 /**
  * One line saying the body is incomplete, or null when it is whole. The body goes to the seat up to
- * the collector's own cap; seats have no network, so a cut body means asking, not guessing.
+ * the collector's own cap; a cut body means asking, not guessing.
  */
 export function cutNoteText(
   body: string,

@@ -43,6 +43,7 @@ import {
   isProtectedPath,
   LOOP_KINDS,
   MC_TMP_DIR_NAME,
+  SEAT_DENIED_HOSTS,
   MC_TOOL_GRANTS,
   MODE_LOOPS,
   modeOfSeat,
@@ -128,8 +129,16 @@ describe("crewCliArgs", () => {
     expect(args).toContain("--disallowedTools");
     const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
     expect(seat.enabled).toBe(true);
-    expect(seat.network).toEqual({ allowedDomains: [] });
+    expect(seat.network).toEqual({ allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] });
     expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
+  });
+
+  it("lets a seat fetch a page: curl and wget are not denied", () => {
+    expect(DENIED_TOOLS).not.toContain("Bash(curl:*)");
+    expect(DENIED_TOOLS).not.toContain("Bash(wget:*)");
+    const a = crewCliArgs(base);
+    expect(a).not.toContain("Bash(curl:*)");
+    expect(a).not.toContain("Bash(wget:*)");
   });
 
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
@@ -395,11 +404,10 @@ describe("the allowlist in phase 2b", () => {
     );
   });
 
-  it("turns background Bash off, so a timed-out suite is killed rather than kept running", () => {
+  it("leaves background Bash on: seats may run background tasks", () => {
     expect(CREW_CLI_ENV).toEqual({
       BASH_MAX_TIMEOUT_MS: "2700000",
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
-      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
       // marks every crew seat's environment, so tests that need what a seat denies can tell (#1411)
@@ -1132,7 +1140,7 @@ describe("crew sandbox and scoped edits", () => {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: [] },
+      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
     });
     // commits are the hub's (the mc commit tool): nothing in either git dir is granted (#31 R19/R24)
     expect(j.sandbox.filesystem.allowWrite).toEqual([]);

@@ -655,7 +655,7 @@ function codexSession(
         ? result.sandbox.type !== "dangerFullAccess"
         : !isObj(result.activePermissionProfile) ||
           result.activePermissionProfile.id !== CODEX_SEAT_PROFILE ||
-          result.sandbox.networkAccess !== false) ||
+          result.sandbox.networkAccess !== true) ||
       !Array.isArray(result.instructionSources) ||
       result.instructionSources.length !== 0 ||
       !isObj(result.thread) ||

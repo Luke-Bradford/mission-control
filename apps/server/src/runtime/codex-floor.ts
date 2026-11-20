@@ -14,6 +14,7 @@ import {
   isProtectedPath,
   MC_MCP_SERVER,
   pathInArea,
+  SEAT_DENIED_HOSTS,
   sandboxReadDenies,
   tomlString,
 } from "@mc/core";
@@ -109,7 +110,11 @@ export function codexSeatConfig(
     // this says so explicitly rather than rely on that default (docs/spikes/2026-10-24-codex-seat-confinement.md).
     grant(CODEX_PROJECT_DIR, "read"),
     `[permissions.${CODEX_SEAT_PROFILE}.network]`,
-    "enabled = false",
+    "enabled = true",
+    `[permissions.${CODEX_SEAT_PROFILE}.network.domains]`,
+    // the whole internet except this Mac's own services (the hub trusts loopback callers)
+    `${tomlString("*")} = ${tomlString("allow")}`,
+    ...SEAT_DENIED_HOSTS.map((host) => `${tomlString(host)} = ${tomlString("deny")}`),
     "",
   ].join("\n");
 }
