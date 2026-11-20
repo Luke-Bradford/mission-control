@@ -1430,7 +1430,7 @@ export type SessionEvent =
       code: number | null;
       signal: string | null;
       reason?: string;
-      /** The keeper went without saying how the CLI ended: the run is to be resumed, not failed. */
+      /** The run did not end on its own (its keeper was lost, or a reattach could not confirm the CLI in time): the supervisor takes it back once instead of failing it. */
       retake?: true;
     }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
