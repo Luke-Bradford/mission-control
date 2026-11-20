@@ -857,6 +857,13 @@ describe("supervisor events (Plan 7a)", () => {
           area: ["apps/**"],
         },
       });
+      first.cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
       first.sup.start();
       const prior = await first.sup.startRun("guido-1", 42, { loop: LOOP });
       await until(() => expect(seatState("guido-1")).toBe("idle"));
