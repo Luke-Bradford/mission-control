@@ -329,7 +329,7 @@ function Detail({
   const fullPr = fullMatches ? full.data : undefined;
   const pageChanges = data?.files?.some((file) => file.startsWith("apps/web/"));
   const evidence = useResource<EvidenceManifest>(
-    pr.headSha && pageChanges !== false
+    pr.headSha && pageChanges === true
       ? {
           path: `/api/prs/${pr.number}/evidence?repo=${enc(pr.repoId)}&sha=${enc(pr.headSha)}`,
           topic: QA_TOPICS,
@@ -411,9 +411,7 @@ function Detail({
         awaiting={awaiting}
         ticket={pr.ticket}
       >
-        {pageChanges === false ? (
-          <p>No page changes</p>
-        ) : (
+        {pageChanges === true && (
           <Pairs
             pr={pr}
             manifest={pairs}
@@ -425,6 +423,7 @@ function Detail({
             }
           />
         )}
+        {pageChanges === false && <p>No page changes</p>}
         <div className="uat-grid-two uat-tests-grid">
           <Tests data={data} checks={fullPr?.checks ?? []} />
           <Panel title="Rework timeline">

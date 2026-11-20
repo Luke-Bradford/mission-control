@@ -131,6 +131,35 @@ describe("QA page when nothing waits", () => {
     await screen.findByText("No page changes");
     expect(screen.queryByRole("heading", { name: "Before and after" })).toBeNull();
   });
+  it("keeps evidence quiet while a non-web change is loading", async () => {
+    rows = [pr(3, null)];
+    window.history.replaceState({}, "", "/qa?repo=mc&pr=3");
+    let resolveDetail: ((value: { status: number; body: PrUatView }) => void) | undefined;
+    const delayedDetail = new Promise<{ status: number; body: PrUatView }>((resolve) => {
+      resolveDetail = resolve;
+    });
+    const fetcher = serve({
+      [`/api/qa/uat/mc/3?head=${SHA}`]: () => delayedDetail,
+      [`/api/qa-reports?repoId=mc&prNumber=3&headSha=${SHA}`]: { reports: [] },
+    });
+    render(<QaReadiness />);
+    await waitFor(() =>
+      expect(fetcher).toHaveBeenCalledWith(`/api/qa/uat/mc/3?head=${SHA}`, expect.anything()),
+    );
+    expect(screen.queryByRole("heading", { name: "Before and after" })).toBeNull();
+    expect(
+      fetcher.mock.calls.some(([path]) => path === `/api/prs/3/evidence?repo=mc&sha=${SHA}`),
+    ).toBe(false);
+
+    resolveDetail?.({
+      status: 200,
+      body: { ...detail(3, false), files: ["apps/server/src/api.ts"] },
+    });
+    await screen.findByText("No page changes");
+    expect(
+      fetcher.mock.calls.some(([path]) => path === `/api/prs/3/evidence?repo=mc&sha=${SHA}`),
+    ).toBe(false);
+  });
   it("does not say nothing needs you after the queue read failed", async () => {
     rows = [];
     serve({ "/api/qa/queue": () => ({ status: 500, body: { error: "down" } }) });
