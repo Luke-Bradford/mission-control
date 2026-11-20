@@ -2256,7 +2256,7 @@ describe("reused worktrees", () => {
     }
   });
 
-  it("leaves a start's run active for the next hub when the hub stops during it", async () => {
+  it("ends a start's run failed when the hub stops before any seat row holds it", async () => {
     const { sup } = make();
     sup.start();
     const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
@@ -2304,7 +2304,7 @@ describe("reused worktrees", () => {
       );
       const left = store.runs("guido-1", 1)[0];
       expect(left?.id).not.toBe(first.runId);
-      expect(left).toMatchObject({ status: "running", endedAt: null });
+      expect(left).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
     } finally {
       cloneGit.mockRestore();
       upsertRun.mockRestore();
