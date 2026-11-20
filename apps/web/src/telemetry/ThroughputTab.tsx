@@ -366,6 +366,7 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
 }
 
 function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
+  const hasTicketSeries = t?.series !== undefined;
   const bySize = new Map<string, number[]>();
   for (const ticket of finished(t)) {
     const size = ticket.size ?? NO_SIZE;
@@ -378,18 +379,20 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
       (size) => !TICKET_SIZES.includes(size as (typeof TICKET_SIZES)[number]) && size !== NO_SIZE,
     )
     .sort();
-  const rows = [...TICKET_SIZES, ...otherSizes, NO_SIZE]
+  const ticketRows = [...TICKET_SIZES, ...otherSizes, NO_SIZE]
     .map((size) => {
       const cycles = (bySize.get(size) ?? []).sort((a, b) => a - b);
-      const p50Ms = rank(cycles, 0.5);
       return {
         size,
-        p50Ms,
+        p50Ms: rank(cycles, 0.5),
         p85Ms: cycles.length >= CYCLE_TIME_MIN_FOR_P85 ? rank(cycles, 0.85) : null,
         tickets: cycles.length,
       };
     })
     .filter((r) => r.tickets > 0 || r.size !== NO_SIZE);
+  const rows = hasTicketSeries
+    ? ticketRows
+    : (t?.cycleTime.rows ?? []).filter((r) => r.tickets > 0 || r.size !== NO_SIZE);
   const peak = Math.max(
     1,
     ...rows.map((r) => (r.tickets === 0 ? 0 : (r.p85Ms ?? r.p50Ms ?? 0)) / HOUR_MS),
@@ -455,6 +458,8 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
           <p className="pnote">
             Each bar runs from p50 to p85; the mark is p50. The axis is 0 to {top} hours. p85 shows
             from {CYCLE_TIME_MIN_FOR_P85} tickets.
+            {!hasTicketSeries && t?.cycleTime.excluded > 0 &&
+              ` ${t.cycleTime.excluded} done tickets left out: no Ready entry.`}
           </p>
         </div>
       )}
