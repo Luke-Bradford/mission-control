@@ -101,7 +101,9 @@ function CurrentQaReadiness() {
   );
   const review = useMemo(
     () =>
-      prs.filter((p) => !p.uat).sort((a, b) => a.createdAt - b.createdAt || a.number - b.number),
+      prs
+        .filter((p) => !p.uat && p.ci === "passing")
+        .sort((a, b) => a.createdAt - b.createdAt || a.number - b.number),
     [prs],
   );
   const params = new URLSearchParams(search);
@@ -321,18 +323,19 @@ function Detail({
     path: `/api/repos/${enc(pr.repoId)}/prs/${pr.number}?head=${enc(pr.headSha ?? "")}`,
     topic: "boards",
   });
+  const detailMatches = detail.data?.sha === pr.headSha;
+  const fullMatches = full.data?.headSha === pr.headSha;
+  const data = detailMatches ? detail.data : undefined;
+  const fullPr = fullMatches ? full.data : undefined;
+  const pageChanges = data?.files?.some((file) => file.startsWith("apps/web/"));
   const evidence = useResource<EvidenceManifest>(
-    pr.headSha
+    pr.headSha && pageChanges !== false
       ? {
           path: `/api/prs/${pr.number}/evidence?repo=${enc(pr.repoId)}&sha=${enc(pr.headSha)}`,
           topic: QA_TOPICS,
         }
       : null,
   );
-  const detailMatches = detail.data?.sha === pr.headSha;
-  const fullMatches = full.data?.headSha === pr.headSha;
-  const data = detailMatches ? detail.data : undefined;
-  const fullPr = fullMatches ? full.data : undefined;
   const moved =
     (detail.data !== undefined && !detailMatches) || (full.data !== undefined && !fullMatches);
   const disabled =
@@ -408,16 +411,20 @@ function Detail({
         awaiting={awaiting}
         ticket={pr.ticket}
       >
-        <Pairs
-          pr={pr}
-          manifest={pairs}
-          loading={evidence.loading}
-          error={
-            evidence.error instanceof ApiError && evidence.error.status === 404
-              ? null
-              : evidence.error
-          }
-        />
+        {pageChanges === false ? (
+          <p>No page changes</p>
+        ) : (
+          <Pairs
+            pr={pr}
+            manifest={pairs}
+            loading={evidence.loading}
+            error={
+              evidence.error instanceof ApiError && evidence.error.status === 404
+                ? null
+                : evidence.error
+            }
+          />
+        )}
         <div className="uat-grid-two uat-tests-grid">
           <Tests data={data} checks={fullPr?.checks ?? []} />
           <Panel title="Rework timeline">

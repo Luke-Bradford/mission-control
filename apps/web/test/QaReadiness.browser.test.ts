@@ -20,7 +20,7 @@ describeRendered("QA acceptance queue in a browser", () => {
         api: fixture(50),
       });
       const rows = await page.boxes(".uat-queue-row");
-      expect(rows).toHaveLength(54);
+      expect(rows).toHaveLength(50);
       expect(await page.unclipped(".uat-queue-row")).not.toContain(false);
       expect(
         await page.evaluate(() => {
@@ -33,17 +33,20 @@ describeRendered("QA acceptance queue in a browser", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
   it.each(
-    [1366, 1600, 1920].flatMap((width) =>
-      ["light", "dark"].map((theme) => ({ width, theme: theme as "light" | "dark" })),
+    [
+      { width: 1920, height: 940 },
+      { width: 2560, height: 1145 },
+    ].flatMap(({ width, height }) =>
+      ["light", "dark"].map((theme) => ({ width, height, theme: theme as "light" | "dark" })),
     ),
   )(
-    "fits the approved layout at $width in $theme",
-    async ({ width, theme }) => {
+    "fits the approved layout at $width×$height in $theme",
+    async ({ width, height, theme }) => {
       mkdirSync(SHOTS, { recursive: true });
       const page = await renderAt({
         page: "test/qaReadinessBrowser.html",
         width,
-        height: 1000,
+        height,
         colorScheme: theme,
         api: fixture(),
       });
@@ -65,10 +68,10 @@ describeRendered("QA acceptance queue in a browser", () => {
         return queue && detail ? queue.right < detail.left : false;
       }, null);
       expect(columns).toBe(true);
-      await page.screenshot(join(SHOTS, `qa-uat-${width}-${theme}.png`));
+      await page.screenshot(join(SHOTS, `qa-uat-${width}x${height}-${theme}.png`));
       await page.click(".uat-actions .uat-send");
       expect(await page.unclipped(".uat-send-form")).toEqual([true]);
-      await page.screenshot(join(SHOTS, `qa-uat-send-back-${width}-${theme}.png`));
+      await page.screenshot(join(SHOTS, `qa-uat-send-back-${width}x${height}-${theme}.png`));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

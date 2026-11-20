@@ -4,12 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
 import { hub, streamStatus } from "../src/data.ts";
 import { QaReadiness } from "../src/pages/QaReadiness.tsx";
-import { stubFetch } from "./fetchStub.ts";
+import { settled, stubFetch } from "./fetchStub.ts";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
 const SHA = "a".repeat(40);
 const NOW = Date.now();
-const pr = (n: number, since: number | null): PullRequestView => ({
+const pr = (
+  n: number,
+  since: number | null,
+  ci: PullRequestView["ci"] = "passing",
+): PullRequestView => ({
   repoId: "mc",
   number: n,
   title: `Change ${n}`,
@@ -19,7 +23,7 @@ const pr = (n: number, since: number | null): PullRequestView => ({
   state: "open",
   isDraft: since === null,
   review: null,
-  ci: "passing",
+  ci,
   createdAt: NOW - 100000,
   updatedAt: NOW,
   mergedAt: null,
@@ -75,6 +79,21 @@ afterEach(() => {
 });
 
 describe("QA page when nothing waits", () => {
+  it("counts only the review rows that are ready to inspect", async () => {
+    rows = [
+      pr(1, null),
+      pr(2, null),
+      pr(3, null),
+      pr(4, null),
+      pr(5, null, "pending"),
+      pr(6, null, "pending"),
+    ];
+    serve();
+    render(<QaReadiness />);
+    expect(await screen.findByText("0 in UAT · 4 in review")).toBeTruthy();
+    expect(screen.getAllByRole("link", { name: /Change [1-4]/ })).toHaveLength(4);
+    expect(screen.queryByRole("link", { name: /Change [5-6]/ })).toBeNull();
+  });
   it("opens no PR and says so in one line", async () => {
     rows = [pr(3, null)];
     const fetcher = serve();
@@ -96,6 +115,21 @@ describe("QA page when nothing waits", () => {
     expect(screen.queryByText("Missing evidence")).toBeNull();
     expect(screen.queryByText(/Could not read what this PR frees/)).toBeNull();
     expect(screen.queryByText("No recorded work waits on this PR.")).toBeNull();
+  });
+  it("keeps a non-web change quiet without an empty evidence panel", async () => {
+    rows = [pr(3, null)];
+    window.history.replaceState({}, "", "/qa?repo=mc&pr=3");
+    const fetcher = serve({
+      [`/api/qa/uat/mc/3?head=${SHA}`]: {
+        ...detail(3, false),
+        files: ["apps/server/src/api.ts"],
+      },
+      [`/api/qa-reports?repoId=mc&prNumber=3&headSha=${SHA}`]: { reports: [] },
+    });
+    render(<QaReadiness />);
+    await settled(fetcher, `/api/qa/uat/mc/3?head=${SHA}`);
+    await screen.findByText("No page changes");
+    expect(screen.queryByRole("heading", { name: "Before and after" })).toBeNull();
   });
   it("does not say nothing needs you after the queue read failed", async () => {
     rows = [];
