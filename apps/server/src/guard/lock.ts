@@ -24,6 +24,7 @@ export interface LockHolds {
   addLockHold(h: LockHoldRow): void;
   deleteLockHold(runId: string, toolUseId: string, at?: number, failed?: boolean): void;
   deleteLockHolds(runId: string, at?: number): void;
+  pinLockHolds(runId: string): void;
 }
 
 interface Holder {
@@ -85,6 +86,7 @@ export class TestLock {
       command: first.command,
       since: first.since,
       calls: new Set(rows.filter((r) => r.runId === first.runId).map((r) => r.toolUseId)),
+      ...(rows.some((r) => r.runId === first.runId && r.pinned === true) ? { pinned: true } : {}),
     };
     for (const other of new Set(rows.map((r) => r.runId))) {
       if (other !== first.runId) this.store((s) => s.deleteLockHolds(other, this.now()));
@@ -166,6 +168,7 @@ export class TestLock {
     const h = this.holder;
     if (h === null || h.runId !== key.runId || !h.calls.has(key.toolUseId)) return;
     h.pinned = true;
+    this.store((s) => s.pinLockHolds(key.runId));
   }
 
   /** The run ended or was interrupted: frees its hold and drops its waiting calls. */

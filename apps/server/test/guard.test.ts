@@ -164,6 +164,19 @@ describe("TestLock", () => {
       lock.release({ runId: "A", toolUseId: "a2" });
       expect(lock.state().holder).toBeNull();
     });
+
+    it("restores a pinned hold as pinned: only releaseRun frees it", async () => {
+      const key = { runId: "A", toolUseId: "a1" };
+      await lock.acquire(key, "s-A", "pnpm -s test", 1000, live());
+      lock.pin(key);
+      const next = new TestLock({ now: () => 6000, holds: store });
+      next.restore(store.lockHolds());
+      expect(next.state().holder?.runId).toBe("A");
+      next.release(key);
+      expect(next.state().holder?.runId).toBe("A");
+      next.releaseRun("A");
+      expect(next.state().holder).toBeNull();
+    });
   });
 
   it("grants a free lock and reports the holder", async () => {

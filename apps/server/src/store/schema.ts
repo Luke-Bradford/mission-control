@@ -310,7 +310,7 @@ CREATE INDEX IF NOT EXISTS flight_decisions_at ON flight_decisions(at);
 -- The test lock's held calls (one row per tool call of the holding run), so a restart restores them.
 CREATE TABLE IF NOT EXISTS test_lock_holds (
   run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
-  since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
+  since INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (run_id, tool_use_id)
 );
 -- One row per hold, retained for QA_RETENTION_DAYS. outcome: pass or fail from the Post hook event.
 CREATE TABLE IF NOT EXISTS test_lock_runs (
