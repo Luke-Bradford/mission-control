@@ -109,6 +109,26 @@ describe("stageReviewEvidence", () => {
     );
   });
 
+  it("skips a pair whose page is no longer captured, and keeps the rest", async () => {
+    const root = tmp();
+    const store = prEvidenceStore(join(root, "evidence"));
+    const m = manifest(sha("a"), 1);
+    const gone = {
+      ...m.pairs[0],
+      page: "readiness",
+    } as unknown as EvidenceManifest["pairs"][number];
+    store.save({ ...m, pairs: [gone, ...m.pairs] }, [
+      ...["before", "after", "diff"].map((k) => ({ name: `board-light-${k}.png`, png })),
+    ]);
+    const scratch = join(root, "scratch");
+    mkdirSync(scratch);
+    const staged = await stageReviewEvidence(store, "mc", 5, sha("a"), scratch);
+    expect(staged?.pairs.map((p) => p.page)).toEqual(["board"]);
+    expect(existsSync(join(scratch, ".mc-review/evidence/board-light-diff.png"))).toBe(true);
+    store.save({ ...manifest(sha("b"), 2), pairs: [gone] }, []);
+    expect(await stageReviewEvidence(store, "mc", 5, sha("b"), root)).toBeUndefined();
+  });
+
   it("gives nothing for a head without pairs, or a hub without a store", async () => {
     const root = tmp();
     const store = prEvidenceStore(join(root, "evidence"));
