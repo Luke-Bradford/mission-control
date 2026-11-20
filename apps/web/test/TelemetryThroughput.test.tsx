@@ -42,6 +42,8 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
       tickets: [
         {
           ticket: "shop#12",
+          title: "Cache the quote total at checkout",
+          size: "S",
           readyAt: NOW - 3 * DAY,
           startedAt: NOW - 3 * DAY,
           mergedAt: NOW - 2 * DAY,
@@ -49,10 +51,21 @@ function tel(over: Partial<TelemetryData> = {}): TelemetryData {
         },
         {
           ticket: "shop#13",
+          title: null,
+          size: null,
           readyAt: NOW - 2 * DAY,
           startedAt: null,
           mergedAt: NOW - DAY,
           doneAt: NOW - DAY + HOUR,
+        },
+        {
+          ticket: "shop#11",
+          title: "Keep ticket history for fourteen days",
+          size: "M",
+          readyAt: NOW - 11 * DAY,
+          startedAt: null,
+          mergedAt: NOW - 10 * DAY,
+          doneAt: NOW - 10 * DAY + HOUR,
         },
         { ticket: "shop#14", readyAt: NOW - DAY, startedAt: null, mergedAt: null, doneAt: null },
       ],
@@ -121,10 +134,10 @@ afterEach(() => {
 });
 
 describe("Telemetry, Throughput tab", () => {
-  it("loads the 7-day per-ticket series whatever range Crew last used", async () => {
+  it("uses the server's 14-day ticket series whatever range Crew last used", async () => {
     const fetch = await open(tel());
     expect(fetch).toHaveBeenCalledWith("/api/telemetry?range=7d", expect.anything());
-    expect(panel("tCycleTicket").querySelectorAll("svg circle.dot")).toHaveLength(2);
+    expect(panel("tCycleTicket").querySelectorAll("svg circle.dot")).toHaveLength(3);
   });
 
   it("drops a hidden Crew agent filter before loading the unscoped Throughput table", async () => {
@@ -187,11 +200,11 @@ describe("Telemetry, Throughput tab", () => {
     expect(merged.querySelector("svg")?.textContent).not.toMatch(/mean/i);
   });
 
-  it("plots one dot per finished ticket in the last 7 days, with p50 and p85 lines", async () => {
+  it("plots every finished ticket in the server's 14-day series, with p50 and p85 lines", async () => {
     await open(tel());
     const cycle = panel("tCycleTicket");
-    expect(within(cycle).getByText(/last 7 days/)).toBeTruthy();
-    expect(cycle.querySelectorAll("svg circle.dot")).toHaveLength(2);
+    expect(within(cycle).getByText(/last 14 days/)).toBeTruthy();
+    expect(cycle.querySelectorAll("svg circle.dot")).toHaveLength(3);
     expect(cycle.querySelectorAll("svg .cycle-line")).toHaveLength(2);
     expect(cycle.querySelector(".legend")?.textContent).toMatch(/p50/);
     expect(cycle.querySelector(".legend")?.textContent).toMatch(/p85/);
@@ -226,20 +239,19 @@ describe("Telemetry, Throughput tab", () => {
 
   it("does not invent per-ticket history when the server sends no series", async () => {
     await open({ ...tel(), series: undefined });
-    expect(panel("tCycleTicket").textContent).toContain("not available for the last 7 days yet.");
+    expect(panel("tCycleTicket").textContent).toContain("not available for the last 14 days yet.");
     expect(panel("tWip").textContent).toContain("Not collected yet.");
     expect(panel("tCycleTicket").querySelector("svg")).toBeNull();
   });
 
-  it("draws cycle time by size as p50 to p85 ranges, and says so for a size with no tickets", async () => {
+  it("derives cycle time by size from the ticket series", async () => {
     await open(tel());
     const size = panel("tCycleSize");
     const rows = [...size.querySelectorAll("li")].map((li) => li.textContent);
-    expect(rows[0]).toContain("S");
-    expect(rows[0]).toContain("4.0 h–9.0 h");
-    expect(rows[2]).toContain("p50 20 h");
-    expect(rows[3]).toContain("no tickets");
-    expect(size.querySelectorAll(".rng")).toHaveLength(2);
+    expect(rows.find((row) => row?.includes("S · 1 ticket"))).toContain("p50 25 h");
+    expect(rows.find((row) => row?.includes("M · 1 ticket"))).toContain("p50 25 h");
+    expect(rows.find((row) => row?.includes("no size · 1 ticket"))).toContain("p50 25 h");
+    expect(size.querySelectorAll(".rng")).toHaveLength(0);
   });
 
   it("steps through tickets in progress and leaves out the days before collection", async () => {
@@ -261,23 +273,14 @@ describe("Telemetry, Throughput tab", () => {
     expect(stat("Tickets in progress", "now").querySelector(".stat-value")?.textContent).toBe("—");
   });
 
-  it("shows the Tickets table with Ticket, Merged, Cycle and cost, and a note on Title and Size", async () => {
+  it("shows ticket titles and sizes, with plain placeholders when the board omits either", async () => {
     const base = tel();
     await open(
       {
         ...base,
         series: {
           ...(base.series as object),
-          tickets: [
-            ...((base.series?.tickets ?? []) as NonNullable<TelemetryData["series"]>["tickets"]),
-            {
-              ticket: "shop#9",
-              readyAt: null,
-              startedAt: null,
-              mergedAt: NOW - 30 * DAY,
-              doneAt: null,
-            },
-          ],
+          tickets: (base.series?.tickets ?? []) as NonNullable<TelemetryData["series"]>["tickets"],
         } as never,
       },
       "?tab=throughput&view=table",
@@ -285,17 +288,24 @@ describe("Telemetry, Throughput tab", () => {
     const table = within(panel("tTickets")).getByRole("table");
     expect([...table.querySelectorAll("th")].map((h) => h.textContent)).toEqual([
       "Ticket",
+      "Title",
+      "Size",
       "Merged",
       "Cycle",
       "~Cost",
     ]);
     const rows = table.querySelectorAll("tbody tr");
-    expect(rows).toHaveLength(2);
-    expect(table.textContent).not.toContain("shop#9");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain("shop#13");
+    expect(rows[0]?.textContent).toContain("Title not on board");
+    expect(rows[0]?.textContent).toContain("—");
     expect(rows[1]?.textContent).toContain("shop#12");
+    expect(rows[1]?.textContent).toContain("Cache the quote total at checkout");
+    expect(rows[1]?.textContent).toContain("S");
     expect(rows[1]?.textContent).toContain("25 h");
     expect(rows[1]?.textContent).toContain("~$18.60");
-    expect(panel("tTickets").textContent).toMatch(/Title and size are not shown yet/);
+    expect(rows[2]?.textContent).toContain("shop#11");
+    expect(panel("tTickets").textContent).not.toMatch(/not shown yet|not in the payload/);
     expect(document.getElementById("tMerged")).toBeNull();
   });
 
