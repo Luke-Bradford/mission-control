@@ -22,6 +22,8 @@ function throughputApi(): Record<string, unknown> {
   const days = (data.throughput as { day: string }[]).map((d) => d.day);
   const tickets = Array.from({ length: 24 }, (_, i) => ({
     ticket: `mission-control#${1900 + i}`,
+    title: `Telemetry ticket ${1900 + i}`,
+    size: (["XS", "S", "M", "L", "XL"] as const)[i % 5],
     readyAt: NOW - (7 - (i % 7)) * DAY - 30 * HOUR,
     startedAt: null,
     mergedAt: NOW - (6 - (i % 7)) * DAY - HOUR,
