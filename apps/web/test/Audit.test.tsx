@@ -235,7 +235,9 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
     expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
   }
   expect(
-    screen.getByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ }).getAttribute("href"),
+    screen
+      .getByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ })
+      .getAttribute("href"),
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(screen.getByRole("link", { name: /PR #701/i }).getAttribute("href")).toBe(
     "/board/mission-control",
