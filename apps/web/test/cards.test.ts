@@ -467,8 +467,17 @@ describe("cardIdle", () => {
   const idle = (
     col: Parameters<typeof cardIdle>[1],
     pr: PullRequestView | null,
-    over: { agent?: boolean; reviewer?: boolean } = {},
-  ) => cardIdle(at2(col), col, pr, over.agent ?? false, over.reviewer ?? false, "UTC");
+    over: { agent?: boolean; reviewer?: boolean; open?: boolean } = {},
+  ) =>
+    cardIdle(
+      at2(col),
+      col,
+      pr,
+      over.agent ?? false,
+      over.reviewer ?? false,
+      over.open ?? pr?.state === "open",
+      "UTC",
+    );
 
   it("an In progress or In review card with no run and no PR says nobody is on it", () => {
     expect(idle("In progress", null)).toBe("Nobody on it since 15 Oct");
@@ -487,6 +496,18 @@ describe("cardIdle", () => {
     expect(idle("In review", prView({ state: "merged" }), { agent: true })).toBeNull();
   });
 
+  it("says nothing when another linked PR is open, though the card shows a merged one", () => {
+    const mergedCode = prView({ number: 1, branch: "feature/77-cache", state: "merged" });
+    const openSpec = prView({ number: 2, branch: "docs/77-spec" });
+    const ticket = boardItem({ status: "In progress" });
+    const shown = cardPr(
+      ticket,
+      [openSpec, mergedCode].map((p) => ({ ...p, ticket: "shop-app#3349" })),
+    );
+    expect(shown?.state).toBe("merged");
+    expect(idle("In progress", mergedCode, { open: true })).toBeNull();
+  });
+
   it("says nothing when a run, a reviewer or an open PR is on the card, or it is not started", () => {
     expect(idle("In progress", null, { agent: true })).toBeNull();
     expect(idle("In review", null, { reviewer: true })).toBeNull();
@@ -497,7 +518,7 @@ describe("cardIdle", () => {
   });
 
   it("drops the date, not the line, while the timezone is unknown", () => {
-    expect(cardIdle(at2("In progress"), "In progress", null, false, false, null)).toBe(
+    expect(cardIdle(at2("In progress"), "In progress", null, false, false, false, null)).toBe(
       "Nobody on it",
     );
   });
