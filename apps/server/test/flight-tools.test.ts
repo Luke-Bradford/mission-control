@@ -3189,6 +3189,14 @@ describe("accept_ruling", () => {
     expect(store.getSetting("flight.runaway-events")).toBeNull();
   });
 
+  it("names the checks CI still waits on when no re-run is going", async () => {
+    rulingImpl = async () => ({ kind: "pending", sha: SHA, waiting: ["e2e"] });
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "CI on aaaaaaa is not done: e2e still pending or not reported. Nothing was re-run.",
+    });
+    expect(decisions()).toEqual([]);
+  });
+
   it("passes the engine's refusals on", async () => {
     rulingImpl = async () => ({ kind: "not", text: "the run is not parked on a CI ruling" });
     expect(await call("accept_ruling", A())).toEqual(
