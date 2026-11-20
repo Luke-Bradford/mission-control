@@ -330,10 +330,10 @@ export function createCrewReloader(deps: {
       const run = store.seatRun(seatId);
       return (
         supervisor.seatBusy(seatId) ||
-        (run?.endedAt === null && !(removed && run.loop?.aside)) ||
+        (run?.endedAt === null && !(removed && run.loop?.hold?.worktree)) ||
         store.queue(seatId).some((q) => q.takenAt !== null) ||
         // an aside run has no process or seat row, but the seat is working
-        (!removed && store.asideRuns().some((r) => r.agentId === seatId))
+        (!removed && store.offSeatRuns().some((r) => r.agentId === seatId))
       );
     } catch {
       return true;
@@ -404,7 +404,7 @@ export function createCrewReloader(deps: {
           ...(config.crew?.sessions ?? []).flatMap((s) => s.seats.map((seat) => seat.id)),
           ...store.openQuestions().map((q) => q.agentId),
           ...store.notes().flatMap((n) => (n.seatId === null ? [] : [n.seatId])),
-          ...store.asideRuns().map((r) => r.agentId),
+          ...store.offSeatRuns().map((r) => r.agentId),
         ].filter((id) => !held.has(id) && !wanted.has(id)),
       );
       const at = now();
@@ -414,7 +414,7 @@ export function createCrewReloader(deps: {
           .runsActiveSince(Number.MAX_SAFE_INTEGER)
           .filter((run) => run.agentId === seatId && run.endedAt === null);
         // A removed aside may be ended deliberately; every other open run keeps its attention.
-        if (open.some((run) => !run.loop?.aside)) continue;
+        if (open.some((run) => !run.loop?.hold?.worktree)) continue;
         for (const run of open) {
           if (!supervisor.endRemovedAside?.(run.id)) continue;
           store.addComms({

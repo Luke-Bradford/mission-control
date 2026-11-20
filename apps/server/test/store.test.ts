@@ -279,19 +279,65 @@ describe("Store", () => {
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps map cache rows by kind, scope and key, and an exclusive put drops the others", () => {
-    const s = new Store(":memory:");
-    s.mapCachePut("tree", "checkout", "a", "1", true);
-    s.mapCachePut("tree", "other", "z", "9", true);
-    s.mapCachePut("merge", "", "m", "[]", false);
-    expect(s.mapCacheGet("tree", "checkout", "a")).toBe("1");
-    s.mapCachePut("tree", "checkout", "b", "2", true);
-    expect(s.mapCacheGet("tree", "checkout", "a")).toBeNull();
-    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("2");
-    expect(s.mapCacheGet("tree", "other", "z")).toBe("9");
-    expect(s.mapCacheGet("merge", "", "m")).toBe("[]");
-    s.mapCachePut("tree", "checkout", "b", "3", true);
-    expect(s.mapCacheGet("tree", "checkout", "b")).toBe("3");
+  it("drops the tables of the removed code-health, Map, token-audit and bug-escape features", () => {
+    const RETIRED_FIXTURE = [
+      "map_cache",
+      "code_health_overview",
+      "run_token_audit",
+      "bug_escapes",
+      "controller_messages",
+      "controller_files",
+    ];
+    const path = join(mkdtempSync(join(tmpdir(), "mc-retired-")), "hub.db");
+    const first = new Store(path);
+    const raw = (first as unknown as { rawDb: DatabaseSync }).rawDb;
+    for (const table of RETIRED_FIXTURE) raw.exec(`CREATE TABLE ${table} (x INTEGER)`);
+    // the old release's trigger on a kept table writes into a retired one
+    raw.exec(`CREATE TABLE code_health_revisions (repo_id TEXT PRIMARY KEY, version INTEGER NOT NULL DEFAULT 0);
+      CREATE TRIGGER code_health_pull_requests_insert AFTER INSERT ON pull_requests BEGIN
+        INSERT INTO code_health_revisions (repo_id, version) SELECT NEW.repo_id, 1 WHERE NEW.repo_id IS NOT NULL
+        ON CONFLICT(repo_id) DO UPDATE SET version = version + 1;
+      END`);
+    first.close();
+    const second = new Store(path);
+    const rows = (type: string) =>
+      (
+        (second as unknown as { rawDb: DatabaseSync }).rawDb
+          .prepare("SELECT name FROM sqlite_master WHERE type = ?")
+          .all(type) as { name: string }[]
+      ).map((r) => r.name);
+    const names = rows("table");
+    for (const table of [...RETIRED_FIXTURE, "code_health_revisions"])
+      expect(names).not.toContain(table);
+    expect(rows("trigger").filter((n) => n.startsWith("code_health"))).toEqual([]);
+    expect(() =>
+      second.upsertPullRequests(
+        "r",
+        [
+          {
+            repoId: "r",
+            number: 2,
+            title: "t",
+            url: "u",
+            branch: "b",
+            ticket: null,
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: 1,
+            updatedAt: 1,
+            mergedAt: null,
+            headSha: "sha",
+            mergeable: null,
+            author: null,
+            assignees: [],
+          },
+        ],
+        2,
+      ),
+    ).not.toThrow();
+    second.close();
   });
 
   it("close releases the database: the store cannot be used after", () => {
@@ -432,6 +478,78 @@ describe("Store", () => {
     };
     expect(row.folded).toBe(0);
     new Store(old); // re-opening is a no-op
+  });
+
+  it("folds a stored park and set-aside into one hold when the database opens", () => {
+    const path = join(dir, "fold-hold.sqlite");
+    new Store(path).close();
+    const store0 = new Store(path);
+    store0.upsertRun(run({ id: "held", seq: 1, startedAt: 1000 }));
+    store0.upsertRun(run({ id: "plain", seq: 2, startedAt: 2000 }));
+    store0.close();
+    const raw = new DatabaseSync(path);
+    const write = (id: string, loop: object) =>
+      raw.prepare("UPDATE runs SET loop = ? WHERE id = ?").run(JSON.stringify(loop), id);
+    const { hold: _hold, ...bare } = NEW_LOOP;
+    write("held", {
+      ...bare,
+      phase: "parked",
+      parked: { kind: "review", reason: "x", ended: false },
+      aside: { worktree: "/w", wake: true, ask: 3 },
+    });
+    write("plain", { ...bare, parked: null, aside: null });
+    raw.exec("CREATE INDEX runs_loop_aside ON runs(id)");
+    raw.exec("CREATE INDEX runs_agent_aside_worktree ON runs(id)");
+    raw.close();
+
+    const reopened = new Store(path);
+    expect(reopened.run("held")?.loop?.hold).toEqual({
+      kind: "review",
+      reason: "x",
+      ended: false,
+      worktree: "/w",
+      wake: true,
+      ask: 3,
+    });
+    expect(reopened.run("plain")?.loop?.hold).toBeNull();
+    expect(reopened.offSeatRuns().map((r) => r.id)).toEqual(["held"]);
+    reopened.close();
+    const check = new DatabaseSync(path);
+    const types = check
+      .prepare(
+        "SELECT json_type(loop, '$.parked') AS parked, json_type(loop, '$.aside') AS aside FROM runs",
+      )
+      .all() as { parked: string | null; aside: string | null }[];
+    expect(types).toEqual([
+      { parked: null, aside: null },
+      { parked: null, aside: null },
+    ]);
+    const before = check.prepare("SELECT id, loop FROM runs ORDER BY id").all();
+    check.close();
+    new Store(path).close(); // a second open changes nothing
+    const again = new DatabaseSync(path);
+    expect(again.prepare("SELECT id, loop FROM runs ORDER BY id").all()).toEqual(before);
+    const indexes = again
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'runs_%aside%'")
+      .all();
+    expect(indexes).toEqual([]);
+    again.close();
+  });
+
+  it("drops the flight_wakes columns the wake no longer writes", () => {
+    const old = join(dir, "wake-columns.sqlite");
+    const db = new DatabaseSync(old);
+    db.exec(
+      "CREATE TABLE flight_wakes (run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, wake_id TEXT, rode TEXT, immediate TEXT, PRIMARY KEY (run_id, at))",
+    );
+    db.close();
+    new Store(old).close();
+    const after = new DatabaseSync(old);
+    const columns = (
+      after.prepare("PRAGMA table_info(flight_wakes)").all() as { name: string }[]
+    ).map((c) => c.name);
+    after.close();
+    expect(columns).toEqual(["run_id", "at", "reasons", "wake_id"]);
   });
 
   it("removes the retired handoff tables from old and fresh databases", () => {
@@ -1643,13 +1761,21 @@ describe("Store", () => {
     store.upsertRun(run({ id: "outside", startedAt: 99, model: "old", promptHash: "old" }));
     store.setRunLoop(
       "timeline",
-      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "one", ended: false } },
+      {
+        ...NEW_LOOP,
+        phase: "parked",
+        hold: { kind: "ci", reason: "one", ended: false, worktree: null, wake: false },
+      },
       120,
     );
     store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 130);
     store.setRunLoop(
       "timeline",
-      { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "two", ended: false } },
+      {
+        ...NEW_LOOP,
+        phase: "parked",
+        hold: { kind: "ci", reason: "two", ended: false, worktree: null, wake: false },
+      },
       140,
     );
     store.setRunLoop("timeline", { ...NEW_LOOP, phase: "working" }, 210);
@@ -1789,7 +1915,11 @@ describe("Store", () => {
       store.upsertRun(run({ id: "outside", agentId: "a3", startedAt: 20, costUsd: 99 }));
       store.setRunLoop(
         "cheap2",
-        { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "x", ended: false } },
+        {
+          ...NEW_LOOP,
+          phase: "parked",
+          hold: { kind: "ci", reason: "x", ended: false, worktree: null, wake: false },
+        },
         150,
       );
       store.addGuardHit({ agentId: "a2", runId: "cheap2", rule: "read-only", text: "t", at: 150 });
@@ -2722,8 +2852,8 @@ describe("seat sessions", () => {
   });
 
   it("hasPendingStart: a queued ticket, a queued review or a live run; not a set-aside run", () => {
-    const aside = { worktree: "/w/x", wake: false };
-    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, aside } }));
+    const aside = { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false };
+    store.upsertRun(run({ id: "set-aside", ticket: "repo#1", loop: { ...NEW_LOOP, hold: aside } }));
     expect(store.hasPendingStart()).toBe(false);
     expect(store.hasActiveRun()).toBe(false);
     store.upsertRun(run({ id: "live", seq: 2, ticket: "repo#2", loop: { ...NEW_LOOP } }));
@@ -2747,16 +2877,28 @@ describe("seat sessions", () => {
     expect(store.hasPendingStart()).toBe(true);
   });
 
-  it("asideRuns: unended runs with an aside, oldest first", () => {
-    const aside = { worktree: "/w/x", wake: false };
-    store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, aside } }));
-    store.upsertRun(run({ id: "a", seq: 1, startedAt: 1000, loop: { ...NEW_LOOP, aside } }));
+  it("offSeatRuns: unended runs that have left their seat, oldest first", () => {
+    const aside = {
+      kind: null,
+      reason: null,
+      ended: false,
+      worktree: "/w/x",
+      wake: false,
+    };
+    store.upsertRun(run({ id: "b", seq: 2, startedAt: 2000, loop: { ...NEW_LOOP, hold: aside } }));
+    store.upsertRun(run({ id: "a", seq: 1, startedAt: 1000, loop: { ...NEW_LOOP, hold: aside } }));
     store.upsertRun(run({ id: "none", seq: 3, startedAt: 3000, loop: NEW_LOOP }));
     store.upsertRun(run({ id: "plain", seq: 4, startedAt: 4000 }));
     store.upsertRun(
-      run({ id: "ended", seq: 5, startedAt: 500, endedAt: 600, loop: { ...NEW_LOOP, aside } }),
+      run({
+        id: "ended",
+        seq: 5,
+        startedAt: 500,
+        endedAt: 600,
+        loop: { ...NEW_LOOP, hold: aside },
+      }),
     );
-    expect(store.asideRuns().map((r) => r.id)).toEqual(["a", "b"]);
+    expect(store.offSeatRuns().map((r) => r.id)).toEqual(["a", "b"]);
   });
 
   it("round-trips a row and upserts on the seat id", () => {
@@ -4303,7 +4445,16 @@ describe("hub retention", () => {
                 id === "parked"
                   ? { ...NEW_LOOP, phase: "parked" }
                   : id === "aside"
-                    ? { ...NEW_LOOP, aside: { worktree: "x", wake: false } }
+                    ? {
+                        ...NEW_LOOP,
+                        hold: {
+                          kind: null,
+                          reason: null,
+                          ended: false,
+                          worktree: "x",
+                          wake: false,
+                        },
+                      }
                     : null,
             }),
           );
@@ -4664,7 +4815,11 @@ it("retains named CI attempts, findings, parks, waits and linked reviewer usage"
   store.setRunLoop("r1", { ...NEW_LOOP, phase: "ci" }, 1600);
   store.setRunLoop(
     "r1",
-    { ...NEW_LOOP, phase: "parked", parked: { kind: "ci", reason: "verify failed", ended: false } },
+    {
+      ...NEW_LOOP,
+      phase: "parked",
+      hold: { kind: "ci", reason: "verify failed", ended: false, worktree: null, wake: false },
+    },
     1700,
   );
   store.setRunLoop("r1", { ...NEW_LOOP, phase: "done" }, 1800);
@@ -4685,7 +4840,7 @@ it("retains named CI attempts, findings, parks, waits and linked reviewer usage"
   expect(history.find((a) => a.runId === "review-run")?.data.tokens).toEqual(tokens);
   expect(history.find((a) => a.data.findings)?.data.findings).toEqual(findings);
   expect(history.find((a) => a.kind === "wait-end")?.data).toEqual({ on: "ci", durationMs: 100 });
-  expect(history.find((a) => a.data.parked)?.data.parked).toMatchObject({
+  expect(history.find((a) => a.data.hold)?.data.hold).toMatchObject({
     reason: "verify failed",
   });
 });

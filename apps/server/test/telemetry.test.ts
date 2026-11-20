@@ -1966,7 +1966,9 @@ describe("crew seats", () => {
             agentId: "GUIDO-1",
             startedAt: at("2026-10-15T07:00:00Z"),
             endedAt: null,
-            loop: { aside: { worktree: "/w/p", wake: false } } as Run["loop"],
+            loop: {
+              hold: { kind: null, reason: null, ended: false, worktree: "/w/p", wake: false },
+            } as Run["loop"],
             ...over,
           }),
         );

@@ -604,7 +604,7 @@ export function flightSignals(i: {
       (!review || !["queued", "starting", "running"].includes(review.state))
     )
       continue;
-    const stoppedWithoutReport = /stopped.*without reporting/i.test(run.loop?.parked?.reason ?? "");
+    const stoppedWithoutReport = /stopped.*without reporting/i.test(run.loop?.hold?.reason ?? "");
     if (run.endedAt === null && !stoppedWithoutReport) continue;
     const missing =
       run.noReport != null ||
@@ -678,7 +678,7 @@ export function flightSignals(i: {
       "old_park",
       `${parkedRun.id}:${at}`,
       at,
-      `${parkedRun.at} ${run?.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run?.loop?.parked?.kind ?? "unknown"}, ${run?.loop?.parked?.reason ?? ""}`,
+      `${parkedRun.at} ${run?.ticket ?? "no ticket"} (run ${parkedRun.id}) parked at ${new Date(at).toISOString()}: ${run?.loop?.hold?.kind ?? "unknown"}, ${run?.loop?.hold?.reason ?? ""}`,
     );
   }
   for (const pr of i.readyPrs ?? []) {

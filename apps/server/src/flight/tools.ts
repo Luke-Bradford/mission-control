@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 /**
  * FLIGHT's mc tools. Each is hidden from every seat whose role does not grant it (`modes: []`,
  * `grantable: ["read-only"]`) and re-checks the run and the seat's loop on every call, so a token
@@ -42,8 +41,6 @@ import {
   CLOSE_DESCRIPTION,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
-  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
-  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMENTED_DECISION,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_PREFIX,
@@ -51,6 +48,7 @@ import {
   CREATE_NO_REPO,
   CREW_LANES,
   type CrewPause,
+  checksPendingText,
   ciLogText,
   ciNoCheckText,
   ciNoFailedText,
@@ -472,8 +470,6 @@ export interface FlightToolsDeps {
           >
         >)
     | null;
-  /** Whether a branch preview is published for this ticket (#1510's looks check). */
-  hasPreview?: (repoId: string, ticket: number) => boolean;
   /** The repo's rules (the area labels), as the engine reads them. */
   rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
@@ -866,10 +862,6 @@ const CreateTicketArgs = z.strictObject({
   size: z.enum(TICKET_SIZES).optional(),
   priority: z.enum(PRIORITIES).optional(),
   basis: basisArg,
-  recommendationId: z
-    .string()
-    .regex(/^chr_[a-f0-9]{32}$/)
-    .optional(),
 });
 const CommentTicketArgs = z.strictObject({
   issue: issueNumber,
@@ -1031,9 +1023,6 @@ function issuesQuery(label: boolean, assignee: boolean, after: boolean): string 
   ];
   return `query(${vars.join(", ")}) { repository(owner: $owner, name: $name) { issues(${filters.join(", ")}) { pageInfo { hasNextPage endCursor } nodes { number title labels(first: 20) { nodes { name } } assignees(first: 10) { nodes { login } } projectItems(first: 10) { nodes { project { number } status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }`;
 }
-
-/** What recommendationId means; the tier list is read from core so the text cannot drift. */
-export const CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION = `A code-health recommendation. An accepted one links its work. A proposed one whose rule is in FLIGHT's tier (${CODE_HEALTH_FLIGHT_TIER_RULES.join(", ")}) is accepted for you: owner FLIGHT, review in ${CODE_HEALTH_FLIGHT_REVIEW_DAYS} days, your basis recorded. Any other proposed one is refused until the operator accepts it. Durable link and recovery prevent duplicate work on retry.`;
 
 /** Each repo's last create_ticket or comment_ticket call: one at a time, so the duplicate check holds. */
 const ticketQueue = new Map<string, Promise<unknown>>();
@@ -1610,7 +1599,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
     // the PR a stopped run opened: no run holds it now, so a new run picks it up on its branch
-    const ownPr = (p: { number: number }): boolean =>
+    // or one opened by hand on the ticket's own branch, which no run recorded
+    const ownPr = (p: {
+      number: number;
+      branch: string;
+      isCrossRepository?: boolean | null;
+    }): boolean =>
+      (p.isCrossRepository === false &&
+        new RegExp(`^feature/${issue}(?:-[^/]+)?$`).test(p.branch)) ||
       store
         .runsOnTicket(repo.id, ref)
         .some((r) => r.endedAt !== null && r.reviewId == null && r.loop?.prNumber === p.number);
@@ -1905,7 +1901,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
 
   /** The run's ticket and park, for the line a decision is filed under. */
   const aboutRun = (call: string, run: Run): string =>
-    `${call}: ${run.ticket ?? run.id}${run.loop?.parked ? `, ${run.loop.parked.reason}` : ""}`;
+    `${call}: ${run.ticket ?? run.id}${run.loop?.hold?.kind ? `, ${run.loop.hold.reason}` : ""}`;
 
   async function acceptRuling(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, RunArgs, args);
@@ -1952,7 +1948,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           rulingRefusedText(call, sha7(r.sha)),
         );
       case "pending":
-        return { text: rerunPendingText(sha7(r.sha)) };
+        return {
+          text:
+            r.waiting === undefined
+              ? rerunPendingText(sha7(r.sha))
+              : checksPendingText(sha7(r.sha), r.waiting),
+        };
       case "not":
         return fail(notAcceptedText(r.text));
     }
@@ -2004,7 +2005,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // where it never parks (an evidence hold) can still be ended
     const onSeat = store.seatSession(seat)?.runId === run.id;
     const parked = run.loop?.phase === "parked";
-    if (!onSeat && !run.loop?.aside) return fail(notEndableRunText(call));
+    if (!onSeat && !run.loop?.hold?.worktree) return fail(notEndableRunText(call));
     // a parked or stalled run keeps the old rule; ending one that is working is a controller power
     const stalled = onSeat && stalledSeats(config, store, at).has(seat);
     const working = onSeat && !parked && !stalled;
@@ -2239,9 +2240,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function createTicket(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, CreateTicketArgs, args);
     if (!c.ok) return c.result;
-    const { title, labels, size, priority, basis, recommendationId } = c.args;
-    const marker = recommendationId ? `<!-- code-health:${recommendationId} -->` : null;
-    const body = marker ? `${c.args.body}\n\n${marker}` : c.args.body;
+    const { title, body, labels, size, priority, basis } = c.args;
     const repo = repoOf();
     if (repo === undefined) return fail(CREATE_NO_REPO);
     if (deps.engine?.status().on !== true) return fail(GITHUB_WRITES_OFF);
@@ -2280,44 +2279,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return queued(ticketQueue, repo.id, async (): Promise<Result> => {
       const stopped = breakerRefusal();
       if (stopped) return stopped;
-      let existingWork: string | null = null,
-        workReady = false,
-        workAttempt = false;
-      if (recommendationId) {
-        let recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
-        // FLIGHT accepts a proposal of its own tier by filing its work; every other rule waits for the operator.
-        if (
-          recommendation?.state.kind === "proposed" &&
-          CODE_HEALTH_FLIGHT_TIER_RULES.includes(recommendation.rule)
-        ) {
-          try {
-            recommendation = store.flightAcceptCodeHealth(
-              repo.id,
-              recommendationId,
-              ctx.seatId,
-              basis,
-              now(),
-            );
-          } catch {
-            return fail("That recommendation changed while FLIGHT accepted it. Read it again.");
-          }
-        }
-        if (
-          !recommendation ||
-          !(
-            recommendation.state.kind === "accepted" ||
-            ((recommendation.state.kind === "paid-off" ||
-              recommendation.state.kind === "no-effect") &&
-              recommendation.workAttempt)
-          )
-        )
-          return fail(
-            "Code-health work requires an accepted recommendation in this repo, or recovery of its existing creation attempt.",
-          );
-        existingWork = recommendation.linkedWork;
-        workReady = recommendation.workReady;
-        workAttempt = recommendation.workAttempt !== null;
-      }
       const at = now();
       const cwd = crewDir(deps.dbPath);
       const failed = (step: string, r: { code: number | null; stderr: string }): Result => {
@@ -2326,15 +2287,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         );
         return fail(createFailedText(step));
       };
-      const finish = async (issue: number, url: string, recovered = false): Promise<Result> => {
+      const finish = async (issue: number, url: string): Promise<Result> => {
         const ref = `${repo.id}#${issue}`;
-        const stoppedByDecision = () =>
-          recommendationId &&
-          store.codeHealthRecommendation(repo.id, recommendationId)?.state.kind !== "accepted";
-        const decisionStop = () => ({
-          text: `Existing issue ${url} is linked. The recommendation was assessed; stopped before further board changes.`,
-        });
-        if (stoppedByDecision()) return decisionStop();
         const [owner = ""] = repo.github.split("/");
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         const added = await deps.gh(
@@ -2345,18 +2299,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           failed("project item-add", added);
           return fail(notOnProjectText(ref));
         }
-        if (recovered)
-          record(now(), {
-            kind: "ticket",
-            ref,
-            about: `${ref}: recommendation project handoff`,
-            decision: "Retried project item-add for existing accepted work.",
-            basis,
-          });
-        if (stoppedByDecision()) return decisionStop();
         // a draft repo's board is never written: moveCard would answer ok and change nothing
         if (repo.autonomy !== "merge") {
-          if (recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
           return { text: createdDraftText(ref, repo.id) };
         }
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
@@ -2369,87 +2313,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             return fail(createdFieldsFailedText(ref));
           }
         }
-        if (stoppedByDecision()) return decisionStop();
-        if (recovered && deps.board.read) {
-          const card = await deps.board.read(repo.id, issue).catch(() => null);
-          if (!card)
-            return fail(
-              "Issue exists; could not check its current board status. Retry the same recommendation.",
-            );
-          if (card.closed || card.status.trim()) {
-            if (recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
-            return {
-              text: `Recovered existing accepted recommendation work: ${url}; kept its current board status.`,
-            };
-          }
-        }
-        if (stoppedByDecision()) return decisionStop();
         const moved = await deps.board.move({
           runId: ctx.runId,
           repoId: repo.id,
           issue,
           column: "Backlog",
         });
-        if (moved.ok && recommendationId) store.completeCodeHealthWork(repo.id, recommendationId);
-        return {
-          text:
-            (recovered ? "Recovered existing accepted recommendation work. " : "") +
-            createdText(ref, moved.ok),
-        };
+        return { text: createdText(ref, moved.ok) };
       };
-      if (existingWork) {
-        if (
-          workReady ||
-          store.codeHealthRecommendation(repo.id, recommendationId ?? "")?.state.kind !== "accepted"
-        )
-          return { text: `Accepted recommendation already links ${existingWork}.` };
-        const prefix = `https://github.com/${repo.github}/issues/`,
-          number = existingWork.slice(prefix.length);
-        if (!existingWork.startsWith(prefix) || !/^[1-9][0-9]*$/.test(number))
-          return fail(
-            "Stored recommendation work link is invalid; inspect its audit before retrying.",
-          );
-        return finish(Number(number), existingWork, true);
-      }
       const listed = await deps.gh(
         [
           "issue",
           "list",
           `--repo=${repo.github}`,
-          recommendationId ? "--state=all" : "--state=open",
-          recommendationId ? "--json=number,title,body" : "--json=number,title",
+          "--state=open",
+          "--json=number,title",
           "--limit=1000",
         ],
         { cwd },
       );
       if (listed.code !== 0) return failed("issue list", listed);
-      if (recommendationId && marker) {
-        let rows: unknown;
-        try {
-          rows = JSON.parse(listed.stdout);
-        } catch {
-          return failed("issue list", { code: 0, stderr: "malformed issue list" });
-        }
-        if (!Array.isArray(rows))
-          return failed("issue list", { code: 0, stderr: "malformed issue list" });
-        const linked = rows.find(
-          (row) =>
-            row &&
-            typeof row.body === "string" &&
-            row.body.split(/\r?\n/).includes(marker) &&
-            Number.isSafeInteger(row.number) &&
-            row.number > 0,
-        );
-        if (linked) {
-          const url = `https://github.com/${repo.github}/issues/${linked.number}`;
-          store.linkCodeHealthRecommendation(repo.id, recommendationId, url, ctx.seatId, at);
-          return finish(linked.number, url, true);
-        }
-      }
-      if (recommendationId && workAttempt)
-        return fail(
-          "An earlier issue creation has an uncertain outcome. No matching recommendation marker was found in the bounded issue list. Inspect GitHub and the audit before resolving this handoff; no second issue was created.",
-        );
       const same = openIssues(listed.stdout)?.find((i) => i.title === title);
       if (same !== undefined) return fail(duplicateTitleText(same.number));
 
@@ -2459,27 +2342,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!checked?.ok) return fail(createFieldOptionText(checked?.reason ?? ""));
       }
       if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
-      if (recommendationId) {
-        const claimed = store.beginCodeHealthWork(
-          repo.id,
-          recommendationId,
-          createHash("sha256")
-            .update(JSON.stringify({ title, body, labels: [...labels].sort(), fields }))
-            .digest("hex"),
-          at,
-        );
-        if (!claimed)
-          return fail(
-            "Recommendation changed before issue creation. Refresh its decision; no new issue was created.",
-          );
-        record(at, {
-          kind: "ticket",
-          ref: recommendationId,
-          about: `Code health ${repo.id}: issue creation attempt`,
-          decision: "Attempting accepted recommendation work through create_ticket.",
-          basis,
-        });
-      }
       const created = await deps.gh(
         [
           "issue",
@@ -2498,8 +2360,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       )?.[1];
       if (number === undefined) return failed("issue create", { code: 0, stderr: "no issue URL" });
       const issue = Number(number);
-      if (recommendationId)
-        store.linkCodeHealthRecommendation(repo.id, recommendationId, url, ctx.seatId, at);
       const ref = `${repo.id}#${issue}`;
       // the issue exists now: whatever follows, it is logged
       record(at, {
@@ -2945,7 +2805,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           recommendation,
           ...(options ?? []).flatMap((o) => [o.label, o.answer, o.description ?? ""]),
         ],
-        hasPreview: main !== null && (deps.hasPreview?.(main.repoId, main.number) ?? false),
+        hasPreview: false,
       });
       if (partFaults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${partFaults.join("; ")}.`);
     }
@@ -3817,7 +3677,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (run !== null && run.endedAt === null) {
           if (!inRunLane(run)) return fail("Run is in another lane.");
           const accountId = runAccountId(store, run.id, cfg.accountId);
-          if (run.loop?.parked?.kind === "budget") return fail("Run is held by its budget.");
+          if (run.loop?.hold?.kind === "budget") return fail("Run is held by its budget.");
           if (accountAtStop(config, store, accountId, at))
             return fail(accountStoppedText(seatCallSign(a.seat), accountId));
           if (
@@ -3934,7 +3794,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       "merge",
       async (a, repo, ctx) => {
         const run = prRun(a.pr);
-        if (run?.loop?.parked?.kind === UAT_PARK)
+        if (run?.loop?.hold?.kind === UAT_PARK)
           return fail(
             "This PR waits for the operator's acceptance; only the operator can clear it.",
           );
@@ -4051,7 +3911,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const run = found.run;
         if (held(run)) return fail("Run is held.");
         if (!inRunLane(run)) return fail("Run is in another lane.");
-        if (!run.loop?.parked) return fail("Run is not parked.");
+        if (!run.loop?.hold?.kind) return fail("Run is not parked.");
         const kinds =
           a.action === "lift"
             ? ["stuck", "gate"]
@@ -4060,7 +3920,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               : a.action === "rework"
                 ? ["review", "review-ruling", MERGE_HOLD_PARK]
                 : ["review", "review-ruling"];
-        if (!kinds.includes(run.loop.parked.kind))
+        if (!kinds.includes(run.loop.hold.kind))
           return fail("This action cannot settle this park.");
         const head = store.runPush(run.id)?.sha ?? run.loop.awaitingFlight ?? null;
         const settled = await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
@@ -4688,11 +4548,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       description: `File a ticket in your repo's Backlog when you find a bug, a gap or an idea; never ask the operator to file one. Work cut from or built on an open PR needs a Depends on line for that PR's ticket (or After PR N); without one the call is refused. labels: exactly one ${AREA_LABEL_PREFIX}* and one ${LANE_LABEL_PREFIX}*, plus any of ${FLIGHT_TICKET_TYPE_LABELS.join(", ")}. The body needs ## Outcome and ## Done when. A title that matches an open issue is refused with that issue's number: comment on it instead. It is posted to GitHub: no @mentions, no issue numbers, no secrets.`,
       inputSchema: objectSchema(
         {
-          recommendationId: {
-            type: "string",
-            pattern: "^chr_[a-f0-9]{32}$",
-            description: CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION,
-          },
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },
           labels: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 10 },

@@ -19,8 +19,8 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
   type Crew,
-  type CrewAsideRun,
   type CrewLoop,
+  type CrewOffSeatRun,
   type CrewQueueItem,
   type CrewRow,
   clockHm,
@@ -134,6 +134,7 @@ import {
   runTicketTitle,
 } from "../run/view.ts";
 import type { AttentionNote, Store } from "../store.ts";
+import { FILE_SERVICE_RUNAWAY_KEY } from "../telemetry/machine-capacity.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
@@ -629,8 +630,8 @@ function buildCrew(
   });
   const digestByRun = store.digests(latestRunIds);
   const contextWindows = store.digestContextWindows(allRuns.map((run) => run.id));
-  const asideAll = store.asideRuns();
-  const referencedPrs = [...allRuns, ...asideAll].flatMap((run) =>
+  const offSeatAll = store.offSeatRuns();
+  const referencedPrs = [...allRuns, ...offSeatAll].flatMap((run) =>
     run.prs.flatMap((pr) => {
       const repo = config.repos.find((repo) => repo.github.toLowerCase() === pr.repo.toLowerCase());
       return repo ? [{ repoId: repo.id, number: pr.number }] : [];
@@ -649,7 +650,14 @@ function buildCrew(
       phase: run.loop.phase,
       text: loopText(ticket, run.loop),
       prNumber: run.loop.prNumber,
-      parked: run.loop.phase === "parked" ? (run.loop.parked?.reason ?? null) : null,
+      hold:
+        run.loop.hold && (run.loop.phase === "parked" || run.loop.hold.worktree)
+          ? {
+              kind: run.loop.phase === "parked" ? run.loop.hold.kind : null,
+              reason: run.loop.phase === "parked" ? run.loop.hold.reason : null,
+              offSeat: !!run.loop.hold.worktree,
+            }
+          : null,
       tries: runTries(store, run, run.loop),
       wait,
       ...(wait === "seat" ? { waitText: reworkWaitText(store, run) } : {}),
@@ -793,11 +801,11 @@ function buildCrew(
         ticket,
         ticketTitle: latest ? runTicketTitle(latest, ticket, ticketTitle(ticket)) : null,
         loop: agent.kind === "crew" && latest ? crewLoop(latest, ticket) : null,
-        asideRuns:
+        offSeatRuns:
           agent.kind === "crew"
-            ? asideAll
+            ? offSeatAll
                 .filter((r) => r.agentId === agent.id && r.id !== latest?.id)
-                .flatMap((r): CrewAsideRun[] => {
+                .flatMap((r): CrewOffSeatRun[] => {
                   const t = runTicket(r, runPrs(config, store, r, prCache));
                   const l = crewLoop(r, t);
                   return l
@@ -1000,13 +1008,19 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 }
 
 /**
- * Hub stops that only the operator clears, by note key or key prefix: machine capacity
- * (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
- * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
- * them to those modules' keys.
+ * Hub alerts that only the operator can act on, by note key or key prefix: machine capacity and a
+ * runaway file-change service (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and
+ * upgrade (cli-update.ts), the CLI auto-rollback (cli-auto.ts) and a seat's focus import
+ * (instructions/notices.ts). Most are stops the operator clears; the file-change alert holds
+ * nothing back and clears itself. hud.test.ts pins them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
+  // a runaway fseventsd the hub could not restart, or one that keeps coming back
+  // (telemetry/machine-capacity.ts): it holds nothing back and clears itself once a restart works
+  // or the service is small again with no recent run of restarts, but only the operator can
+  // restart it by hand or add the sudoers rule
+  `${NOTE_KEY}${FILE_SERVICE_RUNAWAY_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
   // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
@@ -1016,7 +1030,7 @@ export const HUB_STOP_KEYS = [
 /** The park kind of the run behind a note item, if any. */
 function noteParkOf(item: Pick<AttentionItem, "key">, store: Store): string | undefined {
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  return note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  return note?.runId ? (store.run(note.runId)?.loop?.hold?.kind ?? undefined) : undefined;
 }
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
@@ -1851,7 +1865,7 @@ function endedParkGone(
   boardOf: (repoId: string) => BoardItem[],
 ): boolean {
   const loop = run.loop;
-  if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
+  if (loop?.phase !== "parked" || loop.hold?.kind !== "ended") return false;
   return runSubjectGone(config, store, run, boardOf);
 }
 
@@ -2063,7 +2077,9 @@ function crewItems(
     const resolved =
       run !== null &&
       (run.endedAt !== null ||
-        (n.kind === "blocked" && run.loop?.parked == null && (run.loop?.unparkedAt ?? 0) > n.at) ||
+        (n.kind === "blocked" &&
+          run.loop?.hold?.kind == null &&
+          (run.loop?.unparkedAt ?? 0) > n.at) ||
         (n.kind === "blocked" && confirmedResumeAfter(store, run, n.at)) ||
         run.loop?.phase === "done" ||
         (pr !== undefined && pr.state !== "open") ||
@@ -2076,8 +2092,8 @@ function crewItems(
       pr !== undefined &&
       pr.state !== "open" &&
       (pr.mergedAt ?? (pr.state === "closed" ? pr.updatedAt : 0)) >= n.at &&
-      run?.loop?.parked?.kind !== "budget" &&
-      run?.loop?.parked?.kind !== "account" &&
+      run?.loop?.hold?.kind !== "budget" &&
+      run?.loop?.hold?.kind !== "account" &&
       (run === null || store.seatSession(run.agentId)?.state !== "stopped");
     if (
       (n.kind === "blocked" || n.kind === "review") &&

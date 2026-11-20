@@ -25,7 +25,7 @@ const tries: LoopTry[] = STEPS.map((step, index) => ({
 // A finished run with every section present: edges, timeline, events, tokens, caps and next.
 const view: RunLoopView = {
   runId: RUN,
-  loop: { phase: "review", ciFails: 1, parked: null } as RunLoopView["loop"] & object,
+  loop: { phase: "review", ciFails: 1, hold: null } as RunLoopView["loop"] & object,
   events: [
     ...tries.map((try_, index) => ({
       key: `e${index}`,

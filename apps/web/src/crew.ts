@@ -620,7 +620,7 @@ export function waitText(
       // a park's reason names who settles it (FLIGHT, or the operator's acceptance), so the line
       // does not claim the operator for every park
       if (loop.phase === "parked")
-        return loop.parked ? `${PARKED_WAIT_LEAD}: ${loop.parked}` : PARKED_WAIT_LEAD;
+        return loop.hold?.reason ? `${PARKED_WAIT_LEAD}: ${loop.hold.reason}` : PARKED_WAIT_LEAD;
       return WAIT_TEXT.operator;
     case "lock":
       return lockSince === null
@@ -751,7 +751,7 @@ export function seatStatus(row: CrewRow): SeatStatus {
   if (row.reviewing && (row.hudState === "idle" || row.hudState === "running"))
     return { label: "Checking", tone: "neutral" };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
-  const reason = row.loop?.parked ?? row.note ?? undefined;
+  const reason = row.loop?.hold?.reason ?? row.note ?? undefined;
   // The hub holds a stuck ticket on the ticket, not on a seat: a crew seat is never "Blocked".
   // Without an open run it is free; with one it waits on its own command.
   if (row.kind === "crew" && row.hudState === "blocked") {

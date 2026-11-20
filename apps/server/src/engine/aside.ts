@@ -2,6 +2,12 @@ import { carriedFrom, fixKey, type Run, reviewFor, seatIsPaused } from "@mc/core
 import { readCrewPause } from "../config/crew-pause.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 
+/** The worktree and wake flag of a live run that has left its seat, else null. */
+export function offSeatHold(run: Run | null): { worktree: string; wake: boolean } | null {
+  const hold = run?.endedAt === null ? run.loop?.hold : null;
+  return hold?.worktree ? { worktree: hold.worktree, wake: hold.wake } : null;
+}
+
 /**
  * Whether a run set aside in CI or review is due back on its seat: the loop flagged it
  * (`aside.wake`), CI is failing on its pushed sha after its one re-run while it is in `ci`, or
@@ -10,7 +16,7 @@ import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
  * poll or RETRO recording the failure and the run's next engine pass setting the flag.
  */
 export function asideWakeDue(store: Store, run: Run): boolean {
-  const aside = run.loop?.aside;
+  const aside = run.loop?.hold?.worktree ? run.loop.hold : null;
   if (!aside || run.endedAt !== null || run.loop?.phase === "done") return false;
   // a run on its seat is not waiting for one: a restart between its wake and the loop clearing
   // `aside` leaves the flag set, and it must not set the seat's next run aside, over and over
@@ -62,7 +68,7 @@ function fixDueReason(store: Store, run: Run): "ci" | "review" | null {
 function unpausedAsideRuns(store: Store, seatId: string): Run[] {
   const pause = readCrewPause(store);
   return store
-    .asideRuns()
+    .offSeatRuns()
     .filter((run) => run.agentId === seatId && !seatIsPaused(pause, seatId, run.id));
 }
 

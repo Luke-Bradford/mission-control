@@ -166,10 +166,6 @@ export const wasteResolveHoldMs = (check: WasteCheck): number | null =>
         ? WASTE_THRESHOLDS.churnWindowMs
         : null;
 
-/** The refusal a rerun gets. */
-export const unchangedRerunText = (command: string, sha: string): string =>
-  `Not run: ${command} already ran on commit ${sha.slice(0, 7)} and nothing has changed since (no commit, no edited file). It passed, or it has failed twice on this commit; the result is recorded. Change something first, or read that result.`;
-
 /** Every start refusal a waste alarm gives begins with this; the engine reads it as a hold, not a fault. */
 export const WASTE_HELD_PREFIX = "Not started: waste alarm.";
 

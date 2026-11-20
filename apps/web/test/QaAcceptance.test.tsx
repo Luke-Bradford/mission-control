@@ -198,6 +198,7 @@ describe("QA acceptance", () => {
     },
   );
   it("distinguishes a failed evidence read from a genuine missing capture and offers retry", async () => {
+    details = { ...details, files: ["apps/web/src/App.tsx"] };
     evidenceFails = true;
     await ready();
     expect(await screen.findByText(/Screenshot evidence is unavailable/)).toBeTruthy();
@@ -211,11 +212,11 @@ describe("QA acceptance", () => {
     ["a server-only change", ["apps/server/src/api.ts"]],
     ["a change in another repo's layout", ["src/Cart.tsx"]],
     ["a mockup change", ["docs/prototype/mission-control-hud.html"]],
-  ])("does not guess from paths that %s has no screen", async (_name, files) => {
+  ])("shows no page changes when %s has no web files", async (_name, files) => {
     details = { ...details, files };
     await ready();
-    await screen.findByText(/No before\/after pairs have been captured/);
-    expect(screen.queryByText(/Nothing to see/)).toBeNull();
+    await screen.findByText("No page changes");
+    expect(screen.queryByText(/No before\/after pairs have been captured/)).toBeNull();
   });
   it("shows the server's stale-head refusal", async () => {
     refuse = true;

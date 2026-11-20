@@ -564,7 +564,7 @@ export const defaultAppliedText = (label: string, ask: string): string =>
 
 /** A crew row cut down to what the Overview reads (see `CrewSummaryRow`). */
 export function crewRowSummary(row: CrewRow): CrewSummaryRow {
-  const { events: _events, digest, asideRuns, ...rest } = row;
+  const { events: _events, digest, offSeatRuns, ...rest } = row;
   return {
     ...rest,
     digest:
@@ -580,9 +580,9 @@ export function crewRowSummary(row: CrewRow): CrewSummaryRow {
             contextWindow: digest.contextWindow,
             compactions: digest.compactions,
           },
-    ...(asideRuns === undefined
+    ...(offSeatRuns === undefined
       ? {}
-      : { asideRuns: asideRuns.map(({ events: _aside, ...run }) => run) }),
+      : { offSeatRuns: offSeatRuns.map(({ events: _aside, ...run }) => run) }),
   };
 }
 

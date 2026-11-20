@@ -514,7 +514,7 @@ describe("Agents panel", () => {
     phase,
     text,
     prNumber,
-    parked: phase === "parked" ? text : null,
+    hold: phase === "parked" ? { kind: null, reason: text, offSeat: false } : null,
   });
   it("a seat's loop reads in its Step cell: the step and its bar, and a dash when it has none", async () => {
     const loop = loopOf("review", "In review · PR #9", 9);
@@ -541,7 +541,7 @@ describe("Agents panel", () => {
         seatRow({
           hudState: "running",
           loop: { ...loopOf("working", "Working on the ticket"), wait: null },
-          asideRuns: [
+          offSeatRuns: [
             {
               runId: "r-9",
               ticket: ASIDE_TICKET,
@@ -575,7 +575,7 @@ describe("Agents panel", () => {
         seatRow({
           run: null,
           loop: null,
-          asideRuns: [
+          offSeatRuns: [
             {
               runId: "r-9",
               ticket: ASIDE_TICKET,
@@ -695,7 +695,7 @@ describe("Agents panel", () => {
   });
 
   it("the Loop step column keeps its alignment even when no row has a loop", async () => {
-    const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, parked: null };
+    const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, hold: null };
     stub({ rows: [crewRow({ loop: null }), crewRow({ id: "other", index: 1, loop: null })] });
     const none = render(<Overview />);
     const list = () => none.container.querySelector("#agentsList") as HTMLElement;
@@ -931,7 +931,7 @@ describe("Agents panel", () => {
   it("a running seat keeps live tool detail in the row tooltip, not on a line of its own", async () => {
     const detail = "x".repeat(60);
     const row = crewRow({
-      loop: { phase: "working", text: "Implement cache", prNumber: null, parked: null },
+      loop: { phase: "working", text: "Implement cache", prNumber: null, hold: null },
     });
     stub({
       rows: [
@@ -2729,7 +2729,7 @@ describe("Overview: agent text is formatted", () => {
 });
 
 describe("Overview: what a seat is doing", () => {
-  const ci = { phase: "ci" as const, text: "CI on 08a7cfc", prNumber: 9, parked: null };
+  const ci = { phase: "ci" as const, text: "CI on 08a7cfc", prNumber: 9, hold: null };
 
   it("a seat with an ended run is Free and hides its completed loop", async () => {
     const live = seatRow().run as NonNullable<CrewRow["run"]>;
@@ -2738,7 +2738,7 @@ describe("Overview: what a seat is doing", () => {
         seatRow({
           hudState: "idle",
           run: { ...live, status: "ok", endedAt: 1 },
-          loop: { phase: "done", text: "Done · PR #9", prNumber: 9, parked: null },
+          loop: { phase: "done", text: "Done · PR #9", prNumber: 9, hold: null },
         }),
       ],
     });

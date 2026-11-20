@@ -28,7 +28,7 @@ export async function answerAsideQuestion(
       question.passedAt === null ||
       !run ||
       run.endedAt !== null ||
-      !run.loop?.aside
+      !run.loop?.hold?.worktree
     )
       throw new AsideAnswerChanged(
         "The preserved question changed or ended; refresh before answering.",

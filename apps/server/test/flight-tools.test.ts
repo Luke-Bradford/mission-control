@@ -22,7 +22,6 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
-  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   ciLogText,
@@ -85,11 +84,13 @@ import {
   LEDGER_FULL_TEXT,
   LEDGER_KIND_CHANGE_TEXT,
   LEDGER_TRACK_CLOSED_TEXT,
+  leaveSeat,
   ledgerClosedText,
   ledgerNextText,
   ledgerNoKeyText,
   ledgerOwnerText,
   ledgerTitleText,
+  liftPark,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -106,6 +107,7 @@ import {
   PROFILE_PAIR_TEXT,
   PROTECTED_ITEM_REFUSED,
   type PullRequestView,
+  parkHold,
   passNeedsBriefText,
   pathGrantProblem,
   planNeedsSignoffText,
@@ -148,7 +150,6 @@ import { buildApp } from "../src/api.ts";
 import { AttentionMaterialsError } from "../src/attention/attention-materials.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/config/crew-pause.ts";
 import {
@@ -267,8 +268,6 @@ let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let aliveNow: string[];
-/** Tickets of repo mc with a published branch preview. */
-let previewTickets: number[];
 let engineOn: boolean;
 let lifts: boolean;
 let refuseWith: OperatorRefusal | null = null;
@@ -436,10 +435,8 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
-  previewTickets = [];
   flightDeps = (): FlightToolsDeps => ({
     attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
-    hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
       save: (png) => shotsSaveImpl(png),
@@ -1254,7 +1251,7 @@ describe("resume_seat", () => {
         store.setRunLoop("r-guido", {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "budget", ended: false },
+          hold: { kind: "budget", reason: "budget", ended: false, worktree: null, wake: false },
         });
       if (limit === "account")
         store.addUsage({
@@ -1527,17 +1524,6 @@ describe("seat schema", () => {
       ).properties;
       expect(props.seat?.pattern).toBe(SEAT_ID.source);
     }
-  });
-});
-
-describe("create_ticket recommendationId", () => {
-  it("tells FLIGHT which proposed code-health rules it may accept itself", () => {
-    const props = (
-      named("create_ticket").inputSchema as { properties: Record<string, { description?: string }> }
-    ).properties;
-    for (const rule of CODE_HEALTH_FLIGHT_TIER_RULES)
-      expect(props.recommendationId?.description).toContain(rule);
-    expect(props.recommendationId?.description).toContain("operator accepts");
   });
 });
 
@@ -2512,7 +2498,7 @@ describe("start_seat", () => {
             number: 9,
             title: "t",
             url: "u",
-            branch: "feature/7-x",
+            branch: "hand/9-x",
             ticket: "mc#7",
             state: "open",
             isDraft: false,
@@ -2531,7 +2517,7 @@ describe("start_seat", () => {
       expect(startCalls).toEqual([]);
     });
 
-    it("starts a ticket whose open PR an ended run recorded, and still refuses one no run recorded", async () => {
+    it("starts a ticket whose open PR an ended run recorded", async () => {
       const pr = {
         repoId: "mc",
         number: 9,
@@ -2551,7 +2537,6 @@ describe("start_seat", () => {
       };
       store.upsertPullRequests("mc", [pr], NOW);
       board(sc(7, { labels: ["area:server"], status: "In progress" }));
-      expect(await start()).toEqual(refused(wrongColumnText("mc#7", "In progress")));
       store.upsertRun(
         run("r-old", "guido-2", {
           repoId: "mc",
@@ -2563,7 +2548,74 @@ describe("start_seat", () => {
       );
       const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
+      expect(startCalls).toEqual([["guido-1", 7, undefined]]);
+    });
+
+    it("carries on an open PR on the ticket's branch that no run recorded, unless a run is live", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: false,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      store.upsertRun(run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: null }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
+      store.upsertRun(
+        run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: NOW, status: "failed" }),
+      );
+      const r = (await start()) as { isError?: boolean };
+      expect(r.isError).toBeUndefined();
       expect(startCalls.length).toBe(1);
+    });
+
+    it("does not carry on an open PR from a fork, even on a feature branch name", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: true,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In review" }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
     });
   });
 });
@@ -2883,7 +2935,13 @@ describe("end_run", () => {
       store.setRunLoop("r-g", {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "nothing", reason: "nothing to push", ended: false },
+        hold: {
+          kind: "nothing",
+          reason: "nothing to push",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       });
       return call("end_run", { runId: "r-g", basis: "nothing left to do" });
     };
@@ -2902,7 +2960,7 @@ describe("end_run", () => {
     store.setRunLoop("r-g", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind, reason: "nothing to push", ended: false },
+      hold: { kind, reason: "nothing to push", ended: false, worktree: null, wake: false },
     });
   };
   /** The run is off its seat, in review, parked. */
@@ -2913,8 +2971,13 @@ describe("end_run", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed", ended: false },
-          aside: { worktree: "/tmp/none/wt", wake: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed",
+            ended: false,
+            worktree: "/tmp/none/wt",
+            wake: false,
+          },
         },
       }),
     );
@@ -3102,7 +3165,8 @@ describe("end_run", () => {
   it("refuses a set-aside run with uncommitted work, in any phase", async () => {
     setAside();
     const r = store.run("r-g");
-    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    if (r?.loop)
+      store.setRunLoop("r-g", { ...r.loop, phase: "review", hold: liftPark(r.loop.hold) });
     dirty = ["apps/a.ts"];
     expect((await call("end_run", E())).isError).toBe(true);
     expect(asideEnds).toEqual([]);
@@ -3111,7 +3175,8 @@ describe("end_run", () => {
   it("ends a set-aside run that never parked (an evidence hold keeps it in review)", async () => {
     setAside();
     const r = store.run("r-g");
-    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    if (r?.loop)
+      store.setRunLoop("r-g", { ...r.loop, phase: "review", hold: liftPark(r.loop.hold) });
     expect((await call("end_run", E())).isError).toBeFalsy();
     expect(asideEnds.length).toBe(1);
   });
@@ -3139,7 +3204,7 @@ describe("accept_ruling", () => {
       ...NEW_LOOP,
       phase: "parked",
       ciFailedSha: SHA,
-      parked: { kind: "ruling", reason: "ruled", ended: false },
+      hold: { kind: "ruling", reason: "ruled", ended: false, worktree: null, wake: false },
     });
   });
 
@@ -3188,6 +3253,14 @@ describe("accept_ruling", () => {
     for (let i = 0; i < 8; i++) await call("accept_ruling", A());
     expect(store.flightDecisions(0, 5).filter((d) => d.kind === "hub")).toEqual([]);
     expect(store.getSetting("flight.runaway-events")).toBeNull();
+  });
+
+  it("names the checks CI still waits on when no re-run is going", async () => {
+    rulingImpl = async () => ({ kind: "pending", sha: SHA, waiting: ["e2e"] });
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "CI on aaaaaaa is not done: e2e still pending or not reported. Nothing was re-run.",
+    });
+    expect(decisions()).toEqual([]);
   });
 
   it("passes the engine's refusals on", async () => {
@@ -3596,8 +3669,13 @@ describe("flight_state", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed", ended: false },
-          aside: { worktree: "/tmp/none/wt", wake: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed",
+            ended: false,
+            worktree: "/tmp/none/wt",
+            wake: false,
+          },
         },
       }),
     );
@@ -3624,7 +3702,7 @@ describe("flight_state", () => {
     store.setRunLoop("r-inco", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: "silent", reason: "budget", ended: false },
+      hold: { kind: "silent", reason: "budget", ended: false, worktree: null, wake: false },
     });
     store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
     store.addQuestion({
@@ -4284,235 +4362,6 @@ describe("create_ticket", () => {
     mc.autonomy = "merge";
     engineOn = true;
     okGh();
-  });
-
-  function acceptedRecommendation() {
-    store.refreshCodeHealthRecommendations("mc", NOW);
-    const row = store.codeHealthRecommendations("mc")[0];
-    if (!row) throw Error("fixture recommendation missing");
-    store.decideCodeHealthRecommendation(
-      "mc",
-      row.id,
-      {
-        requestId: "12345678-1234-4234-8234-123456789abc",
-        basis: "Fixture evidence",
-        expectedUpdatedAt: row.updatedAt,
-        change: { action: "accept", owner: "owner", reviewAt: NOW + 10000 },
-      },
-      "operator",
-      NOW,
-    );
-    return row.id;
-  }
-  it("links accepted recommendation work before a project failure and never recreates it on retry", async () => {
-    const recommendationId = acceptedRecommendation();
-    readImpl = (n) => card(n, { status: "" });
-    let creates = 0,
-      failProject = true;
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      if (a[1] === "create") {
-        creates++;
-        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-      }
-      return { code: failProject ? 1 : 0, stdout: "", stderr: "project refused" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toBe(
-      "https://github.com/o/mc/issues/42",
-    );
-    failProject = false;
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain(
-      "Recovered existing",
-    );
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.workReady).toBe(true);
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain("already links");
-    expect(creates).toBe(1);
-  });
-  function proposed(rule: string) {
-    const id = `chr_${(rule.length.toString(16).padStart(2, "0")).repeat(16)}`;
-    upsertRecommendation(
-      (store as unknown as { db: DatabaseSync }).db,
-      {
-        id,
-        repoId: "mc",
-        rule,
-        ruleVersion: 1,
-        scope: null,
-        evidenceFingerprint: "f",
-        observation: "o",
-        proposal: "p",
-        uncertainty: "u",
-        rankingReason: "r",
-        target: { metric: "m", direction: "decrease", baseline: 5 },
-      },
-      NOW,
-    );
-    return id;
-  }
-  it("accepts a proposal of FLIGHT's own tier by filing its work, and leaves the others for the operator", async () => {
-    readImpl = (n) => card(n, { status: "" });
-    const other = proposed("recurring-correction");
-    expect((await call("create_ticket", C({ recommendationId: other }))).isError).toBe(true);
-    expect(store.codeHealthRecommendation("mc", other)?.state.kind).toBe("proposed");
-    const mine = proposed("repeatedly-changed-large-file");
-    await call("create_ticket", C({ recommendationId: mine }));
-    const row = store.codeHealthRecommendation("mc", mine);
-    expect(row?.state.kind).toBe("accepted");
-    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
-  });
-  it("recovers a created issue marker after a lost response without a second issue write", async () => {
-    const recommendationId = acceptedRecommendation();
-    readImpl = (n) => card(n, { status: "In progress" });
-    let body = "",
-      creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list")
-        return {
-          code: 0,
-          stdout: JSON.stringify(
-            body ? [{ number: 42, title: "Server: fix the flake", body }] : [],
-          ),
-          stderr: "",
-        };
-      if (a[1] === "create") {
-        creates++;
-        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
-        return { code: 1, stdout: "", stderr: "response lost" };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(
-      (
-        await call(
-          "create_ticket",
-          C({ recommendationId, title: "Rephrased title", body: `${BODY}Updated phrasing` }),
-        )
-      ).text,
-    ).toContain("Recovered existing");
-    expect(creates).toBe(1);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toContain(
-      "issues/42",
-    );
-  });
-  function assessRecommendation(id: string) {
-    const row = store.codeHealthRecommendation("mc", id);
-    if (!row) throw Error("missing fixture recommendation");
-    store.decideCodeHealthRecommendation(
-      "mc",
-      id,
-      {
-        requestId: "a2345678-1234-4234-8234-123456789abc",
-        basis: "Later evidence",
-        expectedUpdatedAt: row.updatedAt,
-        change: {
-          action: "assess",
-          outcome: "no-effect",
-          reason: "Work no longer needed",
-          comparison: "Compared with saved baseline",
-          evidenceId: "fixture-evidence",
-        },
-      },
-      "operator",
-      NOW + 10001,
-    );
-  }
-  it("creates no issue when assessment wins during the issue-list await", async () => {
-    const recommendationId = acceptedRecommendation();
-    let creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list") {
-        assessRecommendation(recommendationId);
-        return { code: 0, stdout: "[]", stderr: "" };
-      }
-      creates++;
-      return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(creates).toBe(0);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.state.kind).toBe("no-effect");
-  });
-  it("keeps the created issue link and assessment when assessment wins during creation", async () => {
-    const recommendationId = acceptedRecommendation();
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      if (a[1] === "create") {
-        assessRecommendation(recommendationId);
-        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-      }
-      throw Error("No board write after assessment");
-    };
-    const result = await call("create_ticket", C({ recommendationId }));
-    expect(result.isError).toBeUndefined();
-    expect(result.text).toContain("was assessed");
-    const row = store.codeHealthRecommendation("mc", recommendationId);
-    expect(row?.state.kind).toBe("no-effect");
-    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
-    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(0);
-  });
-  it("recovers a lost creation response after assessment without overwriting that decision", async () => {
-    const recommendationId = acceptedRecommendation();
-    let body = "",
-      creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list")
-        return {
-          code: 0,
-          stdout: JSON.stringify(body ? [{ number: 42, body, title: "Original issue" }] : []),
-          stderr: "",
-        };
-      if (a[1] === "create") {
-        creates++;
-        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
-        assessRecommendation(recommendationId);
-        return { code: 1, stdout: "", stderr: "response lost" };
-      }
-      throw Error("No board write after assessment");
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(
-      (await call("create_ticket", C({ recommendationId, title: "Rephrased recovery" }))).text,
-    ).toContain("was assessed");
-    expect(creates).toBe(1);
-    const row = store.codeHealthRecommendation("mc", recommendationId);
-    expect(row?.state.kind).toBe("no-effect");
-    expect(row?.linkedWork).toContain("issues/42");
-  });
-  it("fails closed after an ambiguous creation with no visible marker", async () => {
-    const recommendationId = acceptedRecommendation();
-    let creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      creates++;
-      return { code: 1, stdout: "", stderr: "response lost" };
-    };
-    await call("create_ticket", C({ recommendationId }));
-    const retry = await call("create_ticket", C({ recommendationId, title: "Changed title" }));
-    expect(retry.isError).toBe(true);
-    expect(retry.text).toContain("uncertain outcome");
-    expect(creates).toBe(1);
-  });
-  it("counts partial project-recovery writes before a failed board read", async () => {
-    const recommendationId = acceptedRecommendation();
-    store.linkCodeHealthRecommendation(
-      "mc",
-      recommendationId,
-      "https://github.com/o/mc/issues/42",
-      "flight-1",
-      NOW,
-    );
-    readImpl = () => null;
-    ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
-    for (let i = 0; i < 6; i++) await call("create_ticket", C({ recommendationId }));
-    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(5);
-    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toHaveLength(5);
-  });
-  it("refuses an unaccepted or foreign recommendation before GitHub reads", async () => {
-    store.refreshCodeHealthRecommendations("mc", NOW);
-    const recommendationId = store.codeHealthRecommendations("mc")[0]?.id;
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(ghCalls).toEqual([]);
   });
 
   it("counts tickets that were filed and then failed at the project, so they cannot go on unbounded", async () => {
@@ -5175,12 +5024,8 @@ describe("brief_item", () => {
       );
       expect(ok).toEqual({ text: BRIEFED_TEXT });
     });
-    it("refuses a looks question with no picture and no preview; passes with either", async () => {
+    it("refuses a looks question with no picture; passes with one", async () => {
       await refused({ looks: true }, /about how something looks/);
-      previewTickets = [7];
-      const withPreview = await call("brief_item", B({ looks: true }));
-      expect(withPreview).toEqual({ text: BRIEFED_TEXT });
-      previewTickets = [];
       const picture = `/api/hud-screenshots/${"a".repeat(32)}`;
       expect(
         await call(
@@ -5663,7 +5508,7 @@ describe("brief_item", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind, reason: "operator needed", ended: false },
+          hold: { kind, reason: "operator needed", ended: false, worktree: null, wake: false },
         },
       }),
     );
@@ -7213,7 +7058,7 @@ describe("superuser housekeeping", () => {
     runPr();
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
-      aside: { worktree: "/tmp/preserved", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/tmp/preserved", wake: false },
     });
     const row = need(store.seatSession("guido-1"));
     store.setSeatSession({ ...row, runId: null });
@@ -7267,7 +7112,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind, reason: "held", ended: false },
+      hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
     });
     expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
       "isError",
@@ -7283,7 +7128,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "held", ended: false },
+      hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
     });
     const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(refused).toHaveProperty("isError", true);
@@ -7293,11 +7138,36 @@ describe("superuser housekeeping", () => {
   it("settle_park says when the run is not parked", async () => {
     elevated();
     runPr();
-    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), phase: "working", parked: null });
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "working",
+      hold: liftPark(need(store.run("r-pr")?.loop).hold),
+    });
     const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(refused).toHaveProperty("isError", true);
     expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
+  });
+  it("settle_park says a run only held off its seat is not parked, and reaches the engine once a review park holds it", async () => {
+    elevated();
+    runPr();
+    const off = leaveSeat(null, "/tmp/none/wt", false);
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "review",
+      hold: off,
+    });
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is not parked.");
+    expect(engineCalls).toEqual([]);
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      hold: parkHold(off, "review", "held", false),
+    });
+    await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(engineCalls).not.toEqual([]);
   });
   it.each(["lift", "accept", "rework", "rereview"] as const)(
     "settle_park cannot settle a controller check with a review action (%s)",
@@ -7307,7 +7177,13 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind: "controller-check", reason: "held", ended: false },
+        hold: {
+          kind: "controller-check",
+          reason: "held",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       });
       const refused = await call("settle_park", { runId: "r-pr", action });
       expect(refused).toHaveProperty("isError", true);
@@ -7322,7 +7198,7 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind, reason: "held", ended: false },
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
       });
     park("conflict");
     expect(await call("settle_park", { runId: "r-pr", action: "lift" })).toHaveProperty(
@@ -7353,7 +7229,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "held", ended: false },
+      hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
     });
     lifts = false;
     refuseWith = reason;
@@ -7367,7 +7243,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "Blocked", ended: false },
+      hold: { kind: "review", reason: "Blocked", ended: false, worktree: null, wake: false },
     });
     const result = await call("settle_park", {
       runId: "r-pr",
@@ -7396,7 +7272,13 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind: "review", reason: "review round cap", ended: false },
+        hold: {
+          kind: "review",
+          reason: "review round cap",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
         ...(flightReworks === undefined ? {} : { flightReworks }),
       });
 
@@ -7440,7 +7322,13 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: MERGE_HOLD_PARK, reason: "merge held by CAPCOM: bug", ended: false },
+      hold: {
+        kind: MERGE_HOLD_PARK,
+        reason: "merge held by CAPCOM: bug",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       mergeHold: { by: "CAPCOM", reason: "bug", at: NOW },
     });
     for (const action of ["accept", "rereview", "lift", "second_review"] as const) {
@@ -7471,7 +7359,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "budget", reason: "tokens", ended: false },
+      hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
     });
     expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
       refused("Run is held."),
@@ -7499,7 +7387,7 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind, reason: "held", ended: false },
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
       });
 
     park("budget");
@@ -7622,7 +7510,13 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: UAT_PARK, reason: "waiting for your acceptance", ended: false },
+      hold: {
+        kind: UAT_PARK,
+        reason: "waiting for your acceptance",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       uat: { sha: SHA, from: "review", accepted: false },
     });
     const refused = await call("merge_pr", { pr: 12, basis: "ready" });
@@ -7971,7 +7865,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r", {
       ...need(store.run("r")?.loop),
       phase: "parked",
-      parked: { kind: "budget", reason: "budget", ended: false },
+      hold: { kind: "budget", reason: "budget", ended: false, worktree: null, wake: false },
     });
     expect(await call("dismiss_item", { key: `note:${blockedNoteKey("r", 0)}` })).toHaveProperty(
       "isError",
@@ -9270,7 +9164,13 @@ describe("attention hold tools", () => {
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "controller-check", reason: "check", ended: false },
+        hold: {
+          kind: "controller-check",
+          reason: "check",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
     });
     store.raiseNote({
@@ -11197,7 +11097,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "tokens", ended: false },
+          hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
         },
       });
       nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -11225,7 +11125,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "tokens", ended: false },
+          hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
         },
       });
       nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;

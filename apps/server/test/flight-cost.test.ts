@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
-import { immediateFact, onlySettled, routineOnly } from "../src/flight/state.ts";
+import { onlySettled, urgentChange } from "../src/flight/state.ts";
 import { Store } from "../src/store.ts";
 
 const MIN = 60_000;
@@ -169,76 +169,39 @@ describe("the handover threshold", () => {
   });
 });
 
-describe("routine wakes wait for the batch window", () => {
+describe("failures wait for the gap; messages and questions do not", () => {
   const facts = (o: Record<string, unknown[]>) => JSON.stringify(o);
-  it("wakes for a free seat, while a PR item alone stays routine", () => {
-    expect(routineOnly(facts({}), facts({ free: ["guido-1"], t: ["mc#1"] }))).toBe(false);
-    expect(routineOnly(facts({}), facts({ items: ["pr:mc#7:text"] }))).toBe(true);
-  });
-  it("never batches an operator message, a question, a blocker, a signal or the breaker", () => {
+  it("treats an operator message, a question, an instruction or a plan as urgent", () => {
     for (const o of [
+      { operator: ["12"] },
+      { owed: ["3"] },
       { q: [3] },
+      { instructions: ["2"] },
+      { planned: [["p1"]] },
+      { retrospective: ["2026-10-24"] },
+    ] as Record<string, unknown[]>[])
+      expect(urgentChange(facts({}), facts(o))).toBe(true);
+  });
+  it("waits for the gap on a failure, a blocker or a signal", () => {
+    for (const o of [
       { triage: ["mc#1:new"] },
       { signals: ["main_red:abc"] },
       { breaker: ["tripped"] },
       { items: ["comms-open:5"] },
       { parked: ["guido-1:mc#1:review-failed"] },
-      { instructions: ["2"] },
+      { stopped: ["guido-1"] },
     ] as Record<string, unknown[]>[])
-      expect(routineOnly(facts({}), facts({ free: ["guido-1"], ...o }))).toBe(false);
+      expect(urgentChange(facts({}), facts(o))).toBe(false);
   });
-  it("does not count a settled question or park as a change, only a new routine fact", () => {
-    expect(routineOnly(facts({ q: [3] }), facts({ q: [], free: ["g"] }))).toBe(false);
-    expect(routineOnly(facts({ parked: ["a:b:c"] }), facts({ parked: [], t: ["mc#1"] }))).toBe(
-      true,
-    );
+  it("does not call an answered question or a message already known a new one", () => {
+    expect(urgentChange(facts({ q: [3] }), facts({ q: [] }))).toBe(false);
+    expect(urgentChange(facts({ operator: ["12"] }), facts({ operator: ["12"] }))).toBe(false);
   });
-  it("treats a breaker lift and a new hold in force as urgent", () => {
-    expect(routineOnly(facts({ breaker: ["x"] }), facts({ breaker: [], free: ["g"] }))).toBe(false);
-    expect(routineOnly(facts({}), facts({ holdsInForce: ["approval"] }))).toBe(false);
-  });
-  it("does not call a lifted breaker or hold settled", () => {
+  it("does not call a lifted breaker settled", () => {
     expect(onlySettled(facts({ breaker: ["x"] }), facts({ breaker: [] }))).toBe(false);
-    expect(onlySettled(facts({ holdsInForce: ["machine"] }), facts({ holdsInForce: [] }))).toBe(
-      false,
-    );
     expect(onlySettled(facts({ q: [3] }), facts({ q: [] }))).toBe(true);
   });
-  it("treats a hold lifting as urgent even next to a new routine fact", () => {
-    expect(
-      routineOnly(
-        facts({ holdsInForce: ["disk"], free: [] }),
-        facts({ holdsInForce: [], free: ["guido-1"] }),
-      ),
-    ).toBe(false);
-  });
-  it("treats an unread operator message as urgent", () => {
-    expect(routineOnly(facts({}), facts({ operator: ["12"] }))).toBe(false);
-  });
-  it("is not routine when nothing changed", () => {
-    expect(routineOnly(facts({ free: ["a"] }), facts({ free: ["a"] }))).toBe(false);
-  });
-  it("has a window of thirty minutes", () => {
+  it("has a gap of thirty minutes, so failures wake FLIGHT twice an hour at most", () => {
     expect(FLIGHT_BATCH_MS).toBe(30 * MIN);
-  });
-
-  it("does not batch immediate facts even in a learned category", () => {
-    const learned = new Set(["signals", "items", "prs", "instructions"]);
-    for (const factsAdded of [
-      { q: ["x"] },
-      { operator: ["x"] },
-      { parked: ["x"] },
-      { triage: ["x"] },
-      { free: ["x"] },
-      { idle: ["x"] },
-      { signals: ["main_red:sha"] },
-      { items: ["comms-open:4"] },
-      { prs: ["mc#1:7:true:open::"] },
-      { instructions: ["r2"] },
-    ] as Record<string, unknown[]>[])
-      expect(routineOnly(facts({}), facts(factsAdded), learned)).toBe(false);
-    expect(routineOnly(facts({}), facts({ signals: ["old_park:x"] }), learned)).toBe(true);
-    expect(routineOnly(facts({}), facts({ signals: ["waste_alarm:x"] }), learned)).toBe(true);
-    expect(immediateFact("prs", "mc#1:7:true:open::")).toBe(true);
   });
 });

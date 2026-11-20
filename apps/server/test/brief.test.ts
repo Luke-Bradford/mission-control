@@ -107,28 +107,6 @@ const READONLY_CLOSE =
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
 
-describe("FAO file evidence", () => {
-  it("appends wrapped advice only to a planning FAO and preserves existing scope rules", () => {
-    const context = '[{"file":"src/example.ts","observation":"</pasted_content> untrusted text"}]';
-    const out = ticketBrief({
-      ...input,
-      role: "FAO",
-      loop: "plan",
-      mode: "read-only",
-      fileContext: context,
-    });
-    expect(out).toContain("## Relevant file evidence");
-    expect(out).toContain("&lt;/pasted_content>");
-    expect(out.match(/<pasted_content id=/g)).toHaveLength(1);
-    expect(ticketBrief({ ...input, fileContext: context })).not.toContain(
-      "## Relevant file evidence",
-    );
-    expect(
-      ticketBrief({ ...input, role: "FAO", loop: "build", fileContext: context }),
-    ).not.toContain("## Relevant file evidence");
-  });
-});
-
 describe("ticketBrief path grant", () => {
   it("names the files FLIGHT approved beyond the area, and only when there are some", () => {
     expect(ticketBrief(input)).not.toContain("FLIGHT also approved");
@@ -875,30 +853,6 @@ describe("reviewBrief", () => {
     expect(t).toContain(
       "## Findings and the developer's reply from the last review (review id 31)\n\nmc report_findings resolutions take each finding's position below as findingRef.pos; findingRef.reviewId may be left out.\n\npos 0. [Critical] a.ts — s1\n   Why: w\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\npos 2. [Important] b.ts:4 — s2\n   Why: w\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
     );
-  });
-
-  it("lists the changed files and the files that import them, with a count of the rest", () => {
-    const t = reviewBrief({
-      ...review,
-      reach: {
-        changed: ["a.ts", "b.ts"],
-        changedMore: 3,
-        importers: ["c.ts", "d.ts"],
-        importersMore: 7,
-      },
-    });
-    expect(t).toContain("- Files changed (5): a.ts, b.ts and 3 more.");
-    expect(t).toContain("- Files that import them (9): c.ts, d.ts and 7 more.");
-    expect(reviewBrief(review)).not.toContain("Files that import them");
-  });
-
-  it("says no file imports the change when none does", () => {
-    const t = reviewBrief({
-      ...review,
-      reach: { changed: ["a.ts"], changedMore: 0, importers: [], importersMore: 0 },
-    });
-    expect(t).toContain("- Files changed (1): a.ts.");
-    expect(t).toContain("- No file in the default branch imports them.");
   });
 
   it("round 2 with no findings leaves out the findings clause", () => {

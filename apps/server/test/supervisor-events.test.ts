@@ -297,7 +297,7 @@ describe("supervisor events (Plan 7a)", () => {
     lastRefusal: null,
     epoch: 0,
     budgetExtra: 0,
-    parked: null,
+    hold: null,
     touches: null,
     cardFor: null,
   };
@@ -523,7 +523,7 @@ describe("supervisor events (Plan 7a)", () => {
         ...NEW_LOOP,
         phase: "done",
         prNumber: 7,
-        parked: { kind: "silent", reason: "no report", ended: true },
+        hold: { kind: "silent", reason: "no report", ended: true, worktree: null, wake: false },
       });
       await sup.endRunByEngine(runId);
       expect(store.run(runId)?.noReport).toBeUndefined();
@@ -535,7 +535,7 @@ describe("supervisor events (Plan 7a)", () => {
       store.setRunLoop(runId, {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind, reason: "no report", ended: true },
+        hold: { kind, reason: "no report", ended: true, worktree: null, wake: false },
       });
       await sup.endRunByEngine(runId);
       expect(store.run(runId)?.noReport).toBeDefined();
@@ -940,13 +940,13 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("answers no-session on a started hub with no process for the held run", async () => {
       const runId = await leftActive();
+      // stopped, but still pointing at the run: the hub takes nothing back, and the run is held
       const row = store.seatSession("guido-1");
       if (row === null) throw new Error("missing seat");
-      store.setSeatSession({ ...row, runId: null, state: "stopped" });
+      store.setSeatSession({ ...row, state: "stopped" });
       const { sup } = make();
       sup.start();
       await Promise.resolve();
-      store.setSeatSession(row);
       expect(await sup.send(runId, "k", "x")).toBe("no-session");
       expect(store.claimedKeys(runId)).toEqual({});
     });
@@ -1103,7 +1103,10 @@ describe("supervisor events (Plan 7a)", () => {
         transcriptPath: "",
         prs: [],
         summary: null,
-        loop: { ...NEW_LOOP, aside: { worktree: "/w/x", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          hold: { kind: null, reason: null, ended: false, worktree: "/w/x", wake: false },
+        },
       };
       store.upsertRun(run);
       const seen = watchStored(sup);
@@ -1257,6 +1260,51 @@ describe("supervisor events (Plan 7a)", () => {
       });
       expect(snaps[0]?.run).toMatchObject({ status: "failed", endedBy: "exit" });
       expect(snaps[0]?.run?.endedAt).not.toBeNull();
+    });
+
+    it("keeps the exit reason when a session dies before it is ready", async () => {
+      const listeners = new Set<(event: sessionDriver.SessionEvent) => void>();
+      let alive = true;
+      let ready = () => {};
+      const session: sessionDriver.CrewSession = {
+        send: () => {},
+        control: async () => ({}),
+        close: async () => 0,
+        detach: () => {},
+        on: (listener) => {
+          listeners.add(listener);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        pid: undefined,
+        get alive() {
+          return alive;
+        },
+        ready: new Promise<void>((resolve) => {
+          ready = resolve;
+        }),
+        lines: 0,
+        closeSent: Promise.resolve(),
+      };
+      const launch = vi.spyOn(sessionDriver, "startSession").mockReturnValue(session);
+      const { sup } = make();
+      const snaps = watchStored(sup);
+      sup.start();
+      try {
+        const start = refusal(sup.startRun("guido-1", 42));
+        await until(() => expect(listeners.size).toBeGreaterThan(0));
+        alive = false;
+        for (const listener of [...listeners]) listener({ kind: "exit", code: 7, signal: null });
+        ready();
+        await start;
+        await until(() => expect(snaps).toHaveLength(1));
+        expect(snaps[0]?.event).toMatchObject({ kind: "run-ended", endedBy: "exit" });
+        expect(snaps[0]?.run).toMatchObject({ status: "failed", endedBy: "exit" });
+        expect(store.seatSession("guido-1")?.reason).toBe("process exited 7");
+      } finally {
+        launch.mockRestore();
+      }
     });
 
     it("a crash, once, after the store write", async () => {
@@ -1446,7 +1494,7 @@ describe("Codex lifecycle events", () => {
     expect(aside).not.toBeNull();
     store.setRunLoop(runId, {
       ...NEW_LOOP,
-      aside: { worktree: aside?.worktree ?? "", wake: true },
+      hold: { kind: null, reason: null, ended: false, worktree: aside?.worktree ?? "", wake: true },
     });
     expect(store.run(runId)?.sessionId).toBe("codex-thread-1");
     await first.sup.stopAll();

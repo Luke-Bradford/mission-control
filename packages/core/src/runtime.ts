@@ -52,7 +52,6 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
-  MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.logDecision,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
@@ -105,29 +104,6 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.crewTidy,
 ];
 
-/** FLIGHT calls that inspect or keep notes, rather than changing the crew's state. */
-export const FLIGHT_NON_ACTING_TOOLS: readonly McToolName[] = [
-  MC_TOOL_NAMES.codeHealth,
-  MC_TOOL_NAMES.readTicket,
-  MC_TOOL_NAMES.flightState,
-  MC_TOOL_NAMES.screenshotHud,
-  MC_TOOL_NAMES.readPr,
-  MC_TOOL_NAMES.readCiLog,
-  MC_TOOL_NAMES.ghRead,
-  MC_TOOL_NAMES.listTickets,
-  MC_TOOL_NAMES.ledger,
-  MC_TOOL_NAMES.recall,
-  MC_TOOL_NAMES.commsRead,
-  MC_TOOL_NAMES.commsInbox,
-  MC_TOOL_NAMES.logDecision,
-  MC_TOOL_NAMES.updateBrief,
-  MC_TOOL_NAMES.track,
-  MC_TOOL_NAMES.untrack,
-  MC_TOOL_NAMES.remember,
-  MC_TOOL_NAMES.forget,
-  MC_TOOL_NAMES.commsReact,
-];
-
 /**
  * The mc tools each mode has. `base`: every seat of the mode (`*_TOOLS` below lists the same);
  * `grantable`: a role may add. Writers commit and sync main; `push` and `draft_pr` are the hub's
@@ -143,7 +119,6 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.prBody,
-      MC_TOOL_NAMES.publishPreview,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -238,7 +213,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     model: "opus",
     mode: "read-only",
     loop: "plan",
-    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket, MC_TOOL_NAMES.codeHealth],
+    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
     here: hereOf("FAO"),
   },
 };
@@ -360,7 +335,6 @@ export const WRITER_TOOLS = [
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.prBody,
-  MC_TOOLS.publishPreview,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -1457,7 +1431,14 @@ export type SessionEvent =
     }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
+  | {
+      kind: "exit";
+      code: number | null;
+      signal: string | null;
+      reason?: string;
+      /** The run did not end on its own (its keeper was lost, or a reattach could not confirm the CLI in time): the supervisor takes it back once instead of failing it. */
+      retake?: true;
+    }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
 

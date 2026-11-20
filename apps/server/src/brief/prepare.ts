@@ -107,7 +107,7 @@ export function checkBriefRun(
     run.status !== "running" ||
     run.endedAt !== null ||
     (store.seatSession(seatId)?.runId !== runId &&
-      !(explicitQuestionId !== undefined && run.loop?.aside?.ask === explicitQuestionId))
+      !(explicitQuestionId !== undefined && run.loop?.hold?.ask === explicitQuestionId))
   )
     throw new BriefError(409, "The intended seat/run changed or ended; refresh the brief.");
   if (
@@ -267,7 +267,7 @@ export async function prepareBriefActions(
         throw new BriefError(409, "The proposed review head changed or is unknown.");
       if (
         (action.kind === "review-rework" || action.kind === "review-resume") &&
-        !["review", "review-ruling"].includes(run?.loop?.parked?.kind ?? "")
+        !["review", "review-ruling"].includes(run?.loop?.hold?.kind ?? "")
       )
         throw new BriefError(409, "The source is not the displayed review park.");
     }
@@ -439,8 +439,8 @@ export async function prepareBriefActions(
         const loop = store.run(action.runId)?.loop;
         if (
           loop?.phase !== "parked" ||
-          loop.parked?.kind !== action.parkKind ||
-          loop.parked.ended ||
+          loop.hold?.kind !== action.parkKind ||
+          loop.hold.ended ||
           [
             "review",
             "review-ruling",

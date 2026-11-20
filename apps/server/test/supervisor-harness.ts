@@ -26,7 +26,7 @@ import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import type { ReviewPreviews } from "../src/preview/review.ts";
-import { endKeeper } from "../src/runtime/keeper.ts";
+import { endKeeper, KEEPER_SOCKET } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
   type Supervisor,
@@ -86,7 +86,31 @@ const prep = vi.hoisted(() => ({
   peers: [] as unknown[],
   /** Set: the install command a review's checkout runs (the real one when null). */
   installRunner: null as import("../src/runtime/checkouts.ts").InstallRunner | null,
+  /** Every socket the hub opened to a keeper, in order (a test drops one to cut the link). */
+  links: [] as import("node:net").Socket[],
+  /** Reconnects to a keeper that lose their socket before its hello, as one that refuses redials. */
+  refuseKeeperRedials: 0,
 }));
+vi.mock("node:net", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:net")>();
+  const connect = ((...a: Parameters<typeof real.connect>) => {
+    const first = a[0];
+    const refusing =
+      typeof first === "string" &&
+      first.endsWith(`/${KEEPER_SOCKET}`) &&
+      prep.refuseKeeperRedials > 0;
+    // A real socket can connect and receive its hello before a scheduled destroy runs. A refused
+    // dial must never connect: it models a keeper that will not take this hub back at all.
+    const s = refusing ? new real.Socket() : real.connect(...a);
+    if (typeof first === "string" && first.endsWith(`/${KEEPER_SOCKET}`)) prep.links.push(s);
+    if (refusing) {
+      prep.refuseKeeperRedials--;
+      setImmediate(() => s.destroy(new Error("keeper refused redial")));
+    }
+    return s;
+  }) as typeof real.connect;
+  return { ...real, connect, default: { ...real, connect } };
+});
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
   return {
@@ -302,7 +326,6 @@ function make(
     fetchTicket?: FetchTicket;
     flightEnvironment?: SupervisorDeps["flightEnvironment"];
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
-    fileContext?: SupervisorDeps["fileContext"];
     command?: string;
     /** The fake CLI script to run in place of fake-claude.mjs. */
     fake?: string;
@@ -316,7 +339,6 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
-    importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
     evidence?: import("../src/pr-evidence/capture.ts").ReviewEvidenceDeps;
     rolesDir?: string;
     node?: string;
@@ -396,7 +418,6 @@ function make(
     ...(over.externalReviewSubject === undefined
       ? {}
       : { externalReviewSubject: over.externalReviewSubject }),
-    fileContext: over.fileContext,
     ...(over.claim === undefined ? {} : { claim: over.claim }),
     ...(over.profiles === undefined ? {} : { profiles: over.profiles }),
     ...(over.inbox === undefined ? {} : { inbox: over.inbox }),
@@ -412,7 +433,6 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
-    ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
     ...(over.evidence === undefined ? {} : { evidence: over.evidence }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
@@ -488,6 +508,8 @@ beforeEach(() => {
   prep.failWrite = false;
   prep.dropWrite = false;
   prep.sessions = [];
+  prep.links = [];
+  prep.refuseKeeperRedials = 0;
   prep.peers = [];
   prep.installRunner = null;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));

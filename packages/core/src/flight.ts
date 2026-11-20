@@ -193,27 +193,6 @@ export interface FlightWakeRecord {
   reasons: string[];
   /** `flightWakeId(runId, n)`; absent on a wake stored before ids were kept. */
   wakeId?: string;
-  /** Batched categories that rode with an immediate wake. */
-  rode?: string[];
-  /** Cause categories that carried an immediate fact, which batching could not have held back. */
-  immediate?: string[];
-}
-
-export interface FlightWakeAction {
-  runId: string;
-  at: number;
-  reasons: string[];
-  rode: string[];
-  immediate: string[];
-  acted: boolean;
-}
-
-export interface FlightWakeActions {
-  wakes: number;
-  noAction: number;
-  share: number | null;
-  byReason: { reason: string; wakes: number; noAction: number }[];
-  batched: string[];
 }
 
 /** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
@@ -545,7 +524,6 @@ export interface FlightRetrospective {
   /** Tickets opened and closed, runs per ticket, review rounds and idle seat-hours. */
   counts?: WasteCounts;
   /** How often FLIGHT woke without changing state, and which reasons are batched. */
-  wakeActions?: FlightWakeActions;
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -770,6 +748,10 @@ export const rerunStartedDecision = (call: string, sha7: string): string =>
 export const rerunStartedText = (call: string, sha7: string): string =>
   rerunStartedDecision(call, sha7) + RECORDED;
 export const rerunPendingText = (sha7: string): string => `The re-run on ${sha7} is still going.`;
+export const checksPendingText = (sha7: string, names: string[]): string =>
+  names.length > 0
+    ? `CI on ${sha7} is not done: ${names.join(", ")} still pending or not reported. Nothing was re-run.`
+    : `CI on ${sha7} is not done: some checks have not reported. Nothing was re-run.`;
 export const rulingAcceptedDecision = (call: string, sha7: string): string =>
   `Re-run passed on ${sha7}: ${call}'s ruling is accepted.`;
 export const rulingAcceptedText = (call: string, sha7: string): string =>
@@ -1408,32 +1390,10 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** An unread operator request is delivered within a minute, even just after another wake. */
 export const FLIGHT_OPERATOR_WAKE_GAP_MS = 30_000;
 /**
- * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
- * together. Anything else wakes at once.
+ * A failure the hub could not settle waits this long after the last wake, so FLIGHT wakes twice
+ * an hour at most for failures. An operator message or a seat's question wakes at once.
  */
 export const FLIGHT_BATCH_MS = 30 * 60_000;
-export const FLIGHT_BATCH_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
-export const FLIGHT_BATCH_NO_ACTION_SHARE = 0.8;
-export const FLIGHT_BATCH_MIN_WAKES = 10;
-export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
-  "q",
-  "operator",
-  "owed",
-  "triage",
-  "parked",
-  "free",
-  "idle",
-  "breaker",
-  "holdsInForce",
-  "instructions",
-];
-export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [
-  "main_red",
-  "seat_call",
-  "merge_stalled",
-];
-/** @deprecated Unread operator requests no longer expire from FLIGHT's wake inputs. */
-export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** An operator message FLIGHT read and has not answered stays owed this long. */
 export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;
 /** How many days back the cost and wait telemetry looks. */

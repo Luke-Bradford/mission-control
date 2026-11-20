@@ -25,8 +25,85 @@ export const SWAP_USED_HARD_PCT_OF_RAM = 90;
 export const SWAP_FILE_USED_HARD_PCT = 85;
 /** ...but only when that much swap is also a real share of physical RAM. */
 export const SWAP_FILE_MIN_PCT_OF_RAM = 50;
-/** The file-change service (`fseventsd`) is swollen once its resident size passes this. */
-export const FSEVENTSD_RSS_HARD_BYTES = 2 * 1024 ** 3;
+/**
+ * The file-change service (`fseventsd`) hurts the Mac near this size: on 29 October it made the
+ * Mac unusable at 7 GB, so this holds a little before that. A runaway is caught and restarted long before this (see
+ * `fileServiceRunaway`); this hold is only the backstop for when that restart could not run.
+ */
+export const FSEVENTSD_RSS_HARD_BYTES = 6 * 1024 ** 3;
+/**
+ * A healthy `fseventsd` stays flat under crew work: from 13 to 18 November it held 5 to 13 MB
+ * through 100 to 230 runs a day, and grew 31 MB in its busiest hour. In the stuck state seen on
+ * 18 November it kept every event and grew 150 to 317 MB an hour until restarted.
+ */
+export const FSEVENTSD_RUNAWAY_BYTES = 150 * 1024 ** 2;
+export const FSEVENTSD_RUNAWAY_WINDOW_MS = 60 * 60_000;
+/**
+ * A service this large is stuck whether or not it is still growing (it may have levelled off
+ * while the hub was down or the crew idle): healthy, it holds megabytes, not a gigabyte.
+ */
+export const FSEVENTSD_STUCK_BYTES = 1024 ** 3;
+/** At most one diagnostics capture in this long, so the one from the onset is kept. */
+export const FILE_SERVICE_CAPTURE_GAP_MS = 6 * 60 * 60_000;
+/** This many restarts within `FILE_SERVICE_RECURRING_WINDOW_MS` means restarting is not fixing it. */
+export const FILE_SERVICE_RECURRING_RESTARTS = 3;
+/** The window for `FILE_SERVICE_RECURRING_RESTARTS`; independent of the capture gap. */
+export const FILE_SERVICE_RECURRING_WINDOW_MS = 6 * 60 * 60_000;
+/**
+ * A reading under this is a healthy service again, so an open alert may clear. A size, unlike
+ * `FSEVENTSD_RUNAWAY_BYTES` (an amount of growth); equal today by choice, not by necessity.
+ */
+export const FSEVENTSD_HEALTHY_BYTES = 150 * 1024 ** 2;
+/** The setting holding when the hub last saved diagnostics. */
+export const FILE_SERVICE_CAPTURE_SETTING = "machine-capacity:fseventsd-capture-at";
+/** The setting holding the times of the hub's recent successful restarts, as a JSON array. */
+export const FILE_SERVICE_RESTARTS_SETTING = "machine-capacity:fseventsd-restarts";
+/** The setting holding when the hub last tried to restart a runaway `fseventsd`. */
+export const FILE_SERVICE_RESTART_SETTING = "machine-capacity:fseventsd-restart-at";
+/** The operator alert for a runaway the hub could not restart, or one that keeps coming back. */
+export const FILE_SERVICE_RUNAWAY_KEY = "file-service-runaway";
+/**
+ * The one sudoers rule that lets the hub restart it unattended, and nothing else. Root writes it
+ * under a dotted name (sudo ignores those), checks it, and only then moves it into place, so no
+ * user-writable file sits between the check and the install and a bad line never goes live; the
+ * last step shows whether sudo now grants the command without a password.
+ */
+export const FILE_SERVICE_SUDOERS_ADVICE =
+  'To let the hub restart it by itself next time, run once in Terminal: `sudo sh -c \'umask 337; printf "%s ALL=(root) NOPASSWD: /usr/bin/killall fseventsd\\n" "$1" > /etc/sudoers.d/.mc-fseventsd && visudo -cf /etc/sudoers.d/.mc-fseventsd && mv /etc/sudoers.d/.mc-fseventsd /etc/sudoers.d/mc-fseventsd\' _ "$(whoami)" && sudo -k && sudo -n /usr/bin/killall fseventsd && echo "The hub can now restart it."`. The last step restarts it once without a password, as the hub will, and says so. It allows only that one command; any program running as you could then restart fseventsd, and nothing more.';
+
+export interface FileServiceRunaway {
+  fromBytes: number;
+  toBytes: number;
+  sinceAt: number;
+}
+
+/** One reading of `fseventsd` taken at that minute (never a figure carried forward). */
+export interface FileServiceReading {
+  at: number;
+  bytes: number;
+}
+
+/**
+ * `fseventsd` grew by the runaway amount within the last hour of fresh readings, or holds the
+ * stuck size at the latest one; null if neither. Only readings actually taken count: a figure
+ * carried forward while the hub was idle says nothing about when it was reached.
+ */
+export function fileServiceRunaway(
+  readings: readonly FileServiceReading[],
+  now: number,
+): FileServiceRunaway | null {
+  const recent = readings.filter(
+    (r) => r.at >= now - FSEVENTSD_RUNAWAY_WINDOW_MS && r.at <= now && r.bytes > 0,
+  );
+  const latest = recent.at(-1);
+  if (latest === undefined) return null;
+  let low = latest;
+  for (const r of recent) if (r.bytes < low.bytes) low = r;
+  return latest.bytes - low.bytes >= FSEVENTSD_RUNAWAY_BYTES ||
+    latest.bytes >= FSEVENTSD_STUCK_BYTES
+    ? { fromBytes: low.bytes, toBytes: latest.bytes, sinceAt: low.at }
+    : null;
+}
 /** What a swollen file-change service costs to fix, for the Needs-you item. */
 export const FILE_SERVICE_RESTART_ADVICE =
   "Restart the file-change service: run `sudo killall fseventsd` in Terminal. macOS starts it again by itself; it takes about 15 seconds and the Mac does not restart.";

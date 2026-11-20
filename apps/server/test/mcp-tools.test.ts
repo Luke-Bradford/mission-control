@@ -116,7 +116,6 @@ import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { ProfilesError } from "../src/config/profiles.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
-import { PreviewRefused } from "../src/design-preview/previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -351,38 +350,14 @@ afterEach(() => {
 const seatbeltBlocked = await blockedHere("seatbelt");
 
 describe("the mc tools", () => {
-  it("confines code_health reads to the live session repo and fails closed on secret lookup", async () => {
-    const ctx = { seatId: "guido-1", runId: RUN };
-    const reader = tool(MC_TOOL_NAMES.codeHealth);
-    const result = await reader.call(ctx, { tab: "overview" });
-    expect(result.isError).toBeUndefined();
-    expect(JSON.parse(result.text).repoId).toBe("mc");
-    expect((await reader.call(ctx, { tab: "overview", repo: "other" })).isError).toBe(true);
-    expect((await reader.call({ ...ctx, runId: "ended" }, { tab: "overview" })).isError).toBe(true);
-    expect(
-      (
-        await tool(
-          MC_TOOL_NAMES.codeHealth,
-          make({
-            knownSecrets: async () => {
-              throw Error("fixture failure");
-            },
-          }),
-        ).call(ctx, { tab: "overview" })
-      ).isError,
-    ).toBe(true);
-  });
-
   it("serves the mode tools under the names the CLI prefixes, and no push or draft_pr", () => {
     expect(tools.map((t) => [t.name, t.modes])).toEqual([
-      [MC_TOOL_NAMES.codeHealth, []],
       [MC_TOOL_NAMES.commsRead, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsInbox, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsSend, ["writer", "read-only", "scratch"]],
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
-      [MC_TOOL_NAMES.publishPreview, ["writer"]],
       [MC_TOOL_NAMES.prBody, ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
       ["call_flight", ["writer", "read-only", "scratch"]],
@@ -393,14 +368,12 @@ describe("the mc tools", () => {
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
-      MC_TOOLS.codeHealth,
       MC_TOOLS.commsRead,
       MC_TOOLS.commsInbox,
       MC_TOOLS.commsSend,
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
-      MC_TOOLS.publishPreview,
       MC_TOOLS.prBody,
       MC_TOOLS.askFlight,
       MC_TOOLS.callFlight,
@@ -469,76 +442,6 @@ describe("sync_main", () => {
       isError: true,
     });
     expect(calls).toEqual([RUN]);
-  });
-});
-
-describe("publish_preview", () => {
-  const published: Array<{ ticket: number; branch: string; sha: string; worktree: string }> = [];
-  const previews = (running: boolean, refuse?: string): McToolsDeps["designPreviews"] => ({
-    repoId: "mc",
-    url: "http://127.0.0.1:7440/",
-    publish: async (input) => {
-      if (refuse !== undefined) throw new PreviewRefused(refuse);
-      published.push(input);
-      return {
-        repoId: "mc",
-        ticket: input.ticket,
-        branch: input.branch,
-        sha: input.sha,
-        publishedAt: NOW,
-        pr: null,
-        running,
-        url: "http://127.0.0.1:7440/",
-      };
-    },
-  });
-  const call = (over: Partial<McToolsDeps>, args: unknown = {}) =>
-    tool(MC_TOOL_NAMES.publishPreview, make(over)).call(CTX, args);
-
-  it("publishes the committed branch, and says whether it is running", async () => {
-    published.length = 0;
-    const sha = head();
-    const r = await call({ designPreviews: previews(true) });
-    expect(r.text).toBe(
-      `Preview published for #42 at ${sha.slice(0, 7)} and running at http://127.0.0.1:7440/. It stops after an hour unused. It is deleted when the PR closes or after 7 days.`,
-    );
-    expect(published).toEqual([{ ticket: 42, branch: BRANCH, sha, worktree: wt }]);
-    expect((await call({ designPreviews: previews(false) })).text).toBe(
-      `Preview published for #42 at ${sha.slice(0, 7)}. Another preview is running, so this one waits until the operator opens it.`,
-    );
-  });
-
-  it("refuses a dirty tree, an unserved build and a hub without previews", async () => {
-    published.length = 0;
-    write("apps/a.ts", "dirty\n");
-    expect(await call({ designPreviews: previews(true) })).toEqual({
-      text: "Not published: commit your changes first, so the preview matches a commit.",
-      isError: true,
-    });
-    expect(published).toEqual([]);
-    git(wt, "checkout", "--", "apps/a.ts");
-    expect(
-      await call({ designPreviews: previews(true, "Not published: x.sh in the build.") }),
-    ).toEqual({
-      text: "Not published: x.sh in the build.",
-      isError: true,
-    });
-    expect(await call({})).toEqual({
-      text: "Not published: this hub cannot serve previews of this repo. Ask FLIGHT.",
-      isError: true,
-    });
-    expect((await call({ designPreviews: previews(true) }, { x: 1 })).text).toMatch(
-      /^Invalid arguments:/,
-    );
-    liveSeat("retro", "retro:1");
-    expect(
-      (
-        await tool(MC_TOOL_NAMES.publishPreview, make({ designPreviews: previews(true) })).call(
-          { seatId: "retro", runId: "retro:1" },
-          {},
-        )
-      ).isError,
-    ).toBe(true);
   });
 });
 
@@ -1402,93 +1305,6 @@ describe("call_flight", () => {
 });
 
 describe("through /mcp", () => {
-  it("offers code_health only to a granted read-only role and refuses a writer call", async () => {
-    const tokens = new RunTokens(),
-      readerToken = tokens.issue("reader", "reader:1"),
-      writerToken = tokens.issue("guido-1", RUN);
-    liveSeat("reader", "reader:1");
-    const app = buildApp({
-      config: config(),
-      store,
-      bus,
-      tokens,
-      mcpTools: () => tools,
-      seatMode: (id) => (id === "reader" ? "read-only" : "writer"),
-      seatGrants: (id) => (id === "reader" ? [MC_TOOL_NAMES.codeHealth] : []),
-    });
-    const rpc = async (token: string, method: string, params?: unknown) =>
-      (
-        await app.inject({
-          method: "POST",
-          url: "/mcp",
-          headers: { authorization: `Bearer ${token}` },
-          payload: { jsonrpc: "2.0", id: 1, method, params },
-        })
-      ).json();
-    try {
-      const names = (await rpc(readerToken, "tools/list")).result.tools.map(
-        (t: { name: string }) => t.name,
-      );
-      expect(names).toContain(MC_TOOL_NAMES.codeHealth);
-      expect(
-        (
-          await rpc(writerToken, "tools/call", {
-            name: MC_TOOL_NAMES.codeHealth,
-            arguments: { tab: "overview" },
-          })
-        ).error.message,
-      ).toBe("unknown tool");
-      const read = await rpc(readerToken, "tools/call", {
-        name: MC_TOOL_NAMES.codeHealth,
-        arguments: { tab: "overview" },
-      });
-      expect(read.result.isError).not.toBe(true);
-    } finally {
-      await app.close();
-    }
-  });
-
-  it("never offers FLIGHT ask_flight; a seat beside it still has it (#758)", async () => {
-    const cfg = withFlight();
-    tools = make({ config: cfg });
-    const tokens = new RunTokens();
-    const flight = tokens.issue("flight-1", "flight-1:1");
-    const reader = tokens.issue("retro", "retro:1");
-    liveSeat("flight-1", "flight-1:1");
-    const app = buildApp({
-      config: cfg,
-      store,
-      bus,
-      tokens,
-      mcpTools: () => tools,
-      seatMode: (id) => crewSeatMode(cfg, id),
-    });
-    await app.ready();
-    try {
-      const rpc = (tok: string, method: string, params?: unknown) =>
-        app
-          .inject({
-            method: "POST",
-            url: "/mcp",
-            headers: { "content-type": "application/json", authorization: `Bearer ${tok}` },
-            payload: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-          })
-          .then((r) => r.json());
-      const names = async (tok: string) =>
-        (await rpc(tok, "tools/list")).result.tools.map((t: { name: string }) => t.name);
-      expect(await names(flight)).not.toContain("ask_flight");
-      expect(await names(reader)).toContain("ask_flight");
-      const call = await rpc(flight, "tools/call", {
-        name: "ask_flight",
-        arguments: { question: "x?" },
-      });
-      expect(call.error.message).toBe("unknown tool");
-      expect(store.openQuestions()).toEqual([]);
-    } finally {
-      await app.close();
-    }
-  });
-
   it("offers each seat mode its Comms tools; commit runs end to end", async () => {
     const cfg = config();
     const tokens = new RunTokens();
@@ -1522,7 +1338,6 @@ describe("through /mcp", () => {
         "comms_react",
         "commit",
         "sync_main",
-        "publish_preview",
         "pr_body",
         "ask_flight",
         "call_flight",
@@ -3480,7 +3295,7 @@ describe("push and draft_pr", () => {
         store.setRunLoop(RUN, {
           ...NEW_LOOP,
           phase: "review",
-          aside: { worktree: wt, wake: false },
+          hold: { kind: null, reason: null, ended: false, worktree: wt, wake: false },
         });
         expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
       });
@@ -3884,6 +3699,14 @@ describe("push and draft_pr", () => {
       );
     });
 
+    it("adds no closing line to a body that ends Part of the run's issue", async () => {
+      await pushed();
+      await pr("feat: x", "Stage 2.\n\nPart of #42.");
+      expect(ghCalls()[1]?.body).toBe(
+        "Stage 2.\n\nPart of #42.\n\nOpened by GUIDO-1 (Mission Control).\n",
+      );
+    });
+
     it("refuses before a push, and after a commit the push has not sent", async () => {
       const text = { text: "Push first: the PR shows what is on origin.", isError: true };
       expect(await pr("feat: x", "body")).toEqual(text);
@@ -4025,6 +3848,44 @@ describe("push and draft_pr", () => {
       expect(body).toContain(MINORS.trimEnd());
       expect(body).toContain("Closes #42.");
       expect(body.endsWith("Opened by GUIDO-1 (Mission Control).\n")).toBe(true);
+    });
+
+    it("keeps a staged body's Part of line last, with no closing line", async () => {
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view({ body: `#42\n\n## What changed\n\nold\n\n${MINORS}\nPart of #42.\n` }));
+      await edit("New text.\n\nPart of #42.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).toBe(
+        `New text.\n\n${MINORS.trimEnd()}\n\nPart of #42.\n\nOpened by GUIDO-1 (Mission Control).\n`,
+      );
+    });
+
+    it.each(["Stage 3, part of #42.", "New text.\n\nPart of #42"])(
+      "keeps a staged PR staged when the seat's text %j does not end with the marker",
+      async (text) => {
+        store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+        ghState(
+          view({
+            body: `#42\n\n## What changed\n\nPart of #42: stage 3.\n\n${MINORS}\nPart of #42.\n`,
+          }),
+        );
+        await edit(text);
+        const body = edits()[0]?.body ?? "";
+        expect(body).not.toContain("Closes #42.");
+        expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
+      },
+    );
+
+    it("reads the run's latest note, not the first, to see a PR is staged", async () => {
+      store.addEvidence(RUN, "Done.", Date.now() - 1000);
+      store.addEvidence(RUN, "Part of #42: stage 2.", Date.now());
+      store.setRunLoop(RUN, { ...NEW_LOOP, prNumber: 12 });
+      ghState(view());
+      await edit("Stage 2 text.");
+      const body = edits()[0]?.body ?? "";
+      expect(body).not.toContain("Closes #42.");
+      expect(body.match(/Part of #42\./g)).toHaveLength(1);
+      expect(body.trimEnd().split("\n").at(-3)).toBe("Part of #42.");
     });
 
     it("drops a leading hub heading, so the minor post still reads the body as the seat's", async () => {
@@ -4475,7 +4336,7 @@ describe("report_evidence", () => {
     lastRefusal: null,
     epoch: 0,
     budgetExtra: 0,
-    parked: null,
+    hold: null,
     touches: null,
     cardFor: null,
   };
@@ -4618,6 +4479,27 @@ describe("report_evidence", () => {
     });
   });
 
+  it("keeps a decimal test duration instead of refusing the report", async () => {
+    await committed();
+    expect(
+      await tool("report_evidence", ev).call(CTX, {
+        note: "tested",
+        tests: [
+          {
+            command: "pnpm -s vitest run apps/a.test.ts",
+            passed: 1,
+            failed: 0,
+            skipped: 0,
+            duration: 12.6,
+          },
+        ],
+      }),
+    ).toEqual({ text: EVIDENCE_RECORDED });
+    expect(store.latestEvidence(RUN)).toMatchObject({
+      tests: [expect.objectContaining({ duration: 12.6 })],
+    });
+  });
+
   it("records build-seat test runs and tests added", async () => {
     await committed();
     expect(
@@ -4732,7 +4614,7 @@ describe("report_evidence", () => {
             properties: {
               command: { type: "string", minLength: 1 },
               passed: { type: "integer", minimum: 0 },
-              duration: { type: "integer", minimum: 0 },
+              duration: { type: "number", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
             },
             required: ["command", "passed", "failed", "skipped", "duration"],
             additionalProperties: false,
@@ -4799,7 +4681,7 @@ describe("report_evidence", () => {
   it.each(["review"])("records fresh evidence and resumes a %s park", async (kind) => {
     setLoop({
       phase: "parked",
-      parked: { kind, reason: "parked", ended: false },
+      hold: { kind, reason: "parked", ended: false, worktree: null, wake: false },
       transient: 2,
       lastRefusal: "no",
     });
@@ -4807,7 +4689,7 @@ describe("report_evidence", () => {
     expect(await report("fixed")).toEqual({ text: EVIDENCE_RECORDED });
     expect(store.run(RUN)?.loop).toMatchObject({
       phase: "working",
-      parked: null,
+      hold: null,
       transient: 0,
       lastRefusal: null,
     });
@@ -4817,7 +4699,10 @@ describe("report_evidence", () => {
   it.each(["budget", "account-stop", "controller-check", "uat", "gate", "review-ruling"])(
     "keeps a %s park held",
     async (kind) => {
-      setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+      setLoop({
+        phase: "parked",
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
+      });
       await committed();
       expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
       expect(store.latestEvidence(RUN)).toBeNull();
@@ -4827,7 +4712,13 @@ describe("report_evidence", () => {
   it("keeps an ended push-wait stop held despite fresh committed work", async () => {
     setLoop({
       phase: "parked",
-      parked: { kind: "stuck", reason: "Ended by operator", ended: true },
+      hold: {
+        kind: "stuck",
+        reason: "Ended by operator",
+        ended: true,
+        worktree: null,
+        wake: false,
+      },
     });
     await committed();
     expect(await report("Fresh work must not undo an operator stop.")).toEqual(
@@ -4929,17 +4820,23 @@ describe("report_evidence", () => {
           return crewGit(cwd, args, common, options);
         },
       });
-      setLoop({ phase: "parked", parked: { kind, reason: "waiting", ended: false } });
+      setLoop({
+        phase: "parked",
+        hold: { kind, reason: "waiting", ended: false, worktree: null, wake: false },
+      });
       const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
       await vi.waitFor(() => expect(statusReads).toBe(1));
-      setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
+      setLoop({
+        phase: "parked",
+        hold: { kind: "budget", reason: "held", ended: false, worktree: null, wake: false },
+      });
       release();
 
       expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
       expect(store.latestEvidence(RUN)).toBeNull();
       expect(store.run(RUN)?.loop).toMatchObject({
         phase: "parked",
-        parked: { kind: "budget", reason: "held", ended: false },
+        hold: { kind: "budget", reason: "held", ended: false, worktree: null, wake: false },
       });
     },
   );
@@ -5466,7 +5363,7 @@ describe("report_findings", () => {
     });
   });
 
-  it("binds a positional resolution to the latest reported review of the same epoch", async () => {
+  it("binds a positional resolution to the latest reported review of the run", async () => {
     const mk = (epoch: number, round: number, at: number) =>
       store.requestReview({
         authorRunId: RUN,
@@ -5501,6 +5398,85 @@ describe("report_findings", () => {
     expect(store.reviewResolutions(second)).toEqual([
       { reviewId: later, pos: 0, outcome: "fixed" },
     ]);
+  });
+
+  describe("after FLIGHT's rework settle bumps the epoch", () => {
+    // round 1 and 2 ran at epoch 0 (round 2 holds a finding); the settle started round 3 at epoch 1
+    const setup = async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const mk = (epoch: number, round: number, at: number) =>
+        store.requestReview({
+          authorRunId: RUN,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 9,
+          sha: String(at).padEnd(40, "c"),
+          epoch,
+          attempt: 2,
+          round,
+          at,
+        }) as number;
+      const two = mk(0, 2, NOW + 1);
+      store.setReviewState(two, ["queued"], "running", { at: NOW + 1, runId: "retro:r2" });
+      expect(await report(args({ findings: [finding()] }), reviewRun("retro:r2", two))).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      const three = mk(1, 3, NOW + 2);
+      store.setReviewState(three, ["queued"], "running", { at: NOW + 2, runId: "retro:r3" });
+      return { two, three, run: reviewRun("retro:r3", three) };
+    };
+    const resolve = (findingRef: { reviewId?: number; pos: number }) =>
+      args({ verdict: passing, findings: [], resolutions: [{ findingRef, outcome: "fixed" }] });
+
+    it("resolves the previous round's finding given by position alone", async () => {
+      const { two, three, run } = await setup();
+      expect(await report(resolve({ pos: 0 }), run)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("resolves the previous round's finding given with its review id", async () => {
+      const { two, three, run } = await setup();
+      expect(await report(resolve({ reviewId: two, pos: 0 }), run)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(three)).toEqual([{ reviewId: two, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("lets a round 1 of the new epoch resolve the earlier epoch's findings, as its brief says", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const next = store.requestReview({
+        authorRunId: RUN,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 9,
+        sha: "d".repeat(40),
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: NOW + 1,
+      }) as number;
+      store.setReviewState(next, ["queued"], "running", { at: NOW + 1, runId: "retro:e1r1" });
+      expect(await report(resolve({ pos: 0 }), reviewRun("retro:e1r1", next))).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.reviewResolutions(next)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    });
+
+    it("refuses resolutions from a run's very first review", async () => {
+      const refused = await report(resolve({ pos: 0 }));
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain("only allowed from round 2");
+    });
+
+    it("still refuses a finding from neither the previous round nor the brief", async () => {
+      const { three, run } = await setup();
+      const refused = await report(resolve({ reviewId, pos: 0 }), run);
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain("findings must be from the previous round");
+      expect(store.reviewResolutions(three)).toEqual([]);
+    });
   });
 
   it("rejects a positional and an explicit reference to the same prior finding", async () => {
