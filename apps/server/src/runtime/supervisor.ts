@@ -261,10 +261,13 @@ import {
   CODEX_DELIVERY,
   endKeeper,
   KEEPER_ENTRY,
+  KEEPER_PID_FILE,
   type KeeperHello,
   keeperAlive,
   pidAlive,
   processInfo,
+  readKeeperExit,
+  readPidFile,
 } from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
 import { nodeFirstPath, ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "./node-first.ts";
@@ -784,6 +787,8 @@ interface Live {
   replayedBelow: number;
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
   awaitingAtAttach: boolean;
+  /** The keeper attached to for this live session, retained until a retake has made it safe to replace. */
+  keeperPid: number | null;
 }
 
 /** `get_context_usage`'s answer, or null when it is not the shape the CLI sends (spike). */
@@ -942,6 +947,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Runs already taken back once: a second such exit ends them as a crash. */
+  const retakenRuns = new Set<string>();
   /** Writer tickets reserved between their eligibility check and the run row being stored. */
   const startingTickets = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
@@ -1158,9 +1165,41 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /**
+   * Takes back a run whose process did not end on its own. A keeper that is still alive is attached
+   * to; one that has gone (or left an exit) has its folder removed first, so the run resumes with
+   * `--resume` / `thread/resume` instead of failing as "exited". Never throws.
+   */
+  async function retake(l: Live): Promise<void> {
+    const seatId = l.info.seat.id;
+    const runId = l.run.id;
+    try {
+      const row = store.seatSession(seatId);
+      if (row === null || row.runId !== runId || row.state === "stopped") return;
+      if (store.run(runId)?.endedAt !== null) return;
+      const dir = crewKeeperDir(deps.dbPath, runId);
+      // A Codex attach that could not confirm its floor closed its transport, so its keeper may
+      // still be finishing while this exit reaches us. End it before its folder can be reused.
+      if (l.run.vendor === "codex" && l.keeperPid !== null && pidAlive(l.keeperPid)) {
+        if (!(await endAndRemoveKeeper(seatId, runId))) {
+          failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
+          return;
+        }
+      } else if (readKeeperExit(dir) !== null || !keeperAlive(dir)) {
+        if (!(await endAndRemoveKeeper(seatId, runId))) {
+          failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
+          return;
+        }
+      }
+      await recoverSession(row);
+    } catch (e) {
+      log(`${seatId}: could not take back ${runId}: ${errText(e)}`);
+    }
+  }
+
   function onExit(
     l: Live,
-    e: { code: number | null; signal: string | null; reason?: string },
+    e: { code: number | null; signal: string | null; reason?: string; retake?: true },
   ): void {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
@@ -1169,6 +1208,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
+      return;
+    }
+    // The run did not end on its own (its keeper was lost, or a reattach was not confirmed in time):
+    // it is taken back once, not failed. The next such exit is a crash.
+    if (
+      e.retake === true &&
+      l.ending === null &&
+      l.endedBy === null &&
+      !retakenRuns.has(l.run.id) &&
+      !checkRuns.has(l.run.id)
+    ) {
+      retakenRuns.add(l.run.id);
+      fold(l);
+      log(`${seatId}: run ${l.run.id} did not end on its own; taking it back`);
+      void retake(l);
       return;
     }
     // The engine's end was recorded when it began (its time and status stand).
@@ -2432,7 +2486,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // First, so it runs before the seat's own exit handling: never removed, unlike `l.off`, so a
     // discarded process still revokes its token when it exits.
     session.on((e) => {
-      if (e.kind === "exit") release();
+      // A retake owns this grant until it has proved the old keeper gone. Removing its folder
+      // here could let a new keeper race the old one's final socket cleanup.
+      if (e.kind === "exit" && e.retake !== true) release();
     });
     const l: Live = {
       info,
@@ -2456,6 +2512,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       attaching: false,
       replayedBelow: 0,
       awaitingAtAttach: false,
+      keeperPid: null,
       ...init,
     };
     live.set(info.seat.id, l);
@@ -3048,6 +3105,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       attaching: true,
       replayedBelow: hello.lines,
       awaitingAtAttach: hello.awaiting,
+      keeperPid: readPidFile(crewKeeperDir(deps.dbPath, runId), KEEPER_PID_FILE),
       inTurn: hello.awaiting,
       parkedTurn: hello.awaiting && row.state === "parked",
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,

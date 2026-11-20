@@ -39,7 +39,9 @@ import {
   readPidFile,
 } from "../src/runtime/keeper.ts";
 import { restoreRuns } from "../src/runtime/restore.ts";
+import { attachSession } from "../src/runtime/session.ts";
 import { CREW_LOCK_FILE, crewTempRoot, type SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { onSignal } from "../src/shutdown.ts";
 import {
   crewCodexDir,
   crewKeeperDir,
@@ -47,6 +49,8 @@ import {
   crewPromptPath,
   crewTokenPath,
 } from "../src/store/crew-paths.ts";
+import { createQuietGate, crewRefusal } from "../src/update.ts";
+import { sleep } from "../src/util.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -924,6 +928,170 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)?.noReport).toBeUndefined();
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+  });
+
+  it("a hub replaced by a newer one lets go: the keeper and its CLI live on and the newer hub gets the turn (#1912)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperDir = crewKeeperDir(dbPath, runId);
+    const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE) as number;
+    // the newer hub attaches and stays attached: the keeper hands the first hub off
+    const other = await attachSession({ dir: keeperDir, from: () => 0 });
+    expect(other.kind).toBe("attached");
+    if (other.kind !== "attached") return;
+    let results = 0;
+    other.session.on((e) => {
+      if (e.kind === "result") results++;
+    });
+    let exited = false;
+    other.session.on((e) => {
+      if (e.kind === "exit") exited = true;
+    });
+    // the brief's result is replayed, then the SLOW turn's own
+    await until(() => expect(results).toBeGreaterThanOrEqual(2));
+    // the first hub let go and did not dial back: the newer hub still owns the keeper
+    await sleep(500);
+    expect(other.session.alive).toBe(true);
+    expect(exited).toBe(false);
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(starts()).toHaveLength(1);
+    await other.session.close();
+  });
+
+  it("a keeper that dies mid-turn is resumed, not parked as a crash with the run failed (#1912)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    process.kill(readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number, "SIGKILL");
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    await until(() => expect(starts()).toHaveLength(2)); // the resumed CLI records its start once up
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
+  it("a link that drops while its keeper runs does not end the keeper (#1912)", async () => {
+    const { sup } = make();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    seen.length = 0;
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperPid = readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number;
+    prep.links.at(-1)?.destroy();
+    await until(() =>
+      expect(seen).toContainEqual({ kind: "idle", seatId: "guido-1", runId, resumed: false }),
+    );
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(starts()).toHaveLength(1);
+    expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain("echo: SLOW");
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
+  it("a keeper that refuses every redial is taken back, not left silently running (#1912)", async () => {
+    const { sup, log } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperPid = readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number;
+    // One redial retries its socket for two seconds. Refuse all three redials, then allow the
+    // supervisor's retake attach; three individual refusals would all be spent by the first dial.
+    prep.refuseKeeperRedials = Number.POSITIVE_INFINITY;
+    try {
+      prep.links.at(-1)?.destroy();
+      await vi.waitFor(
+        () =>
+          expect(log).toHaveBeenCalledWith(
+            `guido-1: run ${runId} did not end on its own; taking it back`,
+          ),
+        { timeout: 10_000, interval: 10 },
+      );
+      prep.refuseKeeperRedials = 0;
+      await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
+    } finally {
+      prep.refuseKeeperRedials = 0;
+    }
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(starts()).toHaveLength(1);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  }, 15_000);
+
+  it("a mid-turn keeper survives a forced Update restart and the new hub gets its turn (#1912)", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperPid = readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number;
+    // FLIGHT's call after the ten-minute wait takes the forced path
+    const gate = createQuietGate(new CliHold(), { forceAfterMs: 0 });
+    expect(await gate.wait(() => first.sup.busy(), "flight-1")).toBeNull();
+    expect(crewRefusal(first.cfg, first.sup, (id) => store.seatSession(id))).toBeNull();
+    const exit = vi.fn();
+    await onSignal({
+      drain: async () => {},
+      stopCrew: () => first.sup.stopAll(),
+      stop: async () => {},
+      close: async () => {},
+      log: { info() {}, warn() {} },
+      exit,
+    })("update");
+    await until(() => expect(exit).toHaveBeenCalledWith(0));
+    const second = make();
+    const seen: SupervisorEvent[] = [];
+    second.sup.on((e) => seen.push(e));
+    second.sup.start();
+    await until(() => expect(second.sup.seatFacts("guido-1")?.inTurn).toBe(true));
+    prep.links.at(-1)?.destroy(); // the new hub's link drops once
+    await until(() =>
+      expect(seen).toContainEqual({ kind: "idle", seatId: "guido-1", runId, resumed: false }),
+    );
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(starts()).toHaveLength(1);
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+  });
+
+  it("a run whose resumed keeper is lost again is failed, not taken back twice (#1912)", async () => {
+    const { sup } = make();
+    const seen: SupervisorEvent[] = [];
+    sup.on((e) => seen.push(e));
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const kill = () =>
+      process.kill(readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number, "SIGKILL");
+    kill();
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    await until(() => expect(starts()).toHaveLength(2));
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    kill(); // the resumed keeper goes the same way
+    await until(() => expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1));
+    expect(store.run(runId)).toMatchObject({ status: "failed" });
+    expect(store.seatSession("guido-1")?.state).toBe("error");
+    await sleep(500);
+    expect(starts()).toHaveLength(2);
+    expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1);
   });
 
   it("a seat mid-turn at attach is not sent Carry on", async () => {
@@ -1979,6 +2147,31 @@ describe("Codex restart", () => {
     await next.sup.interrupt("guido-1");
     await until(() => expect(next.lock.state().holder).toBeNull());
     await next.sup.endRunByEngine(runId);
+  });
+
+  it("a Codex reattach that is not confirmed in time is resumed, not failed (#1912)", async () => {
+    const first = codexSupervisor({ holdTurn: true, noReattachResponse: true });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await first.sup.stopAll();
+    const next = codexSupervisor();
+    const seen: SupervisorEvent[] = [];
+    next.sup.on((e) => seen.push(e));
+    next.sup.start();
+    await until(() => expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(2));
+    await until(() =>
+      expect(recorded().filter((m) => m.method === "thread/resume")).toHaveLength(2),
+    );
+    await until(() =>
+      expect(store.seatSession("guido-1")?.reason).toBe(
+        "resumed after a restart; send a message to continue",
+      ),
+    );
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
+    expect(store.seatSession("guido-1")?.state).not.toBe("error");
   });
 
   it("resumes the saved thread with the floor overrides when no keeper survives", async () => {
