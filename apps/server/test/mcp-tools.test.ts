@@ -4914,6 +4914,12 @@ describe("report_evidence", () => {
     );
     expect(store.evidenceCount(nextRun)).toBe(0);
     expect(store.runPush(RUN)?.sha).toBe(sha);
+    const ruling = await report("Ruling: the held head needs no change.", nextCtx);
+    expect(ruling.isError).toBe(true);
+    expect(ruling.text).toContain(
+      "Add a regression test for the handoff before re-pushing this head.",
+    );
+    expect(store.evidenceCount(nextRun)).toBe(0);
     await committed("web/b.ts", undefined, nextCtx);
     expect(await report("The revised head is ready.", nextCtx)).toEqual({
       text: EVIDENCE_RECORDED,
