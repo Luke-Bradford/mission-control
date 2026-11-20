@@ -15,6 +15,7 @@ import {
   MC_TOOL_NAMES,
   type McToolName,
   mcTool,
+  runsInBackground,
   seatCallSign,
 } from "@mc/core";
 import { type CcConfig, crewSeatGrants } from "../config.ts";
@@ -199,7 +200,10 @@ export function createCodexApprover(i: {
       // the related-tests check can run the whole suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
         const related = i.checks?.lockedBy(event.input.command);
-        if (related) verdict = { kind: "lock", command: related };
+        if (related)
+          verdict = runsInBackground(event.input.command, event.input.run_in_background === true)
+            ? { kind: "lock", command: related, background: true }
+            : { kind: "lock", command: related };
       }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
       if (verdict.kind === "lock") {

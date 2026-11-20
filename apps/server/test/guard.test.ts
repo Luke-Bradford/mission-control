@@ -977,6 +977,21 @@ describe("POST /api/guard/check", () => {
       expect((await c).body).toBe("{}");
     });
 
+    it.each([
+      ["pnpm run test:related &", undefined],
+      ["pnpm run test:related", true],
+    ])("keeps the lock of a related-tests run left in the background: %s", async (command, bg) => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, pre("a1", "Bash", { command, run_in_background: bg }));
+      expect(lock.state().holder?.runId).toBe("run-a");
+      await check(tokA, { ...post("a1"), tool_input: { command }, exit_code: 0 });
+      expect(lock.state().holder?.runId).toBe("run-a");
+      lock.releaseRun("run-a");
+      expect(lock.state().holder).toBeNull();
+    });
+
     it("allows a configured check to run again unchanged: the hook does not refuse", async () => {
       const { checks } = spy();
       await app.close();

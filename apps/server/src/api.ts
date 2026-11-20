@@ -129,6 +129,7 @@ import {
   type RunLoopView,
   type RunView,
   reviewStatusOf,
+  runsInBackground,
   type StreamEvent,
   seatCallSign,
   seatDef,
@@ -2613,7 +2614,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             typeof command === "string"
           ) {
             const related = checks?.lockedBy(command);
-            if (related) verdict = { kind: "lock", command: related };
+            if (related)
+              verdict = runsInBackground(command, body.data.tool_input?.run_in_background === true)
+                ? { kind: "lock", command: related, background: true }
+                : { kind: "lock", command: related };
           }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {

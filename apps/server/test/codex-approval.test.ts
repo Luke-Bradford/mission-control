@@ -455,6 +455,23 @@ describe("Codex check records", () => {
     },
   );
 
+  it("keeps the lock of a related-tests run left in the background", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, checks, lock);
+    expect(
+      await h.approve(
+        request("pnpm run test:related &", { itemId: "item-rel" }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("accept");
+    lock.release({ runId: "run", toolUseId: "item-rel" });
+    expect(lock.state().holder).not.toBeNull();
+    lock.releaseRun("run");
+    expect(lock.state().holder).toBeNull();
+  });
+
   it("takes the test lock for the related-tests check", async () => {
     const { checks } = recorder();
     const lock = new TestLock();

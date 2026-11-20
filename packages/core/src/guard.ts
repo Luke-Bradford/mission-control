@@ -1557,6 +1557,13 @@ function lineCommands(cmd: string, walk: Walk): Cmd[] {
   }
 }
 
+/** Whether the command line leaves something running after its call returns (the guard's own reading). */
+export function runsInBackground(command: string, runInBackground = false): boolean {
+  const walk = newWalk();
+  const cmds = lineCommands(command, walk);
+  return runInBackground || walk.lineBackground || cmds.some((c) => c.background);
+}
+
 /** The Codex walk preserves exact argv and refuses empty command lines. */
 export function codexLineCommands(script: string): Cmd[] | null {
   const walk = newWalk();
