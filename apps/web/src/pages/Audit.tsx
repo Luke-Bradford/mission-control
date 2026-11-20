@@ -4,6 +4,7 @@ import {
   type AuditPrSize,
   type AuditView,
   type ConfigView,
+  GUARD_RULES,
 } from "@mc/core";
 import { useEffect, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
@@ -25,6 +26,10 @@ type AuditData = Omit<AuditView, "longRunners"> & {
 /** A run's start as the operator's local date and time, for naming a run without its internal id. */
 const startedLabel = (at: number): string =>
   `started ${new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+
+/** A guard rule as the Guard drawer words it; a rule from an older hub, no longer listed, shows as stored. */
+const ruleLabel = (rule: string): string =>
+  Object.hasOwn(GUARD_RULES, rule) ? GUARD_RULES[rule as keyof typeof GUARD_RULES] : rule;
 
 const changes = (s: AuditPrSize): number => s.additions + s.deletions;
 const logPercentOfMax = (value: number, max: number): number =>
@@ -158,7 +163,7 @@ function Improvements({
         ))}
         {actionable(audit.refusals).map((x) => (
           <RunLink key={`${x.agentId}:${x.runId}:${x.rule}`} row={x}>
-            {`Guard refusal · ${x.rule} · ${x.count} · ${x.agentId}`}
+            {`Guard refusal · ${ruleLabel(x.rule)} · ${x.count} · ${x.agentId}`}
           </RunLink>
         ))}
         {actionable(audit.spendOutliers).map((x) => (
@@ -254,7 +259,7 @@ function Checks({ audit }: { audit: AuditData }) {
         ))}
         {audit.refusalsByRule.map((x) => (
           <span key={x.rule}>
-            Guard refusal spike · {x.rule} · {x.count}
+            Guard refusal spike · {ruleLabel(x.rule)} · {x.count}
           </span>
         ))}
         {audit.refusalSpikes.map((x) => (

@@ -25,9 +25,9 @@ const AUDIT = {
   ],
   deathLoops: [{ runId: "run/death", agentId: "retro-cx", parks: 4 }],
   reworkRounds: [{ runId: "run/rework", agentId: "guido-cx", rounds: 3, maxRound: 4 }],
-  refusalsByRule: [{ rule: "no-network", count: 8 }],
+  refusalsByRule: [{ rule: "full-suite", count: 8 }],
   refusals: [
-    { agentId: "inco-cx", runId: "run/alpha", rule: "no-network", count: 8 },
+    { agentId: "inco-cx", runId: "run/alpha", rule: "full-suite", count: 8 },
     { agentId: "retro-cx", runId: null, rule: "read-only", count: 2 },
   ],
   refusalSpikes: [{ agentId: "retro-cx", day: NOW - 2 * 24 * HOUR, count: 12 }],
@@ -250,7 +250,9 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   ).toBe("/agent/guido-cx?trace=run%2Frework");
   expect(
     screen
-      .getByRole("link", { name: "Guard refusal · no-network · 8 · inco-cx" })
+      .getByRole("link", {
+        name: "Guard refusal · Full test suites only through Mission Control (one at a time) · 8 · inco-cx",
+      })
       .getAttribute("href"),
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(
@@ -259,7 +261,9 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
       .getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Fexpensive");
   for (const link of screen.getAllByRole("link"))
-    expect(link.textContent, "no raw run id in link text").not.toMatch(/run\//);
+    expect(link.textContent, "no raw run id or rule key in link text").not.toMatch(
+      /run\/|full-suite/,
+    );
   expect(screen.getByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
   expect(
     screen.getByText(
@@ -284,7 +288,11 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   expect(screen.getByRole("link", { name: "Guard refusal spike · 12" }).getAttribute("href")).toBe(
     "/agent/retro-cx",
   );
-  expect(screen.getByText("Guard refusal spike · no-network · 8")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Guard refusal spike · Full test suites only through Mission Control (one at a time) · 8",
+    ),
+  ).toBeTruthy();
 
   fireEvent.click(
     within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "7d" }),

@@ -507,22 +507,6 @@ class Hub {
   /** Stamps each request as it starts, so answers can be told apart by age. */
   private seq = 0;
 
-  /** A new tree must not retain every older analysis graph for the lifetime of the HUD. */
-  private pruneGraphs(): void {
-    const unused = [...this.entries.values()].filter(
-      (e) =>
-        /^\/api\/repos\/[^/]+\/map\/graph\?key=/.test(e.path) &&
-        e.listeners.size === 0 &&
-        e.settledListeners.size === 0 &&
-        !e.inflight &&
-        !e.queued &&
-        !e.again &&
-        !e.fullAgain,
-    );
-    for (const entry of unused.slice(0, Math.max(0, unused.length - 16)))
-      this.entries.delete(entry.path);
-  }
-
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
     if (!e) {
@@ -538,7 +522,6 @@ class Hub {
         settledListeners: new Set(),
       };
       this.entries.set(path, e);
-      if (path.includes("/map/graph?key=")) this.pruneGraphs();
     }
     return e;
   }
@@ -571,14 +554,12 @@ class Hub {
     e.settledListeners.add(fn);
     return () => {
       e.settledListeners.delete(fn);
-      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
     };
   }
 
   private settle(e: Entry): void {
     e.settled++;
     for (const fn of [...e.settledListeners]) fn();
-    if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -590,7 +571,6 @@ class Hub {
     }
     return () => {
       e.listeners.delete(fn);
-      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
       if (e.listeners.size === 0) {
         clearTimeout(e.activityTimer);
         e.activityTimer = undefined;
