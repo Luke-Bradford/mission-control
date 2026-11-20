@@ -70,7 +70,7 @@ describe("auditActions", () => {
     );
     expect(rows.map((r) => r.rank)).toEqual(rows.map((_, i) => i + 1));
     expect(new Set(rows.map((r) => r.title)).size).toBe(rows.length);
-    expect(rows[0]).toMatchObject({ id: "waste:retry-loop", measure: { now: 2, target: 0 } });
+    expect(rows[0]).toMatchObject({ id: "waste:retry-loop", measure: { now: 1, target: 1 } });
     expect(rows.filter((r) => r.id === "waste:retry-loop")).toHaveLength(1);
     const gitEnv = rows.find((r) => r.id === "guards:refusal:git-env");
     expect(gitEnv).toMatchObject({ decider: "You", measure: { now: 8, target: 0 } });
@@ -81,6 +81,53 @@ describe("auditActions", () => {
       expect(r.title).not.toMatch(/Inspect the shared cause/);
     }
     expect(auditVerdict(rows)).toMatchObject({ count: rows.length, first: rows[0]?.title });
+  });
+
+  it("gives every waste family its real measure against the limit, not an alarm count", () => {
+    const at = (check: WasteAlarm["check"], level: number, evidence = "e"): WasteAlarm => ({
+      ...alarm(level, check, `mc#${level}`),
+      level,
+      evidence,
+    });
+    const cases: [WasteAlarm[], number, number, string][] = [
+      [[at("unchanged-rerun", 3)], 3, 0, "reruns"],
+      [[at("retry-loop", 4)], 4, 1, "failed attempts and resumes"],
+      [[at("review-rounds", 5), at("review-rounds", 3)], 5, 2, "rounds"],
+      [[at("restart-storm", 9)], 9, 6, "starts in an hour"],
+      [[at("cost-without-output", 4)], 4, 3, "× median cost"],
+      [
+        [
+          at(
+            "coordination-overhead",
+            42,
+            "In the last day FLIGHT spent $42.10 and the developers $18.40.",
+          ),
+        ],
+        42,
+        18,
+        "dollars",
+      ],
+      [
+        [
+          at(
+            "ticket-churn",
+            9,
+            "In the last day 9 tickets were opened and 3 closed in mc, so the board did not shrink.",
+          ),
+        ],
+        9,
+        4,
+        "tickets opened",
+      ],
+      [[at("runs-per-ticket", 6)], 6, 3, "runs"],
+      [[at("failed-review-rounds", 3)], 3, 1, "failed rounds"],
+      [[at("clearance-waiting", 7)], 7, 1, "hours"],
+    ];
+    for (const [alarms, now, target, unit] of cases) {
+      const [row] = auditActions(base, alarms, new Set());
+      expect(row?.measure, alarms[0]?.check).toMatchObject({ now, target, unit });
+      expect(row?.measure.targetSource).toMatch(/limit/);
+    }
   });
 
   it("shows run ids as seat and date, with working links, never raw", () => {

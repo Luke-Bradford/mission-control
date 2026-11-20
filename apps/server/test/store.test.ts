@@ -1900,11 +1900,75 @@ describe("Store", () => {
       // Every merge in range is counted per day, sized or not, and the count is not cut.
       const { mergedPerDay } = store.audit(100, 200) as unknown as AuditView;
       expect(mergedPerDay?.reduce((n, d) => n + d.merged, 0)).toBe(3);
-      expect(mergedPerDay).toEqual([{ day: 0, merged: 3 }]);
+      expect(mergedPerDay).toEqual([
+        { day: 0, merged: 3, noReview: 3, round1: 0, round2: 0, round3: 0 },
+      ]);
       expect((store.audit(300, 400) as unknown as AuditView).prSizes).toEqual({
         prs: [],
         outliers: [],
       });
+    });
+
+    it("splits each day's merges by highest review round and ranks files by findings per touch", () => {
+      const files = (...paths: string[]) => paths.map((path) => ({ path, changeType: "modified" }));
+      store.upsertPullRequests(
+        "repo",
+        [
+          mergedPr(1, 150, { files: files("src/a.ts", "pnpm-lock.yaml") }),
+          mergedPr(2, 160, { files: files("src/a.ts") }),
+          mergedPr(3, 170, { files: files("src/b.ts") }),
+          mergedPr(4, 180),
+        ],
+        200,
+      );
+      const review = (pr: number, round: number, seq: number, settle = true) => {
+        store.upsertRun(run({ id: `r${seq}`, startedAt: 110 }));
+        const id = store.requestReview({
+          authorRunId: `r${seq}`,
+          repoId: "repo",
+          seatId: "retro",
+          prNumber: pr,
+          sha: `s${seq}`,
+          epoch: 0,
+          attempt: 1,
+          round,
+          at: 160,
+        }) as number;
+        if (settle) store.setReviewState(id, ["queued"], "reported", { at: 170 });
+        else store.setReviewState(id, ["queued"], "running", { at: 165, runId: `r${seq}` });
+        return { id, runId: `r${seq}` };
+      };
+      const first = review(1, 3, 1, false);
+      review(2, 1, 2);
+      review(3, 2, 3);
+      const finding = (file: string, severity: "Important" | "minor") => ({
+        severity,
+        file,
+        line: 1,
+        summary: "s",
+        scenario: "s",
+        fix: "f",
+      });
+      store.recordFindings(first.id, first.runId, {
+        verdict: "changes",
+        summary: "s",
+        at: 171,
+        findings: [
+          finding("src/a.ts", "Important"),
+          finding("src/a.ts", "Important"),
+          finding("src/b.ts", "Important"),
+          finding("src/a.ts", "minor"),
+          finding("pnpm-lock.yaml", "Important"),
+        ],
+      });
+      const audit = store.audit(100, 200) as unknown as AuditView;
+      expect(audit.mergedPerDay).toEqual([
+        { day: 0, merged: 4, noReview: 1, round1: 1, round2: 1, round3: 1 },
+      ]);
+      expect(audit.findingFiles).toEqual([
+        { file: "src/a.ts", findings: 2, touches: 2 },
+        { file: "src/b.ts", findings: 1, touches: 1 },
+      ]);
     });
 
     it("names the seat and run of each improvement candidate", () => {

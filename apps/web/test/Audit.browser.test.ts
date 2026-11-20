@@ -37,6 +37,22 @@ const audit = {
     outliers: [],
   },
   modelPromptTimeline: [],
+  mergedPerDay: [1, 2, 3, 4, 5, 6].map((n) => ({
+    day: now - n * 24 * HOUR,
+    merged: 10 + n,
+    noReview: 2,
+    round1: 4 + n,
+    round2: 3,
+    round3: 1,
+  })),
+  findingFiles: [
+    {
+      file: "apps/web/src/pages/a-long-directory-name/another-long-directory/Audit.tsx",
+      findings: 6,
+      touches: 3,
+    },
+    { file: "apps/server/src/store.ts", findings: 5, touches: 0 },
+  ],
   questions: { asked: 7, answered: 5, answerMs: HOUR },
   chatter: [{ from: "inco-1", to: "retro-1", ticket: "mission-control#862", rounds: 12 }],
   flakes: [{ key: "web:unit/Audit", count: 3, lastAt: now - HOUR }],
@@ -54,7 +70,31 @@ const audit = {
 const api = {
   "/api/audit?range=30d": audit,
   "/api/config": { loops: [], crew: { sessions: [] } },
-  "/api/waste": { at: now, spend: [], alarms: [], checks: [], flight: [], counts: null },
+  "/api/waste": {
+    at: now,
+    spend: [],
+    alarms: [
+      {
+        id: 1,
+        check: "review-rounds",
+        subject: "guido-1:20261120T113955Z",
+        repoId: "mission-control",
+        ticket: "mission-control#1662",
+        seatId: "guido-1",
+        runId: "guido-1:20261120T113955Z",
+        level: 5,
+        evidence:
+          "PR 2148 (mission-control#1662) is on review round 5; the limit is 2. Reviews stop until FLIGHT decides: fix or park. Runs and their blocking review findings: guido-1:20261120T113955Z (4), guido-1:20261120T101112Z (3), guido-2:20261120T091011Z (6).",
+        openedAt: now - HOUR,
+        closedAt: null,
+        resolvedAt: null,
+        basis: null,
+      },
+    ],
+    checks: [],
+    flight: [],
+    counts: null,
+  },
 };
 
 const { renderAt } = browserSession();
@@ -86,6 +126,12 @@ describeRendered("Audit first screen in a browser", () => {
           return el ? el.getBoundingClientRect().width - el.clientWidth : 0;
         }, null);
         expect(gutter).toBeGreaterThan(0);
+        // A long evidence line wraps inside the panel: every detail heading stays within it.
+        const panel = await page.box(".audit-next");
+        for (const h of await page.boxes(".audit-mg h3")) {
+          expect(h.x).toBeGreaterThanOrEqual(panel.x);
+          expect(h.x + h.width).toBeLessThanOrEqual(panel.x + panel.width);
+        }
         const scrolls = await page.evaluate(
           () => document.documentElement.scrollHeight > window.innerHeight,
           null,

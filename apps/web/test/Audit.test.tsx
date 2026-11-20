@@ -106,8 +106,17 @@ const AUDIT = {
     ],
   },
   mergedPerDay: [
-    { day: NOW - 3 * 24 * HOUR, merged: 70 },
-    { day: NOW - 24 * HOUR, merged: 50 },
+    { day: NOW - 3 * 24 * HOUR, merged: 70, noReview: 10, round1: 40, round2: 15, round3: 5 },
+    { day: NOW - 24 * HOUR, merged: 50, noReview: 0, round1: 30, round2: 12, round3: 8 },
+  ],
+  findingFiles: [
+    {
+      file: "apps/web/src/pages/a-very-long-directory-name/another-long-directory/File.tsx",
+      findings: 6,
+      touches: 3,
+    },
+    { file: "apps/server/src/store.ts", findings: 5, touches: 10 },
+    { file: "apps/server/src/untouched.ts", findings: 4, touches: 0 },
   ],
   modelPromptTimeline: [],
   questions: { asked: 7, answered: 5, answerMs: HOUR },
@@ -187,7 +196,7 @@ it("leads with a one-sentence verdict, then ranked rows with a number now, a tar
   }
   // Waste alarms are grouped into one row, ranked first.
   expect(rows[0]?.textContent).toContain("Fix what makes a ticket fail again and again");
-  expect(rows[0]?.querySelector(".meas .v")?.textContent).toBe("2 → 0 alarms");
+  expect(rows[0]?.querySelector(".meas .v")?.textContent).toBe("1 → 1 failed attempts and resumes");
 });
 
 it("opens the first row, toggles rows, and filters by decider", async () => {
@@ -235,6 +244,46 @@ it("fills the right-hand panels from the audit and the waste report", async () =
   ).toContain("merged 1 → 3 · review fail 50% → 0% · median cost ~$2.00 → ~$1.00 · rework 1 → 0");
   expect(screen.getByText(/Nothing is collected from outside sources yet/)).toBeTruthy();
   expect(screen.queryByRole("tab")).toBeNull();
+});
+
+it("splits How we build by review round, with totals that match the merges", async () => {
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "How we build" });
+  const legend = screen.getByRole("list", { name: /Review rounds/ });
+  expect(legend.textContent).toContain("No hub review 10");
+  expect(legend.textContent).toContain("Round 1 70");
+  expect(legend.textContent).toContain("Round 2 27");
+  expect(legend.textContent).toContain("Round 3+ 13");
+  expect(
+    screen.getByRole("img", {
+      name: /120 in all.*10 with no hub review, 70 round 1, 27 round 2, 13 round 3 or later/,
+    }),
+  ).toBeTruthy();
+});
+
+it("ranks Where findings land by findings per touch, with a dash where no touch is stored", async () => {
+  render(<Audit />);
+  const heading = await screen.findByRole("heading", { level: 2, name: "Where findings land" });
+  const panel = heading.closest("section") as HTMLElement;
+  const rows = Array.from(panel.querySelectorAll("tbody tr")).map((r) =>
+    Array.from(r.querySelectorAll("td")).map((c) => c.textContent),
+  );
+  expect(rows).toEqual([
+    [
+      "apps/web/src/pages/a-very-long-directory-name/another-long-directory/File.tsx",
+      "6",
+      "3",
+      "2.00",
+    ],
+    ["apps/server/src/store.ts", "5", "10", "0.50"],
+    ["apps/server/src/untouched.ts", "4", "–", "–"],
+  ]);
+  expect(Array.from(panel.querySelectorAll("th")).map((h) => h.textContent)).toEqual([
+    "File",
+    "Findings",
+    "Touches",
+    "Per touch",
+  ]);
 });
 
 it("leaves out stale, observed-loop and FLIGHT watch runs", async () => {

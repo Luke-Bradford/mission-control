@@ -15,6 +15,7 @@ import {
 import { GUARD_RULES } from "./guard.ts";
 import {
   WASTE_CHECK_TITLES,
+  WASTE_THRESHOLDS,
   type WasteAlarm,
   type WasteCheck,
   wasteThresholdText,
@@ -111,6 +112,109 @@ const WASTE_ACTION_TITLES: Record<WasteCheck, string> = {
   "clearance-waiting": "Clear the hard-rule PRs waiting on FLIGHT",
 };
 
+/**
+ * A waste check's measure: the worst open alarm's level against the highest value that raises no
+ * alarm. `level` is what the scan stored (reruns, attempts, rounds, starts, a cost multiple, dollars,
+ * hours, tickets), so no figure is parsed except where the level cannot carry the comparison.
+ */
+function wasteMeasure(check: WasteCheck, rows: readonly WasteAlarm[]): AuditAction["measure"] {
+  const t = WASTE_THRESHOLDS;
+  const worst = rows.reduce((n, a) => Math.max(n, a.level), 0);
+  const limit = wasteThresholdText(check);
+  const m = (
+    label: string,
+    now: number,
+    target: number,
+    unit: string,
+    window: string,
+  ): AuditAction["measure"] => ({
+    label,
+    now,
+    atLeast: false,
+    target,
+    unit,
+    targetSource: `highest value that raises no alarm, from the limit: ${limit}; ${window}`,
+  });
+  switch (check) {
+    case "unchanged-rerun":
+      return m("Most reruns of one check on one commit", worst, 0, "reruns", "open alarms now");
+    case "retry-loop":
+      return m(
+        "Most failed attempts and resumes on one ticket",
+        worst,
+        t.retryFailedAttempts - 1,
+        "failed attempts and resumes",
+        "open alarms now",
+      );
+    case "review-rounds":
+      return m(
+        "Most review rounds on one change",
+        worst,
+        t.reviewRounds,
+        "rounds",
+        "open alarms now",
+      );
+    case "restart-storm":
+      return m(
+        "Most starts of one seat in an hour",
+        worst,
+        t.restartStormStarts,
+        "starts in an hour",
+        "the last hour",
+      );
+    case "cost-without-output":
+      return m(
+        "Highest cost against the median of its size, no merge",
+        worst,
+        t.costFactor,
+        "× median cost",
+        "open alarms now",
+      );
+    case "coordination-overhead": {
+      const dev = /developers \$(\d+(?:\.\d+)?)/.exec(rows[0]?.evidence ?? "")?.[1];
+      return m(
+        "FLIGHT spend in the last day",
+        worst,
+        dev === undefined ? t.coordinationMinUsd : Math.floor(Number(dev)),
+        "dollars",
+        "the last day, against the developers' spend",
+      );
+    }
+    case "ticket-churn": {
+      const day = rows
+        .map((a) => /(\d+) tickets were opened and (\d+) closed/.exec(a.evidence))
+        .find((x) => x !== null && x !== undefined);
+      if (day)
+        return m(
+          "Tickets opened in a day, in the busiest repo",
+          Number(day[1]),
+          Math.max(t.churnMinOpened - 1, Number(day[2]) - 1),
+          "tickets opened",
+          "the last day",
+        );
+      return m("Split or parked tickets that started", rows.length, 0, "tickets", "the last day");
+    }
+    case "runs-per-ticket":
+      return m("Most runs on one open ticket", worst, t.runsPerTicket, "runs", "open alarms now");
+    case "failed-review-rounds":
+      return m(
+        "Most failed review rounds on one open PR",
+        worst,
+        t.failedReviewRounds - 1,
+        "failed rounds",
+        "open alarms now",
+      );
+    case "clearance-waiting":
+      return m(
+        "Longest wait on FLIGHT's clearance",
+        worst,
+        t.clearanceAlarmMs / HOUR_MS - 1,
+        "hours",
+        "open alarms now",
+      );
+  }
+}
+
 /** The change each message problem asks for; kinds not listed are not rows. */
 const IMPROVEMENT_TITLES: Partial<Record<AuditImprovementKind, string>> = {
   "question-asked-back": "Answer a seat's question without asking it back",
@@ -172,14 +276,7 @@ export function auditActions(
       source: "Waste",
       title: WASTE_ACTION_TITLES[check],
       why: `${times(rows.length, "open alarm")}: ${plainIds(rows[0]?.evidence ?? "")}`,
-      measure: {
-        label: "Open alarms",
-        now: rows.length,
-        atLeast: false,
-        target: 0,
-        unit: rows.length === 1 ? "alarm" : "alarms",
-        targetSource: `waste alarm closes below its limit: ${wasteThresholdText(check)}`,
-      },
+      measure: wasteMeasure(check, rows),
       decider: "FLIGHT",
       deciderNote: "the alarm waits on FLIGHT or the operator",
       evidence: rows

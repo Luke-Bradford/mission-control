@@ -367,11 +367,26 @@ function NewOutside() {
   );
 }
 
+/** The review-round cohorts of a merged PR, bottom to top of a bar. */
+const COHORTS = [
+  { key: "noReview", cls: "c-none", label: "No hub review" },
+  { key: "round1", cls: "c-r1", label: "Round 1" },
+  { key: "round2", cls: "c-r2", label: "Round 2" },
+  { key: "round3", cls: "c-r3", label: "Round 3+" },
+] as const;
+
 const dayStart = (ms: number): number => Math.floor(ms / DAY_MS) * DAY_MS;
 
 /** Merged PRs per bucket across the range, oldest first, from the hub's uncut per-day counts. */
 function mergedBuckets(audit: AuditData): {
-  buckets: { start: number; merged: number }[];
+  buckets: {
+    start: number;
+    merged: number;
+    noReview: number;
+    round1: number;
+    round2: number;
+    round3: number;
+  }[];
   days: number;
 } {
   const days = Math.max(1, Math.ceil((audit.range.until - audit.range.since) / DAY_MS));
@@ -381,12 +396,21 @@ function mergedBuckets(audit: AuditData): {
   const buckets = Array.from({ length: bars }, (_, i) => ({
     start: end - (bars - 1 - i) * size * DAY_MS,
     merged: 0,
+    noReview: 0,
+    round1: 0,
+    round2: 0,
+    round3: 0,
   }));
   const first = buckets[0]?.start ?? 0;
   for (const d of audit.mergedPerDay ?? []) {
     const bar =
       buckets[Math.max(0, Math.min(bars - 1, Math.floor((d.day - first) / (size * DAY_MS))))];
-    if (bar) bar.merged += d.merged;
+    if (!bar) continue;
+    bar.merged += d.merged;
+    bar.noReview += d.noReview;
+    bar.round1 += d.round1;
+    bar.round2 += d.round2;
+    bar.round3 += d.round3;
   }
   return { buckets, days: size };
 }
@@ -413,6 +437,15 @@ function HowWeBuild({
   const { buckets, days: bucketDays } = mergedBuckets(audit);
   const max = Math.max(1, ...buckets.map((b) => b.merged));
   const served = audit.mergedPerDay !== undefined;
+  const totals = buckets.reduce(
+    (t, b) => ({
+      noReview: t.noReview + b.noReview,
+      round1: t.round1 + b.round1,
+      round2: t.round2 + b.round2,
+      round3: t.round3 + b.round3,
+    }),
+    { noReview: 0, round1: 0, round2: 0, round3: 0 },
+  );
   const merged = (audit.mergedPerDay ?? []).reduce((n, d) => n + d.merged, 0);
   const rounds = audit.reviewRounds?.prs ?? [];
   const reviewed = rounds.reduce((n, r) => n + r.count, 0);
@@ -481,17 +514,25 @@ function HowWeBuild({
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label={`Merged PRs, one bar per ${bucketDays === 1 ? "day" : `${bucketDays} days`}, ${merged} in all, most ${max} in one bar`}
+          aria-label={`Merged PRs, one bar per ${bucketDays === 1 ? "day" : `${bucketDays} days`}, ${merged} in all, most ${max} in one bar. By highest review round: ${totals.noReview} with no hub review, ${totals.round1} round 1, ${totals.round2} round 2, ${totals.round3} round 3 or later`}
         >
-          {buckets.map((b, i) => (
-            <rect
-              key={b.start}
-              x={i * bw + bw * 0.1}
-              y={h - (b.merged / max) * h}
-              width={bw * 0.8}
-              height={(b.merged / max) * h}
-            />
-          ))}
+          {buckets.map((b, i) => {
+            let top = h;
+            return COHORTS.map(({ key, cls }) => {
+              const bh = (b[key] / max) * h;
+              top -= bh;
+              return bh === 0 ? null : (
+                <rect
+                  key={`${b.start}:${key}`}
+                  className={cls}
+                  x={i * bw + bw * 0.1}
+                  y={top}
+                  width={bw * 0.8}
+                  height={bh}
+                />
+              );
+            });
+          })}
         </svg>
         <div className="audit-axis">
           <span>{axisDate(buckets[0]?.start ?? 0)}</span>
@@ -499,6 +540,14 @@ function HowWeBuild({
           <span>{axisDate(buckets[buckets.length - 1]?.start ?? 0)}</span>
         </div>
       </div>
+      <ul className="audit-legend" aria-label="Review rounds, highest reported per merged PR">
+        {COHORTS.map(({ key, cls, label }) => (
+          <li key={key} className={cls}>
+            <i aria-hidden="true" />
+            {label} {totals[key]}
+          </li>
+        ))}
+      </ul>
       <div className="audit-scroll audit-hscroll">
         <table className="audit-table">
           <tbody>
@@ -517,41 +566,53 @@ function HowWeBuild({
 }
 
 function WhereFindingsLand({ audit }: { audit: AuditData }) {
-  const late = audit.reviewRounds?.late ?? [];
+  const files = audit.findingFiles ?? [];
+  // Most findings per touch first; a file with no recorded touch has no ratio and sorts after.
+  const ranked = [...files].sort((a, b) => {
+    const ra = a.touches > 0 ? a.findings / a.touches : -1;
+    const rb = b.touches > 0 ? b.findings / b.touches : -1;
+    return rb - ra || b.findings - a.findings || a.file.localeCompare(b.file);
+  });
   return (
     <Panel
       title="Where findings land"
-      sub="blocking findings by reviewer; findings per file are not collected"
+      sub="files with blocking findings, by findings per touch; generated files left out"
       className="audit-files"
     >
       <div className="audit-scroll audit-fscroll">
-        {late.length === 0 ? (
-          <p className="s fg2 audit-empty">No reviewed findings in this range.</p>
+        {ranked.length === 0 ? (
+          <p className="s fg2 audit-empty">No blocking findings on files in this range.</p>
         ) : (
           <table className="audit-table">
             <thead>
               <tr>
-                <th>Reviewer</th>
-                <th>Model</th>
+                <th>File</th>
                 <th className="num">Findings</th>
-                <th className="num">Late</th>
+                <th className="num">Touches</th>
+                <th className="num">Per touch</th>
               </tr>
             </thead>
             <tbody>
-              {late.map((r) => (
-                <tr key={`${r.seatId}:${r.model}`} className="hrow">
+              {ranked.map((r) => (
+                <tr key={r.file} className="hrow">
                   <td className="lab">
-                    <a href={agentPath(r.seatId)}>{r.seatId}</a>
+                    <span className="audit-path">{r.file}</span>
                   </td>
-                  <td className="lab">{r.model ?? "–"}</td>
                   <td className="num">{r.findings}</td>
-                  <td className="num">{r.late}</td>
+                  <td className="num">{r.touches === 0 ? "–" : r.touches}</td>
+                  <td className="num">
+                    {r.touches === 0 ? "–" : (r.findings / r.touches).toFixed(2)}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+      <p className="audit-sub">
+        Touches are merged PRs in range whose stored diff names the file; a dash means none is
+        stored, so the ratio is undefined.
+      </p>
     </Panel>
   );
 }

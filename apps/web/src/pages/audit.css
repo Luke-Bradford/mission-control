@@ -250,12 +250,20 @@
 .audit-table .more > td {
   padding-block: 0 var(--sp-3);
   padding-left: calc(var(--sp-4) + var(--sp-6));
+  /* A long evidence line wraps inside the cell; it never widens the table past its panel. */
+  max-width: 0;
+  white-space: normal;
+  overflow: visible;
 }
 
 .audit-mg {
   display: grid;
-  grid-template-columns: 1.25fr 1fr 1fr 1fr;
+  grid-template-columns: minmax(0, 1.25fr) repeat(3, minmax(0, 1fr));
   gap: var(--sp-4);
+}
+
+.audit-mg > div {
+  min-width: 0;
 }
 
 .audit-mg h3 {
@@ -266,6 +274,7 @@
 
 .audit-mg p {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   color: var(--fg-2);
@@ -289,6 +298,55 @@
 
 .audit-plot rect {
   fill: var(--accent);
+}
+
+/* Review-round cohorts, stacked: no hub review, round 1, round 2, round 3 or later. */
+.audit-plot rect.c-none {
+  fill: var(--line-2);
+}
+
+.audit-plot rect.c-r1 {
+  fill: var(--accent);
+}
+
+.audit-plot rect.c-r2 {
+  fill: var(--warn);
+  opacity: 0.85;
+}
+
+.audit-plot rect.c-r3 {
+  fill: var(--crit);
+}
+
+.audit-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-3);
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
+  list-style: none;
+  font: 400 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+
+.audit-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--sp-1);
+  background: var(--accent);
+}
+
+.audit-legend .c-none i {
+  background: var(--line-2);
+}
+
+.audit-legend .c-r2 i {
+  background: var(--warn);
+}
+
+.audit-legend .c-r3 i {
+  background: var(--crit);
 }
 
 .audit-table .hrow td {
@@ -422,4 +480,12 @@
   padding: var(--sp-1) var(--sp-4);
   font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--muted);
+}
+
+/* A file path wraps so its whole name stays readable; the rows of this table grow to fit it. */
+.audit-files .audit-table .hrow td {
+  height: auto;
+  min-height: 24px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }

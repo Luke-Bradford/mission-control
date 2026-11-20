@@ -19,6 +19,7 @@ import {
   type AttentionBrief,
   AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
+  AUDIT_FINDING_FILES,
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
@@ -73,6 +74,7 @@ import {
   type HealthRow,
   type HudColumn,
   type HudState,
+  isGeneratedFile,
   type LoopEvent,
   type LoopKind,
   type MachineSample,
@@ -2084,11 +2086,18 @@ export class Store {
         outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
       },
       mergedPerDay: rows(
-        `SELECT (merged_at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS merged FROM pr_history
-         WHERE merged_at >= ? AND merged_at <= ? GROUP BY day ORDER BY day`,
+        `SELECT (merged_at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS merged,
+           SUM(top IS NULL) AS noReview, COALESCE(SUM(top <= 1), 0) AS round1, COALESCE(SUM(top = 2), 0) AS round2,
+           COALESCE(SUM(top >= 3), 0) AS round3
+         FROM (SELECT h.merged_at AS merged_at,
+             (SELECT MAX(v.round) FROM reviews v WHERE v.repo_id = h.repo_id
+               AND v.pr_number = h.number AND v.state = 'reported') AS top
+           FROM pr_history h WHERE h.merged_at >= ? AND h.merged_at <= ?)
+         GROUP BY day ORDER BY day`,
         since,
         until,
       ) as unknown as NonNullable<AuditView["mergedPerDay"]>,
+      findingFiles: this.auditFindingFiles(since, until),
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
@@ -3951,6 +3960,39 @@ export class Store {
       resolution: r.resolution as string | null,
       resolvedReviewId: r.resolved_review_id as number | null,
     }));
+  }
+
+  /**
+   * Files with blocking review findings in range, with how many merged PRs in range touched each
+   * (the stored diff files). Generated files are left out. Most findings first, cut at
+   * AUDIT_FINDING_FILES; `touches` is 0 where no stored diff names the file.
+   */
+  private auditFindingFiles(since: number, until: number): NonNullable<AuditView["findingFiles"]> {
+    const findings = this.db
+      .prepare(
+        `SELECT f.file AS file, COUNT(*) AS findings FROM review_findings f
+         JOIN reviews v ON v.id = f.review_id
+         WHERE v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+           AND f.severity IN (${BLOCKING_SEVERITIES.map(() => "?").join(", ")})
+         GROUP BY f.file`,
+      )
+      .all(since, until, ...BLOCKING_SEVERITIES) as { file: string; findings: number }[];
+    const touched = new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT p.path AS file, COUNT(*) AS touches FROM pr_files p
+             JOIN pr_history h ON h.repo_id = p.repo_id AND h.number = p.pr_number
+             WHERE h.merged_at >= ? AND h.merged_at <= ? GROUP BY p.path`,
+          )
+          .all(since, until) as { file: string; touches: number }[]
+      ).map((r) => [r.file, r.touches]),
+    );
+    return findings
+      .filter((r) => !isGeneratedFile(r.file))
+      .map((r) => ({ file: r.file, findings: r.findings, touches: touched.get(r.file) ?? 0 }))
+      .sort((a, b) => b.findings - a.findings || a.file.localeCompare(b.file))
+      .slice(0, AUDIT_FINDING_FILES);
   }
 
   /** Completed review rounds in the requested window, plus the full history of open PRs. */
