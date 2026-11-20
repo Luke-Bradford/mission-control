@@ -1012,9 +1012,6 @@ describe("a seat keeps running through a restart", () => {
     // One redial retries its socket for two seconds. Refuse all three redials, then allow the
     // supervisor's retake attach; three individual refusals would all be spent by the first dial.
     prep.refuseKeeperRedials = Number.POSITIVE_INFINITY;
-    const allowRetake = setTimeout(() => {
-      prep.refuseKeeperRedials = 0;
-    }, 6500);
     try {
       prep.links.at(-1)?.destroy();
       await vi.waitFor(
@@ -1024,11 +1021,11 @@ describe("a seat keeps running through a restart", () => {
           ),
         { timeout: 10_000, interval: 10 },
       );
+      prep.refuseKeeperRedials = 0;
+      await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
     } finally {
-      clearTimeout(allowRetake);
       prep.refuseKeeperRedials = 0;
     }
-    await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
     expect(pidAlive(keeperPid)).toBe(true);
     expect(starts()).toHaveLength(1);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });

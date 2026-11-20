@@ -94,14 +94,16 @@ const prep = vi.hoisted(() => ({
 vi.mock("node:net", async (importOriginal) => {
   const real = await importOriginal<typeof import("node:net")>();
   const connect = ((...a: Parameters<typeof real.connect>) => {
-    const s = real.connect(...a);
     const first = a[0];
-    if (typeof first === "string" && first.endsWith(`/${KEEPER_SOCKET}`)) prep.links.push(s);
-    if (
+    const refusing =
       typeof first === "string" &&
       first.endsWith(`/${KEEPER_SOCKET}`) &&
-      prep.refuseKeeperRedials > 0
-    ) {
+      prep.refuseKeeperRedials > 0;
+    // A real socket can connect and receive its hello before a scheduled destroy runs. A refused
+    // dial must never connect: it models a keeper that will not take this hub back at all.
+    const s = refusing ? new real.Socket() : real.connect(...a);
+    if (typeof first === "string" && first.endsWith(`/${KEEPER_SOCKET}`)) prep.links.push(s);
+    if (refusing) {
       prep.refuseKeeperRedials--;
       setImmediate(() => s.destroy(new Error("keeper refused redial")));
     }
