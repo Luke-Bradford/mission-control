@@ -1137,7 +1137,16 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               : null;
           if (x.conclusion === "failure") {
             failed.push({ id: x.databaseId, name, attempt, rerun: false });
-          } else if (x.status !== "completed" && attempt !== null && attempt > 1) {
+          } else if (typeof x.status === "string" && x.status !== "completed") {
+            // one shard can fail while the rest of the run goes on: gh's --log-failed reads nothing
+            // until the run completes, but a finished job's own log can be read now. A re-run's own
+            // failed job comes before the attempt it re-runs.
+            const jobs = await failedJobs(repo, x.databaseId);
+            if (jobs.length > 0) {
+              failed.push({ id: x.databaseId, name, attempt, rerun: false, jobs });
+              continue;
+            }
+            if (attempt === null || attempt <= 1) continue;
             // a run being re-run has no conclusion yet: the attempt before it may be the one that
             // failed, but a re-run can also start from a green attempt
             const before = await deps.gh(
@@ -1155,19 +1164,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             const state: unknown = JSON.parse(before.stdout);
             if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
               failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
-              continue;
             }
-          }
-          if (
-            typeof x.status === "string" &&
-            x.status !== "completed" &&
-            x.conclusion !== "failure"
-          ) {
-            // one shard can fail while the rest of the run goes on: gh's --log-failed reads nothing
-            // until the run completes, but a finished job's own log can be read now
-            const jobs = await failedJobs(repo, x.databaseId);
-            if (jobs.length > 0)
-              failed.push({ id: x.databaseId, name, attempt, rerun: false, jobs });
           }
         }
         if (failed.length === 0) return NO_FAILED_RUN;
@@ -1180,7 +1177,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             f.attempt === null
               ? name
               : `${name} (attempt ${f.attempt}${f.rerun ? ", which failed; a re-run is going" : ""})`;
-          const head = `${f.jobs === undefined ? named : `${name} (still running)`}:\n`;
+          const head = `${f.jobs === undefined ? named : f.attempt === null ? `${name} (still running)` : `${name} (attempt ${f.attempt}, still running)`}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
           const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);

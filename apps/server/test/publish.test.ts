@@ -703,12 +703,13 @@ describe("ciExcerpt", () => {
           { databaseId: 12, name: "lint", conclusion: "success", status: "completed", attempt: 1 },
         ]),
       }),
+      () => ({ code: 0, stdout: JSON.stringify({ jobs: [] }) }),
       () => ({ code: 0, stdout: JSON.stringify({ conclusion: "failure" }) }),
       () => ({ code: 0, stdout: "boom\n" }),
     ];
     const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
     expect(out).toBe("test (attempt 1, which failed; a re-run is going):\nboom");
-    expect(ghCalls[1]).toEqual([
+    expect(ghCalls[2]).toEqual([
       "run",
       "view",
       "--repo=o/mc",
@@ -716,7 +717,7 @@ describe("ciExcerpt", () => {
       "--attempt=1",
       "--json=conclusion",
     ]);
-    expect(ghCalls[2]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
+    expect(ghCalls[3]).toEqual(["run", "view", "--repo=o/mc", "11", "--attempt=1", "--log-failed"]);
   });
 
   it("says no failed run when a re-run started from a successful attempt", async () => {
@@ -727,8 +728,8 @@ describe("ciExcerpt", () => {
           { databaseId: 11, name: "test", conclusion: "", status: "in_progress", attempt: 2 },
         ]),
       }),
-      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "success" }) }),
       () => ({ code: 0, stdout: JSON.stringify({ jobs: [] }) }),
+      () => ({ code: 0, stdout: JSON.stringify({ conclusion: "success" }) }),
     ];
     expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
     expect(ghCalls.some((c) => c.includes("--log-failed"))).toBe(false);
@@ -762,6 +763,39 @@ describe("ciExcerpt", () => {
       }),
     ];
     expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(NO_FAILED_RUN);
+  });
+
+  it("reads the failed job of a re-run's current attempt, not the attempt it re-runs", async () => {
+    const log = (name: string) =>
+      [
+        `2026-11-20T01:50:08.0000000Z  FAIL  s.test.ts > ${name}`,
+        "2026-11-20T01:50:08.0000001Z AssertionError: expected 1 to be 2",
+        "2026-11-20T01:50:08.0000002Z  ❯ test/s.test.ts:12:5",
+      ].join("\n");
+    ghAnswers = [
+      () => ({
+        code: 0,
+        stdout: JSON.stringify([
+          { databaseId: 11, name: "CI", conclusion: "", status: "in_progress", attempt: 2 },
+        ]),
+      }),
+      () => ({
+        code: 0,
+        stdout: JSON.stringify({
+          jobs: [
+            { databaseId: 501, name: "server (1)", status: "completed", conclusion: "failure" },
+            { databaseId: 502, name: "server (2)", status: "in_progress" },
+          ],
+        }),
+      }),
+      () => ({ code: 0, stdout: log("current") }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out.startsWith("CI (attempt 2, still running):\n")).toBe(true);
+    expect(out).toContain("FAIL  s.test.ts > current");
+    expect(out).toContain("AssertionError: expected 1 to be 2");
+    expect(out).toContain("❯ test/s.test.ts:12:5");
+    expect(ghCalls.some((c) => c.includes("--attempt=1"))).toBe(false);
   });
 
   describe("a saved server-process shard log", () => {
@@ -818,7 +852,7 @@ describe("ciExcerpt", () => {
       ];
       const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
       holdsFailure(out);
-      expect(out.startsWith("CI (still running):\n")).toBe(true);
+      expect(out.startsWith("CI (attempt 1, still running):\n")).toBe(true);
       expect(out).toContain(`[${JOB}]`);
       expect(ghCalls[1]).toEqual(["run", "view", "--repo=o/mc", "11", "--json=jobs"]);
       expect(ghCalls[2]).toEqual(["api", "repos/o/mc/actions/jobs/501/logs"]);
