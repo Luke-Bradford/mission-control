@@ -384,10 +384,10 @@ describe("the tabs", () => {
     expect(screen.getByRole("group", { name: "Range" })).toBeTruthy();
   });
 
-  it("shows a short coming note, never an empty chart, on each tab not built yet", async () => {
-    for (const [tab, name] of [["machine", "Machine is coming"]] as const) {
+  it("builds every tab: none shows a coming note", async () => {
+    for (const tab of ["crew", "cost", "throughput", "quality", "machine"]) {
       await open(`?tab=${tab}`);
-      screen.getByRole("heading", { level: 2, name });
+      expect(screen.queryByRole("heading", { level: 2, name: /is coming/ }), tab).toBeNull();
       cleanup();
     }
   });
@@ -397,7 +397,8 @@ describe("the tabs", () => {
       cost: ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"],
       // built: its panels are the Quality tab's own, and the earlier two are gone
       quality: [],
-      machine: ["tMach", "tLock"],
+      // built: CPU, memory used, pressure and swap, and agent and test-run memory (the lock table is its Table view)
+      machine: ["tMach", "mMem", "mPressure", "mAgentMem"],
     };
     const all = [...Object.values(expected).flat(), "tQual", "tQualityTrend"];
     for (const [tab, ids] of Object.entries(expected)) {
@@ -425,6 +426,12 @@ describe("the tabs", () => {
         expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
       cleanup();
     }
+  });
+
+  it("keeps the earlier test lock panel on the Machine tab's Table view", async () => {
+    await open("?tab=machine&view=table");
+    expect(document.getElementById("tLock")).not.toBeNull();
+    expect(document.getElementById("tMach")).toBeNull();
   });
 
   it("keeps the earlier cost, token and quota panels, whole, in the Cost and tokens table view", async () => {

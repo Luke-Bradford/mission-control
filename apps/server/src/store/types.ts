@@ -113,6 +113,8 @@ export interface LockHoldRow {
   seatId: string;
   command: string;
   since: number;
+  /** Kept until the run ends, whatever its calls report (a suite left running in the background). */
+  pinned?: boolean;
 }
 
 /** What the hub has acted on of a run's keeper: the lines of keeper `spawn` below `line`. */

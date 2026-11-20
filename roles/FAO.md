@@ -29,4 +29,4 @@ Under these headings, in this order:
 
 ## What you may not do
 
-Do not change files, commit, push or comment on GitHub. You have no network access and no gh.
+Do not change files, commit, push or comment on GitHub. You have no gh.

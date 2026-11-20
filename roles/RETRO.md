@@ -79,4 +79,4 @@ Record Screens in `checked` as `browser` and Shared code as `blast-radius`; name
 
 ## What you may not do
 
-Do not commit, push, run git writes, open PRs or comment on GitHub. You have no tools for these, no network access and no gh. A doubt you cannot settle is a finding, not a question.
+Do not commit, push, run git writes, open PRs or comment on GitHub. You have no tools for these and no gh. A doubt you cannot settle is a finding, not a question.

@@ -383,10 +383,25 @@ function mayNot(role: string): string {
 }
 
 describe("role briefs", () => {
+  it("no role brief or the direction says seats have no network", () => {
+    const root = join(ROLES_DIR, "..");
+    for (const file of [
+      "roles/GUIDO.md",
+      "roles/INCO.md",
+      "roles/FAO.md",
+      "roles/RETRO.md",
+      "docs/direction.md",
+    ]) {
+      expect(readFileSync(join(root, file), "utf8"), file).not.toMatch(
+        /no network|blocks network|network access and no gh/i,
+      );
+    }
+  });
+
   it("GUIDO and INCO commit only with mc commit and report; Mission Control pushes and opens the PR", () => {
     for (const role of ["GUIDO", "INCO"]) {
       expect(mayNot(role)).toBe(
-        "Commit only with the mc commit tool; git writes in Bash are refused. You have no network access and no gh, so GitHub comments, labels and board moves go through FLIGHT.",
+        "Commit only with the mc commit tool; git writes in Bash are refused. You have no gh, so GitHub comments, labels and board moves go through FLIGHT.",
       );
     }
   });
@@ -401,7 +416,7 @@ describe("role briefs", () => {
 
   it("RETRO has no tools for commits, pushes or PRs", () => {
     expect(mayNot("RETRO")).toBe(
-      "Do not commit, push, run git writes, open PRs or comment on GitHub. You have no tools for these, no network access and no gh. A doubt you cannot settle is a finding, not a question.",
+      "Do not commit, push, run git writes, open PRs or comment on GitHub. You have no tools for these and no gh. A doubt you cannot settle is a finding, not a question.",
     );
   });
 });

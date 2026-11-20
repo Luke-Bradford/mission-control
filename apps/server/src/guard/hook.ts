@@ -123,14 +123,20 @@ function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
           ? /^Exit code (\d+)\b/.exec(e.error)?.[1]
           : undefined;
       const response = isObject(e.tool_response) ? e.tool_response : {};
+      // A call the CLI moved to the background on its Bash timeout answers like a finished one
+      // (`backgroundTaskId`, `timedOutAfterMs`): its command is still running, so it is no exit.
+      const background =
+        input.run_in_background === true ||
+        typeof response.backgroundTaskId === "string" ||
+        typeof response.timedOutAfterMs === "number";
       out.exit_code =
         exit !== undefined
           ? Number(exit)
-          : event === "PostToolUse" &&
-              input.run_in_background !== true &&
-              response.interrupted !== true
+          : event === "PostToolUse" && !background && response.interrupted !== true
             ? 0
             : null;
+      // the hub keeps the test lock to the turn's end for a call that left a command running
+      if (background && exit === undefined && event === "PostToolUse") out.background = true;
     }
   }
   return { event: event as GuardHookEvent, body: JSON.stringify(out) };

@@ -28,7 +28,6 @@ FLIGHT is the head agent. It should run the crew the way the operator would run 
    - no secrets or home-folder reads;
    - read-only repos and other lanes' files stay read-only;
    - git and GitHub writes go only through the PR tools;
-   - no network;
    - one full test run at a time;
    - a merge past a failed design review needs the operator's own accept (#1529).
 

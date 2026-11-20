@@ -54,6 +54,7 @@ import {
   READONLY_TOOLS,
   SANDBOX_DENY_READ_HOME,
   SCRATCH_TOOLS,
+  SEAT_DENIED_HOSTS,
   SEAT_STATES,
   SKILL_FILE_MAX,
   SKILLS_DIR,
@@ -128,9 +129,30 @@ describe("crewCliArgs", () => {
     expect(args).toContain("--disallowedTools");
     const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
     expect(seat.enabled).toBe(true);
-    expect(seat.network).toEqual({ allowedDomains: [] });
+    expect(seat.network).toEqual({ allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] });
     expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
   });
+
+  it("lets a seat fetch a page: curl and wget are not denied", () => {
+    expect(DENIED_TOOLS).not.toContain("Bash(curl:*)");
+    expect(DENIED_TOOLS).not.toContain("Bash(wget:*)");
+    const a = crewCliArgs(base);
+    expect(a).not.toContain("Bash(curl:*)");
+    expect(a).not.toContain("Bash(wget:*)");
+  });
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "defines WebSearch for a %s seat and keeps WebFetch denied",
+    (mode) => {
+      const a = crewCliArgs({ ...base, mode });
+      const tools = a[a.indexOf("--tools") + 1].split(",");
+      const denied = a.slice(a.indexOf("--disallowedTools") + 1);
+      expect(tools).toContain("WebSearch");
+      expect(denied).not.toContain("WebSearch");
+      expect(tools).not.toContain("WebFetch");
+      expect(denied).toContain("WebFetch");
+    },
+  );
 
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
@@ -169,9 +191,11 @@ describe("crewCliArgs", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
-    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
+    expect(w[w.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
+    );
     const r = crewCliArgs({ ...base, mode: "read-only" });
-    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill");
+    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill,WebSearch");
   });
 
   it("lets every seat invoke the repo's skills from a read-only plugin folder (#1051)", () => {
@@ -395,11 +419,10 @@ describe("the allowlist in phase 2b", () => {
     );
   });
 
-  it("turns background Bash off, so a timed-out suite is killed rather than kept running", () => {
+  it("leaves background Bash on: seats may run background tasks", () => {
     expect(CREW_CLI_ENV).toEqual({
       BASH_MAX_TIMEOUT_MS: "2700000",
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
-      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
       // marks every crew seat's environment, so tests that need what a seat denies can tell (#1411)
@@ -938,7 +961,9 @@ describe("scratch mode", () => {
     ]) {
       expect(allowed).not.toContain(t);
     }
-    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
+    expect(a[a.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
+    );
   });
 
   it("scratch allows exactly its tools, Edit and Write anchored to the worktree", () => {
@@ -952,6 +977,7 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
+      "WebSearch",
       "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
@@ -1132,7 +1158,7 @@ describe("crew sandbox and scoped edits", () => {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: [] },
+      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
     });
     // commits are the hub's (the mc commit tool): nothing in either git dir is granted (#31 R19/R24)
     expect(j.sandbox.filesystem.allowWrite).toEqual([]);

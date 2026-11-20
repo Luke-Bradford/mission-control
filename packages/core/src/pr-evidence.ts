@@ -17,6 +17,11 @@ export const EVIDENCE_PAGE_PATHS = {
   setup_roles: "/setup/roles",
   setup_sources: "/setup/sources",
   setup_access: "/setup/access",
+  // The Telemetry tabs; the bare address is the Crew tab.
+  telemetry_cost: "/telemetry?tab=cost",
+  telemetry_throughput: "/telemetry?tab=throughput",
+  telemetry_quality: "/telemetry?tab=quality",
+  telemetry_machine: "/telemetry?tab=machine",
 } as const;
 export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
 export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
@@ -147,7 +152,9 @@ export function prEvidenceAffectedPages(
   const hit = new Set<EvidencePage>();
   const add = (page: EvidencePage) => {
     hit.add(page);
-    if (page === "setup") for (const p of EVIDENCE_PAGES) if (p.startsWith("setup_")) hit.add(p);
+    for (const family of ["setup", "telemetry"])
+      if (page === family)
+        for (const p of EVIDENCE_PAGES) if (p.startsWith(`${family}_`)) hit.add(p);
   };
   for (const path of paths) {
     if (!path.startsWith(WEB_PREFIX) || TEST_FILE.test(path)) continue;
