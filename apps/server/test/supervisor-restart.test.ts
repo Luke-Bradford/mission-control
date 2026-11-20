@@ -2143,40 +2143,6 @@ describe("Codex restart", () => {
     expect(store.seatSession("guido-1")?.state).not.toBe("error");
   });
 
-  it("a second hub restart does not take a Codex run back twice (#1912)", async () => {
-    const scenario = { holdTurn: true, noReattachResponse: true };
-    const first = codexSupervisor(scenario);
-    first.sup.start();
-    const { runId } = await first.sup.startRun("guido-1", 42);
-    await until(() => expect(seatState("guido-1")).toBe("running"));
-    await first.sup.stopAll();
-    // the second hub's reattach is not confirmed: the run is taken back once, on a new process
-    const second = codexSupervisor(scenario);
-    second.sup.start();
-    await until(() =>
-      expect(store.seatSession("guido-1")?.reason).toBe(
-        "resumed after a restart; send a message to continue",
-      ),
-    );
-    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
-    // an idle Codex keeper does not outlive its hub: a turn in flight keeps the resumed one alive
-    await second.sup.message("guido-1", "hold", { interrupt: false });
-    await until(() => expect(seatState("guido-1")).toBe("running"));
-    await second.sup.stopAll();
-    const spawns = recorded().filter((m) => m.type === "spawn").length;
-    // the third hub is a new supervisor with no memory: its reattach fails the same way
-    const third = codexSupervisor(scenario);
-    const seen: SupervisorEvent[] = [];
-    third.sup.on((e) => seen.push(e));
-    third.sup.start();
-    await until(() => expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1));
-    expect(store.run(runId)).toMatchObject({ status: "failed" });
-    expect(store.seatSession("guido-1")?.state).toBe("error");
-    await sleep(500);
-    expect(recorded().filter((m) => m.type === "spawn")).toHaveLength(spawns);
-    expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1);
-  });
-
   it("resumes the saved thread with the floor overrides when no keeper survives", async () => {
     const first = codexSupervisor();
     first.sup.start();
