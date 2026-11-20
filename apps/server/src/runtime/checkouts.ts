@@ -1263,6 +1263,7 @@ async function ticketBranch(
   issue: number,
   mergedPullRequestBranches: readonly string[] = [],
   openPullRequestBranches: readonly string[] = [],
+  baseSha?: string,
 ): Promise<{ branch: string | null; branches: ReadonlySet<string> }> {
   let refs: string;
   try {
@@ -1289,6 +1290,40 @@ async function ticketBranch(
   );
   const merged = new Set(mergedPullRequestBranches);
   const open = new Set(openPullRequestBranches);
+  // The merged-PR history lags: a branch whose tip is already in origin's default branch is merged.
+  if (baseSha !== undefined) {
+    let line: Promise<Set<string>> | undefined;
+    const firstParentLine = () =>
+      (line ??= inClone(["rev-list", "--first-parent", "-n", "5000", baseSha]).then(
+        (out) => new Set(out.split("\n")),
+      ));
+    for (const branch of branches) {
+      if (merged.has(branch) || open.has(branch)) continue;
+      const tip = await inClone([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        `refs/heads/${branch}^{commit}`,
+      ]).catch(() =>
+        inClone([
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          "--end-of-options",
+          `refs/remotes/origin/${branch}^{commit}`,
+        ]).catch(() => null),
+      );
+      if (tip === null) continue;
+      const inBase = await inClone(["merge-base", "--is-ancestor", tip.trim(), baseSha]).then(
+        () => true,
+        () => false,
+      );
+      // A tip on the default branch's own first-parent line is a branch cut there and not yet
+      // used (or fast-forwarded in), not one merged in: only history can tell the second apart.
+      if (inBase && !(await firstParentLine()).has(tip.trim())) merged.add(branch);
+    }
+  }
   const openBranches = [...branches].filter((branch) => open.has(branch));
   // An open PR is the ticket's active work. Local branches from ended runs must not compete with
   // it: an earlier stage's branch can remain until the tidy removes it.
@@ -1658,6 +1693,7 @@ export async function prepareCheckout(
     i.issue,
     i.mergedPullRequestBranches,
     i.openPullRequestBranches,
+    baseSha,
   );
   const branch =
     ticket?.branch ??
