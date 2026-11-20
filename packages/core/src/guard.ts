@@ -2279,12 +2279,10 @@ export function guardDecision(
   const cwdDirectories: string[] = [];
   let unknownCwd = false;
   let expandedCwd = false;
-  for (const {
-    argv,
-    braces,
-    indirectGit,
-    directories: wrapperDirectories = [],
-  } of lineCommands(e.input.command ?? "", walk)) {
+  for (const { argv, braces, indirectGit, directories: wrapperDirectories = [] } of lineCommands(
+    e.input.command ?? "",
+    walk,
+  )) {
     const [program, ...args] = argv;
     if (program === undefined) continue;
     if (program === TOO_LONG) {
