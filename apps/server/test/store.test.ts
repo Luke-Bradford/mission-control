@@ -1941,7 +1941,7 @@ describe("Store", () => {
       const first = review(1, 3, 1, false);
       review(2, 1, 2);
       review(3, 2, 3);
-      const finding = (file: string, severity: "Important" | "minor") => ({
+      const finding = (file: string, severity: "Important" | "Minor") => ({
         severity,
         file,
         line: 1,
@@ -1950,14 +1950,14 @@ describe("Store", () => {
         fix: "f",
       });
       store.recordFindings(first.id, first.runId, {
-        verdict: "changes",
+        verdict: { spec: "fail", quality: "fail" },
         summary: "s",
         at: 171,
         findings: [
           finding("src/a.ts", "Important"),
           finding("src/a.ts", "Important"),
           finding("src/b.ts", "Important"),
-          finding("src/a.ts", "minor"),
+          finding("src/a.ts", "Minor"),
           finding("pnpm-lock.yaml", "Important"),
         ],
       });
