@@ -3,8 +3,8 @@ import {
   FLOW_DAYS,
   formatHours,
   NO_SIZE,
-  TICKET_SIZES,
   type Telemetry,
+  TICKET_SIZES,
 } from "@mc/core";
 import { useState } from "react";
 import { useTz } from "../clock.ts";
@@ -374,7 +374,9 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
     bySize.set(size, cycles);
   }
   const otherSizes = [...bySize.keys()]
-    .filter((size) => !TICKET_SIZES.includes(size as (typeof TICKET_SIZES)[number]) && size !== NO_SIZE)
+    .filter(
+      (size) => !TICKET_SIZES.includes(size as (typeof TICKET_SIZES)[number]) && size !== NO_SIZE,
+    )
     .sort();
   const rows = [...TICKET_SIZES, ...otherSizes, NO_SIZE]
     .map((size) => {
