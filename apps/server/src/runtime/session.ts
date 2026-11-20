@@ -45,9 +45,11 @@ import {
   type KeeperHello,
   type KeeperSpec,
   pidAlive,
+  processInfo,
   readKeeperExit,
   readKeeperSecret,
   readPidFile,
+  readPidStamp,
 } from "./keeper.ts";
 
 export type { SessionEvent };
@@ -187,10 +189,17 @@ function lineReader(sock: Socket) {
 }
 type LineReader = ReturnType<typeof lineReader>;
 
-/** Whether the run folder's keeper process is alive. */
+/** Whether the run folder's keeper process is still the keeper that owns this folder. */
 function keeperRuns(dir: string): boolean {
-  const pid = readPidFile(dir, KEEPER_PID_FILE);
-  return pid !== null && pidAlive(pid);
+  const stamp = readPidStamp(dir, KEEPER_PID_FILE);
+  if (stamp === null || !pidAlive(stamp.pid)) return false;
+  const info = processInfo(stamp.pid);
+  return (
+    info !== null &&
+    info.startedAt <= stamp.mtimeMs &&
+    info.command.includes("keeper-cli") &&
+    info.command.includes(dir)
+  );
 }
 
 /** Connects to the keeper's socket, retrying for ATTACH_CONNECT_MS; null when it never answers. */
@@ -481,7 +490,9 @@ function createDriver(i: {
       }
       if (keeperRuns(i.dir)) {
         i.log?.(`${i.dir}: the keeper runs but would not take the hub back; leaving it`);
-        session.detach();
+        // The supervisor takes this session back. It can attach the still-running keeper again,
+        // and, unlike a quiet detach, this wakes the engine if recovery must resume the run.
+        end({ code: null, signal: null, retake: true });
         return;
       }
     }

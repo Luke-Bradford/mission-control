@@ -88,6 +88,8 @@ const prep = vi.hoisted(() => ({
   installRunner: null as import("../src/runtime/checkouts.ts").InstallRunner | null,
   /** Every socket the hub opened to a keeper, in order (a test drops one to cut the link). */
   links: [] as import("node:net").Socket[],
+  /** Reconnects to a keeper that lose their socket before its hello, as one that refuses redials. */
+  refuseKeeperRedials: 0,
 }));
 vi.mock("node:net", async (importOriginal) => {
   const real = await importOriginal<typeof import("node:net")>();
@@ -95,6 +97,14 @@ vi.mock("node:net", async (importOriginal) => {
     const s = real.connect(...a);
     const first = a[0];
     if (typeof first === "string" && first.endsWith(`/${KEEPER_SOCKET}`)) prep.links.push(s);
+    if (
+      typeof first === "string" &&
+      first.endsWith(`/${KEEPER_SOCKET}`) &&
+      prep.refuseKeeperRedials > 0
+    ) {
+      prep.refuseKeeperRedials--;
+      setImmediate(() => s.destroy(new Error("keeper refused redial")));
+    }
     return s;
   }) as typeof real.connect;
   return { ...real, connect, default: { ...real, connect } };
@@ -497,6 +507,7 @@ beforeEach(() => {
   prep.dropWrite = false;
   prep.sessions = [];
   prep.links = [];
+  prep.refuseKeeperRedials = 0;
   prep.peers = [];
   prep.installRunner = null;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));

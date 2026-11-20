@@ -261,11 +261,13 @@ import {
   CODEX_DELIVERY,
   endKeeper,
   KEEPER_ENTRY,
+  KEEPER_PID_FILE,
   type KeeperHello,
   keeperAlive,
   pidAlive,
   processInfo,
   readKeeperExit,
+  readPidFile,
 } from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
 import { nodeFirstPath, ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "./node-first.ts";
@@ -785,6 +787,8 @@ interface Live {
   replayedBelow: number;
   /** At an attach: the keeper said a turn was open. A replayed `result` is then an earlier turn's. */
   awaitingAtAttach: boolean;
+  /** The keeper attached to for this live session, retained until a retake has made it safe to replace. */
+  keeperPid: number | null;
 }
 
 /** `get_context_usage`'s answer, or null when it is not the shape the CLI sends (spike). */
@@ -1174,7 +1178,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (row === null || row.runId !== runId || row.state === "stopped") return;
       if (store.run(runId)?.endedAt !== null) return;
       const dir = crewKeeperDir(deps.dbPath, runId);
-      if (readKeeperExit(dir) !== null || !keeperAlive(dir)) {
+      // A Codex attach that could not confirm its floor closed its transport, so its keeper may
+      // still be finishing while this exit reaches us. End it before its folder can be reused.
+      if (l.run.vendor === "codex" && l.keeperPid !== null && pidAlive(l.keeperPid)) {
+        if (!(await endAndRemoveKeeper(seatId, runId))) {
+          failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
+          return;
+        }
+      } else if (readKeeperExit(dir) !== null || !keeperAlive(dir)) {
         if (!(await endAndRemoveKeeper(seatId, runId))) {
           failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
           return;
@@ -2475,7 +2486,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     // First, so it runs before the seat's own exit handling: never removed, unlike `l.off`, so a
     // discarded process still revokes its token when it exits.
     session.on((e) => {
-      if (e.kind === "exit") release();
+      // A retake owns this grant until it has proved the old keeper gone. Removing its folder
+      // here could let a new keeper race the old one's final socket cleanup.
+      if (e.kind === "exit" && e.retake !== true) release();
     });
     const l: Live = {
       info,
@@ -2499,6 +2512,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       attaching: false,
       replayedBelow: 0,
       awaitingAtAttach: false,
+      keeperPid: null,
       ...init,
     };
     live.set(info.seat.id, l);
@@ -3091,6 +3105,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       attaching: true,
       replayedBelow: hello.lines,
       awaitingAtAttach: hello.awaiting,
+      keeperPid: readPidFile(crewKeeperDir(deps.dbPath, runId), KEEPER_PID_FILE),
       inTurn: hello.awaiting,
       parkedTurn: hello.awaiting && row.state === "parked",
       rateLimitedUntil: cursor?.spawn === hello.spawn ? cursor.rateLimitedUntil : null,
