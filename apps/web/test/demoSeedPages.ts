@@ -684,6 +684,9 @@ function setupApi(): Record<string, unknown> {
 /** The QA queue: the open PRs, newest first. */
 export function qaQueue(tickets: readonly DemoTicket[]) {
   const sha = "a".repeat(40);
+  const acceptancePrs = new Set(
+    tickets.filter((ticket) => ticket.stage === "checks").map((ticket) => ticket.n + 1000),
+  );
   return {
     prs: openPrs(tickets).map((pr, i) => ({
       repoId: DEMO_REPO,
@@ -694,14 +697,14 @@ export function qaQueue(tickets: readonly DemoTicket[]) {
       ticket: pr.ticket,
       state: "open",
       isDraft: false,
-      review: i === 0 ? "approved" : "none",
-      ci: i === 0 ? "passing" : "pending",
+      review: acceptancePrs.has(pr.number) ? "approved" : "none",
+      ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
       createdAt: NOW - (i + 2) * HOUR,
       updatedAt: NOW - 5 * MIN,
       mergedAt: null,
       headSha: sha,
       mergeable: "MERGEABLE",
-      ...(i === 0 ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
+      ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
     })),
     flightId: "flight-1",
   };
