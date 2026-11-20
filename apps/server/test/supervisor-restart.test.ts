@@ -1009,19 +1009,31 @@ describe("a seat keeps running through a restart", () => {
     await sup.message("guido-1", "SLOW", { interrupt: false });
     await until(() => expect(seatState("guido-1")).toBe("running"));
     const keeperPid = readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number;
-    prep.refuseKeeperRedials = 3;
-    prep.links.at(-1)?.destroy();
-    await until(() =>
-      expect(log).toHaveBeenCalledWith(
-        `guido-1: run ${runId} did not end on its own; taking it back`,
-      ),
-    );
+    // One redial retries its socket for two seconds. Refuse all three redials, then allow the
+    // supervisor's retake attach; three individual refusals would all be spent by the first dial.
+    prep.refuseKeeperRedials = Number.POSITIVE_INFINITY;
+    const allowRetake = setTimeout(() => {
+      prep.refuseKeeperRedials = 0;
+    }, 6500);
+    try {
+      prep.links.at(-1)?.destroy();
+      await vi.waitFor(
+        () =>
+          expect(log).toHaveBeenCalledWith(
+            `guido-1: run ${runId} did not end on its own; taking it back`,
+          ),
+        { timeout: 10_000, interval: 10 },
+      );
+    } finally {
+      clearTimeout(allowRetake);
+      prep.refuseKeeperRedials = 0;
+    }
     await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
     expect(pidAlive(keeperPid)).toBe(true);
     expect(starts()).toHaveLength(1);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
-  });
+  }, 15_000);
 
   it("a mid-turn keeper survives a forced Update restart and the new hub gets its turn (#1912)", async () => {
     const first = make();
