@@ -2212,6 +2212,27 @@ describe("reused worktrees", () => {
         knownSecrets: async () => [],
       }).find((tool) => tool.name === "start_seat");
       if (startSeat === undefined) throw new Error("missing start_seat");
+      // FLIGHT's own live run, which every FLIGHT tool checks first
+      const seatRow = store.seatSession("guido-1");
+      if (seatRow === null || failed === undefined) throw new Error("missing fixture rows");
+      store.upsertRun({
+        ...failed,
+        id: "flight-run",
+        agentId: "flight-1",
+        endedAt: null,
+        status: "running",
+        ticket: null,
+        branch: null,
+        loop: undefined,
+      });
+      store.setSeatSession({
+        ...seatRow,
+        seatId: "flight-1",
+        runId: "flight-run",
+        state: "running",
+        reason: null,
+        worktree: null,
+      });
       const carriedOn = await startSeat.call(
         { seatId: "flight-1", runId: "flight-run" },
         { seat: "guido-1", issue: 42, basis: "carry the open PR on" },

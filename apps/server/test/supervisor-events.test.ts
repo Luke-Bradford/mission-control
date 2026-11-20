@@ -940,6 +940,10 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("answers no-session on a started hub with no process for the held run", async () => {
       const runId = await leftActive();
+      // stopped, but still pointing at the run: the hub takes nothing back, and the run is held
+      const row = store.seatSession("guido-1");
+      if (row === null) throw new Error("missing seat");
+      store.setSeatSession({ ...row, state: "stopped" });
       const { sup } = make();
       sup.start();
       await Promise.resolve();
