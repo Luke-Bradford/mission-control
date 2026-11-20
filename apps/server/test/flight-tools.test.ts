@@ -2561,6 +2561,7 @@ describe("start_seat", () => {
             title: "t",
             url: "u",
             branch: "feature/7-x",
+            isCrossRepository: false,
             ticket: "mc#7",
             state: "open",
             isDraft: false,
@@ -2585,6 +2586,36 @@ describe("start_seat", () => {
       const r = (await start()) as { isError?: boolean };
       expect(r.isError).toBeUndefined();
       expect(startCalls.length).toBe(1);
+    });
+
+    it("does not carry on an open PR from a fork, even on a feature branch name", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: true,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In review" }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
     });
   });
 });

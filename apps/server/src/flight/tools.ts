@@ -1599,8 +1599,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const column = hudColumnOf(card);
     // the PR a stopped run opened: no run holds it now, so a new run picks it up on its branch
     // or one opened by hand on the ticket's own branch, which no run recorded
-    const ownPr = (p: { number: number; branch: string }): boolean =>
-      new RegExp(`^feature/${issue}(?:-[^/]+)?$`).test(p.branch) ||
+    const ownPr = (p: {
+      number: number;
+      branch: string;
+      isCrossRepository?: boolean | null;
+    }): boolean =>
+      (p.isCrossRepository === false &&
+        new RegExp(`^feature/${issue}(?:-[^/]+)?$`).test(p.branch)) ||
       store
         .runsOnTicket(repo.id, ref)
         .some((r) => r.endedAt !== null && r.reviewId == null && r.loop?.prNumber === p.number);
