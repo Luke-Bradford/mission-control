@@ -458,7 +458,8 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
           <p className="pnote">
             Each bar runs from p50 to p85; the mark is p50. The axis is 0 to {top} hours. p85 shows
             from {CYCLE_TIME_MIN_FOR_P85} tickets.
-            {!hasTicketSeries && t?.cycleTime.excluded > 0 &&
+            {!hasTicketSeries &&
+              t?.cycleTime.excluded > 0 &&
               ` ${t.cycleTime.excluded} done tickets left out: no Ready entry.`}
           </p>
         </div>
