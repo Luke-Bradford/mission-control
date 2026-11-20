@@ -3964,19 +3964,41 @@ export class Store {
 
   /**
    * Files with blocking review findings in range, with how many merged PRs in range touched each
-   * (the stored diff files). Generated files are left out. Most findings first, cut at
-   * AUDIT_FINDING_FILES; `touches` is 0 where no stored diff names the file.
+   * (the stored diff files). Generated files are left out. Most findings per touch first (files with no stored touch
+   * last), cut at AUDIT_FINDING_FILES after ranking; `touches` is 0 where no stored diff names the file.
    */
   private auditFindingFiles(since: number, until: number): NonNullable<AuditView["findingFiles"]> {
-    const findings = this.db
+    const marks = BLOCKING_SEVERITIES.map(() => "?").join(", ");
+    const raised = this.db
       .prepare(
-        `SELECT f.file AS file, COUNT(*) AS findings FROM review_findings f
+        `SELECT f.review_id AS review, f.file AS file, COUNT(*) AS n FROM review_findings f
          JOIN reviews v ON v.id = f.review_id
          WHERE v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
-           AND f.severity IN (${BLOCKING_SEVERITIES.map(() => "?").join(", ")})
-         GROUP BY f.file`,
+           AND f.severity IN (${marks})
+         GROUP BY f.review_id, f.file`,
       )
-      .all(since, until, ...BLOCKING_SEVERITIES) as { file: string; findings: number }[];
+      .all(since, until, ...BLOCKING_SEVERITIES) as { review: number; file: string; n: number }[];
+    // A finding the reviewer holds is listed again by the next round. That listing is the same
+    // finding, so it is not counted twice: each held resolution takes one listing of its file from
+    // the round that held it, provided the held finding was itself raised in range.
+    const held = new Map<string, number>();
+    for (const h of this.db
+      .prepare(
+        `SELECT x.review_id AS review, p.file AS file, COUNT(*) AS n FROM review_resolutions x
+         JOIN review_findings p ON p.review_id = x.prior_review_id AND p.pos = x.finding_pos
+         JOIN reviews pv ON pv.id = x.prior_review_id
+         JOIN reviews v ON v.id = x.review_id
+         WHERE x.outcome = 'held' AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+           AND pv.state = 'reported' AND pv.ended_at >= ? AND pv.ended_at <= ?
+         GROUP BY x.review_id, p.file`,
+      )
+      .all(since, until, since, until) as { review: number; file: string; n: number }[])
+      held.set(`${h.review}\0${h.file}`, h.n);
+    const findings = new Map<string, number>();
+    for (const r of raised) {
+      const carried = Math.min(held.get(`${r.review}\0${r.file}`) ?? 0, r.n);
+      findings.set(r.file, (findings.get(r.file) ?? 0) + r.n - carried);
+    }
     const touched = new Map(
       (
         this.db
@@ -3988,10 +4010,17 @@ export class Store {
           .all(since, until) as { file: string; touches: number }[]
       ).map((r) => [r.file, r.touches]),
     );
-    return findings
-      .filter((r) => !isGeneratedFile(r.file))
-      .map((r) => ({ file: r.file, findings: r.findings, touches: touched.get(r.file) ?? 0 }))
-      .sort((a, b) => b.findings - a.findings || a.file.localeCompare(b.file))
+    // Ranked by findings per touch before the cut, so the cut keeps the top of that ranking; a file
+    // with no stored touch has no ratio and follows those that do.
+    return [...findings]
+      .filter(([file]) => !isGeneratedFile(file))
+      .map(([file, n]) => ({ file, findings: n, touches: touched.get(file) ?? 0 }))
+      .filter((r) => r.findings > 0)
+      .sort((a, b) => {
+        if ((a.touches > 0) !== (b.touches > 0)) return a.touches > 0 ? -1 : 1;
+        const ratio = a.touches > 0 ? b.findings * a.touches - a.findings * b.touches : 0;
+        return ratio || b.findings - a.findings || a.file.localeCompare(b.file);
+      })
       .slice(0, AUDIT_FINDING_FILES);
   }
 

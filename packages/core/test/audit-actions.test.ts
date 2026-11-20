@@ -91,7 +91,7 @@ describe("auditActions", () => {
     });
     const cases: [WasteAlarm[], number, number, string][] = [
       [[at("unchanged-rerun", 3)], 3, 0, "reruns"],
-      [[at("retry-loop", 4)], 4, 1, "failed attempts and resumes"],
+      [[at("retry-loop", 4)], 4, 1, "failed attempts"],
       [[at("review-rounds", 5), at("review-rounds", 3)], 5, 2, "rounds"],
       [[at("restart-storm", 9)], 9, 6, "starts in an hour"],
       [[at("cost-without-output", 4)], 4, 3, "× median cost"],
@@ -128,6 +128,60 @@ describe("auditActions", () => {
       expect(row?.measure, alarms[0]?.check).toMatchObject({ now, target, unit });
       expect(row?.measure.targetSource).toMatch(/limit/);
     }
+  });
+
+  it("keeps each retry and churn cause against its own limit", () => {
+    const at = (check: WasteAlarm["check"], evidence: string, over: Partial<WasteAlarm> = {}) => ({
+      ...alarm(1, check, "mc#1"),
+      evidence,
+      level: 3,
+      ...over,
+    });
+    const one = (a: WasteAlarm) => auditActions(base, [a], new Set())[0];
+    // failed attempts only
+    expect(
+      one(at("retry-loop", "mc#1 is parked: 3 failed attempts (a, b, c). It stays parked."))
+        ?.measure,
+    ).toMatchObject({ now: 3, target: 1, unit: "failed attempts" });
+    // resumes only: the resume limit, never the failed-attempt one
+    const resumed = one(
+      at("retry-loop", "mc#1 is parked: run r resumed 3 times without a report. It stays parked."),
+    );
+    expect(resumed?.measure).toMatchObject({ now: 3, target: 2, unit: "resumes" });
+    expect(resumed?.measure.targetSource).toMatch(/3 carry-on resumes/);
+    // mixed: first cause on the row, the other against its own limit in the evidence
+    const mixed = one(
+      at(
+        "retry-loop",
+        "mc#1 is parked: 2 failed attempts (a, b); run r resumed 4 times without a report. It stays parked.",
+        { level: 6 },
+      ),
+    );
+    expect(mixed?.measure).toMatchObject({ now: 2, target: 1, unit: "failed attempts" });
+    expect(mixed?.evidence[0]).toMatch(/: 4 → 2 resumes/);
+    // churn: a restarted ticket and split tickets are their own causes
+    const restarted = one(
+      at("ticket-churn", "mc#1 was parked and has started again (r1, r2).", {
+        subject: "mc#1:restarted",
+        level: 2,
+      }),
+    );
+    expect(restarted?.measure).toMatchObject({ now: 2, target: 0, unit: "runs" });
+    const split = auditActions(
+      base,
+      [
+        at("ticket-churn", "mc#7 reads as a piece of other work.", {
+          subject: "mc#7:split",
+          level: 1,
+        }),
+        at("ticket-churn", "mc#8 reads as a piece of other work.", {
+          subject: "mc#8:split",
+          level: 1,
+        }),
+      ],
+      new Set(),
+    )[0];
+    expect(split?.measure).toMatchObject({ now: 2, target: 0, unit: "tickets" });
   });
 
   it("shows run ids as seat and date, with working links, never raw", () => {

@@ -196,7 +196,7 @@ it("leads with a one-sentence verdict, then ranked rows with a number now, a tar
   }
   // Waste alarms are grouped into one row, ranked first.
   expect(rows[0]?.textContent).toContain("Fix what makes a ticket fail again and again");
-  expect(rows[0]?.querySelector(".meas .v")?.textContent).toBe("1 → 1 failed attempts and resumes");
+  expect(rows[0]?.querySelector(".meas .v")?.textContent).toBe("1 → 1 failed attempts");
 });
 
 it("opens the first row, toggles rows, and filters by decider", async () => {

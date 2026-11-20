@@ -112,107 +112,212 @@ const WASTE_ACTION_TITLES: Record<WasteCheck, string> = {
   "clearance-waiting": "Clear the hard-rule PRs waiting on FLIGHT",
 };
 
-/**
- * A waste check's measure: the worst open alarm's level against the highest value that raises no
- * alarm. `level` is what the scan stored (reruns, attempts, rounds, starts, a cost multiple, dollars,
- * hours, tickets), so no figure is parsed except where the level cannot carry the comparison.
- */
-function wasteMeasure(check: WasteCheck, rows: readonly WasteAlarm[]): AuditAction["measure"] {
+/** One alarm's cause as a figure: what is measured, its value now, and the highest value that raises no alarm. */
+interface WasteCause {
+  /** Alarms with the same key share one metric and threshold, so only they are grouped. */
+  key: string;
+  label: string;
+  now: number;
+  target: number;
+  unit: string;
+  window: string;
+  /** How alarms of one key combine: the worst of them, or how many there are. */
+  combine: "max" | "count";
+}
+
+const exact = (text: string, re: RegExp): number | null => {
+  const m = re.exec(text);
+  return m?.[1] === undefined ? null : Number(m[1]);
+};
+
+/** The causes one alarm stands for; an alarm can name more than one (failed attempts and resumes). */
+function wasteCauses(check: WasteCheck, a: WasteAlarm): WasteCause[] {
   const t = WASTE_THRESHOLDS;
-  const worst = rows.reduce((n, a) => Math.max(n, a.level), 0);
-  const limit = wasteThresholdText(check);
-  const m = (
+  const c = (
+    key: string,
     label: string,
     now: number,
     target: number,
     unit: string,
-    window: string,
-  ): AuditAction["measure"] => ({
-    label,
-    now,
-    atLeast: false,
-    target,
-    unit,
-    targetSource: `highest value that raises no alarm, from the limit: ${limit}; ${window}`,
-  });
+    window = "open alarms now",
+    combine: WasteCause["combine"] = "max",
+  ): WasteCause => ({ key, label, now, target, unit, window, combine });
   switch (check) {
     case "unchanged-rerun":
-      return m("Most reruns of one check on one commit", worst, 0, "reruns", "open alarms now");
-    case "retry-loop":
-      return m(
-        "Most failed attempts and resumes on one ticket",
-        worst,
-        t.retryFailedAttempts - 1,
-        "failed attempts and resumes",
-        "open alarms now",
-      );
+      return [c("rerun", "Most reruns of one check on one commit", a.level, 0, "reruns")];
+    case "retry-loop": {
+      const failed = exact(a.evidence, /(\d+) failed attempts/);
+      const resumed = [...a.evidence.matchAll(/resumed (\d+) times/g)].map((m) => Number(m[1]));
+      const out: WasteCause[] = [];
+      if (failed !== null)
+        out.push(
+          c(
+            "failed",
+            "Most failed attempts on one ticket",
+            failed,
+            t.retryFailedAttempts - 1,
+            "failed attempts",
+          ),
+        );
+      if (resumed.length > 0)
+        out.push(
+          c(
+            "resumed",
+            "Most carry-on resumes of one run without a report",
+            Math.max(...resumed),
+            t.retryResumes - 1,
+            "resumes",
+          ),
+        );
+      return out.length > 0
+        ? out
+        : [
+            c(
+              "failed",
+              "Most failed attempts on one ticket",
+              a.level,
+              t.retryFailedAttempts - 1,
+              "failed attempts",
+            ),
+          ];
+    }
     case "review-rounds":
-      return m(
-        "Most review rounds on one change",
-        worst,
-        t.reviewRounds,
-        "rounds",
-        "open alarms now",
-      );
+      return [c("rounds", "Most review rounds on one change", a.level, t.reviewRounds, "rounds")];
     case "restart-storm":
-      return m(
-        "Most starts of one seat in an hour",
-        worst,
-        t.restartStormStarts,
-        "starts in an hour",
-        "the last hour",
-      );
+      return [
+        c(
+          "starts",
+          "Most starts of one seat in an hour",
+          a.level,
+          t.restartStormStarts,
+          "starts in an hour",
+          "the last hour",
+        ),
+      ];
     case "cost-without-output":
-      return m(
-        "Highest cost against the median of its size, no merge",
-        worst,
-        t.costFactor,
-        "× median cost",
-        "open alarms now",
-      );
+      return [
+        c(
+          "cost",
+          "Highest cost against the median of its size, no merge",
+          a.level,
+          t.costFactor,
+          "× median cost",
+        ),
+      ];
     case "coordination-overhead": {
-      const dev = /developers \$(\d+(?:\.\d+)?)/.exec(rows[0]?.evidence ?? "")?.[1];
-      return m(
-        "FLIGHT spend in the last day",
-        worst,
-        dev === undefined ? t.coordinationMinUsd : Math.floor(Number(dev)),
-        "dollars",
-        "the last day, against the developers' spend",
-      );
+      const dev = exact(a.evidence, /developers \$(\d+(?:\.\d+)?)/);
+      return [
+        c(
+          "flight-usd",
+          "FLIGHT spend in the last day",
+          a.level,
+          dev === null ? t.coordinationMinUsd : Math.floor(dev),
+          "dollars",
+          "the last day, against the developers' spend",
+        ),
+      ];
     }
     case "ticket-churn": {
-      const day = rows
-        .map((a) => /(\d+) tickets were opened and (\d+) closed/.exec(a.evidence))
-        .find((x) => x !== null && x !== undefined);
-      if (day)
-        return m(
-          "Tickets opened in a day, in the busiest repo",
-          Number(day[1]),
-          Math.max(t.churnMinOpened - 1, Number(day[2]) - 1),
-          "tickets opened",
+      const opened = /(\d+) tickets were opened and (\d+) closed/.exec(a.evidence);
+      if (opened)
+        return [
+          c(
+            "day",
+            "Tickets opened in a day, in the busiest repo",
+            Number(opened[1]),
+            Math.max(t.churnMinOpened - 1, Number(opened[2]) - 1),
+            "tickets opened",
+            "the last day",
+          ),
+        ];
+      if (a.subject.endsWith(":restarted"))
+        return [
+          c(
+            "restarted",
+            "Runs started on a ticket parked by a retry loop",
+            a.level,
+            0,
+            "runs",
+            "since the alarm opened",
+          ),
+        ];
+      return [
+        c(
+          "split",
+          "Tickets that read as a piece of other work",
+          1,
+          0,
+          "tickets",
           "the last day",
-        );
-      return m("Split or parked tickets that started", rows.length, 0, "tickets", "the last day");
+          "count",
+        ),
+      ];
     }
     case "runs-per-ticket":
-      return m("Most runs on one open ticket", worst, t.runsPerTicket, "runs", "open alarms now");
+      return [c("runs", "Most runs on one open ticket", a.level, t.runsPerTicket, "runs")];
     case "failed-review-rounds":
-      return m(
-        "Most failed review rounds on one open PR",
-        worst,
-        t.failedReviewRounds - 1,
-        "failed rounds",
-        "open alarms now",
-      );
+      return [
+        c(
+          "failed-rounds",
+          "Most failed review rounds on one open PR",
+          a.level,
+          t.failedReviewRounds - 1,
+          "failed rounds",
+        ),
+      ];
     case "clearance-waiting":
-      return m(
-        "Longest wait on FLIGHT's clearance",
-        worst,
-        t.clearanceAlarmMs / HOUR_MS - 1,
-        "hours",
-        "open alarms now",
-      );
+      return [
+        c(
+          "clearance",
+          "Longest wait on FLIGHT's clearance",
+          a.level,
+          t.clearanceAlarmMs / HOUR_MS - 1,
+          "hours",
+        ),
+      ];
   }
+}
+
+/**
+ * A waste check's measure. Alarms are grouped by the metric and threshold they share; the row shows
+ * the first metric present (in the order the check names them) and every other metric as its own
+ * "label: now → target unit" line, so a mixed row never puts one cause's figure against another's limit.
+ */
+function wasteMeasure(
+  check: WasteCheck,
+  rows: readonly WasteAlarm[],
+): { measure: AuditAction["measure"]; other: string[] } {
+  const groups = new Map<string, WasteCause>();
+  for (const a of rows) {
+    for (const cause of wasteCauses(check, a)) {
+      const had = groups.get(cause.key);
+      groups.set(
+        cause.key,
+        had === undefined
+          ? cause
+          : {
+              ...had,
+              now: cause.combine === "count" ? had.now + cause.now : Math.max(had.now, cause.now),
+            },
+      );
+    }
+  }
+  const [first, ...rest] = [...groups.values()];
+  const limit = wasteThresholdText(check);
+  const source = (c: WasteCause) =>
+    `highest value that raises no alarm, from the limit: ${limit}; ${c.window}`;
+  const head = first as WasteCause;
+  return {
+    measure: {
+      label: head.label,
+      now: head.now,
+      atLeast: false,
+      target: head.target,
+      unit: head.unit,
+      targetSource: source(head),
+    },
+    other: rest.map((c) => `${c.label}: ${c.now} → ${c.target} ${c.unit} (${source(c)})`),
+  };
 }
 
 /** The change each message problem asks for; kinds not listed are not rows. */
@@ -270,18 +375,22 @@ export function auditActions(
   for (const check of Object.keys(WASTE_CHECK_TITLES) as WasteCheck[]) {
     const rows = open.filter((a) => a.check === check);
     if (rows.length === 0) continue;
+    const waste = wasteMeasure(check, rows);
     add({
       group: "waste",
       id: `waste:${check}`,
       source: "Waste",
       title: WASTE_ACTION_TITLES[check],
       why: `${times(rows.length, "open alarm")}: ${plainIds(rows[0]?.evidence ?? "")}`,
-      measure: wasteMeasure(check, rows),
+      measure: waste.measure,
       decider: "FLIGHT",
       deciderNote: "the alarm waits on FLIGHT or the operator",
-      evidence: rows
-        .slice(0, DETAIL_LINES)
-        .map((a) => `${plainIds(a.subject)}: ${plainIds(a.evidence)}`),
+      evidence: [
+        ...waste.other,
+        ...rows
+          .slice(0, DETAIL_LINES)
+          .map((a) => `${plainIds(a.subject)}: ${plainIds(a.evidence)}`),
+      ].slice(0, DETAIL_LINES),
       caveat: "An alarm marks spend that bought no progress; it does not say the work was wrong.",
       links: rows.slice(0, DETAIL_LINES).flatMap((a) => {
         const run = RUN_ID.exec(`${a.runId ?? ""} ${a.subject} ${a.evidence}`);

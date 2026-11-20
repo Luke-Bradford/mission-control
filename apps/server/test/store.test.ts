@@ -1971,6 +1971,104 @@ describe("Store", () => {
       ]);
     });
 
+    describe("findings by file", () => {
+      const finding = (file: string) => ({
+        severity: "Important" as const,
+        file,
+        line: 1,
+        summary: "s",
+        scenario: "s",
+        fix: "f",
+      });
+      const round = (
+        authorRun: string,
+        n: number,
+        findings: ReturnType<typeof finding>[],
+        resolutions: {
+          findingRef: { reviewId: number; pos: number };
+          outcome: "fixed" | "reply-accepted" | "held" | "waived";
+        }[] = [],
+      ) => {
+        const id = store.requestReview({
+          authorRunId: authorRun,
+          repoId: "repo",
+          seatId: "retro",
+          prNumber: 1,
+          sha: `s${n}`,
+          epoch: 0,
+          attempt: 1,
+          round: n,
+          at: 100 + n,
+        }) as number;
+        store.setReviewState(id, ["queued"], "running", { at: 110 + n, runId: `rv${n}` });
+        store.recordFindings(id, `rv${n}`, {
+          verdict: { spec: "fail", quality: "fail" },
+          summary: "s",
+          at: 120 + n,
+          findings,
+          resolutions,
+        });
+        return id;
+      };
+
+      it("counts a held finding once across rounds, and fixed, accepted and new ones as they are", () => {
+        store.upsertRun(run({ id: "author", startedAt: 100 }));
+        const r1 = round("author", 1, [
+          finding("src/a.ts"),
+          finding("src/a.ts"),
+          finding("src/b.ts"),
+          finding("src/c.ts"),
+          finding("src/d.ts"),
+        ]);
+        round(
+          "author",
+          2,
+          [finding("src/a.ts"), finding("src/a.ts")],
+          [
+            { findingRef: { reviewId: r1, pos: 0 }, outcome: "held" },
+            { findingRef: { reviewId: r1, pos: 1 }, outcome: "fixed" },
+            { findingRef: { reviewId: r1, pos: 2 }, outcome: "reply-accepted" },
+            { findingRef: { reviewId: r1, pos: 3 }, outcome: "waived" },
+          ],
+        );
+        const files = (store.audit(100, 200) as unknown as AuditView).findingFiles ?? [];
+        // a.ts: two raised in round 1, round 2 lists the held one again plus one new = 3 findings
+        expect(Object.fromEntries(files.map((f) => [f.file, f.findings]))).toEqual({
+          "src/a.ts": 3,
+          "src/b.ts": 1,
+          "src/c.ts": 1,
+          "src/d.ts": 1,
+        });
+      });
+
+      it("ranks by findings per touch before cutting to the limit", () => {
+        store.upsertRun(run({ id: "author", startedAt: 100 }));
+        const many = Array.from({ length: 55 }, (_, i) => `src/busy${i}.ts`);
+        const prs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+          mergedPr(n, 150, {
+            files: [...many, "src/rare.ts"].map((path) => ({ path, changeType: "modified" })),
+          }),
+        );
+        // busy files: 2 findings in 10 touches (0.2); the rare file: 1 finding in 10 touches (0.1) is
+        // lower, so give it one touch only by listing it in a single PR
+        prs.forEach((p, i) => {
+          if (i > 0)
+            p.files = (p.files as { path: string }[]).filter(
+              (f) => f.path !== "src/rare.ts",
+            ) as never;
+        });
+        store.upsertPullRequests("repo", prs, 200);
+        round("author", 1, [
+          ...many.flatMap((f) => [finding(f), finding(f)]),
+          finding("src/rare.ts"),
+        ]);
+        const files = (store.audit(100, 200) as unknown as AuditView).findingFiles ?? [];
+        expect(files).toHaveLength(50);
+        // 1 finding in 1 touch (1.0) beats 2 in 10 (0.2), though it has fewer findings
+        expect(files[0]).toEqual({ file: "src/rare.ts", findings: 1, touches: 1 });
+      });
+    });
+
     it("names the seat and run of each improvement candidate", () => {
       store.upsertRun(
         run({ id: "cheap1", agentId: "a1", startedAt: 110, ticket: "repo#1", costUsd: 1 }),
