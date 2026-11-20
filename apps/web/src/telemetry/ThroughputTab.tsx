@@ -3,8 +3,8 @@ import {
   FLOW_DAYS,
   formatHours,
   NO_SIZE,
-  TELEMETRY_RANGES,
   type Telemetry,
+  TICKET_SIZES,
 } from "@mc/core";
 import { useState } from "react";
 import { useTz } from "../clock.ts";
@@ -21,7 +21,7 @@ const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 /** The per-ticket series covers the longest range the server serves: its dots span this window. */
 export const TICKET_SERIES_RANGE = "7d" as const;
-const TICKET_DAYS = TELEMETRY_RANGES[TICKET_SERIES_RANGE] / (24 * 60);
+const TICKET_DAYS = FLOW_DAYS;
 const CHART_H = 140;
 const CHART_MIN_H = 120;
 const MS_PER_HOUR_FIGURE = HOUR_MS;
@@ -217,7 +217,8 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
   const [hover, setHover] = useState<number | null>(null);
   const rows = finished(t);
   const from = now - TICKET_DAYS * DAY_MS;
-  const shown = rows.filter((r) => r.doneAt >= from && r.doneAt <= now);
+  // The server's ticket series is already the complete 14-day window.
+  const shown = rows;
   const sorted = shown.map((r) => r.doneAt - r.readyAt).sort((a, b) => a - b);
   const p50 = rank(sorted, 0.5);
   const p85 = rank(sorted, 0.85);
@@ -365,7 +366,33 @@ function CycleDots({ t, wait, now }: { t: Telemetry | undefined; wait: string; n
 }
 
 function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
-  const rows = (t?.cycleTime.rows ?? []).filter((r) => r.tickets > 0 || r.size !== NO_SIZE);
+  const hasTicketSeries = t?.series !== undefined;
+  const bySize = new Map<string, number[]>();
+  for (const ticket of finished(t)) {
+    const size = ticket.size ?? NO_SIZE;
+    const cycles = bySize.get(size) ?? [];
+    cycles.push(ticket.doneAt - ticket.readyAt);
+    bySize.set(size, cycles);
+  }
+  const otherSizes = [...bySize.keys()]
+    .filter(
+      (size) => !TICKET_SIZES.includes(size as (typeof TICKET_SIZES)[number]) && size !== NO_SIZE,
+    )
+    .sort();
+  const ticketRows = [...TICKET_SIZES, ...otherSizes, NO_SIZE]
+    .map((size) => {
+      const cycles = (bySize.get(size) ?? []).sort((a, b) => a - b);
+      return {
+        size,
+        p50Ms: rank(cycles, 0.5),
+        p85Ms: cycles.length >= CYCLE_TIME_MIN_FOR_P85 ? rank(cycles, 0.85) : null,
+        tickets: cycles.length,
+      };
+    })
+    .filter((r) => r.tickets > 0 || r.size !== NO_SIZE);
+  const rows = hasTicketSeries
+    ? ticketRows
+    : (t?.cycleTime.rows ?? []).filter((r) => r.tickets > 0 || r.size !== NO_SIZE);
   const peak = Math.max(
     1,
     ...rows.map((r) => (r.tickets === 0 ? 0 : (r.p85Ms ?? r.p50Ms ?? 0)) / HOUR_MS),
@@ -431,7 +458,8 @@ function CycleBySize({ t, wait }: { t: Telemetry | undefined; wait: string }) {
           <p className="pnote">
             Each bar runs from p50 to p85; the mark is p50. The axis is 0 to {top} hours. p85 shows
             from {CYCLE_TIME_MIN_FOR_P85} tickets.
-            {t.cycleTime.excluded > 0 &&
+            {!hasTicketSeries &&
+              t?.cycleTime.excluded > 0 &&
               ` ${t.cycleTime.excluded} done tickets left out: no Ready entry.`}
           </p>
         </div>
@@ -588,12 +616,10 @@ export function ThroughputTable({
   t,
   wait,
   dim,
-  now,
 }: {
   t: Telemetry | undefined;
   wait: string;
   dim: boolean;
-  now: number;
 }) {
   const tz = useTz();
   const costs = new Map(
@@ -603,9 +629,7 @@ export function ThroughputTable({
     ]),
   );
   const rows = (t?.series?.tickets ?? [])
-    .filter(
-      (k) => k.mergedAt !== null && k.mergedAt >= now - TICKET_DAYS * DAY_MS && k.mergedAt <= now,
-    )
+    .filter((k) => k.mergedAt !== null)
     .sort((a, b) => (b.mergedAt ?? 0) - (a.mergedAt ?? 0));
   return (
     <div className={`grid${dim ? " dim" : ""}`} data-view="table" data-n="1">
@@ -622,9 +646,19 @@ export function ThroughputTable({
         ) : (
           <div className="pb tw">
             <table>
+              <colgroup>
+                <col className="ticket-ref-column" />
+                <col />
+                <col className="ticket-size-column" />
+                <col className="ticket-merged-column" />
+                <col className="ticket-cycle-column" />
+                <col className="ticket-cost-column" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>Ticket</th>
+                  <th>Title</th>
+                  <th>Size</th>
                   <th className="r">Merged</th>
                   <th className="r">Cycle</th>
                   <th className="r">~Cost</th>
@@ -643,6 +677,17 @@ export function ThroughputTable({
                           k.ticket
                         )}
                       </td>
+                      <td className="ticket-title-cell">
+                        {k.title === null || k.title === undefined ? (
+                          "Title not on board"
+                        ) : (
+                          <details className="ticket-title-disclosure">
+                            <summary aria-label={`Show full title: ${k.title}`}>{k.title}</summary>
+                            <span className="ticket-title-full">{k.title}</span>
+                          </details>
+                        )}
+                      </td>
+                      <td>{k.size ?? DASH}</td>
                       <td className="r num">
                         {k.mergedAt !== null && tz ? dayMonth(k.mergedAt, tz) : DASH}
                       </td>
@@ -659,7 +704,6 @@ export function ThroughputTable({
             </table>
           </div>
         )}
-        <p className="pnote">Title and size are not shown yet.</p>
       </Panel>
     </div>
   );

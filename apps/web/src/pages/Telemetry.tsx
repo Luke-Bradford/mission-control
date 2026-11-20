@@ -315,7 +315,7 @@ export function Telemetry() {
             <CostPanels t={t} scope={scope} view={view} dim={dim} />
           ) : tab === "throughput" ? (
             view === "table" ? (
-              <ThroughputTable t={t} wait={scope.wait} dim={dim} now={now} />
+              <ThroughputTable t={t} wait={scope.wait} dim={dim} />
             ) : (
               <ThroughputCharts t={t} wait={scope.wait} now={now} dim={dim} />
             )
