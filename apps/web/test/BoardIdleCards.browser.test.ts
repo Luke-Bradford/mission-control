@@ -18,11 +18,13 @@ const items = [
     status: "In review",
     state: "review",
   }),
+  boardItem({ issueNumber: 5, title: "Its PR merged, nobody on it", status: "In Progress" }),
   boardItem({ issueNumber: 4, title: "Has an open PR", status: "In review", state: "review" }),
 ];
 const prs = [
   prView({ number: 12, ticket: "shop-app#2", state: "closed", updatedAt: NOW - 30 * HOUR }),
   prView({ number: 14, ticket: "shop-app#4" }),
+  prView({ number: 15, ticket: "shop-app#5", state: "merged" }),
 ];
 
 describeRendered("Board cards with nothing working on them, rendered", () => {
@@ -65,6 +67,7 @@ describeRendered("Board cards with nothing working on them, rendered", () => {
       expect(by["shop-app#1"]).toMatch(/^Nobody on it since \d+ \w+$/);
       expect(by["shop-app#2"]).toMatch(/^PR closed, nothing open/);
       expect(by["shop-app#3"]).toMatch(/^Nobody on it since/);
+      expect(by["shop-app#5"]).toMatch(/^Nobody on it since/);
       expect(by["shop-app#4"]).not.toMatch(/Nobody|nothing open/);
       expect(JSON.stringify(by)).not.toContain("Handed off");
       expect(await page.unclipped(".kcard .overlay > .xs")).not.toContain(false);

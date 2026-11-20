@@ -481,11 +481,17 @@ describe("cardIdle", () => {
     expect(idle("In progress", closed)).toBe("PR closed, nothing open");
   });
 
+  it("a merged-only In progress or In review card is idle too", () => {
+    expect(idle("In progress", prView({ state: "merged" }))).toBe("Nobody on it since 15 Oct");
+    expect(idle("In review", prView({ state: "merged" }))).toBe("Nobody on it since 15 Oct");
+    expect(idle("In review", prView({ state: "merged" }), { agent: true })).toBeNull();
+  });
+
   it("says nothing when a run, a reviewer or an open PR is on the card, or it is not started", () => {
     expect(idle("In progress", null, { agent: true })).toBeNull();
     expect(idle("In review", null, { reviewer: true })).toBeNull();
     expect(idle("In progress", prView())).toBeNull();
-    expect(idle("In review", prView({ state: "merged" }))).toBeNull();
+    expect(idle("Blocked", prView({ state: "merged" }))).toBeNull();
     expect(idle("Ready", null)).toBeNull();
     expect(idle("Done", prView({ state: "closed" }))).toBeNull();
   });

@@ -772,6 +772,14 @@ describe("cards", () => {
     expect(two.textContent).not.toContain("—");
   });
 
+  it("a merged-only In progress card says nobody is on it and still shows its PR", async () => {
+    stub({ shopApp: [todo(3349, { status: "In Progress" })], prs: [pr({ state: "merged" })] });
+    await open();
+    const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
+    expect(within(c).getByText(/^Nobody on it/)).toBeTruthy();
+    expect(within(c).getByText("Merged")).toBeTruthy();
+  });
+
   it("PR line: CI pill from CI_PILL, no review pill on a plain open PR", async () => {
     stub({
       shopApp: [todo(3349, { status: "In review", state: "review" })],

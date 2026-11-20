@@ -162,8 +162,8 @@ export function cardColumn(item: BoardItem): BoardColumn {
 /**
  * The one line that says why a card nothing is working on is where it is: its last PR was closed
  * with nothing open, or nobody has it in a column that expects work. Null while a run or a
- * reviewer is on it, an open or merged PR carries it, or it is not started. `pr` is `cardPr`'s
- * pick, so a closed one means no open PR. The PR has no close time of its own (its last
+ * reviewer is on it, an open PR carries it, or it is not started. `pr` is `cardPr`'s
+ * pick, so a closed or merged one means no open PR (a merged PR does not keep a card carried). The PR has no close time of its own (its last
  * update is not it), so the line gives no date.
  */
 export function cardIdle(
@@ -177,7 +177,7 @@ export function cardIdle(
   if (col === "Done" || col === WAITING_COLUMN || hasAgent || hasReviewer) return null;
   const on = (ms: number) => (tz === null ? "" : ` ${dayMonth(ms, tz)}`);
   if (pr?.state === "closed") return "PR closed, nothing open";
-  if (pr === null && (col === "In progress" || col === "In review"))
+  if ((pr === null || pr.state === "merged") && (col === "In progress" || col === "In review"))
     return tz === null ? "Nobody on it" : `Nobody on it since${on(item.updatedAt)}`;
   return null;
 }

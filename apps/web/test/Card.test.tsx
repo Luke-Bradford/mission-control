@@ -195,3 +195,26 @@ it("a card whose PR is closed shows the idle line, not a bare Closed badge", () 
   expect(screen.getByText("PR closed, nothing open")).toBeTruthy();
   expect(screen.queryByText("Closed")).toBeNull();
 });
+
+it("a card whose only PR is merged shows the PR and says nobody is on it", () => {
+  render(
+    <Card
+      item={boardItem({ status: "In progress" })}
+      showRepo={false}
+      agent={null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={prView({ state: "merged" })}
+      idle="Nobody on it since 15 Oct"
+      mine={false}
+      unacked={false}
+      outcome="Merged"
+      when=""
+      statusOutOfDate={null}
+      you={null}
+    />,
+  );
+  expect(screen.getByText("Nobody on it since 15 Oct")).toBeTruthy();
+  expect(screen.getByText("Merged")).toBeTruthy();
+});

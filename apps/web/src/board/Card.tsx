@@ -237,25 +237,26 @@ export const Card = memo(function Card({
         {idle}
       </span>
     ),
+    // a closed PR is the idle line itself; a merged one still shows beside it
     col !== "Done" &&
-      !idle &&
-      (pr ? (
-        <PrLine
-          key="pr"
-          pr={pr}
-          checkLabel={checkLabel}
-          checkTone={checkTone}
-          checkingSeat={checkingSeat}
-          checkingSince={checkingSince}
-          checkReason={checkReason}
-        />
-      ) : (
-        PR_EXPECTED.includes(col) && (
-          <span key="nopr" className="xs muted">
-            {NO_PR_YET}
-          </span>
-        )
-      )),
+      (pr
+        ? !(idle && pr.state === "closed") && (
+            <PrLine
+              key="pr"
+              pr={pr}
+              checkLabel={checkLabel}
+              checkTone={checkTone}
+              checkingSeat={checkingSeat}
+              checkingSince={checkingSince}
+              checkReason={checkReason}
+            />
+          )
+        : !idle &&
+          PR_EXPECTED.includes(col) && (
+            <span key="nopr" className="xs muted">
+              {NO_PR_YET}
+            </span>
+          )),
     col === "Done" && (
       <span key="done" className="row">
         <Pill tone={outcome === "Merged" ? "ok" : "plain"}>{outcome}</Pill>
