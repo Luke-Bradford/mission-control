@@ -2201,7 +2201,7 @@ describe("reused worktrees", () => {
         supervisor: sup,
         login: "me",
         engine: null,
-        rules: async () => DEFAULT_REPO_RULES,
+        rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [] }),
         fetchTicket: async () => TICKET,
         board: {
           move: async () => ({ ok: true, changed: true }),

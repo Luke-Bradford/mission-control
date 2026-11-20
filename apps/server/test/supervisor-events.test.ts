@@ -940,13 +940,9 @@ describe("supervisor events (Plan 7a)", () => {
 
     it("answers no-session on a started hub with no process for the held run", async () => {
       const runId = await leftActive();
-      const row = store.seatSession("guido-1");
-      if (row === null) throw new Error("missing seat");
-      store.setSeatSession({ ...row, runId: null, state: "stopped" });
       const { sup } = make();
       sup.start();
       await Promise.resolve();
-      store.setSeatSession(row);
       expect(await sup.send(runId, "k", "x")).toBe("no-session");
       expect(store.claimedKeys(runId)).toEqual({});
     });
