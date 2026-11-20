@@ -11,7 +11,8 @@
 #page-telemetry[data-tab="crew"],
 #page-telemetry[data-tab="cost"],
 #page-telemetry[data-tab="throughput"],
-#page-telemetry[data-tab="quality"] {
+#page-telemetry[data-tab="quality"],
+#page-telemetry[data-tab="machine"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: visible;

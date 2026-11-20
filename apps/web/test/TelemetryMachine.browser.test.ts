@@ -152,6 +152,27 @@ describeRendered("Telemetry, Machine tab, in a browser", () => {
                   document.querySelectorAll("#mMem rect.band").length,
                 ],
                 tiles: document.querySelectorAll(".summary .stat").length,
+                // every chart, body and legend sits inside its own panel: nothing is clipped
+                escaped: ["#tMach", "#mMem", "#mPressure", "#mAgentMem"].flatMap((id) => {
+                  const panel = (document.querySelector(id) as HTMLElement).getBoundingClientRect();
+                  return [
+                    ...document.querySelectorAll(
+                      `${id} .pb, ${id} .chart, ${id} svg, ${id} .legend`,
+                    ),
+                  ]
+                    .filter((el) => {
+                      const r = el.getBoundingClientRect();
+                      return (
+                        r.bottom > panel.bottom + 1 ||
+                        r.top < panel.top - 1 ||
+                        r.right > panel.right + 1
+                      );
+                    })
+                    .map((el) => `${id} ${el.tagName}.${el.getAttribute("class") ?? ""}`);
+                }),
+                legends: ["#tMach", "#mMem", "#mPressure", "#mAgentMem"].map(
+                  (id) => document.querySelectorAll(`${id} .legend`).length,
+                ),
               };
             }, undefined);
             expect(page.errors()).toEqual([]);
@@ -169,6 +190,8 @@ describeRendered("Telemetry, Machine tab, in a browser", () => {
             expect([g.cpuLines, g.memLines]).toEqual([1, 1]);
             expect(g.bands).toEqual([2, 2]);
             expect(g.tiles).toBe(6);
+            expect(g.escaped).toEqual([]);
+            expect(g.legends).toEqual([1, 1, 1, 1]);
             if (evidence) {
               mkdirSync(evidence, { recursive: true });
               await page.screenshot(
