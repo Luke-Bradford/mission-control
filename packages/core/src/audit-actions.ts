@@ -278,46 +278,42 @@ function wasteCauses(check: WasteCheck, a: WasteAlarm): WasteCause[] {
   }
 }
 
+/** Checks whose alarms name more than one cause get a title per cause; the rest use the check's title. */
+const WASTE_CAUSE_TITLES: Record<string, string> = {
+  "retry-loop:failed": "Fix what makes a ticket fail again and again",
+  "retry-loop:resumed": "Stop carry-on resumes of a run that never reports",
+  "ticket-churn:day": "Slow the day's flood of newly opened tickets",
+  "ticket-churn:restarted": "Stop restarting tickets a retry loop parked",
+  "ticket-churn:split": "Stop splitting one piece of work into many tickets",
+};
+
 /**
- * A waste check's measure. Alarms are grouped by the metric and threshold they share; the row shows
- * the first metric present (in the order the check names them) and every other metric as its own
- * "label: now → target unit" line, so a mixed row never puts one cause's figure against another's limit.
+ * Open alarms grouped by the cause they stand for. Alarms with the same cause share one metric and
+ * threshold, so only they combine; a distinct cause is its own row with its own figure against its own limit.
+ * An alarm naming two causes counts under each.
  */
-function wasteMeasure(
+function wasteCauseGroups(
   check: WasteCheck,
   rows: readonly WasteAlarm[],
-): { measure: AuditAction["measure"]; other: string[] } {
-  const groups = new Map<string, WasteCause>();
+): { cause: WasteCause; alarms: WasteAlarm[] }[] {
+  const groups = new Map<string, { cause: WasteCause; alarms: WasteAlarm[] }>();
   for (const a of rows) {
     for (const cause of wasteCauses(check, a)) {
       const had = groups.get(cause.key);
-      groups.set(
-        cause.key,
-        had === undefined
-          ? cause
-          : {
-              ...had,
-              now: cause.combine === "count" ? had.now + cause.now : Math.max(had.now, cause.now),
-            },
-      );
+      if (had === undefined) groups.set(cause.key, { cause, alarms: [a] });
+      else {
+        had.cause = {
+          ...had.cause,
+          now:
+            cause.combine === "count"
+              ? had.cause.now + cause.now
+              : Math.max(had.cause.now, cause.now),
+        };
+        had.alarms.push(a);
+      }
     }
   }
-  const [first, ...rest] = [...groups.values()];
-  const limit = wasteThresholdText(check);
-  const source = (c: WasteCause) =>
-    `highest value that raises no alarm, from the limit: ${limit}; ${c.window}`;
-  const head = first as WasteCause;
-  return {
-    measure: {
-      label: head.label,
-      now: head.now,
-      atLeast: false,
-      target: head.target,
-      unit: head.unit,
-      targetSource: source(head),
-    },
-    other: rest.map((c) => `${c.label}: ${c.now} → ${c.target} ${c.unit} (${source(c)})`),
-  };
+  return [...groups.values()];
 }
 
 /** The change each message problem asks for; kinds not listed are not rows. */
@@ -370,36 +366,42 @@ export function auditActions(
     drafts.push(d);
   };
 
-  // Open waste alarms: one row per check, never one per ticket.
+  // Open waste alarms: one row per cause, never one per ticket and never several causes in one row.
   const open = alarms.filter((a) => a.closedAt === null && a.resolvedAt === null);
   for (const check of Object.keys(WASTE_CHECK_TITLES) as WasteCheck[]) {
-    const rows = open.filter((a) => a.check === check);
-    if (rows.length === 0) continue;
-    const waste = wasteMeasure(check, rows);
-    add({
-      group: "waste",
-      id: `waste:${check}`,
-      source: "Waste",
-      title: WASTE_ACTION_TITLES[check],
-      why: `${times(rows.length, "open alarm")}: ${plainIds(rows[0]?.evidence ?? "")}`,
-      measure: waste.measure,
-      decider: "FLIGHT",
-      deciderNote: "the alarm waits on FLIGHT or the operator",
-      evidence: [
-        ...waste.other,
-        ...rows
+    const checkRows = open.filter((a) => a.check === check);
+    if (checkRows.length === 0) continue;
+    const limit = wasteThresholdText(check);
+    for (const { cause, alarms: rows } of wasteCauseGroups(check, checkRows)) {
+      add({
+        group: "waste",
+        id: `waste:${check}:${cause.key}`,
+        source: "Waste",
+        title: WASTE_CAUSE_TITLES[`${check}:${cause.key}`] ?? WASTE_ACTION_TITLES[check],
+        why: `${times(rows.length, "open alarm")}: ${plainIds(rows[0]?.evidence ?? "")}`,
+        measure: {
+          label: cause.label,
+          now: cause.now,
+          atLeast: false,
+          target: cause.target,
+          unit: cause.unit,
+          targetSource: `highest value that raises no alarm, from the limit: ${limit}; ${cause.window}`,
+        },
+        decider: "FLIGHT",
+        deciderNote: "the alarm waits on FLIGHT or the operator",
+        evidence: rows
           .slice(0, DETAIL_LINES)
           .map((a) => `${plainIds(a.subject)}: ${plainIds(a.evidence)}`),
-      ].slice(0, DETAIL_LINES),
-      caveat: "An alarm marks spend that bought no progress; it does not say the work was wrong.",
-      links: rows.slice(0, DETAIL_LINES).flatMap((a) => {
-        const run = RUN_ID.exec(`${a.runId ?? ""} ${a.subject} ${a.evidence}`);
-        const seat = a.seatId ?? run?.[1] ?? null;
-        return seat === null
-          ? []
-          : [{ label: plainIds(a.subject), agentId: seat, runId: a.runId ?? run?.[0] ?? null }];
-      }),
-    });
+        caveat: "An alarm marks spend that bought no progress; it does not say the work was wrong.",
+        links: rows.slice(0, DETAIL_LINES).flatMap((a) => {
+          const run = RUN_ID.exec(`${a.runId ?? ""} ${a.subject} ${a.evidence}`);
+          const seat = a.seatId ?? run?.[1] ?? null;
+          return seat === null
+            ? []
+            : [{ label: plainIds(a.subject), agentId: seat, runId: a.runId ?? run?.[0] ?? null }];
+        }),
+      });
+    }
   }
 
   const link = (r: { agentId: string | null; runId?: string | null }, label: string) =>

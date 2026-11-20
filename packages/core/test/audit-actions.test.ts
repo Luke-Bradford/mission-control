@@ -70,8 +70,11 @@ describe("auditActions", () => {
     );
     expect(rows.map((r) => r.rank)).toEqual(rows.map((_, i) => i + 1));
     expect(new Set(rows.map((r) => r.title)).size).toBe(rows.length);
-    expect(rows[0]).toMatchObject({ id: "waste:retry-loop", measure: { now: 1, target: 1 } });
-    expect(rows.filter((r) => r.id === "waste:retry-loop")).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: "waste:retry-loop:failed",
+      measure: { now: 1, target: 1 },
+    });
+    expect(rows.filter((r) => r.id === "waste:retry-loop:failed")).toHaveLength(1);
     const gitEnv = rows.find((r) => r.id === "guards:refusal:git-env");
     expect(gitEnv).toMatchObject({ decider: "You", measure: { now: 8, target: 0 } });
     expect(rows.find((r) => r.id === "runs:long")?.measure.now).toBe(3);
@@ -157,8 +160,28 @@ describe("auditActions", () => {
         { level: 6 },
       ),
     );
-    expect(mixed?.measure).toMatchObject({ now: 2, target: 1, unit: "failed attempts" });
-    expect(mixed?.evidence[0]).toMatch(/: 4 → 2 resumes/);
+    expect(mixed).toBeDefined();
+    const mixedRows = auditActions(
+      base,
+      [
+        at(
+          "retry-loop",
+          "mc#1 is parked: 2 failed attempts (a, b); run r resumed 4 times without a report. It stays parked.",
+          { level: 6 },
+        ),
+      ],
+      new Set(),
+    );
+    expect(mixedRows.find((r) => r.id === "waste:retry-loop:failed")?.measure).toMatchObject({
+      now: 2,
+      target: 1,
+      unit: "failed attempts",
+    });
+    expect(mixedRows.find((r) => r.id === "waste:retry-loop:resumed")?.measure).toMatchObject({
+      now: 4,
+      target: 2,
+      unit: "resumes",
+    });
     // churn: a restarted ticket and split tickets are their own causes
     const restarted = one(
       at("ticket-churn", "mc#1 was parked and has started again (r1, r2).", {
@@ -182,6 +205,41 @@ describe("auditActions", () => {
       new Set(),
     )[0];
     expect(split?.measure).toMatchObject({ now: 2, target: 0, unit: "tickets" });
+  });
+
+  it("keeps distinct ticket-churn causes as distinct rows and combines repeats of one", () => {
+    const at = (evidence: string, subject: string, level: number): WasteAlarm => ({
+      ...alarm(level, "ticket-churn", subject),
+      subject,
+      evidence,
+      level,
+    });
+    const rows = auditActions(
+      base,
+      [
+        at(
+          "In the last day 9 tickets were opened and 3 closed in mc, so the board did not shrink.",
+          "mc",
+          9,
+        ),
+        at("mc#1 was parked and has started again (r1, r2).", "mc#1:restarted", 2),
+        at("mc#2 was parked and has started again (r3).", "mc#2:restarted", 3),
+        at("mc#7 reads as a piece of other work.", "mc#7:split", 1),
+        at("mc#8 reads as a piece of other work.", "mc#8:split", 1),
+      ],
+      new Set(),
+    ).filter((r) => r.source === "Waste");
+    expect(rows.map((r) => r.id).sort()).toEqual([
+      "waste:ticket-churn:day",
+      "waste:ticket-churn:restarted",
+      "waste:ticket-churn:split",
+    ]);
+    expect(new Set(rows.map((r) => r.title)).size).toBe(3);
+    const by = (k: string) => rows.find((r) => r.id.endsWith(k));
+    expect(by("day")?.measure).toMatchObject({ now: 9, unit: "tickets opened" });
+    expect(by("restarted")?.measure).toMatchObject({ now: 3, target: 0, unit: "runs" });
+    expect(by("split")?.measure).toMatchObject({ now: 2, target: 0, unit: "tickets" });
+    expect(by("restarted")?.evidence).toHaveLength(2);
   });
 
   it("shows run ids as seat and date, with working links, never raw", () => {

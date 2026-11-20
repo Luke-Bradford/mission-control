@@ -99,6 +99,30 @@ const api = {
 
 const { renderAt } = browserSession();
 
+const LONG = "a-very-long-guard-rule-name-that-goes-on-and-on-and-on-and-on-and-on";
+/** The audit with `n` guard-rule rows, each with a long title, so the list has to scroll inside its panel. */
+const withRules = (n: number) => ({
+  ...api,
+  "/api/audit?range=30d": {
+    ...audit,
+    longRunners: [],
+    deathLoops: [],
+    reworkRounds: [],
+    refusalSpikes: [],
+    spendOutliers: [],
+    chatter: [],
+    flakes: [],
+    questions: { asked: 0, answered: 0, answerMs: 0 },
+    refusals: Array.from({ length: n }, (_, i) => ({
+      agentId: "guido-1",
+      runId: null,
+      rule: `${LONG}-${String(i).padStart(2, "0")}`,
+      count: 100 - i,
+    })),
+  },
+  "/api/waste": { ...api["/api/waste"], alarms: [] },
+});
+
 describeRendered("Audit first screen in a browser", () => {
   for (const [width, height] of [
     [1920, 940],
@@ -137,6 +161,93 @@ describeRendered("Audit first screen in a browser", () => {
           null,
         );
         expect(scrolls).toBe(false);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
+  for (const [n, rows] of [
+    [0, 0],
+    [1, 1],
+    [50, 50],
+  ] as const) {
+    it(
+      `holds ${n} rows with long titles inside the panel at 1920×940: page still, list scrolls, every row reachable by keyboard`,
+      async () => {
+        const page = await renderAt({
+          page: "test/auditBarBrowser.html",
+          width: 1920,
+          height: 940,
+          api: withRules(n),
+        });
+        const toggles = n === 0 ? [] : await page.boxes(".audit-rt");
+        expect(toggles).toHaveLength(rows);
+        const pageScrolls = () =>
+          page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight, null);
+        expect(await pageScrolls()).toBe(false);
+        if (n === 0) {
+          expect(await page.boxes(".audit-next .audit-empty")).toHaveLength(1);
+          await page.close();
+          return;
+        }
+        // Tab through every toggle: each takes focus in turn and shows a focus ring.
+        const focused = new Set<string>();
+        for (let i = 0; i < 200 && focused.size < rows; i++) {
+          await page.press("Tab");
+          const f = await page.evaluate(() => {
+            const el = document.activeElement;
+            if (!(el instanceof HTMLElement) || !el.classList.contains("audit-rt")) return null;
+            const st = getComputedStyle(el);
+            const ring =
+              (st.outlineStyle !== "none" && Number.parseFloat(st.outlineWidth) > 0) ||
+              st.boxShadow !== "none";
+            const list = el.closest(".audit-scroll")?.getBoundingClientRect();
+            const box = el.getBoundingClientRect();
+            return {
+              text: el.textContent ?? "",
+              ring,
+              inView: !!list && box.top >= list.top - 1 && box.bottom <= list.bottom + 1,
+            };
+          }, null);
+          if (f === null) continue;
+          expect(f.ring, f.text).toBe(true);
+          // Focus scrolls the list, never the page, so the focused row is always on screen.
+          expect(f.inView, f.text).toBe(true);
+          focused.add(f.text);
+        }
+        expect(focused.size).toBe(rows);
+        expect(await pageScrolls()).toBe(false);
+        if (n === 50) {
+          // The list scrolls inside its panel and reaches the final action.
+          const scroll = await page.evaluate(() => {
+            const el = document.querySelector(".audit-next .audit-scroll");
+            if (!el) return null;
+            const st = getComputedStyle(el);
+            return {
+              overflows: el.scrollHeight > el.clientHeight,
+              scrollable: st.overflowY === "auto" || st.overflowY === "scroll",
+              atEnd: el.scrollTop + el.clientHeight >= el.scrollHeight - 2,
+            };
+          }, null);
+          expect(scroll).toMatchObject({ overflows: true, scrollable: true, atEnd: true });
+          const end = await page.box(".audit-end");
+          const list = await page.box(".audit-next .audit-scroll");
+          expect(end.y + end.height).toBeLessThanOrEqual(list.y + list.height + 1);
+        }
+        // The full title of the last row is reachable by opening it.
+        const last = [...focused].pop() ?? "";
+        await page.evaluate(() => {
+          const all = document.querySelectorAll<HTMLElement>(".audit-rt");
+          all[all.length - 1]?.click();
+        }, null);
+        const full = await page.evaluate(
+          () => document.querySelector(".audit-fulltitle")?.textContent ?? "",
+          null,
+        );
+        expect(last.endsWith(full.trim().slice(-20))).toBe(true);
+        expect(full).toContain(LONG);
+        expect(await pageScrolls()).toBe(false);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,
