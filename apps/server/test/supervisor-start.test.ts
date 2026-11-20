@@ -83,6 +83,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
 import { loadProfiles, profileHash } from "../src/config/profiles.ts";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
+import type { Engine } from "../src/engine/engine.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
@@ -2200,7 +2201,8 @@ describe("reused worktrees", () => {
         bus,
         supervisor: sup,
         login: "me",
-        engine: null,
+        // the supervisor carries an open PR on only for a start the engine drives
+        engine: { status: () => ({ on: true }) } as unknown as Engine,
         rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [] }),
         fetchTicket: async () => TICKET,
         board: {
@@ -2237,7 +2239,7 @@ describe("reused worktrees", () => {
         { seatId: "flight-1", runId: "flight-run" },
         { seat: "guido-1", issue: 42, basis: "carry the open PR on" },
       );
-      expect(carriedOn.isError).toBeUndefined();
+      expect(carriedOn.isError ? carriedOn.text : undefined).toBeUndefined();
       const carriedRunId = store.seatSession("guido-1")?.runId;
       expect(store.run(carriedRunId ?? "")?.branch).toBe(BRANCH);
     } finally {
