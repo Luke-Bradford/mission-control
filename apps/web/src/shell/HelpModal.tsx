@@ -28,8 +28,8 @@ export function HelpModal() {
         <div className="pb helpb">
           <p>
             <kbd>g</kbd> then <kbd>o</kbd> Overview · <kbd>n</kbd> Needs you · <kbd>f</kbd> FLIGHT ·{" "}
-            <kbd>b</kbd> Board · <kbd>a</kbd> Agent · <kbd>m</kbd> Map · <kbd>c</kbd> Comms ·{" "}
-            <kbd>t</kbd> Telemetry · <kbd>d</kbd> Audit · <kbd>s</kbd> Setup
+            <kbd>b</kbd> Board · <kbd>a</kbd> Agent · <kbd>c</kbd> Comms · <kbd>t</kbd> Telemetry ·{" "}
+            <kbd>d</kbd> Audit · <kbd>s</kbd> Setup
           </p>
           <p>
             <kbd>f</kbd> show or hide FLIGHT · <kbd>j</kbd> <kbd>k</kbd> next or previous agent ·{" "}

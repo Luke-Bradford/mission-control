@@ -7,10 +7,6 @@ import { shortAge } from "./roster.ts";
 export const SILENT_AFTER_MS = STALL_MS;
 /** The context bar and ring turn amber from here: the point where the seat hands over. */
 export const CONTEXT_HANDOVER_PCT = 75;
-/** Figures turn amber past these. */
-export const ROUNDS_PER_PR_WARN = 2.1;
-export const SHARE_3_PLUS_ROUNDS_WARN_PCT = 30;
-export const BLOCKING_PER_REVIEW_WARN = 2.0;
 
 /** How long a working seat has been silent, or null when it is not (or is not working). */
 export function silentFor(

@@ -43,7 +43,6 @@ const PAGES = [
   "Board",
   "Agent",
   "Trace",
-  "Map",
   "Comms",
   "QA",
   "Telemetry",

@@ -16,13 +16,10 @@ import {
   FLOW_DAYS,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
-  type MapPayload,
-  type MapSnapshot,
   type PullRequestView,
   prListPath,
   TOPICS,
   type Topic,
-  unpackMap,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet, apiOperatorGet, openStream, type StreamSource } from "./api.ts";
@@ -32,30 +29,6 @@ export interface Resource<T> {
   data: T | undefined;
   error: Error | null;
   loading: boolean;
-}
-
-/** Preserve unchanged repository-analysis data across a refetch. */
-function shareMap(previous: MapSnapshot | undefined, next: MapSnapshot): MapSnapshot {
-  if (!previous || previous.repoId !== next.repoId) return next;
-  const out = { ...next };
-  for (const key of [
-    "tree",
-    "rules",
-    "imports",
-    "hist",
-    "seats",
-    "findings",
-    "conflicts",
-    "conflictsUnchecked",
-  ] as const) {
-    if (previous[key] === next[key] || JSON.stringify(previous[key]) === JSON.stringify(next[key]))
-      Object.assign(out, { [key]: previous[key] });
-  }
-  return Object.keys(out).every(
-    (key) => out[key as keyof MapSnapshot] === previous[key as keyof MapSnapshot],
-  )
-    ? previous
-    : out;
 }
 
 /**
@@ -200,28 +173,6 @@ export const RESOURCES = {
       (ticket === "" ? "" : `&ticket=${enc(ticket)}`),
     topic: "agents",
   }),
-  codeHealth: (repo: string, window = "30d", tab = "overview"): ResourceRef => ({
-    path: `/api/code-health?repo=${enc(repo)}&window=${enc(window)}&tab=${enc(tab)}`,
-    topic: ["agents", "boards", "flight", "health"],
-  }),
-  /** The Audit first screen: one stored summary, refetched only when the server says it changed. */
-  codeHealthOverview: (repo: string, window = "30d"): ResourceRef => ({
-    path: `/api/code-health/overview?repo=${enc(repo)}&window=${enc(window)}`,
-    topic: "health",
-  }),
-  codeHealthEvidence: (repo: string, id: string, cursor = "0"): ResourceRef => ({
-    path: `/api/code-health/evidence/${enc(id)}?repo=${enc(repo)}&cursor=${enc(cursor)}`,
-    topic: null,
-  }),
-  codeHealthHistory: (repo: string, cursor = "0"): ResourceRef => ({
-    path: `/api/code-health/recommendations?repo=${enc(repo)}&cursor=${enc(cursor)}`,
-    topic: ["agents", "flight"],
-  }),
-  /** Where each run's tokens went; read on opening and on Refresh, not on every crew event. */
-  tokenAudit: (days: number): ResourceRef => ({
-    path: `/api/audit/tokens?days=${days}`,
-    topic: null,
-  }),
   audit: (range: string): ResourceRef => ({
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
@@ -301,16 +252,12 @@ export const RESOURCES = {
     topic: null,
   }),
   escalations: { path: "/api/escalations", topic: "escalations" },
-  /** The branch builds the hub keeps to show; the server drops one when its PR closes. Read once per visit. */
-  designPreviews: { path: "/api/design-previews", topic: null },
   /** Who holds the full-suite lock and who waits; the server emits "guard" when that changes. */
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
   /** Guard blocks over the Quality tab's fixed window. */
   guardHitsFlow: { path: `/api/guard/hits?days=${FLOW_DAYS}`, topic: "guard" },
-  /** The QA board's flow figures (escaped defects) over the Quality tab's fixed window. */
-  qaFlow: { path: `/api/qa/flow?days=${FLOW_DAYS}`, topic: ["boards", "guard"] },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
   allAccountModels: { path: "/api/accounts/models", topic: "config" },
   accountModels: (id: string): ResourceRef => ({
@@ -325,7 +272,6 @@ export const RESOURCES = {
     path: `/api/boards/${enc(repoId)}/setup`,
     topic: null,
   }),
-  repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
   /** One repo's rules with where each value comes from (Setup › Roles & guards). */
   repoRules: (id: string): ResourceRef => ({
@@ -400,8 +346,6 @@ export const ACTIONS = {
     seatId === null
       ? `/api/flight/orders/${id}/revoke`
       : `/api/seats/${enc(seatId)}/instructions/${id}/revoke`,
-  codeHealthDecision: (repo: string, id: string) =>
-    `/api/code-health/recommendations/${enc(id)}?repo=${enc(repo)}`,
   /** Body `{ pr }`; starts a branch preview and returns its URL. */
   startPreview: "/api/previews",
   /** Body `{ base, profile }`; returns the refreshed template profiles. */
@@ -549,26 +493,12 @@ interface Entry {
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
 /** Only PR flow needs a protected JSON read. */
-const mapSnapshots = new Map<string, MapSnapshot>();
-const readResource = async <T>(path: string): Promise<T> => {
-  if (/^\/api\/repos\/[^/]+\/map$/.test(path)) {
-    const next = shareMap(
-      mapSnapshots.get(path),
-      unpackMap(await apiGet<MapPayload | MapSnapshot>(path)),
-    );
-    if (mapSnapshots.size >= 16 && !mapSnapshots.has(path))
-      mapSnapshots.delete(mapSnapshots.keys().next().value as string);
-    mapSnapshots.set(path, next);
-    return next as T;
-  }
-  return path === RESOURCES.prFlow.path ||
-    path === RESOURCES.dependencies.path ||
-    path === RESOURCES.designPreviews.path ||
-    /^\/api\/attention\/[^/]+\/materials$/.test(path) ||
-    path.startsWith("/api/code-health")
+const readResource = async <T>(path: string): Promise<T> =>
+  path === RESOURCES.prFlow.path ||
+  path === RESOURCES.dependencies.path ||
+  /^\/api\/attention\/[^/]+\/materials$/.test(path)
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);
-};
 
 class Hub {
   private readonly entries = new Map<string, Entry>();
@@ -576,22 +506,6 @@ class Hub {
   private generation = 0;
   /** Stamps each request as it starts, so answers can be told apart by age. */
   private seq = 0;
-
-  /** A new tree must not retain every older analysis graph for the lifetime of the HUD. */
-  private pruneGraphs(): void {
-    const unused = [...this.entries.values()].filter(
-      (e) =>
-        /^\/api\/repos\/[^/]+\/map\/graph\?key=/.test(e.path) &&
-        e.listeners.size === 0 &&
-        e.settledListeners.size === 0 &&
-        !e.inflight &&
-        !e.queued &&
-        !e.again &&
-        !e.fullAgain,
-    );
-    for (const entry of unused.slice(0, Math.max(0, unused.length - 16)))
-      this.entries.delete(entry.path);
-  }
 
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
@@ -608,7 +522,6 @@ class Hub {
         settledListeners: new Set(),
       };
       this.entries.set(path, e);
-      if (path.includes("/map/graph?key=")) this.pruneGraphs();
     }
     return e;
   }
@@ -641,14 +554,12 @@ class Hub {
     e.settledListeners.add(fn);
     return () => {
       e.settledListeners.delete(fn);
-      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
     };
   }
 
   private settle(e: Entry): void {
     e.settled++;
     for (const fn of [...e.settledListeners]) fn();
-    if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -660,7 +571,6 @@ class Hub {
     }
     return () => {
       e.listeners.delete(fn);
-      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
       if (e.listeners.size === 0) {
         clearTimeout(e.activityTimer);
         e.activityTimer = undefined;
@@ -869,7 +779,6 @@ class Hub {
    * unless `refetch` is false (a switch between Live and Demo: the new tree fetches for itself).
    */
   clear({ refetch = true }: { refetch?: boolean } = {}): void {
-    mapSnapshots.clear();
     this.generation++;
     for (const e of this.entries.values()) {
       e.inflight = false;

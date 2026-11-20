@@ -276,7 +276,9 @@ export function Telemetry() {
             </span>
           )}
           <span className="grow" />
-          {def.built && <Seg label="View" options={VIEWS} value={view} onChange={setView} />}
+          {def.built && tab !== "quality" && (
+            <Seg label="View" options={VIEWS} value={view} onChange={setView} />
+          )}
         </div>
         <HealthBand t={bandRes.data} onNeedsRoute={setRuns} />
         <div className="tabsrow">
@@ -319,7 +321,7 @@ export function Telemetry() {
                 <ThroughputCharts t={t} wait={scope.wait} now={now} dim={dim} />
               )
             ) : tab === "quality" ? (
-              <QualityPanels t={t} view={view} dim={dim} />
+              <QualityPanels t={t} dim={dim} />
             ) : (
               <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
             )
