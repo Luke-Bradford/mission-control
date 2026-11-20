@@ -353,6 +353,8 @@ export function telemetryView(): Telemetry {
       ],
       tickets: DEMO_TICKETS.map((t, i) => ({
         ticket: `${DEMO_REPO}#${t.n}`,
+        title: t.title,
+        size: (["XS", "S", "M", "L", "XL"] as const)[i % 5],
         readyAt: NOW - (30 + i * 3) * HOUR,
         startedAt: NOW - (28 + i * 3) * HOUR,
         mergedAt: t.stage === "merged" ? NOW - (i + 1) * HOUR : null,
