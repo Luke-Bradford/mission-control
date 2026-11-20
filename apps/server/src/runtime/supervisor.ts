@@ -2703,6 +2703,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           run.endedAt !== null ||
           heldRunIds.has(run.id) ||
           starting.has(run.agentId) ||
+          // a run set aside is off its seat by design; its hold is its own record
           run.loop?.hold?.worktree != null ||
           !abandonedStart
         )

@@ -711,6 +711,44 @@ describe("reattach after a restart", () => {
     );
   });
 
+  it("leaves a run set aside alone when the hub starts, though no seat row holds it", async () => {
+    const id = "aside:20261020T000000Z";
+    const run = {
+      id,
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running" as const,
+      sessionId: "11111111-2222-4333-8444-555555555555",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: crewTranscriptPath(dbPath, id),
+      prs: [],
+      summary: null,
+      loop: {
+        ...NEW_LOOP,
+        hold: {
+          kind: null,
+          reason: null,
+          ended: false,
+          worktree: join(root, "mc-crew", "guido-1-42"),
+          wake: false,
+        },
+      },
+    };
+    writeFileSync(run.transcriptPath, "{}\n");
+    store.upsertRun(run);
+    const { sup } = make();
+    sup.start();
+    await sup.stopAll();
+    expect(store.run(id)).toMatchObject({ status: "running", endedAt: null });
+  });
+
   it("leaves an observed loop's running row alone when the hub starts", async () => {
     const run = {
       id: "ta-loop:20261020T000000Z",
