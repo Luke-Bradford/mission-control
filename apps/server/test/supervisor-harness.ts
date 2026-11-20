@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type BoardItem,
@@ -233,8 +233,15 @@ let bus: ChangeBus;
 let recordFile: string;
 const sups: Supervisor[] = [];
 
+/** Keep the test helper runnable when another test temporarily narrows PATH. */
+const GIT =
+  (process.env.PATH ?? "")
+    .split(delimiter)
+    .map((entry) => join(entry, "git"))
+    .find((path) => existsSync(path)) ?? "git";
+
 const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", ["-c", "user.email=a@b", "-c", "user.name=n", ...args], {
+  execFileSync(GIT, ["-c", "user.email=a@b", "-c", "user.name=n", ...args], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
