@@ -412,52 +412,6 @@ describeRendered("Comms chart, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it.each([
-    { width: 1920, height: 940 },
-    { width: 2560, height: 1250 },
-  ])(
-    "fills a $width × $height window with and without a filter",
-    async ({ width, height }) => {
-      mkdirSync(SHOTS, { recursive: true });
-      for (const focus of ["", "?focus=seat:seat-2"]) {
-        const page = await renderAt({
-          page: "test/commsBrowser.html",
-          width,
-          height,
-          search: `?at=${encodeURIComponent(`/comms/chart${focus}`)}`,
-          api: crewApi(20),
-        });
-        await page.box(".comms-rails svg");
-        const m = await measure(page);
-        expect(m.nodes).toBe(22);
-        // The chart takes the window: wide, and as tall as the rows need up to the window.
-        expect(m.canvasW).toBeGreaterThan(m.viewW * (focus ? 0.55 : 0.85));
-        // Full names at 20 seats: none cut with an ellipsis.
-        expect(m.names.some((name) => name.text.endsWith("…"))).toBe(false);
-        expect(overlaps(m.names)).toBe(false);
-        const w = await waitMarkProblems(page);
-        expect([w.overlap, w.onHub, w.onSeat, w.onName, w.outside]).toEqual([0, 0, 0, 0, 0]);
-        // Rows grow with the window: the seats span most of the chart's height, not a third of it.
-        const spread = await page.evaluate(() => {
-          const ys = [...document.querySelectorAll(".comms-node:not(.hub)")].map(
-            (e) => e.getBoundingClientRect().top,
-          );
-          const scroll = document.querySelector(".comms-rails-scroll")?.getBoundingClientRect();
-          return { span: Math.max(...ys) - Math.min(...ys), height: scroll?.height ?? 0 };
-        }, null);
-        expect(spread.span).toBeGreaterThan(0.5 * spread.height);
-        expect(m.pane).toBe(focus !== "");
-        if (focus) {
-          expect(m.chip).toContain("SEAT-2");
-          expect((await page.reachable(".comms-chart-pane")).every(Boolean)).toBe(true);
-        }
-        await page.screenshot(join(SHOTS, `full-${width}-${focus ? "filtered" : "all"}.png`));
-        await page.close();
-      }
-    },
-    BROWSER_TEST_TIMEOUT_MS,
-  );
-
   it(
     "narrows to a seat and a link by click and clears by Escape",
     async () => {
@@ -465,7 +419,7 @@ describeRendered("Comms chart, rendered", () => {
         page: "test/commsBrowser.html",
         width: 1920,
         height: 940,
-        search: `?at=${encodeURIComponent("/comms/chart")}`,
+        search: `?at=${encodeURIComponent("/comms/crew")}`,
         api: crewApi(9),
       });
       await page.box(".comms-node");
@@ -497,12 +451,9 @@ describeRendered("Comms chart, rendered", () => {
   );
 
   it(
-    "does bounded work at 50 participants with messages arriving, in the panel and full screen",
+    "does bounded work at 50 participants with messages arriving, in the panel",
     async () => {
-      for (const [at, width, height] of [
-        ["/comms/crew", 1600, 1000],
-        ["/comms/chart", 1920, 940],
-      ] as const) {
+      for (const [at, width, height] of [["/comms/crew", 1600, 1000]] as const) {
         const api = crewApi(50);
         const links = api["/api/comms/links"].links;
         const page = await renderAt({
@@ -564,10 +515,7 @@ describeRendered("Comms chart, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it.each([
-    { at: "/comms", width: 1600, height: 1000 },
-    { at: "/comms/chart", width: 1920, height: 940 },
-  ])(
+  it.each([{ at: "/comms", width: 1600, height: 1000 }])(
     "renders Demo's chart at $at with readable wait marks",
     async ({ at, width, height }) => {
       const page = await renderAt({

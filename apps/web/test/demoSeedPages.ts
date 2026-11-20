@@ -9,20 +9,15 @@ import {
   type FlightPrFlowRow,
   type FlightPrFlowView,
   LIVE_MINUTES,
-  type MapSnapshot,
   type PipelineStage,
   TELEMETRY_POINTS,
   type Telemetry,
 } from "@mc/core";
 import { shiftTimes } from "../src/demo/shift.ts";
-import { codeHealthBrowserApi } from "./codeHealthBrowserFixtures.ts";
-import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { boardItem, HOUR, MIN, NOW, prView } from "./fixtures.ts";
 import { prFlowFixture } from "./prFlowFixture.ts";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 import { qaHistoryApi, qaHistorySavedReport } from "./qaHistoryFixture.ts";
-import { testHealthFixture } from "./testHealthFixtures.ts";
-import { tokenAuditFixture } from "./tokenAuditFixture.ts";
 
 export const DEMO_REPO = "shop-app";
 export const DEMO_REPOS = [DEMO_REPO, "site-builder"] as const;
@@ -597,15 +592,13 @@ function seatApi(): Record<string, unknown> {
         [
           `/api/agents/${id}/files`,
           {
-            files: mapFiles()
-              .slice(0, 3)
-              .map((f, i) => ({
-                path: f.path,
-                add: 12 + i * 5,
-                del: 2 + i,
-                state: i === 2 ? "uncommitted" : "committed",
-                commitSha: i === 2 ? null : "a".repeat(40),
-              })),
+            files: ["app", "api", "cart"].map((dir, i) => ({
+              path: `src/${dir}/module-1.ts`,
+              add: 12 + i * 5,
+              del: 2 + i,
+              state: i === 2 ? "uncommitted" : "committed",
+              commitSha: i === 2 ? null : "a".repeat(40),
+            })),
             note: null,
             sha: null,
           },
@@ -642,22 +635,6 @@ function setupApi(): Record<string, unknown> {
     },
     "/api/guard/hits?days=7": { hits: [], counts: {} },
     "/api/guard/hits?days=14": { hits: [], counts: { "git-write": 7, "full-suite": 3 } },
-    "/api/qa/flow?days=14": {
-      days: 14,
-      since: NOW - 14 * 24 * HOUR,
-      escapedDefects: [
-        {
-          repoId: DEMO_REPO,
-          issueNumber: 112,
-          prNumber: 104,
-          via: "file",
-          filedAt: NOW - 24 * HOUR,
-          mergedAt: NOW - 72 * HOUR,
-          seat: "dev-1",
-          model: null,
-        },
-      ],
-    },
     "/api/test-lock/history": { runs: [], today: { runs: 0, waitMs: 0 }, usualMs: {} },
     "/api/repos/profiles": [],
     "/api/update/log": {
@@ -684,6 +661,9 @@ function setupApi(): Record<string, unknown> {
 /** The QA queue: the open PRs, newest first. */
 export function qaQueue(tickets: readonly DemoTicket[]) {
   const sha = "a".repeat(40);
+  const acceptancePrs = new Set(
+    tickets.filter((ticket) => ticket.stage === "checks").map((ticket) => ticket.n + 1000),
+  );
   return {
     prs: openPrs(tickets).map((pr, i) => ({
       repoId: DEMO_REPO,
@@ -694,14 +674,14 @@ export function qaQueue(tickets: readonly DemoTicket[]) {
       ticket: pr.ticket,
       state: "open",
       isDraft: false,
-      review: i === 0 ? "approved" : "none",
-      ci: i === 0 ? "passing" : "pending",
+      review: acceptancePrs.has(pr.number) ? "approved" : "none",
+      ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
       createdAt: NOW - (i + 2) * HOUR,
       updatedAt: NOW - 5 * MIN,
       mergedAt: null,
       headSha: sha,
       mergeable: "MERGEABLE",
-      ...(i === 0 ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
+      ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
     })),
     flightId: "flight-1",
   };
@@ -808,17 +788,6 @@ function memoryApi(): Record<string, unknown> {
   };
 }
 
-/** The files each open PR changes, for the Map's PR focus. */
-function prFiles(tickets: readonly DemoTicket[]): Record<string, unknown> {
-  const tree = mapFiles();
-  return Object.fromEntries(
-    allPrs(tickets).map((pr, i) => [
-      `/api/repos/${DEMO_REPO}/prs/${pr.number}/files`,
-      { files: [0, 1, 2].map((k) => tree[(i * 5 + k * 7) % tree.length]?.path ?? "") },
-    ]),
-  );
-}
-
 function flightApi(): Record<string, unknown> {
   return {
     "/api/flight/orders?limit=1": { active: [], history: [], nextCursor: null },
@@ -844,84 +813,12 @@ function flightApi(): Record<string, unknown> {
   };
 }
 
-// ---- The Map ---------------------------------------------------------------------------------
-
-const MAP_DIRS = ["app", "api", "cart", "checkout", "orders", "search", "shared", "email"];
-
-export function mapFiles(count = 60): { path: string; lines: number }[] {
-  return Array.from({ length: count }, (_, i) => {
-    const dir = MAP_DIRS[i % MAP_DIRS.length] ?? "app";
-    return {
-      path: `src/${dir}/module-${Math.floor(i / MAP_DIRS.length) + 1}.ts`,
-      lines: 40 + ((i * 37) % 260),
-    };
-  });
-}
-
-export function mapSnapshot(
-  seatIds: readonly string[],
-  tickets: readonly DemoTicket[],
-): MapSnapshot {
-  const tree = mapFiles();
-  const mine = tickets.filter((t) => t.seat && seatIds.includes(t.seat));
-  return {
-    repoId: DEMO_REPO,
-    tree,
-    imports: tree.slice(1).map((f, i) => ({ from: f.path, to: tree[i % 8]?.path ?? f.path })),
-    hist: { since: NOW - 30 * 24 * HOUR, prCount: 0, fixCount: 0, files: {}, coupling: [] },
-    rules: { areas: { "area:app": ["src/**"] }, hardRules: [] },
-    seats: mine.map((t, i) => ({
-      seat: t.seat as string,
-      state: "running",
-      since: NOW - (10 + i) * MIN,
-      ticket: t.n,
-      title: t.title,
-      branches: [`feature/${t.n}-demo`],
-      area: ["src/**"],
-      changedOn: [`feature/${t.n}-demo`],
-      nowTicket: null,
-      tickets: { [`feature/${t.n}-demo`]: t.n },
-      calls: [],
-      scope: {
-        read: [tree[i * 3]?.path ?? "", tree[i * 3 + 1]?.path ?? ""],
-        modified: [{ file: tree[i * 3 + 2]?.path ?? "", add: 10 + i, rem: 2, source: "churn" }],
-      },
-      recent: [{ file: tree[i * 3]?.path ?? "", at: NOW - 5 * MIN }],
-      context: { total: 84_000, window: 400_000 },
-      badges: { questions: [], failures: [], review: null, tests: null, ci: null, waiting: null },
-    })),
-    findings: [],
-    conflicts: [],
-    conflictsUnchecked: [],
-    seq: 0,
-  };
-}
-
 /** Everything but the Overview's own answers; the keys are request paths. */
 export function demoPageAnswers(
   tickets: readonly DemoTicket[] = DEMO_TICKETS,
 ): Record<string, unknown> {
   const telemetry = telemetryView();
   const clock = Date.now();
-  const ownRepo = (text: string, repo = DEMO_REPO) =>
-    text
-      .replaceAll("repo=sample", `repo=${repo}`)
-      .replaceAll('"repoId":"sample"', `"repoId":"${repo}"`);
-  const base = {
-    ...codeHealthBrowserApi(NOW),
-    ...codeRiskFixture(NOW).api,
-    ...testHealthFixture(NOW).api,
-  };
-  const health = Object.fromEntries(
-    DEMO_REPOS.flatMap((repo) =>
-      Object.entries(base)
-        .filter(([path]) => path.startsWith("/api/code-health"))
-        .map(([path, value]) => [
-          ownRepo(path, repo),
-          JSON.parse(ownRepo(JSON.stringify(value), repo)),
-        ]),
-    ),
-  );
   // The history fixture is written for other repos; Demo's are its own.
   const history = JSON.parse(
     JSON.stringify(shiftTimes(qaHistoryApi(3), clock, NOW - clock))
@@ -945,14 +842,9 @@ export function demoPageAnswers(
     };
   }
   return {
-    ...health,
-    ...Object.fromEntries(
-      [1, 7, 30].map((days) => [`/api/audit/tokens?days=${days}`, tokenAuditFixture({ days })]),
-    ),
     ...history,
     ...memoryApi(),
     ...seatApi(),
-    ...prFiles(tickets),
     ...commsApi(),
     ...setupApi(),
     ...flightApi(),
@@ -965,6 +857,8 @@ export function demoPageAnswers(
     "/api/audit?range=7d": auditView(),
     "/api/audit?range=24h": auditView(),
     "/api/audit?range=30d": auditView(),
+    "/api/audit?range=90d": auditView(),
+    "/api/audit?range=365d": auditView(),
     ...Object.fromEntries(
       ["1h", "6h", "24h", "7d", "30d"].map((r) => [`/api/telemetry?range=${r}`, telemetry]),
     ),
@@ -974,10 +868,6 @@ export function demoPageAnswers(
     [`/api/repos/${DEMO_REPO}/prs`]: openPrs(tickets),
     [`/api/repos/${DEMO_REPO}/prs?shape=summary`]: openPrs(tickets),
     "/api/repos/site-builder/prs?shape=summary": [],
-    [`/api/repos/${DEMO_REPO}/map`]: mapSnapshot(
-      SEAT_IDS.filter((id) => id !== "flight-1"),
-      tickets,
-    ),
   };
 }
 

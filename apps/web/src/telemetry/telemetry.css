@@ -11,7 +11,8 @@
 #page-telemetry[data-tab="crew"],
 #page-telemetry[data-tab="cost"],
 #page-telemetry[data-tab="throughput"],
-#page-telemetry[data-tab="quality"] {
+#page-telemetry[data-tab="quality"],
+#page-telemetry[data-tab="machine"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: visible;
@@ -643,16 +644,6 @@
   white-space: nowrap;
 }
 
-.coming {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.coming-note .pb p {
-  margin: 0;
-}
-
 .runs-dialog .pb {
   display: grid;
   gap: var(--sp-2);
@@ -1111,4 +1102,28 @@
 .quota-row .vl {
   text-align: right;
   white-space: nowrap;
+}
+
+/* Machine: CPU over Memory used in the left column on one time axis, the other two beside them. */
+.tabpanel .grid[data-tab="machine"] {
+  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+/* the plots fill their panels; the legend stays below the measured plot */
+.tabpanel .grid[data-tab="machine"] > .panel > .pb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+
+.tabpanel .grid[data-tab="machine"] > .panel > .pb > .chart {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.machine-readout {
+  flex: none;
 }

@@ -61,9 +61,6 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
-const CommsChartPage = lazy(() =>
-  import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
-);
 const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
@@ -270,7 +267,6 @@ const PAGE_TITLES: Record<Route["page"], string> = {
   ticket: "Board",
   agent: "Agents",
   comms: "Comms",
-  commsChart: "Comms",
   telemetry: "Telemetry",
   qa: "QA",
   planner: "Planner",
@@ -377,9 +373,6 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "comms":
       page = <Comms item={r.item} view={r.view} />;
-      break;
-    case "commsChart":
-      page = <CommsChartPage />;
       break;
     case "telemetry":
       page = <Telemetry />;

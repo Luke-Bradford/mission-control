@@ -1454,7 +1454,14 @@ export type SessionEvent =
     }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
+  | {
+      kind: "exit";
+      code: number | null;
+      signal: string | null;
+      reason?: string;
+      /** The run did not end on its own (its keeper was lost, or a reattach could not confirm the CLI in time): the supervisor takes it back once instead of failing it. */
+      retake?: true;
+    }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
 

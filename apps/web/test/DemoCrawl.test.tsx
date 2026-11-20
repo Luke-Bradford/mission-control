@@ -34,7 +34,6 @@ const PAGE_ROUTES: Record<Route["page"], readonly string[]> = {
   ticket: ["/tickets/shop-app/102"],
   agent: ["/agent", "/agent/dev-1", "/agent/flight-1"],
   comms: ["/comms", "/comms/crew", "/comms/agents/dev-1"],
-  commsChart: ["/comms/chart"],
   qa: ["/qa", "/qa?view=history"],
   planner: ["/planner", "/planner?view=history"],
   telemetry: ["/telemetry"],

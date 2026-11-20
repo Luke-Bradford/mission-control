@@ -1623,9 +1623,6 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
-  ["GET", "/api/audit/tokens?days=7"],
-  ["GET", "/api/code-health?repo=shop-app"],
-  ["GET", "/api/code-health/overview?repo=shop-app"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -8918,47 +8915,6 @@ describe("QA board data", () => {
           closed: 8,
         },
       ],
-    });
-  });
-
-  it("keeps the removed code-health and token-audit routes answering empty until the web cut", async () => {
-    const overview = await get("/api/code-health/overview?repo=shop-app&window=7d");
-    expect(overview.statusCode).toBe(200);
-    expect(overview.json()).toMatchObject({
-      repoId: "shop-app",
-      window: "7d",
-      verdict: { tone: "unknown", figureIds: [] },
-      rows: [],
-      outside: { state: "not-collected" },
-    });
-    for (const tab of ["overview", "review", "risk", "test"]) {
-      const view = await get(`/api/code-health?repo=shop-app&tab=${tab}`);
-      expect(view.statusCode).toBe(200);
-      expect(view.json()).toMatchObject({ repoId: "shop-app", window: "30d", data: { tab } });
-    }
-    const tokens = await get("/api/audit/tokens?days=7");
-    expect(tokens.statusCode).toBe(200);
-    expect(tokens.json()).toMatchObject({ days: 7, runs: 0, calls: 0, byRole: [], topRuns: [] });
-    expect((await get("/api/audit/tokens?hours=3")).json()).toMatchObject({
-      hours: 3,
-      basis: "events",
-    });
-    for (const bad of [
-      "days=0",
-      "days=366",
-      "days=1.5",
-      "days=abc",
-      "days=1&days=2",
-      "hours=0",
-      "hours=25",
-      "hours=2.5",
-      "hours=x",
-      "hours=1&days=1",
-      "shape=full",
-    ])
-      expect((await get(`/api/audit/tokens?${bad}`)).statusCode, bad).toBe(400);
-    expect((await get("/api/audit/tokens?days=366")).json()).toEqual({
-      error: "days must be a whole number from 1 to 365",
     });
   });
 

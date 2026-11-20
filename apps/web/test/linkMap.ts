@@ -72,10 +72,7 @@ export const EVERYWHERE: LinkRule[] = [
   rule(/^Trace$/, /^\/agent\/[\w-]+\?trace=[\w-]+$/, "The run's trace on its seat's page."),
 ];
 
-export const LINK_MAP: Record<
-  Page | "ticket" | "commsChart",
-  { routes: string[]; rules: LinkRule[] }
-> = {
+export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRule[] }> = {
   overview: {
     routes: ["/"],
     rules: [
@@ -195,33 +192,10 @@ export const LINK_MAP: Record<
         /^\/comms\/agents\/[\w-]+\/contacts\/[\w-]+$/,
         "One of the agent's contacts: that conversation.",
       ),
-      rule(/^Open the chart full screen$/, /^\/comms\/chart$/, "The chart on its own."),
       rule(
         /^Your conversation with /,
         /^\/comms\/agents\/[\w-]+\/contacts\/CAPCOM$/,
         "A thread between two agents is read-only; the operator talks to the agent in their own conversation.",
-      ),
-    ],
-  },
-  commsChart: {
-    routes: ["/comms/chart"],
-    rules: [
-      rule(/^\d+ waiting for you$/, /^\/needs-you$/, "Needs you."),
-      rule(/^← Comms$/, /^\/comms$/, "Back to Comms."),
-      rule(
-        /Narrow the chart to this conversation$/,
-        /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
-        "A chart line narrows the chart to that pair and opens their thread.",
-      ),
-      rule(
-        /Narrow the chart to [\w#-]+$/,
-        /^\/comms(\/[\w-]+)*\?focus=seat%3A[\w-]+$/,
-        "A chart seat narrows the chart to that seat and opens its conversations.",
-      ),
-      rule(
-        / → /,
-        /^\/comms(\/[\w-]+)+\?focus=pair%3A[^&]+$/,
-        "A chart line opens that pair's thread.",
       ),
     ],
   },
@@ -234,7 +208,6 @@ export const LINK_MAP: Record<
       rule(/· PR #\d+ ·/, /^\/qa\?repo=[\w-]+&pr=\d+$/, "A queued PR opens its readiness report."),
       rule(/^Open preview$/, EXTERNAL, "The PR's running preview, in a new tab."),
       rule(/^Open PR #\d+ on GitHub$/, EXTERNAL, "GitHub, in a new tab."),
-      rule(/^Open code risk in Audit$/, /^\/audit\?tab=risk$/, "Code risk lives in Audit."),
       rule(
         /^Open native review for /,
         /^\/qa\?view=history&native=\d+&identity=\w+$/,
@@ -294,9 +267,11 @@ export const LINK_MAP: Record<
   audit: {
     routes: ["/audit"],
     rules: [
-      rule(/^Code risk in Audit$/, /^\/audit\?tab=risk$/, "Code risk tab."),
-      rule(/^Cost and flow context$/, /^\/telemetry$/, "Cost and flow."),
-      rule(/^PR readiness and tests in QA$/, /^\/qa$/, "PR readiness."),
+      rule(
+        /^(Long runner|Rework|Death loop|Guard refusal( spike)?|Spend outlier) · /,
+        /^\/agent\/[\w-]+(\?trace=[\w-]+)?$/,
+        "A finding opens the seat's run trace.",
+      ),
     ],
   },
   setup: {
@@ -342,11 +317,6 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/board/Card.tsx":
     "page: the ticket (card, title), Needs you item (You chip), seat (agent tag), trace",
   "src/browserNotifications.ts": "page: the notification's target",
-  "src/code-health/CodeHealth.tsx": "page: Audit, QA, Telemetry",
-  "src/code-health/CodeRisk.tsx": "page: Audit risk",
-  "src/code-health/TokenAudit.tsx": "page: seat, ticket",
-  "src/code-health/dialogs.tsx": "external: GitHub",
-  "src/comms/ChartPane.tsx": "page: the chart full screen",
   "src/comms/CommsGraph.tsx": "page: chart filter, Needs you",
   "src/comms/Conversation.tsx":
     "page: Comms views, the ticket, the operator's own thread with an agent",
@@ -374,12 +344,10 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/hud/PrChip.tsx": "external: GitHub; page: QA report",
   "src/hud/RepoRef.tsx": "page: ticket or QA",
   "src/instructions/Instructions.tsx": "page: seat queue",
-  "src/lenses/lenses.tsx": "page: PR map",
   "src/needs/LinksSection.tsx": "page: seat",
   "src/needs/Materials.tsx": "page: ticket; external: GitHub",
   "src/needs/NeedsControls.tsx": "page: next or previous item",
   "src/needs/NeedsList.tsx": "page: the item",
-  "src/needs/PreviewFrame.tsx": "external: the preview",
   "src/overview/ActivityPanel.tsx": "page: read path, seat run",
   "src/overview/AgentsPanel.tsx": "page: seat, FLIGHT, Setup",
   "src/overview/LockBox.tsx": "page: seat",
@@ -389,9 +357,8 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/pages/Agent.tsx": "page: Setup sessions",
   "src/pages/BoardPage.tsx": "page: lane boards, Setup repos",
   "src/pages/Comms.tsx": "page: Comms views, Needs you",
-  "src/pages/CommsChartPage.tsx": "page: back to Comms, chart filter",
   "src/pages/Flight.tsx": "page: legacy hash to Needs you",
-  "src/pages/LegacyAudit.tsx": "page: seat, trace, board",
+  "src/pages/Audit.tsx": "page: seat, trace, board",
   "src/pages/Needs.tsx": "page: first item",
   "src/pages/Planner.tsx": "page: the plan list; the Planner views",
   "src/pages/QaReadiness.tsx": "page: QA, Audit; external: preview",
