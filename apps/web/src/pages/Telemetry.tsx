@@ -22,11 +22,11 @@ import {
   useSearch,
 } from "../router.ts";
 import { useStore } from "../shell/store.ts";
-import { ComingTab } from "../telemetry/ComingTab.tsx";
 import { CostPanels, CostSummaryRow } from "../telemetry/CostTab.tsx";
 import { CrewPanels, CrewSummaryRow } from "../telemetry/CrewTab.tsx";
 import type { AgentInfo, Scope } from "../telemetry/common.ts";
 import { HealthBand } from "../telemetry/HealthBand.tsx";
+import { MachineCharts, MachineSummaryRow, MachineTable } from "../telemetry/MachineTab.tsx";
 import { QUALITY_RANGE, QualityPanels, QualitySummaryRow } from "../telemetry/QualityTab.tsx";
 import { RunsDialog } from "../telemetry/RunsDialog.tsx";
 import type { StatSpec } from "../telemetry/Stat.tsx";
@@ -193,6 +193,8 @@ export function Telemetry() {
   const setTab = (next: TelemetryTab) => navigate(telemetryPath(next, view));
   const setView = (next: TelemetryView) => navigate(telemetryPath(tab, next));
 
+  // The lock table reads the lock's own routes, so it shows whether or not telemetry has loaded.
+  const lockTable = tab === "machine" && view === "table";
   const stale = t !== undefined && res.error !== null;
   const disconnected = !connection.connected && connection.reconnecting;
   const age = updatedAt.current === null ? null : Date.now() - updatedAt.current;
@@ -276,7 +278,7 @@ export function Telemetry() {
             </span>
           )}
           <span className="grow" />
-          {def.built && tab !== "quality" && (
+          {tab !== "quality" && (
             <Seg label="View" options={VIEWS} value={view} onChange={setView} />
           )}
         </div>
@@ -297,6 +299,7 @@ export function Telemetry() {
           <CostSummaryRow t={t} scope={scope} onNeedsRoute={setRuns} refreshing={refetching} />
         )}
         {tab === "throughput" && <ThroughputSummaryRow t={t} onNeedsRoute={setRuns} />}
+        {tab === "machine" && <MachineSummaryRow t={t} onNeedsRoute={setRuns} />}
         <section
           id={TAB_PANEL_ID}
           className="tabpanel"
@@ -304,36 +307,28 @@ export function Telemetry() {
           aria-labelledby={tabId(tab)}
           aria-busy={refetching || (t === undefined && res.error === null)}
         >
-          {!def.built && res.error && !res.data && (
-            <p className="s crit-t">Could not load telemetry: {res.error.message}</p>
-          )}
-          {def.built ? (
-            state ? (
-              <div className="grid" data-state={state}>
-                <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
-              </div>
-            ) : tab === "cost" ? (
-              <CostPanels t={t} scope={scope} view={view} dim={dim} />
-            ) : tab === "throughput" ? (
-              view === "table" ? (
-                <ThroughputTable t={t} wait={scope.wait} dim={dim} />
-              ) : (
-                <ThroughputCharts t={t} wait={scope.wait} now={now} dim={dim} />
-              )
-            ) : tab === "quality" ? (
-              <QualityPanels t={t} dim={dim} />
+          {state && !lockTable ? (
+            <div className="grid" data-state={state}>
+              <StatePanel kind={state} range={range} fixed={def.fixed} onRetry={retry} />
+            </div>
+          ) : tab === "cost" ? (
+            <CostPanels t={t} scope={scope} view={view} dim={dim} />
+          ) : tab === "throughput" ? (
+            view === "table" ? (
+              <ThroughputTable t={t} wait={scope.wait} dim={dim} />
             ) : (
-              <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
+              <ThroughputCharts t={t} wait={scope.wait} now={now} dim={dim} />
+            )
+          ) : tab === "quality" ? (
+            <QualityPanels t={t} dim={dim} />
+          ) : tab === "machine" ? (
+            view === "table" ? (
+              <MachineTable scope={scope} dim={dim} />
+            ) : (
+              <MachineCharts t={t} scope={scope} dim={dim} />
             )
           ) : (
-            <ComingTab
-              tab={tab as Exclude<TelemetryTab, "crew" | "cost" | "throughput" | "quality">}
-              label={def.label}
-              t={t}
-              scope={scope}
-              live={scope.live}
-              filtered={agent !== "" || account !== "" || ticket !== ""}
-            />
+            <CrewPanels t={t} crew={crew} scope={scope} view={view} dim={dim} />
           )}
         </section>
         <RunsDialog stat={runs} onClose={() => setRuns(null)} />

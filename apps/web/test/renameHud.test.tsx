@@ -41,7 +41,7 @@ for (const display of ["lock box", "Telemetry lock row", "Decided without you"])
         : answer(...args),
     );
     if (display === "Telemetry lock row")
-      window.history.replaceState(null, "", "/telemetry?tab=machine");
+      window.history.replaceState(null, "", "/telemetry?tab=machine&view=table");
     const { container } = render(
       display === "lock box" ? (
         <LockBox />

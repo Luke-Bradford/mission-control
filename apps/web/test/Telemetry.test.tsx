@@ -328,12 +328,11 @@ describe("Telemetry refetch", () => {
 });
 
 describe("Telemetry toolbar", () => {
-  it("names the tab it shows and, on an unbuilt tab, says what is coming over the current panels", async () => {
+  it("names the tab it shows and builds its own panels, with no coming note", async () => {
     await loaded(undefined, undefined, undefined, "machine");
     expect(screen.getByRole("tab", { name: "Machine" }).getAttribute("aria-selected")).toBe("true");
-    screen.getByRole("heading", { level: 2, name: "Machine is coming" });
-    // the current panels stay under the note, so nothing disappears meanwhile
-    for (const id of ["machP", "tMach", "tLock"]) expect(panel(id)).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Machine is coming" })).toBeNull();
+    for (const id of ["tMach", "mMem", "mPressure", "mAgentMem"]) expect(panel(id)).toBeTruthy();
   });
 
   it("asks for 24h by default and the picked range on a switch", async () => {
@@ -987,23 +986,28 @@ describe("Capacity and cost", () => {
     );
   });
 
-  it("machine: CPU and Memory lines with the lock legend; omitted history and steps are not tracked", async () => {
+  it("machine: CPU and Memory used on split panels with the lock legend; the lock table is the Table view", async () => {
     const data = tel();
     await loaded(data, undefined, undefined, "machine");
-    const p = panel("tMach");
-    expect(p.querySelectorAll("path.line")).toHaveLength(2);
-    expect([...p.querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual([
-      "CPU",
-      "Memory",
-      "test lock held",
-    ]);
-    const svg = within(p).getByRole("img");
-    data.machine.forEach((sample, i) => {
-      fireEvent.keyDown(svg, { key: i === 0 ? "Home" : "ArrowRight" });
-      const percent = (value: number | null): string => (value === null ? "—" : `${value}%`);
-      expect(p.querySelector(".tip")?.textContent).toContain(`CPU${percent(sample.cpuPct)}`);
-      expect(p.querySelector(".tip")?.textContent).toContain(`Memory${percent(sample.memPct)}`);
-    });
+    const split = [
+      { id: "tMach", legend: ["CPU", "test lock held"], name: "CPU", key: "cpuPct" },
+      { id: "mMem", legend: ["Memory used", "test lock held"], name: "Memory used", key: "memPct" },
+    ] as const;
+    for (const { id, legend, name, key } of split) {
+      const p = panel(id);
+      expect(p.querySelectorAll("path.line"), id).toHaveLength(1);
+      expect([...p.querySelectorAll(".legend span")].map((s) => s.textContent)).toEqual(legend);
+      const svg = within(p).getByRole("img");
+      // a sample with no reading is not a stop on a one-series chart
+      data.machine
+        .filter((sample) => sample[key] !== null)
+        .forEach((sample, i) => {
+          fireEvent.keyDown(svg, { key: i === 0 ? "Home" : "ArrowRight" });
+          expect(p.querySelector(".tip")?.textContent).toContain(`${name}${sample[key]}%`);
+        });
+    }
+    cleanup();
+    await show("machine", "table");
     within(panel("tLock")).getByText(NOT_TRACKED);
   });
 
@@ -1183,8 +1187,9 @@ describe("Capacity and cost", () => {
       [RESOURCES.testLock.path]: lock,
       [RESOURCES.crew.path]: { rows: [seatRow({ id: "inco-1", hudState: "stalled" })] },
     });
-    open("machine");
+    open("machine", "table");
     render(<Telemetry />);
+    await waitFor(() => expect(document.getElementById("tLock")).not.toBeNull());
     const p = within(panel("tLock"));
     const row = (await p.findByText("no output")).closest("tr") as HTMLTableRowElement;
     expect([...row.querySelectorAll("td")].map((cell) => cell.textContent)).toEqual([
@@ -1277,7 +1282,7 @@ describe("empty and failing telemetry", () => {
     }
   });
 
-  it("a failed fetch says so, on Crew and Cost and tokens and on a tab not built yet", async () => {
+  it("a failed fetch says so, on Crew, Cost and tokens and Machine", async () => {
     stubFetch({ "/api/config": CFG });
     await show("crew");
     screen.getByText("Telemetry did not load.");
@@ -1287,7 +1292,7 @@ describe("empty and failing telemetry", () => {
     await screen.findByText("Telemetry did not load.");
     cleanup();
     await show("machine");
-    await screen.findByText(/^Could not load telemetry:/);
+    await screen.findByText("Telemetry did not load.");
   });
 });
 
@@ -1394,8 +1399,9 @@ describe("engine telemetry", () => {
               : null;
       return data ? new Response(JSON.stringify(data)) : answer(...args);
     });
-    open("machine");
-    const { container } = render(<Telemetry />);
+    open("machine", "table");
+    render(<Telemetry />);
+    await waitFor(() => expect(document.getElementById("tLock")).not.toBeNull());
     await within(panel("tLock")).findByText("freed with its run");
     expect([...panel("tLock").querySelectorAll("th")].map((x) => x.textContent)).toEqual([
       "Started",
@@ -1418,11 +1424,13 @@ describe("engine telemetry", () => {
     ]);
     expect(row.querySelector(".warn-t")).toBeTruthy();
     within(panel("tLock")).getByText(state === "stalled" ? "no output" : "running");
-    expect(kpi(container, "Lock wait")).toMatchObject({ value: "1:00", detail: "today · 1 run" });
-    expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(2);
-    // Lock holds shade the chart; their names stay in the tooltip so the 100% line has no text pile.
-    const chartText = [...panel("tMach").querySelectorAll("svg text")].map((t) => t.textContent);
-    expect(chartText.filter((t) => t?.includes("suite"))).toEqual([]);
+    // the summary row, shown on both views, carries the day's lock wait and runs
+    expect(document.querySelector('.summary [data-stat="lockwait"] .stat-value')?.textContent).toBe(
+      "1.0",
+    );
+    expect(document.querySelector('.summary [data-stat="runs"] .stat-value')?.textContent).toBe(
+      "1",
+    );
     const live = within(panel("tLock"))
       .getByText(state === "stalled" ? "no output" : "running")
       .closest("tr") as HTMLTableRowElement;
@@ -1431,6 +1439,13 @@ describe("engine telemetry", () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
     expect(live.querySelectorAll("td")[4]?.textContent).toBe("1:02");
+    // the same runs shade the load charts on the Charts view
+    fireEvent.click(screen.getByRole("button", { name: "Charts" }));
+    await waitFor(() => expect(document.getElementById("tMach")).not.toBeNull());
+    expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(2);
+    // Lock holds shade the chart; their names stay in the tooltip so the 100% line has no text pile.
+    const chartText = [...panel("tMach").querySelectorAll("svg text")].map((t) => t.textContent);
+    expect(chartText.filter((t) => t?.includes("suite"))).toEqual([]);
   });
 });
 
@@ -1770,5 +1785,148 @@ describe("Cost and tokens tab", () => {
     expect(document.body.querySelector("[data-ticket-title-tooltip]")?.textContent).toBe(
       "shop-app#3349 · Quote cache warmup",
     );
+  });
+});
+
+describe("Machine tab", () => {
+  const GIB = 2 ** 30;
+  const latest = {
+    at: NOW,
+    cpuPct: 41,
+    cores: 8,
+    memUsedBytes: 12 * GIB,
+    memTotalBytes: 16 * GIB,
+    memoryPressureFreePct: 62,
+    diskFreeBytes: 40 * GIB,
+    diskTotalBytes: 500 * GIB,
+    swapUsedBytes: 2 * GIB,
+    swapTotalBytes: 8 * GIB,
+    agents: null,
+  };
+  const view = { latest, warning: null, maxSeats: 4, seats: 1, perSessionMax: 2 };
+  const series = (over: Record<string, unknown> = {}) =>
+    [3, 2, 1].map((h, i) => ({
+      at: NOW - h * HOUR,
+      cpuPct: 20 + i * 10,
+      memPct: 40 + i * 10,
+      ...over,
+    }));
+  const tile = (id: string): HTMLElement =>
+    document.querySelector(`.summary [data-stat="${id}"]`) as HTMLElement;
+  const shown = (id: string): string => tile(id).querySelector(".stat-value")?.textContent ?? "";
+
+  async function machineTab(over: Partial<TelemetryData>, extra: Record<string, unknown> = {}) {
+    const data = tel(over);
+    stubFetch({
+      "/api/telemetry?range=24h": data,
+      "/api/config": CFG,
+      "/api/metrics": METRICS_VIEW,
+      "/api/machine": view,
+      ...extra,
+    });
+    await show("machine");
+    return data;
+  }
+
+  it("summary: memory free, CPU, swap, lock wait, lock holder and runs today, in that order", async () => {
+    await machineTab(
+      { machine: series() },
+      {
+        [RESOURCES.testLockHistory.path]: {
+          runs: [],
+          today: { runs: 3, waitMs: 150_000 },
+          usualMs: {},
+        },
+        [RESOURCES.testLock.path]: {
+          holder: { runId: "r1", seatId: "inco-1", command: "pnpm test", since: NOW - 60_000 },
+          waiting: [],
+        },
+      },
+    );
+    expect(screen.getByRole("region", { name: "Machine summary" })).toBeTruthy();
+    await waitFor(() => expect(shown("runs")).toBe("3"));
+    expect(
+      [...document.querySelectorAll(".summary .stat")].map((s) => s.getAttribute("data-stat")),
+    ).toEqual(["mem", "cpu", "swap", "lockwait", "lock", "runs"]);
+    expect(shown("mem")).toBe("62");
+    expect(shown("cpu")).toBe("41");
+    expect(shown("swap")).toBe("25");
+    expect(shown("lockwait")).toBe("2.5");
+    expect(shown("lock").toLowerCase()).toContain("inco-1");
+  });
+
+  it("swap, pressure and per-run memory the server does not send say so, never a flat zero", async () => {
+    await machineTab(
+      { machine: series() },
+      { "/api/machine": { ...view, latest: { ...latest, swapUsedBytes: null } } },
+    );
+    expect(shown("swap")).toBe("—");
+    expect(tile("swap").textContent).toContain("not collected yet");
+    for (const id of ["mPressure", "mAgentMem"]) {
+      expect(panel(id).querySelector("path.line"), id).toBeNull();
+      expect(panel(id).textContent).toContain("not collected yet");
+    }
+  });
+
+  it("plots pressure, swap and the stacked agent and test-run memory when they are sent", async () => {
+    await machineTab({
+      machine: series({ swapPct: 10, pressurePct: 30, agentGb: 6.5, testRunGb: 3 }),
+    });
+    expect(panel("mPressure").querySelectorAll("path.line")).toHaveLength(2);
+    const stack = panel("mAgentMem");
+    expect(stack.querySelectorAll("path.line")).toHaveLength(2);
+    expect(panel("mAgentMem").textContent).not.toContain("not collected yet");
+    fireEvent.keyDown(within(stack).getByRole("img"), { key: "Home" });
+    // each readout is the series' own value; only the drawn line is stacked
+    expect(stack.querySelector(".tip")?.textContent).toContain("Agents6.5 GB");
+    expect(stack.querySelector(".tip")?.textContent).toContain("Test runs3 GB");
+  });
+
+  it("CPU and memory used rise together on two panels that share one time axis", async () => {
+    const data = await machineTab({ machine: series() });
+    const cpu = panel("tMach");
+    const mem = panel("mMem");
+    for (const [p, name] of [
+      [cpu, "CPU"],
+      [mem, "Memory used"],
+    ] as const) {
+      const label = within(p).getByRole("img").getAttribute("aria-label") ?? "";
+      expect(label, name).toContain(`${name} latest`);
+    }
+    expect(within(mem).getByRole("img").getAttribute("aria-label")).toContain(
+      `latest ${data.machine.at(-1)?.memPct}%`,
+    );
+    // one set of time labels: the memory panel carries it, the CPU panel above it does not
+    expect(cpu.querySelector(".ct.now")).toBeNull();
+    expect(mem.querySelector(".ct.now")?.textContent).toBe("now");
+    // a crosshair on one is a crosshair on both
+    fireEvent.keyDown(within(cpu).getByRole("img"), { key: "Home" });
+    expect(mem.querySelector(".xhair")).not.toBeNull();
+  });
+
+  it("shades the full-suite runs on both CPU and memory used", async () => {
+    await machineTab(
+      { machine: series() },
+      {
+        [RESOURCES.testLockHistory.path]: {
+          runs: [
+            {
+              runId: "r1",
+              seatId: "inco-1",
+              command: "pnpm test",
+              queuedAt: NOW - 2 * HOUR - 60_000,
+              startedAt: NOW - 2 * HOUR,
+              endedAt: NOW - 2 * HOUR + 600_000,
+              outcome: "done",
+              ticket: null,
+            },
+          ],
+          today: { runs: 1, waitMs: 60_000 },
+          usualMs: {},
+        },
+      },
+    );
+    await waitFor(() => expect(panel("tMach").querySelectorAll("rect.band")).toHaveLength(1));
+    expect(panel("mMem").querySelectorAll("rect.band")).toHaveLength(1);
   });
 });
