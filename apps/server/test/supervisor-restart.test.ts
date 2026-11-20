@@ -2165,7 +2165,7 @@ describe("Codex restart", () => {
     await second.sup.stopAll();
     const spawns = recorded().filter((m) => m.type === "spawn").length;
     // the third hub is a new supervisor with no memory: its reattach fails the same way
-    const third = codexSupervisor();
+    const third = codexSupervisor(scenario);
     const seen: SupervisorEvent[] = [];
     third.sup.on((e) => seen.push(e));
     third.sup.start();
