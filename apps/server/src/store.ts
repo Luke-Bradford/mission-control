@@ -2058,8 +2058,10 @@ export class Store {
 
   /** Records a successful occurrence of a routine event watched by Audit. */
   recordSilenceEvent(kind: SilenceWatchedEventKind, at: number): void {
+    const before = auditEventLastSeen(this.db, kind);
     recordAuditEvent(this.db, kind, at);
-    if (auditEventLastSeen(this.db, kind) === at)
+    // Re-reporting the same observation must not move its quiet-time marker.
+    if (before !== at && auditEventLastSeen(this.db, kind) === at)
       this.setSetting(
         `silence-quiet-at-seen:${kind}`,
         JSON.stringify({

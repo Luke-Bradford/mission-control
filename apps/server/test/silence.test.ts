@@ -346,6 +346,19 @@ describe("the watched events' hooks", () => {
     expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBe(NOW + 7);
   });
 
+  it("keeps the quiet-time marker when the same observation is reported again", () => {
+    const quiet = { crewPaused: false, budgetStopped: false, noSeatRan: false };
+    store.recordSilenceEvent("screenshot-captured", NOW);
+    store.checkSilenceAlarms(NOW, quiet);
+    store.checkSilenceAlarms(NOW + HOUR, { ...quiet, crewPaused: true });
+    store.checkSilenceAlarms(NOW + 2 * HOUR, { ...quiet, crewPaused: true });
+    const key = "silence-quiet-at-seen:screenshot-captured";
+    const marker = store.getSetting(key);
+    expect(JSON.parse(marker ?? "null").quietTotal).toBe(0);
+    store.recordSilenceEvent("screenshot-captured", NOW);
+    expect(store.getSetting(key)).toBe(marker);
+  });
+
   it("records a completed review when its PR later merges", () => {
     store.upsertPullRequests("repo", [pr([])], NOW);
     raw(
