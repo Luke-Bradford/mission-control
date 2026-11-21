@@ -26,6 +26,7 @@ import {
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
   type CheckDrop,
+  COMMS_MC,
   COMMS_MESSAGE_MAX,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
@@ -5233,6 +5234,42 @@ describe("report_findings", () => {
       resolution: "fixed",
       resolvedReviewId: second,
     });
+  });
+
+  it("records a step-up for the build step when round 2 repeats a class of blocking finding", async () => {
+    store.upsertRun(run({ effort: "medium", model: "sonnet-5.5" }));
+    expect(await report(args({ findings: [finding({ category: "correctness" })] }))).toEqual({
+      text: expect.stringContaining(FINDINGS_RECORDED),
+    });
+    expect(store.modelAdvice("mc", 42, "build")).toBeNull();
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    reviewRun("retro:round-2", second);
+    await report(
+      args({ findings: [finding({ category: "correctness", file: "apps/b.ts" })] }),
+      { seatId: "retro", runId: "retro:round-2" },
+    );
+    expect(store.modelAdvice("mc", 42, "build")).toMatchObject({
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "high",
+      by: "step-up",
+      reason: expect.stringContaining("correctness"),
+    });
+    expect(store.loopEventsOfRun(RUN).map((e) => e.key)).toContain(`${RUN}:stepup:${second}`);
+    expect(store.comms(0).some((c) => c.from === COMMS_MC && c.text.includes("correctness"))).toBe(
+      true,
+    );
   });
 
   it("validates structured report fields and only accepts prior-round resolutions", async () => {

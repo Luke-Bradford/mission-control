@@ -25,6 +25,7 @@ import {
   type CheckState,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_MC,
   COMMS_CREW,
   COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
@@ -192,6 +193,8 @@ import {
   removeMissingText,
   removeNotFileText,
   reviewedEventText,
+  type ReviewFinding,
+  type ReviewRow,
   reviewFor,
   runawayRefusedText,
   SYNC_MAIN_GAP_MIN,
@@ -200,6 +203,7 @@ import {
   seatCallSign,
   seatDef,
   sectionOf,
+  stepUpAdvice,
   specialPathsText,
   unclosedMarkdown,
   VERDICTS,
@@ -2816,9 +2820,57 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       reviewedEventText(seatCallSign(ctx.seatId), review.sha, blocking, findings.length - blocking),
       at,
     );
+    recordStepUp(ctx, review, findings, at);
     bus.emit("agents");
     deps.onFindings?.(ctx.seatId, ctx.runId);
     return { text: `${FINDINGS_RECORDED}\nQA report: ${qaReport.permalink}` };
+  }
+
+  /**
+   * From round 2, a class of blocking finding that repeats the previous reported review of the same
+   * author run and epoch records build-step advice to raise effort or the model, tells the watch
+   * seat, and notes it on the ticket's loop; it is recorded once per review.
+   */
+  function recordStepUp(
+    ctx: McToolContext,
+    review: ReviewRow,
+    findings: readonly ReviewFinding[],
+    at: number,
+  ): void {
+    if (review.round < 2) return;
+    const previous = store
+      .reviewsOfRun(review.authorRunId)
+      .filter((r) => r.id < review.id && r.state === "reported" && r.epoch === review.epoch)
+      .at(-1);
+    const author = store.run(review.authorRunId);
+    const issue = author === null ? null : issueOf(author);
+    if (previous === undefined || author === null || issue === null) return;
+    const advice = stepUpAdvice({
+      round: review.round,
+      previous: store.findingsOf(previous.id),
+      current: findings,
+      model: author.model,
+      effort: author.effort ?? null,
+      at,
+    });
+    if (advice === null) return;
+    store.setModelAdvice(review.repoId, issue, advice);
+    store.addLoopEvent(
+      `${review.authorRunId}:stepup:${review.id}`,
+      review.authorRunId,
+      advice.reason,
+      at,
+    );
+    const place = seatPlace(config, ctx.seatId);
+    const watcher = place?.session.seats.find((x) => !x.retiring && seatDef(x).loop === "watch");
+    store.addComms({
+      at,
+      from: COMMS_MC,
+      senderKind: "hub",
+      to: watcher?.id ?? COMMS_CAPCOM,
+      ticket: author.ticket ?? null,
+      text: advice.reason,
+    });
   }
 
   /** The repo's plan sign-off setting, from its rules as the engine reads them. */
