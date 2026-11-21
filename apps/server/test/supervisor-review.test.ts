@@ -818,6 +818,13 @@ describe("startReview", () => {
     });
   });
 
+  it("a review run stores its loop kind, so the model table sees a reviewer's model", async () => {
+    const { runId } = await started();
+    expect(store.run(runId)?.loopKind).toBe("review");
+    const seatRuns = store.modelTableData(0, Date.now() + 86_400_000 * 365).seatRuns;
+    expect(seatRuns).toContainEqual(expect.objectContaining({ seatId: "retro", loop: "review" }));
+  });
+
   it("reviews a trusted controller PR without a crew author run", async () => {
     const seed = reviewOfPush();
     const identity = externalReviewKey("mc", 10);

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTrial } from "../src/cli/model-trial.ts";
 import { Store } from "../src/store.ts";
@@ -170,6 +171,27 @@ describe("model trial", () => {
       0.01,
     );
     expect(await runTrial(opts("review"))).toContain("Caught 0 of 2 blocking findings");
+  });
+
+  it("counts only completed replays and reports the skipped one and the shortfall", async () => {
+    // a newer eligible review whose commit is not in the clone
+    const w = new DatabaseSync(db);
+    w.prepare(
+      `INSERT INTO reviews (author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt, round, state, run_id, blocking, created_at, ended_at)
+       VALUES ('guido-1:1', 'mc', 'retro', 10, ?, 0, 1, 1, 'reported', 'retro:1', 1, ?, ?)`,
+    ).run("f".repeat(40), NOW + 5, NOW + 5);
+    w.prepare(
+      "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES ('mc', 10, ?, '{}')",
+    ).run(NOW);
+    w.close();
+    fakeClaude({ findings: [] }, 0.01);
+    const out = await runTrial(opts("review", { count: 2 }));
+    expect(out).toContain("over 1 completed reviews");
+    expect(out).toContain("1 completed, 2 eligible, 1 skipped");
+    expect(out).toContain("Shortfall: 1 completed of the 2 asked for");
+    const full = await runTrial(opts("review", { count: 1 }));
+    expect(full).toContain("1 completed, 2 eligible, 1 skipped");
+    expect(full).not.toContain("Shortfall");
   });
 
   it("wake trial counts false waits", async () => {

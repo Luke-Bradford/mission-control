@@ -4653,6 +4653,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         prs: [],
         summary: null,
         reviewId,
+        loopKind: def.loop,
         ...(advice === null ? {} : { advice }),
       };
       store.upsertRun(run);

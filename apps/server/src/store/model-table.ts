@@ -10,7 +10,6 @@ import {
 
 type Row = Record<string, SQLInputValue>;
 
-const STEP_UP: (typeof ADVICE_BYS)[number] = "step-up";
 const ticketNumber = (ticket: string): number | null => {
   const m = /#(\d+)$/.exec(ticket);
   return m?.[1] === undefined ? null : Number(m[1]);
@@ -93,8 +92,6 @@ export function modelTableData(db: DatabaseSync, since: number, until: number): 
       startedAt: r.started_at as number,
     }),
   );
-  const first = db
-    .prepare("SELECT MIN(at) AS at FROM model_advice WHERE by = ?")
-    .get(STEP_UP) as Row;
+  const first = db.prepare("SELECT MIN(at) AS at FROM model_step_ups").get() as Row;
   return { rows, seatRuns, stepUpSince: (first.at ?? null) as number | null };
 }

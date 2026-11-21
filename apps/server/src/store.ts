@@ -711,6 +711,10 @@ export class Store {
            effort = excluded.effort, reason = excluded.reason, by = excluded.by, at = excluded.at`,
       )
       .run(repoId, issue, a.step, a.model, a.effort, a.reason, a.by, a.at);
+    if (a.by === "step-up")
+      this.db
+        .prepare("INSERT INTO model_step_ups (repo_id, issue, at) VALUES (?, ?, ?)")
+        .run(repoId, issue, a.at);
   }
 
   modelAdvice(repoId: RepoId, issue: number, step: AdviceStep): ModelAdvice | null {

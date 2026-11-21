@@ -120,15 +120,20 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
        JOIN pr_history h ON h.repo_id = rv.repo_id AND h.number = rv.pr_number
        WHERE rv.repo_id = ? AND rv.round = 1 AND rv.state = 'reported' AND rv.blocking > 0
          AND instr(r.model, ?) > 0
-       ORDER BY COALESCE(rv.ended_at, rv.created_at) DESC, rv.id DESC LIMIT ?`,
+       ORDER BY COALESCE(rv.ended_at, rv.created_at) DESC, rv.id DESC`,
     )
-    .all(o.repo, o.baseline ?? "", o.count) as Row[];
+    .all(o.repo, o.baseline ?? "") as Row[];
   const role = readFileSync(new URL("../../../../roles/RETRO.md", import.meta.url), "utf8");
   const lines: string[] = [];
   let total = 0;
   let found = 0;
   let recordedAll = 0;
-  for (const r of rows) {
+  let completed = 0;
+  let skipped = 0;
+  let next = 0;
+  // Older eligible reviews stand in for one whose commit is not in the clone, until `count` complete.
+  for (; next < rows.length && completed < o.count; next += 1) {
+    const r = rows[next] as Row;
     const recorded = (
       db
         .prepare(
@@ -145,6 +150,7 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
       diff = (await exec("git", ["diff", base, sha], { cwd: o.clone, maxBuffer: 64 * 1024 * 1024 }))
         .stdout;
     } catch {
+      skipped += 1;
       lines.push(`- PR ${r.pr_number}: skipped, its commit is not in the clone.`);
       continue;
     }
@@ -158,14 +164,20 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
       }),
     );
     const hit = recorded.filter((f) => caught(f, trial));
+    completed += 1;
     found += hit.length;
     recordedAll += recorded.length;
     lines.push(
       `- PR ${r.pr_number}: caught ${hit.length} of ${recorded.length}; ${trial.length} findings; cost ${money(answer.cost)}`,
     );
   }
+  const shortfall =
+    completed < o.count
+      ? ` Shortfall: ${completed} completed of the ${o.count} asked for, as only ${rows.length} eligible reviews exist and ${skipped} were skipped.`
+      : "";
   return [
-    `Caught ${found} of ${recordedAll} blocking findings over ${rows.length} reviews.`,
+    `Caught ${found} of ${recordedAll} blocking findings over ${completed} completed reviews.`,
+    `Reviews: ${completed} completed, ${rows.length} eligible, ${skipped} skipped (commit not in the clone).${shortfall}`,
     `Cost ${money(total)} in total.`,
     "",
     ...lines,

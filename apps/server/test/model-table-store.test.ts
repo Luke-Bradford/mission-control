@@ -120,5 +120,16 @@ describe("modelTableData", () => {
       at: NOW - 3 * DAY,
     });
     expect(store.modelTableData(NOW - 30 * DAY, NOW).stepUpSince).toBe(NOW - 3 * DAY);
+    // a later planner recommendation replaces the stored advice but not when step-up began
+    store.setModelAdvice("mc", 1, {
+      step: "build",
+      model: "opus-5.5",
+      effort: "high",
+      reason: "planner",
+      by: "planner",
+      at: NOW - 1 * DAY,
+    });
+    expect(store.modelAdvice("mc", 1, "build")?.by).toBe("planner");
+    expect(store.modelTableData(NOW - 30 * DAY, NOW).stepUpSince).toBe(NOW - 3 * DAY);
   });
 });

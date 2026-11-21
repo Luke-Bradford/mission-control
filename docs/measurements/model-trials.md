@@ -23,6 +23,8 @@ The runner is `apps/server/src/cli/model-trial.ts`. Each result ends with an emp
 | `wake` | FLIGHT wakes that have a `wake_id` and at least one decision. Truth is "acted" when any decision of that wake is not `wait`. Reports agreement and false waits (the model said wait, FLIGHT acted). | Zero false waits. |
 | `summary` | The stored run summary beside the model's one-line version. The runner has only the stored summary, not the transcript, so this checks wording and cost, not whether a summary is accurate. | A person reads the lines and finds them as good. |
 
+A review whose commit is not in the clone is skipped and an older eligible one stands in, until `--count` reviews complete; the result states completed, eligible and skipped totals and any shortfall.
+
 Small samples prove little. Report the count with every result, and do not generalise from fewer than 20 items.
 
 ## Results

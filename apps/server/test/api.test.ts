@@ -548,6 +548,9 @@ describe("audit", () => {
       groups: { none: [], type: [], size: [], plan: [] },
       changes: [],
     });
+    for (const days of [7, 30, 90, 365]) {
+      expect((await get(`/api/audit/models?range=${days}d`)).statusCode).toBe(200);
+    }
     expect((await get("/api/audit/models?range=5d")).statusCode).toBe(400);
   });
 
