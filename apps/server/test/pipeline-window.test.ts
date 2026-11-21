@@ -221,4 +221,17 @@ describe("command line", () => {
     expect(b.status).toBe(1);
     expect(b.stdout.trim()).toBe(`Not read: ${junk} is not a hub database.`);
   });
+
+  it("does not read a partial SQLite schema", () => {
+    const partial = join(dir, "partial.db");
+    const db = new DatabaseSync(partial);
+    db.exec("CREATE TABLE ci_runs (id INTEGER PRIMARY KEY)");
+    db.close();
+
+    const r = cli("--db", partial, "--repo", REPO, "--from", "2026-11-16T00:00:00Z");
+
+    expect(r.status).toBe(1);
+    expect(r.stdout.trim()).toBe(`Not read: ${partial} is not a hub database.`);
+    expect(r.stderr).toBe("");
+  });
 });

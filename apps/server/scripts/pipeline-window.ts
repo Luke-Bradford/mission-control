@@ -55,6 +55,13 @@ export const CONTROLLER_ONLY_PATTERNS: readonly RegExp[] = [
 const USAGE =
   "Usage: pipeline-window.ts --db <copy of the hub DB> --repo <repo id> --from <ISO time> [--hours 24]";
 
+const HUB_SCHEMA_QUERIES = [
+  "SELECT repo_id, loop FROM runs LIMIT 0",
+  "SELECT repo_id, pr_number, sha, name, attempt, conclusion, url, at FROM ci_runs LIMIT 0",
+  "SELECT id, repo_id, pr_number, round, state, summary, ended_at FROM reviews LIMIT 0",
+  "SELECT review_id, severity, summary, scenario, fix, pos FROM review_findings LIMIT 0",
+] as const;
+
 /** The CI job's class by name; null for the `check` summary job, which is left out of every count. */
 export function ciFailureClass(job: string): CiFailureClass | null {
   const name = job.toLowerCase();
@@ -192,11 +199,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     if (!existsSync(dbPath)) throw new Error("missing");
     db = new DatabaseSync(dbPath, { readOnly: true });
-    db.prepare("SELECT 1 FROM ci_runs LIMIT 1").get();
+    for (const query of HUB_SCHEMA_QUERIES) db.prepare(query).get();
+    const report = pipelineWindow(db, { repoId, from, until: from + hours * 3_600_000 });
+    for (const line of formatPipelineReport(report)) console.log(line);
   } catch {
     console.log(`Not read: ${dbPath} is not a hub database.`);
     process.exit(1);
   }
-  const report = pipelineWindow(db, { repoId, from, until: from + hours * 3_600_000 });
-  for (const line of formatPipelineReport(report)) console.log(line);
 }
