@@ -5,15 +5,19 @@ import { flightState } from "../flight/state.ts";
 import type { Store } from "../store.ts";
 import { accountAtStop } from "./queue.ts";
 
-/** Ready work means an otherwise quiet crew should still be watched. */
-function readyWorkFitsIdleSeat(store: Store, config: CcConfig, at: number): boolean {
+/** The accounts of idle build seats that Ready work fits; empty when no Ready work waits. */
+function readyWorkIdleAccounts(store: Store, config: CcConfig, at: number): string[] {
   const state = flightState({ config, store, busy: [], now: at });
-  return state.seats.some(
-    (seat) =>
-      seat.loop === "build" &&
-      seat.free &&
-      (state.wake?.fit?.[seat.id]?.length ?? state.tickets.some((ticket) => ticket.ready)),
-  );
+  const seats = config.crew?.sessions.flatMap((s) => s.seats) ?? [];
+  return state.seats
+    .filter(
+      (seat) =>
+        seat.loop === "build" &&
+        seat.free &&
+        (state.wake?.fit?.[seat.id]?.length ?? state.tickets.some((ticket) => ticket.ready)),
+    )
+    .map((seat) => seats.find((s) => s.id === seat.id)?.accountId)
+    .filter((id): id is string => id !== undefined);
 }
 
 /** Local only: no GitHub write and no network fetch. */
@@ -37,14 +41,18 @@ export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): n
       budgetParked: hold?.kind === "budget",
     });
   }
-  const readyWork = readyWorkFitsIdleSeat(store, config, at);
+  const idleAccounts = readyWorkIdleAccounts(store, config, at);
+  // an idle seat whose account is at its stop cannot start the Ready work
+  const startable = idleAccounts.filter((id) => !accountAtStop(config, store, id, at));
+  const readyWork = startable.length > 0;
   store.checkSilenceAlarms(at, {
     crewPaused: readCrewPause(store) !== null,
     noSeatRan: working.length === 0 && !readyWork,
     readyWorkForIdleSeat: readyWork,
     // the budget stops the crew only when every working seat is parked on it or at its account's stop
     budgetStopped:
-      working.length > 0 &&
+      working.length + idleAccounts.length > 0 &&
+      startable.length === 0 &&
       working.every((w) => w.budgetParked || accountAtStop(config, store, w.accountId, at)),
   });
 }

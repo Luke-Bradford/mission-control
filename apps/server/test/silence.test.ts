@@ -192,6 +192,37 @@ describe("the silence timer's quiet periods", () => {
     silent();
     expect(alarms()).toEqual([]);
   });
+  const atStop = (accountId: string) =>
+    store.addUsage({
+      accountId,
+      window: "5h",
+      at: NOW,
+      pct: 99,
+      resetAt: NOW + HOUR,
+      source: "t",
+    });
+  it("raises none when Ready work waits but every idle seat's account is at its stop", () => {
+    store.replaceBoard("repo", [card({ issueNumber: 8, itemId: "I8", labels: ["area:y"] })]);
+    atStop("a1");
+    atStop("a2");
+    silent();
+    expect(alarms()).toEqual([]);
+  });
+  it("still raises an alarm when Ready work fits an idle seat whose account is under its stop", () => {
+    store.replaceBoard("repo", [card({ issueNumber: 8, itemId: "I8", labels: ["area:y"] })]);
+    atStop("a1");
+    silent();
+    expect(alarms()).toHaveLength(1);
+  });
+  it("closes an open alarm when the event resumes during a quiet period", () => {
+    seat(run({}));
+    silent();
+    expect(alarms()).toHaveLength(1);
+    store.recordSilenceEvent("screenshot-captured", NOW + 1);
+    writeCrewPause(store, { seats: [], reason: "pause", at: NOW, by: "operator" }, NOW);
+    runSilenceCheck({ store, config, now: () => NOW + 2 });
+    expect(alarms()).toEqual([]);
+  });
   it("raises an alarm when one seat is budget-parked and another still works", () => {
     seat(parked("r1", "guido-1"));
     seat(run({ id: "r2", agentId: "inco-1" }));
