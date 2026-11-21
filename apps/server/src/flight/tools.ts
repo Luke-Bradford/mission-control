@@ -4816,6 +4816,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // a ruling still pending leaves no decision row: it is a read
       const rowsBefore = store.flightDecisions(0, 1)[0]?.id ?? 0;
       const result = await tool.call(ctx, args);
+      if (result.isError !== true) store.recordSilenceEvent("flight-tool-succeeded", now());
       if (!write) return result;
       const rowAdded = (store.flightDecisions(0, 1)[0]?.id ?? 0) !== rowsBefore;
       const landed =

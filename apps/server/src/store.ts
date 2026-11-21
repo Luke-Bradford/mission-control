@@ -110,6 +110,8 @@ import {
   reviewTimings,
   reworkRatios,
   type SeatSessionRow,
+  SILENCE_WATCHED_EVENTS,
+  type SilenceWatchedEventKind,
   type StoredFinding,
   type Telemetry,
   type TestLockRun,
@@ -124,7 +126,13 @@ import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
-import { auditItems, recordAuditItem } from "./store/audit.ts";
+import {
+  auditEventLastSeen,
+  auditItems,
+  recordAuditEvent,
+  recordAuditItem,
+  recordSilenceAlarm,
+} from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { flightQueries } from "./store/flight.ts";
 import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
@@ -194,6 +202,8 @@ const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 type Row = Record<string, SQLInputValue>;
 
 const DAY_MS = 86_400_000;
+const SILENCE_CLOCK = "silence";
+const SILENCE_SEAT_START_CLOCK = "silence-seat-start";
 
 /** The median of the values, or null when there are none. */
 function median(values: number[]): number | null {
@@ -1676,6 +1686,9 @@ export class Store {
          url = excluded.url, at = excluded.at`,
     );
     for (const p of prs) {
+      const old = this.db
+        .prepare("SELECT state FROM pull_requests WHERE repo_id = ? AND number = ?")
+        .get(repoId, p.number) as Row | undefined;
       if (p.headSha)
         for (const c of p.checks ?? [])
           addCiRun.run(
@@ -1696,6 +1709,9 @@ export class Store {
             readAt,
             readAt,
           );
+      for (const check of p.checks ?? [])
+        if (check.completedAt != null)
+          this.recordSilenceEvent("ci-result-observed", check.completedAt);
       const runs = this.db
         .prepare(
           `SELECT id FROM runs INDEXED BY runs_loop_pr_number
@@ -1749,6 +1765,16 @@ export class Store {
         p.base ?? null,
         p.isCrossRepository == null ? null : p.isCrossRepository ? 1 : 0,
       );
+      if (
+        p.state === "merged" &&
+        old?.state !== "merged" &&
+        this.db
+          .prepare(
+            "SELECT 1 FROM reviews WHERE repo_id = ? AND pr_number = ? AND verdict IS NOT NULL",
+          )
+          .get(repoId, p.number) !== undefined
+      )
+        this.recordSilenceEvent("merged-pr-review-recorded", p.mergedAt ?? readAt);
       if (p.mergedAt !== null) {
         const { files: _files, ...record } = p;
         addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(record));
@@ -2028,6 +2054,107 @@ export class Store {
     at: number;
   }): void {
     recordAuditItem(this.db, i);
+  }
+
+  /** Records a successful occurrence of a routine event watched by Audit. */
+  recordSilenceEvent(kind: SilenceWatchedEventKind, at: number): void {
+    const before = auditEventLastSeen(this.db, kind);
+    recordAuditEvent(this.db, kind, at);
+    // Re-reporting the same observation must not move its quiet-time marker.
+    if (before !== at && auditEventLastSeen(this.db, kind) === at)
+      this.setSetting(
+        `silence-quiet-at-seen:${kind}`,
+        JSON.stringify({
+          lastSeenAt: at,
+          quietTotal: this.silenceQuietTotal(this.silenceClock(kind)),
+        }),
+      );
+  }
+
+  /** When a watched event last succeeded, or null if it never has. */
+  silenceEventLastSeen(kind: SilenceWatchedEventKind): number | null {
+    return auditEventLastSeen(this.db, kind);
+  }
+
+  /**
+   * Opens alarms for routine events that stopped, and clears resumed ones. A quiet period (the crew
+   * paused, stopped on its budget, or no seat working a ticket) leaves every alarm as it was.
+   */
+  checkSilenceAlarms(
+    at: number,
+    quiet: {
+      crewPaused: boolean;
+      budgetStopped: boolean;
+      noSeatRan: boolean;
+      readyWorkForIdleSeat?: boolean;
+    },
+  ): void {
+    const active = !(quiet.crewPaused || quiet.budgetStopped || quiet.noSeatRan);
+    const quietTotal = this.advanceSilenceQuietTime(SILENCE_CLOCK, at, !active);
+    const seatStartQuietTotal = this.advanceSilenceQuietTime(
+      SILENCE_SEAT_START_CLOCK,
+      at,
+      !active || quiet.readyWorkForIdleSeat !== true,
+    );
+    for (const event of SILENCE_WATCHED_EVENTS) {
+      const lastSeenAt = auditEventLastSeen(this.db, event.kind);
+      if (lastSeenAt === null) continue;
+      const total = event.kind === "seat-run-started" ? seatStartQuietTotal : quietTotal;
+      const quietAtSeen = this.silenceQuietAtSeen(event.kind, lastSeenAt, total);
+      const silent = at - lastSeenAt - (total - quietAtSeen) > event.gapMs;
+      // Opening needs a live crew (and, for seat starts, Ready work an idle seat could take); a resumed event always clears its own alarm.
+      const canOpen =
+        active && (event.kind !== "seat-run-started" || quiet.readyWorkForIdleSeat === true);
+      if (silent && !canOpen) continue;
+      const detail = silent
+        ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
+        : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
+      if (silent) recordSilenceAlarm(this.db, event.kind, "open", detail, at);
+      else recordSilenceAlarm(this.db, event.kind, "done", detail, at);
+    }
+  }
+
+  /** The clock that excludes quiet intervals for a watched event. */
+  private silenceClock(kind: SilenceWatchedEventKind): string {
+    return kind === "seat-run-started" ? SILENCE_SEAT_START_CLOCK : SILENCE_CLOCK;
+  }
+
+  /** Advances a quiet-time total, assigning each interval to the preceding tick's state. */
+  private advanceSilenceQuietTime(clock: string, at: number, quiet: boolean): number {
+    const lastTick = Number(this.getSetting(`${clock}-last-tick`));
+    const lastQuiet = this.getSetting(`${clock}-last-quiet`) === "true";
+    let total = this.silenceQuietTotal(clock);
+    if (Number.isFinite(lastTick) && lastQuiet && at > lastTick) total += at - lastTick;
+    this.setSetting(`${clock}-last-tick`, String(at));
+    this.setSetting(`${clock}-last-quiet`, String(quiet));
+    this.setSetting(`${clock}-quiet-total`, String(total));
+    return total;
+  }
+
+  private silenceQuietTotal(clock: string): number {
+    const total = Number(this.getSetting(`${clock}-quiet-total`));
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  /** The quiet-time total in force when the event's current observation was made. */
+  private silenceQuietAtSeen(
+    kind: SilenceWatchedEventKind,
+    lastSeenAt: number,
+    total: number,
+  ): number {
+    const key = `silence-quiet-at-seen:${kind}`;
+    try {
+      const seen = JSON.parse(this.getSetting(key) ?? "null") as {
+        lastSeenAt?: unknown;
+        quietTotal?: unknown;
+      } | null;
+      if (seen?.lastSeenAt === lastSeenAt && typeof seen.quietTotal === "number")
+        return seen.quietTotal;
+    } catch {
+      // A damaged cursor should start measuring from this check, not stop Audit.
+    }
+    this.setSetting(key, JSON.stringify({ lastSeenAt, quietTotal: total }));
+    return total;
   }
 
   /** Items recorded in range, newest first. */
@@ -3691,6 +3818,12 @@ export class Store {
       const author = row.author_run_id as string;
       const repoId = row.repo_id as string;
       const prNumber = row.pr_number as number;
+      const merged =
+        (
+          this.db
+            .prepare("SELECT state FROM pull_requests WHERE repo_id = ? AND number = ?")
+            .get(repoId, prNumber) as Row | undefined
+        )?.state === "merged";
       // late: a later round's finding on a file the author did not touch since the last review
       const changed =
         (row.round as number) >= 2 && row.changed_since !== null
@@ -3804,6 +3937,7 @@ export class Store {
         findings: r.findings,
       });
       this.clearNoReportNotes(runId, r.at);
+      if (merged) this.recordSilenceEvent("merged-pr-review-recorded", r.at);
       if (r.qaReport && !this.putQaReport(r.qaReport))
         throw new Error("QA report snapshot already exists");
       recorded = true;

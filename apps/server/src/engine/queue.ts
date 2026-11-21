@@ -618,6 +618,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   }
   try {
     await supervisor.startRun(seatId, issue, { loop: NEW_LOOP });
+    store.recordSilenceEvent("seat-run-started", deps.now());
     store.dropQueued(seatId, repoId, issue);
     deps.transientTakes.delete(seatId);
     const stuckKey = `${TAKE_STUCK_KEY_PREFIX}${seatId}`;
