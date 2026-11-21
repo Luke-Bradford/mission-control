@@ -211,11 +211,11 @@ it("opens the first row, toggles rows, and filters by decider", async () => {
   expect(buttons()[1]?.getAttribute("aria-expanded")).toBe("true");
 
   fireEvent.click(
-    within(screen.getByRole("group", { name: "Decider" })).getByRole("button", { name: "You" }),
+    within(screen.getByRole("group", { name: "Decider" })).getByRole("button", { name: "FLIGHT" }),
   );
-  const you = document.querySelectorAll("tr.rec");
-  expect(you.length).toBeGreaterThan(0);
-  for (const r of you) expect(r.querySelector(".dec b")?.textContent).toBe("You");
+  const flight = document.querySelectorAll("tr.rec");
+  expect(flight.length).toBeGreaterThan(0);
+  for (const r of flight) expect(r.querySelector(".dec b")?.textContent).toBe("FLIGHT");
 });
 
 it("links each row's detail to the seat and run, in words rather than raw ids", async () => {
@@ -405,6 +405,50 @@ it("counts every merge in the chart and says what it covers", async () => {
   ).toBeTruthy();
   expect(screen.getByText("Merged PRs").nextSibling?.textContent).toBe("120");
   expect(screen.getByText(/120 in 30 days, all counted/)).toBeTruthy();
+});
+
+it("keeps the range-start date and the next date as separate bars", async () => {
+  hub.clear();
+  const start = Math.floor((NOW - 30 * 24 * HOUR) / (24 * HOUR)) * 24 * HOUR;
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/waste": WASTE,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      mergedPerDay: [
+        { day: start, merged: 4, noReview: 4, round1: 0, round2: 0, round3: 0 },
+        { day: start + 24 * HOUR, merged: 6, noReview: 6, round1: 0, round2: 0, round3: 0 },
+      ],
+    } satisfies AuditView,
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "How we build" });
+  // 31 UTC dates, one bar each: 4 and 6 are not folded into one bar of 10.
+  expect(
+    screen.getByRole("img", { name: /one bar per day, 10 in all, most 6 in one bar/ }),
+  ).toBeTruthy();
+  expect(screen.getByText(/^28 Sep/)).toBeTruthy();
+});
+
+it("shows a past change's own comparison window, partial near the range edge", async () => {
+  hub.clear();
+  const first = AUDIT.changes[0];
+  const second = AUDIT.changes[1];
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/waste": WASTE,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      changes: [
+        { ...first, windowMs: 3 * 24 * HOUR },
+        { ...second, windowMs: 7 * 24 * HOUR },
+      ],
+    } satisfies AuditView,
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "What past recommendations achieved" });
+  expect(screen.getByText("3 days each side, partial: the range ends there")).toBeTruthy();
+  expect(screen.getByText("7 days each side")).toBeTruthy();
 });
 
 it("does not call a failed waste read zero alarms", async () => {

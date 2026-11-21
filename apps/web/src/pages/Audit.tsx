@@ -27,7 +27,8 @@ const FILTER_OPTIONS = DECIDER_FILTERS.map((value) => ({
 }));
 
 const DAY_MS = 86_400_000;
-const CHART_BARS = 30;
+/** Enough bars for a 30-day range's 31 UTC dates to keep one bar each. */
+const CHART_BARS = 31;
 
 /** `actionable` is supplied by newer Audit responses; old servers omit it. */
 type AuditData = Omit<AuditView, "longRunners"> & {
@@ -389,19 +390,20 @@ function mergedBuckets(audit: AuditData): {
   }[];
   days: number;
 } {
-  const days = Math.max(1, Math.ceil((audit.range.until - audit.range.since) / DAY_MS));
+  // Whole UTC dates from the one the range starts on to the one it ends on: a range that starts
+  // mid-day has partial first and last dates, and each keeps its own bar.
+  const first = dayStart(audit.range.since);
+  const days = Math.max(1, Math.round((dayStart(audit.range.until) - first) / DAY_MS) + 1);
   const size = Math.ceil(days / CHART_BARS);
-  const end = dayStart(audit.range.until);
   const bars = Math.ceil(days / size);
   const buckets = Array.from({ length: bars }, (_, i) => ({
-    start: end - (bars - 1 - i) * size * DAY_MS,
+    start: first + i * size * DAY_MS,
     merged: 0,
     noReview: 0,
     round1: 0,
     round2: 0,
     round3: 0,
   }));
-  const first = buckets[0]?.start ?? 0;
   for (const d of audit.mergedPerDay ?? []) {
     const bar =
       buckets[Math.max(0, Math.min(bars - 1, Math.floor((d.day - first) / (size * DAY_MS))))];
@@ -504,7 +506,7 @@ function HowWeBuild({
       title="How we build"
       sub={
         served
-          ? `merged PRs, one bar per ${bucketDays === 1 ? "day" : `${bucketDays} days`} · ${merged} in ${audit.range.until - audit.range.since >= DAY_MS ? Math.round((audit.range.until - audit.range.since) / DAY_MS) : 1} days, all counted`
+          ? `merged PRs, first and last dates partial, one bar per ${bucketDays === 1 ? "day" : `${bucketDays} days`} · ${merged} in ${audit.range.until - audit.range.since >= DAY_MS ? Math.round((audit.range.until - audit.range.since) / DAY_MS) : 1} days, all counted`
           : "merged PRs per day are not served by this hub"
       }
       className="audit-health"
@@ -617,6 +619,17 @@ function WhereFindingsLand({ audit }: { audit: AuditData }) {
   );
 }
 
+const CHANGE_WINDOW_MS = 7 * DAY_MS;
+
+/** A comparison window in words; shorter than a week means the range edge cut it. */
+function windowText(ms: number): string {
+  const hours = Math.max(1, Math.round(ms / (DAY_MS / 24)));
+  const span = hours >= 48 ? `${Math.round(hours / 24)} days` : `${hours} hours`;
+  return ms < CHANGE_WINDOW_MS
+    ? `${span} each side, partial: the range ends there`
+    : `${span} each side`;
+}
+
 function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange }) {
   const pct = (r: number | null) => percent(r == null ? null : r * 100);
   return (
@@ -632,7 +645,8 @@ function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange })
         {changes.length > 0 && (
           <>
             <h3 className="audit-sub">
-              Prompt and model changes in the last {range}: a week before and after. These are not
+              Prompt and model changes in the last {range}: the window before and after each is on
+              its row, up to a week, and shorter where the range edge cuts it. These are not
               recommendation results and do not show what caused a change.
             </h3>
             <table className="audit-table">
@@ -645,7 +659,8 @@ function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange })
                       {x.to} · {x.agentId}
                     </td>
                     <td className="sub">
-                      merged {x.before.merged} → {x.after.merged} · review fail{" "}
+                      <span className="audit-window">{windowText(x.windowMs)}</span> · merged{" "}
+                      {x.before.merged} → {x.after.merged} · review fail{" "}
                       {pct(x.before.reviewFailRate)} → {pct(x.after.reviewFailRate)} · median cost{" "}
                       {cost(x.before.medianCostPerMergedTicket)} →{" "}
                       {cost(x.after.medianCostPerMergedTicket)} · rework {x.before.reworkRounds} →{" "}

@@ -75,8 +75,9 @@ describe("auditActions", () => {
       measure: { now: 1, target: 1 },
     });
     expect(rows.filter((r) => r.id === "waste:retry-loop:failed")).toHaveLength(1);
-    const gitEnv = rows.find((r) => r.id === "guards:refusal:git-env");
-    expect(gitEnv).toMatchObject({ decider: "You", measure: { now: 8, target: 0 } });
+    // Ordinary guard refusals are the guard working: no row, and no invented zero target.
+    expect(rows.some((r) => r.id.startsWith("guards:refusal:"))).toBe(false);
+    expect(rows.some((r) => /guard keeps refusing/.test(r.title))).toBe(false);
     expect(rows.find((r) => r.id === "runs:long")?.measure.now).toBe(3);
     expect(rows.find((r) => r.id === "messages:unanswered")?.measure.now).toBe(2);
     for (const r of rows) {

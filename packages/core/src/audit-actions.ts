@@ -12,7 +12,6 @@ import {
   type AuditImprovementKind,
   type AuditView,
 } from "./audit.ts";
-import { GUARD_RULES } from "./guard.ts";
 import { WASTE_CHECKS, WASTE_THRESHOLDS, type WasteAlarm, type WasteCheck } from "./waste.ts";
 
 /** Who decides what to do about a row: FLIGHT, or the operator ("You"). */
@@ -87,10 +86,6 @@ export const plainIds = (text: string): string =>
       return `${seat} run of ${Number(d)} ${MONTHS[Number(mo) - 1] ?? mo} ${h}:${mi} UTC`;
     })
     .replace(/@([0-9a-f]{7,40})\b/g, (_m, sha: string) => ` at commit ${sha.slice(0, 7)}`);
-
-/** A guard rule as the Guard drawer words it; a rule no longer listed shows as stored. */
-const ruleText = (rule: string): string =>
-  Object.hasOwn(GUARD_RULES, rule) ? GUARD_RULES[rule as keyof typeof GUARD_RULES] : rule;
 
 /** The change each waste check asks for. */
 /** The limit each waste check raises its alarm at, in words, from WASTE_THRESHOLDS. */
@@ -510,44 +505,8 @@ export function auditActions(
     });
   }
 
-  // Guard refusals: one row per rule, so "git-env" and "full-suite" are two causes.
-  const byRule = new Map<
-    string,
-    { count: number; seats: Map<string, number>; run: string | null }
-  >();
-  for (const r of keep(audit.refusals)) {
-    const e = byRule.get(r.rule) ?? { count: 0, seats: new Map(), run: null };
-    e.count += r.count;
-    e.seats.set(r.agentId, (e.seats.get(r.agentId) ?? 0) + r.count);
-    e.run ??= r.runId;
-    byRule.set(r.rule, e);
-  }
-  for (const [rule, e] of [...byRule].sort((a, b) => b[1].count - a[1].count)) {
-    const seats = [...e.seats].sort((a, b) => b[1] - a[1]);
-    add({
-      group: "refusals",
-      id: `guards:refusal:${rule}`,
-      source: "Guards",
-      title: `Find why the guard keeps refusing: ${ruleText(rule)}`,
-      why: `${times(e.count, "refusal")} across ${times(seats.length, "seat")}; most from ${seats[0]?.[0]}.`,
-      measure: count(
-        "Refusals in range",
-        e.count,
-        capped("refusals"),
-        "refusals",
-        0,
-        "a refusal is a stopped action",
-      ),
-      decider: "You",
-      deciderNote: "guard rules are yours to change",
-      evidence: seats.slice(0, DETAIL_LINES).map(([seat, n]) => `${seat} · ${times(n, "refusal")}`),
-      caveat:
-        "Some refusals are right: the guard did its job. Step one reads the hits and changes nothing.",
-      links: seats
-        .slice(0, DETAIL_LINES)
-        .map(([seat]) => ({ label: seat, agentId: seat, runId: null })),
-    });
-  }
+  // Raw guard refusals are not rows: a refusal is a guard doing its job, so a count has no policy
+  // target. Only a spike past AUDIT_REFUSAL_SPIKE, a recorded line, becomes a row (below).
 
   const spikes = audit.refusalSpikes.filter((s) => !excluded.has(s.agentId));
   if (spikes.length > 0) {
