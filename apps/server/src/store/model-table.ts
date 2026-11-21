@@ -1,6 +1,5 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import {
-  type ADVICE_BYS,
   MODEL_CHANGE_SIDE_MS,
   type ModelRunRow,
   type ModelTableData,
