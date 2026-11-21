@@ -13,6 +13,11 @@ const screenshotEvent = () => {
   if (event === undefined) throw new Error("Screenshot capture must be watched");
   return event;
 };
+const ciEvent = () => {
+  const event = SILENCE_WATCHED_EVENTS.find((item) => item.kind === "ci-result-observed");
+  if (event === undefined) throw new Error("CI result observation must be watched");
+  return event;
+};
 
 let store: Store;
 beforeEach(() => {
@@ -214,6 +219,30 @@ describe("silence alarms", () => {
 
     expect(store.audit(SINCE, NOW + 2 * HOUR).items).toMatchObject([
       { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
+  it("clears an open CI alarm after the result returns through a quiet night", () => {
+    const watched = ciEvent();
+    store.recordSilenceEvent(watched.kind, NOW - 7 * HOUR);
+    for (let at = NOW - 7 * HOUR; at <= NOW; at += MIN) store.checkSilenceAlarms(at, QUIET_NONE);
+    expect(store.audit(SINCE, NOW).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+
+    const resumedAt = NOW + 30_000;
+    store.recordSilenceEvent(watched.kind, resumedAt);
+    for (let at = NOW + MIN; at <= NOW + 10 * HOUR; at += MIN)
+      store.checkSilenceAlarms(at, { ...QUIET_NONE, noSeatRan: true });
+    store.checkSilenceAlarms(NOW + 10 * HOUR + MIN, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW + 10 * HOUR + MIN).items).toMatchObject([
+      {
+        kind: "silence-alarm",
+        subject: watched.kind,
+        state: "done",
+        detail: expect.stringContaining(new Date(resumedAt).toISOString()),
+      },
     ]);
   });
 

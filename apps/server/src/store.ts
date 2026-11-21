@@ -2182,8 +2182,7 @@ export class Store {
         ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
         : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
       if (silent) recordSilenceAlarm(this.db, event.kind, "open", detail, at);
-      else if (at - lastSeenAt <= event.gapMs)
-        recordSilenceAlarm(this.db, event.kind, "done", detail, at);
+      else recordSilenceAlarm(this.db, event.kind, "done", detail, at);
     }
   }
 
