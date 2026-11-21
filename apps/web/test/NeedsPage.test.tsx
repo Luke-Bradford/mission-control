@@ -15,7 +15,19 @@ import { Header } from "../src/shell/Header.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { closeItem, openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { brief, CONFIG, crewRow, escalation, HOUR, item, MIN, NOW, SEAT_Q } from "./fixtures.ts";
+import {
+  BRIEF_REVISION,
+  boundBrief,
+  brief,
+  CONFIG,
+  crewRow,
+  escalation,
+  HOUR,
+  item,
+  MIN,
+  NOW,
+  SEAT_Q,
+} from "./fixtures.ts";
 
 const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 
@@ -808,7 +820,7 @@ describe("actions on the page", () => {
     act(() => closeItem());
   });
 
-  it("a picked option with no id is stored as the choice: it shows once on Needs you, in Comms and in the fly-out, and the question leaves the list", async () => {
+  it("an option with no bound id stays disabled and cannot leave the list", async () => {
     // The stub does what the hub does: a message that carries a pick is stored with it, and the
     // thread reads it back as the choice. No choice exists before the click.
     let messages: object[] = [];
@@ -861,7 +873,9 @@ describe("actions on the page", () => {
     const option = within(document.querySelector("#needsOpts") as HTMLElement).getByRole("button", {
       name: "5174",
     }) as HTMLButtonElement;
-    await waitFor(() => expect(option.disabled).toBe(false));
+    await waitFor(() => expect(option.disabled).toBe(true));
+    expect(bodies(fn, "/api/seats/mc-dev-1/message")).toEqual([]);
+    if (option.disabled) return;
     await waitFor(() => expect(document.querySelector("#discuss .flight-thread")).toBeTruthy());
     for (const view of surfaces()) {
       expect(await view.findByText("No messages yet.")).toBeTruthy();
@@ -953,5 +967,143 @@ describe("the Comms redirect", () => {
     render(<Comms item="f1" view={{ kind: "flight" }} />);
     await waitFor(() => expect(window.location.pathname).toBe("/comms"));
     await waitFor(() => expect(window.location.search).toContain("item=f1"));
+  });
+});
+
+describe("Needs you page, a complete brief", () => {
+  const CHOICE = "/api/attention/ask%3Abound/choice";
+  const bound = item({
+    key: "ask:bound",
+    kind: "question",
+    agentId: "mc-dev-1",
+    escalationId: null,
+    text: "Which port?",
+    brief: boundBrief(),
+  });
+  const posts = (fn: ReturnType<typeof routes>, path: string) =>
+    fn.mock.calls
+      .filter(([p, init]) => p === path && init?.method === "POST")
+      .map(([, init]) => JSON.parse(init?.body as string));
+
+  it("shows the facts without a click and Accept posts the bound recommendation", async () => {
+    const fn = routes([bound], {
+      [`POST ${CHOICE}`]: {
+        epoch: "e1",
+        requestId: "r",
+        optionId: "a",
+        at: NOW,
+        state: "applied",
+        text: "Answer sent.",
+        actor: { operator: true },
+      },
+    });
+    render(<Needs item="ask:bound" />);
+    expect(await screen.findByText("Why it needs you")).toBeTruthy();
+    expect(screen.getByText("Cost of delay")).toBeTruthy();
+    const details = document.querySelector(".needs-more") as HTMLDetailsElement;
+    expect(details.contains(screen.getByText("Why it needs you"))).toBe(false);
+    const accept = (await screen.findByRole("button", {
+      name: "Accept recommendation: 5174",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(accept.disabled).toBe(false));
+    fireEvent.click(accept);
+    await waitFor(() => expect(posts(fn, CHOICE)).toHaveLength(1));
+    expect(posts(fn, CHOICE)[0]).toEqual({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+      requestId: expect.any(String),
+    });
+    expect((await screen.findByTestId("choice-line")).textContent).toContain("Answer sent.");
+  });
+
+  it("Discuss focuses the conversation and sends no choice, even when it says approve", async () => {
+    const fn = routes([bound], { "/api/flight": LIVE_FLIGHT });
+    render(<Needs item="ask:bound" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Discuss" }));
+    const input = screen.getByLabelText("Message FLIGHT");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    fireEvent.change(input, { target: { value: "approve" } });
+    expect(posts(fn, CHOICE)).toEqual([]);
+    expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+  });
+
+  it("opens a person item's brief block without a click", async () => {
+    const person = item({
+      key: "person:1:1",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      brief: brief({
+        person: {
+          source: { kind: "github" },
+          take: "Looks fine.",
+          replies: [{ id: "r1", label: "Reply", text: "Thanks" }],
+        } as never,
+      }),
+    });
+    routes([person]);
+    render(<Needs item="person:1:1" />);
+    await screen.findByText("Suggested replies");
+    expect((document.querySelector(".needs-more") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("uses the complete bound decision contract for a person-source brief on the page", async () => {
+    const person = item({
+      key: "person:bound:1",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      brief: boundBrief({
+        person: { source: { kind: "github", messageId: "1", revision: "source-v1" } },
+      }),
+    });
+    const path = `/api/attention/${encodeURIComponent(person.key)}/choice`;
+    const fn = routes([person], {
+      [`POST ${path}`]: {
+        epoch: "e1",
+        requestId: "r",
+        optionId: "a",
+        at: NOW,
+        state: "applied",
+        text: "Answer sent.",
+        actor: { operator: true },
+      },
+    });
+    render(<Needs item={person.key} />);
+    expect(await screen.findByText("Why it needs you")).toBeTruthy();
+    expect(screen.getByText("Consequence of 5174.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept recommendation: 5174" }));
+    await waitFor(() => expect(posts(fn, path)).toHaveLength(1));
+    expect(posts(fn, path)[0]).toMatchObject({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+    });
+  });
+
+  it("keeps an unbound complete person brief readable on the page", async () => {
+    const { binding: _binding, ...withoutBinding } = boundBrief({
+      person: { source: { kind: "github", messageId: "1", revision: "source-v1" } },
+    });
+    const person = item({
+      key: "person:unbound:1",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      brief: withoutBinding,
+    });
+    const path = `/api/attention/${encodeURIComponent(person.key)}/choice`;
+    const fn = routes([person]);
+    render(<Needs item={person.key} />);
+    expect(await screen.findByText("Why it needs you")).toBeTruthy();
+    expect(screen.getByText("Consequence of 5174.")).toBeTruthy();
+    const accept = screen.getByRole("button", {
+      name: "Accept recommendation: 5174",
+    }) as HTMLButtonElement;
+    expect(accept.disabled).toBe(true);
+    expect(screen.queryByText("Suggested replies")).toBeNull();
+    fireEvent.click(accept);
+    expect(posts(fn, path)).toEqual([]);
   });
 });

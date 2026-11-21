@@ -2,7 +2,7 @@ import type { AttentionItem, AutonomyQuestion } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
-import { hub, RESOURCES } from "../src/data.ts";
+import { hub, RESOURCES, streamStatus } from "../src/data.ts";
 import { FLIGHT_NO_SEAT, FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import type { PersonThreadView } from "../src/notifications.ts";
 import { navigate } from "../src/router.ts";
@@ -26,7 +26,18 @@ function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
   return fetchRoutes({ "/api/comms/flight": { messages: [] }, ...discussions, ...routes });
 }
 
-import { brief, CONFIG, crewRow, escalation, HOUR, item, NOW, SEAT_Q } from "./fixtures.ts";
+import {
+  BRIEF_REVISION,
+  boundBrief,
+  brief,
+  CONFIG,
+  crewRow,
+  escalation,
+  HOUR,
+  item,
+  NOW,
+  SEAT_Q,
+} from "./fixtures.ts";
 
 const KEY = `person:101:${NOW - HOUR}`;
 const N = 12;
@@ -347,8 +358,6 @@ describe("ItemPanel, acting on an item", () => {
     return fn;
   }
   const panel = () => document.querySelector("#discuss") as HTMLElement;
-  /** What a pick of SEAT_Q's first option carries: the brief shown and the option's place in it. */
-  const PICK_5174 = { briefAt: NOW, option: 0 };
   const enabled = async (name: string) => {
     const b = (await within(panel()).findByRole("button", { name })) as HTMLButtonElement;
     await waitFor(() => expect(b.disabled).toBe(false));
@@ -363,37 +372,225 @@ describe("ItemPanel, acting on an item", () => {
     expect(within(panel()).getByRole("button", { name: "5180" })).toBeTruthy();
   });
 
-  it("an option on a seat's question posts its answer to that seat", async () => {
-    const fn = acting([SEAT_Q]);
-    fireEvent.click(await enabled("5174"));
-    await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
-      ]),
-    );
+  const BOUND_SEAT = { ...SEAT_Q, brief: boundBrief() };
+  const CHOICE_PATH = "/api/attention/ask%3A7/choice";
+  const applied = (over: object = {}) => ({
+    epoch: "e1",
+    requestId: "r",
+    optionId: "a",
+    at: NOW + 1,
+    state: "applied",
+    text: "Answer sent.",
+    actor: { operator: true },
+    ...over,
+  });
+
+  it("an option on a seat's question posts its bound choice, not a message to the seat", async () => {
+    const fn = acting([BOUND_SEAT], { [`POST ${CHOICE_PATH}`]: applied({ optionId: "b" }) });
+    fireEvent.click(await enabled("5180"));
+    await waitFor(() => expect(posts(fn, CHOICE_PATH)).toHaveLength(1));
+    expect(posts(fn, CHOICE_PATH)[0]).toMatchObject({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "b",
+    });
+    expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([]);
+    expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([]);
+  });
+
+  it("an option on FLIGHT's own question posts its bound choice and keeps the dock closed", async () => {
+    act(() => toggleDock(false));
+    const fn = acting([{ ...BOUND_SEAT, agentId: "flight-1" }], {
+      [`POST ${CHOICE_PATH}`]: applied({ optionId: "b" }),
+    });
+    fireEvent.click(await enabled("5180"));
+    await waitFor(() => expect(posts(fn, CHOICE_PATH)).toHaveLength(1));
+    await waitFor(() => expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true));
+    expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([]);
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
-  it("an option on a brief the hub wrote, with no action of its own, goes as a plain message with no pick", async () => {
-    const fn = acting([{ ...SEAT_Q, brief: brief({ by: "hub" }) }]);
-    fireEvent.click(await enabled("5174"));
-    await waitFor(() =>
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
-      ]),
-    );
+  it("an unbound option is shut, says why, and sends nothing, even when its chat says approve", async () => {
+    const fn = acting([SEAT_Q]);
+    const pick = (await within(panel()).findByRole("button", {
+      name: "5174",
+    })) as HTMLButtonElement;
+    expect(pick.disabled).toBe(true);
+    expect(within(panel()).getAllByText(/Needs a refreshed brief/).length).toBeGreaterThan(0);
+    fireEvent.click(pick);
+    fireEvent.change(within(panel()).getByLabelText("Message FLIGHT"), {
+      target: { value: "approve" },
+    });
+    expect(posts(fn, CHOICE_PATH)).toEqual([]);
+    expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([]);
   });
 
-  it("an option on FLIGHT's own question posts to FLIGHT with the item key and keeps the dock closed", async () => {
-    act(() => toggleDock(false));
-    const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }]);
-    fireEvent.click(await enabled("5180"));
-    await waitFor(() =>
-      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Use port 5180.", itemKey: SEAT_Q.key, choice: { briefAt: NOW, option: 1 } },
-      ]),
-    );
-    await waitFor(() => expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true));
+  it("stale brief cannot dispatch", async () => {
+    const stale = {
+      ...BOUND_SEAT,
+      brief: boundBrief({
+        state: { completeness: "complete", freshness: "stale", reason: "The head changed." },
+      }),
+    };
+    const fn = acting([stale]);
+    const accept = (await within(panel()).findByRole("button", {
+      name: /Accept recommendation/,
+    })) as HTMLButtonElement;
+    expect(accept.disabled).toBe(true);
+    expect(within(panel()).getAllByText(/The head changed\./).length).toBeGreaterThan(0);
+    fireEvent.click(accept);
+    fireEvent.click(within(panel()).getByRole("button", { name: "5180" }));
+    expect(posts(fn, CHOICE_PATH)).toEqual([]);
+  });
+
+  it("shows the decision facts open, and Accept posts the bound recommendation", async () => {
+    const fn = acting([BOUND_SEAT], { [`POST ${CHOICE_PATH}`]: applied() });
+    const ui = within(panel());
+    await ui.findByText("Why it needs you");
+    expect(ui.getByText("Who FLIGHT consulted")).toBeTruthy();
+    expect(ui.getByText("If nobody answers")).toBeTruthy();
+    expect(ui.getByText("Cost of delay")).toBeTruthy();
+    expect(ui.getByText("The dev seat waits.")).toBeTruthy();
+    expect(ui.getByText("Consequence of 5174.")).toBeTruthy();
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    await waitFor(() => expect(posts(fn, CHOICE_PATH)).toHaveLength(1));
+    expect(posts(fn, CHOICE_PATH)[0]).toEqual({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+      requestId: expect.any(String),
+    });
+    expect((await ui.findByTestId("choice-line")).textContent).toContain("Answer sent.");
+  });
+
+  it("uses the complete bound decision contract for a person-source brief", async () => {
+    const current = {
+      ...personItem,
+      brief: boundBrief({
+        person: { source: { kind: "github", messageId: "101", revision: "source-v1" } },
+      }),
+    };
+    const path = `/api/attention/${encodeURIComponent(current.key)}/choice`;
+    const fn = acting([current], { [`POST ${path}`]: applied() });
+    const ui = within(panel());
+    await ui.findByText("Why it needs you");
+    expect(ui.getByText("Who FLIGHT consulted")).toBeTruthy();
+    expect(ui.getByText("Cost of delay")).toBeTruthy();
+    expect(ui.getByText("Consequence of 5174.")).toBeTruthy();
+    expect(ui.getAllByText("Can be undone.")).toHaveLength(2);
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    await waitFor(() => expect(posts(fn, path)).toHaveLength(1));
+    expect(posts(fn, path)[0]).toMatchObject({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+    });
+    expect((await ui.findByTestId("choice-line")).textContent).toContain("Answer sent.");
+  });
+
+  it("keeps an unbound complete person brief readable without legacy reply actions", async () => {
+    const { binding: _binding, ...withoutBinding } = boundBrief({
+      person: { source: { kind: "github", messageId: "101", revision: "source-v1" } },
+    });
+    const current = { ...personItem, brief: withoutBinding };
+    const path = `/api/attention/${encodeURIComponent(current.key)}/choice`;
+    const fn = acting([current]);
+    const ui = within(panel());
+    await ui.findByText("Why it needs you");
+    expect(ui.getByText("Consequence of 5174.")).toBeTruthy();
+    const accept = ui.getByRole("button", {
+      name: "Accept recommendation: 5174",
+    }) as HTMLButtonElement;
+    expect(accept.disabled).toBe(true);
+    expect(ui.getAllByText(/Needs a refreshed brief/).length).toBeGreaterThan(0);
+    expect(ui.queryByText("Suggested replies")).toBeNull();
+    expect(ui.queryByRole("button", { name: "Reply" })).toBeNull();
+    fireEvent.click(accept);
+    expect(posts(fn, path)).toEqual([]);
+  });
+
+  it("Discuss opens and focuses the conversation and sends no choice", async () => {
+    const fn = acting([BOUND_SEAT]);
+    fireEvent.click(await enabled("Discuss"));
+    const input = within(panel()).getByLabelText("Message FLIGHT");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(posts(fn, CHOICE_PATH)).toEqual([]);
+    expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+  });
+
+  it("disconnected shuts Accept and every option, then reopens them on reconnect", async () => {
+    const fn = acting([BOUND_SEAT], { [`POST ${CHOICE_PATH}`]: applied() });
+    await enabled("Accept recommendation: 5174");
+    act(() => streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: NOW }));
+    try {
+      await within(panel()).findByText("Disconnected. Reconnect to choose.");
+      const accept = within(panel()).getByRole("button", {
+        name: "Accept recommendation: 5174",
+      }) as HTMLButtonElement;
+      expect(accept.disabled).toBe(true);
+      const option = within(panel()).getByRole("button", { name: "5180" }) as HTMLButtonElement;
+      expect(option.disabled).toBe(true);
+      fireEvent.click(option);
+      fireEvent.click(accept);
+      expect(posts(fn, CHOICE_PATH)).toEqual([]);
+      act(() => streamStatus.set({ connected: true, reconnecting: false, lastMessageAt: NOW }));
+      await enabled("Accept recommendation: 5174");
+      expect(within(panel()).queryByText("Disconnected. Reconnect to choose.")).toBeNull();
+    } finally {
+      act(() => streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null }));
+    }
+  });
+
+  it("pending, unknown and failure keep the intent", async () => {
+    let calls = 0;
+    const fn = acting([BOUND_SEAT], {
+      [`POST ${CHOICE_PATH}`]: () => {
+        calls += 1;
+        if (calls === 1) return { status: 500, body: { error: "Hub error" } };
+        if (calls === 2)
+          return {
+            status: 200,
+            body: applied({ state: "pending", text: "Waiting for the seat." }),
+          };
+        return { status: 200, body: applied() };
+      },
+    });
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    expect((await within(panel()).findByRole("alert")).textContent).toContain("Hub error");
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    const line = await within(panel()).findByTestId("choice-line");
+    expect(line.textContent).toContain("Not confirmed yet: Waiting for the seat.");
+    for (const name of ["5174", "5180"])
+      expect((within(panel()).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+    const ids = posts(fn, CHOICE_PATH).map((b) => b.requestId);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).toBe(ids[1]);
+  });
+
+  it("a refused receipt reopens the options and the next click uses a new request id", async () => {
+    let calls = 0;
+    const fn = acting([BOUND_SEAT], {
+      [`POST ${CHOICE_PATH}`]: () => {
+        calls += 1;
+        return calls === 1
+          ? { status: 200, body: applied({ state: "refused", text: "The seat moved on." }) }
+          : { status: 200, body: applied() };
+      },
+    });
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    expect((await within(panel()).findByRole("alert")).textContent).toContain("The seat moved on.");
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    await waitFor(() => expect(posts(fn, CHOICE_PATH)).toHaveLength(2));
+    const [a, b] = posts(fn, CHOICE_PATH);
+    expect(a.requestId).not.toBe(b.requestId);
+  });
+
+  it("an escalation without a bound option stays Reply on GitHub and offers no Accept", async () => {
+    acting([item({ brief: brief() })]);
+    await within(panel()).findByRole("link", { name: "Reply on GitHub ↗" });
+    expect(within(panel()).queryByRole("button", { name: /Accept recommendation/ })).toBeNull();
   });
 
   it("an escalation's options are text beside Reply on GitHub, and nothing is posted", async () => {
@@ -412,10 +609,12 @@ describe("ItemPanel, acting on an item", () => {
 
   it("with FLIGHT stopped, a seat's item still replies and FLIGHT can be messaged with a Start button", async () => {
     const fn = acting([SEAT_Q], STOPPED);
-    fireEvent.click(await enabled("5174"));
+    const reply = (await within(panel()).findByLabelText("Your answer")) as HTMLInputElement;
+    fireEvent.change(reply, { target: { value: "Use port 5174." } });
+    fireEvent.click(await enabled("Reply"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
+        { text: "Use port 5174.", question: 7, itemKey: "ask:7" },
       ]),
     );
     const input = within(panel()).getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
@@ -427,17 +626,15 @@ describe("ItemPanel, acting on an item", () => {
     expect(within(panel()).getByRole("button", { name: "Start FLIGHT" })).toBeTruthy();
   });
 
-  it("with FLIGHT stopped, an answer for FLIGHT is still sent, with the stopped notice beside it", async () => {
-    const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }], STOPPED);
+  it("with FLIGHT stopped, a bound option for FLIGHT is still sent, with the stopped notice beside it", async () => {
+    const fn = acting([{ ...BOUND_SEAT, agentId: "flight-1" }], {
+      ...STOPPED,
+      [`POST ${CHOICE_PATH}`]: applied(),
+    });
     const opt = (await enabled("5174")) as HTMLButtonElement;
-    expect(opt.disabled).toBe(false);
     expect(within(panel()).getAllByText(FLIGHT_STOPPED_NOTICE).length).toBeGreaterThan(0);
     fireEvent.click(opt);
-    await waitFor(() =>
-      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Use port 5174.", itemKey: SEAT_Q.key, choice: PICK_5174 },
-      ]),
-    );
+    await waitFor(() => expect(posts(fn, CHOICE_PATH)).toHaveLength(1));
   });
 
   it("with FLIGHT stopped, the Reply box takes text and sends it to FLIGHT", async () => {
@@ -466,7 +663,6 @@ describe("ItemPanel, acting on an item", () => {
   });
 
   describe("an option with an id", () => {
-    const CHOOSE = "/api/attention/ask%3A7/choose";
     const CHOICE = "/api/attention/ask%3A7/choice";
     const withIds = {
       ...SEAT_Q,
@@ -490,42 +686,16 @@ describe("ItemPanel, acting on an item", () => {
       ...over,
     });
 
-    it("posts the choose route with the option id and the brief's time, and shows it recorded", async () => {
-      const fn = acting([withIds], { [`POST ${CHOOSE}`]: receipt() });
-      fireEvent.click(await enabled("5174"));
-      await waitFor(() =>
-        expect(posts(fn, CHOOSE)).toEqual([{ optionId: "a", briefAt: withIds.brief.at }]),
-      );
-      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([]);
-      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
-        "Recorded. Stored for mc-dev-1.",
-      );
-    });
-
     it("shows the recorded choice after a reload", async () => {
       acting([withIds], { [CHOICE]: receipt({ deliveredAt: NOW + 60_000 }) });
       expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
         "Recorded. mc-dev-1 took it at",
       );
-      expect(within(panel()).queryByText(/You chose/)).toBeNull();
+      expect(within(panel()).queryByText(/You chose/)).toBeTruthy();
       const pick = (await within(panel()).findByRole("button", {
         name: "5174",
       })) as HTMLButtonElement;
       expect(pick.disabled).toBe(true);
-    });
-
-    it("shows the server's refusal and records nothing", async () => {
-      acting([withIds], {
-        [`POST ${CHOOSE}`]: () => ({
-          status: 409,
-          body: { error: "The question changed since you opened it. Reload and choose again." },
-        }),
-      });
-      fireEvent.click(await enabled("5174"));
-      expect((await within(panel()).findByRole("alert")).textContent).toContain(
-        "The question changed",
-      );
-      expect(within(panel()).queryByTestId("choice-line")).toBeNull();
     });
   });
 
@@ -551,6 +721,7 @@ describe("ItemPanel, acting on an item", () => {
             ],
           }),
           id: 31,
+          state: { completeness: "complete", freshness: "current", reason: "Matches the source." },
           binding: {
             version: 2,
             sourceRevision: REVISION,
@@ -619,7 +790,7 @@ describe("ItemPanel, acting on an item", () => {
       expect(typeof posts(fn, BOUND)[0].requestId).toBe("string");
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
       expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(c.text);
-      expect(within(panel()).queryByText(/You chose/)).toBeNull();
+      expect(within(panel()).queryByText(/You chose/)).toBeTruthy();
       for (const name of [c.label, c.other])
         expect((within(panel()).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
           true,
@@ -661,16 +832,14 @@ describe("ItemPanel, acting on an item", () => {
     expect(fn.mock.calls.filter(([p]) => p === "/api/attention").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("a refused seat answer (409) shows the server's message on the card", async () => {
+  it("a refused bound choice (409) shows the server's message on the card", async () => {
     const refusal = "That question is no longer open on this seat.";
-    const fn = acting([SEAT_Q], {
-      "POST /api/seats/mc-dev-1/message": () => ({ status: 409, body: { error: refusal } }),
+    const fn = acting([{ ...SEAT_Q, brief: boundBrief() }], {
+      "POST /api/attention/ask%3A7/choice": () => ({ status: 409, body: { error: refusal } }),
     });
     fireEvent.click(await enabled("5174"));
     expect((await within(panel()).findByRole("alert")).textContent).toBe(refusal);
-    expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-      { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
-    ]);
+    expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([]);
   });
 
   it("Dismiss shows the refusal text and keeps the panel", async () => {
@@ -707,23 +876,7 @@ describe("ItemPanel, acting on an item", () => {
     },
   );
 
-  it("sends legacy person options through sendAnswer, with the pick, and shuts the options", async () => {
-    const current = { ...SEAT_Q, kind: "person" as const, agentId: "flight-1" };
-    const fn = acting([current]);
-    fireEvent.click(await enabled("5174"));
-    await waitFor(() =>
-      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: "Use port 5174.", itemKey: current.key, choice: PICK_5174 },
-      ]),
-    );
-    await waitFor(() =>
-      expect(
-        (within(panel()).getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled,
-      ).toBe(true),
-    );
-  });
-
-  it("an item without a brief still offers Reply, the FLIGHT thread and Dismiss", async () => {
+  it("an item without a brief still offers Reply, Ask FLIGHT and Dismiss", async () => {
     const fn = acting([{ ...SEAT_Q, brief: undefined }]);
     const input = (await screen.findByLabelText("Your answer")) as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(false));
@@ -1302,18 +1455,28 @@ describe("ItemPanel, person variant", () => {
 
 describe("ItemPanel choice state", () => {
   it("keeps an answered choice visible and disables another answer", async () => {
+    const q = { ...SEAT_Q, brief: boundBrief() };
     stubFetch({
-      "/api/attention": [SEAT_Q],
+      "/api/attention": [q],
       "/api/crew?shape=summary": {
         rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
         firstRunToday: null,
       },
       "/api/flight": { seat: null, decisions: [] },
-      "POST /api/seats/mc-dev-1/message": {},
+      "POST /api/attention/ask%3A7/choice": {
+        epoch: "e1",
+        requestId: "r",
+        optionId: "a",
+        at: NOW + 1,
+        state: "applied",
+        text: "Answer sent.",
+        actor: { operator: true },
+      },
     });
     render(<ItemPanel />);
     act(() => openItem(SEAT_Q.key));
     const choice = await screen.findByRole("button", { name: "5174" });
+    await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(choice);
     await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(true));
     expect((choice as HTMLButtonElement).disabled).toBe(true);
@@ -1396,7 +1559,7 @@ describe("ItemPanel beside the one FLIGHT thread", () => {
     expect(inDock.queryByRole("heading", { name: /^About: / })).toBeNull();
   });
 
-  it("shows a picked option once, as the choice the hub stores from the click, and sends no second message", async () => {
+  it("keeps an unbound option shut even when the FLIGHT thread has messages", async () => {
     // No choice exists before the click. The stub does what the hub does: a message that carries
     // a pick is stored with it, and the thread reads it back as the choice.
     let extra: object[] = [];
@@ -1448,31 +1611,18 @@ describe("ItemPanel beside the one FLIGHT thread", () => {
       expect(await view.findByText("The port is available.")).toBeTruthy();
       expect(view.queryByText(/You chose/)).toBeNull();
     }
-    fireEvent.click(flyout.getByRole("button", { name: "5174" }));
-    for (const view of [flyout, dock]) {
-      expect(await view.findByText("You chose: 5174")).toBeTruthy();
-      expect(view.getAllByText(/You chose/)).toHaveLength(1);
-    }
+    const option = flyout.getByRole("button", { name: "5174" }) as HTMLButtonElement;
+    expect(option.disabled).toBe(true);
+    fireEvent.click(option);
     expect(
       fn.mock.calls
         .filter(([p, init]) => p === "/api/seats/mc-dev-1/message" && init?.method === "POST")
         .map(([, init]) => JSON.parse(init?.body as string)),
-    ).toEqual([
-      {
-        text: "Use port 5174.",
-        question: 7,
-        itemKey: SEAT_Q.key,
-        choice: { briefAt: NOW, option: 0 },
-      },
-    ]);
+    ).toEqual([]);
     expect(
       fn.mock.calls.filter(([p, init]) => p === "/api/comms" && init?.method === "POST"),
     ).toHaveLength(0);
-    await waitFor(() =>
-      expect((flyout.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
-        true,
-      ),
-    );
+    expect(dock.queryByText(/You chose/)).toBeNull();
   });
 
   it("keeps the brief and options while a thread send is pending, and a late failure stays with the send", async () => {
@@ -1771,77 +1921,76 @@ it.each(["flight", "github"] as const)(
       target === "flight" ? FLIGHT_STOPPED_NOTICE : "Reply on GitHub to answer this item.";
     await screen.findAllByText(reason);
     const group = screen.getByRole("group", { name: "Your call:" });
-    // GitHub-bound options are answered on GitHub; FLIGHT-bound ones stay open while it is stopped
+    // An option with no prepared action is shut; GitHub-bound ones are answered on GitHub
     if (target === "github") expect(within(group).getByText(reason)).toBeTruthy();
     for (const label of ["5174", "5180"])
       expect(
         (within(group).getByRole("button", { name: label }) as HTMLButtonElement).disabled,
-      ).toBe(target === "github");
+      ).toBe(true);
     expect(within(group).getByText("Use port 5174.")).toBeTruthy();
     expect(within(group).getByText("Use port 5180.")).toBeTruthy();
     expect(screen.getByText("Use 5174.").closest(".recommendation")).toBeTruthy();
   },
 );
 
-it.each(["seat", "flight"] as const)(
-  "records a successful %s pick after switching items mid-request",
-  async (target) => {
-    const first = { ...SEAT_Q, agentId: target === "flight" ? "flight-1" : "mc-dev-1" };
-    const other = { ...first, key: "ask:other" };
-    const postPath = `/api/seats/${target === "flight" ? "flight-1" : "mc-dev-1"}/message`;
-    const fn = stubFetch({
-      "/api/attention": [first, other],
-      "/api/crew?shape=summary": {
-        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
-        firstRunToday: null,
-      },
-      "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-      "POST /api/seats/mc-dev-1/message": {},
-      "POST /api/seats/flight-1/message": {},
-    });
-    const answer = fn.getMockImplementation() as (...args: unknown[]) => Promise<Response>;
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    fn.mockImplementation(async (...args: unknown[]) => {
-      if (args[0] === postPath && (args[1] as RequestInit)?.method === "POST") await gate;
-      return answer(...args);
-    });
-    render(<ItemPanel />);
-    act(() => openItem(first.key));
-    const choice = await screen.findByRole("button", { name: "5174" });
-    await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(choice);
-    await waitFor(() =>
-      expect(
-        fn.mock.calls.some(([path, init]) => path === postPath && init?.method === "POST"),
-      ).toBe(true),
-    );
-    act(() => openItem(other.key));
-    await act(async () => {
-      release();
-      await gate;
-    });
-    expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
-    act(() => openItem(first.key));
-    await waitFor(() =>
-      expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
-        true,
-      ),
-    );
-    for (const label of ["5174", "5180"]) {
-      const button = screen.getByRole("button", { name: label }) as HTMLButtonElement;
-      expect(button.disabled).toBe(true);
-      fireEvent.click(button);
-    }
-    expect(
-      fn.mock.calls.filter(([path, init]) => path === postPath && init?.method === "POST"),
-    ).toHaveLength(1);
-  },
-);
+it("records a successful bound pick on its own item after switching items mid-request", async () => {
+  const first = { ...SEAT_Q, brief: boundBrief() };
+  const other = { ...first, key: "ask:other", brief: boundBrief({ id: 32 }) };
+  const postPath = "/api/attention/ask%3A7/choice";
+  const fn = stubFetch({
+    "/api/attention": [first, other],
+    "/api/crew?shape=summary": {
+      rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+      firstRunToday: null,
+    },
+    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
+    [`POST ${postPath}`]: {
+      epoch: "e1",
+      requestId: "r",
+      optionId: "a",
+      at: NOW + 1,
+      state: "applied",
+      text: "Answer sent.",
+      actor: { operator: true },
+    },
+  });
+  const answer = fn.getMockImplementation() as (...args: unknown[]) => Promise<Response>;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  fn.mockImplementation(async (...args: unknown[]) => {
+    if (args[0] === postPath && (args[1] as RequestInit)?.method === "POST") await gate;
+    return answer(...args);
+  });
+  render(<ItemPanel />);
+  act(() => openItem(first.key));
+  const choice = await screen.findByRole("button", { name: "5174" });
+  await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(choice);
+  await waitFor(() =>
+    expect(fn.mock.calls.some(([path, init]) => path === postPath && init?.method === "POST")).toBe(
+      true,
+    ),
+  );
+  act(() => openItem(other.key));
+  await act(async () => {
+    release();
+    await gate;
+  });
+  expect(screen.queryByText("You chose:")).toBeNull();
+  expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(false);
+  act(() => openItem(first.key));
+  await screen.findByText("You chose:");
+  for (const label of ["5174", "5180"]) {
+    const button = screen.getByRole("button", { name: label }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+  }
+  expect(
+    fn.mock.calls.filter(([path, init]) => path === postPath && init?.method === "POST"),
+  ).toHaveLength(1);
+});
 
 it("fetches the whole tagged message when the list only has a preview", async () => {
   const tag = item({
