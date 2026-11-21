@@ -91,10 +91,6 @@ const idKinds = (full: string, seatIds: readonly string[]): string[] => {
   ];
 };
 
-/** Whether `text` holds an id a person cannot read (a ticket number, commit code, path and so on). */
-export const hasUnreadableId = (text: string, seatIds: readonly string[] = []): boolean =>
-  RAW_TEXT.some(([re]) => re.test(text)) || idKinds(text, seatIds).length > 0;
-
 const plainFaults = (
   part: string,
   text: string,

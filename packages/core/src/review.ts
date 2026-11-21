@@ -464,8 +464,6 @@ export const readyHardRuleText = (ref: string, pr: number, paths: readonly strin
   `${ref}: PR #${pr} passed every check but touches hard-rule files (${paths.join(", ")}); merge it yourself`;
 export const headMovedText = (ref: string, pr: number, head: string, pushed: string): string =>
   `${ref}: PR #${pr}'s head ${head.slice(0, 7)} is not the commit Mission Control pushed (${pushed.slice(0, 7)}); it is not reviewed, so check it before merging`;
-export const reviewHeldParkText = (retro: string, sha: string, round: number): string =>
-  `${retro}'s review of ${sha.slice(0, 7)} is held: the change is past its review rounds (round ${round}); FLIGHT decides`;
 export const reviewParkText = (
   retro: string,
   sha: string,
@@ -500,8 +498,6 @@ export const reviewFailedParkText = (
   n: number,
   failure: string,
 ): string => `${retro}'s review of ${sha.slice(0, 7)} failed ${n} times; last: ${failure}`;
-export const reviewRulingParkText = (call: string, retro: string, sha: string): string =>
-  `${call} ruled on ${retro}'s findings on ${sha.slice(0, 7)} instead of fixing them; see its last report`;
 export const REVIEW_RESUME_TEXT =
   "Carry on with your review of PR #{pr}: Mission Control restarted, or your rate limit has reset. When you are done, call mc report_findings.";
 export const REVIEW_NUDGE_TEXT =
