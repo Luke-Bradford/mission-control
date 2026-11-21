@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PullRequestView, Run, SilenceWatchedEventKind } from "@mc/core";
+import type { BoardItem, PullRequestView, Run, SilenceWatchedEventKind } from "@mc/core";
 import { SILENCE_WATCHED_EVENTS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { writeCrewPause } from "../src/config/crew-pause.ts";
@@ -74,6 +74,31 @@ const run = (over: Partial<Run>): Run => ({
   summary: null,
   ...over,
 });
+const card = (over: Partial<BoardItem> = {}): BoardItem => ({
+  repoId: "repo",
+  issueNumber: 7,
+  title: "Ready work",
+  status: "Ready",
+  state: "planned",
+  labels: ["area:server"],
+  assignees: [],
+  priority: null,
+  updatedAt: NOW,
+  url: "u",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: "S",
+  closed: false,
+  prioritySource: null,
+  createdAt: NOW - HOUR,
+  itemId: "I7",
+  projectId: "P1",
+  ...over,
+});
 const seat = (r: Run) => {
   store.upsertRun(r);
   store.setSeatSession({
@@ -105,6 +130,11 @@ describe("the silence timer's quiet periods", () => {
     seat(run({ id: "rf", agentId: "flight-1", ticket: null }));
     silent();
     expect(alarms()).toEqual([]);
+  });
+  it("raises an alarm when Ready work fits an idle seat", () => {
+    store.replaceBoard("repo", [card()]);
+    silent();
+    expect(alarms()).toHaveLength(1);
   });
   it("raises none when the only run has ended", () => {
     store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok" }));

@@ -1,8 +1,20 @@
 import { runAccountId } from "../accounts/bindings.ts";
 import { readCrewPause } from "../config/crew-pause.ts";
 import type { CcConfig } from "../config.ts";
+import { flightState } from "../flight/state.ts";
 import type { Store } from "../store.ts";
 import { accountAtStop } from "./queue.ts";
+
+/** Ready work means an otherwise quiet crew should still be watched. */
+function readyWorkFitsIdleSeat(store: Store, config: CcConfig, at: number): boolean {
+  const state = flightState({ config, store, busy: [], now: at });
+  return state.seats.some(
+    (seat) =>
+      seat.loop === "build" &&
+      seat.free &&
+      (state.wake?.fit?.[seat.id]?.length ?? state.tickets.some((ticket) => ticket.ready)),
+  );
+}
 
 /** Local only: no GitHub write and no network fetch. */
 export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): number }): void {
@@ -24,9 +36,10 @@ export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): n
       budgetParked: parked?.kind === "budget",
     });
   }
+  const readyWork = readyWorkFitsIdleSeat(store, config, at);
   store.checkSilenceAlarms(at, {
     crewPaused: readCrewPause(store) !== null,
-    noSeatRan: working.length === 0,
+    noSeatRan: working.length === 0 && !readyWork,
     // the budget stops the crew only when every working seat is parked on it or at its account's stop
     budgetStopped:
       working.length > 0 &&
