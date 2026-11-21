@@ -202,6 +202,8 @@ const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 type Row = Record<string, SQLInputValue>;
 
 const DAY_MS = 86_400_000;
+const SILENCE_CLOCK = "silence";
+const SILENCE_SEAT_START_CLOCK = "silence-seat-start";
 
 /** The median of the values, or null when there are none. */
 function median(values: number[]): number | null {
@@ -2133,6 +2135,14 @@ export class Store {
   /** Records a successful occurrence of a routine event watched by Audit. */
   recordSilenceEvent(kind: SilenceWatchedEventKind, at: number): void {
     recordAuditEvent(this.db, kind, at);
+    if (auditEventLastSeen(this.db, kind) === at)
+      this.setSetting(
+        `silence-quiet-at-seen:${kind}`,
+        JSON.stringify({
+          lastSeenAt: at,
+          quietTotal: this.silenceQuietTotal(this.silenceClock(kind)),
+        }),
+      );
   }
 
   /** When a watched event last succeeded, or null if it never has. */
@@ -2154,41 +2164,70 @@ export class Store {
     },
   ): void {
     const active = !(quiet.crewPaused || quiet.budgetStopped || quiet.noSeatRan);
-    const activeSince = this.silenceActiveSince("silence-active-since", active, at);
-    const seatStartActiveSince = this.silenceActiveSince(
-      "silence-seat-start-active-since",
-      active && quiet.readyWorkForIdleSeat === true,
+    const quietTotal = this.advanceSilenceQuietTime(SILENCE_CLOCK, at, !active);
+    const seatStartQuietTotal = this.advanceSilenceQuietTime(
+      SILENCE_SEAT_START_CLOCK,
       at,
+      !active || quiet.readyWorkForIdleSeat !== true,
     );
-    if (activeSince === null) return;
+    if (!active) return;
     for (const event of SILENCE_WATCHED_EVENTS) {
       const lastSeenAt = auditEventLastSeen(this.db, event.kind);
       if (lastSeenAt === null) continue;
-      const startedAt = event.kind === "seat-run-started" ? seatStartActiveSince : activeSince;
-      if (startedAt === null) continue;
-      const silent = at - Math.max(lastSeenAt, startedAt) > event.gapMs;
+      const total = event.kind === "seat-run-started" ? seatStartQuietTotal : quietTotal;
+      if (event.kind === "seat-run-started" && quiet.readyWorkForIdleSeat !== true) continue;
+      const quietAtSeen = this.silenceQuietAtSeen(event.kind, lastSeenAt, total);
+      const silent = at - lastSeenAt - (total - quietAtSeen) > event.gapMs;
       const detail = silent
         ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
         : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
-      recordSilenceAlarm(this.db, event.kind, silent ? "open" : "done", detail, at);
+      if (silent) recordSilenceAlarm(this.db, event.kind, "open", detail, at);
+      else if (at - lastSeenAt <= event.gapMs)
+        recordSilenceAlarm(this.db, event.kind, "done", detail, at);
     }
   }
 
-  /** Starts a silence window when its work is expected, and discards it for quiet time. */
-  private silenceActiveSince(key: string, active: boolean, at: number): number | null {
-    if (!active) {
-      this.deleteSetting(key);
-      return null;
+  /** The clock that excludes quiet intervals for a watched event. */
+  private silenceClock(kind: SilenceWatchedEventKind): string {
+    return kind === "seat-run-started" ? SILENCE_SEAT_START_CLOCK : SILENCE_CLOCK;
+  }
+
+  /** Advances a quiet-time total, assigning each interval to the preceding tick's state. */
+  private advanceSilenceQuietTime(clock: string, at: number, quiet: boolean): number {
+    const lastTick = Number(this.getSetting(`${clock}-last-tick`));
+    const lastQuiet = this.getSetting(`${clock}-last-quiet`) === "true";
+    let total = this.silenceQuietTotal(clock);
+    if (Number.isFinite(lastTick) && lastQuiet && at > lastTick) total += at - lastTick;
+    this.setSetting(`${clock}-last-tick`, String(at));
+    this.setSetting(`${clock}-last-quiet`, String(quiet));
+    this.setSetting(`${clock}-quiet-total`, String(total));
+    return total;
+  }
+
+  private silenceQuietTotal(clock: string): number {
+    const total = Number(this.getSetting(`${clock}-quiet-total`));
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  /** The quiet-time total in force when the event's current observation was made. */
+  private silenceQuietAtSeen(
+    kind: SilenceWatchedEventKind,
+    lastSeenAt: number,
+    total: number,
+  ): number {
+    const key = `silence-quiet-at-seen:${kind}`;
+    try {
+      const seen = JSON.parse(this.getSetting(key) ?? "null") as {
+        lastSeenAt?: unknown;
+        quietTotal?: unknown;
+      } | null;
+      if (seen?.lastSeenAt === lastSeenAt && typeof seen.quietTotal === "number")
+        return seen.quietTotal;
+    } catch {
+      // A damaged cursor should start measuring from this check, not stop Audit.
     }
-    const saved = this.getSetting(key);
-    if (saved === null) {
-      this.setSetting(key, String(at));
-      return at;
-    }
-    const startedAt = Number(saved);
-    if (Number.isFinite(startedAt)) return startedAt;
-    this.setSetting(key, String(at));
-    return at;
+    this.setSetting(key, JSON.stringify({ lastSeenAt, quietTotal: total }));
+    return total;
   }
 
   /** Items recorded in range, newest first. */

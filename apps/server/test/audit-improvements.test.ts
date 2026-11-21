@@ -181,12 +181,38 @@ describe("silence alarms", () => {
     const watched = screenshotEvent();
     store.recordSilenceEvent(watched.kind, NOW - 50 * HOUR);
     store.checkSilenceAlarms(NOW - 49 * HOUR, QUIET_NONE);
+    store.checkSilenceAlarms(NOW - 48 * HOUR, { ...QUIET_NONE, crewPaused: true });
     store.checkSilenceAlarms(NOW, { ...QUIET_NONE, crewPaused: true });
     store.checkSilenceAlarms(NOW + MIN, QUIET_NONE);
     expect(store.audit(SINCE, NOW + MIN).items).toEqual([]);
 
     store.checkSilenceAlarms(NOW + MIN + watched.gapMs + 1, QUIET_NONE);
     expect(store.audit(SINCE, NOW + MIN + watched.gapMs + 1).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
+  it("keeps an open alarm open across a quiet tick", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
+    store.checkSilenceAlarms(NOW, QUIET_NONE);
+    store.checkSilenceAlarms(NOW + MIN, { ...QUIET_NONE, noSeatRan: true });
+    store.checkSilenceAlarms(NOW + 2 * MIN, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW + 2 * MIN).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
+  it("counts active time on both sides of a short quiet spell", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - 23 * HOUR);
+    store.checkSilenceAlarms(NOW - 23 * HOUR, QUIET_NONE);
+    store.checkSilenceAlarms(NOW, { ...QUIET_NONE, noSeatRan: true });
+    store.checkSilenceAlarms(NOW + MIN, QUIET_NONE);
+    store.checkSilenceAlarms(NOW + 2 * HOUR, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW + 2 * HOUR).items).toMatchObject([
       { kind: "silence-alarm", subject: watched.kind, state: "open" },
     ]);
   });
