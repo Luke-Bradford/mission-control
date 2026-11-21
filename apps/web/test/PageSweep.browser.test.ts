@@ -98,13 +98,17 @@ describeRendered("Every header page at 1920x940 and 2560x1145", () => {
                 const el = n.parentElement;
                 const t = (n.textContent ?? "").trim();
                 if (!el || !NAME.test(t) || !shown(el)) continue;
-                if (el.closest("script, style, .sr-only, [aria-hidden=true]")) continue;
+                // the Setup notification examples are fictional copy, not live names, and the Needs-you question band holds no links by design
+                if (
+                  el.closest("script, style, .sr-only, [aria-hidden=true], .notif, .needs-band-who")
+                )
+                  continue;
                 if (el.closest(CONTROL)) continue;
                 const link = el.closest("a");
                 const href = link?.getAttribute("href") ?? "";
                 if (!link || href === "" || href === "#")
                   problems.push(
-                    `name is not a link in ${el.tagName.toLowerCase()}: ${t.slice(0, 60)}`,
+                    `name is not a link in ${el.tagName.toLowerCase()} in ${el.parentElement?.className} / ${el.parentElement?.parentElement?.className}: ${t.slice(0, 60)}`,
                   );
               }
               // text cut by an ancestor that hides overflow, with no ellipsis and no scroll to reach it
