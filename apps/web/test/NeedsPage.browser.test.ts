@@ -487,14 +487,23 @@ describeRendered("Needs you page", () => {
       const ASKED = "Why this layout?";
       const REPLY = "It keeps every ask one click away.";
       const PICKED = "List and open item";
-      const choosePath = `/api/attention/${encodeURIComponent(KEY)}/choose`;
+      const choosePath = `/api/attention/${encodeURIComponent(KEY)}/choice`;
       /** The hub for one walk: it stores what the page sends, and FLIGHT's reply is the fixture's. */
       const hub = () => {
         const base = api(2);
         const [first, ...others] = base["/api/attention"];
         if (!first?.brief) throw new Error("the fixture's first ask has a brief");
-        // FLIGHT's brief to the operator: its options go through the choose route
-        const open = { ...first, brief: { ...first.brief, for: "operator" as const } };
+        // The server-bound choice route is the only way an option can act.
+        const open = {
+          ...first,
+          brief: boundBrief({
+            options: [
+              { id: "a", label: PICKED, answer: PICKED },
+              { id: "b", label: "One long column", answer: "One long column" },
+            ],
+            recommendedOptionId: "a",
+          }),
+        };
         const earlier = base["/api/comms/flight"].messages;
         let sent = false;
         let chosen = false;
@@ -529,14 +538,13 @@ describeRendered("Needs you page", () => {
           [choosePath]: (method: string) => {
             if (method === "POST") chosen = true;
             return {
-              key: KEY,
-              optionId: "list",
-              label: PICKED,
-              to: "flight-1",
-              target: "flight",
-              chosenAt: NOW,
-              deliveredAt: null,
-              alreadyChosen: false,
+              epoch: "e1",
+              requestId: "r",
+              optionId: "a",
+              at: NOW,
+              state: "applied",
+              text: "Answer sent.",
+              actor: { operator: true },
             };
           },
         };
@@ -616,7 +624,6 @@ describeRendered("Needs you page", () => {
             try {
               if (surface.name === "page") {
                 await ready(page);
-                await pictureLoaded(page);
               }
               await page.boxes(`${surface.scope} .flight-thread-message`);
               await page.boxes(`${surface.opts} button`);
@@ -759,8 +766,8 @@ describeRendered("Needs you page", () => {
           "/api/attention": () => (chosen ? [other] : [protectedAsk, other]),
           "/api/comms/flight": () => ({ messages: chosen ? [choiceMessage] : [] }),
           // the receipt route's GET and the choice POST share the path
-          [choicePath]: (method: string) => {
-            if (method === "POST") chosen = true;
+          [`POST ${choicePath}`]: () => {
+            chosen = true;
             return receipt;
           },
         },
