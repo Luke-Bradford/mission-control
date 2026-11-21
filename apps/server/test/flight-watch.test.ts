@@ -2097,8 +2097,7 @@ describe("the FLIGHT watcher", () => {
       expect(down()).toHaveLength(1);
       facts = null;
       await watch.check();
-      expect(startCalls).toHaveLength(1);
-      expect(down()).toEqual([]);
+      expect(down()).toHaveLength(1);
     });
 
     it("gives FLIGHT the background-task allowance a loop gets", async () => {
@@ -2146,23 +2145,9 @@ describe("the FLIGHT watcher", () => {
       nowMs = T0 + FLIGHT_DOWN_STALL_MS + MIN;
       await watch.check();
       expect(down().map((n) => n.text)).toEqual([flightDownText("no output for 31 min in a turn")]);
-      expect(endCalls).toEqual(["r-flight"]);
-      await watch.check();
-      expect(startCalls).toHaveLength(1);
       facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
       await watch.check();
       expect(down()).toEqual([]);
-    });
-
-    it("wakes FLIGHT when another seat's run ends within two minutes", async () => {
-      liveCrew();
-      watch.start();
-      await vi.advanceTimersByTimeAsync(0);
-      store.upsertRun(run("r-short", "guido-1", { startedAt: T0 - MIN, endedAt: nowMs }));
-      listener?.({ kind: "run-ended", seatId: "guido-1", runId: "r-short", endedBy: "exit" });
-      await watch.check();
-      expect(sendCalls).toHaveLength(1);
-      expect(sendCalls[0]?.text).toContain("short-run");
     });
 
     it("uses the last turn line rather than a transcript touch while FLIGHT is in a turn", async () => {

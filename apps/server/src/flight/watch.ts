@@ -180,16 +180,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let rotationRequested = false;
   /** The failure in plain words for the operator's alert; the raw error stays in the hub log. */
   let lastReason: string | null = null;
-  /** Short runs need FLIGHT's judgement even when their card did not otherwise change. */
-  const shortRuns = new Set<string>();
-  const withShortRuns = (facts: string): string =>
-    JSON.stringify({
-      ...(JSON.parse(facts) as Record<string, unknown>),
-      "short-run": [...shortRuns],
-    });
-  const watchedFacts = (state: FlightState): string => withShortRuns(wakeFacts(state));
-  const watchedDeliveredFacts = (state: FlightState): string =>
-    withShortRuns(deliveredFacts(state));
   /**
    * The handover guard's cooldown: when the hub starts FLIGHT again after the guard stopped it
    * (`retryAt`, null when it stays stopped), and when it last did (a trip within an hour of that
@@ -506,7 +496,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotationRequested = false; // the fresh session already sees the current config
       try {
         const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
-        const causes = changedWakeFacts(lastFacts, watchedFacts(state));
+        const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const note = store
           .flightMemory(state.repo)
           .find((m) => memoryTopicKey(m.topic) === FLIGHT_HANDOVER_TOPIC);
@@ -531,7 +521,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markItemsShown(store, state);
         markRetrospectiveShown(store, state);
         markPointersShown(store, config, state, t);
-        lastFacts = watchedDeliveredFacts(state);
+        lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         const woke = causes.length > 0 ? causes : ["initial"];
         recordFlightWake(store, found.session.repoId, t, woke);
@@ -569,16 +559,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         (digest?.background.length ?? 0) > 0
           ? Math.max(FLIGHT_DOWN_STALL_MS, BACKGROUND_STALL_MS)
           : FLIGHT_DOWN_STALL_MS;
-      if (facts.inTurn && t - output >= limit) {
+      if (facts.inTurn && t - output >= limit)
         raiseDown(
           id,
           found.session.repoId,
           `no output for ${Math.floor((t - output) / 60_000)} min in a turn`,
           t,
         );
-        await supervisor.endRunByEngine(run.id);
-        return;
-      } else clearDown(t);
+      else clearDown(t);
     }
     if (runId == null || facts === null || facts.inTurn) return;
     if (facts.rateLimitedUntil !== null && facts.rateLimitedUntil > t) return;
@@ -628,7 +616,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       areas: await deps.areas?.(found.session.repoId),
       conflicts: await deps.conflicts?.(found.session.repoId),
     });
-    const wake = watchedFacts(state);
+    const wake = wakeFacts(state);
     const listed = hasFacts(wake);
     recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t));
     // FLIGHT's writes are stopped until the operator lifts the breaker: a wake could only idle
@@ -674,7 +662,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markRetrospectiveShown(store, state);
         markPointersShown(store, config, state, t);
         const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
-        lastFacts = watchedDeliveredFacts(state);
+        lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         recordFlightWake(store, found.session.repoId, t, woke);
         recordWakeReasons(store, runId, t, woke, flightWakeId(runId, n + 1));
@@ -796,16 +784,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           if (e.kind === "idle") lastTurnEndAt = now();
           if (!flightLive(config, store, (seatId) => supervisor.sessionAlive?.(seatId) ?? null))
             bus.emit("attention");
-        } else if (e.kind === "run-ended") {
-          const run = store.run(e.runId);
-          if (run !== null && run.endedAt !== null && run.endedAt - run.startedAt <= 2 * 60_000) {
-            shortRuns.add(run.id);
-            void check();
-            return;
-          }
-        }
-        if (e.seatId === flightSeat(config)?.seat.id) void check();
-        else schedule();
+          void check();
+        } else schedule();
       });
       offBus = bus.subscribe((topic) => {
         if (topic === "attention" || topic === "boards" || topic === "flight") schedule();
