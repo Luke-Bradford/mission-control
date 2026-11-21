@@ -1008,6 +1008,10 @@ describe("cards", () => {
     expect((c.closest(".kcol") as HTMLElement).querySelector(".kh")?.textContent).toMatch(/^Done/);
     const flag = within(c).getByText("Status out of date");
     expect(flag.title).toBe("GitHub says Closed; the board's Status says In progress");
+    // the reason is on the card itself, not only in the tooltip
+    expect(
+      within(c).getAllByText("GitHub says Closed; the board's Status says In progress"),
+    ).toHaveLength(1);
     expect(within(c).queryByText(/^Blocked:/)).toBeNull();
     // the open one agrees with its Status: no flag
     expect(

@@ -675,54 +675,61 @@ export const QaReportRead = memo(function QaReportRead({
           )}
         </ReportScroll>
       </Panel>
-      <Panel
-        id={`qa-visual-${r.id}`}
-        title="Visual confirmation"
-        sub={
-          r.visual.applicability === "not_applicable"
-            ? "Not applicable · reason required"
-            : r.visual.applicability === "required"
-              ? "Before and after required"
-              : "Applicability not established"
-        }
-      >
-        <div className="pb uat-pairs">
-          {r.visual.applicability === "not_applicable" && !r.visual.pairs.length && (
-            <p className="uat-no-capture">{NOTHING_TO_SEE}</p>
-          )}
-          <p>
-            {r.visual.reason ?? "QA has not recorded why visual evidence does or does not apply."}
-          </p>
-          {!r.visual.pairs.length && r.visual.applicability !== "not_applicable" && (
-            <p className="uat-banner">Before/after pairs are missing from this report.</p>
-          )}
-          {r.visual.pairs.map((pair) => (
-            <section className="uat-pair" key={JSON.stringify(pair)}>
-              <h3>{pair.label}</h3>
-              <div className="uat-shots">
-                <QaReportImage image={pair.before} label={`Before · ${pair.label}`} />
-                <QaReportImage image={pair.after} label={`After · ${pair.label}`} />
-              </div>
-              {pair.diff && (
-                <details>
-                  <summary>Pixel diff · {pair.label}</summary>
-                  <QaReportImage image={pair.diff} label={`Pixel diff · ${pair.label}`} />
-                </details>
-              )}
-            </section>
-          ))}
-          {!!r.visual.screenshots?.length && (
-            <details>
-              <summary>Additional QA browser captures ({r.visual.screenshots.length})</summary>
-              <div className="uat-shots">
-                {r.visual.screenshots.map((s) => (
-                  <QaReportImage key={JSON.stringify(s)} image={s} label={s.label} />
-                ))}
-              </div>
-            </details>
-          )}
-        </div>
-      </Panel>
+      {r.visual.applicability === "not_applicable" &&
+      !r.visual.pairs.length &&
+      !r.visual.screenshots?.length ? (
+        // a change with no screen gets one line, not a panel with nothing in it
+        <p id={`qa-visual-${r.id}`} className="uat-no-capture">
+          {NOTHING_TO_SEE}
+          {r.visual.reason ? ` ${r.visual.reason}` : ""}
+        </p>
+      ) : (
+        <Panel
+          id={`qa-visual-${r.id}`}
+          title="Visual confirmation"
+          sub={
+            r.visual.applicability === "not_applicable"
+              ? "Not applicable · reason required"
+              : r.visual.applicability === "required"
+                ? "Before and after required"
+                : "Applicability not established"
+          }
+        >
+          <div className="pb uat-pairs">
+            <p>
+              {r.visual.reason ?? "QA has not recorded why visual evidence does or does not apply."}
+            </p>
+            {!r.visual.pairs.length && r.visual.applicability !== "not_applicable" && (
+              <p className="uat-banner">Before/after pairs are missing from this report.</p>
+            )}
+            {r.visual.pairs.map((pair) => (
+              <section className="uat-pair" key={JSON.stringify(pair)}>
+                <h3>{pair.label}</h3>
+                <div className="uat-shots">
+                  <QaReportImage image={pair.before} label={`Before · ${pair.label}`} />
+                  <QaReportImage image={pair.after} label={`After · ${pair.label}`} />
+                </div>
+                {pair.diff && (
+                  <details>
+                    <summary>Pixel diff · {pair.label}</summary>
+                    <QaReportImage image={pair.diff} label={`Pixel diff · ${pair.label}`} />
+                  </details>
+                )}
+              </section>
+            ))}
+            {!!r.visual.screenshots?.length && (
+              <details>
+                <summary>Additional QA browser captures ({r.visual.screenshots.length})</summary>
+                <div className="uat-shots">
+                  {r.visual.screenshots.map((s) => (
+                    <QaReportImage key={JSON.stringify(s)} image={s} label={s.label} />
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
+        </Panel>
+      )}
       <div className="uat-grid-two">
         <Panel title="What worked well">
           <ul className="pb qa-report-text-list">

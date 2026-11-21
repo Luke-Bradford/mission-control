@@ -132,10 +132,13 @@ it("requires an explicit non-visual reason while keeping the rest of the report"
     pairs: [],
   };
   render(<QaReportRead report={report} />);
-  expect(screen.getByText(report.visual.reason ?? "")).toBeTruthy();
-  expect(screen.getByText("Not applicable · reason required")).toBeTruthy();
+  // one quiet line carries the recorded reason; there is no empty panel
+  expect(
+    screen.getByText(`Nothing to see: this change has no screen. ${report.visual.reason}`),
+  ).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Visual confirmation" })).toBeNull();
+  expect(screen.queryByText("Not applicable · reason required")).toBeNull();
   expect(screen.queryByText(/Before\/after pairs are missing/)).toBeNull();
-  expect(screen.getByText("Nothing to see: this change has no screen.")).toBeTruthy();
 });
 it("does not say nothing to see when visual evidence is merely missing", () => {
   const report = qaReportFixture();
