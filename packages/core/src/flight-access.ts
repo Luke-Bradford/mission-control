@@ -82,7 +82,3 @@ export const FLIGHT_GH_WRITE_ACTIONS = [
   "ready",
   "delete_branch",
 ] as const;
-export type FlightGhWriteAction = (typeof FLIGHT_GH_WRITE_ACTIONS)[number];
-
-/** Branches `gh_write` never deletes, whatever the PRs say. */
-export const FLIGHT_PROTECTED_BRANCHES: readonly RegExp[] = [/^main$/, /^archive\//];

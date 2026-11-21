@@ -942,11 +942,6 @@ export const STOP_GRACE_MS = 10_000;
 
 /** What every crew action answers on a server that runs no crew (`MC_NO_CREW=1`, or no `crew`). */
 export const CREW_DISABLED = "crew is disabled on this server";
-/**
- * `GET /api/agents/:id/files` for a crew seat (its note; `/files/diff` answers it as the error):
- * no host git runs in a worktree a seat can write until the guard.
- */
-export const CREW_FILES_NOTE = "Files for crew seats arrive with the mailbox (phase 2d).";
 
 /** A crew seat's call sign, in every message, refusal and commit: its id upper-cased. */
 export const seatCallSign = (seatId: string): string => seatId.toUpperCase();
