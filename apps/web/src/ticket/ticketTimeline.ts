@@ -61,10 +61,19 @@ export const KIND_WORD: Record<PageEvent["kind"], string> = {
 
 const count = (n: number, word: string): string => `${n} ${word}`;
 
-/** What a run ran on and what was recommended for it; empty when neither was recorded. */
+/** What a run ran on and what was recommended for it, without the reason; empty when neither was recorded. */
 function runModelText(e: Extract<PageEvent, { kind: "run" }>): string {
   const ran = e.model == null ? "" : `, ran ${modelEffortText(e.model, e.effort ?? null)}`;
-  return `${ran}${e.advice === undefined ? "" : `; ${adviceLineText(e.advice)}`}`;
+  const rec =
+    e.advice === undefined
+      ? ""
+      : `; ${adviceLineText({ ...e.advice, reason: "" }).replace(/:\s*$/, "")}`;
+  return `${ran}${rec}`;
+}
+
+/** The full recommendation of a run event, with its reason, for the page's Full text; null when none. */
+export function runAdviceText(e: PageEvent): string | null {
+  return e.kind === "run" && e.advice !== undefined ? adviceLineText(e.advice) : null;
 }
 
 /** One line for an event; the page renders it as text. */

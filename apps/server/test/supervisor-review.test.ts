@@ -32,6 +32,7 @@ import { dirname, join } from "node:path";
 import {
   DEFAULT_PROFILES,
   type EvidencePage,
+  HUB_DEFAULT_REASON,
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
@@ -814,6 +815,28 @@ describe("startReview", () => {
     await until(() => expect(seatState("retro")).toBe("idle"));
     return { ...m, ...r, runId };
   }
+
+  it("a review run snapshots the planner's advice for the ticket", async () => {
+    store.setModelAdvice("mc", 42, {
+      step: "review",
+      model: null,
+      effort: "high",
+      reason: "touches the guard",
+      by: "planner",
+      at: 1,
+    });
+    const { runId } = await started();
+    expect(store.run(runId)?.advice).toMatchObject({ step: "review", by: "planner" });
+  });
+
+  it("a review run snapshots the hub default when nothing is stored", async () => {
+    const { runId } = await started();
+    expect(store.run(runId)?.advice).toMatchObject({
+      step: "review",
+      reason: HUB_DEFAULT_REASON,
+      by: "hub",
+    });
+  });
 
   it("reviews a trusted controller PR without a crew author run", async () => {
     const seed = reviewOfPush();

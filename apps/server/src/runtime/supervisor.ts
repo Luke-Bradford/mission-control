@@ -4570,6 +4570,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let runId = `${seatId}:${compactUtc(startedAt)}`;
       if (store.run(runId) !== null) runId = `${runId}-${seq}`;
       const cliSessionId = randomUUID();
+      const advice =
+        issue === null ? null : adviceFor(info.repo.id, issue, def.loop, info.seat, startedAt);
       const run: Run = {
         id: runId,
         agentId: seatId,
@@ -4593,6 +4595,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         prs: [],
         summary: null,
         reviewId,
+        ...(advice === null ? {} : { advice }),
       };
       store.upsertRun(run);
       if (scratch.installNote !== undefined) {
