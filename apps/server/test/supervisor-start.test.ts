@@ -524,7 +524,7 @@ describe("startRun eligibility", () => {
       },
     });
     sup.start();
-    const first = await sup.startRun("guido-1", 42);
+    await sup.startRun("guido-1", 42);
     await sup.endRun("guido-1");
     const second = await sup.startRun("guido-2", 42);
     expect(store.run(second.runId)?.advice).toMatchObject({
