@@ -9,18 +9,13 @@ import {
   crewHudState,
   DEFAULT_AWAY,
   driverStopKey,
-  ENGINE_NOT_RUNNING,
   escalationKind,
-  FLIGHT_NOT_RUNNING,
   FLOW_COLLECTOR_PREFIX,
   flowCollector,
-  GUARD_NONE_TEXT,
   GUARD_NOTE,
-  guardSummary,
   HUD_COLUMNS,
   HUD_STATE_LABEL,
   HUD_STATE_LAMP,
-  HUD_STATE_RANK,
   HUD_STATE_TONE,
   HUD_STATES,
   hudColumnOf,
@@ -70,8 +65,6 @@ describe("constants", () => {
     expect(METER_WARN_PCT).toBe(80);
     expect(METER_FULL_PCT).toBe(100);
     expect(TELEMETRY_RANGES).toEqual({ "1h": 60, "6h": 360, "24h": 1440, "7d": 10080 });
-    expect(FLIGHT_NOT_RUNNING).toBe("FLIGHT is not running yet. It arrives in phase 3.");
-    expect(ENGINE_NOT_RUNNING).toBe("Arrives with the engine (phase 2).");
     expect(RETRY_NOTE).toBe(
       "Tries 1 and 2 resume the same agent; try 3 starts a fresh agent on a stronger model; after that the ticket parks for you. A retry that makes no progress (same failures, same diff) stops early.",
     );
@@ -162,16 +155,6 @@ describe("hudState", () => {
       "Stopped",
       "Error",
     ]);
-    expect(HUD_STATE_RANK).toEqual({
-      error: 0,
-      stalled: 0,
-      blocked: 1,
-      parked: 1,
-      waiting: 2,
-      running: 3,
-      idle: 4,
-      stopped: 5,
-    });
   });
 });
 
@@ -598,7 +581,6 @@ describe("crewHudState", () => {
 
 describe("guard and test lock copy", () => {
   it("pins the exact text", () => {
-    expect(GUARD_NONE_TEXT).toBe("Guard: nothing blocked this week.");
     expect(GUARD_NOTE).toContain(
       "The guard catches agent mistakes and ordinary spellings, not deliberate evasion.",
     );
@@ -609,8 +591,6 @@ describe("guard and test lock copy", () => {
     expect(GUARD_NOTE).toContain("a full suite run with & or nohup");
     expect(GUARD_NOTE).toContain("FLIGHT runs with full access");
     expect(GUARD_NOTE).toContain("separate from the refusal counts above");
-    expect(guardSummary(1, 0)).toBe("Guard: 1 blocked command (for information)");
-    expect(guardSummary(3, 2)).toBe("Guard: 3 blocked commands, 2 new (for information)");
     expect(LOCK_FREE_TEXT).toBe("No full-suite run in progress.");
     expect(LOCK_NOBODY_WAITING).toBe("Nobody waiting.");
     expect(lockHolderText("GUIDO-2", "pnpm test", "1:23")).toBe(

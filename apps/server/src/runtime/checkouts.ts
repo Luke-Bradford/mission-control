@@ -1695,11 +1695,14 @@ export async function prepareCheckout(
     i.openPullRequestBranches,
     baseSha,
   );
+  const merged = i.mergedPullRequestBranches ?? [];
+  const plain = branchFor(i.issue, i.title);
+  // a new run never lands on a branch name a merged PR already used
   const branch =
     ticket?.branch ??
-    (ticket === null || ticket.branches.size === 0
-      ? branchFor(i.issue, i.title)
-      : freshTicketBranch(i.issue, i.title, ticket.branches));
+    ((ticket === null || ticket.branches.size === 0) && !merged.includes(plain)
+      ? plain
+      : freshTicketBranch(i.issue, i.title, new Set([...(ticket?.branches ?? []), ...merged])));
   // a worktree made before sessions had folders is reused where it is
   const own =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
