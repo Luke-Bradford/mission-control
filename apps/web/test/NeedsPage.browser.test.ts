@@ -497,6 +497,7 @@ describeRendered("Needs you page", () => {
         const open = {
           ...first,
           brief: boundBrief({
+            ask: "Which layout should the Needs you page use: a list and the open item, or one long column?",
             options: [
               { id: "a", label: PICKED, answer: PICKED },
               { id: "b", label: "One long column", answer: "One long column" },
@@ -646,11 +647,9 @@ describeRendered("Needs you page", () => {
               expect(posts(page, "/api/comms"), at).toBe(1);
               await shot("2-reply");
 
-              // pick an option: one receipt in the thread, and the question leaves the list (the
-              // page moves on to the next question, whose thread is the same stored conversation)
+              // Pick the bound option. The question leaves the list; the page moves on to the next
+              // question, whose thread is the same stored conversation.
               await page.click(`${surface.opts} button`);
-              expect(await inThread(page, surface.scope, `You chose: ${PICKED}`), at).toBe(1);
-              expect(await inThread(page, surface.scope, "You chose"), at).toBe(1);
               expect(posts(page, choosePath), at).toBe(1);
               expect(await waiting(page, "2"), at).toBe("2");
               if (surface.name === "page") {
@@ -661,9 +660,11 @@ describeRendered("Needs you page", () => {
                 expect(list, at).not.toContain("Which layout should the Needs you page use");
                 expect(list, at).toContain("Second ask");
               }
-              // the send and the reply are still there, once each, beside the receipt
+              // Discuss stays chat only: the send and reply remain once each and Accept did not
+              // manufacture a chat choice.
               expect(await inThread(page, surface.scope, ASKED), at).toBe(1);
               expect(await inThread(page, surface.scope, REPLY), at).toBe(1);
+              expect(await inThread(page, surface.scope, "You chose"), at).toBe(0);
               expect(page.errors(), at).toEqual([]);
               await shot("3-picked");
             } finally {
@@ -766,8 +767,8 @@ describeRendered("Needs you page", () => {
           "/api/attention": () => (chosen ? [other] : [protectedAsk, other]),
           "/api/comms/flight": () => ({ messages: chosen ? [choiceMessage] : [] }),
           // the receipt route's GET and the choice POST share the path
-          [`POST ${choicePath}`]: () => {
-            chosen = true;
+          [choicePath]: (method: string) => {
+            if (method === "POST") chosen = true;
             return receipt;
           },
         },
@@ -800,7 +801,8 @@ describeRendered("Needs you page", () => {
         expect(
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
-        // the answered question leaves "Waiting on you" (and its count); the thread shows the pick once
+        // the answered question leaves "Waiting on you" (and its count); a bound choice is not a
+        // chat message, so the POST and list transition are the evidence here.
         const listText = () =>
           page.evaluate(
             () =>
@@ -828,15 +830,6 @@ describeRendered("Needs you page", () => {
             undefined,
           ),
         ).toContain("Another ask still waiting");
-        expect(
-          await page.evaluate(
-            () =>
-              [...document.querySelectorAll("#needsSide .flight-thread-message")].filter((m) =>
-                m.textContent?.includes("You chose: Not now, clear it"),
-              ).length,
-            undefined,
-          ),
-        ).toBe(1);
         if (SHOTS) await page.screenshot(join(SHOTS, "needs-protected-after-1600x1000.png"));
       } finally {
         await page.close();
