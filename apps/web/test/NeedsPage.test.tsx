@@ -21,11 +21,11 @@ import {
   brief,
   CONFIG,
   crewRow,
+  escalation,
   HOUR,
   item,
   MIN,
   NOW,
-  escalation,
   SEAT_Q,
 } from "./fixtures.ts";
 

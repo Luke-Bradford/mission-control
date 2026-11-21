@@ -1,6 +1,6 @@
 import type { AttentionItem, BriefBinding } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { answerTarget, askedQuestion, boundChoice, flightText } from "../src/comms/answer.ts";
+import { answerTarget, askedQuestion, boundChoice } from "../src/comms/answer.ts";
 import type { FlightSeat } from "../src/flight/flightTypes.ts";
 import { BRIEF_REVISION, boundBrief, crewRow, item, SEAT_Q } from "./fixtures.ts";
 

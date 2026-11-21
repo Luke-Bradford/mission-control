@@ -358,8 +358,6 @@ describe("ItemPanel, acting on an item", () => {
     return fn;
   }
   const panel = () => document.querySelector("#discuss") as HTMLElement;
-  /** What a pick of SEAT_Q's first option carries: the brief shown and the option's place in it. */
-  const PICK_5174 = { briefAt: NOW, option: 0 };
   const enabled = async (name: string) => {
     const b = (await within(panel()).findByRole("button", { name })) as HTMLButtonElement;
     await waitFor(() => expect(b.disabled).toBe(false));
