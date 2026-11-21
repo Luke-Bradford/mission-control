@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { eventLine } from "../../web/src/ticket/ticketTimeline.ts";
+import { eventLine, runAdviceText } from "../../web/src/ticket/ticketTimeline.ts";
 
 type RunEvent = Parameters<typeof eventLine>[0];
 
@@ -22,9 +22,18 @@ describe("ticket timeline run line", () => {
         },
       }),
     );
-    expect(line).toContain(
-      "ran sonnet-5.5 medium; recommended opus-5.5 high by the planner: Touches the supervisor.",
-    );
+    expect(line).toContain("ran sonnet-5.5 medium; recommended opus-5.5 high by the planner");
+    expect(line).not.toContain("Touches the supervisor");
+  });
+
+  it("gives the full recommendation with its reason apart from the line", () => {
+    const reason = "Touches the supervisor. ".repeat(12).trim();
+    const e = run({
+      model: "sonnet-5.5",
+      advice: { step: "build", model: "opus-5.5", effort: "high", reason, by: "planner", at: 1 },
+    });
+    expect(runAdviceText(e)).toBe(`recommended opus-5.5 high by the planner: ${reason}`);
+    expect(runAdviceText(run({}))).toBeNull();
   });
 
   it("shows only the actual model for a run with no advice", () => {
