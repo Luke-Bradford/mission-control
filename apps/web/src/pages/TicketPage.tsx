@@ -36,6 +36,7 @@ import {
   type PageEvent,
   prEvents,
   questionState,
+  runAdviceText,
 } from "../ticket/ticketTimeline.ts";
 import "../ticket/ticket.css";
 
@@ -167,6 +168,7 @@ function TicketPlanResult({ prs }: { prs: TicketQaPr[] }) {
 
 function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null }) {
   const findings = e.kind === "review" ? findingsOf(t, e.reviewId) : [];
+  const advice = runAdviceText(e);
   return (
     <li className="tk-event" data-kind={e.kind}>
       <span className="tk-when">{tz ? `${dayMonth(e.at, tz)} ${hhmm(e.at, tz)}` : dash}</span>
@@ -179,6 +181,12 @@ function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null
           <p className="tk-text">
             <MentionText text={e.kind === "comms" ? e.text : `${e.decision}\n${e.basis}`} />
           </p>
+        </details>
+      )}
+      {advice !== null && (
+        <details className="tk-more">
+          <summary>Full text</summary>
+          <p className="tk-text">{advice}</p>
         </details>
       )}
       {findings.length > 0 && (

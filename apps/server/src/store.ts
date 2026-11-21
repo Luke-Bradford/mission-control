@@ -14,6 +14,7 @@ import type {
 } from "@mc/core";
 import {
   type AccountId,
+  type AdviceStep,
   type AgentId,
   ASKING_RUN_ENDED_REASON,
   type AttentionBrief,
@@ -76,6 +77,8 @@ import {
   type LoopEvent,
   type LoopKind,
   type MachineSample,
+  type ModelAdvice,
+  type ModelTableData,
   OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
@@ -128,6 +131,7 @@ import { auditItems, recordAuditItem } from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { flightQueries } from "./store/flight.ts";
 import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
+import { modelTableData } from "./store/model-table.ts";
 import * as reviewsStore from "./store/reviews.ts";
 import {
   evidenceOf,
@@ -695,6 +699,45 @@ export class Store {
           by: r.by as ProfileOverride["by"],
         }
       : null;
+  }
+
+  /** Records the model and effort recommended for a ticket's step; a later write replaces it. */
+  setModelAdvice(repoId: RepoId, issue: number, a: ModelAdvice): void {
+    this.db
+      .prepare(
+        `INSERT INTO model_advice (repo_id, issue, step, model, effort, reason, by, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo_id, issue, step) DO UPDATE SET model = excluded.model,
+           effort = excluded.effort, reason = excluded.reason, by = excluded.by, at = excluded.at`,
+      )
+      .run(repoId, issue, a.step, a.model, a.effort, a.reason, a.by, a.at);
+    if (a.by === "step-up")
+      this.db
+        .prepare("INSERT INTO model_step_ups (repo_id, issue, at) VALUES (?, ?, ?)")
+        .run(repoId, issue, a.at);
+  }
+
+  modelAdvice(repoId: RepoId, issue: number, step: AdviceStep): ModelAdvice | null {
+    const r = this.db
+      .prepare(
+        "SELECT model, effort, reason, by, at FROM model_advice WHERE repo_id = ? AND issue = ? AND step = ?",
+      )
+      .get(repoId, issue, step) as Row | undefined;
+    return r
+      ? {
+          step,
+          model: r.model as string | null,
+          effort: r.effort as string | null,
+          reason: r.reason as string,
+          by: r.by as ModelAdvice["by"],
+          at: r.at as number,
+        }
+      : null;
+  }
+
+  /** The runs and seat changes behind Audit's model table, for a window of `since` to `until`. */
+  modelTableData(since: number, until: number): ModelTableData {
+    return modelTableData(this.db, since, until);
   }
 
   run(id: string): Run | null {

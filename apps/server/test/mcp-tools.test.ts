@@ -26,6 +26,7 @@ import {
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
   type CheckDrop,
+  COMMS_MC,
   COMMS_MESSAGE_MAX,
   COMMS_QUESTION_TO_FLIGHT,
   CREW_MODES,
@@ -63,6 +64,7 @@ import {
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_PROFILE_ONLY,
+  MC_PLAN_STEPS_PLANNER_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_BODY_EMPTY,
@@ -5234,6 +5236,42 @@ describe("report_findings", () => {
     });
   });
 
+  it("records a step-up for the build step when round 2 repeats a class of blocking finding", async () => {
+    store.upsertRun(run({ effort: "medium", model: "sonnet-5.5" }));
+    expect(await report(args({ findings: [finding({ category: "correctness" })] }))).toEqual({
+      text: expect.stringContaining(FINDINGS_RECORDED),
+    });
+    expect(store.modelAdvice("mc", 42, "build")).toBeNull();
+    const second = store.requestReview({
+      authorRunId: RUN,
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 2,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
+    reviewRun("retro:round-2", second);
+    await report(args({ findings: [finding({ category: "correctness", file: "apps/b.ts" })] }), {
+      seatId: "retro",
+      runId: "retro:round-2",
+    });
+    expect(store.modelAdvice("mc", 42, "build")).toMatchObject({
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "high",
+      by: "step-up",
+      reason: expect.stringContaining("correctness"),
+    });
+    expect(store.loopEventsOfRun(RUN).map((e) => e.key)).toContain(`${RUN}:stepup:${second}`);
+    expect(store.comms(0).some((c) => c.from === COMMS_MC && c.text.includes("correctness"))).toBe(
+      true,
+    );
+  });
+
   it("validates structured report fields and only accepts prior-round resolutions", async () => {
     expect((await report(args({ checked: [{ check: "nope", result: "pass" }] }))).isError).toBe(
       true,
@@ -5874,6 +5912,26 @@ describe("report_plan", () => {
       updatedAt: NOW,
     });
     expect(await plan(PLAN, { seatId: "guido-1", runId })).toEqual(refused(MC_PLAN_NOT_FAO));
+    expect(ghCalls()).toEqual([]);
+  });
+
+  it("refuses steps from a build seat", async () => {
+    const runId = "guido:steps";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const steps = [{ step: "build", model: "opus-5.5", reason: "hard" }];
+    expect(
+      await tool("report_plan", pt).call({ seatId: "guido-1", runId }, { plan: PLAN, steps }),
+    ).toEqual(refused(MC_PLAN_STEPS_PLANNER_ONLY));
+    expect(store.modelAdvice("mc", 7, "build")).toBeNull();
     expect(ghCalls()).toEqual([]);
   });
 
@@ -6554,6 +6612,37 @@ describe("report_plan", () => {
       refused(planNoProfilesText("boom")),
     );
     expect(ghCalls()).toEqual([]);
+  });
+
+  it("report_plan records model advice per step", async () => {
+    expect(
+      await planWith({
+        steps: [
+          { step: "build", model: "sonnet-5.5", effort: "medium", reason: "small change" },
+          { step: "review", model: "opus-5.5", reason: "safety step" },
+        ],
+      }),
+    ).toEqual({ text: MC_PLAN_WRITTEN });
+    expect(store.modelAdvice("mc", 7, "build")).toMatchObject({
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "medium",
+      reason: "small change",
+      by: "planner",
+    });
+    expect(store.modelAdvice("mc", 7, "review")).toMatchObject({ model: "opus-5.5", effort: null });
+    expect(store.modelAdvice("mc", 7, "plan")).toBeNull();
+  });
+
+  it("refuses a step given twice before gh is called, and records no advice when the plan fails", async () => {
+    const one = { step: "build", model: "sonnet-5.5", reason: "r" };
+    expect(await planWith({ steps: [one, one] })).toEqual(
+      refused(`${MC_BAD_ARGS}steps: each step may appear once`),
+    );
+    expect(ghCalls()).toEqual([]);
+    ghState(view("Do X.", "CLOSED"));
+    await planWith({ steps: [one] });
+    expect(store.modelAdvice("mc", 7, "build")).toBeNull();
   });
 
   it("takes a profile and its reason together or not at all", async () => {

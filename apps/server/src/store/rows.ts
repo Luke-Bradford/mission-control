@@ -13,6 +13,7 @@ import type {
   GuardHit,
   GuardRule,
   LoopKind,
+  ModelAdvice,
   ReportedTest,
   ReviewRow,
   ReviewState,
@@ -48,6 +49,16 @@ export function parsePlan(raw: string): { plan?: Run["plan"] } {
   }
 }
 
+/** A run's stored advice; a value that won't parse is dropped rather than failing every run read. */
+function parseAdvice(raw: string): { advice?: ModelAdvice } {
+  try {
+    const advice = JSON.parse(raw) as ModelAdvice;
+    return advice !== null && typeof advice === "object" ? { advice } : {};
+  } catch {
+    return {};
+  }
+}
+
 export const toRun = (r: Row): Run => ({
   ...(r.vendor === "codex" ? { vendor: "codex" as const } : {}),
   ...(r.latest_plan == null ? {} : { latestPlan: r.latest_plan as string }),
@@ -68,6 +79,7 @@ export const toRun = (r: Row): Run => ({
     ? {}
     : { loop: JSON.parse(r.loop as string) as RunLoop }),
   ...(r.plan == null ? {} : parsePlan(r.plan as string)),
+  ...(r.advice == null ? {} : parseAdvice(r.advice as string)),
   // Absent, not null, on a run that started without a profile.
   ...(r.profile === null || r.profile === undefined
     ? {}

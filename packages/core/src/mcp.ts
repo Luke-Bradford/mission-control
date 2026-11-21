@@ -564,6 +564,10 @@ export const MC_PLAN_WRITTEN_CONTINUE =
 export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner or build seats.";
 export const MC_PLAN_PROFILE_ONLY =
   "Not written: profile and profile_reason are for planner seats.";
+export const MC_PLAN_STEPS_ONCE = "each step may appear once";
+export const MC_PLAN_STEPS_PLANNER_ONLY = "Only the planner records model advice; leave steps out.";
+export const MC_PLAN_STEPS_HINT =
+  "Recommend a model and effort per step with the reason only when Audit's model table or a trial result supports it.";
 export const MC_PLAN_ALREADY =
   "Not written: the ticket already has a ## Plan section. Ask FLIGHT with mc ask_flight if it needs replacing.";
 export const MC_PLAN_ISSUE_CLOSED = "Not written: the ticket is closed.";

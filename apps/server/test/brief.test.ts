@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import {
   DEFAULT_PROFILES,
+  MC_PLAN_STEPS_HINT,
   OLDER_FINDINGS_MAX,
   type Profile,
   type ProfileRoute,
@@ -222,8 +223,11 @@ describe("ticketBrief profile lines", () => {
       profile: chosen(profile, { by: "size", size: "M" }),
       profileNames: ["feature", "bugfix"],
     });
-    expect(out.split("\n").at(-1)).toBe(
+    expect(out.split("\n").at(-2)).toBe(
       "To use another template, call mc report_plan with profile (one of: feature, bugfix) and profile_reason; the developer still runs every CI check the picked template requires.",
+    );
+    expect(out.split("\n").at(-1)).toBe(
+      `${MC_PLAN_STEPS_HINT} Pass them as steps to mc report_plan.`,
     );
     expect(
       lines({ profile: chosen(profile, { by: "size", size: "M" }), profileNames: ["feature"] }),

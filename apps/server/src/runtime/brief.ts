@@ -19,6 +19,7 @@ import {
   evidenceImageName,
   type LoopKind,
   MC_LINE_PREFIX,
+  MC_PLAN_STEPS_HINT,
   MC_TOOL_NAMES,
   OLDER_FINDINGS_MAX,
   profileRouteText,
@@ -175,6 +176,7 @@ function profileLines(i: Pick<BriefInput, "profile" | "loop" | "profileNames">):
     ...(i.loop === "plan" && i.profileNames !== undefined
       ? [
           `To use another template, call mc report_plan with profile (one of: ${i.profileNames.join(", ")}) and profile_reason; the developer still runs every CI check the picked template requires.`,
+          `${MC_PLAN_STEPS_HINT} Pass them as steps to mc report_plan.`,
         ]
       : []),
   ];
