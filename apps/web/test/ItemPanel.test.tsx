@@ -488,6 +488,27 @@ describe("ItemPanel, acting on an item", () => {
     expect((await ui.findByTestId("choice-line")).textContent).toContain("Answer sent.");
   });
 
+  it("keeps an unbound complete person brief readable without legacy reply actions", async () => {
+    const { binding: _binding, ...withoutBinding } = boundBrief({
+      person: { source: { kind: "github", messageId: "101", revision: "source-v1" } },
+    });
+    const current = { ...personItem, brief: withoutBinding };
+    const path = `/api/attention/${encodeURIComponent(current.key)}/choice`;
+    const fn = acting([current]);
+    const ui = within(panel());
+    await ui.findByText("Why it needs you");
+    expect(ui.getByText("Consequence of 5174.")).toBeTruthy();
+    const accept = ui.getByRole("button", {
+      name: "Accept recommendation: 5174",
+    }) as HTMLButtonElement;
+    expect(accept.disabled).toBe(true);
+    expect(ui.getAllByText(/Needs a refreshed brief/).length).toBeGreaterThan(0);
+    expect(ui.queryByText("Suggested replies")).toBeNull();
+    expect(ui.queryByRole("button", { name: "Reply" })).toBeNull();
+    fireEvent.click(accept);
+    expect(posts(fn, path)).toEqual([]);
+  });
+
   it("Discuss opens and focuses the conversation and sends no choice", async () => {
     const fn = acting([BOUND_SEAT]);
     fireEvent.click(await enabled("Discuss"));

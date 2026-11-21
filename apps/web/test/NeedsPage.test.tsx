@@ -1081,4 +1081,29 @@ describe("Needs you page, a complete brief", () => {
       optionId: "a",
     });
   });
+
+  it("keeps an unbound complete person brief readable on the page", async () => {
+    const { binding: _binding, ...withoutBinding } = boundBrief({
+      person: { source: { kind: "github", messageId: "1", revision: "source-v1" } },
+    });
+    const person = item({
+      key: "person:unbound:1",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      brief: withoutBinding,
+    });
+    const path = `/api/attention/${encodeURIComponent(person.key)}/choice`;
+    const fn = routes([person]);
+    render(<Needs item={person.key} />);
+    expect(await screen.findByText("Why it needs you")).toBeTruthy();
+    expect(screen.getByText("Consequence of 5174.")).toBeTruthy();
+    const accept = screen.getByRole("button", {
+      name: "Accept recommendation: 5174",
+    }) as HTMLButtonElement;
+    expect(accept.disabled).toBe(true);
+    expect(screen.queryByText("Suggested replies")).toBeNull();
+    fireEvent.click(accept);
+    expect(posts(fn, path)).toEqual([]);
+  });
 });

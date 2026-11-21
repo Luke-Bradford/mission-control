@@ -253,11 +253,10 @@ export function useItemDetail(key: string | null) {
   const thread = currentThread ?? savedPerson?.thread;
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
   const handledHow = handled?.how ?? justHandled[k];
-  // A person-source brief may now carry the same complete, bound decision contract as every
-  // other ask. Keep the legacy reply controls only for older person records without that contract.
-  const completePersonBrief = Boolean(
-    item?.brief?.person && item.brief.decision && item.brief.binding,
-  );
+  // A person-source brief may carry a complete decision even when the server cannot prepare an
+  // action for it. Keep that contract readable and let its missing binding disable choices.
+  // Only older records with no decision context use the legacy reply controls.
+  const completePersonBrief = Boolean(item?.brief?.person && item.brief.decision);
   const options = completePersonBrief
     ? (item?.brief?.options ?? [])
     : item?.brief?.person
