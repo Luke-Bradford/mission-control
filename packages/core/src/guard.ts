@@ -86,10 +86,6 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.crewTidy,
 ];
 
-/** What a power-gated tool says when the repo is not `superuser`. */
-export const needsSuperuserText = (repo: string): string =>
-  `${repo} has flight_powers: standard; this needs flight_powers: superuser in config.yaml`;
-
 /** What `flightGitBranch` answers for a detached HEAD: its commits move no branch, main included. */
 export const DETACHED_HEAD = "HEAD";
 

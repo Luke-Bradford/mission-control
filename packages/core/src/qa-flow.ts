@@ -66,7 +66,6 @@ export const QA_FLOW_METRICS = {
     from: "server",
   },
 } as const satisfies Readonly<Record<string, MetricDef>>;
-export type QaFlowMetricId = keyof typeof QA_FLOW_METRICS;
 
 const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
 
