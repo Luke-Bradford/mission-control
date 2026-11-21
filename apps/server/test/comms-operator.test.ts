@@ -104,7 +104,6 @@ it("an identical send within a minute is stored once and answers already sent wi
   });
   expect(again.json().message.id).toBe(first.message.id);
   expect(store.comms(0)).toHaveLength(1);
-  expect(store.commsRepeatCount(0)).toBe(1);
   expect(woken).toEqual(["guido-1"]);
   // after the minute it is stored again
   tick(61_000);

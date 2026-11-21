@@ -206,30 +206,6 @@ describe("chatter", () => {
   });
 });
 
-describe("repeat-message", () => {
-  it("gives one row for a message sent twice", () => {
-    msg({ pr: 3 });
-    store.addComms(
-      {
-        at: NOW - HOUR + 2000,
-        from: "guido-1",
-        to: "flight-1",
-        ticket: "repo#7",
-        text: "hello",
-        pr: 3,
-        senderKind: "seat",
-      },
-      undefined,
-      NOW - HOUR,
-    );
-    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7", pr: 3 }]);
-  });
-  it("gives no row for a message sent once", () => {
-    msg();
-    expect(rows("repeat-message")).toEqual([]);
-  });
-});
-
 describe("repeat-notice", () => {
   const notice = (n: number, pr = 5) => {
     for (let i = 0; i < n; i++)
@@ -340,26 +316,5 @@ describe("range boundaries and links", () => {
       ["comms:1", "repo#7"],
       ["comms:3", "repo#8"],
     ]);
-  });
-  it("links an exact repeat through its run's ticket, and leaves out one with no link", () => {
-    store.upsertRun(run({ id: "r1" }));
-    const repeat = (over: object) => {
-      const row = {
-        at: NOW - HOUR,
-        from: "guido-1",
-        to: "flight-1",
-        ticket: null,
-        text: "hello",
-        senderKind: "seat" as const,
-        ...over,
-      };
-      store.addComms(row, undefined, NOW - 2 * HOUR);
-      store.addComms({ ...row, at: NOW - HOUR + 1 }, undefined, NOW - 2 * HOUR);
-    };
-    repeat({ fromRunId: "r1", text: "linked" });
-    repeat({ text: "unlinked" });
-    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7" }]);
-    for (const r of store.audit(SINCE, NOW).improvements ?? [])
-      if (r.kind !== "tool-usage") expect(r.ticket !== null || r.pr !== null).toBe(true);
   });
 });

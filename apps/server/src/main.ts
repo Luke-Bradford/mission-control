@@ -71,7 +71,6 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
-import { takeStuckPrs } from "./engine/stuck-prs.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { flightConflicts } from "./flight/conflicts.ts";
@@ -819,21 +818,6 @@ export async function main(): Promise<void> {
         now: Date.now,
         log: (line) => log(`engine: ${line}`),
       }),
-    takeStuckPrs: (onlySeat) =>
-      takeStuckPrs(
-        {
-          config,
-          store,
-          supervisor,
-          login: hubLogin,
-          rules: engineRules,
-          inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
-          enabled: engineOn,
-          now: Date.now,
-          log: (line) => log(`engine: ${line}`),
-        },
-        onlySeat,
-      ),
     takeNext: (seatId) =>
       takeNext(
         {

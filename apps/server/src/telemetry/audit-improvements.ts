@@ -206,22 +206,6 @@ export function messageImprovements(
     });
   }
 
-  // The same message sent more than once (the exact-repeat guard's count).
-  for (const r of all(
-    `SELECT p.message_id, COUNT(*) AS n, MAX(p.at) AS at FROM comms_repeats p
-     WHERE p.at >= ? AND p.at <= ? GROUP BY p.message_id ORDER BY p.message_id`,
-    since,
-    until,
-  )) {
-    out.push({
-      kind: "repeat-message",
-      subject: `comms:${r.message_id as number}`,
-      ...commsLink(r.message_id as number),
-      detail: `The same message was sent ${(r.n as number) + 1} times; the hub stored it once.`,
-      at: r.at as number,
-    });
-  }
-
   // The same hub notice repeated on one PR.
   for (const r of all(
     `SELECT pr, text, COUNT(*) AS n, MAX(at) AS at, MAX(ticket) AS ticket FROM comms

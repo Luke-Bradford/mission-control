@@ -96,8 +96,6 @@ import { flightQuestion } from "../comms/index.ts";
 import { pausedSeat, readCrewPause } from "../config/crew-pause.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { reviewHoldOf } from "../engine/review-hold.ts";
-import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
   attentionItems,
   crew,
@@ -1040,12 +1038,6 @@ export function flightState(i: {
     seats: reviewSeats.map((seat) => {
       const reviews = reviewRows.filter((row) => row.seatId === seat.id);
       const held = unended(seat.id);
-      const holds = reviews.flatMap((row) => {
-        const hold = row.state === "queued" ? reviewHoldOf(store, row.id) : null;
-        return hold === null
-          ? []
-          : [{ prNumber: row.prNumber, reason: hold.reason, waitsOn: hold.prNumber }];
-      });
       return {
         seat: seat.id,
         queued: reviews.filter((row) => row.state === "queued").length,
@@ -1058,7 +1050,6 @@ export function flightState(i: {
             .filter((row) => row.state === "queued")
             .map((row) => Math.floor((now - row.createdAt) / 60_000)),
         ),
-        ...(holds.length > 0 ? { holds } : {}),
         idle:
           !seatUnavailable(seat) &&
           !accountAtStop(
@@ -1399,8 +1390,6 @@ export function flightState(i: {
       session,
       seats,
       aside,
-      ...(i.areas === undefined ? {} : { areas: i.areas }),
-      stuckPrs: stuckPrs({ store, config, repoId: session.repoId, flow, now }),
       triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
       readyPrs: prs.flatMap((p) => {
         const at = store

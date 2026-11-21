@@ -1988,32 +1988,6 @@ describe("the FLIGHT watcher", () => {
     }
   });
 
-  it("holds FLIGHT's starts while a restart-storm alarm stands: no start, no failed-start note, one start after it closes", async () => {
-    const id = store.waste.insertAlarm(
-      {
-        check: "restart-storm",
-        subject: "flight-1",
-        repoId: "mc",
-        ticket: null,
-        seatId: "flight-1",
-        runId: null,
-        level: 8,
-        evidence: "FLIGHT-1 started 8 times in the last hour.",
-      },
-      nowMs,
-    );
-    for (let i = 0; i < 5; i++) {
-      nowMs += 60_000;
-      await watch.check();
-    }
-    expect(startCalls).toEqual([]);
-    expect(notesOpen()).toEqual([]);
-    store.waste.closeAlarm(id, nowMs);
-    nowMs += 60_000;
-    await watch.check();
-    expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
-  });
-
   it("keeps starting FLIGHT while its account's weekly pace passes 100%", async () => {
     for (const [at, pct] of [
       [T0 - 6 * 60 * MIN, 40],
@@ -3709,72 +3683,6 @@ describe("triage and quiet wakes", () => {
     makeWatch();
     await watch.check();
     expect(sendCalls).toHaveLength(1);
-  });
-
-  it("keeps new, finished plan and resolved dependency causes separate per ticket", () => {
-    const card = triageCard({ status: "Refinement", blockedBy: [{ ref: "mc#1", closed: false }] });
-    store.replaceBoard("mc", [card]);
-    const initial = signalState();
-    expect(initial.triage[0]?.cause).toBe("new");
-    markFlightSignalsShown(store, initial, nowMs);
-    store.upsertRun(run("planner", "guido-1", { ticket: "mc#176" }));
-    store.addLoopEvent("planner:plan", "planner", "Plan written for mc#176", T0);
-    store.replaceBoard("mc", [{ ...card, blockedBy: [{ ref: "mc#1", closed: true }] }]);
-    const next = signalState();
-    expect(next.triage.map((t) => t.cause).sort()).toEqual(["dependency", "plan"]);
-    markFlightSignalsShown(store, next, nowMs);
-    expect(signalState().triage).toEqual([]);
-  });
-
-  it("wakes FLIGHT once when a chain of waiting tickets has stood still for 30 minutes", async () => {
-    liveCrew();
-    const root = triageCard({ issueNumber: 1, status: "In progress", state: "in progress" });
-    const mid = triageCard({
-      issueNumber: 2,
-      status: "Blocked",
-      state: "blocked",
-      after: { issues: [1], prs: [] },
-    });
-    const top = triageCard({
-      issueNumber: 3,
-      status: "Blocked",
-      state: "blocked",
-      after: { issues: [2], prs: [] },
-    });
-    store.replaceBoard("mc", [root, mid, top]);
-    const stalled = () => signalState().signals.filter((x) => x.kind === "chain_stalled");
-    expect(stalled()).toEqual([]);
-    nowMs += 29 * MIN;
-    expect(stalled()).toEqual([]);
-    nowMs += MIN;
-    const found = stalled();
-    // one signal for the whole chain, not one for each ticket in it
-    expect(found.map((x) => x.key)).toEqual(["mc#3>mc#2>mc#1"]);
-    expect(found[0]?.evidence).toContain("30 min");
-    markFlightSignalsShown(store, signalState(), nowMs);
-    expect(stalled().filter((x) => !x.told)).toEqual([]);
-  });
-
-  it("drops a stalled chain that ended before FLIGHT was told", () => {
-    liveCrew();
-    const waiting = triageCard({
-      issueNumber: 2,
-      status: "Blocked",
-      state: "blocked",
-      after: { issues: [1], prs: [] },
-    });
-    const root = triageCard({ issueNumber: 1, status: "In progress", state: "in progress" });
-    store.replaceBoard("mc", [root, waiting]);
-    signalState();
-    nowMs += 31 * MIN;
-    expect(signalState().signals.filter((x) => x.kind === "chain_stalled")).toHaveLength(1);
-    store.replaceBoard("mc", [{ ...root, status: "Done", state: "done", closed: true }, waiting]);
-    store.upsertPullRequests(
-      "mc",
-      [stored(7, { ticket: "mc#1", closingIssues: [1], state: "merged", mergedAt: nowMs })],
-      nowMs,
-    );
-    expect(signalState().signals.filter((x) => x.kind === "chain_stalled")).toEqual([]);
   });
 
   it("keeps the stored PR list and wake facts stable on a phase-only move and metadata timestamp change", () => {

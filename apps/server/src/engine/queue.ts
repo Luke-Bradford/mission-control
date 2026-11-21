@@ -40,7 +40,6 @@ import {
   seatCallSign,
   seatDef,
   type TicketView,
-  WASTE_HELD_PREFIX,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import type { CardNow } from "../collectors/github.ts";
@@ -59,7 +58,6 @@ import { waitReader } from "../queue/dependencies.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { restartHold, ticketParked } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { paceStartCheck } from "../telemetry/pace.ts";
@@ -169,19 +167,15 @@ export const maxOpenRunsOf = (config: CcConfig): number =>
 
 /** The cards in the Ready column (a closed card is Done, never Ready), in the order picked. */
 function readyCards(store: Store, repoId: RepoId): BoardItem[] {
-  return (
-    store
-      .board(repoId)
-      .filter((c) => hudColumnOf(c) === "Ready")
-      // a ticket a waste alarm parked is not dealt: FLIGHT takes the next
-      .filter((c) => ticketParked(store, refOf(repoId, c.issueNumber)) === null)
-      .sort(
-        (a, b) =>
-          priorityRank(a.priority) - priorityRank(b.priority) ||
-          a.createdAt - b.createdAt ||
-          a.issueNumber - b.issueNumber,
-      )
-  );
+  return store
+    .board(repoId)
+    .filter((c) => hudColumnOf(c) === "Ready")
+    .sort(
+      (a, b) =>
+        priorityRank(a.priority) - priorityRank(b.priority) ||
+        a.createdAt - b.createdAt ||
+        a.issueNumber - b.issueNumber,
+    );
 }
 
 /**
@@ -522,15 +516,6 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
     store.dropQueued(seatId, repoId, issue);
     return;
   }
-  // a waste alarm holds this ticket or this seat: no note, nothing to fix on the card
-  if (ticketParked(store, ref) !== null) {
-    store.dropQueued(seatId, repoId, issue);
-    return;
-  }
-  if (restartHold(store, seatId) !== null) {
-    store.untake(seatId, repoId, issue);
-    return;
-  }
   // the setting or the plan may have changed since the card was queued: read both again; fails
   // closed on unreadable rules
   const live = await deps.rules(repoId);
@@ -645,8 +630,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       e instanceof SupervisorError &&
       (e.message === AWAY_START_REFUSED ||
         e.message === AWAY_QUOTA_REFUSED ||
-        e.message.startsWith(PACE_HELD_PREFIX) ||
-        e.message.startsWith(WASTE_HELD_PREFIX))
+        e.message.startsWith(PACE_HELD_PREFIX))
     ) {
       store.untake(seatId, repoId, issue);
       return;

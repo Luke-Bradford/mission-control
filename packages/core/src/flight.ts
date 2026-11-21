@@ -1049,11 +1049,6 @@ export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
-/**
- * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
- * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
- */
-export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1064,8 +1059,6 @@ export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
 /** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
 export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
-/** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
-export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
@@ -1080,7 +1073,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
-  "chain_stalled",
   "github_budget",
   "hub_error",
   "old_park",
@@ -1090,8 +1082,6 @@ export const FLIGHT_SIGNAL_KINDS = [
   "controller_unanswered",
   "seat_call",
   "question_changed",
-  "waste_alarm",
-  "stuck_pr",
   "wake_stuck",
 ] as const;
 /** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
@@ -1099,6 +1089,9 @@ export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [
   "idle_no_work",
   "budget_unused",
   "wait_over",
+  "stuck_pr",
+  "waste_alarm",
+  "chain_stalled",
 ];
 export interface FlightSignal {
   checks?: string[];

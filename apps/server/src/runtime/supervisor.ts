@@ -128,8 +128,6 @@ import {
   ticketInReviewText,
   ticketPathGrants,
   trimHookCommand,
-  wasteParkText,
-  wasteStormText,
   watchCheckoutName,
   watchStartRefusedText,
 } from "@mc/core";
@@ -175,7 +173,6 @@ import { approvedPaths, runPathGrants, setRunPathGrants } from "../repo/path-gra
 import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
-import { restartHold, ticketParked } from "../spend/waste.ts";
 import {
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
@@ -957,8 +954,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
-  /** Runs the engine is waking for rework: that is a fix, not a "carry on" resume the waste alarm counts. */
-  const wakingRuns = new Set<string>();
   const deferredRecoveries = new Set<string>();
   let recoveringDeferred: Promise<void> | null = null;
   let unpauseResume: (() => void) | undefined;
@@ -1565,23 +1560,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   }
 
   /**
-   * A run has ended (however it ended): its open questions close and its strays go. Never throws;
+   * A run has ended (however it ended): its open questions close. Never throws;
    * the end itself is already recorded.
    */
   function closeRunItems(info: SeatInfo, runId: string | null): void {
     try {
       const seatId = info.seat.id;
-      const mine = store
-        .strays()
-        .filter((x) => x.sessionId === info.session.id && x.agentId === seatId)
-        .map((x) => x.path);
-      store.clearStrays(info.session.id, mine);
       // only this run's questions: another run of the seat, set aside, may still wait on the operator
       if (runId === null) store.endSeatQuestions(seatId, now());
       else store.endRunQuestions(runId, now());
       bus.emit("attention");
     } catch (e) {
-      log(`${info.seat.id}: could not close the run's questions and strays: ${errText(e)}`);
+      log(`${info.seat.id}: could not close the run's questions: ${errText(e)}`);
     }
   }
 
@@ -2274,9 +2264,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
       spawnedAt: resume ? Date.now() : null,
     });
-    // a carry-on resume is recorded: three without a report is a retry loop (waste alarm)
-    if (l.resumedAt !== null && !wakingRuns.has(run.id))
-      store.addResumeAttempt(run.id, l.resumedAt);
     // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
     if (resume) {
       void session.ready.then(() => {
@@ -3600,16 +3587,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       ) {
         throw new SupervisorError(422, AWAY_QUOTA_REFUSED);
       }
-      // A waste alarm stops a loop: a seat in a restart storm, or a parked ticket. The operator's
-      // explicit start and FLIGHT's pass; a reader never competes for the ticket.
-      if (!readOnly && !opts?.operator) {
-        const storm = restartHold(store, info.seat.id);
-        if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
-        if (opts?.flight !== true) {
-          const parked = ticketParked(store, ref);
-          if (parked !== null) throw new SupervisorError(422, wasteParkText(ref, parked));
-        }
-      }
       // A detached reader does not compete for the ticket or its assignee.
       const refusal = eligibleToStart({
         ...(away && !opts?.operator
@@ -4090,11 +4067,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     },
   ): Promise<{ runId: string; worktree: string }> {
     const info = need(seatId);
-    // a seat in a restart storm is not started again (a CLI update's live check is not a restart)
-    if (opts.check === undefined && opts.operator !== true) {
-      const storm = restartHold(store, seatId);
-      if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
-    }
     const def = seatDef(info.seat);
     const check = opts.check;
     const unavailable = seatUnavailable(info.seat);
@@ -4432,8 +4404,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
-    const storm = restartHold(store, seatId);
-    if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
     const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
@@ -5027,7 +4997,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
     starting.add(seatId);
-    wakingRuns.add(runId);
     try {
       /** The run cannot go back: it ends `failed`, the seat (another run's now) untouched. */
       const fail = (reason: string, cause?: unknown): never => {
@@ -5179,7 +5148,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           store.setRunLoop(runId, { ...current, hold: rejoinSeat(current.hold) });
       }
     } finally {
-      wakingRuns.delete(runId);
       starting.delete(seatId);
       startingWorktrees.delete(aside.worktree);
     }

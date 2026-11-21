@@ -115,7 +115,7 @@ describe("wake deltas", () => {
   it("starts a new session with one new signal instead of 400 already handled ones", () => {
     const state = busyBoard();
     state.signals = Array.from({ length: 400 }, (_, n) => ({
-      kind: "chain_stalled" as const,
+      kind: "idle_seat" as const,
       key: `mc#${n}>mc#500`,
       since: 1,
       evidence: "An unchanged chain that FLIGHT already handled. ".repeat(10),

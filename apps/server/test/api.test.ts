@@ -4194,19 +4194,6 @@ describe("crew and attention", () => {
     expect(items[0]?.acked).toBe(true);
   });
 
-  it("POST /api/attention/ack of a crew error acks its row, so it leaves the list", async () => {
-    withCrew();
-    const id = store.addCrewError({ agentId: "guido-1", runId: "r", text: "broke", at: NOW });
-    const key = `crew-error:${id}`;
-    expect(((await get("/api/attention")).json() as AttentionItem[]).map((i) => i.key)).toEqual([
-      key,
-    ]);
-    expect((await postBody("/api/attention/ack", { keys: [key, "crew-error:x"] })).json()).toEqual({
-      acked: 2,
-    });
-    expect((await get("/api/attention")).json()).toEqual([]);
-  });
-
   const parked = (key: string, kind: "blocked" | "review" = "blocked") => ({
     key,
     kind,
@@ -6311,7 +6298,6 @@ describe("crew routes", () => {
       deliveredAt: first.json().deliveredAt,
     });
     expect(store.comms(0).filter((c) => c.text === "same words")).toHaveLength(1);
-    expect(store.commsRepeatCount(0)).toBe(1);
   });
 
   it("wakes the seat on a retry when the first wake failed, storing the message once", async () => {

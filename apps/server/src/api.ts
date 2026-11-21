@@ -334,7 +334,6 @@ import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
-  CREW_ERROR_KEY,
   crew,
   forgetViews,
   hubAlert,
@@ -3960,7 +3959,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
         );
       });
-      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      // Reader: docs/runbook.md#spend-report (spend per merged change and the building share; the Audit page reads it)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
@@ -6259,11 +6258,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const keys = [...new Set(body.data.keys)];
         store.ack(keys, now());
-        // a crew error stays listed until acked: its row is marked, so it leaves Needs you
-        for (const k of keys) {
-          const id = k.startsWith(CREW_ERROR_KEY) ? k.slice(CREW_ERROR_KEY.length) : "";
-          if (/^[1-9]\d{0,15}$/.test(id)) store.ackCrewError(Number(id));
-        }
         bus.emit("attention");
         if (keys.some((k) => k.startsWith(GUARD_ACK_PREFIX))) bus.emit("guard");
         return { acked: keys.length };

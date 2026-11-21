@@ -187,7 +187,6 @@ import {
   reviewedEventText,
   reviewFor,
   runawayRefusedText,
-  type StrayKind,
   SYNC_MAIN_GAP_MIN,
   scanSecrets,
   scanText,
@@ -2028,7 +2027,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
 
     return deps.inClone(session.checkout, async () => {
       // Checked here, in the queue: a commit that waited behind a slow checkout must not land
-      // after its run ended (or re-record strays the run's end cleared).
+      // after its run ended.
       const live = liveRun(ctx);
       if (live === null || live.worktree === null || live.run.branch === null) {
         return { text: MC_RUN_ENDED, isError: true };
@@ -2301,7 +2300,6 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         const kept: string[] = [];
         const links: string[] = [];
         const foreign: string[] = [];
-        const strays: { path: string; kind: StrayKind }[] = [];
         for (const p of paths) {
           if (NOT_PRINTABLE_ASCII.test(p)) {
             // fail closed, before any other check: no name of this kind is committed
@@ -2315,32 +2313,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             const owner = writers.find((w) => pathInArea(w.area, p));
             if (owner === undefined) {
               outside.push(p);
-              strays.push({ path: p, kind: "outside" });
             } else {
               const call = seatCallSign(owner.id);
               others.set(call, [...(others.get(call) ?? []), p]);
-              strays.push({ path: p, kind: "other-area" });
             }
           } else if (special.has(p)) {
             links.push(p);
           }
         }
-
-        // The seat's strays this commit no longer has were reverted: they go; the rest are
-        // recorded (again), so a path it touched twice keeps one item.
-        const at = now();
-        const still = new Set(strays.map((s) => s.path));
-        const gone = store
-          .strays()
-          .filter((s) => s.sessionId === session.id && s.agentId === seat.id && !still.has(s.path))
-          .map((s) => s.path);
-        if (gone.length > 0) store.clearStrays(session.id, gone);
-        if (strays.length > 0) {
-          store.addStrays(
-            strays.map((s) => ({ sessionId: session.id, agentId: seat.id, at, ...s })),
-          );
-        }
-        if (gone.length > 0 || strays.length > 0) bus.emit("attention");
 
         const refused =
           outside.length > 0 ||
