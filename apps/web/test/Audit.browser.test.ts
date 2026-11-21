@@ -240,7 +240,9 @@ describeRendered("Audit first screen in a browser", () => {
         const last = [...focused].pop() ?? "";
         await page.evaluate(() => {
           const all = document.querySelectorAll<HTMLElement>(".audit-rt");
-          all[all.length - 1]?.click();
+          const el = all[all.length - 1];
+          // The first row starts open, so a single row is already showing its full title.
+          if (el?.getAttribute("aria-expanded") !== "true") el?.click();
         }, null);
         const full = await page.evaluate(
           () => document.querySelector(".audit-fulltitle")?.textContent ?? "",
