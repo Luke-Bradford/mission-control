@@ -58,8 +58,6 @@ export const UPDATE_UNAVAILABLE = "updates are not available on this server";
 export const UPDATE_LOG_UNREADABLE = "could not read update.log";
 /** Why Update (and Check for updates) is off on a preview server. */
 export const PREVIEW_SERVER = "this is a preview server";
-export const FLIGHT_NOT_RUNNING = "FLIGHT is not running yet. It arrives in phase 3.";
-export const ENGINE_NOT_RUNNING = "Arrives with the engine (phase 2).";
 export const RETRY_NOTE =
   "Tries 1 and 2 resume the same agent; try 3 starts a fresh agent on a stronger model; after that the ticket parks for you. A retry that makes no progress (same failures, same diff) stops early.";
 
@@ -221,17 +219,6 @@ export function seatTurnText(from: HudState, to: HudState): string | null {
   if (from === "running" && to === "idle") return SEAT_TURN_END_TEXT;
   return null;
 }
-
-export const HUD_STATE_RANK: Record<HudState, number> = {
-  error: 0,
-  stalled: 0,
-  blocked: 1,
-  parked: 1,
-  waiting: 2,
-  running: 3,
-  idle: 4,
-  stopped: 5,
-};
 
 /** Mockup L112–114: green is being worked, amber waits, red is broken, grey is everything else. */
 export const HUD_STATE_TONE: Record<HudState, HudTone> = {
@@ -485,17 +472,6 @@ export const ATTENTION_LABEL: Record<AttentionKind, string> = {
 /** A crew seat's doing line while its run is in line for the test lock. */
 export const LOCK_WAITING_TEXT = "waiting for the test lock";
 
-/** Why the commit tool recorded a stray: outside every writer's area, or inside another's. */
-export const STRAY_KINDS = ["outside", "other-area"] as const;
-export type StrayKind = (typeof STRAY_KINDS)[number];
-
-/** A stray's Needs-you text; `owner` is the call sign whose area holds it (`other-area`). */
-export function strayText(path: string, sessionId: string, owner: string | null): string {
-  return owner === null
-    ? `${path} changed in s/${sessionId} outside every agent's area`
-    : `${path} changed in s/${sessionId} inside ${owner}'s area`;
-}
-
 /** A seat's `ask_flight` question, as FLIGHT and (once FLIGHT briefs it) the operator see it. */
 export const questionText = (call: string, text: string): string => `${call} asks: ${text}`;
 
@@ -515,13 +491,6 @@ export function escalationKind(e: Pick<Escalation, "kind" | "source">): Attentio
       return "parked";
   }
 }
-
-// Guard drawer, test lock (catalogue 2.5, 2.7.4, 2.1.4)
-
-/** The Guard drawer's summary: blocked commands this week, and how many are not yet acknowledged. */
-export const guardSummary = (total: number, fresh: number): string =>
-  `Guard: ${total} blocked command${total === 1 ? "" : "s"}${fresh > 0 ? `, ${fresh} new` : ""} (for information)`;
-export const GUARD_NONE_TEXT = "Guard: nothing blocked this week.";
 /** Limits set when each seat starts, not refusals the guard records: the refusal counts leave them out. */
 export const RUNTIME_LIMITS = [
   "Claude seats may use the network through curl and web search, except this Mac's own services (loopback); web fetch is off; Codex seats stay offline",
@@ -557,10 +526,6 @@ export const TIMELINE_TICKS_MAX = 300;
 
 /** How long a reversible decision waits before its recommended option applies. */
 export const DECISION_DEFAULT_WAIT_MS = 40 * 60_000;
-
-/** The Comms line recording an automatically applied decision. */
-export const defaultAppliedText = (label: string, ask: string): string =>
-  `Default applied: ${label} (${ask})`;
 
 /** A crew row cut down to what the Overview reads (see `CrewSummaryRow`). */
 export function crewRowSummary(row: CrewRow): CrewSummaryRow {

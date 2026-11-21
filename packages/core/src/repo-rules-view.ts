@@ -11,29 +11,6 @@ export interface RepoRuleView<T> {
   repoAdds?: string[];
 }
 
-/** The keys the Roles & guards page edits, in the page's order. */
-export const REPO_RULE_EDITABLE_KEYS = [
-  "pick_from",
-  "needs",
-  "areas",
-  "promote_backlog",
-  "plan_signoff",
-  "protected",
-  "hard_rules",
-  "hard_rules_by",
-  "commands.writer",
-  "commands.review",
-  "full_suite",
-  "required_checks",
-  "checks",
-  "uat.labels",
-  "uat.paths",
-  "always_ask",
-] as const;
-
-/** Read-only on the page: only config.yaml sets them. */
-export const REPO_RULE_AUTHORITY_KEYS = ["autonomy", "flight_powers"] as const;
-
 /** The editable and read-only rule values for one configured repository. */
 export interface RepoRulesView {
   /** SHA-256 of the config.yaml bytes every value here was read from. */

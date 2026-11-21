@@ -528,25 +528,6 @@ export interface PrCheck {
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
 export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt" | "skipped">;
 
-/**
- * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
- * `previewable` is true only where `POST /api/previews` could start one now: the hub supports
- * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
- * null; the web offers "Start preview" when `previewable && preview === null`.
- */
-/** A branch's built web app, kept to show as the real app in Demo (the operator opens it from Needs you). */
-export interface DesignPreviewView {
-  /** The repo the preview was published for; ticket numbers are only unique within one repo. */
-  repoId: RepoId;
-  ticket: number;
-  branch: string;
-  sha: string;
-  publishedAt: number;
-  pr: number | null;
-  running: boolean;
-  url: string;
-}
-
 export interface PullRequestPreviewFacts {
   previewable: boolean;
   preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
@@ -1301,16 +1282,6 @@ export interface PersonBrief {
   related?: BriefReference[];
   decisionKey?: string;
   replies?: SuggestedReply[];
-}
-
-export interface ItemChatMessage {
-  id: string;
-  itemKey: string;
-  correlationId: string;
-  replyTo?: string;
-  role: "operator" | "flight";
-  text: string;
-  at: number;
 }
 
 /** One answer FLIGHT suggests for an item that is a choice. */

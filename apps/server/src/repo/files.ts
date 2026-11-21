@@ -233,17 +233,6 @@ export async function readOnlyBase(worktree: string, exec: GitExec): Promise<str
   ];
 }
 
-/** Object collectors require proof that missing objects cannot start a promisor fetch. */
-export async function readOnlyObjectBase(
-  worktree: string,
-  exec: GitExec = realGitExec,
-): Promise<string[]> {
-  const base = await readOnlyBase(worktree, exec);
-  if (!base.includes("--no-lazy-fetch"))
-    throw Error("Object collection requires verified no-lazy-fetch support");
-  return ["--no-replace-objects", ...base];
-}
-
 /** `diff` with no external driver, textconv or submodule look-inside; a rename is a delete and an add. */
 const SAFE_DIFF = [
   "diff",
@@ -530,24 +519,4 @@ export async function fileDiff(
     if (code === MAX_BUFFER_CODE && typeof stdout === "string") return done(stdout, true);
     throw new GitFailed(gitMessage(e, worktree));
   }
-}
-
-/** Net tracked changes since the branch base, including staged and working-tree edits. */
-export async function mapChanges(
-  worktree: string,
-  exec: GitExec = realGitExec,
-): Promise<import("@mc/core").MapChange[]> {
-  const base = await readOnlyBase(worktree, exec);
-  if (await usesFilters(worktree, base, exec)) throw new GitFailed(FILTERS_NOTE);
-  const ancestor = (await exec([...base, "merge-base", "origin/HEAD", "HEAD"])).trim();
-  if (!/^[a-f0-9]{40,64}$/.test(ancestor)) throw new GitFailed();
-  const out = await exec([...base, ...SAFE_DIFF, "--numstat", "-z", ancestor, "--"]);
-  return parseNumstat(out, "uncommitted")
-    .filter((r) => r.add !== null && r.del !== null)
-    .map((r) => ({
-      file: cleanText(r.path),
-      add: r.add as number,
-      rem: r.del as number,
-      source: "diff",
-    }));
 }

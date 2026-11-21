@@ -3,8 +3,23 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
+import type { PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
+
+/** Why a branch's conflicts went unchecked: its head isn't in the checkout, or the check failed. */
+export interface MapUnchecked {
+  branch: string;
+  reason: "head not fetched" | "merge check failed";
+}
+
+/** A computed merge conflict between two open PR heads. */
+export interface MergeConflict {
+  file: string;
+  branches: [string, string];
+  shas: [string, string];
+  /** The open PR number of each branch, in the same order; null when the PR row has none. */
+  prs?: [number | null, number | null];
+}
 
 const execFileP = promisify(execFile);
 type Tip = Pick<PullRequestView, "branch" | "headSha" | "state"> & { number?: number };
@@ -58,13 +73,13 @@ export class MergeConflicts {
     worktree: string,
     prs: readonly Tip[],
   ): Promise<{
-    conflicts: MapSnapshot["conflicts"];
+    conflicts: MergeConflict[];
     unchecked: MapUnchecked[];
     failures: PairFailure[];
   }> {
     return queued(async () => {
       const tips = prs.filter((p) => p.state === "open" && p.headSha && SHA.test(p.headSha));
-      const conflicts: MapSnapshot["conflicts"] = [];
+      const conflicts: MergeConflict[] = [];
       const unchecked = new Map<string, MapUnchecked["reason"]>();
       const failures: PairFailure[] = [];
       const failedPairs: [string, string][] = [];
