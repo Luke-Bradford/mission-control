@@ -9,8 +9,6 @@ export const THEME_KEY = "mc-theme";
 export const DOCK_KEY = "mc-dock";
 /** FLIGHT's explicit rail choice, kept only for this browser session. */
 export const DOCK_COLLAPSED_KEY = "mc-dock-collapsed";
-/** The Crew Activity Map's last manually picked repo. */
-export const MAP_REPO_KEY = "mc-map-repo";
 
 /** The Overview live log's filter. */
 export const ACTIVITY_FILTER_KEY = "overview.live-log.filter";
@@ -34,8 +32,6 @@ export const PALETTE_RECENT_KEY = "mc-palette-recent";
 
 /** The footer's build-status toggle. */
 export const BUILD_STATUS_KEY = "mc-build-status";
-/** PR heads the operator checked locally in this browser. */
-export const QA_CHECKED_HEADS_KEY = "mc-qa-checked-heads";
 
 /** The tab's Demo choice, in sessionStorage: per tab, kept over a reload, copied to a popout. */
 export const DEMO_KEY = "mc-demo";

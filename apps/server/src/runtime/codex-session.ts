@@ -168,6 +168,8 @@ function codexSession(
   outbox = readOutbox(i.outboxPath),
 ): CrewSession {
   let replaying = "threadId" in i;
+  /** The reattach was not confirmed in time: the exit asks the supervisor to take the run back. */
+  let retake = false;
   const replayRequests = new Map<RpcId, ReplayApproval>();
   let checked = false;
   const report = () => !replaying || ("from" in i && transport.lines > i.from);
@@ -404,7 +406,9 @@ function codexSession(
     if (e.kind === "exit") {
       if (!closing && !checked) failed = true;
       finish();
-      emit(failed ? { ...e, reason: CANNOT_START } : e);
+      emit(
+        failed ? { ...e, reason: CANNOT_START, ...(retake ? { retake: true as const } : {}) } : e,
+      );
     } else if (e.kind === "attached") {
       if (closing) return;
       replaying = false;
@@ -626,6 +630,10 @@ function codexSession(
   const cannotStart = (e: unknown) => {
     if (closing) return;
     failed = true;
+    // An attach whose thread/resume got no answer in time did not fail: the app-server may be busy
+    // with the turn. The CLI is still closed (an unconfirmed floor is never driven), and the run is
+    // resumed on a fresh one instead of ended.
+    if ("threadId" in i && e instanceof SessionControlError && e.kind === "timeout") retake = true;
     const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
     i.log?.(why);
     emit({ kind: "stderr", text: why });

@@ -8,9 +8,13 @@
 }
 
 /* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
-#page-telemetry[data-tab="crew"] {
+#page-telemetry[data-tab="crew"],
+#page-telemetry[data-tab="cost"],
+#page-telemetry[data-tab="throughput"],
+#page-telemetry[data-tab="quality"],
+#page-telemetry[data-tab="machine"] {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(var(--crew-min, 520px), 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: visible;
 }
 
@@ -237,15 +241,13 @@
 }
 
 .summary .stat-sub {
-  position: absolute;
-  right: var(--sp-3);
-  bottom: var(--sp-2);
-  display: block;
-  white-space: nowrap;
+  position: static;
+  display: -webkit-box;
+  white-space: normal;
 }
 
 .summary .stat-main {
-  padding-right: var(--sp-7);
+  padding-right: 0;
 }
 
 /* the tab panel: a grid of panels that share what is left of the screen */
@@ -277,11 +279,98 @@
   grid-template-rows: minmax(240px, 1fr);
 }
 
+/* Cost and tokens: four chart panels in two rows, or the tables, which scroll inside their panels. */
+.tabpanel .grid[data-n="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.tabpanel .grid.cost-tables {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: none;
+  grid-auto-rows: minmax(240px, auto);
+  align-content: start;
+  overflow: auto;
+}
+
+.cost-tables .tgrid {
+  display: contents;
+}
+
 /* Wide work areas put the two crew panels side by side. */
 @media (min-width: 2200px) {
-  .tabpanel .grid[data-view="charts"]:not([data-state]) {
+  .tabpanel .grid[data-view="charts"][data-n="2"]:not([data-state]) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-rows: minmax(256px, 1fr);
+  }
+}
+
+/* Throughput and Quality: four charts in a 2x2, or the one table across the width. */
+.tabpanel .grid[data-view="charts"][data-n="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+/* Throughput plots fill the panel body; the legend stays below the measured plot. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+
+.tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb > .chart {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+
+/* The ranked Guard list keeps its rows: it scrolls inside the panel and the note stays below it. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard > .pb.qlist {
+  display: block;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#qGuard .agent-list-scroll-cue {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
+}
+
+/* In a short desktop work area, answer the time-sensitive token and quota questions first. */
+@media (min-width: 1200px) and (max-height: 760px) {
+  #page-telemetry[data-tab="cost"] .grid[data-n="4"] #tTok {
+    order: -2;
+  }
+
+  #page-telemetry[data-tab="cost"] .grid[data-n="4"] #tQuotaUsed {
+    order: -1;
+  }
+
+  #page-telemetry[data-tab="cost"] .grid[data-n="4"] > .panel > .pb > .chart {
+    min-height: 0;
+  }
+}
+
+.tabpanel .grid[data-view="table"][data-n="1"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tabpanel .qchart > .chart {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+}
+
+/* At wide desktop sizes, the three compact daily charts share the first row. The ranked list takes
+   the useful residual height across the second row instead of leaving four oversized panels empty. */
+@media (min-width: 2200px) and (min-height: 1100px) {
+  .tabpanel .grid[data-view="charts"][data-n="4"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(250px, 0.72fr) minmax(360px, 1.28fr);
+  }
+
+  .tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard {
+    grid-column: 1 / -1;
   }
 }
 
@@ -452,9 +541,13 @@
   border-radius: 0;
 }
 
+/* unknown: a dashed outline over a cross-hatch, so it never reads as dotted Parked */
+.crew-sw.st.unknown,
 .share.unknown {
-  background: none;
-  border: 1px dashed var(--line-2);
+  background:
+    repeating-linear-gradient(45deg, var(--fg-2) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(135deg, var(--fg-2) 0 1px, transparent 1px 4px);
+  border: 1px dashed var(--fg-2);
 }
 
 .readout {
@@ -549,16 +642,6 @@
 #tUtil .vl {
   text-align: right;
   white-space: nowrap;
-}
-
-.coming {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.coming-note .pb p {
-  margin: 0;
 }
 
 .runs-dialog .pb {
@@ -727,7 +810,9 @@
 }
 
 #page-telemetry.refetching .kpis,
-#page-telemetry.refetching .tgrid {
+#page-telemetry.refetching .tgrid,
+#page-telemetry.refetching .summary,
+#page-telemetry.refetching .tabpanel .grid {
   opacity: 0.6;
 }
 
@@ -791,4 +876,316 @@
 .crew-cell:hover .crew-cell-def,
 .crew-cell:focus-within .crew-cell-def {
   display: block;
+}
+
+/* throughput: legend keys, the dots chart, range bars and the step line */
+.tp-legend i {
+  --k: var(--accent);
+}
+
+.tp-legend i.k-bar {
+  background: var(--k);
+}
+
+.tp-legend i.k-dash {
+  width: 16px;
+  height: 0;
+  border-radius: 0;
+  border-top: 2px dashed var(--k);
+}
+
+.tp-legend i.k-line {
+  width: 16px;
+  height: 2px;
+  background: var(--k);
+}
+
+.tp-legend i.k-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--k);
+}
+
+.chart .dot {
+  fill: var(--accent);
+  fill-opacity: 0.85;
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.chart .overflow-dot {
+  fill: var(--accent);
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.chart .cycle-line {
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+
+.size-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.size-rows li {
+  display: grid;
+  grid-template-columns: minmax(88px, 30%) minmax(0, 1fr) minmax(72px, auto);
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.size-rows .lb {
+  color: var(--fg-2);
+}
+
+.size-rows .tr {
+  position: relative;
+  height: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.size-rows .rng {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
+.size-rows .tr b {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: calc(var(--sp-1) / -4);
+  background: var(--fg);
+}
+
+.size-rows .vl {
+  text-align: right;
+}
+
+.tickets-panel .pnote {
+  flex: none;
+}
+
+/* Ticket identifiers and measures stay available at narrow desktop widths; the board title takes
+   the remaining space and can be expanded by keyboard for its full value. */
+.tickets-panel .tw {
+  overflow-x: clip;
+}
+
+.tickets-panel table {
+  table-layout: fixed;
+}
+
+.tickets-panel .ticket-ref-column {
+  width: 168px;
+}
+
+.tickets-panel .ticket-size-column {
+  width: 48px;
+}
+
+.tickets-panel .ticket-merged-column,
+.tickets-panel .ticket-cycle-column,
+.tickets-panel .ticket-cost-column {
+  width: 64px;
+}
+
+.tickets-panel td:first-child a {
+  display: block;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.tickets-panel .ticket-title-cell {
+  white-space: normal;
+}
+
+.ticket-title-disclosure {
+  min-width: 0;
+}
+
+.ticket-title-disclosure summary {
+  display: -webkit-box;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.ticket-title-disclosure summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ticket-title-full {
+  display: none;
+  margin-top: var(--sp-1);
+  overflow-wrap: anywhere;
+}
+
+.ticket-title-disclosure[open] .ticket-title-full {
+  display: block;
+}
+
+/* cost and tokens */
+.spend-stack {
+  display: flex;
+  height: 14px;
+  margin-bottom: var(--sp-2);
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+  overflow: hidden;
+  gap: var(--sp-1);
+}
+
+.spend-stack i {
+  display: block;
+  height: 100%;
+}
+
+/* The spend total and scope note stay visible while busy rows scroll above them. */
+.step-summary {
+  flex: none;
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
+}
+
+.step-sw {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: var(--sp-1);
+  border-radius: var(--r-s);
+}
+
+.ticket-label {
+  display: block;
+  min-width: 0;
+  position: relative;
+}
+
+.ticket-title-tooltip {
+  position: fixed;
+  z-index: 20;
+  width: max-content;
+  max-width: min(480px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.quota-meters {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-4);
+  list-style: none;
+  display: grid;
+  align-content: start;
+  gap: var(--sp-2);
+}
+
+.quota-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 22%) minmax(0, 1fr) minmax(64px, 18%) minmax(120px, auto);
+  gap: var(--sp-2);
+  align-items: center;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.quota-row .lb {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quota-row .tr {
+  position: relative;
+  height: 10px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.quota-row .tr i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--r-s);
+}
+
+.quota-row[data-level="alert"] .tr i {
+  background: var(--warn);
+}
+
+.quota-row[data-level="stop"] .tr i {
+  background: var(--crit);
+}
+
+.quota-row .tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  border-left: 1px dashed var(--warn);
+}
+
+.quota-row .tick.stop {
+  border-left-color: var(--crit);
+}
+
+.quota-row .hist {
+  width: 100%;
+  height: 20px;
+  background: var(--surface-2);
+  border-radius: var(--r-s);
+}
+
+.quota-row .hist path {
+  stroke: var(--accent);
+}
+
+.quota-row .vl {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Machine: CPU over Memory used in the left column on one time axis, the other two beside them. */
+.tabpanel .grid[data-tab="machine"] {
+  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+/* the plots fill their panels; the legend stays below the measured plot */
+.tabpanel .grid[data-tab="machine"] > .panel > .pb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+
+.tabpanel .grid[data-tab="machine"] > .panel > .pb > .chart {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.machine-readout {
+  flex: none;
 }

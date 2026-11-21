@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as crewModule from "../src/crew.ts";
 import { crewOrder, isCurrentWork, MAX_STATE_PILL_LENGTH } from "../src/crew.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
-import { activityLive, activityValues } from "../src/overview/agentActivity.ts";
 import { laneTokens } from "../src/overview/CrewLane.tsx";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
 import { nextAgent, setSelectedAgent } from "../src/shell/selection.ts";
@@ -154,7 +153,7 @@ it("shows FLIGHT, the crew and the observed loops as rows of one table, in eleve
     step: "implement",
     text: "Implementing",
     prNumber: null,
-    parked: null,
+    hold: null,
   };
   const rows = [
     seatRow({ id: "free", index: 4, hudState: "idle" }),
@@ -326,14 +325,20 @@ it("names and confirms the waiver for a review-parked seat", async () => {
     phase: "parked" as const,
     text: "Blocked: RETRO finding",
     prNumber: 9,
-    parked: "RETRO finding",
+    hold: { kind: "review", reason: "RETRO finding", offSeat: false },
   };
   const row = seatRow({ hudState: "parked", loop, ticket: "shop-app#9" });
   const ask = item({ key: "note:blocked:r-12:0", kind: "blocked", agentId: "guido-1" });
   const f = stub([row], true, [ask], "CI", undefined, {
     "/api/runs/r-12/loop": {
       loop: {
-        parked: { kind: "review", reason: "RETRO finding", ended: false },
+        hold: {
+          kind: "review",
+          reason: "RETRO finding",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
         pushFor: "abc1234def",
       },
     },
@@ -357,7 +362,7 @@ describe("the overview's waiver follows the park's own Needs-you item", () => {
     phase: "parked" as const,
     text: "Blocked: held past its review rounds",
     prNumber: 31,
-    parked: "held past its review rounds; FLIGHT decides",
+    hold: { kind: "review", reason: "held past its review rounds; FLIGHT decides", offSeat: false },
     wait: "operator" as const,
   };
   const row = () =>
@@ -366,14 +371,20 @@ describe("the overview's waiver follows the park's own Needs-you item", () => {
       loop: parked,
       ticket: "shop-app#30",
       run: { ...run, id: "r-30" },
-      asideRuns: [{ runId: "r-31", ticket: null, ticketTitle: null, loop: parked }],
+      offSeatRuns: [{ runId: "r-31", ticket: null, ticketTitle: null, loop: parked }],
     });
   const loops = {
     "/api/runs/r-30/loop": {
-      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "eee5555000" },
+      loop: {
+        hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
+        pushFor: "eee5555000",
+      },
     },
     "/api/runs/r-31/loop": {
-      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "ddd4444000" },
+      loop: {
+        hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
+        pushFor: "ddd4444000",
+      },
     },
   };
   const waivers = () => [
@@ -426,10 +437,13 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     phase: "parked" as const,
     text: reason,
     prNumber: 9,
-    parked: reason,
+    hold: { kind: "review", reason, offSeat: false },
   });
   const park = (sha: string, reason: string) => ({
-    loop: { parked: { kind: "review", reason, ended: false }, pushFor: sha },
+    loop: {
+      hold: { kind: "review", reason, ended: false, worktree: null, wake: false },
+      pushFor: sha,
+    },
   });
   const run = seatRow().run as NonNullable<CrewRow["run"]>;
   const row = seatRow({
@@ -437,7 +451,7 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     loop: loop("first"),
     run: { ...run, id: "r-20" },
     ticket: "shop-app#20",
-    asideRuns: ["r-21", "r-22"].map((runId) => ({
+    offSeatRuns: ["r-21", "r-22"].map((runId) => ({
       runId,
       ticket: `shop-app#${runId.slice(2)}`,
       ticketTitle: null,
@@ -523,7 +537,7 @@ it("keeps live tool prose in the row tooltip and only the loop node in the cell"
   stub([
     seatRow({
       digest: { ...digest([]), liveTool: tool },
-      loop: { phase: "working", text: "Working", prNumber: null, parked: null },
+      loop: { phase: "working", text: "Working", prNumber: null, hold: null },
     }),
   ]);
   const { container } = render(<AgentsPanel />);
@@ -624,7 +638,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "working", text: "Working", prNumber: null, parked: null },
+        loop: { phase: "working", text: "Working", prNumber: null, hold: null },
       }),
     "Idle",
   ],
@@ -634,7 +648,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "ci", text: "CI", prNumber: null, parked: null },
+        loop: { phase: "ci", text: "CI", prNumber: null, hold: null },
       }),
     "Watching",
   ],
@@ -644,7 +658,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "review", text: "Review", prNumber: null, parked: null },
+        loop: { phase: "review", text: "Review", prNumber: null, hold: null },
       }),
     "Review",
   ],
@@ -654,7 +668,12 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "parked", text: "Parked", prNumber: null, parked: "Waiting" },
+        loop: {
+          phase: "parked",
+          text: "Parked",
+          prNumber: null,
+          hold: { kind: null, reason: "Waiting", offSeat: false },
+        },
       }),
     "Parked",
   ],
@@ -664,7 +683,7 @@ it.each([
       seatRow({
         id: "short-state",
         hudState: "idle",
-        loop: { phase: "done", text: "Done", prNumber: null, parked: null },
+        loop: { phase: "done", text: "Done", prNumber: null, hold: null },
       }),
     "Idle",
   ],
@@ -754,7 +773,7 @@ it("keeps full text in titles on compact row labels and doing lines", async () =
     step: "implement",
     text: "Implementing",
     prNumber: null,
-    parked: null,
+    hold: null,
   };
   stub([seatRow({ id: "running", role, mode: "writer", loop })]);
   const { container } = render(<AgentsPanel />);
@@ -834,7 +853,7 @@ it("keeps eleven cells with the need on the second Work line", async () => {
         text: "Implementing",
         step: "implement",
         prNumber: null,
-        parked: null,
+        hold: null,
       },
     }),
   ]);
@@ -887,20 +906,6 @@ it("advances the one-hour lane with the panel clock", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
   vi.setSystemTime(NOW);
   const end = Math.floor(NOW / MIN) * MIN;
-  // The helpers behind the retired 30-minute sparkline still read the same window.
-  expect(
-    activityValues(
-      digest([
-        [end - 29 * MIN, 7],
-        [end, 90],
-      ]),
-      NOW,
-    )[0],
-  ).toBe(7);
-  expect(activityLive(digest([[end, 90]]), end + 59_999)).toBe(true);
-  expect(activityLive(digest([[end, 90]]), end + MIN)).toBe(false);
-  expect(activityLive(digest([]), NOW)).toBe(false);
-
   stub([seatRow({ id: "live", digest: digest([[end, 90]]), lastOutputAt: null })], true, []);
   const { container } = render(<AgentsPanel />);
   await screen.findByText("live");
@@ -1058,7 +1063,7 @@ it.each(["ci", "review", "parked"] as const)(
         seatRow({
           id: "waiting-work",
           hudState: "idle",
-          loop: { phase, text: "Waiting", prNumber: 524, parked: null },
+          loop: { phase, text: "Waiting", prNumber: 524, hold: null },
         }),
       ],
       true,
@@ -1154,7 +1159,7 @@ it.each([
 it("uses engine state and loop phase for current work", () => {
   const row = seatRow({
     hudState: "idle",
-    loop: { phase: "ci", text: "CI", prNumber: 1, parked: null },
+    loop: { phase: "ci", text: "CI", prNumber: 1, hold: null },
   });
   expect(isCurrentWork(row)).toBe(true);
   expect(isCurrentWork({ ...row, paused: true })).toBe(false);
@@ -1211,7 +1216,12 @@ it.each(["blocked", "parked", "idle"] as const)(
         seatRow({
           id: "guido-cx",
           hudState,
-          loop: { phase: "parked", text: "Blocked", prNumber: null, parked: "Waiting" },
+          loop: {
+            phase: "parked",
+            text: "Blocked",
+            prNumber: null,
+            hold: { kind: null, reason: "Waiting", offSeat: false },
+          },
         }),
       ],
       true,
@@ -1237,7 +1247,12 @@ it.each(["stopped", "idle"] as const)(
           id: "guido-cx",
           hudState,
           run: null,
-          loop: { phase: "parked", text: "Blocked", prNumber: null, parked: "Waiting" },
+          loop: {
+            phase: "parked",
+            text: "Blocked",
+            prNumber: null,
+            hold: { kind: null, reason: "Waiting", offSeat: false },
+          },
         }),
       ],
       true,
@@ -1293,7 +1308,7 @@ describe("the Work line of an idle seat with an open run", () => {
     await screen.findByText("guido-cx");
     return (rowsIn(container)[1] as HTMLElement).querySelector(".ticket-cell")?.textContent ?? "";
   };
-  const open = { phase: "working", text: "Working on it", prNumber: null, parked: null } as const;
+  const open = { phase: "working", text: "Working on it", prNumber: null, hold: null } as const;
 
   it("says the run is open rather than working on the ticket", async () => {
     const text = await work({ loop: open });

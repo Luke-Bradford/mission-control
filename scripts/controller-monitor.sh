@@ -72,7 +72,7 @@ while true; do
       # every open crew PR (branch feature/<n>-… or fix/<n>-…) has a run that is moving: none, or parked
       # for 10+ minutes, is reported. A PR the controller or a person opened has no run by design.
       print -r -- "$prs" | jq -r '.[]|select(.headRefName|test("^(feature|fix)/[0-9]+-"))|.number' | while read -r n; do
-        st=$(print -r -- "$crew" | jq -r --argjson n $n '[.rows[]|(.asideRuns[]?, {loop:.loop})|select(.loop.prNumber==$n)|.loop.phase+" "+((.loop.text // "")|gsub("\n";" "))][0] // "none"')
+        st=$(print -r -- "$crew" | jq -r --argjson n $n '[.rows[]|(.offSeatRuns[]?, {loop:.loop})|select(.loop.prNumber==$n)|.loop.phase+" "+((.loop.text // "")|gsub("\n";" "))][0] // "none"')
         case $st in
           none) key="stuck:$n:none" ;;
           parked*) key="stuck:$n:${${st#parked }:0:60}" ;;
@@ -100,7 +100,7 @@ while true; do
       else empty end' | while IFS=$tab read -r id since what; do say "seat:$id:$since" "seat-down: $id $what"; done
 
   # runs waiting on the controller's own verdict, active or set aside
-  print -r -- "$crew" | jq -r '.rows[]|(.asideRuns[]?, {runId:.run.id, loop:.loop})|select((.loop.text // "")|test("controller check"))|"\(.runId)\t\(.loop.prNumber)\t\((.loop.text // "")|gsub("\n";" ")|.[0:40])"' |
+  print -r -- "$crew" | jq -r '.rows[]|(.offSeatRuns[]?, {runId:.run.id, loop:.loop})|select((.loop.text // "")|test("controller check"))|"\(.runId)\t\(.loop.prNumber)\t\((.loop.text // "")|gsub("\n";" ")|.[0:40])"' |
     while IFS=$tab read -r run pr text; do say "check:$run:$text" "controller-check: $run PR $pr"; done
 
   # FLIGHT's requests to the controller (attention items it keeps for itself that name the controller)

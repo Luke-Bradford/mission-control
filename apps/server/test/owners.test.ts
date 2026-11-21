@@ -265,16 +265,6 @@ describe("Needs-you owners", () => {
     expect(o["esc:shop-app#10"]).toBe("loop");
     expect(o["esc:shop-app#11"]).toBe("operator");
   });
-
-  it("a crew error and a stray are the operator's", () => {
-    store.addCrewError({ agentId: "GUIDO-1", runId: null, text: "boom", at: NOW - MIN });
-    store.addStrays([
-      { sessionId: "shop-app-1", path: "x.md", agentId: "GUIDO-1", kind: "outside", at: NOW },
-    ]);
-    const all = attentionItems(crewWith(["GUIDO-1"]), store, NOW);
-    expect(all.map((i) => i.kind).sort()).toEqual(["error", "stray"]);
-    expect(all.every((i) => i.owner === "operator")).toBe(true);
-  });
 });
 
 describe("Needs-you items clear themselves", () => {

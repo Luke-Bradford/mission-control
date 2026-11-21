@@ -321,7 +321,6 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
   function mean(a) { var v = a.filter(function (x) { return x !== null; }); return Math.round(sum(v) / v.length); }
   F.ciNow = mean(F.ci); F.fpNow = mean(F.firstPass);
   F.guard = [["outside-area edit", 31], ["protected file", 22], ["oversized change", 14], ["credential read", 9], ["unsafe delete", 7], ["network call", 6], ["lock bypass", 4], ["unreviewed merge", 2], ["unknown tool", 1]];
-  F.escaped = [["demo#88", "Export drops the last row", "found by user", "Important", "27 Oct"], ["demo#91", "Retry loops after a 404", "found in review of a later PR", "Important", "29 Oct"], ["demo#95", "Archive keeps the old label", "found by user", "Minor", "30 Oct"], ["demo#97", "Settings reset on reload", "found by user", "Critical", "31 Oct"], ["demo#99", "Sort order lost after edit", "found in QA", "Minor", "2 Nov"]];
 
   F.cpuS = cap100(series(N, 42, 26, 21, 7)); F.memFreeS = cap100(series(N, 58, 14, 22, 15));
   F.cpuS[N - 1] = F.cpu; F.memFreeS[N - 1] = F.memFree;
@@ -335,7 +334,7 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
   F.lockWaitMin = 8;
   F.events = [{ at: 0.28, label: "crew paused 20:50" }, { at: 0.62, label: "hub update 05:10" }];
 
-  if (WORST) ["tools", "subagents", "totals", "lockRows", "tickets", "escaped"].forEach(function (k) { var base = F[k].slice(); for (var c = 0; c < 6; c++) F[k] = F[k].concat(base); });
+  if (WORST) ["tools", "subagents", "totals", "lockRows", "tickets"].forEach(function (k) { var base = F[k].slice(); for (var c = 0; c < 6; c++) F[k] = F[k].concat(base); });
 
   /* ---------- stats: label, value, unit, window, definition, drill ---------- */
   function verdict() {
@@ -754,7 +753,6 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
       out.push(P("rounds", "Rounds per PR", "rounds, up to 4 · last 14 days", barChart({ n: 14, vals: F.rounds, ymax: 4, ticks: [0, 2, 4], label: "Review rounds per PR", xl: X14 }) + readoutHtml("rounds", [{ name: "Last recorded", color: "var(--accent)", value: String(F.rounds[10]) }]), [NOTE.review, NOTE.attempts]));
       var gmax = F.guard[0][1];
       out.push(P("guard", "Guard blocks by rule", "blocks · last 14 days", rowsOf("Guard blocks by rule", "", F.guard.map(function (g) { return '<div class="r"><span class="lb">' + esc(g[0]) + '</span><div class="tr"><i style="width:' + g[1] / gmax * 100 + '%;--c:var(--think)"></i></div><span class="vl">' + D(String(g[1]), "exists", "the Guard drawer", g[0]) + "</span></div>"; })), ["A block is a guard rule stopping an action; it is not a failure of the seat."]));
-      tables.push(T("escaped", "Escaped defects", "found after merge", ["Ticket", "Title", "How found", "Severity", "Found"], F.escaped, []));
     }
     if (tab === "machine") {
       var ms = [{ name: "CPU", color: "var(--accent)", vals: F.cpuS }, { name: "Memory free", color: "var(--think)", vals: F.memFreeS }];

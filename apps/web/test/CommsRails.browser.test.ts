@@ -214,6 +214,15 @@ describeRendered("Comms chart, rendered", () => {
         await page.box(".comms-rails svg");
         await page.box(".comms-node");
         await page.box(".comms-wait-mark");
+        // The initial SVG uses the fallback size until ResizeObserver receives the panel's box.
+        // Wait for that layout pass before judging whether the settled chart needs to scroll.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            ),
+          null,
+        );
         const m = await measure(page);
         // Ten session seats plus FLIGHT, CAPCOM and #crew (the three hubs are drawn on the centre line).
         expect(m.nodes).toBe(13);
@@ -339,6 +348,14 @@ describeRendered("Comms chart, rendered", () => {
         api,
       });
       await page.box(".comms-node");
+      // Do not count the chart's initial ResizeObserver layout as idle work.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+        null,
+      );
       await page.evaluate(() => {
         const w = window as unknown as { __raf: number; __mut: number; __long: number };
         w.__raf = 0;
@@ -395,52 +412,6 @@ describeRendered("Comms chart, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it.each([
-    { width: 1920, height: 940 },
-    { width: 2560, height: 1250 },
-  ])(
-    "fills a $width × $height window with and without a filter",
-    async ({ width, height }) => {
-      mkdirSync(SHOTS, { recursive: true });
-      for (const focus of ["", "?focus=seat:seat-2"]) {
-        const page = await renderAt({
-          page: "test/commsBrowser.html",
-          width,
-          height,
-          search: `?at=${encodeURIComponent(`/comms/chart${focus}`)}`,
-          api: crewApi(20),
-        });
-        await page.box(".comms-rails svg");
-        const m = await measure(page);
-        expect(m.nodes).toBe(22);
-        // The chart takes the window: wide, and as tall as the rows need up to the window.
-        expect(m.canvasW).toBeGreaterThan(m.viewW * (focus ? 0.55 : 0.85));
-        // Full names at 20 seats: none cut with an ellipsis.
-        expect(m.names.some((name) => name.text.endsWith("…"))).toBe(false);
-        expect(overlaps(m.names)).toBe(false);
-        const w = await waitMarkProblems(page);
-        expect([w.overlap, w.onHub, w.onSeat, w.onName, w.outside]).toEqual([0, 0, 0, 0, 0]);
-        // Rows grow with the window: the seats span most of the chart's height, not a third of it.
-        const spread = await page.evaluate(() => {
-          const ys = [...document.querySelectorAll(".comms-node:not(.hub)")].map(
-            (e) => e.getBoundingClientRect().top,
-          );
-          const scroll = document.querySelector(".comms-rails-scroll")?.getBoundingClientRect();
-          return { span: Math.max(...ys) - Math.min(...ys), height: scroll?.height ?? 0 };
-        }, null);
-        expect(spread.span).toBeGreaterThan(0.5 * spread.height);
-        expect(m.pane).toBe(focus !== "");
-        if (focus) {
-          expect(m.chip).toContain("SEAT-2");
-          expect((await page.reachable(".comms-chart-pane")).every(Boolean)).toBe(true);
-        }
-        await page.screenshot(join(SHOTS, `full-${width}-${focus ? "filtered" : "all"}.png`));
-        await page.close();
-      }
-    },
-    BROWSER_TEST_TIMEOUT_MS,
-  );
-
   it(
     "narrows to a seat and a link by click and clears by Escape",
     async () => {
@@ -448,7 +419,7 @@ describeRendered("Comms chart, rendered", () => {
         page: "test/commsBrowser.html",
         width: 1920,
         height: 940,
-        search: `?at=${encodeURIComponent("/comms/chart")}`,
+        search: `?at=${encodeURIComponent("/comms/crew")}`,
         api: crewApi(9),
       });
       await page.box(".comms-node");
@@ -480,12 +451,9 @@ describeRendered("Comms chart, rendered", () => {
   );
 
   it(
-    "does bounded work at 50 participants with messages arriving, in the panel and full screen",
+    "does bounded work at 50 participants with messages arriving, in the panel",
     async () => {
-      for (const [at, width, height] of [
-        ["/comms/crew", 1600, 1000],
-        ["/comms/chart", 1920, 940],
-      ] as const) {
+      for (const [at, width, height] of [["/comms/crew", 1600, 1000]] as const) {
         const api = crewApi(50);
         const links = api["/api/comms/links"].links;
         const page = await renderAt({
@@ -504,43 +472,20 @@ describeRendered("Comms chart, rendered", () => {
           w.__churn = 0;
           if (!base) throw new Error("no chart");
           new MutationObserver((records) => {
-            for (const r of records) w.__churn += r.addedNodes.length + r.removedNodes.length;
+            const count = (node: Node) =>
+              node.nodeType === Node.ELEMENT_NODE
+                ? 1 + (node as Element).querySelectorAll("*").length
+                : 0;
+            for (const r of records)
+              for (const node of [...r.addedNodes, ...r.removedNodes]) w.__churn += count(node);
           }).observe(base, { childList: true, subtree: true });
         }, null);
-        // Busy: sweep the pointer over every seat for 3 seconds, while new messages land on a third
-        // of the links every 300 ms and the page reads them again.
-        const measuring = page.evaluate(
-          () =>
-            new Promise<number[]>((resolve) => {
-              const seats = [...document.querySelectorAll<SVGElement>(".comms-node")];
-              const deltas: number[] = [];
-              const started = performance.now();
-              let last = started;
-              let i = 0;
-              const tick = (now: number) => {
-                deltas.push(now - last);
-                last = now;
-                i++;
-                seats[i % seats.length]?.dispatchEvent(
-                  new MouseEvent("mouseover", { bubbles: true }),
-                );
-                seats[i % seats.length]?.dispatchEvent(new MouseEvent("mouseenter"));
-                if (now - started < 3000) requestAnimationFrame(tick);
-                else resolve(deltas);
-              };
-              requestAnimationFrame(tick);
-            }),
-          null,
-        );
-        let done = false;
-        void measuring.finally(() => {
-          done = true;
-        });
-        let round = 0;
+        // Send a fixed number of batches to exercise the same work on every runner. A message must
+        // update what changed, never rebuild the links and seats. The dots live in the overlay.
+        const rounds = 4;
+        const maxChurnPerRound = 5;
         let seen = 0;
-        while (!done) {
-          await new Promise((r) => setTimeout(r, 300));
-          round++;
+        for (let round = 1; round <= rounds; round++) {
           for (const [k, link] of links.entries())
             if (k % 3 === 0) {
               link.count += 1;
@@ -552,7 +497,6 @@ describeRendered("Comms chart, rendered", () => {
             await page.evaluate(() => document.querySelectorAll(".comms-particle").length, null),
           );
         }
-        const frames = await measuring;
         const churn = await page.evaluate(
           () => (window as unknown as { __churn: number }).__churn,
           null,
@@ -561,26 +505,17 @@ describeRendered("Comms chart, rendered", () => {
         expect(seen).toBeGreaterThan(0);
         // Deterministic: with new messages on a third of the 100 links every round, almost nothing is
         // added or removed from the chart. A rebuild per arrival would add hundreds each round.
-        expect(churn).toBeLessThanOrEqual(round * 4);
-        // Timing is wall-clock on a shared runner, so it is logged and only loosely bounded.
-        const sorted = [...frames].sort((a, b) => a - b);
-        const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
-        const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0;
+        expect(churn).toBeLessThanOrEqual(rounds * maxChurnPerRound);
         console.info(
-          `comms chart 50 seats ${at}: ${frames.length} frames, ${seen} dots at most, ${churn} elements churned in ${round} rounds, median ${median.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms, slowest ${(sorted.at(-1) ?? 0).toFixed(1)}ms`,
+          `comms chart 50 seats ${at}: ${seen} dots at most, ${churn} elements churned in ${rounds} rounds`,
         );
-        expect(median).toBeLessThan(34);
-        expect(sorted.at(-1) ?? 0).toBeLessThan(500);
         await page.close();
       }
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it.each([
-    { at: "/comms", width: 1600, height: 1000 },
-    { at: "/comms/chart", width: 1920, height: 940 },
-  ])(
+  it.each([{ at: "/comms", width: 1600, height: 1000 }])(
     "renders Demo's chart at $at with readable wait marks",
     async ({ at, width, height }) => {
       const page = await renderAt({

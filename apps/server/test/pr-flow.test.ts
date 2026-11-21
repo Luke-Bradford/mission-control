@@ -1,14 +1,12 @@
 import {
   type BoardItem,
   type FlightPrFlow,
-  type FlightState,
   NEW_LOOP,
   type PullRequestView,
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { nextWakeAt, wakeReasons } from "../src/flight/state.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr/flow.ts";
+import { prFlow, prFlowFacts } from "../src/pr/flow.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import { Store } from "../src/store.ts";
 
@@ -219,7 +217,13 @@ describe("PR flow ownership and clocks", () => {
         ...NEW_LOOP,
         prNumber: 7,
         phase: "parked",
-        parked: { kind: "review-failed", reason: "reviewer failed", ended: false },
+        hold: {
+          kind: "review-failed",
+          reason: "reviewer failed",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
       T + 5 * M,
     );
@@ -530,17 +534,6 @@ describe("dependencies and immutable flow metrics", () => {
 });
 
 describe("PR flow timed wake boundaries", () => {
-  it("targets only the PR identity, so another PR's clearance decision cannot settle it", () => {
-    const reasons = wakeReasons(
-      "{}",
-      JSON.stringify({ prFlow: [`7:stage:clearance:${T}`, `8:waiting:controller:${T}`] }),
-    );
-    expect(reasons.map((r) => r.targets)).toEqual([
-      ["7", "#7"],
-      ["8", "#8"],
-    ]);
-  });
-
   it.each(["operator", "controller"] as const)(
     "schedules and emits stable %s and p90 facts at their boundaries",
     (owner) => {
@@ -573,10 +566,6 @@ describe("PR flow timed wake boundaries", () => {
           },
         ],
       };
-      expect(prFlowWakeTimes(f)).toEqual([T + 10 * M, T + 15 * M]);
-      expect(nextWakeAt({ prFlow: f, planned: [] } as unknown as FlightState, 0, T)).toBe(
-        T + 10 * M,
-      );
       f.generatedAt = T + 10 * M - 1;
       expect(prFlowFacts(f)).toEqual([]);
       f.generatedAt++;

@@ -9,6 +9,34 @@ export interface TicketQaPr {
   number: number;
   url: string;
   headSha?: string | null;
+  createdAt?: number;
+}
+
+export interface ConfiguredTicketQaPr {
+  pr: TicketQaPr;
+  repoId: string;
+  github: string;
+}
+
+/** The ticket's collected and live PR rows describe one shared set of QA evidence. */
+export function ticketQaPrs(local: TicketQaPr[], linked: TicketQaPr[] | undefined): TicketQaPr[] {
+  return [...local, ...(linked ?? []).filter((pr) => !local.some((row) => row.url === pr.url))];
+}
+
+/** A PR is usable only when its URL names one configured GitHub repository. */
+export function configuredTicketQaPrs(
+  prs: TicketQaPr[],
+  repos: ConfigView["repos"],
+): ConfiguredTicketQaPr[] {
+  return prs.flatMap((pr) => {
+    const github = githubRepoOfUrl(pr.url);
+    const repo =
+      /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/i.test(pr.url) &&
+      pr.url.endsWith(`/pull/${pr.number}`)
+        ? repos.find((row) => row.github.toLowerCase() === github?.toLowerCase())
+        : undefined;
+    return repo ? [{ pr, repoId: repo.id, github: repo.github }] : [];
+  });
 }
 
 function Reports({ repoId, github, pr }: { repoId: string; github: string; pr: TicketQaPr }) {
@@ -76,18 +104,13 @@ export function TicketQaReports({ prs }: { prs: TicketQaPr[] }) {
       </p>
     );
   if (!config.data) return <p className="muted">Loading QA report references…</p>;
-  const repos = config.data.repos;
+  const configured = configuredTicketQaPrs(prs, config.data.repos);
   return (
     <ul className="ticket-qa" aria-label="Saved QA reports">
       {prs.map((pr) => {
-        const github = githubRepoOfUrl(pr.url);
-        const repo =
-          /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*$/i.test(pr.url) &&
-          pr.url.endsWith(`/pull/${pr.number}`)
-            ? repos.find((r) => r.github.toLowerCase() === github?.toLowerCase())
-            : undefined;
-        return repo ? (
-          <Reports key={pr.url} repoId={repo.id} github={repo.github} pr={pr} />
+        const match = configured.find((item) => item.pr === pr);
+        return match ? (
+          <Reports key={pr.url} repoId={match.repoId} github={match.github} pr={pr} />
         ) : (
           <li key={pr.url}>
             PR #{pr.number}: QA reports unavailable; its repository is not configured.

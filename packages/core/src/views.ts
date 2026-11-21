@@ -3,6 +3,7 @@ import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
 import type { CrewMode, CrewRole, LoopKind } from "./runtime-model.ts";
+import type { TicketPlan } from "./ticket-plan.ts";
 import type {
   AccountId,
   AgentId,
@@ -342,9 +343,13 @@ export interface Telemetry {
       projectedExhaustionAt?: number | null;
       resets: { at: number; resetAt: number; cause: string }[];
     }[];
-    /** The board and run facts used to plot a ticket's cycle in hours. Null means that fact was not observed. */
+    /** The board and run facts used to plot a ticket's cycle in hours, for the last 14 days whatever the range. Null means that fact was not observed. */
     tickets: {
       ticket: string;
+      /** The board card's title, or null when the board no longer holds the card. Always set by the server. */
+      title?: string | null;
+      /** The board Size, or null when the board has none. */
+      size?: string | null;
       readyAt: number | null;
       startedAt: number | null;
       mergedAt: number | null;
@@ -764,6 +769,8 @@ export interface TicketHistory {
   prototypeProblem?: string | null;
   /** Why the body is missing; null when GitHub answered. */
   githubError: string | null;
+  /** The ticket's plan and where its sign-off stands; null when it has none. */
+  plan?: TicketPlan | null;
   runs: TicketRunView[];
   prs: TicketPrView[];
   /** Live closing PR references, including PRs not yet collected into local history. */

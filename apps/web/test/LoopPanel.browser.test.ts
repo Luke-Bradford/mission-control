@@ -44,7 +44,7 @@ const view: RunLoopView = {
     phase: "parked",
     pushFor: SHA,
     prNumber: 77,
-    parked: { kind: "review", reason: PARK, ended: false },
+    hold: { kind: "review", reason: PARK, ended: false, worktree: null, wake: false },
   } as RunLoopView["loop"] & object,
   events: [],
   tries,
@@ -56,7 +56,12 @@ const row = crewRow({
   id: SEAT,
   kind: "crew",
   hudState: "idle",
-  loop: { phase: "parked", text: `Blocked: ${PARK}`, parked: PARK, prNumber: 77 },
+  loop: {
+    phase: "parked",
+    text: `Blocked: ${PARK}`,
+    hold: { kind: "review", reason: PARK, offSeat: false },
+    prNumber: 77,
+  },
 });
 const detail = agentView(row);
 detail.awaiting = { label: "Parked", reason: PARK, since: row.stateSince };

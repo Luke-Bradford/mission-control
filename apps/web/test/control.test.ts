@@ -41,9 +41,9 @@ it("plan progress counts done tasks and hides without a list", () => {
 it("run outcomes use the operator's words", () => {
   expect(runOutcome({ status: "running" }).word).toBe("now");
   expect(runOutcome({ status: "ok" }).word).toBe("finished");
-  expect(runOutcome({ status: "blocked", loop: { parked: "needs a call" } } as never).word).toBe(
-    "parked: needs a call",
-  );
+  expect(
+    runOutcome({ status: "blocked", loop: { hold: { reason: "needs a call" } } } as never).word,
+  ).toBe("parked: needs a call");
 });
 it("all-time figures total the runs and leave cost null when none is recorded", () => {
   const r = (over: object) =>

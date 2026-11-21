@@ -1,6 +1,7 @@
 /** Durable, immutable QA evidence. A report verdict is a historical statement, not live readiness. */
 import type { EvidenceManifest } from "./pr-evidence.ts";
 import type { FindingResolution, ReviewCheck, ReviewFinding, ReviewVerdict } from "./review.ts";
+import type { QaPlan } from "./ticket-plan.ts";
 import type { PrCheck } from "./types.ts";
 
 export interface QaTestReceipt {
@@ -89,6 +90,8 @@ export interface QaReport {
   limitations: string[];
   followUps: QaFollowUp[];
   visual: QaVisualEvidence;
+  /** The plan the operator signed off for the ticket, kept beside what was built; absent when there was none. */
+  plan?: QaPlan;
   completeness: { state: "complete" | "incomplete"; missing: string[] };
   permalink: string;
 }

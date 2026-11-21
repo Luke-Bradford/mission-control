@@ -34,8 +34,8 @@ const PAGE_ROUTES: Record<Route["page"], readonly string[]> = {
   ticket: ["/tickets/shop-app/102"],
   agent: ["/agent", "/agent/dev-1", "/agent/flight-1"],
   comms: ["/comms", "/comms/crew", "/comms/agents/dev-1"],
-  commsChart: ["/comms/chart"],
   qa: ["/qa", "/qa?view=history"],
+  planner: ["/planner", "/planner?view=history"],
   telemetry: ["/telemetry"],
   audit: ["/audit"],
   setup: SETUP_TABS.map((tab) => `/setup/${tab}`),
@@ -65,6 +65,7 @@ const MUST_SHOW: Record<string, { text?: string; images?: number }> = {
   "/needs-you/demo-design-signoff": { text: "Proposed", images: 2 },
   "/needs-you/demo-picture-options": { text: "Corner badge", images: 2 },
   "/qa": { images: 2 },
+  "/planner": { text: "What is proposed", images: 1 },
   "/agent": { text: "DEV-1" },
   "/board/shop-app": { text: "Retry failed payment webhooks" },
 };

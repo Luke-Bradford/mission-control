@@ -25,15 +25,15 @@ export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): n
   const working: { runId: string; accountId: string; budgetParked: boolean }[] = [];
   for (const session of store.activeSeatSessions()) {
     const run = session.runId === null ? null : store.run(session.runId);
-    if (run === null || run.endedAt !== null || run.ticket === null || run.loop?.aside) continue;
+    const hold = run?.loop?.hold;
+    if (run === null || run.endedAt !== null || run.ticket === null || hold?.worktree != null) continue;
     const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
     if (seat === undefined) continue;
-    const parked = run.loop?.parked;
-    if (parked && parked.kind !== "budget") continue;
+    if (hold?.kind != null && hold.kind !== "budget") continue;
     working.push({
       runId: run.id,
       accountId: runAccountId(store, run.id, seat.accountId),
-      budgetParked: parked?.kind === "budget",
+      budgetParked: hold?.kind === "budget",
     });
   }
   const readyWork = readyWorkFitsIdleSeat(store, config, at);

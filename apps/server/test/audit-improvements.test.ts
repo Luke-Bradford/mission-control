@@ -90,6 +90,55 @@ describe("question-asked-back", () => {
     discussion("needs:2", "Go with the first option.", NOW - HOUR);
     expect(rows("question-asked-back")).toEqual([]);
   });
+  it("reads the first operator message in the shared thread", () => {
+    choice("needs:3");
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:3",
+      text: "What does this mean?",
+      at: NOW - HOUR,
+    });
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:3",
+      text: "Thanks?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toMatchObject([
+      { subject: "needs:3", ticket: "repo#7", pr: null, at: NOW - HOUR },
+    ]);
+  });
+  it("gives no row when the first shared-thread message is a statement", () => {
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:4",
+      text: "Go ahead.",
+      at: NOW - HOUR,
+    });
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:4",
+      text: "Why?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toEqual([]);
+  });
+  it("gives one row when an item has both a legacy discussion and a thread", () => {
+    choice("needs:5");
+    discussion("needs:5", "Why?", NOW - HOUR);
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:5",
+      text: "Why again?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toHaveLength(1);
+  });
 });
 
 describe("silence alarms", () => {
@@ -215,30 +264,6 @@ describe("chatter", () => {
   });
 });
 
-describe("repeat-message", () => {
-  it("gives one row for a message sent twice", () => {
-    msg({ pr: 3 });
-    store.addComms(
-      {
-        at: NOW - HOUR + 2000,
-        from: "guido-1",
-        to: "flight-1",
-        ticket: "repo#7",
-        text: "hello",
-        pr: 3,
-        senderKind: "seat",
-      },
-      undefined,
-      NOW - HOUR,
-    );
-    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7", pr: 3 }]);
-  });
-  it("gives no row for a message sent once", () => {
-    msg();
-    expect(rows("repeat-message")).toEqual([]);
-  });
-});
-
 describe("repeat-notice", () => {
   const notice = (n: number, pr = 5) => {
     for (let i = 0; i < n; i++)
@@ -349,26 +374,5 @@ describe("range boundaries and links", () => {
       ["comms:1", "repo#7"],
       ["comms:3", "repo#8"],
     ]);
-  });
-  it("links an exact repeat through its run's ticket, and leaves out one with no link", () => {
-    store.upsertRun(run({ id: "r1" }));
-    const repeat = (over: object) => {
-      const row = {
-        at: NOW - HOUR,
-        from: "guido-1",
-        to: "flight-1",
-        ticket: null,
-        text: "hello",
-        senderKind: "seat" as const,
-        ...over,
-      };
-      store.addComms(row, undefined, NOW - 2 * HOUR);
-      store.addComms({ ...row, at: NOW - HOUR + 1 }, undefined, NOW - 2 * HOUR);
-    };
-    repeat({ fromRunId: "r1", text: "linked" });
-    repeat({ text: "unlinked" });
-    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7" }]);
-    for (const r of store.audit(SINCE, NOW).improvements ?? [])
-      if (r.kind !== "tool-usage") expect(r.ticket !== null || r.pr !== null).toBe(true);
   });
 });

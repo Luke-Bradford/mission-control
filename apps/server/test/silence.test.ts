@@ -111,7 +111,7 @@ const seat = (r: Run) => {
     updatedAt: NOW,
   });
 };
-const budgetPark = { parked: { kind: "budget", reason: "limit", ended: false } };
+const budgetPark = { hold: { kind: "budget", reason: "limit", ended: false, worktree: null, wake: false } };
 const parked = (id: string, agentId: string) =>
   run({ id, agentId, loop: budgetPark as unknown as Run["loop"] });
 const silent = () => {
@@ -252,14 +252,20 @@ describe("the watched events' hooks", () => {
     );
   it("records a merged-PR review only when a merged PR has a review", () => {
     merged(1);
-    store.recordCodeHealthMergedReviews("repo", NOW);
     expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBeNull();
     raw(
       `INSERT INTO reviews (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt,
-        round, state, created_at, ended_at) VALUES (1, 'a', 'repo', 'retro', 1, 'sha1', 0, 1, 1,
-        'reported', 1, 1)`,
+        round, state, run_id, created_at, started_at) VALUES (1, 'a', 'repo', 'retro', 1, 'sha1', 0, 1, 1,
+        'running', 'review-run', 1, 1)`,
     );
-    store.recordCodeHealthMergedReviews("repo", NOW + 7);
+    expect(
+      store.recordFindings(1, "review-run", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "clean",
+        findings: [],
+        at: NOW + 7,
+      }),
+    ).toBe(true);
     expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBe(NOW + 7);
   });
 });

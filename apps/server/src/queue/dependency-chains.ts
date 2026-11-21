@@ -21,7 +21,8 @@ function queuedSince(store: Store, run: Run): number | null {
   let queued = false;
   for (const attempt of store.runAttempts(run.id)) {
     if (attempt.runId !== run.id || attempt.kind !== "loop") continue;
-    const aside = !!attempt.data.aside;
+    const aside = !!(attempt.data.hold as { worktree?: string | null } | null | undefined)
+      ?.worktree;
     if (aside && !queued) since = attempt.at;
     if (!aside) since = null;
     queued = aside;
@@ -38,7 +39,6 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
     prs.filter((p) => p.state === "open"),
   );
   const active = runs.filter((r) => r.endedAt === null);
-  const holds = store.activeHolds().filter((h) => h.ref.startsWith(`${repoId}#`));
   const record = readWaitRecord(store, repoId);
   const work = new Map<string, DependencyWork>();
   const edges: DependencyEdge[] = [];
@@ -185,13 +185,9 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
       add(`PR ${pr.number}`, `PR ${underlying.number}`, "stacked", since);
     }
   }
-  for (const hold of holds) {
-    if (prs.find((p) => p.number === hold.waitsOn)?.state === "merged") continue;
-    add(hold.ref, `PR ${hold.waitsOn}`, "held", hold.at);
-  }
-  for (const run of active.filter((r) => !!r.loop?.aside)) {
+  for (const run of active.filter((r) => !!r.loop?.hold?.worktree)) {
     const ahead = active.find(
-      (r) => r.id !== run.id && r.agentId === run.agentId && !r.loop?.aside,
+      (r) => r.id !== run.id && r.agentId === run.agentId && !r.loop?.hold?.worktree,
     );
     if (!ahead) continue;
     const refOf = (r: Run) => (r.loop?.prNumber != null ? `PR ${r.loop.prNumber}` : r.ticket);

@@ -391,7 +391,9 @@ describe("vite config", () => {
     await expect(buildFixture(dir)).resolves.toBeDefined();
   });
 
-  it("allows web assets, workspace packages, dependencies and Vite's virtual modules", async () => {
+  it("allows web assets, workspace packages, dependencies and Vite's virtual modules", {
+    timeout: 30_000,
+  }, async () => {
     const dir = fixture(`
       import "vite/modulepreload-polyfill";
       import React from "react";

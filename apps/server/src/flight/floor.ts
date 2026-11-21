@@ -20,7 +20,7 @@ import { runawayTrip } from "./runaway.ts";
 export function flightShellContext(store: Store, runId: string, cwd?: string): FlightShellContext {
   const run = store.run(runId);
   const worktree =
-    run?.loop?.aside?.worktree ??
+    run?.loop?.hold?.worktree ??
     (run ? store.seatSession(run.agentId)?.worktree : undefined) ??
     undefined;
   return { cwd: cwd ?? worktree, worktree, resolvePath: realPathOrParent };

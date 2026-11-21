@@ -16,6 +16,7 @@ import { pausedSeat } from "../config/crew-pause.ts";
 import type { CcConfig } from "../config.ts";
 import { runawayTrip } from "../flight/runaway.ts";
 import { isOperatorCall, questionWithOperator } from "../hud/hud.ts";
+import { parseTicket } from "../run/view.ts";
 import type { Store } from "../store.ts";
 import { CompleteBriefContent } from "./schema.ts";
 import { briefHash, briefSourceRevision } from "./source.ts";
@@ -106,7 +107,7 @@ export function checkBriefRun(
     run.status !== "running" ||
     run.endedAt !== null ||
     (store.seatSession(seatId)?.runId !== runId &&
-      !(explicitQuestionId !== undefined && run.loop?.aside?.ask === explicitQuestionId))
+      !(explicitQuestionId !== undefined && run.loop?.hold?.ask === explicitQuestionId))
   )
     throw new BriefError(409, "The intended seat/run changed or ended; refresh the brief.");
   if (
@@ -235,6 +236,20 @@ export async function prepareBriefActions(
     item.repoId === repoId &&
     ((prSource?.[1] === repoId && Number(prSource[2]) === number) ||
       (sourceRun?.repoId === repoId && sourceRun.loop?.prNumber === number));
+  // A Comms item about a PR or ticket is bound to no run, so the run its PR or ticket names counts.
+  const itemTicket = item.ticket === null ? null : parseTicket(item.ticket);
+  const namesRun = (runId: string): boolean => {
+    if (runId === itemRun) return true;
+    const run = store.run(runId);
+    if (!run || item.repoId !== run.repoId) return false;
+    if (item.ticket !== null && run.ticket === item.ticket) return true;
+    if (itemTicket?.repoId !== run.repoId) return false;
+    return (
+      run.loop?.prNumber === itemTicket.number ||
+      (run.ticket !== null &&
+        store.pullRequest(run.repoId, itemTicket.number)?.ticket === run.ticket)
+    );
+  };
   for (const option of brief.options) {
     const action = option.action;
     if (!action || !option.id)
@@ -252,7 +267,7 @@ export async function prepareBriefActions(
         throw new BriefError(409, "The proposed review head changed or is unknown.");
       if (
         (action.kind === "review-rework" || action.kind === "review-resume") &&
-        !["review", "review-ruling"].includes(run?.loop?.parked?.kind ?? "")
+        !["review", "review-ruling"].includes(run?.loop?.hold?.kind ?? "")
       )
         throw new BriefError(409, "The source is not the displayed review park.");
     }
@@ -351,7 +366,9 @@ export async function prepareBriefActions(
       case "merge-hold": {
         const target = action.target;
         if (target.kind === "run") {
-          if (!itemRun || target.runId !== itemRun)
+          // Only a merge hold may be named through the item's PR or ticket; a controller verdict
+          // needs the item to be that run's own source.
+          if (action.kind === "merge-hold" ? !namesRun(target.runId) : target.runId !== itemRun)
             throw new BriefError(409, "The approval target is not this item's run.");
           const run = store.run(target.runId);
           const pr = run?.loop?.prNumber ? store.pullRequest(run.repoId, run.loop.prNumber) : null;
@@ -422,8 +439,8 @@ export async function prepareBriefActions(
         const loop = store.run(action.runId)?.loop;
         if (
           loop?.phase !== "parked" ||
-          loop.parked?.kind !== action.parkKind ||
-          loop.parked.ended ||
+          loop.hold?.kind !== action.parkKind ||
+          loop.hold.ended ||
           [
             "review",
             "review-ruling",

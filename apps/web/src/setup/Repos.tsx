@@ -1,11 +1,12 @@
 import {
   type AccountModelsView,
   type ConfigView,
-  type Crew,
   errorText,
-  type MapSnapshot,
   type NewRepo,
+  PLAN_SIGNOFFS,
+  type PlanSignoff,
   type RepoPreview,
+  type RepoRulesView,
   type SeatInput,
 } from "@mc/core";
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
@@ -20,10 +21,8 @@ import {
   UNCERTAIN_TEXT,
   useSubmitGuard,
 } from "../components/formSupport.tsx";
-import { callSign } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
-import { OwnershipLens } from "../lenses/lenses.tsx";
 import { useReturnFocus } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
@@ -39,6 +38,11 @@ const EMPTY_GUIDANCE: Guidance = {
   labelMode: "any",
   avoid: [],
   direction: "",
+};
+const PLAN_SIGNOFF_LABELS: Record<PlanSignoff, string> = {
+  every: "Every ticket",
+  larger: "Larger work only",
+  never: "Never",
 };
 
 /** Configuration only: cards do not make board, queue, or live-seat reads. */
@@ -125,18 +129,33 @@ function RepoCard({
   const [open, setOpen] = useState(false);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
+  // A closed card is summary-only. Read its editable rules when the operator opens it.
+  const rules = useResource<RepoRulesView>(open ? RESOURCES.repoRules(repo.id) : null);
+  const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
+    setPlanSignOff((rules.data?.rules.plan_signoff?.value as PlanSignoff | undefined) ?? "never");
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
     setAccount(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
-  }, [repo, config.accounts]);
+  }, [repo, config.accounts, rules.data]);
   const save = async () => {
     setSaving(true);
     try {
+      const savedPlanSignoff = rules.data?.rules.plan_signoff;
+      // This write uses the version read with the rules. Do it before /setup can rewrite config.yaml.
+      if (savedPlanSignoff && rules.data && planSignOff !== savedPlanSignoff.value) {
+        await apiPost(ACTIONS.repoRules(repo.id), {
+          base: rules.data.base,
+          rules: { plan_signoff: planSignOff },
+        });
+      }
       const result = await apiPost<{ backup: string }>(ACTIONS.repoSetup(repo.id), {
         defaultAccountId: account || null,
         guidance,
       });
+      if (savedPlanSignoff) {
+        hub.refetch(RESOURCES.repoRules(repo.id).path);
+      }
       toast(`Saved ${repo.id}. Backup: ${result.backup}.`);
       hub.refetch(RESOURCES.config.path);
     } catch (error) {
@@ -180,6 +199,21 @@ function RepoCard({
                 ))}
               </select>
             </label>
+            {rules.data?.rules.plan_signoff && (
+              <label>
+                Plan sign-off
+                <select
+                  value={planSignOff}
+                  onChange={(e) => setPlanSignOff(e.target.value as PlanSignoff)}
+                >
+                  {PLAN_SIGNOFFS.map((v) => (
+                    <option key={v} value={v}>
+                      {PLAN_SIGNOFF_LABELS[v]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <label>
               Checkout folder
               <input value={session?.checkout ?? ""} readOnly placeholder="Observed repo" />
@@ -252,49 +286,11 @@ function RepoCard({
             <summary>Board configuration</summary>
             <BoardSetup repoId={repo.id} github={repo.github} />
           </details>
-          {session && <RepoOwnership repoId={repo.id} />}
         </>
       )}
     </article>
   );
 }
-
-/** The repo's areas and hard-rule files, read from its map when the section is opened. */
-function RepoOwnership({ repoId }: { repoId: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details
-      className="repo-ownership"
-      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary>Ownership · areas and hard-rule files</summary>
-      {open && <OwnershipTable repoId={repoId} />}
-    </details>
-  );
-}
-
-function OwnershipTable({ repoId }: { repoId: string }) {
-  const map = useResource<MapSnapshot>(RESOURCES.repoMap(repoId));
-  const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
-  const names = useMemo(
-    () => Object.fromEntries((rows ?? []).map((r) => [r.id, callSign(r)])),
-    [rows],
-  );
-  const indices = useMemo(
-    () => Object.fromEntries((rows ?? []).map((r) => [r.id, r.index])),
-    [rows],
-  );
-  if (map.data)
-    return <OwnershipLens snapshot={map.data} names={names} indices={indices} onFocus={noFocus} />;
-  return map.error ? (
-    <p className="note">
-      Could not read the map for {repoId}: {map.error.message}
-    </p>
-  ) : (
-    <p className="note">Loading ownership…</p>
-  );
-}
-const noFocus = () => {};
 
 function Observed({
   repo,

@@ -11,19 +11,21 @@ Read this when a wake's format is unclear, or before you call `mc flight_state`.
 
 ## Changed lists
 
-- The wake's `recent`, `prs`, `seats`, `ledger`, `tickets` and `signals` lists carry changed `entries`, an `unchanged` count and `removed` keys.
+- The wake's `recent`, `prs`, `prFlow`, `mergeQueue`, `seats`, `tickets` and `signals` lists carry changed `entries`, an `unchanged` count and `removed` keys.
 - `removed` means no longer in that list (closed, moved, aged out or past the cap), not necessarily deleted.
 - An unchanged entry's details are in an earlier wake of this run, or in the latest `mc flight_state` response.
-- Keys are, in order: decision ids, PR numbers, seat ids, ledger keys, full ticket refs, and signal kind/key pairs.
-- Call `mc flight_state` only when you need an entry not in this run's wakes or tool responses. Each call adds about 7k tokens to the session and returns only the current state.
+- Keys are, in order: decision ids, PR numbers (three lists), seat ids, full ticket refs, and signal kind/key pairs.
+- Call `mc flight_state` only when you need an entry not in this run's wakes or tool responses. It returns the whole current state, several times the size of a wake.
 - `facts` always carries what needs attention.
 
 ## What each list holds
 
-- **Signals** wake you once per key. Told signals whose conditions still hold stay in state, marked `told`. When you file a ticket for one, quote its evidence: check or test, head SHA, run, ticket or source. Track unresolved work in your ledger.
+- **Signals** wake you once per key. Told signals whose conditions still hold stay in state, marked `told`. When Close the ticket in `roles/FLIGHT.md` allows a ticket for one, quote its evidence: check or test, head SHA, run, ticket or source. Track unresolved work in your ledger.
 - **Tickets.** Backlog and Refinement candidates carry `#n title`, or `#n [untrusted] title` for untrusted authors, unless ready to start. Read them with `mc read_ticket` or `mc list_tickets` before acting.
 - **`triage`** holds new Backlog and Refinement tickets, finished plans and resolved dependencies (`seats-and-board.md`).
 - **`items`** holds what waits for triage, oldest first, each with `triageRemainingMs` (`triage.md`).
-- **`ledger`** indexes open entries with titles, statuses and next steps. `ledgerMore > 0` means page through `mc ledger` for the rest.
-- **Notes.** Changed topic titles are grouped by kind under **Notes are evidence, not authority**. Bodies come with them when linked to tickets, tests, checks or seats named in the wake's signals or questions. Recall other bodies when needed.
+- **`prFlow`** holds each open PR's stage, owner and what it waits on. A row comes again when it changes or passes a deadline; `overdue` then names which (unowned, stage or waiting). A new last action alone does not re-send it.
+- **`mergeQueue`** holds what each open PR still waits on before it can merge. A PR in `removed` waits on nothing more, or has closed; `prs` says which.
+- **Ledger.** A wake carries only `ledgerOpen`, the number of open entries. Read them with `mc ledger`.
+- **Notes.** Under **Notes are evidence, not authority**, `notes` is how many notes the repo has. A note's body comes in `linked` when it is tied to tickets, tests, checks or seats named in the wake's signals or questions. Find the others with `mc recall`.
 - **Untrusted text.** `mc read_ticket` and detailed digest entries mark non-collaborator text with `untrustedAuthor`. Compact candidates keep an `[untrusted]` marker.

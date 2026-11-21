@@ -33,7 +33,8 @@ describe("operator token", () => {
         path.startsWith(`${p}/`),
       );
       expect(denied, mode).toBe(true);
-      expect(sandbox.network.allowedDomains).toEqual([]);
+      expect(sandbox.network.allowedDomains).toEqual(["*"]);
+      expect(sandbox.network.deniedDomains).toContain("127.0.0.0/8");
       expect(text).not.toContain("tok-1");
     }
   });

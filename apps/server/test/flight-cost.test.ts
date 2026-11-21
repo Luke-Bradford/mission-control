@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
-import { onlySettled, routineOnly, unhandledReasons, wakeReasons } from "../src/flight/state.ts";
+import { onlySettled, urgentChange } from "../src/flight/state.ts";
 import { Store } from "../src/store.ts";
 
 const MIN = 60_000;
@@ -169,96 +169,39 @@ describe("the handover threshold", () => {
   });
 });
 
-describe("routine wakes wait for the batch window", () => {
+describe("failures wait for the gap; messages and questions do not", () => {
   const facts = (o: Record<string, unknown[]>) => JSON.stringify(o);
-  it("treats a free seat or a PR item alone as routine", () => {
-    expect(routineOnly(facts({}), facts({ free: ["guido-1"], t: ["mc#1"] }))).toBe(true);
-    expect(routineOnly(facts({}), facts({ items: ["pr:mc#7:text"] }))).toBe(true);
-  });
-  it("never batches an operator message, a question, a blocker, a signal or the breaker", () => {
+  it("treats an operator message, a question, an instruction or a plan as urgent", () => {
     for (const o of [
-      { discussions: [[1, [2]]] },
+      { operator: ["12"] },
+      { owed: ["3"] },
       { q: [3] },
+      { instructions: ["2"] },
+      { planned: [["p1"]] },
+      { retrospective: ["2026-10-24"] },
+    ] as Record<string, unknown[]>[])
+      expect(urgentChange(facts({}), facts(o))).toBe(true);
+  });
+  it("waits for the gap on a failure, a blocker or a signal", () => {
+    for (const o of [
       { triage: ["mc#1:new"] },
       { signals: ["main_red:abc"] },
       { breaker: ["tripped"] },
       { items: ["comms-open:5"] },
       { parked: ["guido-1:mc#1:review-failed"] },
-      { instructions: ["2"] },
+      { stopped: ["guido-1"] },
     ] as Record<string, unknown[]>[])
-      expect(routineOnly(facts({}), facts({ free: ["guido-1"], ...o }))).toBe(false);
+      expect(urgentChange(facts({}), facts(o))).toBe(false);
   });
-  it("does not count a settled question or park as a change, only a new routine fact", () => {
-    expect(routineOnly(facts({ q: [3] }), facts({ q: [], free: ["g"] }))).toBe(true);
-    expect(routineOnly(facts({ parked: ["a:b:c"] }), facts({ parked: [], t: ["mc#1"] }))).toBe(
-      true,
-    );
+  it("does not call an answered question or a message already known a new one", () => {
+    expect(urgentChange(facts({ q: [3] }), facts({ q: [] }))).toBe(false);
+    expect(urgentChange(facts({ operator: ["12"] }), facts({ operator: ["12"] }))).toBe(false);
   });
-  it("treats a breaker lift and a new hold in force as urgent", () => {
-    expect(routineOnly(facts({ breaker: ["x"] }), facts({ breaker: [], free: ["g"] }))).toBe(false);
-    expect(routineOnly(facts({}), facts({ holdsInForce: ["approval"] }))).toBe(false);
-  });
-  it("does not call a lifted breaker or hold settled", () => {
+  it("does not call a lifted breaker settled", () => {
     expect(onlySettled(facts({ breaker: ["x"] }), facts({ breaker: [] }))).toBe(false);
-    expect(onlySettled(facts({ holdsInForce: ["machine"] }), facts({ holdsInForce: [] }))).toBe(
-      false,
-    );
     expect(onlySettled(facts({ q: [3] }), facts({ q: [] }))).toBe(true);
   });
-  it("treats a hold lifting as urgent even next to a new routine fact", () => {
-    expect(
-      routineOnly(
-        facts({ holdsInForce: ["disk"], free: [] }),
-        facts({ holdsInForce: [], free: ["guido-1"] }),
-      ),
-    ).toBe(false);
-  });
-  it("treats an unread operator message as urgent", () => {
-    expect(routineOnly(facts({}), facts({ operator: ["12"] }))).toBe(false);
-  });
-  it("is not routine when nothing changed", () => {
-    expect(routineOnly(facts({ free: ["a"] }), facts({ free: ["a"] }))).toBe(false);
-  });
-  it("has a window of fifteen minutes", () => {
-    expect(FLIGHT_BATCH_MS).toBe(15 * MIN);
-  });
-});
-
-describe("wakes that ended in nothing are handled by a wait on their exact key", () => {
-  const wait = (target: string, at: number) =>
-    store.addFlightDecision({
-      at,
-      kind: "wait",
-      seatId: null,
-      targetRunId: null,
-      ref: null,
-      questionId: null,
-      about: `${target}: waiting on a thing`,
-      decision: "waiting until later",
-      basis: "b",
-    });
-  it("a wait on a repeat_park key with spaces handles the signal", () => {
-    const key = "mc#9:review failed on the same file";
-    const facts = JSON.stringify({ signals: [`repeat_park:${key}`] });
-    const reasons = wakeReasons("", facts);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      1,
-    );
-    wait(key, NOW + MIN);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      0,
-    );
-  });
-  it("a wait on an item's full key handles its item_stale signal", () => {
-    const item = "message:guido-1:stream:guido-1:20261105T020751Z:271748:0";
-    const refs = [{ key: item, ticket: null }];
-    const facts = JSON.stringify({
-      signals: ["item_stale:message:guido-1:stream:guido-1:20261105T020751Z:271748"],
-    });
-    const reasons = wakeReasons("", facts, refs);
-    wait(item, NOW + MIN);
-    expect(unhandledReasons(store, reasons, NOW, new Set(reasons.map((r) => r.id)))).toHaveLength(
-      0,
-    );
+  it("has a gap of thirty minutes, so failures wake FLIGHT twice an hour at most", () => {
+    expect(FLIGHT_BATCH_MS).toBe(30 * MIN);
   });
 });

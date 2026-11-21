@@ -615,7 +615,7 @@ export const minorIssueFailedText = (pr: number, why: string): string =>
 /** What of the author run's loop decides whether a reviewed PR can merge. */
 export type ReviewCheckLoop = Pick<
   RunLoop,
-  "mergeHold" | "uat" | "awaitingFlight" | "controllerCheck" | "phase" | "parked"
+  "mergeHold" | "uat" | "awaitingFlight" | "controllerCheck" | "phase" | "hold"
 >;
 
 /** Who holds a reviewed PR back from merging, or null when nothing does. */
@@ -624,7 +624,7 @@ function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
   const held = (by: "FLIGHT" | "CAPCOM" | "operator" | "hub"): ReviewCheckState => ({
     kind: "held",
     by,
-    ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
+    ...(loop.hold?.reason ? { reason: loop.hold.reason } : {}),
   });
   if (loop.controllerCheck && !loop.controllerCheck.pass) return held("FLIGHT");
   if (loop.uat && !loop.uat.accepted) return held("operator");
@@ -670,7 +670,7 @@ export function reviewCheckOf(
         ? {
             kind: "held",
             by: "hub",
-            ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
+            ...(loop.hold?.reason ? { reason: loop.hold.reason } : {}),
           }
         : { kind: "queued", position: queueAhead + 1 };
     default:

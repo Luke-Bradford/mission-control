@@ -384,36 +384,64 @@ describe("the tabs", () => {
     expect(screen.getByRole("group", { name: "Range" })).toBeTruthy();
   });
 
-  it("shows a short coming note, never an empty chart, on each tab not built yet", async () => {
-    for (const [tab, name] of [
-      ["cost", "Cost and tokens is coming"],
-      ["throughput", "Throughput is coming"],
-      ["quality", "Quality is coming"],
-      ["machine", "Machine is coming"],
-    ] as const) {
+  it("builds every tab: none shows a coming note", async () => {
+    for (const tab of ["crew", "cost", "throughput", "quality", "machine"]) {
       await open(`?tab=${tab}`);
-      screen.getByRole("heading", { level: 2, name });
+      expect(screen.queryByRole("heading", { level: 2, name: /is coming/ }), tab).toBeNull();
       cleanup();
     }
   });
 
   it("keeps each earlier panel on the tab that will take it", async () => {
     const expected: Record<string, string[]> = {
-      cost: ["tTok", "tQuota", "tTicketBars", "tStepBars", "tTotals", "tCostMerged"],
-      throughput: ["tThru", "tCycle", "tFlow", "tCycleControl", "tForecast"],
-      quality: ["tQual", "tQualityTrend"],
-      machine: ["tMach", "tLock"],
+      cost: ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"],
+      // built: its panels are the Quality tab's own, and the earlier two are gone
+      quality: [],
+      // built: CPU, memory used, pressure and swap, and agent and test-run memory (the lock table is its Table view)
+      machine: ["tMach", "mMem", "mPressure", "mAgentMem"],
     };
-    const all = Object.values(expected).flat();
+    const all = [...Object.values(expected).flat(), "tQual", "tQualityTrend"];
     for (const [tab, ids] of Object.entries(expected)) {
       await open(`?tab=${tab}`);
       for (const id of all)
         expect(document.getElementById(id) !== null, `${tab}: ${id}`).toBe(ids.includes(id));
       // moved to the Crew tab, or to the seat's Agent page
-      for (const id of ["tCrewState", "tUtil", "tLat", "tSubs", "tCapcom", "tTurn"])
+      for (const id of [
+        "tCrewState",
+        "tUtil",
+        "tLat",
+        "tSubs",
+        "tCapcom",
+        "tTurn",
+        // moved to the Throughput tab, which draws its own (the forecast is dropped)
+        "tThru",
+        "tCycle",
+        "tFlow",
+        "tCycleControl",
+        "tForecast",
+      ])
+        expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
+      // the Cost and tokens tab's table view holds these, and no other tab does
+      for (const id of ["tTotals", "tCostTable", "tStepTable", "quotaP", "tQuota", "tCostMerged"])
         expect(document.getElementById(id), `${tab}: ${id}`).toBeNull();
       cleanup();
     }
+  });
+
+  it("keeps the earlier test lock panel on the Machine tab's Table view", async () => {
+    await open("?tab=machine&view=table");
+    expect(document.getElementById("tLock")).not.toBeNull();
+    expect(document.getElementById("tMach")).toBeNull();
+  });
+
+  it("keeps the earlier cost, token and quota panels, whole, in the Cost and tokens table view", async () => {
+    await open("?tab=cost&view=table");
+    for (const id of ["tTotals", "tCostTable", "tStepTable", "quotaP", "tQuota", "tCostMerged"])
+      expect(document.getElementById(id) !== null, id).toBe(true);
+    cleanup();
+    await open("?tab=cost");
+    for (const id of ["tTok", "tQuotaUsed", "tTicketBars", "tStepBars"])
+      expect(document.getElementById(id) !== null, id).toBe(true);
   });
 });
 

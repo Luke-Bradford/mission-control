@@ -38,6 +38,7 @@ import {
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   estimateTokens,
+  FLIGHT_FULL_BUILTINS,
   freezeRules,
   GUARD_HOOK_TIMEOUT_S,
   GUARD_UNREACHABLE_TEXT,
@@ -82,9 +83,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
 import { loadProfiles, profileHash } from "../src/config/profiles.ts";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
+import type { Engine } from "../src/engine/engine.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
@@ -92,6 +95,7 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { runPathGrants } from "../src/repo/path-grants.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
+import * as checkouts from "../src/runtime/checkouts.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
@@ -214,66 +218,6 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
-  describe("a waste alarm holds the hub's own starts", () => {
-    const alarm = (check: "restart-storm" | "retry-loop", subject: string, ticket?: string) =>
-      store.waste.insertAlarm(
-        {
-          check,
-          subject,
-          repoId: "mc",
-          ticket: ticket ?? null,
-          seatId: check === "restart-storm" ? subject : null,
-          runId: null,
-          level: 9,
-          evidence: "evidence line.",
-        },
-        Date.now(),
-      );
-    const flightSeat = {
-      id: "flight-1",
-      role: "FLIGHT",
-      accountId: "claude-main",
-      model: "opus",
-      area: [],
-    };
-
-    it("refuses startRun and startWatch of a seat in a restart storm, and lets the operator start", async () => {
-      alarm("restart-storm", "guido-1");
-      alarm("restart-storm", "flight-1");
-      const { sup } = make({
-        rules: withRules(),
-        fetchTicket: ticketWith({}),
-        extraSeat: flightSeat,
-      });
-      sup.start();
-      const e = await refusal(sup.startRun("guido-1", 42));
-      expect(e.status).toBe(422);
-      expect(e.message).toMatch(/^Not started: waste alarm\. GUIDO-1 is in a restart storm/);
-      const w = await refusal(sup.startWatch("flight-1"));
-      expect(w.status).toBe(422);
-      expect(w.message).toMatch(/FLIGHT-1 is in a restart storm/);
-      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
-    });
-
-    it("lets the operator's dock start the watch seat during its own storm", async () => {
-      alarm("restart-storm", "flight-1");
-      const { sup } = make({ rules: withRules(), extraSeat: flightSeat });
-      sup.start();
-      expect((await sup.startWatch("flight-1", { operator: true })).runId).toBeTruthy();
-    });
-
-    it("refuses a start of a parked ticket and starts another ticket", async () => {
-      alarm("retry-loop", "mc#42", "mc#42");
-      const claim = vi.fn(async () => {});
-      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
-      sup.start();
-      const e = await refusal(sup.startRun("guido-1", 42));
-      expect(e.status).toBe(422);
-      expect(e.message).toMatch(/^Not started: waste alarm\. mc#42 is parked/);
-      expect(claim).not.toHaveBeenCalled();
-    });
-  });
-
   describe("a weekly pace past 100%", () => {
     it("never refuses a start: the account's stop_at alone limits it (32% use, 195% projection)", async () => {
       const at = Date.now();
@@ -336,7 +280,7 @@ describe("startRun eligibility", () => {
   });
 
   it("0: refuses a closed card", async () => {
-    onBoard(boardCard(42, { closed: true }));
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
     await refused(422, startClosedText("mc#42"));
   });
 
@@ -492,6 +436,50 @@ describe("startRun eligibility", () => {
       await refused(422, grantRefusedText("mc#42", ["package.json"]), {
         fetchTicket: ticketWith({ body: BODY }),
       });
+    });
+
+    it("starts a Paths: line of files and globs in the seat's area with no grant", async () => {
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({
+          body: "Paths: apps/server/src/telemetry/**, apps/server/src/a.ts\n",
+        }),
+      });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual([]);
+    });
+
+    it.each(["apps/server", "apps/*"])(
+      "starts Paths: globs under the area %s with no grant",
+      async (guidoArea) => {
+        const { sup } = make({
+          rules: withRules(),
+          guidoArea: [guidoArea],
+          fetchTicket: ticketWith({ body: "Paths: apps/server/src/**, apps/server/**\n" }),
+        });
+        sup.start();
+        const { runId } = await sup.startRun("guido-1", 42);
+        expect(runPathGrants(store, runId)).toEqual([]);
+      },
+    );
+
+    it("refuses an outside glob with the text it always had", async () => {
+      await refused(422, grantUngrantableText("docs/**", pathGrantProblem("docs/**") as string), {
+        fetchTicket: ticketWith({ body: "Paths: apps/server/**, docs/**\n" }),
+      });
+    });
+
+    it("asks FLIGHT only for the outside file of a mixed Paths: line", async () => {
+      const body = "Paths: apps/server/src/**, package.json\n";
+      await refused(422, grantRefusedText("mc#42", ["package.json"]), {
+        fetchTicket: ticketWith({ body }),
+      });
+      approve();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({ body }) });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      expect(runPathGrants(store, runId)).toEqual(["package.json"]);
     });
 
     it("starts a ticket with no Paths: line holding no grant", async () => {
@@ -666,7 +654,11 @@ describe("startRun", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
-      loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/older", wake: true } },
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        hold: { kind: null, reason: null, ended: false, worktree: "/w/older", wake: true },
+      },
     });
     const pause = { seats: "all" as const, reason: "Hold other work", at: 1, by: "operator" };
     writeCrewPause(store, pause, 1);
@@ -694,7 +686,7 @@ describe("startRun", () => {
     const error = await refusal(sup.startRun("guido-1", 42));
     expect(error.status).toBe(409);
     expect(error.message).toContain("mc#41");
-    expect(store.run(older)?.loop?.aside?.wake).toBe(true);
+    expect(store.run(older)?.loop?.hold?.wake).toBe(true);
   });
 
   it("binds a run-bound pause exception at the actual pre-launch run boundary", async () => {
@@ -821,6 +813,63 @@ describe("startRun", () => {
     await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
       message: ticketHasRunText("mc#42"),
     });
+  });
+
+  it("starts a fresh stage after its merged PR has expired from the live cache", async () => {
+    git(clone, "branch", BRANCH);
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged stage",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 50,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      100,
+    );
+    store.sweepPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 2,
+          title: "Another PR",
+          url: "u",
+          branch: "feature/43-another",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      101,
+    );
+
+    const { sup } = make();
+    sup.start();
+    const out = await sup.startRun("guido-1", 42);
+
+    expect(store.pullRequests("mc").map((p) => p.number)).toEqual([2]);
+    expect(out.branch).toBe(`${BRANCH}-stage-2`);
   });
 
   it("remakes a worktree recorded before a store restart, clearing only after installation", async () => {
@@ -1019,7 +1068,6 @@ describe("startRun", () => {
       "TERM",
       "BASH_MAX_TIMEOUT_MS",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
-      "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
       SEAT_SANDBOX_ENV,
@@ -1046,8 +1094,8 @@ describe("startRun", () => {
     expect(env.GIT_COMMITTER_NAME).toBeUndefined();
     // Bash returns to the worktree after every command, so a `cd` never moves the rules (#41)
     expect(env.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe("1");
-    // a timed-out suite is killed, not moved to the background still holding the test lock
-    expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    // background Bash is on: seats may run background tasks
+    expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBeUndefined();
     expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
@@ -1706,6 +1754,36 @@ describe("startRun", () => {
     await first;
   });
 
+  it("reserves a ticket while a competing writer starts", async () => {
+    let release = () => {};
+    const fetched = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sup, fetchTicket } = make({
+      fetchTicket: async () => {
+        await fetched;
+        return TICKET;
+      },
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    const first = sup.startRun("guido-1", 42);
+    await until(() => expect(fetchTicket).toHaveBeenCalledTimes(1));
+    const second = refusal(sup.startRun("guido-2", 42));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchTicket).toHaveBeenCalledTimes(1);
+    const error = await second;
+    expect(error.status).toBe(409);
+    release();
+    await first;
+  });
+
   it("busy() names a start held in its checkout, so Update refuses it", async () => {
     const { sup } = make();
     sup.start();
@@ -2006,6 +2084,172 @@ describe("reused worktrees", () => {
     expect(store.runs("guido-1", 10)).toEqual([]);
   });
 
+  it("fails a carried-on run when cloning its checkout git directory fails", async () => {
+    const { sup, cfg } = make({
+      extraSeat: {
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      },
+    });
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockRejectedValue(new Error("clone failed"));
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const failed = store.runs("guido-1", 1)[0];
+      expect(failed).toMatchObject({ status: "failed" });
+      expect(failed?.endedAt).not.toBeNull();
+      expect(store.runsOnTicket("mc", "mc#42").every((run) => run.endedAt !== null)).toBe(true);
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+      store.replaceBoard("mc", [boardCard(42, { labels: ["area:server"], status: "In progress" })]);
+      const startSeat = createFlightTools({
+        config: cfg,
+        store,
+        bus,
+        supervisor: sup,
+        login: "me",
+        // the supervisor carries an open PR on only for a start the engine drives
+        engine: { status: () => ({ on: true }) } as unknown as Engine,
+        rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [] }),
+        fetchTicket: async () => TICKET,
+        board: {
+          move: async () => ({ ok: true, changed: true }),
+          read: async () => boardCard(42, { labels: ["area:server"], status: "In progress" }),
+        },
+        gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+        dbPath,
+        knownSecrets: async () => [],
+      }).find((tool) => tool.name === "start_seat");
+      if (startSeat === undefined) throw new Error("missing start_seat");
+      // FLIGHT's own live run, which every FLIGHT tool checks first
+      const seatRow = store.seatSession("guido-1");
+      if (seatRow === null || failed === undefined) throw new Error("missing fixture rows");
+      store.upsertRun({
+        ...failed,
+        id: "flight-run",
+        agentId: "flight-1",
+        endedAt: null,
+        status: "running",
+        ticket: null,
+        branch: null,
+        loop: undefined,
+      });
+      store.setSeatSession({
+        ...seatRow,
+        seatId: "flight-1",
+        runId: "flight-run",
+        state: "running",
+        reason: null,
+        worktree: null,
+      });
+      const carriedOn = await startSeat.call(
+        { seatId: "flight-1", runId: "flight-run" },
+        { seat: "guido-1", issue: 42, basis: "carry the open PR on" },
+      );
+      expect(carriedOn.isError ? carriedOn.text : undefined).toBeUndefined();
+      const carriedRunId = store.seatSession("guido-1")?.runId;
+      expect(store.run(carriedRunId ?? "")?.branch).toBe(BRANCH);
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
+  });
+
+  it("ends a start's run failed when the hub stops before any seat row holds it", async () => {
+    const { sup } = make();
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockImplementation(async () => {
+            void sup.stopAll();
+            throw new Error("clone failed");
+          });
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const left = store.runs("guido-1", 1)[0];
+      expect(left?.id).not.toBe(first.runId);
+      expect(left).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
+  });
+
   it("reports an install refusal in the brief after recording the start merge", async () => {
     const first = await checkout();
     writeFileSync(join(first.path, ".npmrc"), "unsafe=true\n");
@@ -2080,6 +2324,50 @@ describe("endRun", () => {
     expect(next.runId).not.toBe(runId);
     expect(store.run(next.runId)?.seq).toBe(2);
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("removes a stopped ticket worktree after its card closes", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
+  });
+
+  it("removes a stopped ticket worktree after its branch PR merges", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 1,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
   });
 
   it("with hold, stops the seat and keeps it out of rotation", async () => {
@@ -2391,7 +2679,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token
@@ -2885,14 +3173,16 @@ describe("repo guidance at launch", () => {
       );
   });
 
-  it("starts FLIGHT with the controller-equivalent Claude profile", async () => {
+  it("starts FLIGHT unsandboxed with its listed tools and without the operator's settings", async () => {
     const { sup } = make({ extraSeat: FLIGHT });
     sup.start();
     await sup.startWatch("flight-1");
     await until(() => expect(launches()).toHaveLength(1));
     const argv = launches()[0]?.argv as string[];
-    for (const flag of ["--restricted", "--tools", "--disallowedTools", "--permission-mode"])
+    for (const flag of ["--restricted", "--disallowedTools", "--permission-mode"])
       expect(argv).not.toContain(flag);
+    expect(argv[argv.indexOf("--setting-sources") + 1]).toBe("project,local");
+    expect(argv[argv.indexOf("--tools") + 1]).toBe(FLIGHT_FULL_BUILTINS.join(","));
     expect(argv).toContain("mcp__mc__*");
     const settings = JSON.parse(argv[argv.indexOf("--settings") + 1] ?? "{}");
     expect(settings.sandbox).toEqual({ enabled: false });
@@ -3304,18 +3594,18 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
   });
 
-  it.each([
-    ["git commit -m x", "git-write"],
-    ["sleep 1 &", "background"],
-  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
-    const { sup } = codex({ command });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await untilCodex(() => expect(decision()).toBe("decline"));
-    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
-    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRunByEngine(runId);
-  });
+  it.each([["git commit -m x", "git-write"]] as const)(
+    "sends %s to the shared %s outcome guard",
+    async (command, rule) => {
+      const { sup } = codex({ command });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await untilCodex(() => expect(decision()).toBe("decline"));
+      expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
+      await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it.each([
     { name: "uncorrelated mc", server: MC_MCP_SERVER, correlated: false },
@@ -3636,7 +3926,10 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   store.upsertRun({ ...run, endedAt: null, status: "running" });
   store.setRunLoop(run.id, {
     ...NEW_LOOP,
-    aside: {
+    hold: {
+      kind: null,
+      reason: null,
+      ended: false,
       worktree: join(root, "mc-crew", "guido-1-42"),
       wake: true,
     },
@@ -3644,7 +3937,7 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   const error = await refusal(sup.wakeRun(run.id));
   expect(error.status).toBe(409);
   expect(store.run(run.id)?.endedAt).toBeNull();
-  expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
+  expect(store.run(run.id)?.loop?.hold?.wake).toBe(true);
   expect(recorded()).toEqual([]);
 });
 
