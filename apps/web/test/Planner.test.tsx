@@ -49,6 +49,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Planner tab", () => {
+  it("says so inside the panel, with an alert and a retry, when the plans fail to load", async () => {
+    load({ "/api/plans": () => ({ status: 500, body: { error: "down" } }) });
+    render(<Planner />);
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(screen.getByText("No plans to show until they load.")).toBeTruthy();
+    expect(screen.queryByText("No plan is waiting for you")).toBeNull();
+  });
+  it("says no plan is waiting, not that loading failed, for a true empty list", async () => {
+    view = { waiting: [], history: [] };
+    load();
+    render(<Planner />);
+    expect(await screen.findByText("No plan is waiting for you")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("No plans to show until they load.")).toBeNull();
+  });
   it("routes to Planner and shows waiting and history", async () => {
     expect(route("/planner")).toEqual({ page: "planner" });
     load();
