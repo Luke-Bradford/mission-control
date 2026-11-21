@@ -323,6 +323,39 @@ describe("TicketPage", () => {
     const more = tl.querySelector("details.tk-more");
     expect(more?.querySelector(".tk-text")?.textContent).toBe(long);
   });
+
+  it("holds the whole recommendation reason of a run in a details element", async () => {
+    const reason = "reason ".repeat(40).trim();
+    const base = history();
+    show({
+      ...base,
+      timeline: [
+        {
+          key: "k9",
+          at: 3_000,
+          kind: "run",
+          runId: "r9",
+          seat: "guido-1",
+          status: "ok",
+          phase: "build",
+          model: "sonnet-5.5",
+          effort: "medium",
+          advice: {
+            step: "build",
+            model: "opus-5.5",
+            effort: "high",
+            reason,
+            by: "planner",
+            at: 1_000,
+          },
+        } as TicketEvent,
+      ],
+    });
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    const more = tl.querySelector("details.tk-more");
+    expect(more?.querySelector("summary")?.textContent).toBe("Full text");
+    expect(more?.querySelector(".tk-text")?.textContent).toContain(reason);
+  });
 });
 
 it("a closed ticket exposes QA for a live closing PR before it reaches the local collector", async () => {
