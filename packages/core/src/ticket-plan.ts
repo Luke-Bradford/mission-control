@@ -72,9 +72,6 @@ export type QaPlan = Pick<
   TicketPlan,
   "ref" | "asks" | "proposal" | "sizeEstimate" | "risks" | "mockups" | "decidedAt"
 >;
-
-export const planNotRequiredText = (ref: string): string =>
-  `${ref} has no plan to sign off here: its repo does not hold tickets for sign-off, so it is already on the usual path.`;
 /** FLIGHT's promote refusal: the repo needs a signed-off plan first. */
 export const planNeedsSignoffText = (ref: string, state: PlanState | null): string =>
   state === "awaiting-signoff"

@@ -591,67 +591,6 @@ export class Store {
     );
   }
 
-  /** Review runs that started since `since` on a ticket, oldest first. */
-  reviewRunsSince(since: number): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE review_id IS NOT NULL AND ticket IS NOT NULL AND started_at >= ?
-           ORDER BY started_at, seq`,
-        )
-        .all(since) as Row[]
-    ).map(toRun);
-  }
-
-  /** PRs merged in `[from, to]`, and every run on a ticket one of them closed. */
-  mergedTicketRuns(from: number, to: number): { mergedPrs: number; runs: Run[] } {
-    const merged = this.db
-      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
-      .get(from, to) as { n: number };
-    const runs = (
-      this.db
-        .prepare(
-          `WITH merged_tickets AS (
-             SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
-             WHERE merged_at >= ? AND merged_at <= ?
-           ) SELECT r.* FROM runs r JOIN merged_tickets t ON r.repo_id = t.repo_id AND r.ticket = t.ticket
-           ORDER BY r.started_at, r.seq`,
-        )
-        .all(from, to) as Row[]
-    ).map(toRun);
-    return { mergedPrs: merged.n, runs };
-  }
-
-  /** For each prompt section recorded since `since`, the run that sent the most of it. */
-  promptSectionTopRuns(since: number): {
-    section: PromptSection;
-    runId: string;
-    agentId: string;
-    ticket: string | null;
-    tokens: number;
-  }[] {
-    return this.db
-      .prepare(
-        `SELECT section, runId, agentId, ticket, tokens FROM (
-           SELECT p.section AS section, p.run_id AS runId, r.agent_id AS agentId, r.ticket AS ticket,
-             SUM(p.tokens) AS tokens,
-             ROW_NUMBER() OVER (PARTITION BY p.section ORDER BY SUM(p.tokens) DESC, p.run_id) AS n
-           FROM prompt_sections p JOIN runs r ON r.id = p.run_id WHERE p.at >= ?
-           GROUP BY p.section, p.run_id)
-         WHERE n = 1`,
-      )
-      .all(since) as never;
-  }
-
-  /** Prompt-section tokens by section for prompts recorded since `since`. */
-  promptSectionTotals(since: number): { section: PromptSection; tokens: number }[] {
-    return this.db
-      .prepare(
-        "SELECT section, SUM(tokens) AS tokens FROM prompt_sections WHERE at >= ? GROUP BY section",
-      )
-      .all(since) as { section: PromptSection; tokens: number }[];
-  }
-
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
   addToolResultBytes(runId: string, bytes: number, at: number): void {
     const last = this.db
@@ -1194,21 +1133,6 @@ export class Store {
       )
       .all(since, since) as Row[];
     return rows.map((r) => this.boardMoveOf(r));
-  }
-
-  /**
-   * Whether a real run in this store moved the issue's card to a column (done). Rows under
-   * `pr:` and `dep:` ids have no run, so another hub's moves never count.
-   */
-  runMovedCard(repoId: RepoId, issue: number): boolean {
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM board_moves m JOIN runs r ON r.id = m.run_id
-           WHERE m.repo_id = ? AND m.issue = ? AND m.state = 'done' LIMIT 1`,
-        )
-        .get(repoId, issue) !== undefined
-    );
   }
 
   /** Every move of the run's card, oldest first, pending ones too. */
@@ -4318,13 +4242,6 @@ export class Store {
   } {
     return this.commsStore.commsForTicket(ref, ticketContext);
   }
-  commsLinkedPr(ref: string): string | null {
-    const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
-    const row = this.db
-      .prepare("SELECT number FROM pull_requests WHERE ticket=? ORDER BY number DESC LIMIT 1")
-      .get(ticket) as { number: number } | undefined;
-    return row === undefined ? null : `PR ${row.number}`;
-  }
   /**
    * Direct-link counts since `since`, each with its newest message (id, time and the first
    * COMMS_LINK_PREVIEW characters) so the Comms graph can show it and spot a new one.
@@ -5911,17 +5828,6 @@ export class Store {
       }
     }
     return id;
-  }
-
-  /** Whether the key was ever briefed for the operator (a brief with no reader predates routing). */
-  operatorBriefed(key: string): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM briefs WHERE key = ? AND (structured IS NULL OR json_extract(structured, '$.for') IS NOT 'flight') LIMIT 1",
-        )
-        .get(key) !== undefined
-    );
   }
 
   /** The newest brief on each attention key. */

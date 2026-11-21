@@ -1634,6 +1634,12 @@ describe("ticket checkout recovery", () => {
     ).toMatchObject({ branch: `${BRANCH}-stage-2`, created: true });
   });
 
+  it("starts a fresh stage branch when the ticket has no branches but a merged PR used the name", async () => {
+    expect(
+      await prepareCheckout({ ...input(), mergedPullRequestBranches: [BRANCH] }),
+    ).toMatchObject({ branch: `${BRANCH}-stage-2`, created: true });
+  });
+
   it("starts a fresh stage branch when the branch's tip is already in origin's default branch", async () => {
     git(clone, "checkout", "-q", "-b", BRANCH);
     commit(clone, { "done.txt": "x\n" });

@@ -672,8 +672,6 @@ export const accountStoppedText = (call: string, accountId: string): string =>
 export const openPrText = (ref: string, pr: number): string =>
   `Not started: ${ref} has PR #${pr} open; finish or close it first.`;
 export const notOnBoardText = (ref: string): string => `Not started: ${ref} is not on the board.`;
-export const restartDoneText = (ref: string): string =>
-  `Not restarted: ${ref} is closed; reopen_issue first.`;
 export const wrongColumnText = (ref: string, column: string): string =>
   `Not started: ${ref} is in ${column}.`;
 export const ticketHasRunText = (ref: string): string => `Not started: ${ref} already has a run.`;
@@ -1368,8 +1366,6 @@ export const FLIGHT_ITEMS_LISTED = 20;
 export const FLIGHT_RECENT_LISTED = 10;
 /** How long Needs you gives FLIGHT to triage an operator-owned item. */
 export const FLIGHT_TRIAGE_WAIT_MS = 20 * 60_000;
-/** How long FLIGHT may keep an item after briefing it as handling. */
-export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 /** Compatibility for callers of the former question-only hold. */
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
@@ -1447,7 +1443,6 @@ export const wakeKey = (runId: string, n: number): string => `${wakeKeyPrefix(ru
 /** Turn 1 is the start brief; wake k is turn k + 1, so a run's last turn is FLIGHT_MAX_WAKES + 1. */
 export const flightTurnText = (n: number, max: number): string =>
   `turn ${n} of ${max}, then a fresh session`;
-export const flightTurnShort = (n: number, max: number): string => `turn ${n} of ${max}`;
 export const FLIGHT_NOTE_KEY = "flight:start-failed";
 /**
  * The note the watch raises while FLIGHT is down without having failed to start: parked, waiting
