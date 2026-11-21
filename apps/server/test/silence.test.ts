@@ -118,6 +118,7 @@ const parked = (id: string, agentId: string) =>
   run({ id, agentId, loop: budgetPark as unknown as Run["loop"] });
 const silent = () => {
   store.recordSilenceEvent("screenshot-captured", NOW - gap("screenshot-captured") - 1);
+  runSilenceCheck({ store, config, now: () => NOW - gap("screenshot-captured") - 1 });
   runSilenceCheck({ store, config, now: () => NOW });
 };
 const alarms = () => store.audit(NOW - 7 * 24 * HOUR, NOW).items?.filter((i) => i.state === "open");
@@ -134,9 +135,32 @@ describe("the silence timer's quiet periods", () => {
     expect(alarms()).toEqual([]);
   });
   it("raises an alarm when Ready work fits an idle seat", () => {
-    store.replaceBoard("repo", [card()]);
+    store.replaceBoard("repo", [card({ issueNumber: 8, itemId: "I8", labels: ["area:y"] })]);
     silent();
     expect(alarms()).toHaveLength(1);
+  });
+  it("does not watch seat starts without Ready work for an idle seat", () => {
+    seat(run({}));
+    store.recordSilenceEvent("seat-run-started", NOW - gap("seat-run-started") - 1);
+    runSilenceCheck({ store, config, now: () => NOW });
+    expect(alarms()).toEqual([]);
+
+    store.checkSilenceAlarms(NOW, {
+      crewPaused: false,
+      budgetStopped: false,
+      noSeatRan: false,
+      readyWorkForIdleSeat: true,
+    });
+    const later = NOW + gap("seat-run-started") + 1;
+    store.checkSilenceAlarms(later, {
+      crewPaused: false,
+      budgetStopped: false,
+      noSeatRan: false,
+      readyWorkForIdleSeat: true,
+    });
+    expect(store.audit(NOW - 7 * 24 * HOUR, later).items).toMatchObject([
+      { subject: "seat-run-started", state: "open" },
+    ]);
   });
   it("raises none when the only run has ended", () => {
     store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok" }));
@@ -237,7 +261,27 @@ describe("the watched events' hooks", () => {
       ],
       NOW + 5,
     );
-    expect(store.silenceEventLastSeen("ci-result-observed")).toBe(NOW + 5);
+    expect(store.silenceEventLastSeen("ci-result-observed")).toBe(2);
+    store.upsertPullRequests("repo", [pr([])], NOW + 6);
+    store.upsertPullRequests(
+      "repo",
+      [
+        pr([
+          {
+            name: "web",
+            kind: "check",
+            state: "passing",
+            conclusion: "SUCCESS",
+            attempt: 2,
+            url: null,
+            startedAt: 3,
+            completedAt: NOW + 7,
+          },
+        ]),
+      ],
+      NOW + 8,
+    );
+    expect(store.silenceEventLastSeen("ci-result-observed")).toBe(NOW + 7);
   });
 
   const raw = (sql: string, ...a: (string | number | null)[]) =>
@@ -269,5 +313,29 @@ describe("the watched events' hooks", () => {
       }),
     ).toBe(true);
     expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBe(NOW + 7);
+  });
+
+  it("records a completed review when its PR later merges", () => {
+    store.upsertPullRequests("repo", [pr([])], NOW);
+    raw(
+      `INSERT INTO reviews (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt,
+        round, state, run_id, created_at, started_at) VALUES (2, 'a', 'repo', 'retro', 1, 'sha1', 0, 2, 1,
+        'running', 'review-open', 1, 1)`,
+    );
+    store.recordFindings(2, "review-open", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "clean",
+      findings: [],
+      at: NOW + 1,
+    });
+    expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBeNull();
+
+    store.upsertPullRequests("repo", [{ ...pr([]), state: "merged", mergedAt: NOW + 2 }], NOW + 3);
+    expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBe(NOW + 2);
+  });
+
+  it("does not record a merge with no completed review", () => {
+    store.upsertPullRequests("repo", [{ ...pr([]), state: "merged", mergedAt: NOW + 2 }], NOW + 3);
+    expect(store.silenceEventLastSeen("merged-pr-review-recorded")).toBeNull();
   });
 });

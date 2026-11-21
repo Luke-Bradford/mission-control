@@ -145,6 +145,7 @@ describe("silence alarms", () => {
   it("raises one alarm after an expected event gap and clears it when the event resumes", () => {
     const watched = screenshotEvent();
     store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
+    store.checkSilenceAlarms(NOW - watched.gapMs - 1, QUIET_NONE);
     store.checkSilenceAlarms(NOW, QUIET_NONE);
 
     expect(store.audit(SINCE, NOW).items).toMatchObject([
@@ -176,10 +177,25 @@ describe("silence alarms", () => {
     );
   });
 
+  it("starts measuring a gap again when a quiet period ends", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - 50 * HOUR);
+    store.checkSilenceAlarms(NOW - 49 * HOUR, QUIET_NONE);
+    store.checkSilenceAlarms(NOW, { ...QUIET_NONE, crewPaused: true });
+    store.checkSilenceAlarms(NOW + MIN, QUIET_NONE);
+    expect(store.audit(SINCE, NOW + MIN).items).toEqual([]);
+
+    store.checkSilenceAlarms(NOW + MIN + watched.gapMs + 1, QUIET_NONE);
+    expect(store.audit(SINCE, NOW + MIN + watched.gapMs + 1).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
   it("includes the event, last seen time, and expected gap in Audit's Do next data", () => {
     const watched = screenshotEvent();
     const lastSeenAt = NOW - watched.gapMs - 1;
     store.recordSilenceEvent(watched.kind, lastSeenAt);
+    store.checkSilenceAlarms(lastSeenAt, QUIET_NONE);
     store.checkSilenceAlarms(NOW, QUIET_NONE);
 
     expect(store.audit(SINCE, NOW).items).toMatchObject([

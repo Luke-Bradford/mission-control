@@ -41,6 +41,7 @@ export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): n
   store.checkSilenceAlarms(at, {
     crewPaused: readCrewPause(store) !== null,
     noSeatRan: working.length === 0 && !readyWork,
+    readyWorkForIdleSeat: readyWork,
     // the budget stops the crew only when every working seat is parked on it or at its account's stop
     budgetStopped:
       working.length > 0 &&

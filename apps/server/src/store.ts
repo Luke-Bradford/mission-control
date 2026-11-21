@@ -1760,6 +1760,9 @@ export class Store {
          url = excluded.url, at = excluded.at`,
     );
     for (const p of prs) {
+      const old = this.db
+        .prepare("SELECT state FROM pull_requests WHERE repo_id = ? AND number = ?")
+        .get(repoId, p.number) as Row | undefined;
       if (p.headSha)
         for (const c of p.checks ?? [])
           addCiRun.run(
@@ -1780,8 +1783,9 @@ export class Store {
             readAt,
             readAt,
           );
-      if (p.headSha && (p.checks?.length ?? 0) > 0)
-        this.recordSilenceEvent("ci-result-observed", readAt);
+      for (const check of p.checks ?? [])
+        if (check.completedAt != null)
+          this.recordSilenceEvent("ci-result-observed", check.completedAt);
       const runs = this.db
         .prepare(
           `SELECT id FROM runs INDEXED BY runs_loop_pr_number
@@ -1835,6 +1839,16 @@ export class Store {
         p.base ?? null,
         p.isCrossRepository == null ? null : p.isCrossRepository ? 1 : 0,
       );
+      if (
+        p.state === "merged" &&
+        old?.state !== "merged" &&
+        this.db
+          .prepare(
+            "SELECT 1 FROM reviews WHERE repo_id = ? AND pr_number = ? AND verdict IS NOT NULL",
+          )
+          .get(repoId, p.number) !== undefined
+      )
+        this.recordSilenceEvent("merged-pr-review-recorded", p.mergedAt ?? readAt);
       if (p.mergedAt !== null) {
         const { files: _files, ...record } = p;
         addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(record));
@@ -2132,18 +2146,49 @@ export class Store {
    */
   checkSilenceAlarms(
     at: number,
-    quiet: { crewPaused: boolean; budgetStopped: boolean; noSeatRan: boolean },
+    quiet: {
+      crewPaused: boolean;
+      budgetStopped: boolean;
+      noSeatRan: boolean;
+      readyWorkForIdleSeat?: boolean;
+    },
   ): void {
-    if (quiet.crewPaused || quiet.budgetStopped || quiet.noSeatRan) return;
+    const active = !(quiet.crewPaused || quiet.budgetStopped || quiet.noSeatRan);
+    const activeSince = this.silenceActiveSince("silence-active-since", active, at);
+    const seatStartActiveSince = this.silenceActiveSince(
+      "silence-seat-start-active-since",
+      active && quiet.readyWorkForIdleSeat === true,
+      at,
+    );
+    if (activeSince === null) return;
     for (const event of SILENCE_WATCHED_EVENTS) {
       const lastSeenAt = auditEventLastSeen(this.db, event.kind);
       if (lastSeenAt === null) continue;
-      const silent = at - lastSeenAt > event.gapMs;
+      const startedAt = event.kind === "seat-run-started" ? seatStartActiveSince : activeSince;
+      if (startedAt === null) continue;
+      const silent = at - Math.max(lastSeenAt, startedAt) > event.gapMs;
       const detail = silent
         ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
         : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
       recordSilenceAlarm(this.db, event.kind, silent ? "open" : "done", detail, at);
     }
+  }
+
+  /** Starts a silence window when its work is expected, and discards it for quiet time. */
+  private silenceActiveSince(key: string, active: boolean, at: number): number | null {
+    if (!active) {
+      this.deleteSetting(key);
+      return null;
+    }
+    const saved = this.getSetting(key);
+    if (saved === null) {
+      this.setSetting(key, String(at));
+      return at;
+    }
+    const startedAt = Number(saved);
+    if (Number.isFinite(startedAt)) return startedAt;
+    this.setSetting(key, String(at));
+    return at;
   }
 
   /** Items recorded in range, newest first. */
