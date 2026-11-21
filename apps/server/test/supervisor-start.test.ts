@@ -512,6 +512,28 @@ describe("startRun eligibility", () => {
     });
   });
 
+  it("a hub default follows the seat: a later run on another seat gets its own model", async () => {
+    const { sup } = make({
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "opus-5.5",
+        effort: "high",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    const first = await sup.startRun("guido-1", 42);
+    await sup.endRun("guido-1");
+    const second = await sup.startRun("guido-2", 42);
+    expect(store.run(second.runId)?.advice).toMatchObject({
+      model: "opus-5.5",
+      effort: "high",
+      by: "hub",
+    });
+  });
+
   it("a build run snapshots the hub default when the planner recorded no advice", async () => {
     const { sup } = make();
     sup.start();

@@ -878,7 +878,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   /**
    * The advice a new run starts with: the one recorded for its ticket and step, else the hub's
-   * default (the seat's own model and effort), which is recorded too. A loop with no step gets none.
+   * default (the seat's own model and effort), which is recorded too. A hub default belongs to the
+   * seat it was made for, so a later run rebuilds it from its own seat. A loop with no step gets none.
    */
   function adviceFor(
     repoId: RepoId,
@@ -890,7 +891,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const step = adviceStepOf(loop);
     if (step === null) return null;
     const stored = store.modelAdvice(repoId, issue, step);
-    if (stored !== null) return stored;
+    if (stored !== null && stored.by !== "hub") return stored;
     const fallback: ModelAdvice = {
       step,
       model: seat.model,
