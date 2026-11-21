@@ -216,6 +216,9 @@ describe("Plan and mockups in the question", () => {
     const region = await screen.findByRole("region", { name: "Plan of shop-app#4001" });
     expect(within(region).getByText("Detail")).toBeTruthy();
     expect(within(region).getByText("nested point")).toBeTruthy();
+    expect(document.querySelector(".mat-main-plan h4 a")?.getAttribute("href")).toBe(
+      "/tickets/shop-app/4001",
+    );
     expect(screen.getByText("No pictures are attached to this question.")).toBeTruthy();
   });
 

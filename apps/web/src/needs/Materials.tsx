@@ -532,7 +532,7 @@ function MainPlan({ item }: { item: AttentionItem }) {
   return (
     <section className="mat-main-plan">
       <h4 className="mat-heading">
-        Plan of {label}: {t.title}
+        Plan of {name}: {t.title}
       </h4>
       {plan === null ? (
         <p className="note">
