@@ -3748,9 +3748,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                           (severityRank[left.severity] ?? 2) - (severityRank[right.severity] ?? 2),
                       )
                       .slice(0, 10);
-              if (priorRun.summary === null && evidence === undefined && findings.length === 0)
+              const handoffReason =
+                priorRun.ticket === null
+                  ? null
+                  : (store
+                      .flightDecisionsOnTicket(priorRun.ticket, [priorRun.id], 20)
+                      .find(
+                        (decision) =>
+                          decision.kind === "end" && decision.targetRunId === priorRun.id,
+                      )?.basis ?? null);
+              if (
+                priorRun.summary === null &&
+                evidence === undefined &&
+                findings.length === 0 &&
+                handoffReason === null
+              )
                 return null;
               return [
+                ...(handoffReason === null
+                  ? []
+                  : [`FLIGHT reassigned this ticket: ${handoffReason}`]),
                 ...(priorRun.summary === null
                   ? []
                   : [`Earlier summary: ${cleanText(priorRun.summary, 1500)}`]),

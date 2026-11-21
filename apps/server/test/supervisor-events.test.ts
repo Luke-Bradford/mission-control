@@ -10,6 +10,8 @@ import { describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { commsInboxContext } from "../src/comms/index.ts";
 import { messageUnpausedSeat } from "../src/config/crew-pause.ts";
+import type { Engine } from "../src/engine/engine.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { assignIssue, claimAs } from "../src/queue/claim.ts";
 import { CLI_PID_FILE, KEEPER_PID_FILE, pidAlive, readPidFile } from "../src/runtime/keeper.ts";
@@ -32,6 +34,7 @@ import {
   recorded,
   refusal,
   root,
+  START_RULES,
   seatState,
   store,
   TZ,
@@ -735,7 +738,16 @@ describe("supervisor events (Plan 7a)", () => {
         },
       });
       first.sup.start();
-      const priorLoop = { ...LOOP, phase: "ci" as const, prNumber: 9 };
+      const priorLoop = {
+        ...LOOP,
+        phase: "ci" as const,
+        prNumber: 9,
+        mergeHold: {
+          by: "FLIGHT" as const,
+          reason: "Fix the missing regression before sending this head back to review.",
+          at: 1,
+        },
+      };
       const priorStart = await first.sup.startRun("guido-1", 42, { loop: priorLoop });
       await until(() => expect(seatState("guido-1")).toBe("idle"));
       const worktree = store.seatSession("guido-1")?.worktree;
@@ -751,6 +763,17 @@ describe("supervisor events (Plan 7a)", () => {
         ...prior,
         summary: "Earlier summary",
         loop: priorLoop,
+      });
+      store.addFlightDecision({
+        at: 2,
+        kind: "end",
+        seatId: "guido-1",
+        targetRunId: priorStart.runId,
+        ref: null,
+        questionId: null,
+        about: "Ended GUIDO-1's run.",
+        decision: "Ended GUIDO-1's run.",
+        basis: "Fix the missing regression before sending this head back to review.",
       });
       store.addEvidence(priorStart.runId, "Earlier evidence", 2);
       store.addRunCommit({
@@ -812,12 +835,89 @@ describe("supervisor events (Plan 7a)", () => {
       await until(() => expect(userLines()).toHaveLength(2));
       const brief = userLines()[1] as string;
       expect(brief).toContain("## Continue the earlier run");
+      expect(brief).toContain(
+        "Fix the missing regression before sending this head back to review.",
+      );
       expect(brief.indexOf("critical.ts")).toBeLessThan(brief.indexOf("important.ts"));
       expect(brief).not.toContain("minor.ts");
       expect(brief).not.toContain("resolved.ts");
       expect(brief).not.toContain("extra-9.ts");
       expect(store.runCommits(runId)).toContain(head);
       expect(store.runCommits(runId)).not.toContain("f".repeat(40));
+    });
+
+    it("carries FLIGHT's end_run basis into the replacement seat's handoff", async () => {
+      const first = make({
+        extraSeat: {
+          id: "guido-2",
+          role: "GUIDO",
+          accountId: "claude-main",
+          model: "haiku",
+          effort: "high",
+          area: ["apps/**"],
+        },
+      });
+      first.cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      first.sup.start();
+      const prior = await first.sup.startRun("guido-1", 42, { loop: LOOP });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      const priorRun = store.run(prior.runId);
+      const flightSeat = store.seatSession("guido-1");
+      if (priorRun === null || flightSeat === null) throw new Error("missing fixture rows");
+      store.upsertRun({
+        ...priorRun,
+        id: "flight-run",
+        agentId: "flight-1",
+        ticket: null,
+        branch: null,
+        loop: undefined,
+      });
+      store.setSeatSession({
+        ...flightSeat,
+        seatId: "flight-1",
+        runId: "flight-run",
+        worktree: null,
+      });
+      const endRun = createFlightTools({
+        config: first.cfg,
+        store,
+        bus,
+        supervisor: first.sup,
+        login: "me",
+        engine: {
+          status: () => ({ on: true }),
+          uncommitted: async () => [],
+        } as unknown as Engine,
+        rules: async () => START_RULES,
+        fetchTicket: first.fetchTicket,
+        board: {
+          move: async () => ({ ok: true, changed: true }),
+          read: async () => null,
+        },
+        gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+        dbPath,
+        knownSecrets: async () => [],
+      }).find((tool) => tool.name === "end_run");
+      if (endRun === undefined) throw new Error("missing end_run");
+
+      expect(
+        await endRun.call(
+          { seatId: "flight-1", runId: "flight-run" },
+          { runId: prior.runId, basis: "Fix the missing regression." },
+        ),
+      ).toMatchObject({ text: expect.stringContaining("Ended GUIDO-1") });
+
+      await first.sup.startRun("guido-2", 42, { loop: LOOP });
+      await until(() => expect(userLines()).toHaveLength(2));
+      expect(userLines()[1]).toContain(
+        "FLIGHT reassigned this ticket: Fix the missing regression.",
+      );
     });
   });
 

@@ -5093,7 +5093,11 @@ describe("the engine runs reviews", () => {
         expect(await h.engine.holdMerge(RUN, "FLIGHT", "design not approved")).toEqual({
           ok: true,
         });
-        expect(loopOf().mergeHold).toMatchObject({ by: "FLIGHT", reason: "design not approved" });
+        expect(loopOf().mergeHold).toMatchObject({
+          by: "FLIGHT",
+          reason: "design not approved",
+          sha: SHA,
+        });
         await h.engine.reconcileRun(RUN);
         reported(first().id, []);
         await vi.waitFor(() => expect(loopOf().hold?.kind).toBe(MERGE_HOLD_PARK));

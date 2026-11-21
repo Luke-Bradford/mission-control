@@ -3440,12 +3440,13 @@ export function createEngine(deps: EngineDeps): Engine {
         if (loop.mergeHold && loop.mergeHold.by === "CAPCOM" && by !== "CAPCOM")
           return refuse("the operator already holds this run's merge");
         const at = now();
+        const sha = store.runPush(runId)?.sha;
         // a run already parked on the hold keeps the phase it left, and its park names the new holder
         const parkedOnHold = loop.phase === "parked" && loop.hold?.kind === MERGE_HOLD_PARK;
         const from = loop.mergeHold?.from;
         store.setRunLoop(runId, {
           ...loop,
-          mergeHold: { by, reason, at, ...(from ? { from } : {}) },
+          mergeHold: { by, reason, at, ...(sha ? { sha } : {}), ...(from ? { from } : {}) },
           ...(parkedOnHold && loop.hold
             ? { hold: { ...loop.hold, reason: mergeHoldParkText(by, reason) } }
             : {}),
