@@ -106,6 +106,7 @@ const withRules = (n: number) => ({
   "/api/audit?range=30d": {
     ...audit,
     longRunners: [],
+    prSizes: { prs: [], outliers: [] },
     deathLoops: [],
     reworkRounds: [],
     refusalSpikes: [],
