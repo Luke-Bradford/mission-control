@@ -496,7 +496,15 @@ function MainPlan({ item }: { item: AttentionItem }) {
   if (!ref) return null;
   const t = res.data;
   const matches = t !== undefined && t.repoId === ref.repoId && t.number === ref.number;
-  const name = `${ref.repoId}#${ref.number}`;
+  const label = `${ref.repoId}#${ref.number}`;
+  const name = (
+    <a
+      href={ticketPath(ref.repoId, ref.number)}
+      onClick={(e) => followLink(e, ticketPath(ref.repoId, ref.number))}
+    >
+      {label}
+    </a>
+  );
   if (!matches)
     return res.error ? (
       <p className="note" role="status">
@@ -524,7 +532,7 @@ function MainPlan({ item }: { item: AttentionItem }) {
   return (
     <section className="mat-main-plan">
       <h4 className="mat-heading">
-        Plan of {name}: {t.title}
+        Plan of {label}: {t.title}
       </h4>
       {plan === null ? (
         <p className="note">
@@ -537,7 +545,7 @@ function MainPlan({ item }: { item: AttentionItem }) {
           </a>
         </p>
       ) : (
-        <PlanScroll label={`Plan of ${name}`}>
+        <PlanScroll label={`Plan of ${label}`}>
           <OpenLinks>
             <Markdown text={plan} />
           </OpenLinks>

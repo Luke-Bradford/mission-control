@@ -242,7 +242,16 @@ describe("Plan and mockups in the question", () => {
   it("shows a failed ticket read as an error with Retry", async () => {
     routes([ask()], { [TICKET]: () => ({ status: 500, body: { error: "boom" } }) });
     render(<Needs item="q1" />);
-    expect(await screen.findByText(/Could not load the plan of shop-app#4001: boom/)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        (_, el) =>
+          el?.tagName === "P" &&
+          /Could not load the plan of shop-app#4001: boom/.test(el.textContent ?? ""),
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "shop-app#4001" }).getAttribute("href")).toBe(
+      "/tickets/shop-app/4001",
+    );
     expect(screen.getByRole("button", { name: "Retry loading the plan" })).toBeTruthy();
   });
 
