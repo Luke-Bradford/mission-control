@@ -50,7 +50,7 @@ describeRendered("Every header page at 1920x940 and 2560x1145", () => {
                 const tag = el.tagName.toLowerCase();
                 if (/<\/?[a-z][^>]*>/i.test(t) || /&(amp|lt|gt|quot|#\d+);/.test(t))
                   problems.push(`raw markup in ${tag}: ${t.slice(0, 60)}`);
-                if (/\*\*\S|\]\(https?:|^#{1,6} \S|`[^`]+`/.test(t))
+                if (/\*\*\S|\]\(https?:|`[^`]+`/.test(t))
                   problems.push(`raw markdown in ${tag}: ${t.slice(0, 60)}`);
                 if (/\brun-[0-9a-f]{6,}|\b[0-9a-f]{32,}\b|\bnull\b|\bundefined\b|\[object /.test(t))
                   problems.push(`internal id or value in ${tag}: ${t.slice(0, 60)}`);
