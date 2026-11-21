@@ -3807,10 +3807,11 @@ export class Store {
       const author = row.author_run_id as string;
       const repoId = row.repo_id as string;
       const prNumber = row.pr_number as number;
-      const merged =
-        (this.db
+      const merged = (
+        this.db
           .prepare("SELECT state FROM pull_requests WHERE repo_id = ? AND number = ?")
-          .get(repoId, prNumber) as Row | undefined)?.state === "merged";
+          .get(repoId, prNumber) as Row | undefined
+      )?.state === "merged";
       // late: a later round's finding on a file the author did not touch since the last review
       const changed =
         (row.round as number) >= 2 && row.changed_since !== null

@@ -26,7 +26,8 @@ export function runSilenceCheck(deps: { store: Store; config: CcConfig; now(): n
   for (const session of store.activeSeatSessions()) {
     const run = session.runId === null ? null : store.run(session.runId);
     const hold = run?.loop?.hold;
-    if (run === null || run.endedAt !== null || run.ticket === null || hold?.worktree != null) continue;
+    if (run === null || run.endedAt !== null || run.ticket === null || hold?.worktree != null)
+      continue;
     const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
     if (seat === undefined) continue;
     if (hold?.kind != null && hold.kind !== "budget") continue;

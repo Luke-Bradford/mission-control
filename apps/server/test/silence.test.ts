@@ -111,7 +111,9 @@ const seat = (r: Run) => {
     updatedAt: NOW,
   });
 };
-const budgetPark = { hold: { kind: "budget", reason: "limit", ended: false, worktree: null, wake: false } };
+const budgetPark = {
+  hold: { kind: "budget", reason: "limit", ended: false, worktree: null, wake: false },
+};
 const parked = (id: string, agentId: string) =>
   run({ id, agentId, loop: budgetPark as unknown as Run["loop"] });
 const silent = () => {
