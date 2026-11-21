@@ -78,6 +78,7 @@ import {
   type LoopKind,
   type MachineSample,
   type ModelAdvice,
+  type ModelTableData,
   OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
@@ -130,6 +131,7 @@ import { auditItems, recordAuditItem } from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { flightQueries } from "./store/flight.ts";
 import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
+import { modelTableData } from "./store/model-table.ts";
 import * as reviewsStore from "./store/reviews.ts";
 import {
   evidenceOf,
@@ -727,6 +729,11 @@ export class Store {
           at: r.at as number,
         }
       : null;
+  }
+
+  /** The runs and seat changes behind Audit's model table, for a window of `since` to `until`. */
+  modelTableData(since: number, until: number): ModelTableData {
+    return modelTableData(this.db, since, until);
   }
 
   run(id: string): Run | null {

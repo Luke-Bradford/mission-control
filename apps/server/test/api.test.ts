@@ -541,6 +541,16 @@ describe("audit", () => {
     expect(response.json()).toEqual(emptyAudit(30));
   });
 
+  it("serves the model table for a range, empty with no runs, and refuses a bad range", async () => {
+    const ok = await get("/api/audit/models?range=7d");
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({
+      groups: { none: [], type: [], size: [], plan: [] },
+      changes: [],
+    });
+    expect((await get("/api/audit/models?range=5d")).statusCode).toBe(400);
+  });
+
   it.each([7, 30, 90, 365])("accepts the %dd range", async (days) => {
     const response = await get(`/api/audit?range=${days}d`);
     expect(response.statusCode).toBe(200);

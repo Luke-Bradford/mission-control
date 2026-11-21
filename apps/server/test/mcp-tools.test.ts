@@ -5255,10 +5255,10 @@ describe("report_findings", () => {
     }) as number;
     store.setReviewState(second, ["queued"], "running", { at: NOW + 1, runId: "retro:round-2" });
     reviewRun("retro:round-2", second);
-    await report(
-      args({ findings: [finding({ category: "correctness", file: "apps/b.ts" })] }),
-      { seatId: "retro", runId: "retro:round-2" },
-    );
+    await report(args({ findings: [finding({ category: "correctness", file: "apps/b.ts" })] }), {
+      seatId: "retro",
+      runId: "retro:round-2",
+    });
     expect(store.modelAdvice("mc", 42, "build")).toMatchObject({
       step: "build",
       model: "sonnet-5.5",
