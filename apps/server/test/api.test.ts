@@ -481,6 +481,8 @@ describe("audit", () => {
     refusalSpikes: [],
     spendOutliers: [],
     prSizes: { prs: [], outliers: [] },
+    mergedPerDay: [],
+    findingFiles: [],
     chatter: [],
     flakes: [],
     changes: [],

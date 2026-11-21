@@ -19,6 +19,7 @@ import {
   type AttentionBrief,
   AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
+  AUDIT_FINDING_FILES,
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
@@ -73,6 +74,7 @@ import {
   type HealthRow,
   type HudColumn,
   type HudState,
+  isGeneratedFile,
   type LoopEvent,
   type LoopKind,
   type MachineSample,
@@ -1995,6 +1997,19 @@ export class Store {
         prs,
         outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
       },
+      mergedPerDay: rows(
+        `SELECT (merged_at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS merged,
+           SUM(top IS NULL) AS noReview, COALESCE(SUM(top <= 1), 0) AS round1, COALESCE(SUM(top = 2), 0) AS round2,
+           COALESCE(SUM(top >= 3), 0) AS round3
+         FROM (SELECT h.merged_at AS merged_at,
+             (SELECT MAX(v.round) FROM reviews v WHERE v.repo_id = h.repo_id
+               AND v.pr_number = h.number AND v.state = 'reported') AS top
+           FROM pr_history h WHERE h.merged_at >= ? AND h.merged_at <= ?)
+         GROUP BY day ORDER BY day`,
+        since,
+        until,
+      ) as unknown as NonNullable<AuditView["mergedPerDay"]>,
+      findingFiles: this.auditFindingFiles(since, until),
       chatter: this.commsChatter(since, until),
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
@@ -2102,6 +2117,7 @@ export class Store {
     }[];
     const changes: AuditChange[] = [];
     const previous = new Map<string, (typeof runs)[number]>();
+    const metrics = this.auditMetricsReader(since - AUDIT_CHANGE_WINDOW_MS, until);
     for (const run of runs) {
       const last = previous.get(run.agent_id);
       previous.set(run.agent_id, run);
@@ -2123,8 +2139,8 @@ export class Store {
           from,
           to,
           windowMs,
-          before: this.auditMetrics(run.started_at - windowMs, run.started_at - 1),
-          after: this.auditMetrics(run.started_at, run.started_at + windowMs - 1),
+          before: metrics(run.started_at - windowMs, run.started_at - 1),
+          after: metrics(run.started_at, run.started_at + windowMs - 1),
         });
       }
     }
@@ -2238,39 +2254,70 @@ export class Store {
     };
   }
 
-  /** Crew-wide metrics over one window, both ends inclusive. */
-  private auditMetrics(from: number, to: number): AuditMetrics {
-    const merged = this.db
-      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
-      .get(from, to) as { n: number };
+  /**
+   * The metrics of any window inside `[low, high]`, worked out from one read of the merged PRs,
+   * reported reviews and per-ticket costs in that span, so a long list of changes does not run
+   * a handful of queries per change.
+   */
+  private auditMetricsReader(
+    low: number,
+    high: number,
+  ): (from: number, to: number) => AuditMetrics {
+    const merged = (
+      this.db
+        .prepare(
+          `SELECT merged_at AS at, repo_id AS repoId, json_extract(record, '$.ticket') AS ticket
+           FROM pr_history WHERE merged_at >= ? AND merged_at <= ? ORDER BY merged_at`,
+        )
+        .all(low, high) as { at: number; repoId: string; ticket: string | null }[]
+    ).filter((m) => m.at !== null);
     const reviews = this.db
       .prepare(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(blocking > 0), 0) AS failed FROM reviews
-         WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?`,
+        `SELECT ended_at AS at, blocking > 0 AS failed, author_run_id AS authorRunId, round
+         FROM reviews WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ? ORDER BY ended_at`,
       )
-      .get(from, to) as { n: number; failed: number };
-    const costs = this.db
+      .all(low, high) as { at: number; failed: number; authorRunId: string; round: number }[];
+    const cost = new Map<string, number>();
+    for (const c of this.db
       .prepare(
-        `WITH merged_tickets AS (
-           SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
-           WHERE merged_at >= ? AND merged_at <= ?
-         ) SELECT SUM(r.cost_usd) AS costUsd FROM merged_tickets t
-         JOIN runs r ON r.repo_id = t.repo_id AND r.ticket = t.ticket
-         GROUP BY t.repo_id, t.ticket HAVING costUsd IS NOT NULL`,
+        `SELECT repo_id AS repoId, ticket, SUM(cost_usd) AS costUsd FROM runs
+         WHERE ticket IS NOT NULL GROUP BY repo_id, ticket HAVING costUsd IS NOT NULL`,
       )
-      .all(from, to) as { costUsd: number }[];
-    const rework = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(rounds), 0) AS n FROM (
-           SELECT MAX(0, MAX(round) - 1) AS rounds FROM reviews
-           WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ? GROUP BY author_run_id)`,
-      )
-      .get(from, to) as { n: number };
-    return {
-      merged: merged.n,
-      reviewFailRate: reviews.n === 0 ? null : reviews.failed / reviews.n,
-      medianCostPerMergedTicket: median(costs.map((c) => c.costUsd)),
-      reworkRounds: rework.n,
+      .all() as { repoId: string; ticket: string; costUsd: number }[])
+      cost.set(`${c.repoId}\0${c.ticket}`, c.costUsd);
+    // First index whose time is at or after `t`.
+    const lower = (rows: readonly { at: number }[], t: number): number => {
+      let lo = 0;
+      let hi = rows.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if ((rows[mid] as { at: number }).at < t) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    return (from, to) => {
+      const prs = merged.slice(lower(merged, from), lower(merged, to + 1));
+      const reviewed = reviews.slice(lower(reviews, from), lower(reviews, to + 1));
+      const costs = new Set<string>();
+      for (const m of prs) {
+        const key = `${m.repoId}\0${m.ticket}`;
+        if (m.ticket !== null && cost.has(key)) costs.add(key);
+      }
+      const topRound = new Map<string, number>();
+      for (const r of reviewed)
+        topRound.set(r.authorRunId, Math.max(topRound.get(r.authorRunId) ?? r.round, r.round));
+      let rework = 0;
+      for (const top of topRound.values()) rework += Math.max(0, top - 1);
+      return {
+        merged: prs.length,
+        reviewFailRate:
+          reviewed.length === 0
+            ? null
+            : reviewed.reduce((n, r) => n + (r.failed ? 1 : 0), 0) / reviewed.length,
+        medianCostPerMergedTicket: median([...costs].map((k) => cost.get(k) as number)),
+        reworkRounds: rework,
+      };
     };
   }
 
@@ -3857,6 +3904,68 @@ export class Store {
       resolution: r.resolution as string | null,
       resolvedReviewId: r.resolved_review_id as number | null,
     }));
+  }
+
+  /**
+   * Files with blocking review findings in range, with how many merged PRs in range touched each
+   * (the stored diff files). Generated files are left out. Most findings per touch first (files with no stored touch
+   * last), cut at AUDIT_FINDING_FILES after ranking; `touches` is 0 where no stored diff names the file.
+   */
+  private auditFindingFiles(since: number, until: number): NonNullable<AuditView["findingFiles"]> {
+    const marks = BLOCKING_SEVERITIES.map(() => "?").join(", ");
+    const raised = this.db
+      .prepare(
+        `SELECT f.review_id AS review, f.file AS file, COUNT(*) AS n FROM review_findings f
+         JOIN reviews v ON v.id = f.review_id
+         WHERE v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+           AND f.severity IN (${marks})
+         GROUP BY f.review_id, f.file`,
+      )
+      .all(since, until, ...BLOCKING_SEVERITIES) as { review: number; file: string; n: number }[];
+    // A finding the reviewer holds is listed again by the next round. That listing is the same
+    // finding, so it is not counted twice: each held resolution takes one listing of its file from
+    // the round that held it, provided the held finding was itself raised in range.
+    const held = new Map<string, number>();
+    for (const h of this.db
+      .prepare(
+        `SELECT x.review_id AS review, p.file AS file, COUNT(*) AS n FROM review_resolutions x
+         JOIN review_findings p ON p.review_id = x.prior_review_id AND p.pos = x.finding_pos
+         JOIN reviews pv ON pv.id = x.prior_review_id
+         JOIN reviews v ON v.id = x.review_id
+         WHERE x.outcome = 'held' AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+           AND pv.state = 'reported' AND pv.ended_at >= ? AND pv.ended_at <= ?
+         GROUP BY x.review_id, p.file`,
+      )
+      .all(since, until, since, until) as { review: number; file: string; n: number }[])
+      held.set(`${h.review}\0${h.file}`, h.n);
+    const findings = new Map<string, number>();
+    for (const r of raised) {
+      const carried = Math.min(held.get(`${r.review}\0${r.file}`) ?? 0, r.n);
+      findings.set(r.file, (findings.get(r.file) ?? 0) + r.n - carried);
+    }
+    const touched = new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT p.path AS file, COUNT(*) AS touches FROM pr_files p
+             JOIN pr_history h ON h.repo_id = p.repo_id AND h.number = p.pr_number
+             WHERE h.merged_at >= ? AND h.merged_at <= ? GROUP BY p.path`,
+          )
+          .all(since, until) as { file: string; touches: number }[]
+      ).map((r) => [r.file, r.touches]),
+    );
+    // Ranked by findings per touch before the cut, so the cut keeps the top of that ranking; a file
+    // with no stored touch has no ratio and follows those that do.
+    return [...findings]
+      .filter(([file]) => !isGeneratedFile(file))
+      .map(([file, n]) => ({ file, findings: n, touches: touched.get(file) ?? 0 }))
+      .filter((r) => r.findings > 0)
+      .sort((a, b) => {
+        if (a.touches > 0 !== b.touches > 0) return a.touches > 0 ? -1 : 1;
+        const ratio = a.touches > 0 ? b.findings * a.touches - a.findings * b.touches : 0;
+        return ratio || b.findings - a.findings || a.file.localeCompare(b.file);
+      })
+      .slice(0, AUDIT_FINDING_FILES);
   }
 
   /** Completed review rounds in the requested window, plus the full history of open PRs. */

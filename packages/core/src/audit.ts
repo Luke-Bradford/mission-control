@@ -5,6 +5,15 @@ import type { AuditSpecBounce, AuditSpecBounceCount } from "./spec-bounce.ts";
 
 /** A merged PR at or above this many changed lines (additions plus deletions) is a size outlier. */
 export const AUDIT_PR_OUTLIER_LINES = 800;
+
+/** Files the findings-by-file list keeps, most findings first. */
+export const AUDIT_FINDING_FILES = 50;
+
+/** Generated files (lockfiles, build output, snapshots) are left out of findings by file. */
+export const isGeneratedFile = (path: string): boolean =>
+  /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|[^/]+\.lock|dist|build|coverage|node_modules)(\/|$)|\.(snap|min\.js|min\.css|map)$/.test(
+    path,
+  );
 /** A seat with this many guard refusals in one UTC day is a refusal spike. */
 export const AUDIT_REFUSAL_SPIKE = 10;
 /** A run costing at least this many times the range's median run cost is a spend outlier. */
@@ -181,6 +190,22 @@ export interface AuditView {
     promptHash: string | null;
   }[];
   prSizes: { prs: AuditPrSize[]; outliers: AuditPrSize[] };
+  /**
+   * Every PR merged in range, counted per UTC day (`day` is the day's start), oldest first. Unlike
+   * `prSizes` it is never cut, so its total is the range's merge count. The server always sets it;
+   * optional so web fixtures built before it type-check.
+   */
+  mergedPerDay?: {
+    day: number;
+    merged: number;
+    /** Of `merged`: no hub review on record, then by the highest reported round (3 is round 3 or later). */
+    noReview: number;
+    round1: number;
+    round2: number;
+    round3: number;
+  }[];
+  /** Files with blocking findings in range; `touches` is merged PRs in range whose stored diff names the file (0: unknown). */
+  findingFiles?: { file: string; findings: number; touches: number }[];
   /** Long back-and-forth between two seats on one ticket. */
   chatter: { from: string; to: string; ticket: string; rounds: number }[];
   /** Checks that failed, then passed on the same head; kept for FLIGHT_SIGNAL_KEEP_MS only. */

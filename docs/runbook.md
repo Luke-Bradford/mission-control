@@ -419,6 +419,11 @@ The report is hub code over recorded runs and reviews (`apps/server/src/spend/wa
 - `GET /waste` also serves `counts`: the latest daily retrospective's tickets opened and closed, runs per
   ticket (tickets with runs, mean, busiest), review rounds (reported, failed) and idle seat-hours, over the
   retrospective's 24 hours; null before the first. `alarms` and `checks` are always empty.
+- The Audit page is one screen: a verdict, then "Do next" (one ranked row per cause, from
+  `GET /api/audit`, built by `auditActions` in `packages/core`), "New
+  outside", "How we build", "Where findings land" and "What past recommendations achieved". Each row
+  shows a number now, a target that comes from an existing limit (or zero), and who decides. No
+  proposal is stored, so a row has no accept step or review date; the last panels say what is not collected.
 - `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged
   change and the share spent on building (developer runs). A cost is
   `null` where no run recorded one, never zero or an estimate: Codex runs record tokens but not cost,
