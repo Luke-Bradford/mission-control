@@ -13,13 +13,7 @@ import {
   type AuditView,
 } from "./audit.ts";
 import { GUARD_RULES } from "./guard.ts";
-import {
-  WASTE_CHECK_TITLES,
-  WASTE_THRESHOLDS,
-  type WasteAlarm,
-  type WasteCheck,
-  wasteThresholdText,
-} from "./waste.ts";
+import { WASTE_CHECKS, WASTE_THRESHOLDS, type WasteAlarm, type WasteCheck } from "./waste.ts";
 
 /** Who decides what to do about a row: FLIGHT, or the operator ("You"). */
 export type AuditDecider = "FLIGHT" | "You";
@@ -99,6 +93,34 @@ const ruleText = (rule: string): string =>
   Object.hasOwn(GUARD_RULES, rule) ? GUARD_RULES[rule as keyof typeof GUARD_RULES] : rule;
 
 /** The change each waste check asks for. */
+/** The limit each waste check raises its alarm at, in words, from WASTE_THRESHOLDS. */
+function wasteLimitText(check: WasteCheck): string {
+  const t = WASTE_THRESHOLDS;
+  const hours = (ms: number): string => `${ms / 3_600_000} h`;
+  switch (check) {
+    case "unchanged-rerun":
+      return "a rerun with nothing changed since the last run";
+    case "retry-loop":
+      return `${t.retryFailedAttempts} failed attempts, or ${t.retryResumes} carry-on resumes with no report`;
+    case "review-rounds":
+      return `more than ${t.reviewRounds} review rounds`;
+    case "restart-storm":
+      return `more than ${t.restartStormStarts} starts in ${hours(t.restartStormWindowMs)}`;
+    case "cost-without-output":
+      return `${t.costFactor} times the median cost of its size, with no merge`;
+    case "coordination-overhead":
+      return `FLIGHT spend over the developers' once it is at least $${t.coordinationMinUsd} in ${hours(t.coordinationWindowMs)}`;
+    case "ticket-churn":
+      return `tickets opened reach tickets closed, with at least ${t.churnMinOpened} opened in ${hours(t.churnWindowMs)}`;
+    case "runs-per-ticket":
+      return `more than ${t.runsPerTicket} runs and no merge`;
+    case "failed-review-rounds":
+      return `${t.failedReviewRounds} failed review rounds`;
+    case "clearance-waiting":
+      return `waiting ${hours(t.clearanceAlarmMs)} on FLIGHT's clearance`;
+  }
+}
+
 const WASTE_ACTION_TITLES: Record<WasteCheck, string> = {
   "unchanged-rerun": "Stop rerunning checks on a commit that has not changed",
   "retry-loop": "Fix what makes a ticket fail again and again",
@@ -368,10 +390,10 @@ export function auditActions(
 
   // Open waste alarms: one row per cause, never one per ticket and never several causes in one row.
   const open = alarms.filter((a) => a.closedAt === null && a.resolvedAt === null);
-  for (const check of Object.keys(WASTE_CHECK_TITLES) as WasteCheck[]) {
+  for (const check of WASTE_CHECKS) {
     const checkRows = open.filter((a) => a.check === check);
     if (checkRows.length === 0) continue;
-    const limit = wasteThresholdText(check);
+    const limit = wasteLimitText(check);
     for (const { cause, alarms: rows } of wasteCauseGroups(check, checkRows)) {
       add({
         group: "waste",
