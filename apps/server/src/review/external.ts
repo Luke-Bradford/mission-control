@@ -29,9 +29,8 @@ class ExternalReviewPublicationError extends Error {}
 
 /**
  * A branch the crew or an observed loop still owns: a build run that has not ended, any run of a
- * configured loop (observed loops are read-only, so their PRs never take the external path), a
- * seat that has claimed the branch's handoff and has no run row yet, or, given the PR's ticket, a
- * live run on that ticket under another branch.
+ * configured loop (observed loops are read-only, so their PRs never take the external path), or,
+ * given the PR's ticket, a live run on that ticket under another branch.
  */
 export const branchOwned = (
   config: Pick<CcConfig, "loops">,
@@ -48,10 +47,7 @@ export const branchOwned = (
     (ticket != null &&
       store
         .runsOnTicket(repoId, ticket)
-        .some((run) => run.endedAt === null && run.reviewId == null)) ||
-    store
-      .claimedHandoffs(repoId)
-      .some((h) => h.branch === branch || (ticket != null && h.ticket === ticket))
+        .some((run) => run.endedAt === null && run.reviewId == null))
   );
 };
 

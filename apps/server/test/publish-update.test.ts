@@ -18,6 +18,7 @@ import {
   gitIdentity,
   MC_MERGE_AUTHOR,
   MERGE_BRANCH_MOVED,
+  MERGE_NOT_RUN_BRANCH,
   prDiffKey,
   UPDATE_MERGE_IN_PROGRESS,
   UPDATE_NO_WORKTREE,
@@ -86,7 +87,7 @@ const run = (over: Partial<Run> = {}): Run => ({
   ...over,
 });
 
-const publisher = () =>
+const publisher = (now: () => number = () => START) =>
   createPublisher({
     config: config(),
     store,
@@ -96,7 +97,7 @@ const publisher = () =>
     dbPath: join(dir, "mc.sqlite"),
     knownSecrets: async () => [],
     checks: async () => [],
-    now: () => START,
+    now,
   } satisfies McToolsDeps);
 
 /** Main moves with `edit`; the branch (in its own worktree) has one commit editing apps/a.ts. */
@@ -167,6 +168,167 @@ describe("worktreeChanges (real git)", () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     const r = await publisher().worktreeChanges(run(), join(dir, "elsewhere"));
     expect(r).toMatchObject({ ok: false });
+  });
+});
+
+describe("fastForward (real git)", () => {
+  /** Someone else pushes a commit on top of the branch tip from another clone; its sha. */
+  function outsidePush(edit?: (other: string) => void): string {
+    git(worktree, "push", "-q", "origin", BRANCH);
+    const other = join(dir, "other");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", BRANCH);
+    write(other, "docs/c.md", "doc\nedited\n");
+    edit?.(other);
+    git(other, "add", "-A");
+    git(other, "commit", "-q", "-m", "doc edit");
+    git(other, "push", "-q", "origin", BRANCH);
+    return git(other, "rev-parse", "HEAD");
+  }
+
+  it("fetches the new commit and moves the run's own branch onto it", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush();
+    expect(await publisher().fastForward(run(), worktree, sha)).toEqual({
+      ok: true,
+      commits: 1,
+    });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(sha);
+    expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${BRANCH}`);
+  });
+
+  it("reports an install that the moved-in commits need but the hub refuses", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush((other) => {
+      write(other, "package.json", '{"name":"sync-test","private":true}\n');
+      write(other, "pnpm-lock.yaml", "garbage: [\n");
+    });
+    const r = await publisher().fastForward(run(), worktree, sha);
+    expect(r).toMatchObject({ ok: true });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(sha);
+    expect(r.ok && r.installNote).toContain("dependencies changed; install refused:");
+  });
+
+  it("leaves a branch that has diverged from the new commit as it is", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush();
+    write(worktree, "apps/a.ts", "local\n");
+    git(worktree, "commit", "-q", "-am", "local only");
+    const before = git(worktree, "rev-parse", "HEAD");
+    expect(await publisher().fastForward(run(), worktree, sha)).toMatchObject({ ok: false });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+  });
+
+  it("leaves another branch, or a detached HEAD, as it is", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const sha = outsidePush();
+    git(worktree, "switch", "-q", "-c", "other-branch");
+    const before = git(worktree, "rev-parse", "HEAD");
+    expect(await publisher().fastForward(run(), worktree, sha)).toEqual({
+      ok: false,
+      text: MERGE_NOT_RUN_BRANCH,
+      transient: false,
+    });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+    git(worktree, "switch", "-q", "--detach", "HEAD");
+    expect(await publisher().fastForward(run(), worktree, sha)).toMatchObject({ ok: false });
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(before);
+  });
+});
+
+describe("isDescendant (real git)", () => {
+  /** A commit another clone pushed to origin on `branch`, started at `from`; its sha. */
+  function pushedElsewhere(branch: string, from: string): string {
+    git(worktree, "push", "-q", "origin", BRANCH);
+    const other = join(dir, "other");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", "-B", branch, from);
+    write(other, "docs/c.md", `doc\n${branch}\n`);
+    git(other, "commit", "-q", "-am", "elsewhere");
+    git(other, "push", "-q", "origin", branch);
+    return git(other, "rev-parse", "HEAD");
+  }
+  const has = (sha: string): boolean => {
+    try {
+      git(clone, "cat-file", "-e", `${sha}^{commit}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it("fetches a head the clone has not seen, then finds it on top of the push", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const head = pushedElsewhere(BRANCH, tip);
+    expect(has(head)).toBe(false);
+    expect(await publisher().isDescendant(run(), tip, head)).toBe(true);
+    expect(has(head)).toBe(true);
+  });
+
+  it("is false for an unseen head that does not descend from the push", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const head = pushedElsewhere("unrelated", mainSha);
+    expect(has(head)).toBe(false);
+    expect(await publisher().isDescendant(run(), tip, head)).toBe(false);
+  });
+});
+
+describe("isDescendant fetch retry (real git)", () => {
+  it("asks again after a pause when the first fetch failed, and then follows the head", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const other = join(dir, "other2");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", "-B", "later", mainSha);
+    write(other, "docs/c.md", "doc\nlater\n");
+    git(other, "commit", "-q", "-am", "later");
+    const head = git(other, "rev-parse", "HEAD");
+    let t = START;
+    const p = publisher(() => t);
+    // not on origin yet: the fetch fails
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    git(other, "push", "-q", "origin", "later");
+    // on origin now, but the pause after the failed fetch has not passed
+    t += 1000;
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    // after the pause it is fetched and found
+    t += 60_000;
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(true);
+  });
+});
+
+describe("runEnded (real git)", () => {
+  it("lets go of a failed fetch when the run ends, so a later one asks at once", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    store.upsertRun(run());
+    const other = join(dir, "other3");
+    git(dir, "clone", "-q", join(dir, "origin.git"), other);
+    git(other, "config", "user.name", "o");
+    git(other, "config", "user.email", "o@example.com");
+    git(other, "checkout", "-q", "-B", "later", mainSha);
+    write(other, "docs/c.md", "doc\nlater\n");
+    git(other, "commit", "-q", "-am", "later");
+    const head = git(other, "rev-parse", "HEAD");
+    const t = START;
+    const p = publisher(() => t);
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    git(other, "push", "-q", "origin", "later");
+    // inside the pause the failure is remembered; once the run has ended it is not
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(false);
+    p.runEnded(run().id);
+    expect(await p.isDescendant(run(), mainSha, head)).toBe(true);
   });
 });
 

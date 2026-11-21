@@ -22,7 +22,6 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
-  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   ciLogText,
@@ -65,7 +64,6 @@ import {
   FLIGHT_RUNAWAY,
   FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_STATE_TEXT_MAX,
-  FLIGHT_UNPARK_KINDS,
   type FlightDecision,
   flightWakeId,
   GH_READ_BAD_PATH,
@@ -86,27 +84,34 @@ import {
   LEDGER_FULL_TEXT,
   LEDGER_KIND_CHANGE_TEXT,
   LEDGER_TRACK_CLOSED_TEXT,
+  leaveSeat,
   ledgerClosedText,
   ledgerNextText,
   ledgerNoKeyText,
   ledgerOwnerText,
   ledgerTitleText,
+  liftPark,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TICKET_READERS_ONLY,
   MC_TOOLS,
+  MERGE_HOLD_PARK,
   NEW_LOOP,
   NOT_ON_BOARD,
   needsYouItems,
   OPERATOR_HEADER,
   openPrText,
   PACE_SETTING,
+  PLAN_SEND_REFUSED,
   PROFILE_PAIR_TEXT,
   PROTECTED_ITEM_REFUSED,
   type PullRequestView,
+  parkHold,
   passNeedsBriefText,
   pathGrantProblem,
+  planNeedsSignoffText,
+  planSentText,
   questionClosedText,
   READ_NO_GITHUB,
   READ_NO_PR,
@@ -114,7 +119,6 @@ import {
   RETURN_NOT_SEAT_QUESTION,
   type RepoRules,
   type Run,
-  type RunLoop,
   researchText,
   retiredBriefText,
   returnedQuestionText,
@@ -132,7 +136,6 @@ import {
   UAT_PARK,
   untrackedText,
   WAITING_OPERATOR_LABEL,
-  WAITS_ON_ONLY_BACKLOG,
   WITHDRAW_NOT_YOURS,
   WITHDRAW_SEAT_QUESTION,
   waitingOperatorPromoteText,
@@ -147,7 +150,6 @@ import { buildApp } from "../src/api.ts";
 import { AttentionMaterialsError } from "../src/attention/attention-materials.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/config/crew-pause.ts";
 import {
@@ -158,27 +160,23 @@ import {
   SEAT_ID,
 } from "../src/config.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { setReviewHold } from "../src/engine/review-hold.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
+import { observeFlightMain } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
   flightTriageItems,
   operatorItems,
-  unhandledReasons,
-  wakeReasons,
 } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
-import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud/hud.ts";
+import { attentionItems, isOperatorCall } from "../src/hud/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -269,8 +267,6 @@ let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let aliveNow: string[];
-/** Tickets of repo mc with a published branch preview. */
-let previewTickets: number[];
 let engineOn: boolean;
 let lifts: boolean;
 let refuseWith: OperatorRefusal | null = null;
@@ -438,10 +434,8 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
-  previewTickets = [];
   flightDeps = (): FlightToolsDeps => ({
     attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
-    hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
       save: (png) => shotsSaveImpl(png),
@@ -585,81 +579,6 @@ beforeEach(() => {
   live("flight-1", "r-flight");
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-describe("wait_on", () => {
-  const waitArgs = (over: Record<string, unknown> = {}) => ({
-    target: "mc#7",
-    on: "its PR merging",
-    until: new Date(NOW + 30 * 60_000).toISOString(),
-    basis: "the PR is in CI",
-    ...over,
-  });
-
-  it("is a FLIGHT tool, granted to the read-only watch role", () => {
-    expect(named("wait_on")).toMatchObject({ modes: [], grantable: ["read-only"] });
-  });
-
-  it("records a wait decision on the target, and keeps the time for the wake that ends it", async () => {
-    const r = await call("wait_on", waitArgs());
-    expect(r.isError).toBeUndefined();
-    expect(store.flightDecisions(0, 10)).toEqual([
-      expect.objectContaining({
-        kind: "wait",
-        ref: "mc#7",
-        about: "mc#7: waiting on its PR merging",
-        decision: `waiting until ${new Date(NOW + 30 * 60_000).toISOString()}`,
-        basis: "the PR is in CI",
-      }),
-    ]);
-    expect(flightWaits(store)["mc#7"]).toEqual({
-      on: "its PR merging",
-      until: NOW + 30 * 60_000,
-      at: NOW,
-    });
-  });
-
-  it("waits on the original target when given a wait_over signal's id", async () => {
-    const r = await call("wait_on", waitArgs({ target: `wait_over:wait_over:mc#7:${NOW}:${NOW}` }));
-    expect(r.isError).toBeUndefined();
-    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
-    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
-      ref: "mc#7",
-      about: "mc#7: waiting on its PR merging",
-    });
-  });
-
-  it.each([
-    ["items", `pr:mc#7:${NOW}`, `pr:mc#7:${NOW}`],
-    ["signals", `hub_error:loop:engine:${NOW}`, `loop:engine:${NOW}`],
-    ["signals", `merge_stalled:mc#9:1559:${NOW}`, `mc#9:1559:${NOW}`],
-  ])(
-    "keeps a reason's own key whole, so a wait on it handles the %s fact %s",
-    async (category, fact, target) => {
-      expect((await call("wait_on", waitArgs({ target }))).isError).toBeUndefined();
-      expect(Object.keys(flightWaits(store))).toEqual([target]);
-      const reasons = wakeReasons("", JSON.stringify({ [category]: [fact] }));
-      expect(unhandledReasons(store, reasons, NOW - 1, new Set(reasons.map((x) => x.id)))).toEqual(
-        [],
-      );
-    },
-  );
-
-  it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
-    expect(
-      (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,
-    ).toBe(true);
-    expect(
-      (await call("wait_on", waitArgs({ until: new Date(NOW + 8 * 86_400_000).toISOString() })))
-        .isError,
-    ).toBe(true);
-    live("guido-1", "r-guido");
-    expect(await call("wait_on", waitArgs(), ctx("guido-1", "r-guido"))).toEqual({
-      text: MC_FLIGHT_ONLY,
-      isError: true,
-    });
-    expect(store.flightDecisions(0, 10)).toEqual([]);
-  });
-});
 
 describe("log_decision", () => {
   it("is shown only to a role that is granted it", () => {
@@ -834,30 +753,6 @@ describe("move_review", () => {
         decision: "Not started: RETRO-CX's account codex-main is at its usage stop.",
       }),
     ]);
-  });
-
-  it("resolve_waste_alarm lifts a hold with a recorded basis and refuses an alarm that is not open", async () => {
-    const id = store.waste.insertAlarm(
-      {
-        check: "retry-loop",
-        subject: "mc#7",
-        repoId: "mc",
-        ticket: "mc#7",
-        seatId: null,
-        runId: null,
-        level: 2,
-        evidence: "mc#7 is parked: 2 failed attempts.",
-      },
-      NOW,
-    );
-    const done = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
-    expect(done.isError).toBeUndefined();
-    expect(store.waste.alarms("WHERE id = ?", id)[0]).toMatchObject({
-      resolvedAt: expect.any(Number),
-      basis: "park it; take the next",
-    });
-    const again = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
-    expect(again.isError).toBe(true);
   });
 
   it("moves a queued review while the target account's pace passes 100%: pace never holds it", async () => {
@@ -1331,7 +1226,7 @@ describe("resume_seat", () => {
         store.setRunLoop("r-guido", {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "budget", ended: false },
+          hold: { kind: "budget", reason: "budget", ended: false, worktree: null, wake: false },
         });
       if (limit === "account")
         store.addUsage({
@@ -1441,19 +1336,18 @@ describe("tool list", () => {
       "instruct_seat",
       "revoke_instruction",
       "log_decision",
-      "wait_on",
       "read_ticket",
       "answer_question",
       "return_question",
       "withdraw_question",
       "attach_materials",
       "start_seat",
-      "reassign_ticket",
       "message_seat",
       "comms_pin",
       "flight_state",
       "screenshot_hud",
       "promote",
+      "send_to_planner",
       "end_run",
       "accept_ruling",
       "sync_main",
@@ -1467,7 +1361,6 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
-      "resolve_waste_alarm",
       "move_review",
       "resume_seat",
       "merge_pr",
@@ -1605,17 +1498,6 @@ describe("seat schema", () => {
       ).properties;
       expect(props.seat?.pattern).toBe(SEAT_ID.source);
     }
-  });
-});
-
-describe("create_ticket recommendationId", () => {
-  it("tells FLIGHT which proposed code-health rules it may accept itself", () => {
-    const props = (
-      named("create_ticket").inputSchema as { properties: Record<string, { description?: string }> }
-    ).properties;
-    for (const rule of CODE_HEALTH_FLIGHT_TIER_RULES)
-      expect(props.recommendationId?.description).toContain(rule);
-    expect(props.recommendationId?.description).toContain("operator accepts");
   });
 });
 
@@ -2061,136 +1943,6 @@ describe("start_seat", () => {
     expect(startCalls).toHaveLength(1);
   });
 
-  it("reassigns an ended author's ticket through the existing start checks and logs the handoff", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    store.upsertRun(
-      run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
-    );
-    expect(
-      (
-        await call("reassign_ticket", {
-          issue: 7,
-          seat: "guido-1",
-          reason: "The old seat hit quota",
-        })
-      ).isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
-      kind: "start",
-      ref: "mc#7",
-      basis: "The old seat hit quota",
-    });
-    expect(store.flightDecisions(0, 10)[0]?.decision).toContain(
-      "Reassigned from GUIDO-CX to GUIDO-1",
-    );
-  });
-
-  it("refuses to reassign a ticket with a live author and never ends it", async () => {
-    store.upsertRun(run("live", "guido-cx", { ticket: "mc#7", branch: "feature/7-live" }));
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Move it" })).isError,
-    ).toBe(true);
-    expect(startCalls).toEqual([]);
-    expect(store.run("live")?.endedAt).toBeNull();
-  });
-  it("reassigns a removed author only when it has a durable crew handoff", async () => {
-    const old = run("removed", "removed-seat", {
-      ticket: "mc#7",
-      branch: "feature/7-old",
-      endedAt: NOW - 1000,
-    });
-    store.upsertRun(old);
-    const args = { issue: 7, seat: "guido-1", reason: "Continue after the seat was removed" };
-    expect((await call("reassign_ticket", args)).isError).toBe(true);
-    recordRunHandoff(store, old, null);
-    expect((await call("reassign_ticket", args)).isError).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-  });
-  it.each(["In progress", "In review"])(
-    "continues the preserved author's open PR from %s",
-    async (status) => {
-      cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-      board(sc(7, { status }));
-      store.upsertRun(
-        run("old", "guido-cx", { ticket: "mc#7", branch: "feature/7-old", endedAt: NOW - 1000 }),
-      );
-      const savedPr = {
-        repoId: "mc",
-        number: 9,
-        title: "PR",
-        url: "u",
-        branch: "feature/7-old",
-        ticket: "mc#7",
-        state: "open" as const,
-        isDraft: true,
-        review: null,
-        ci: "pending" as const,
-        createdAt: NOW,
-        updatedAt: NOW,
-        mergedAt: null,
-        headSha: null,
-        mergeable: null,
-      };
-      store.upsertPullRequests("mc", [savedPr], NOW);
-      expect(
-        (
-          await call("reassign_ticket", {
-            issue: 7,
-            seat: "guido-1",
-            reason: "Continue CI and review",
-          })
-        ).isError,
-      ).toBeUndefined();
-      expect(startCalls).toHaveLength(1);
-      startCalls.length = 0;
-      store.upsertPullRequests("mc", [{ ...savedPr, branch: "feature/7-unrelated" }], NOW);
-      expect(
-        await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Continue" }),
-      ).toEqual(refused(openPrText("mc#7", 9)));
-      expect(startCalls).toEqual([]);
-    },
-  );
-  it("returns an ended run's open PR to a seat when the PR's head is not the run's branch", async () => {
-    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
-    board(sc(7, { status: "In review" }));
-    store.upsertRun(
-      run("old", "guido-cx", {
-        ticket: "mc#7",
-        branch: "feature/7-local",
-        endedAt: NOW - 1000,
-        loop: { ...NEW_LOOP, prNumber: 9 },
-      }),
-    );
-    store.upsertPullRequests(
-      "mc",
-      [
-        {
-          repoId: "mc",
-          number: 9,
-          title: "PR",
-          url: "u",
-          branch: "feature/7-pr-head",
-          ticket: "mc#7",
-          state: "open" as const,
-          isDraft: false,
-          review: null,
-          ci: "pending" as const,
-          createdAt: NOW,
-          updatedAt: NOW,
-          mergedAt: null,
-          headSha: null,
-          mergeable: null,
-        },
-      ],
-      NOW,
-    );
-    expect(
-      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the findings" }))
-        .isError,
-    ).toBeUndefined();
-    expect(startCalls).toHaveLength(1);
-  });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
     [
@@ -2720,7 +2472,7 @@ describe("start_seat", () => {
             number: 9,
             title: "t",
             url: "u",
-            branch: "feature/7-x",
+            branch: "hand/9-x",
             ticket: "mc#7",
             state: "open",
             isDraft: false,
@@ -2736,6 +2488,107 @@ describe("start_seat", () => {
         NOW,
       );
       expect(await start()).toEqual(refused(openPrText("mc#7", 9)));
+      expect(startCalls).toEqual([]);
+    });
+
+    it("starts a ticket whose open PR an ended run recorded", async () => {
+      const pr = {
+        repoId: "mc",
+        number: 9,
+        title: "t",
+        url: "u",
+        branch: "feature/7-x",
+        ticket: "mc#7",
+        state: "open" as const,
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      };
+      store.upsertPullRequests("mc", [pr], NOW);
+      board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      store.upsertRun(
+        run("r-old", "guido-2", {
+          repoId: "mc",
+          ticket: "mc#7",
+          endedAt: NOW,
+          status: "failed",
+          loop: { ...NEW_LOOP, prNumber: 9 },
+        }),
+      );
+      const r = (await start()) as { isError?: boolean };
+      expect(r.isError).toBeUndefined();
+      expect(startCalls).toEqual([["guido-1", 7, undefined]]);
+    });
+
+    it("carries on an open PR on the ticket's branch that no run recorded, unless a run is live", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: false,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In progress" }));
+      store.upsertRun(run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: null }));
+      expect((await start()).isError).toBe(true);
+      expect(startCalls).toEqual([]);
+      store.upsertRun(
+        run("r-live", "guido-2", { repoId: "mc", ticket: "mc#7", endedAt: NOW, status: "failed" }),
+      );
+      const r = (await start()) as { isError?: boolean };
+      expect(r.isError).toBeUndefined();
+      expect(startCalls.length).toBe(1);
+    });
+
+    it("does not carry on an open PR from a fork, even on a feature branch name", async () => {
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 9,
+            title: "t",
+            url: "u",
+            branch: "feature/7-x",
+            isCrossRepository: true,
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      board(sc(7, { labels: ["area:server"], status: "In review" }));
+      expect((await start()).isError).toBe(true);
       expect(startCalls).toEqual([]);
     });
   });
@@ -3028,156 +2881,23 @@ describe("comms_pin", () => {
   });
 });
 
-describe("message_seat unpark", () => {
-  const U = (over: Record<string, unknown> = {}) => ({
-    seat: "guido-1",
-    text: "Carry on",
-    unpark: true,
-    basis: "silent",
-    ...over,
-  });
-  const parked = (kind = "silent", ended = false) => {
+describe("message_seat", () => {
+  it("sends the text to the seat and records a message; unpark is not an argument", async () => {
     live("guido-1", "r-g");
-    const loop: RunLoop = {
-      ...NEW_LOOP,
-      phase: "parked",
-      parked: { kind, reason: "went quiet", ended },
-    };
-    store.setRunLoop("r-g", loop);
-  };
-  beforeEach(() => {
-    engineOn = true;
-  });
-
-  it("un-parks a silent park by FLIGHT", async () => {
-    parked("silent");
-    expect(await call("message_seat", U())).toEqual({
-      text: "Sent to GUIDO-1, and its run is un-parked.",
+    expect(
+      await call("message_seat", { seat: "guido-1", text: "Carry on", basis: "silent" }),
+    ).toEqual({
+      text: "Sent to GUIDO-1.",
     });
     expect(messageCalls).toEqual([["guido-1", "", { interrupt: false, questions: "none" }]]);
-    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
+    expect(engineCalls).toEqual([]);
     expect(decisions()).toMatchObject([
-      {
-        kind: "unpark",
-        seatId: "guido-1",
-        targetRunId: "r-g",
-        about: "GUIDO-1: went quiet",
-        decision: "Carry on",
-      },
+      { kind: "message", seatId: "guido-1", decision: "Carry on" },
     ]);
-  });
-
-  it("records a message when the engine did not un-park", async () => {
-    parked("silent");
-    lifts = false;
-    expect(await call("message_seat", U())).toEqual({ text: "Sent to GUIDO-1." });
-    expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-    expect(decisions()).toMatchObject([{ kind: "message", seatId: "guido-1" }]);
-  });
-
-  describe("a set-aside run, by runId", () => {
-    const aside = (id = "r-g") =>
-      store.upsertRun(
-        run(id, "guido-1", {
-          loop: {
-            ...NEW_LOOP,
-            phase: "parked",
-            parked: { kind: "ci", reason: "CI failed", ended: false },
-            aside: { worktree: "/tmp/none/wt", wake: false },
-          },
-        }),
-      );
-
-    it("un-parks it without a word to the seat, which is on another run", async () => {
-      aside();
-      expect(await call("message_seat", U({ runId: "r-g" }))).toEqual({
-        text: "Sent to GUIDO-1, and its run is un-parked.",
-      });
-      expect(messageCalls).toEqual([]);
-      expect(engineCalls).toEqual([["r-g", "FLIGHT", { kinds: FLIGHT_UNPARK_KINDS }]]);
-      expect(decisions()).toMatchObject([
-        { kind: "unpark", seatId: "guido-1", targetRunId: "r-g", about: "GUIDO-1: CI failed" },
-      ]);
-    });
-
-    it("still sends to the seat when the run is the one it holds", async () => {
-      parked("silent");
-      expect((await call("message_seat", U({ runId: "r-g" }))).isError).toBeUndefined();
-      expect(messageCalls).toHaveLength(1);
-    });
-
-    it("refuses another seat's run, an ended run, and a runId without unpark", async () => {
-      aside("r-x");
-      expect(await call("message_seat", U({ runId: "r-x", seat: "inco-1" }))).toEqual(
-        refused("Not sent: r-x is not an unended run of INCO-1."),
-      );
-      store.upsertRun(run("r-y", "guido-1", { endedAt: NOW, status: "ok" }));
-      expect((await call("message_seat", U({ runId: "r-y" }))).isError).toBe(true);
-      expect(await call("message_seat", U({ runId: "r-x", unpark: false }))).toEqual(
-        refused("Not sent: runId goes with unpark: true."),
-      );
-      expect(engineCalls).toEqual([]);
-    });
-  });
-
-  it("leaves a budget park to the operator", async () => {
-    parked("budget");
-    expect(await call("message_seat", U())).toEqual(
-      refused(
-        'Not sent: a budget park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-      ),
-    );
-    expect(messageCalls).toEqual([]);
-  });
-
-  it.each(["review", "review-ruling", "ruling", "review-failed"])(
-    "cannot lift a %s park with a message",
-    async (kind) => {
-      parked(kind);
-      expect((await call("message_seat", U())).isError).toBe(true);
-      expect(messageCalls).toEqual([]);
-      expect(engineCalls).toEqual([]);
-    },
-  );
-
-  it.each(["nothing", "gate", "conflict"])("lifts a %s park", async (kind) => {
-    parked(kind);
-    expect(await call("message_seat", U())).toEqual({
-      text: "Sent to GUIDO-1, and its run is un-parked.",
-    });
-  });
-
-  it("leaves an ended park to the operator", async () => {
-    parked("silent", true);
-    expect((await call("message_seat", U())).text).toBe(
-      'Not sent: a silent park is the operator\'s call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.',
-    );
-  });
-
-  it("refuses a run that is not parked, or no run", async () => {
-    expect(await call("message_seat", U())).toEqual(
-      refused("Not sent: GUIDO-1's run is not parked."),
-    );
-    live("guido-1", "r-g");
-    store.setRunLoop("r-g", NEW_LOOP);
-    expect((await call("message_seat", U())).text).toBe("Not sent: GUIDO-1's run is not parked.");
-  });
-
-  it("un-parks one run 5 times, with no refusal", async () => {
-    for (let i = 0; i < 5; i++) {
-      parked("ci");
-      expect((await call("message_seat", U())).isError).toBeUndefined();
-    }
-    expect(decisions().filter((d) => d.kind === "unpark")).toHaveLength(5);
-  });
-
-  it("refuses with the engine off", async () => {
-    parked("silent");
-    engineOn = false;
-    expect(await call("message_seat", U())).toEqual(
-      refused("Not sent: the loop engine is off on this server, so nothing can be un-parked."),
-    );
-    expect(messageCalls).toEqual([]);
+    expect(
+      (await call("message_seat", { seat: "guido-1", text: "x", unpark: true, basis: "b" }))
+        .isError,
+    ).toBe(true);
   });
 });
 
@@ -3189,7 +2909,13 @@ describe("end_run", () => {
       store.setRunLoop("r-g", {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "nothing", reason: "nothing to push", ended: false },
+        hold: {
+          kind: "nothing",
+          reason: "nothing to push",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       });
       return call("end_run", { runId: "r-g", basis: "nothing left to do" });
     };
@@ -3208,7 +2934,7 @@ describe("end_run", () => {
     store.setRunLoop("r-g", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind, reason: "nothing to push", ended: false },
+      hold: { kind, reason: "nothing to push", ended: false, worktree: null, wake: false },
     });
   };
   /** The run is off its seat, in review, parked. */
@@ -3219,8 +2945,13 @@ describe("end_run", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed", ended: false },
-          aside: { worktree: "/tmp/none/wt", wake: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed",
+            ended: false,
+            worktree: "/tmp/none/wt",
+            wake: false,
+          },
         },
       }),
     );
@@ -3408,7 +3139,8 @@ describe("end_run", () => {
   it("refuses a set-aside run with uncommitted work, in any phase", async () => {
     setAside();
     const r = store.run("r-g");
-    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    if (r?.loop)
+      store.setRunLoop("r-g", { ...r.loop, phase: "review", hold: liftPark(r.loop.hold) });
     dirty = ["apps/a.ts"];
     expect((await call("end_run", E())).isError).toBe(true);
     expect(asideEnds).toEqual([]);
@@ -3417,7 +3149,8 @@ describe("end_run", () => {
   it("ends a set-aside run that never parked (an evidence hold keeps it in review)", async () => {
     setAside();
     const r = store.run("r-g");
-    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    if (r?.loop)
+      store.setRunLoop("r-g", { ...r.loop, phase: "review", hold: liftPark(r.loop.hold) });
     expect((await call("end_run", E())).isError).toBeFalsy();
     expect(asideEnds.length).toBe(1);
   });
@@ -3445,7 +3178,7 @@ describe("accept_ruling", () => {
       ...NEW_LOOP,
       phase: "parked",
       ciFailedSha: SHA,
-      parked: { kind: "ruling", reason: "ruled", ended: false },
+      hold: { kind: "ruling", reason: "ruled", ended: false, worktree: null, wake: false },
     });
   });
 
@@ -3494,6 +3227,14 @@ describe("accept_ruling", () => {
     for (let i = 0; i < 8; i++) await call("accept_ruling", A());
     expect(store.flightDecisions(0, 5).filter((d) => d.kind === "hub")).toEqual([]);
     expect(store.getSetting("flight.runaway-events")).toBeNull();
+  });
+
+  it("names the checks CI still waits on when no re-run is going", async () => {
+    rulingImpl = async () => ({ kind: "pending", sha: SHA, waiting: ["e2e"] });
+    expect(await call("accept_ruling", A())).toEqual({
+      text: "CI on aaaaaaa is not done: e2e still pending or not reported. Nothing was re-run.",
+    });
+    expect(decisions()).toEqual([]);
   });
 
   it("passes the engine's refusals on", async () => {
@@ -3708,52 +3449,6 @@ describe("flight_state", () => {
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
   });
 
-  describe("500 expired waits (#1632)", () => {
-    const waits = async (args: Record<string, unknown>) => {
-      for (let i = 0; i < 500; i++)
-        recordFlightWait(store, `mc#${1000 + i}`, {
-          on: "a long wait",
-          until: NOW - 3 * 24 * 60 * 60_000,
-          at: NOW - 4 * 24 * 60 * 60_000,
-        });
-      const read = JSON.parse((await call("flight_state", args)).text) as {
-        signals: { kind: string; evidence: string }[];
-      };
-      return read.signals.filter((s) => s.kind === "wait_over");
-    };
-
-    it("fold into one summary line with the count", async () => {
-      const over = await waits({});
-      expect(over).toHaveLength(1);
-      expect(over[0]?.evidence).toContain("500 expired waits");
-      expect(JSON.stringify(over).length).toBeLessThan(1000);
-    });
-
-    it("keep a wait that ended an hour ago listed on every read", async () => {
-      recordFlightWait(store, "mc#77", {
-        on: "PR 77 to merge",
-        until: NOW - 3_600_000,
-        at: NOW - 7_200_000,
-      });
-      const keys = async () =>
-        (
-          JSON.parse((await call("flight_state", {})).text) as {
-            signals: { kind: string; key: string }[];
-          }
-        ).signals
-          .filter((s) => s.kind === "wait_over")
-          .map((s) => s.key);
-      await keys();
-      const second = await keys();
-      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
-      expect(second).not.toContain("expired");
-    });
-
-    it("are all listed with full: true", async () => {
-      expect(await waits({ full: true })).toHaveLength(500);
-    });
-  });
-
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -3921,14 +3616,6 @@ describe("flight_state", () => {
 
     const id = queuedReview();
     expect(id).not.toBeNull();
-    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #3.", prNumber: 3 });
-    expect(
-      (
-        (await state()) as {
-          reviewQueue: { seats: { seat: string; holds: unknown[] }[] };
-        }
-      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1")?.holds,
-    ).toEqual([{ prNumber: 7, reason: "Waiting for older PR #3.", waitsOn: 3 }]);
     writeCrewPause(
       store,
       { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
@@ -3948,8 +3635,13 @@ describe("flight_state", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed", ended: false },
-          aside: { worktree: "/tmp/none/wt", wake: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed",
+            ended: false,
+            worktree: "/tmp/none/wt",
+            wake: false,
+          },
         },
       }),
     );
@@ -3976,7 +3668,7 @@ describe("flight_state", () => {
     store.setRunLoop("r-inco", {
       ...NEW_LOOP,
       phase: "parked",
-      parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget", ended: false },
+      hold: { kind: "silent", reason: "budget", ended: false, worktree: null, wake: false },
     });
     store.setSeatTurnEnded("inco-1", NOW - 7 * 60_000);
     store.addQuestion({
@@ -4061,7 +3753,6 @@ describe("flight_state", () => {
           waitedMin: 0,
         },
       ],
-      discussions: [],
       time: "13:00",
       repo: "mc",
       lane: null,
@@ -4099,7 +3790,7 @@ describe("flight_state", () => {
           idleMin: 7,
           ticket: "mc#5",
           phase: "parked",
-          parked: { kind: FLIGHT_UNPARK_KINDS[0], reason: "budget" },
+          parked: { kind: "silent", reason: "budget" },
           openQuestion: true,
         },
         {
@@ -4209,7 +3900,6 @@ describe("flight_state", () => {
           triageRemainingMs: 20 * 60_000,
         },
       ],
-      holds: [],
       reviewQueue: {
         queued: 0,
         running: 0,
@@ -4610,112 +4300,6 @@ describe("promote", () => {
     expect(await call("promote", P())).toEqual(refused("Not moved: card not on the project"));
     expect(decisions()).toEqual([]);
   });
-
-  describe("holds", () => {
-    const pr = (number: number, state: "open" | "merged" | "closed" = "open") => ({
-      repoId: "mc",
-      number,
-      title: `PR ${number}`,
-      url: "u",
-      branch: `feature/${number}-x`,
-      ticket: null,
-      state,
-      isDraft: false,
-      review: null,
-      ci: null,
-      createdAt: NOW,
-      updatedAt: NOW,
-      mergedAt: null,
-      headSha: "abc",
-      mergeable: null,
-      author: null,
-      assignees: [],
-    });
-    const H = (over: Record<string, unknown> = {}) => P({ to: "Backlog", waits_on: 246, ...over });
-
-    beforeEach(() => {
-      board(backlog({ status: "Ready" }));
-      store.upsertPullRequests("mc", [pr(246), pr(247, "merged"), pr(248, "closed")], NOW);
-    });
-
-    it("holds a Ready card FLIGHT did not move, behind an open PR", async () => {
-      expect((await call("promote", H())).isError).toBeUndefined();
-      expect(moveCalls).toEqual([{ runId: "r-flight", repoId: "mc", issue: 7, column: "Backlog" }]);
-      expect(store.activeHolds()).toMatchObject([
-        { ref: "mc#7", waitsOn: 246, basis: "it is complete", releasedAt: null },
-      ]);
-      expect(decisions()).toMatchObject([
-        { kind: "promote", ref: "mc#7", decision: "Held in Backlog behind PR #246" },
-      ]);
-    });
-
-    it("holds a Refinement card too", async () => {
-      board(backlog({ status: "Refinement" }));
-      expect((await call("promote", H())).isError).toBeUndefined();
-    });
-
-    it("refuses a hold on a card with a run", async () => {
-      live("guido-1", "r-guido", { ticket: "mc#7" });
-      expect(await call("promote", H())).toEqual(refused("Not moved: mc#7 has a run."));
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("refuses a hold behind a merged, closed or unknown PR", async () => {
-      for (const n of [247, 248, 999]) {
-        expect(await call("promote", H({ waits_on: n }))).toEqual(
-          refused(`Not moved: PR #${n} is not an open PR in mc.`),
-        );
-      }
-      expect(moveCalls).toEqual([]);
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("refuses waits_on on a move that is not to Backlog, and a hold from Backlog", async () => {
-      board(backlog());
-      expect(await call("promote", P({ waits_on: 246 }))).toEqual(refused(WAITS_ON_ONLY_BACKLOG));
-      expect(await call("promote", P({ to: "Refinement", waits_on: 246 }))).toEqual(
-        refused(WAITS_ON_ONLY_BACKLOG),
-      );
-      expect((await call("promote", H())).isError).toBe(true);
-      expect(moveCalls).toEqual([]);
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("keeps a new hold while the stored board still shows the card in Ready", async () => {
-      await call("promote", H());
-      await call("flight_state", {});
-      expect(store.activeHolds()).toHaveLength(1);
-      board(backlog());
-      await call("flight_state", {});
-      board(backlog({ status: "Ready" }));
-      await call("flight_state", {});
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("releases a hold whose card a run has taken, though the board never showed it in Backlog", async () => {
-      await call("promote", H());
-      board(backlog({ status: "Ready" }));
-      await call("flight_state", {});
-      expect(store.activeHolds()).toHaveLength(1);
-      live("guido-1", "r-guido", { ticket: "mc#7" });
-      await call("flight_state", {});
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("releases the hold when the card is promoted again", async () => {
-      await call("promote", H());
-      board(backlog());
-      expect((await call("promote", P())).isError).toBeUndefined();
-      expect(store.activeHolds()).toEqual([]);
-    });
-
-    it("keeps the hold when the promote again is refused", async () => {
-      await call("promote", H());
-      board(backlog({ labels: [] }));
-      expect((await call("promote", P())).isError).toBe(true);
-      expect(store.activeHolds()).toHaveLength(1);
-    });
-  });
 });
 
 describe("create_ticket", () => {
@@ -4744,235 +4328,6 @@ describe("create_ticket", () => {
     mc.autonomy = "merge";
     engineOn = true;
     okGh();
-  });
-
-  function acceptedRecommendation() {
-    store.refreshCodeHealthRecommendations("mc", NOW);
-    const row = store.codeHealthRecommendations("mc")[0];
-    if (!row) throw Error("fixture recommendation missing");
-    store.decideCodeHealthRecommendation(
-      "mc",
-      row.id,
-      {
-        requestId: "12345678-1234-4234-8234-123456789abc",
-        basis: "Fixture evidence",
-        expectedUpdatedAt: row.updatedAt,
-        change: { action: "accept", owner: "owner", reviewAt: NOW + 10000 },
-      },
-      "operator",
-      NOW,
-    );
-    return row.id;
-  }
-  it("links accepted recommendation work before a project failure and never recreates it on retry", async () => {
-    const recommendationId = acceptedRecommendation();
-    readImpl = (n) => card(n, { status: "" });
-    let creates = 0,
-      failProject = true;
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      if (a[1] === "create") {
-        creates++;
-        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-      }
-      return { code: failProject ? 1 : 0, stdout: "", stderr: "project refused" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toBe(
-      "https://github.com/o/mc/issues/42",
-    );
-    failProject = false;
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain(
-      "Recovered existing",
-    );
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.workReady).toBe(true);
-    expect((await call("create_ticket", C({ recommendationId }))).text).toContain("already links");
-    expect(creates).toBe(1);
-  });
-  function proposed(rule: string) {
-    const id = `chr_${(rule.length.toString(16).padStart(2, "0")).repeat(16)}`;
-    upsertRecommendation(
-      (store as unknown as { db: DatabaseSync }).db,
-      {
-        id,
-        repoId: "mc",
-        rule,
-        ruleVersion: 1,
-        scope: null,
-        evidenceFingerprint: "f",
-        observation: "o",
-        proposal: "p",
-        uncertainty: "u",
-        rankingReason: "r",
-        target: { metric: "m", direction: "decrease", baseline: 5 },
-      },
-      NOW,
-    );
-    return id;
-  }
-  it("accepts a proposal of FLIGHT's own tier by filing its work, and leaves the others for the operator", async () => {
-    readImpl = (n) => card(n, { status: "" });
-    const other = proposed("recurring-correction");
-    expect((await call("create_ticket", C({ recommendationId: other }))).isError).toBe(true);
-    expect(store.codeHealthRecommendation("mc", other)?.state.kind).toBe("proposed");
-    const mine = proposed("repeatedly-changed-large-file");
-    await call("create_ticket", C({ recommendationId: mine }));
-    const row = store.codeHealthRecommendation("mc", mine);
-    expect(row?.state.kind).toBe("accepted");
-    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
-  });
-  it("recovers a created issue marker after a lost response without a second issue write", async () => {
-    const recommendationId = acceptedRecommendation();
-    readImpl = (n) => card(n, { status: "In progress" });
-    let body = "",
-      creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list")
-        return {
-          code: 0,
-          stdout: JSON.stringify(
-            body ? [{ number: 42, title: "Server: fix the flake", body }] : [],
-          ),
-          stderr: "",
-        };
-      if (a[1] === "create") {
-        creates++;
-        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
-        return { code: 1, stdout: "", stderr: "response lost" };
-      }
-      return { code: 0, stdout: "", stderr: "" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(
-      (
-        await call(
-          "create_ticket",
-          C({ recommendationId, title: "Rephrased title", body: `${BODY}Updated phrasing` }),
-        )
-      ).text,
-    ).toContain("Recovered existing");
-    expect(creates).toBe(1);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.linkedWork).toContain(
-      "issues/42",
-    );
-  });
-  function assessRecommendation(id: string) {
-    const row = store.codeHealthRecommendation("mc", id);
-    if (!row) throw Error("missing fixture recommendation");
-    store.decideCodeHealthRecommendation(
-      "mc",
-      id,
-      {
-        requestId: "a2345678-1234-4234-8234-123456789abc",
-        basis: "Later evidence",
-        expectedUpdatedAt: row.updatedAt,
-        change: {
-          action: "assess",
-          outcome: "no-effect",
-          reason: "Work no longer needed",
-          comparison: "Compared with saved baseline",
-          evidenceId: "fixture-evidence",
-        },
-      },
-      "operator",
-      NOW + 10001,
-    );
-  }
-  it("creates no issue when assessment wins during the issue-list await", async () => {
-    const recommendationId = acceptedRecommendation();
-    let creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list") {
-        assessRecommendation(recommendationId);
-        return { code: 0, stdout: "[]", stderr: "" };
-      }
-      creates++;
-      return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(creates).toBe(0);
-    expect(store.codeHealthRecommendation("mc", recommendationId)?.state.kind).toBe("no-effect");
-  });
-  it("keeps the created issue link and assessment when assessment wins during creation", async () => {
-    const recommendationId = acceptedRecommendation();
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      if (a[1] === "create") {
-        assessRecommendation(recommendationId);
-        return { code: 0, stdout: "https://github.com/o/mc/issues/42", stderr: "" };
-      }
-      throw Error("No board write after assessment");
-    };
-    const result = await call("create_ticket", C({ recommendationId }));
-    expect(result.isError).toBeUndefined();
-    expect(result.text).toContain("was assessed");
-    const row = store.codeHealthRecommendation("mc", recommendationId);
-    expect(row?.state.kind).toBe("no-effect");
-    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
-    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(0);
-  });
-  it("recovers a lost creation response after assessment without overwriting that decision", async () => {
-    const recommendationId = acceptedRecommendation();
-    let body = "",
-      creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list")
-        return {
-          code: 0,
-          stdout: JSON.stringify(body ? [{ number: 42, body, title: "Original issue" }] : []),
-          stderr: "",
-        };
-      if (a[1] === "create") {
-        creates++;
-        body = a.find((s) => s.startsWith("--body="))?.slice(7) ?? "";
-        assessRecommendation(recommendationId);
-        return { code: 1, stdout: "", stderr: "response lost" };
-      }
-      throw Error("No board write after assessment");
-    };
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(
-      (await call("create_ticket", C({ recommendationId, title: "Rephrased recovery" }))).text,
-    ).toContain("was assessed");
-    expect(creates).toBe(1);
-    const row = store.codeHealthRecommendation("mc", recommendationId);
-    expect(row?.state.kind).toBe("no-effect");
-    expect(row?.linkedWork).toContain("issues/42");
-  });
-  it("fails closed after an ambiguous creation with no visible marker", async () => {
-    const recommendationId = acceptedRecommendation();
-    let creates = 0;
-    ghImpl = async (a) => {
-      if (a[1] === "list") return { code: 0, stdout: "[]", stderr: "" };
-      creates++;
-      return { code: 1, stdout: "", stderr: "response lost" };
-    };
-    await call("create_ticket", C({ recommendationId }));
-    const retry = await call("create_ticket", C({ recommendationId, title: "Changed title" }));
-    expect(retry.isError).toBe(true);
-    expect(retry.text).toContain("uncertain outcome");
-    expect(creates).toBe(1);
-  });
-  it("counts partial project-recovery writes before a failed board read", async () => {
-    const recommendationId = acceptedRecommendation();
-    store.linkCodeHealthRecommendation(
-      "mc",
-      recommendationId,
-      "https://github.com/o/mc/issues/42",
-      "flight-1",
-      NOW,
-    );
-    readImpl = () => null;
-    ghImpl = async () => ({ code: 0, stdout: "", stderr: "" });
-    for (let i = 0; i < 6; i++) await call("create_ticket", C({ recommendationId }));
-    expect(ghCalls.filter((a) => a[0] === "project")).toHaveLength(5);
-    expect(JSON.parse(store.getSetting("flight.runaway-events") ?? "[]")).toHaveLength(5);
-  });
-  it("refuses an unaccepted or foreign recommendation before GitHub reads", async () => {
-    store.refreshCodeHealthRecommendations("mc", NOW);
-    const recommendationId = store.codeHealthRecommendations("mc")[0]?.id;
-    expect((await call("create_ticket", C({ recommendationId }))).isError).toBe(true);
-    expect(ghCalls).toEqual([]);
   });
 
   it("counts tickets that were filed and then failed at the project, so they cannot go on unbounded", async () => {
@@ -5635,12 +4990,8 @@ describe("brief_item", () => {
       );
       expect(ok).toEqual({ text: BRIEFED_TEXT });
     });
-    it("refuses a looks question with no picture and no preview; passes with either", async () => {
+    it("refuses a looks question with no picture; passes with one", async () => {
       await refused({ looks: true }, /about how something looks/);
-      previewTickets = [7];
-      const withPreview = await call("brief_item", B({ looks: true }));
-      expect(withPreview).toEqual({ text: BRIEFED_TEXT });
-      previewTickets = [];
       const picture = `/api/hud-screenshots/${"a".repeat(32)}`;
       expect(
         await call(
@@ -6123,7 +5474,7 @@ describe("brief_item", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind, reason: "operator needed", ended: false },
+          hold: { kind, reason: "operator needed", ended: false, worktree: null, wake: false },
         },
       }),
     );
@@ -6151,47 +5502,6 @@ describe("brief_item", () => {
       flightTriage: "handling",
       brief: { for: "flight", at: nowMs },
     });
-  });
-
-  it.each(["operator", "flight"])(
-    "keeps a %s brief when the same stray is recorded again (its time stays first-seen)",
-    async (forWhom) => {
-      const stray = {
-        sessionId: "s1",
-        path: "outside.ts",
-        agentId: "guido-1",
-        kind: "outside" as const,
-        at: NOW,
-      };
-      store.addStrays([stray]);
-      const key = store.strays()[0]?.key;
-      const briefed = await call("brief_item", B({ key, for: forWhom }));
-      // a stray names no ticket or PR, so a brief for the operator is refused (#1543) and the
-      // item stays FLIGHT's; its time stays first-seen either way
-      if (forWhom === "operator") expect(briefed.isError).toBe(true);
-      else expect(briefed.isError).toBeUndefined();
-      nowMs += 1000;
-      store.addStrays([{ ...stray, at: nowMs }]);
-      const item = attentionItems(cfg, store, nowMs).find((i) => i.key === key);
-      if (forWhom === "operator") {
-        expect(item).toMatchObject({ owner: "flight", at: NOW });
-      } else {
-        expect(item).toMatchObject({
-          owner: "flight",
-          flightTriage: "handling",
-          at: NOW,
-          brief: { for: "flight" },
-        });
-      }
-    },
-  );
-
-  it.each([undefined, "operator"])("requires an ask when for is %s", async (forWhom) => {
-    for (const ask of [undefined, "", " \n\t"]) {
-      expect((await call("brief_item", B({ for: forWhom, ask }))).isError).toBe(true);
-      expect(store.briefs().size).toBe(0);
-      expect(seen).toEqual([]);
-    }
   });
 
   it("keeps context uncut, allows no options for FLIGHT's own brief, and rejects oversized text", async () => {
@@ -6924,29 +6234,6 @@ describe("draft_reply", () => {
     ).toBe(true);
     expect(store.drafts()).toEqual([]);
     expect(ghCalls).toEqual([]);
-  });
-});
-
-describe("correlated discussion replies", () => {
-  it("returns tagged replies only to their original item, including late replies", async () => {
-    const a = store.ensureDiscussion("note:a", "v1");
-    const b = store.ensureDiscussion("note:b", "v1");
-    store.askDiscussion(a.id, "ask-a", "Why?", NOW);
-    store.askDiscussion(b.id, "ask-b", "Which?", NOW);
-    const args = {
-      about: "Item discussion",
-      decision: "Checked the code.",
-      basis: "Code",
-      discussion: { id: a.id, replyTo: "ask-a", messageId: "reply-a" },
-    };
-    expect((await call("log_decision", args)).isError).toBeUndefined();
-    expect(store.discussion("note:a", a.id)?.messages.at(-1)?.text).toBe(args.decision);
-    expect(store.discussion("note:b", b.id)?.messages).toHaveLength(1);
-    expect(
-      (await call("log_decision", { ...args, discussion: { ...args.discussion, id: b.id } }))
-        .isError,
-    ).toBe(true);
-    expect(decisions()).toEqual([]);
   });
 });
 
@@ -7696,7 +6983,7 @@ describe("superuser housekeeping", () => {
     runPr();
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
-      aside: { worktree: "/tmp/preserved", wake: false },
+      hold: { kind: null, reason: null, ended: false, worktree: "/tmp/preserved", wake: false },
     });
     const row = need(store.seatSession("guido-1"));
     store.setSeatSession({ ...row, runId: null });
@@ -7750,7 +7037,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind, reason: "held", ended: false },
+      hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
     });
     expect(await call("settle_park", { runId: "r-pr", action: "accept" })).toHaveProperty(
       "isError",
@@ -7766,7 +7053,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "held", ended: false },
+      hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
     });
     const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(refused).toHaveProperty("isError", true);
@@ -7776,11 +7063,36 @@ describe("superuser housekeeping", () => {
   it("settle_park says when the run is not parked", async () => {
     elevated();
     runPr();
-    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), phase: "working", parked: null });
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "working",
+      hold: liftPark(need(store.run("r-pr")?.loop).hold),
+    });
     const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
     expect(refused).toHaveProperty("isError", true);
     expect(JSON.stringify(refused)).toContain("Run is not parked.");
     expect(engineCalls).toEqual([]);
+  });
+  it("settle_park says a run only held off its seat is not parked, and reaches the engine once a review park holds it", async () => {
+    elevated();
+    runPr();
+    const off = leaveSeat(null, "/tmp/none/wt", false);
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "review",
+      hold: off,
+    });
+    const refused = await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(refused).toHaveProperty("isError", true);
+    expect(JSON.stringify(refused)).toContain("Run is not parked.");
+    expect(engineCalls).toEqual([]);
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      hold: parkHold(off, "review", "held", false),
+    });
+    await call("settle_park", { runId: "r-pr", action: "accept" });
+    expect(engineCalls).not.toEqual([]);
   });
   it.each(["lift", "accept", "rework", "rereview"] as const)(
     "settle_park cannot settle a controller check with a review action (%s)",
@@ -7790,7 +7102,13 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind: "controller-check", reason: "held", ended: false },
+        hold: {
+          kind: "controller-check",
+          reason: "held",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       });
       const refused = await call("settle_park", { runId: "r-pr", action });
       expect(refused).toHaveProperty("isError", true);
@@ -7805,7 +7123,7 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind, reason: "held", ended: false },
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
       });
     park("conflict");
     expect(await call("settle_park", { runId: "r-pr", action: "lift" })).toHaveProperty(
@@ -7836,7 +7154,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "held", ended: false },
+      hold: { kind: "review", reason: "held", ended: false, worktree: null, wake: false },
     });
     lifts = false;
     refuseWith = reason;
@@ -7850,7 +7168,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "review", reason: "Blocked", ended: false },
+      hold: { kind: "review", reason: "Blocked", ended: false, worktree: null, wake: false },
     });
     const result = await call("settle_park", {
       runId: "r-pr",
@@ -7879,7 +7197,13 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind: "review", reason: "review round cap", ended: false },
+        hold: {
+          kind: "review",
+          reason: "review round cap",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
         ...(flightReworks === undefined ? {} : { flightReworks }),
       });
 
@@ -7896,7 +7220,7 @@ describe("superuser housekeeping", () => {
         "r-pr",
         "FLIGHT",
         {
-          kinds: ["review", "review-ruling"],
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
           action: "rework",
           basis: "Checked the current state",
           note: "Fix the validation branch and add its regression test.",
@@ -7917,13 +7241,50 @@ describe("superuser housekeeping", () => {
     });
     expect(engineCalls).toHaveLength(5);
   });
+  it("sends a merge-hold park back for rework, and no other settle touches it", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      phase: "parked",
+      hold: {
+        kind: MERGE_HOLD_PARK,
+        reason: "merge held by CAPCOM: bug",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
+      mergeHold: { by: "CAPCOM", reason: "bug", at: NOW },
+    });
+    for (const action of ["accept", "rereview", "lift", "second_review"] as const) {
+      expect(await call("settle_park", { runId: "r-pr", action })).toEqual(
+        refused("This action cannot settle this park."),
+      );
+    }
+    expect(engineCalls).toEqual([]);
+    expect(
+      await call("settle_park", { runId: "r-pr", action: "rework", note: "Fix the overlap." }),
+    ).toEqual({ text: "Settled r-pr: rework." });
+    expect(engineCalls).toEqual([
+      [
+        "r-pr",
+        "FLIGHT",
+        {
+          kinds: ["review", "review-ruling", MERGE_HOLD_PARK],
+          action: "rework",
+          basis: "Checked the current state",
+          note: "Fix the overlap.",
+        },
+      ],
+    ]);
+  });
   it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
     elevated();
     runPr();
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: "budget", reason: "tokens", ended: false },
+      hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
     });
     expect(await call("settle_park", { runId: "r-pr", action: "rework" })).toEqual(
       refused("Run is held."),
@@ -7951,7 +7312,7 @@ describe("superuser housekeeping", () => {
       store.setRunLoop("r-pr", {
         ...need(store.run("r-pr")?.loop),
         phase: "parked",
-        parked: { kind, reason: "held", ended: false },
+        hold: { kind, reason: "held", ended: false, worktree: null, wake: false },
       });
 
     park("budget");
@@ -8074,7 +7435,13 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       phase: "parked",
-      parked: { kind: UAT_PARK, reason: "waiting for your acceptance", ended: false },
+      hold: {
+        kind: UAT_PARK,
+        reason: "waiting for your acceptance",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
       uat: { sha: SHA, from: "review", accepted: false },
     });
     const refused = await call("merge_pr", { pr: 12, basis: "ready" });
@@ -8423,7 +7790,7 @@ describe("superuser housekeeping", () => {
     store.setRunLoop("r", {
       ...need(store.run("r")?.loop),
       phase: "parked",
-      parked: { kind: "budget", reason: "budget", ended: false },
+      hold: { kind: "budget", reason: "budget", ended: false, worktree: null, wake: false },
     });
     expect(await call("dismiss_item", { key: `note:${blockedNoteKey("r", 0)}` })).toHaveProperty(
       "isError",
@@ -9722,7 +9089,13 @@ describe("attention hold tools", () => {
       loop: {
         ...NEW_LOOP,
         phase: "parked",
-        parked: { kind: "controller-check", reason: "check", ended: false },
+        hold: {
+          kind: "controller-check",
+          reason: "check",
+          ended: false,
+          worktree: null,
+          wake: false,
+        },
       },
     });
     store.raiseNote({
@@ -10573,18 +9946,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(store.acks().has(key)).toBe(true);
       // acked, so it no longer asks for anyone
       expect(items().find((i) => i.key === key)?.acked ?? true).toBe(true);
-      // a crew error is acked and its row marked
-      const errorId = store.addCrewError({
-        agentId: "guido-1",
-        runId: null,
-        at: NOW,
-        text: "an mc tool failed",
-      });
-      const errKey = `${CREW_ERROR_KEY}${errorId}`;
-      expect(items().some((i) => i.key === errKey)).toBe(true);
-      expect((await call("dismiss_item", { key: errKey })).isError).toBeUndefined();
-      expect(store.acks().has(errKey)).toBe(true);
-      expect(store.crewErrors().some((e) => e.id === errorId)).toBe(false);
     });
     it("dismiss_item settles an ordinary flag the engine raised about a run, but not one with no run", async () => {
       live("guido-1", "r-fm", { ticket: "mc#7" });
@@ -11649,7 +11010,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "tokens", ended: false },
+          hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
         },
       });
       nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -11677,7 +11038,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "budget", reason: "tokens", ended: false },
+          hold: { kind: "budget", reason: "tokens", ended: false, worktree: null, wake: false },
         },
       });
       nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -11987,5 +11348,221 @@ describe("attach_materials", () => {
     expect(
       (await call("attach_materials", { key: `ask:${id}`, ...story({ extra: 1 }) })).isError,
     ).toBe(true);
+  });
+});
+
+describe("plan sign-off", () => {
+  const area = { "area:server": ["apps/server/**"] };
+  const GOOD = "Body\n\n## Done when\n\n- it works\n";
+  const P = { issue: 7, to: "Ready", basis: "it is complete" };
+  const backlog = (over: Partial<BoardItem> = {}) =>
+    card(7, { status: "Backlog", labels: ["area:server"], size: "S", ...over });
+  const setting = (planSignoff: "every" | "larger" | "never") => {
+    rulesNow = { ...DEFAULT_REPO_RULES, promoteBacklog: true, areas: area, planSignoff };
+  };
+  const signedOff = () => {
+    store.plans.file(
+      "mc",
+      7,
+      { asks: "a", proposal: "p", sizeEstimate: null, risks: null, mockups: [] },
+      true,
+      nowMs,
+    );
+    store.plans.approve("mc", 7, nowMs);
+  };
+
+  beforeEach(() => {
+    const mc = cfg.repos[0];
+    if (mc === undefined) throw new Error("no repo");
+    mc.autonomy = "merge";
+    engineOn = true;
+    fetchImpl = async (n) => ticket(n, { body: GOOD });
+    board(backlog());
+  });
+
+  it("every: promote to Ready refuses without a signed-off plan, and moves once it is signed", async () => {
+    setting("every");
+    expect(await call("promote", P)).toEqual(refused(planNeedsSignoffText("mc#7", null)));
+    expect(moveCalls).toEqual([]);
+    store.plans.file(
+      "mc",
+      7,
+      { asks: null, proposal: "p", sizeEstimate: null, risks: null, mockups: [] },
+      true,
+      nowMs,
+    );
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+    store.plans.sendBack("mc", 7, "smaller");
+    expect(await call("promote", P)).toEqual(refused(planNeedsSignoffText("mc#7", "sent-back")));
+    signedOff();
+    expect((await call("promote", P)).isError).toBeUndefined();
+    expect(moveCalls).toHaveLength(1);
+  });
+
+  it("every: moving a ticket back to Backlog is not held", async () => {
+    setting("every");
+    board(backlog({ status: "Ready" }));
+    expect((await call("promote", { ...P, to: "Backlog" })).isError).toBeUndefined();
+  });
+
+  it("larger: refuses a marked ticket and lets an unmarked one through", async () => {
+    setting("larger");
+    expect((await call("promote", P)).isError).toBeUndefined();
+    board(backlog());
+    store.plans.request("mc", 7, nowMs);
+    nowMs += 60 * 60_000;
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-plan")),
+    );
+  });
+
+  it("changing every to larger lets an unmarked ticket through and still holds a marked one", async () => {
+    setting("every");
+    store.plans.file(
+      "mc",
+      7,
+      { asks: "a", proposal: "p", sizeEstimate: "S", risks: "r", mockups: [] },
+      false,
+      nowMs,
+    );
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+    setting("larger");
+    expect((await call("promote", P)).isError).toBeUndefined();
+    board(backlog());
+    nowMs += 60 * 60_000;
+    store.plans.request("mc", 7, nowMs);
+    expect(await call("promote", P)).toEqual(
+      refused(planNeedsSignoffText("mc#7", "awaiting-signoff")),
+    );
+  });
+
+  it("never: nothing is held, even a ticket marked earlier", async () => {
+    setting("never");
+    store.plans.request("mc", 7, nowMs);
+    expect((await call("promote", P)).isError).toBeUndefined();
+  });
+
+  it("send_to_planner marks a ticket of any size and the planner start accepts it", async () => {
+    setting("larger");
+    expect(await call("send_to_planner", { issue: 7, basis: "a design shift" })).toEqual({
+      text: planSentText("mc#7"),
+    });
+    expect(store.plans.get("mc", 7)).toMatchObject({ state: "awaiting-plan", marked: true });
+    expect(decisions()).toMatchObject([
+      { kind: "promote", ref: "mc#7", decision: "Sent to the Planner tab" },
+    ]);
+    expect(await call("start_seat", { seat: "fao-1", issue: 7, basis: "to plan" })).toEqual({
+      text: "Started FAO-1 on mc#7.",
+    });
+  });
+
+  describe("a developer start on a held ticket", () => {
+    const PLANNED = `${GOOD}\n## Plan\n\n1. do\n`;
+    const dev = () => call("start_seat", { seat: "guido-1", issue: 7, basis: "planned" });
+    const filed = () => {
+      fetchImpl = async (n) => ticket(n, { body: PLANNED });
+      board(backlog({ size: "M" }));
+      store.plans.file(
+        "mc",
+        7,
+        { asks: "a", proposal: "p", sizeEstimate: "M", risks: "r", mockups: [] },
+        false,
+        nowMs,
+      );
+    };
+
+    it("every: a plan waiting for sign-off blocks the start; signed off, it starts", async () => {
+      setting("every");
+      filed();
+      expect(await dev()).toEqual(refused(planNeedsSignoffText("mc#7", "awaiting-signoff")));
+      expect(startCalls).toEqual([]);
+      store.plans.approve("mc", 7, nowMs);
+      expect(await dev()).toEqual({ text: "Started GUIDO-1 on mc#7." });
+    });
+
+    it("larger: a marked ticket is blocked, an unmarked one starts", async () => {
+      setting("larger");
+      filed();
+      expect((await dev()).isError).toBeUndefined();
+      startCalls.length = 0;
+      nowMs += 60 * 60_000;
+      store.plans.request("mc", 7, nowMs);
+      expect(await dev()).toEqual(refused(planNeedsSignoffText("mc#7", "awaiting-signoff")));
+      expect(startCalls).toEqual([]);
+    });
+
+    it("never: the start is not held", async () => {
+      setting("never");
+      filed();
+      store.plans.request("mc", 7, nowMs);
+      expect((await dev()).isError).toBeUndefined();
+    });
+  });
+
+  it("a ticket that already has a ## Plan when it is sent to the planner is planned again", async () => {
+    setting("every");
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
+    board(backlog({ size: "M" }));
+    expect(await call("send_to_planner", { issue: 7, basis: "design shift" })).toEqual({
+      text: planSentText("mc#7"),
+    });
+    expect(await call("start_seat", { seat: "fao-1", issue: 7, basis: "again" })).toEqual({
+      text: "Started FAO-1 on mc#7.",
+    });
+  });
+
+  it("send_to_planner refuses a card in Ready, or closed, and writes no row", async () => {
+    board(backlog({ status: "Ready" }));
+    const ready = await call("send_to_planner", { issue: 7, basis: "x" });
+    expect(ready.isError).toBe(true);
+    expect(ready.text).toContain("Backlog");
+    board(backlog({ closed: true }));
+    expect((await call("send_to_planner", { issue: 7, basis: "x" })).isError).toBe(true);
+    expect(store.plans.get("mc", 7)).toBeNull();
+  });
+
+  it("a Size S ticket nobody sent still has no planner", async () => {
+    expect((await call("start_seat", { seat: "fao-1", issue: 7, basis: "to plan" })).isError).toBe(
+      true,
+    );
+  });
+
+  it("a plan sent back may be planned again though the ticket has a ## Plan", async () => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\n## Plan\n\n1. do\n` });
+    board(backlog({ size: "M" }));
+    expect((await call("start_seat", { seat: "fao-1", issue: 7, basis: "again" })).isError).toBe(
+      true,
+    );
+    store.plans.file(
+      "mc",
+      7,
+      { asks: null, proposal: "p", sizeEstimate: null, risks: null, mockups: [] },
+      true,
+      nowMs,
+    );
+    store.plans.sendBack("mc", 7, "smaller");
+    expect(await call("start_seat", { seat: "fao-1", issue: 7, basis: "again" })).toEqual({
+      text: "Started FAO-1 on mc#7.",
+    });
+  });
+
+  it("flight_state tells FLIGHT the repo's setting and the plans waiting", async () => {
+    setting("every");
+    store.plans.request("mc", 7, nowMs);
+    const state = JSON.parse((await call("flight_state", {})).text);
+    expect(state.planSignoff).toBe("every");
+    expect(state.plans).toEqual([{ ref: "mc#7", state: "awaiting-plan", held: true }]);
+  });
+
+  it("send_to_planner refuses a signed-off plan and a card not on the board", async () => {
+    signedOff();
+    expect(await call("send_to_planner", { issue: 7, basis: "x" })).toEqual(
+      refused(PLAN_SEND_REFUSED),
+    );
+    expect((await call("send_to_planner", { issue: 99, basis: "x" })).isError).toBe(true);
   });
 });

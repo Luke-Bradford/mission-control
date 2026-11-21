@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
-  CI_PENDING_MAX_MS,
   conflictKey,
   conflictText,
   evidenceCanUnpark,
@@ -115,7 +114,10 @@ const behind = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}): 
 /** The run off its seat: another run holds the seat. */
 const aside = (s: LoopSnapshot, wake = false): LoopSnapshot => ({
   ...s,
-  loop: { ...s.loop, aside: { worktree: "/w/r1", wake } },
+  loop: {
+    ...s.loop,
+    hold: { kind: null, reason: null, ended: false, worktree: "/w/r1", wake },
+  },
   seat: { ...s.seat, state: "stopped", inTurn: true, holdsRun: false },
 });
 
@@ -216,7 +218,7 @@ describe("main moves", () => {
     expect(r.actions).toContainEqual(update);
     expect(kinds(r.actions)).not.toContain("merge");
     expect(kinds(r.actions)).not.toContain("mark-ready");
-    expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+    expect(r.loop.hold).toMatchObject({ worktree: "/w/r1", wake: false });
   });
 
   it("a conflicting PR in ci, in a merge workspace: stays in ci and updates", () => {
@@ -226,7 +228,7 @@ describe("main moves", () => {
     );
     const r = reconcile(s);
     expect(r.loop.phase).toBe("ci");
-    expect(r.loop.parked).toBeNull();
+    expect(r.loop.hold?.kind ?? null).toBeNull();
     expect(r.actions).toContainEqual(update);
   });
 
@@ -235,8 +237,8 @@ describe("main moves", () => {
     const merging = { mainSha: MAIN, files: ["a.ts"] };
     expect(
       reconcile(behind({ pr: pr({ mergeable: "CONFLICTING" }) }, { ...ci, mainMerge: merging }))
-        .loop.parked,
-    ).toEqual({ kind: "conflict", reason: "PR #12 conflicts with main", ended: false });
+        .loop.hold,
+    ).toMatchObject({ kind: "conflict", reason: "PR #12 conflicts with main", ended: true });
   });
 
   describe("a newly found conflict sends the seat to merge main", () => {
@@ -247,7 +249,7 @@ describe("main moves", () => {
     it("in a draft workspace: back to working with the line pending, no park", () => {
       const r = reconcile(behind({ autoMerge: false, pr: conflicting }, ci));
       expect(r.loop.phase).toBe("working");
-      expect(r.loop.parked).toBeNull();
+      expect(r.loop.hold?.kind ?? null).toBeNull();
       expect(r.actions).toContainEqual({ kind: "send", ...line });
     });
 
@@ -264,36 +266,47 @@ describe("main moves", () => {
 
     it("parks when the seat was already sent the line for this sha", () => {
       const s = behind({ autoMerge: false, pr: conflicting, claimed: { [line.key]: NOW } }, ci);
-      expect(reconcile(s).loop.parked).toEqual({
+      expect(reconcile(s).loop.hold).toMatchObject({
         kind: "conflict",
         reason: "PR #12 conflicts with main",
-        ended: false,
+        ended: true,
       });
     });
   });
 
-  describe("a run parked on a conflict", () => {
-    const parked = (over: Partial<LoopSnapshot> = {}): LoopSnapshot =>
-      behind(over, {
-        phase: "parked",
-        parked: { kind: "conflict", reason: "PR #12 conflicts with main", ended: false },
-        pushFor: SHA,
-      });
+  describe("a run stopped on a conflict", () => {
+    const stopped = (over: Partial<LoopSnapshot> = {}): LoopSnapshot =>
+      behind(
+        { ended: { reason: "stopped" }, ...over },
+        {
+          phase: "parked",
+          hold: {
+            kind: "conflict",
+            reason: "PR #12 conflicts with main",
+            ended: true,
+            worktree: null,
+            wake: false,
+          },
+          pushFor: SHA,
+        },
+      );
 
-    it("goes back to CI once the pushed head shows on a PR that no longer conflicts", () => {
-      const r = reconcile(parked({ pr: pr({ mergeable: "MERGEABLE" }) }));
-      expect(r.loop.phase).toBe("ci");
-      expect(r.loop.parked).toBeNull();
-      expect(r.loop.pushFor).toBe(SHA);
-    });
-
-    it("stays parked while the PR still conflicts", () => {
-      const r = reconcile(parked({ pr: pr({ mergeable: "CONFLICTING" }) }));
+    it("stays stopped, even once the PR no longer conflicts", () => {
+      const r = reconcile(stopped({ pr: pr({ mergeable: "MERGEABLE" }) }));
       expect(r.loop.phase).toBe("parked");
+      expect(r.loop.hold).toMatchObject({ kind: "conflict", ended: true });
     });
 
-    it("lets the seat's report of a committed merge resume it", () => {
-      expect(evidenceCanUnpark({ kind: "conflict", reason: "x", ended: false })).toBe(true);
+    it("a report of a committed merge does not resume it", () => {
+      expect(
+        evidenceCanUnpark({
+          kind: "conflict",
+          reason: "x",
+          ended: true,
+          worktree: null,
+          wake: false,
+        }),
+      ).toBe(false);
     });
   });
 
@@ -304,7 +317,7 @@ describe("main moves", () => {
     );
     const r = reconcile(s);
     expect(r.loop.phase).toBe("ci");
-    expect(r.loop.parked).toBeNull();
+    expect(r.loop.hold?.kind ?? null).toBeNull();
     expect(kinds(r.actions)).not.toContain("update-branch");
   });
 
@@ -312,12 +325,12 @@ describe("main moves", () => {
     const s = behind(
       {
         pr: pr({ mergeable: "CONFLICTING" }),
-        pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 },
+        pushed: { sha: SHA, at: NOW - 30 * 60_000 - 1 },
       },
-      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - CI_PENDING_MAX_MS - 1, gate: null },
+      { phase: "ci", cardFor: "ci:0", pushStartedAt: NOW - 30 * 60_000 - 1, gate: null },
     );
     const r = reconcile(s);
-    expect(r.loop.parked).toBeNull();
+    expect(r.loop.hold?.kind ?? null).toBeNull();
     expect(r.loop.phase).toBe("working");
     expect(sends(r.actions)).toContain(mergeMainKey("r1", SHA));
   });
@@ -348,7 +361,7 @@ describe("main moves", () => {
 
     it("wakes an aside run", () => {
       const r = reconcile(aside(working()));
-      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+      expect(r.loop.hold).toMatchObject({ worktree: "/w/r1", wake: true });
       expect(kinds(r.actions)).toContain("wake");
     });
 

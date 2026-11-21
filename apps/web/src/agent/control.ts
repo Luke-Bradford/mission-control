@@ -7,10 +7,6 @@ import { shortAge } from "./roster.ts";
 export const SILENT_AFTER_MS = STALL_MS;
 /** The context bar and ring turn amber from here: the point where the seat hands over. */
 export const CONTEXT_HANDOVER_PCT = 75;
-/** Figures turn amber past these. */
-export const ROUNDS_PER_PR_WARN = 2.1;
-export const SHARE_3_PLUS_ROUNDS_WARN_PCT = 30;
-export const BLOCKING_PER_REVIEW_WARN = 2.0;
 
 /** How long a working seat has been silent, or null when it is not (or is not working). */
 export function silentFor(
@@ -29,7 +25,7 @@ export function stoppedReason(row: CrewRow, now: number, tz: string | null): str
   if (row.hudState !== "stopped") return null;
   if (row.crewPause) return row.crewPause.reason;
   if (row.stop) return stopLine(row.stop, now, tz);
-  return row.note ?? row.loop?.parked ?? "Stopped by you.";
+  return row.note ?? row.loop?.hold?.reason ?? "Stopped by you.";
 }
 
 /** "last output 4m ago", or null when the seat has never produced any. */
@@ -64,7 +60,7 @@ export function runOutcome(run: Pick<RunView, "status" | "loop">): {
       return { word: "finished", kind: "finished" };
     case "blocked":
       return {
-        word: run.loop?.parked ? `parked: ${run.loop.parked}` : "parked",
+        word: run.loop?.hold?.reason ? `parked: ${run.loop.hold.reason}` : "parked",
         kind: "parked",
       };
     case "failed":

@@ -9,20 +9,15 @@ import {
   type FlightPrFlowRow,
   type FlightPrFlowView,
   LIVE_MINUTES,
-  type MapSnapshot,
   type PipelineStage,
   TELEMETRY_POINTS,
   type Telemetry,
 } from "@mc/core";
 import { shiftTimes } from "../src/demo/shift.ts";
-import { codeHealthBrowserApi } from "./codeHealthBrowserFixtures.ts";
-import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { boardItem, HOUR, MIN, NOW, prView } from "./fixtures.ts";
 import { prFlowFixture } from "./prFlowFixture.ts";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 import { qaHistoryApi, qaHistorySavedReport } from "./qaHistoryFixture.ts";
-import { testHealthFixture } from "./testHealthFixtures.ts";
-import { tokenAuditFixture } from "./tokenAuditFixture.ts";
 
 export const DEMO_REPO = "shop-app";
 export const DEMO_REPOS = [DEMO_REPO, "site-builder"] as const;
@@ -358,6 +353,8 @@ export function telemetryView(): Telemetry {
       ],
       tickets: DEMO_TICKETS.map((t, i) => ({
         ticket: `${DEMO_REPO}#${t.n}`,
+        title: t.title,
+        size: (["XS", "S", "M", "L", "XL"] as const)[i % 5],
         readyAt: NOW - (30 + i * 3) * HOUR,
         startedAt: NOW - (28 + i * 3) * HOUR,
         mergedAt: t.stage === "merged" ? NOW - (i + 1) * HOUR : null,
@@ -597,15 +594,13 @@ function seatApi(): Record<string, unknown> {
         [
           `/api/agents/${id}/files`,
           {
-            files: mapFiles()
-              .slice(0, 3)
-              .map((f, i) => ({
-                path: f.path,
-                add: 12 + i * 5,
-                del: 2 + i,
-                state: i === 2 ? "uncommitted" : "committed",
-                commitSha: i === 2 ? null : "a".repeat(40),
-              })),
+            files: ["app", "api", "cart"].map((dir, i) => ({
+              path: `src/${dir}/module-1.ts`,
+              add: 12 + i * 5,
+              del: 2 + i,
+              state: i === 2 ? "uncommitted" : "committed",
+              commitSha: i === 2 ? null : "a".repeat(40),
+            })),
             note: null,
             sha: null,
           },
@@ -641,6 +636,7 @@ function setupApi(): Record<string, unknown> {
       quietHours: { start: "22:00", end: "07:00", timezone: "UTC" },
     },
     "/api/guard/hits?days=7": { hits: [], counts: {} },
+    "/api/guard/hits?days=14": { hits: [], counts: { "git-write": 7, "full-suite": 3 } },
     "/api/test-lock/history": { runs: [], today: { runs: 0, waitMs: 0 }, usualMs: {} },
     "/api/repos/profiles": [],
     "/api/update/log": {
@@ -667,6 +663,9 @@ function setupApi(): Record<string, unknown> {
 /** The QA queue: the open PRs, newest first. */
 export function qaQueue(tickets: readonly DemoTicket[]) {
   const sha = "a".repeat(40);
+  const acceptancePrs = new Set(
+    tickets.filter((ticket) => ticket.stage === "checks").map((ticket) => ticket.n + 1000),
+  );
   return {
     prs: openPrs(tickets).map((pr, i) => ({
       repoId: DEMO_REPO,
@@ -677,14 +676,14 @@ export function qaQueue(tickets: readonly DemoTicket[]) {
       ticket: pr.ticket,
       state: "open",
       isDraft: false,
-      review: i === 0 ? "approved" : "none",
-      ci: i === 0 ? "passing" : "pending",
+      review: acceptancePrs.has(pr.number) ? "approved" : "none",
+      ci: acceptancePrs.has(pr.number) ? "passing" : "pending",
       createdAt: NOW - (i + 2) * HOUR,
       updatedAt: NOW - 5 * MIN,
       mergedAt: null,
       headSha: sha,
       mergeable: "MERGEABLE",
-      ...(i === 0 ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
+      ...(acceptancePrs.has(pr.number) ? { uat: { sha, since: NOW - 40 * MIN } } : {}),
     })),
     flightId: "flight-1",
   };
@@ -721,6 +720,12 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}`] = { reports: [] };
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
       reports: [],
+    };
+    const ticket = tickets.find((item) => item.n + 1000 === pr.number);
+    out[`/api/repos/${DEMO_REPO}/prs/${pr.number}`] = {
+      repoId: DEMO_REPO,
+      number: pr.number,
+      ticket: ticket ? `${DEMO_REPO}#${ticket.n}` : null,
     };
   }
   return out;
@@ -785,17 +790,6 @@ function memoryApi(): Record<string, unknown> {
   };
 }
 
-/** The files each open PR changes, for the Map's PR focus. */
-function prFiles(tickets: readonly DemoTicket[]): Record<string, unknown> {
-  const tree = mapFiles();
-  return Object.fromEntries(
-    allPrs(tickets).map((pr, i) => [
-      `/api/repos/${DEMO_REPO}/prs/${pr.number}/files`,
-      { files: [0, 1, 2].map((k) => tree[(i * 5 + k * 7) % tree.length]?.path ?? "") },
-    ]),
-  );
-}
-
 function flightApi(): Record<string, unknown> {
   return {
     "/api/flight/orders?limit=1": { active: [], history: [], nextCursor: null },
@@ -821,84 +815,12 @@ function flightApi(): Record<string, unknown> {
   };
 }
 
-// ---- The Map ---------------------------------------------------------------------------------
-
-const MAP_DIRS = ["app", "api", "cart", "checkout", "orders", "search", "shared", "email"];
-
-export function mapFiles(count = 60): { path: string; lines: number }[] {
-  return Array.from({ length: count }, (_, i) => {
-    const dir = MAP_DIRS[i % MAP_DIRS.length] ?? "app";
-    return {
-      path: `src/${dir}/module-${Math.floor(i / MAP_DIRS.length) + 1}.ts`,
-      lines: 40 + ((i * 37) % 260),
-    };
-  });
-}
-
-export function mapSnapshot(
-  seatIds: readonly string[],
-  tickets: readonly DemoTicket[],
-): MapSnapshot {
-  const tree = mapFiles();
-  const mine = tickets.filter((t) => t.seat && seatIds.includes(t.seat));
-  return {
-    repoId: DEMO_REPO,
-    tree,
-    imports: tree.slice(1).map((f, i) => ({ from: f.path, to: tree[i % 8]?.path ?? f.path })),
-    hist: { since: NOW - 30 * 24 * HOUR, prCount: 0, fixCount: 0, files: {}, coupling: [] },
-    rules: { areas: { "area:app": ["src/**"] }, hardRules: [] },
-    seats: mine.map((t, i) => ({
-      seat: t.seat as string,
-      state: "running",
-      since: NOW - (10 + i) * MIN,
-      ticket: t.n,
-      title: t.title,
-      branches: [`feature/${t.n}-demo`],
-      area: ["src/**"],
-      changedOn: [`feature/${t.n}-demo`],
-      nowTicket: null,
-      tickets: { [`feature/${t.n}-demo`]: t.n },
-      calls: [],
-      scope: {
-        read: [tree[i * 3]?.path ?? "", tree[i * 3 + 1]?.path ?? ""],
-        modified: [{ file: tree[i * 3 + 2]?.path ?? "", add: 10 + i, rem: 2, source: "churn" }],
-      },
-      recent: [{ file: tree[i * 3]?.path ?? "", at: NOW - 5 * MIN }],
-      context: { total: 84_000, window: 400_000 },
-      badges: { questions: [], failures: [], review: null, tests: null, ci: null, waiting: null },
-    })),
-    findings: [],
-    conflicts: [],
-    conflictsUnchecked: [],
-    seq: 0,
-  };
-}
-
 /** Everything but the Overview's own answers; the keys are request paths. */
 export function demoPageAnswers(
   tickets: readonly DemoTicket[] = DEMO_TICKETS,
 ): Record<string, unknown> {
   const telemetry = telemetryView();
   const clock = Date.now();
-  const ownRepo = (text: string, repo = DEMO_REPO) =>
-    text
-      .replaceAll("repo=sample", `repo=${repo}`)
-      .replaceAll('"repoId":"sample"', `"repoId":"${repo}"`);
-  const base = {
-    ...codeHealthBrowserApi(NOW),
-    ...codeRiskFixture(NOW).api,
-    ...testHealthFixture(NOW).api,
-  };
-  const health = Object.fromEntries(
-    DEMO_REPOS.flatMap((repo) =>
-      Object.entries(base)
-        .filter(([path]) => path.startsWith("/api/code-health"))
-        .map(([path, value]) => [
-          ownRepo(path, repo),
-          JSON.parse(ownRepo(JSON.stringify(value), repo)),
-        ]),
-    ),
-  );
   // The history fixture is written for other repos; Demo's are its own.
   const history = JSON.parse(
     JSON.stringify(shiftTimes(qaHistoryApi(3), clock, NOW - clock))
@@ -915,26 +837,30 @@ export function demoPageAnswers(
     const path = `/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${report.prNumber}`;
     history[path] = { reports: [report] };
     history[`${path}&headSha=${report.headSha}`] = { reports: [report] };
+    history[`/api/repos/${DEMO_REPO}/prs/${report.prNumber}`] = {
+      repoId: DEMO_REPO,
+      number: report.prNumber,
+      ticket: null,
+    };
   }
   return {
-    ...health,
-    ...Object.fromEntries(
-      [1, 7, 30].map((days) => [`/api/audit/tokens?days=${days}`, tokenAuditFixture({ days })]),
-    ),
     ...history,
     ...memoryApi(),
     ...seatApi(),
-    ...prFiles(tickets),
     ...commsApi(),
     ...setupApi(),
     ...flightApi(),
     ...qaPrApi(tickets),
     ...ticketItems(tickets),
     "/api/qa/queue": qaQueue(tickets),
+    "/api/plans": plansView(),
+    [`/api/plans?repoId=${DEMO_REPO}`]: plansView(),
     "/api/dependencies": [],
     "/api/audit?range=7d": auditView(),
     "/api/audit?range=24h": auditView(),
     "/api/audit?range=30d": auditView(),
+    "/api/audit?range=90d": auditView(),
+    "/api/audit?range=365d": auditView(),
     ...Object.fromEntries(
       ["1h", "6h", "24h", "7d", "30d"].map((r) => [`/api/telemetry?range=${r}`, telemetry]),
     ),
@@ -942,10 +868,74 @@ export function demoPageAnswers(
     "/api/boards/site-builder": [],
     [`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`]: openPrs(tickets),
     [`/api/repos/${DEMO_REPO}/prs`]: openPrs(tickets),
-    [`/api/repos/${DEMO_REPO}/map`]: mapSnapshot(
-      SEAT_IDS.filter((id) => id !== "flight-1"),
-      tickets,
-    ),
+    [`/api/repos/${DEMO_REPO}/prs?shape=summary`]: openPrs(tickets),
+    "/api/repos/site-builder/prs?shape=summary": [],
+  };
+}
+
+const planPicture = (c: string, caption: string) => ({
+  id: c.repeat(64),
+  url: `/api/plan-assets/${c.repeat(64)}`,
+  caption,
+  mediaType: "image/png" as const,
+});
+
+/** Plans to sign off: one waiting, one sent back, one approved (the Retry ticket's). */
+function plansView() {
+  const at = Date.now() - 3 * 3_600_000;
+  const base = {
+    repoId: DEMO_REPO,
+    marked: true,
+    requestedAt: at,
+    plannedAt: at,
+    note: null,
+    mockups: [] as ReturnType<typeof planPicture>[],
+  };
+  return {
+    waiting: [
+      {
+        ...base,
+        issue: 201,
+        ref: `${DEMO_REPO}#201`,
+        title: "Audit the coupon rules",
+        state: "awaiting-signoff",
+        asks: "List every coupon rule, say which overlap, and flag any that can stack to a free order.",
+        proposal:
+          "Read the coupon rules, add a table of overlaps to the audit page, and a test that no stack goes below zero.",
+        mockups: [planPicture("a", "Audit table with overlaps marked")],
+        sizeEstimate: "M",
+        risks: "Old coupons have no owner, so some overlaps may be on purpose.",
+        decidedAt: null,
+      },
+    ],
+    history: [
+      {
+        ...base,
+        issue: 104,
+        ref: `${DEMO_REPO}#104`,
+        title: "Fix the address form on narrow screens",
+        state: "sent-back",
+        asks: "The address form overflows below 360px.",
+        proposal: "Rebuild the form as one column.",
+        sizeEstimate: "S",
+        risks: "None known.",
+        note: "Keep the postcode lookup on narrow screens.",
+        decidedAt: at,
+      },
+      {
+        ...base,
+        issue: 102,
+        ref: `${DEMO_REPO}#102`,
+        title: "Retry failed payment webhooks",
+        state: "signed-off",
+        asks: "Failed payment webhooks are dropped; retry them.",
+        proposal: "Queue each failed webhook and retry with backoff, five tries over an hour.",
+        mockups: [planPicture("b", "Retry queue in the admin screen")],
+        sizeEstimate: "M",
+        risks: "A retry could double-charge if the first call did land.",
+        decidedAt: at - 86_400_000,
+      },
+    ],
   };
 }
 

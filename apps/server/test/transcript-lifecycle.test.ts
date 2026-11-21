@@ -89,7 +89,9 @@ it("never touches a live transcript", async () => {
 
 it("never touches set-aside or active-seat transcripts", async () => {
   const aside = run("aside", NOW - 20 * 24 * HOUR);
-  aside.loop = { aside: { worktree: join(dir, "aside"), wake: false } } as Run["loop"];
+  aside.loop = {
+    hold: { kind: null, reason: null, ended: false, worktree: join(dir, "aside"), wake: false },
+  } as Run["loop"];
   const active = run("active", NOW - 20 * 24 * HOUR);
   store.upsertRun(aside);
   store.upsertRun(active);

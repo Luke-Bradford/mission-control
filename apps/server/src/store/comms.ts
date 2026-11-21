@@ -52,7 +52,7 @@ export function cutCommsText(text: string): string {
     : text;
 }
 
-/** The queries over the comms, comms_reads and comms_repeats tables (and the tables they join). */
+/** The queries over the comms and comms_reads tables (and the tables they join). */
 export class CommsQueries {
   private readonly db: DatabaseSync;
   private readonly host: CommsHost;
@@ -151,9 +151,6 @@ export class CommsQueries {
         if (same !== undefined) {
           id = same.id;
           repeat = true;
-          this.db
-            .prepare("INSERT INTO comms_repeats (at, from_id, to_id, message_id) VALUES (?,?,?,?)")
-            .run(row.at, row.from, row.to, same.id);
           return;
         }
       }
@@ -187,15 +184,6 @@ export class CommsQueries {
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
     return stored !== null && repeat ? { ...stored, repeat: true } : stored;
-  }
-
-  /** How many exact repeats of a stored message were turned away at or after `since`. */
-  commsRepeatCount(since: number): number {
-    return (
-      this.db.prepare("SELECT COUNT(*) AS n FROM comms_repeats WHERE at >= ?").get(since) as {
-        n: number;
-      }
-    ).n;
   }
 
   /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */

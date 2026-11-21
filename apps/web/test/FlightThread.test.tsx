@@ -1,4 +1,4 @@
-import type { ConfigView } from "@mc/core";
+import { COMMS_MESSAGE_MAX, type ConfigView } from "@mc/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, streamStatus } from "../src/data.ts";
@@ -108,6 +108,13 @@ describe("FlightThread", () => {
     expect(await screen.findByText(/Hub is down/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
     expect((box as HTMLTextAreaElement).value).toBe("hi");
+  });
+
+  it("stops the box at the length the server accepts", async () => {
+    stub([]);
+    render(<FlightThread itemKey="question:a" about="A question" />);
+    const box = (await screen.findByLabelText("Message FLIGHT")) as HTMLTextAreaElement;
+    expect(box.maxLength).toBe(COMMS_MESSAGE_MAX);
   });
 
   it("shows the working line only when the server reports it", async () => {

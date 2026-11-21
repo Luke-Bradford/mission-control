@@ -1,7 +1,24 @@
+import "@fontsource/barlow-semi-condensed/latin-500.css";
+import "@fontsource/barlow-semi-condensed/latin-600.css";
+import "@fontsource/barlow-semi-condensed/latin-700.css";
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-500.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-mono/latin-400.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
+import "@fontsource/ibm-plex-mono/latin-600.css";
 import "../src/hud.css";
 import { createRoot } from "react-dom/client";
-import { LegacyAudit as Audit } from "../src/pages/LegacyAudit.tsx";
+import { Audit } from "../src/pages/Audit.tsx";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");
-createRoot(root).render(<Audit />);
+createRoot(root).render(
+  <div className="app">
+    <div className="shell">
+      <main>
+        <Audit />
+      </main>
+    </div>
+  </div>,
+);

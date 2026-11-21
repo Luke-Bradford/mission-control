@@ -123,7 +123,16 @@ it("only reports PRs whose ready step covers the current head and outstanding pa
     store.upsertRun(
       run(id, {
         endedAt: id === "ended" ? NOW : null,
-        loop: { ...NEW_LOOP, parked: { kind: "stuck", reason: id, ended: id === "park-ended" } },
+        loop: {
+          ...NEW_LOOP,
+          hold: {
+            kind: "stuck",
+            reason: id,
+            ended: id === "park-ended",
+            worktree: null,
+            wake: false,
+          },
+        },
       }),
     );
   const digest = awayDigest(store, true, [], ["mc"], NOW);

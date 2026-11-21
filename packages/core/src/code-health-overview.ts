@@ -3,7 +3,7 @@ import type { CodeHealthRecommendation, CodeHealthWindow } from "./code-health.t
 import type { WasteCheck } from "./waste.ts";
 
 /** Bump when the stored shape changes, so an older stored summary is rebuilt rather than served. */
-export const CODE_HEALTH_OVERVIEW_VERSION = 2;
+export const CODE_HEALTH_OVERVIEW_VERSION = 3;
 /** The ranked rows on the first screen. */
 export const CODE_HEALTH_OVERVIEW_ROWS_MAX = 10;
 /** Files shown under "Where findings land". */

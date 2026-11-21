@@ -551,7 +551,7 @@ describe("FLIGHT page", () => {
   });
 
   it("Seats shows a looped run's ticket, phase and a linked PR; a seat with no ticket shows a dash", async () => {
-    const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, parked: null };
+    const loop = { phase: "review" as const, text: "In review · PR #9", prNumber: 9, hold: null };
     stubFetch({
       "/api/crew?shape=summary": {
         rows: [
@@ -581,7 +581,7 @@ describe("FLIGHT page", () => {
       phase: "parked" as const,
       text: "Blocked: needs you",
       prNumber: null,
-      parked: "needs you",
+      hold: { kind: "operator", reason: "needs you", offSeat: false },
       wait: "operator" as const,
     };
     stubFetch({
@@ -702,7 +702,7 @@ describe("FLIGHT page", () => {
   });
 
   it("Seats keeps a seat whose loop is done, with its Done step", async () => {
-    const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
+    const done = { phase: "done" as const, text: "Done", prNumber: 9, hold: null };
     stubFetch({
       "/api/crew?shape=summary": {
         rows: [seatRow({ run: null, hudState: "idle", ticket: "shop-app#5", loop: done })],
@@ -754,7 +754,7 @@ describe("FLIGHT page", () => {
       phase: "ci",
       text: "Verifying",
       prNumber: null,
-      parked: null,
+      hold: null,
       profile: "ticket-template",
       step: "verify",
       steps: [
@@ -856,7 +856,7 @@ describe("FLIGHT page", () => {
         phase: "review" as const,
         text: "In review · PR #9",
         prNumber: 9,
-        parked: null,
+        hold: null,
       };
       stubWith(
         [seatRow({ hudState: "idle", ticket: "shop-app#5", ticketTitle: "Stop the race", loop })],
@@ -876,7 +876,7 @@ describe("FLIGHT page", () => {
     });
 
     it("shows the marks without counts until the run's tries load", async () => {
-      const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
+      const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, hold: null };
       stubWith([seatRow({ hudState: "running", ticket: "shop-app#5", loop })]);
       render(<FlightTabs />);
       const list = await findSeats();
@@ -893,7 +893,7 @@ describe("FLIGHT page", () => {
         phase: "parked" as const,
         text: "Blocked: CI failed 3 times",
         prNumber: null,
-        parked: "CI failed 3 times",
+        hold: { kind: "ci", reason: "CI failed 3 times", offSeat: false },
       };
       stubWith(
         [seatRow({ hudState: "blocked", ticket: "shop-app#5", loop: parked })],
@@ -906,7 +906,7 @@ describe("FLIGHT page", () => {
     });
 
     it("keeps a row with no ticket, such as FLIGHT's seat, with no ticket reference", async () => {
-      const loop = { phase: "working" as const, text: "Working", prNumber: null, parked: null };
+      const loop = { phase: "working" as const, text: "Working", prNumber: null, hold: null };
       stubWith([
         seatRow({ id: "flight-1", ticket: null, ticketTitle: null, hudState: "running", loop }),
         seatRow({ hudState: "running", ticket: "shop-app#5", loop }),
@@ -923,8 +923,8 @@ describe("FLIGHT page", () => {
 
   it("Work in flight lists a seat with an active run and a loop once; a done loop with an active run stays", async () => {
     const live = crewRow().run as NonNullable<ReturnType<typeof crewRow>["run"]>;
-    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
-    const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
+    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, hold: null };
+    const done = { phase: "done" as const, text: "Done", prNumber: 9, hold: null };
     stubFetch({
       "/api/crew?shape=summary": {
         rows: [
@@ -950,7 +950,7 @@ describe("FLIGHT page", () => {
   });
 
   it("Seats lists an observed loop that carries a loop once", async () => {
-    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
+    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, hold: null };
     stubFetch({
       "/api/crew?shape=summary": { rows: [crewRow({ loop })], firstRunToday: null },
       "/api/config": CONFIG,
@@ -961,7 +961,7 @@ describe("FLIGHT page", () => {
   });
 
   it("the session filter applies to a looped row", async () => {
-    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, parked: null };
+    const loop = { phase: "working" as const, text: "Working on #5", prNumber: null, hold: null };
     stubFetch({
       "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "idle", ticket: "shop-app#5", loop })],

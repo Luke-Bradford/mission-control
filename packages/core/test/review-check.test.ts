@@ -44,7 +44,7 @@ describe("reviewCheckOf", () => {
       awaitingFlight: null,
       controllerCheck: null,
       phase: "review" as const,
-      parked: null,
+      hold: null,
     };
     expect(
       reviewCheckOf([row()], 0, {
@@ -66,14 +66,14 @@ describe("reviewCheckOf", () => {
       reviewCheckOf([row()], 0, {
         ...base,
         phase: "parked",
-        parked: { kind: "gate", reason: "x", ended: false },
+        hold: { kind: "gate", reason: "x", ended: false, worktree: null, wake: false },
       }),
     ).toEqual({ kind: "held", by: "hub", reason: "x" });
     expect(
       reviewCheckOf([row({ blocking: 1 })], 0, {
         ...base,
         phase: "parked",
-        parked: { kind: "review", reason: "x", ended: false },
+        hold: { kind: "review", reason: "x", ended: false, worktree: null, wake: false },
       }),
     ).toEqual({ kind: "held", by: "hub", reason: "x" });
     expect(reviewCheckOf([row({ blocking: 1 })], 0, base)).toEqual({ kind: "sent" });
@@ -81,7 +81,7 @@ describe("reviewCheckOf", () => {
       reviewCheckOf([row({ state: "failed" })], 1, {
         ...base,
         phase: "parked",
-        parked: { kind: "review-failed", reason: "x", ended: false },
+        hold: { kind: "review-failed", reason: "x", ended: false, worktree: null, wake: false },
       }),
     ).toEqual({ kind: "held", by: "hub", reason: "x" });
   });
@@ -108,7 +108,7 @@ describe("reviewCheckOf", () => {
       awaitingFlight: null,
       controllerCheck: null,
       phase: "review" as const,
-      parked: null,
+      hold: null,
     };
     expect(reviewCheckOf([row()], 0, none)).toEqual({ kind: "ready" });
     const hold = { by: "FLIGHT" as const, reason: "x", at: 1 };

@@ -16,7 +16,7 @@ const TABS = {
   machine: "Machine",
 } as const;
 const PANEL_COUNTS = { crew: 2, cost: 4, throughput: 4, quality: 4, machine: 3 } as const;
-const TABLE_COUNTS = { crew: 2, cost: 2, throughput: 1, quality: 1, machine: 1 } as const;
+const TABLE_COUNTS = { crew: 2, cost: 2, throughput: 1, quality: 0, machine: 1 } as const;
 const STATES = ["normal", "loading", "empty", "error", "stale", "disconnected"] as const;
 
 /** The 21 panel ids of the current page (apps/web/src/telemetry). */
@@ -87,7 +87,6 @@ const MEASURES = [
   "RETRO findings per PR",
   "Human review wait",
   "PRs sent back",
-  "Escaped defects",
   "Guard blocks",
   "Test attempts",
   "CPU",
@@ -387,7 +386,7 @@ describe("Telemetry mockup", () => {
       for (const view of ["", "&view=table"]) {
         const document = render(`?tab=${tab}${view}`);
         const numbers = [...document.querySelectorAll(".rows .vl, .readout .vl, td.num")];
-        // Escaped defects has no numeric column; blank legend keys are not values.
+        // Quality has no table view; blank legend keys are not values.
         if (!(tab === "quality" && view))
           expect(numbers.length, `${tab}${view}`).toBeGreaterThan(0);
         for (const number of numbers) {

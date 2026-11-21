@@ -26,27 +26,12 @@ export function waitReader(
   return (card) => ticketWaits({ repoId, card, board, prs });
 }
 
-/** A wait that ended: the ticket it freed, what it was waiting on, and what the engine has done about it. */
-export interface ReleasedWait {
-  ref: string;
-  /** The waits that had stood, as refs (`repo#number` or `PR number`). */
-  resolved: string[];
-  at: number;
-  /** The card's move to Ready is settled (done, or the card was not Blocked or not complete). */
-  moved?: boolean;
-  /** PRs of the ticket that have been told to merge main. */
-  synced?: number[];
-  /** When the engine last tried and failed; it waits before trying again. */
-  triedAt?: number;
-}
-
 export interface WaitRecord {
   /** Each waiting ticket: its open waits (refs) and when the hub first saw it wait. */
   waiting: Record<
     string,
     { open: string[]; unread?: string[]; since: number; sinceByRef?: Record<string, number> }
   >;
-  released: ReleasedWait[];
 }
 
 /** Each edge retains its first observation; legacy entries fall back to their recorded set start. */
@@ -59,17 +44,15 @@ export function observedWaitSince(
 }
 
 export const WAIT_RECORD_SETTING = "dependency-waits";
-/** A released wait is kept this long, for the wake and the engine's retries. */
-export const WAIT_RELEASED_KEEP_MS = 24 * 60 * 60_000;
 
 export function readWaitRecord(store: Store, repoId: RepoId): WaitRecord {
   try {
     const v = JSON.parse(
       store.getSetting(`${WAIT_RECORD_SETTING}:${repoId}`) ?? "null",
     ) as Partial<WaitRecord> | null;
-    return { waiting: v?.waiting ?? {}, released: v?.released ?? [] };
+    return { waiting: v?.waiting ?? {} };
   } catch {
-    return { waiting: {}, released: [] };
+    return { waiting: {} };
   }
 }
 
@@ -108,16 +91,7 @@ export function observeWaits(
       ),
     };
   }
-  const released = record.released.filter((r) => now - r.at < WAIT_RELEASED_KEEP_MS);
-  for (const [ref, entry] of Object.entries(record.waiting)) {
-    if (waiting[ref] !== undefined) continue;
-    // a ticket that closed or left the board did not get released
-    if (!open.some((c) => `${repoId}#${c.issueNumber}` === ref)) continue;
-    // a wait the hub never read has no known end: reading the PR later is not a release
-    if (entry.open.every((r) => entry.unread?.includes(r))) continue;
-    released.push({ ref, resolved: entry.open, at: now });
-  }
-  const next = { waiting, released };
+  const next = { waiting };
   writeWaitRecord(store, repoId, next);
   return next;
 }
@@ -147,84 +121,4 @@ export function blockedWork(
       },
     ];
   });
-}
-
-/**
- * "mc#1015 merged: mc#1139, mc#1142 unblocked": one line per set of waits that ended together.
- * `verb` is "merged" for a PR or an issue a merged PR closed, else "closed". A card `owned` says
- * false for (no run of this hub touched it) is not released by the hub, so its line says it stays Blocked.
- */
-export function releasedLines(
-  released: readonly ReleasedWait[],
-  verb: (ref: string) => string,
-  owned: (ref: string) => boolean = () => true,
-): { ref: string; at: number; text: string }[] {
-  const groups = new Map<string, ReleasedWait[]>();
-  for (const r of released) {
-    const key = [...r.resolved].sort().join(", ");
-    groups.set(key, [...(groups.get(key) ?? []), r]);
-  }
-  return [...groups.values()].flatMap((rs) => {
-    const first = rs[0];
-    if (first === undefined) return [];
-    const said = [...new Set(first.resolved)].map((d) => `${d} ${verb(d)}`).join(", ");
-    const line = (group: ReleasedWait[], tail: string) => {
-      const head = group[0];
-      return head === undefined
-        ? []
-        : [
-            {
-              ref: head.ref,
-              at: Math.max(...group.map((r) => r.at)),
-              text: `${said}: ${group.map((r) => r.ref).join(", ")} ${tail}`,
-            },
-          ];
-    };
-    return [
-      ...line(
-        rs.filter((r) => owned(r.ref)),
-        "unblocked",
-      ),
-      ...line(
-        rs.filter((r) => !owned(r.ref)),
-        "stays Blocked: no run of this hub has touched it, so the hub does not release it",
-      ),
-    ];
-  });
-}
-
-/** Whether a ref that stopped being a wait was merged ("merged") or just closed ("closed"). */
-export function endedVerb(
-  store: Pick<Store, "pullRequests">,
-  repoId: RepoId,
-): (ref: string) => string {
-  const prs = store.pullRequests(repoId);
-  return (ref) => {
-    const pr = /^PR (\d+)$/.exec(ref);
-    if (pr)
-      return prs.find((p) => p.number === Number(pr[1]))?.state === "merged" ? "merged" : "closed";
-    const issue = /#(\d+)$/.exec(ref);
-    const n = issue ? Number(issue[1]) : -1;
-    const merged = prs.some(
-      (p) =>
-        p.state === "merged" &&
-        (p.closingIssues?.length ? p.closingIssues.includes(n) : p.ticket === ref),
-    );
-    return merged ? "merged" : "closed";
-  };
-}
-
-/** Sets flags on a released wait, rereading the record so a concurrent observe is not overwritten. */
-export function patchReleased(
-  store: Store,
-  repoId: RepoId,
-  ref: string,
-  at: number,
-  fields: Partial<Pick<ReleasedWait, "moved" | "synced" | "triedAt">>,
-): void {
-  const record = readWaitRecord(store, repoId);
-  const entry = record.released.find((r) => r.ref === ref && r.at === at);
-  if (entry === undefined) return;
-  Object.assign(entry, fields);
-  writeWaitRecord(store, repoId, record);
 }

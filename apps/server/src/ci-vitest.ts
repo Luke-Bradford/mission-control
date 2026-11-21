@@ -101,4 +101,5 @@ export function runVitestForCi(args: string[]): number {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url))
-  process.exit(runVitestForCi(process.argv.slice(2)));
+  // exitCode, not exit(): exit() drops output still queued for a pipe, which cut CI logs at 64 KiB
+  process.exitCode = runVitestForCi(process.argv.slice(2));

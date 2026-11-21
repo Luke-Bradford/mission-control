@@ -45,9 +45,9 @@ export const WASTE_THRESHOLDS = Object.freeze({
   retryResumes: 3,
   /** A change past this many review rounds stops its reviews. */
   reviewRounds: 2,
-  /** An open PR with this many failed review rounds is raised to FLIGHT; its reviews go on. */
+  /** An open PR with this many failed review rounds raises an alarm; its reviews go on. */
   failedReviewRounds: 2,
-  /** A hard-rule PR waiting this long on FLIGHT's clearance is raised to FLIGHT. */
+  /** A hard-rule PR waiting this long on FLIGHT's clearance raises an alarm. */
   clearanceAlarmMs: 2 * HOUR_MS,
   /** The same wait shows on the Audit waste route from this long. */
   clearanceAuditMs: DAY_MS,
@@ -63,7 +63,7 @@ export const WASTE_THRESHOLDS = Object.freeze({
   /** Tickets opened in the window reach tickets closed (with at least this many opened). */
   churnWindowMs: DAY_MS,
   churnMinOpened: 5,
-  /** An event alarm (a rerun refused) stays open this long, then closes. */
+  /** An event alarm (a rerun) stays open this long, then closes. */
   eventOpenMs: DAY_MS,
 });
 
@@ -88,10 +88,10 @@ export const WASTE_WINDOW_MS: Record<WasteWindow, number> = { day: DAY_MS, week:
 export const WASTE_SPLIT_TITLE = /\b(?:half|halves|slice|slices|follow-?\s?ups?|part\s+\d+)\b/i;
 
 /** What a check does when it fires. */
-export type WasteAction = "refuse" | "park" | "stop-reviews" | "stop-restarts" | "alarm";
+export type WasteAction = "park" | "stop-reviews" | "stop-restarts" | "alarm";
 
 export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
-  "unchanged-rerun": "refuse",
+  "unchanged-rerun": "alarm",
   "retry-loop": "park",
   "review-rounds": "stop-reviews",
   "restart-storm": "stop-restarts",
@@ -102,6 +102,20 @@ export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
   "failed-review-rounds": "alarm",
   "clearance-waiting": "alarm",
 };
+
+/**
+ * The alarms that wake FLIGHT, once each: work on one ticket that is going round, which a person
+ * would otherwise find only by reading the log. The rest are stored and served by GET /api/waste.
+ * Not here, and why: a review-rounds hold parks the run, and the park wakes FLIGHT; an unchanged
+ * rerun is an alarm the Audit page shows and a restart storm is held by the hub itself; clearance waiting counts hours,
+ * so a resolved one would wake FLIGHT again every hour; cost, coordination and churn are left out
+ * by choice, as measures of spend for the Audit page.
+ */
+export const WASTE_WAKES_FLIGHT: readonly WasteCheck[] = [
+  "retry-loop",
+  "failed-review-rounds",
+  "runs-per-ticket",
+];
 
 /** One waste alarm as the hub keeps it. */
 export interface WasteAlarm {
@@ -151,10 +165,6 @@ export const wasteResolveHoldMs = (check: WasteCheck): number | null =>
       : check === "ticket-churn"
         ? WASTE_THRESHOLDS.churnWindowMs
         : null;
-
-/** The refusal a rerun gets. */
-export const unchangedRerunText = (command: string, sha: string): string =>
-  `Not run: ${command} already ran on commit ${sha.slice(0, 7)} and nothing has changed since (no commit, no edited file). It passed, or it has failed twice on this commit; the result is recorded. Change something first, or read that result.`;
 
 /** Every start refusal a waste alarm gives begins with this; the engine reads it as a hold, not a fault. */
 export const WASTE_HELD_PREFIX = "Not started: waste alarm.";
@@ -214,13 +224,12 @@ export interface WasteSpend {
 }
 
 /**
- * One 24-hour bucket of FLIGHT's own activity: how often it woke, how often it decided to wait, and
+ * One 24-hour bucket of FLIGHT's own activity: how often it woke, and
  * its share of the new tokens every run used. The share is null when no run recorded tokens.
  */
 export interface FlightDay {
   since: number;
   wakes: number;
-  waits: number;
   flightTokens: number;
   totalTokens: number;
   tokenShare: number | null;

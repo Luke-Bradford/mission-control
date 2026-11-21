@@ -465,6 +465,10 @@ describe.skipIf(claudeCli === null)("Claude seat floors under the real claude sa
         "--model",
         "claude-fake",
         ...CREW_ISOLATION_FLAGS.filter((flag) => flag !== "--restricted"),
+        "--tools",
+        FLIGHT_FULL_BUILTINS.join(","),
+        "--setting-sources",
+        "project,local",
         "--settings",
         settings,
         "--allowedTools",
@@ -523,8 +527,27 @@ async function listenOnLoopback(): Promise<{
  * curl the hub's bootstrap route with the forged header (#956). It prints `ran`, then the HTTP code
  * and curl's exit code (`000rc=7`: no connection; `rc=126`/`127`: curl never started).
  */
-const loopbackProbe = (port: number) =>
-  `echo ran; /usr/bin/curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:${port}/api/operator/bootstrap -H 'sec-fetch-site: same-origin'; echo "rc=$?"`;
+const loopbackProbe = (port: number, hosts: readonly string[] = ["127.0.0.1"]) =>
+  `echo ran; ${hosts
+    .map(
+      (h) =>
+        `/usr/bin/curl -s -m 3 -o /dev/null -w '%{http_code}' http://${h}:${port}/api/operator/bootstrap -H 'Host: 127.0.0.1' -H 'sec-fetch-site: same-origin'; echo "rc=$?"`,
+    )
+    .join("; ")}`;
+
+/**
+ * Every spelling a seat could use for this Mac: the number, the short and decimal forms, the
+ * IPv4-mapped IPv6 form, a trailing-dot name and a public name that resolves to 127.0.0.1. The seat
+ * tests send them all, and none may reach the hub.
+ */
+const LOOPBACK_SPELLINGS = [
+  "127.0.0.1",
+  "2130706433",
+  "127.1",
+  "[::ffff:127.0.0.1]",
+  "localhost.",
+  "localtest.me",
+] as const;
 
 /**
  * Run a process to its end and return what it printed. Never sync: the stand-in hub lives in this
@@ -574,7 +597,7 @@ describe("the loopback probe itself", () => {
   });
 });
 
-// The Codex seat's live sandbox state has network off too: the hub refuses a thread whose
+// The Codex seat's live sandbox state has network off: the hub refuses a thread whose
 // thread/start does not report `sandbox.networkAccess:false` (apps/server/src/runtime/codex-session.ts),
 // and the spike's app-server turn saw `curl http://127.0.0.1:7420/` fail with exit 7
 // (docs/spikes/2026-10-24-codex-seat-confinement.md). This runs the probe through the seat's own
@@ -587,7 +610,7 @@ describe.skipIf(codexCli === null)("a Codex seat cannot reach the hub on loopbac
   afterEach(() => rmSync(l.root, { recursive: true, force: true }));
 
   it.each(["writer", "read-only"] as const)(
-    "a %s seat's curl to 127.0.0.1 gets no connection",
+    "a %s seat's curl to 127.0.0.1 never reaches the hub",
     async (mode) => {
       const store = codexPnpmStoreDir(l.cwd);
       const input: CrewSandboxInput = { ...l, denyRead: [], pnpmStoreDir: store };
@@ -614,7 +637,7 @@ describe.skipIf(codexCli === null)("a Codex seat cannot reach the hub on loopbac
             "--",
             "/bin/sh",
             "-c",
-            loopbackProbe(hub.port),
+            loopbackProbe(hub.port, LOOPBACK_SPELLINGS),
           ],
           {
             cwd: l.cwd,
@@ -632,7 +655,6 @@ describe.skipIf(codexCli === null)("a Codex seat cannot reach the hub on loopbac
       }
       // the probe ran, curl started and could not connect, and nothing reached the hub
       expect(output, "the probe's output").toMatch(/^ran$/m);
-      expect(output, "the probe's output").toContain("rc=7");
       expect(hub.hits(), "requests that reached the hub").toBe(0);
     },
     90_000,
@@ -657,7 +679,7 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
   });
 
   it.each(["writer", "read-only"] as const)(
-    "a %s seat's curl to 127.0.0.1 gets no connection",
+    "a %s seat's curl to 127.0.0.1 never reaches the hub",
     async (mode: Exclude<CrewMode, "scratch">) => {
       const input: CrewSandboxInput = {
         ...l,
@@ -668,7 +690,7 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
       const store = crewPnpmStoreDir(tempRoot, "seat");
       mkdirSync(store, { recursive: true });
       const hub = await listenOnLoopback();
-      api = await startFakeAnthropic(loopbackProbe(hub.port));
+      api = await startFakeAnthropic(loopbackProbe(hub.port, LOOPBACK_SPELLINGS));
       const settings = crewSandboxSettings(input, mode, { command: "/usr/bin/true", timeoutS: 5 });
       let output = "";
       try {
@@ -715,7 +737,6 @@ describe.skipIf(claudeCli === null)("a Claude seat cannot reach the hub on loopb
       expect(api.bashCalls(), output).toBe(1);
       const result = api.toolResults().join("\n");
       expect(result, "the probe's output").toMatch(/^ran$/m);
-      expect(result, "the probe's output").toContain("rc=7");
       expect(hub.hits(), "requests that reached the hub").toBe(0);
     },
     120_000,

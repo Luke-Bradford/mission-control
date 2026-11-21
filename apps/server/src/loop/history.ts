@@ -169,7 +169,7 @@ export function loopTries(
   if (run.endedAt !== null) {
     if (last.step === "done") close(run.endedAt, "pass");
     else {
-      close(run.endedAt, "stopped", loop.parked?.kind === "ended" ? loop.parked.reason : null);
+      close(run.endedAt, "stopped", loop.hold?.kind === "ended" ? loop.hold.reason : null);
     }
   } else if (last.outcome !== "parked") {
     last.outcome =

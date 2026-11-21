@@ -55,6 +55,7 @@ const DEMO_PICTURE_ROUTES: readonly string[] = [
   "/api/qa/review-shots/",
   "/api/qa-report-assets/",
   "/api/attention-material-assets/",
+  "/api/plan-assets/",
   "/api/hud-screenshots/",
 ];
 

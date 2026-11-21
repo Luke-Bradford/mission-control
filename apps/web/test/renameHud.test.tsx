@@ -40,6 +40,8 @@ for (const display of ["lock box", "Telemetry lock row", "Decided without you"])
         ? new Response(JSON.stringify({ rows: [row], firstRunToday: null }))
         : answer(...args),
     );
+    if (display === "Telemetry lock row")
+      window.history.replaceState(null, "", "/telemetry?tab=machine&view=table");
     const { container } = render(
       display === "lock box" ? (
         <LockBox />

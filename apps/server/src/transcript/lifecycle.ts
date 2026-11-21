@@ -56,7 +56,7 @@ export async function maintainTranscripts(i: {
       if (!st.isFile()) continue;
       if (
         run.endedAt === null ||
-        run.loop?.aside != null ||
+        run.loop?.hold?.worktree != null ||
         active.has(id) ||
         keeperAlive(crewKeeperDirPath(i.store.path, id))
       ) {

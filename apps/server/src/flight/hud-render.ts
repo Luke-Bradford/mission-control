@@ -8,9 +8,7 @@ import {
   HUD_PAGE_PATHS,
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
-  QA_DISCLOSURE_LABEL,
-  QA_TAB_LABELS,
-  QA_VIEW_LABEL,
+  OPERATOR_HEADER,
 } from "@mc/core";
 import { type HudProxy, startHudProxy } from "./hud-proxy.ts";
 
@@ -26,9 +24,6 @@ const HUD_SEGMENTS = [
 const HUD_PATH = new RegExp(`^/(?:$|(?:${HUD_SEGMENTS.join("|")})(?:/|$))`);
 const HUD_STREAM_PATH = "/api/stream";
 // Waits use selectors, never page-evaluated strings: the hub's CSP (script-src 'self') forbids eval.
-// The labels are the page's own (mc/core): a rename there reaches this capture and its tests.
-const HUD_QA_VIEW = `[aria-label="${QA_VIEW_LABEL}"]`;
-const HUD_QA_DISCLOSURE = `button:text-is("${QA_DISCLOSURE_LABEL}")`;
 const HUD_DEMO_MARKER = `[aria-label="${DEMO_MARKER_LABEL}"]`;
 const HUD_READY = "html[data-hud-ready='1']";
 /**
@@ -85,8 +80,8 @@ export function hudRenderRequest(hubOrigin: string): HudRenderGuard {
 }
 
 interface BrowserRoute {
-  request(): { method(): string; url(): string };
-  continue(): Promise<void>;
+  request(): { method(): string; url(): string; headers(): Record<string, string> };
+  continue(options?: { headers: Record<string, string> }): Promise<void>;
   abort(): Promise<void>;
 }
 
@@ -176,6 +171,11 @@ export interface HudRenderOptions {
   viewport?: HudViewport;
   /** Turn the web app's Demo mode on before the page loads, and wait for its marker. */
   demo?: boolean;
+  /**
+   * The operator token of a throwaway hub the capture owns. The browser adds it to that hub's
+   * `/api/` reads, so token-guarded pages show their data; the page's own script never holds it.
+   */
+  operatorToken?: string;
 }
 
 const loadPlaywright = async (): Promise<HudPlaywright> =>
@@ -354,7 +354,15 @@ export async function renderHudWithPlaywright(
         await route.abort();
         return;
       }
-      await (guard(method, requestUrl) ? route.continue() : route.abort());
+      if (!guard(method, requestUrl)) {
+        await route.abort();
+        return;
+      }
+      if (options.operatorToken !== undefined && path.startsWith("/api/"))
+        await route.continue({
+          headers: { ...request.headers(), [OPERATOR_HEADER]: options.operatorToken },
+        });
+      else await route.continue();
     });
     ensureActive();
     await context.routeWebSocket("**/*", async (route) => {
@@ -370,11 +378,6 @@ export async function renderHudWithPlaywright(
     const network = watchNetwork(page);
     await page.goto(url, { waitUntil: "load", timeout: remaining() });
     ensureActive();
-    const click = async (selector: string): Promise<void> => {
-      waiting = `click ${selector}`;
-      await page.click(selector, { timeout: remaining() });
-      waiting = undefined;
-    };
     const wait = async (selector: string, state: "attached" | "detached"): Promise<void> => {
       waiting = `${selector} (${state})`;
       await page.waitForSelector(selector, { state, timeout: remaining() });
@@ -388,51 +391,11 @@ export async function renderHudWithPlaywright(
     // The simulator fills the page from its seed once Demo is on; the marker says it is running.
     if (options.demo) await wait(HUD_DEMO_MARKER, "attached");
     await wait(PAGE_LOADING, "detached");
-    // Evidence captures visit each Audit tab on both old and new commits. Only these fixed
-    // local view selectors may be clicked; requests still cross the GET-only boundary.
-    let tab = new URL(url).searchParams.get("evidence-tab");
-    let qaSelected = false;
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
-    // Older main commits kept QA inside Audit; photograph that equivalent baseline rather
-    // than the Overview redirect when the standalone route has not been built yet.
-    if (new URL(url).pathname === "/qa" && new URL(page.url()).pathname !== "/qa") {
-      await page.goto(guard.page("/audit"), { waitUntil: "load", timeout: remaining() });
-      await wait(HUD_READY, "attached");
-      await wait(PAGE_MAIN, "attached");
-      await wait(PAGE_LOADING, "detached");
-      tab = "readiness";
-    }
-    if (new URL(page.url()).pathname === "/audit" && (tab === "readiness" || tab === "hotspots")) {
-      const label = QA_TAB_LABELS[tab];
-      // Audit now leads with code health and keeps the QA views behind a disclosure; an older
-      // baseline shows them at once. Wait until the page shows one or the other (the page may
-      // still be drawing), then open the disclosure only when the view itself is absent.
-      await wait(`${HUD_QA_VIEW}, ${HUD_QA_DISCLOSURE}`, "attached");
-      if ((await page.locator(HUD_QA_VIEW).count()) === 0) {
-        await click(HUD_QA_DISCLOSURE);
-        await wait(HUD_QA_VIEW, "attached");
-      }
-      await click(`${HUD_QA_VIEW} button:text-is("${label}")`);
-      await wait(`${HUD_QA_VIEW} button[aria-pressed="true"]:text-is("${label}")`, "attached");
-      qaSelected = true;
-    }
     await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
     ensureActive();
     await wait(PAGE_LOADING, "detached");
     ensureActive();
-    if (qaSelected) {
-      // The QA view sits below Code Health and the shot is the viewport only. The control matched
-      // by HUD_QA_VIEW is a small toolbar group, so scroll the section that holds it (its toolbar
-      // and the tab's content) to the top of the viewport; an older baseline with no such section
-      // keeps the control itself in sight. The tab's data has settled, so the layout is final.
-      waiting = `scroll the section of ${HUD_QA_VIEW} to the top`;
-      const sections = page.locator(`section:has(${HUD_QA_VIEW})`);
-      const target = (await sections.count()) > 0 ? sections.last() : page.locator(HUD_QA_VIEW);
-      await target.evaluate((element) => element.scrollIntoView({ block: "start" }));
-      waiting = undefined;
-      await network.quiet(quietMs, () => expired || Date.now() - started >= deadlineMs);
-      ensureActive();
-    }
     try {
       guard.page(page.url());
     } catch {
@@ -470,6 +433,7 @@ export interface HudHelperJob {
   colorScheme?: HudColorScheme;
   viewport?: HudViewport;
   demo?: boolean;
+  operatorToken?: string;
 }
 
 export interface HudHelperOptions {
@@ -481,6 +445,7 @@ export interface HudHelperOptions {
   colorScheme?: HudColorScheme;
   viewport?: HudViewport;
   demo?: boolean;
+  operatorToken?: string;
   /** Extra time past the render deadline for the helper's own cleanup before it is killed. */
   graceMs?: number;
   /** How long the helper gets to close Chrome after SIGTERM before the group is killed. */
@@ -590,6 +555,7 @@ export function renderHudInHelper(
       ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
       ...(options.viewport === undefined ? {} : { viewport: options.viewport }),
       ...(options.demo === undefined ? {} : { demo: options.demo }),
+      ...(options.operatorToken === undefined ? {} : { operatorToken: options.operatorToken }),
     };
     child.send(job);
   });

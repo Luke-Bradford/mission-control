@@ -43,7 +43,10 @@ export function repoRulesView(input: {
     value,
     source: block?.[key] !== undefined ? "repo-file" : own(set(rawRules[key])),
   });
-  const filled = <T>(value: T, key: "needs" | "promote_backlog"): RepoRuleView<T> => ({
+  const filled = <T>(
+    value: T,
+    key: "needs" | "promote_backlog" | "plan_signoff",
+  ): RepoRuleView<T> => ({
     value,
     source: set(rawRules[key]) ? "set-here" : block?.[key] !== undefined ? "repo-file" : "default",
   });
@@ -77,6 +80,7 @@ export function repoRulesView(input: {
       needs: filled(effective.needs, "needs"),
       areas: replaced(effective.areas, "areas"),
       promote_backlog: filled(effective.promoteBacklog, "promote_backlog"),
+      plan_signoff: filled(effective.planSignoff ?? "never", "plan_signoff"),
       protected: plain(repo.protectedFiles ?? [], set(raw.protected)),
       hard_rules: hardRules,
       hard_rules_by: hardRulesBy,

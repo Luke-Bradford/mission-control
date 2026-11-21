@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type ControlSubtype, type SessionEvent, STDERR_TEXT_MAX } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { endKeeper } from "../src/runtime/keeper.ts";
+import {
+  endKeeper,
+  KEEPER_EXIT_FILE,
+  KEEPER_PID_FILE,
+  readPidFile,
+} from "../src/runtime/keeper.ts";
 import {
   type CrewSession,
   endsAtResult,
@@ -384,6 +389,29 @@ describe("startSession against the fake CLI", () => {
       await new Promise((r) => setTimeout(r, 5));
     }
     expect(await until(isExit)).toEqual({ kind: "exit", code: null, signal: "SIGKILL" });
+  });
+
+  it("a keeper that ends before the CLI's last words arrive still gives those words", async () => {
+    const { s, events, until } = start();
+    const keeperDir = join(dir, `k${keeperDirs}`);
+    s.send("hi");
+    await until(isResult);
+    // the keeper's exit file holds what the CLI said last; the keeper goes before the socket carries it
+    writeFileSync(
+      join(keeperDir, KEEPER_EXIT_FILE),
+      JSON.stringify({
+        code: 1,
+        signal: null,
+        at: Date.now(),
+        lastStderr: "invalid seat settings",
+        lastStderrAt: Date.now(),
+        endReason: null,
+      }),
+    );
+    process.kill(readPidFile(keeperDir, KEEPER_PID_FILE) as number, "SIGKILL");
+    expect(await until(isExit)).toEqual({ kind: "exit", code: 1, signal: null });
+    const said = events.filter((e) => e.kind === "stderr").map((e) => (e as { text: string }).text);
+    expect(said.at(-1)).toBe("invalid seat settings");
   });
 
   it("an exit is reported even while a grandchild holds the pipes open", async () => {

@@ -168,7 +168,7 @@ export function heldRun(
     !seat ||
     (repoId !== undefined && run.repoId !== repoId) ||
     store.seatSession(run.agentId)?.state === "stopped" ||
-    run.loop?.parked?.kind === "budget" ||
+    run.loop?.hold?.kind === "budget" ||
     store
       .openQuestions()
       .some(
@@ -237,7 +237,7 @@ export function protectedDecisionItem(
   )
     return true;
   if (item.kind !== "blocked" || commsOpen) return false;
-  const parked = run?.loop?.parked?.kind;
+  const parked = run?.loop?.hold?.kind;
   // A blocked row is an operator hold unless it can be proved to be an ordinary, non-parked
   // note. Missing source rows are deliberately treated as protected rather than defaulted.
   return note === undefined || note.runId === null || parked === "budget" || parked === "account";

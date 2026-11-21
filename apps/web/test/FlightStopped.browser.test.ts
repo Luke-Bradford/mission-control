@@ -15,12 +15,10 @@ const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
 const KEY = "decision:layout";
 const NOTICE = "FLIGHT is stopped. It reads this when it starts.";
-const discussionPath = `/api/attention/${encodeURIComponent(KEY)}/discussion`;
 
 /** Needs you with a FLIGHT question open and FLIGHT stopped. */
 function api() {
   const base = desktopFixture().api;
-  const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: [] };
   return {
     ...base,
     "/api/flight": {
@@ -51,8 +49,7 @@ function api() {
     ],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
-    [discussionPath]: discussion,
-    [`${discussionPath}?id=d1`]: discussion,
+    "/api/comms/flight": { messages: [] },
   };
 }
 
@@ -109,20 +106,26 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                   ...document.querySelectorAll<HTMLButtonElement>(".option-pick"),
                 ].map((b) => b.disabled),
                 askDisabled: document.querySelector<HTMLInputElement>(
-                  "#needsDiscussionForm textarea, #needsDiscussionForm input",
+                  "#needsSide .flight-thread-form textarea, #needsSide .flight-thread-form input",
                 )?.disabled,
                 notice,
                 start: rect(start),
-                mainNotices: document.querySelectorAll("#needsMain .flight-stopped").length,
-                ask: rect(q("#needsDiscussionForm")),
-                stopped: rect(q("#needsDiscussionForm .flight-stopped")),
+                main: rect(q("#needsMain")),
+                mainNotices: [...document.querySelectorAll("#needsMain .flight-stopped")].map(
+                  (n) => ({
+                    row: rect(n),
+                    button: rect(n.querySelector("button")),
+                  }),
+                ),
+                ask: rect(q("#needsSide .flight-thread-form")),
+                stopped: rect(q("#needsSide .flight-thread-form .flight-stopped")),
                 input: rect(input),
                 width: innerWidth,
                 height: innerHeight,
               };
             }, undefined);
             // The answer column scrolls: each notice must be reachable by scrolling it into view.
-            for (let i = 0; i < state.mainNotices; i++) {
+            for (let i = 0; i < state.mainNotices.length; i++) {
               const notice = await page.evaluate((index) => {
                 const n = document.querySelectorAll("#needsMain .flight-stopped")[index];
                 n.scrollIntoView({ block: "nearest" });
@@ -184,7 +187,9 @@ describeRendered("Needs you with FLIGHT stopped", () => {
             );
             await page.evaluate(() => {
               (
-                document.querySelector("#needsDiscussionForm textarea") as HTMLTextAreaElement
+                document.querySelector(
+                  "#needsSide .flight-thread-form textarea",
+                ) as HTMLTextAreaElement
               ).focus();
             }, undefined);
             await page.press("Tab");

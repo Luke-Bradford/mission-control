@@ -11,6 +11,8 @@ import {
 const { renderAt } = browserSession();
 
 const TABS = ["crew", "cost", "throughput", "quality", "machine"] as const;
+// The Quality tab has no table panel, so its Table view is empty.
+const TABLE_TABS = TABS.filter((tab) => tab !== "quality");
 const THEMES = ["dark", "light"] as const;
 const SIZES = [
   [1280, 900],
@@ -146,7 +148,7 @@ describeRendered("Telemetry mockup in a browser", () => {
     "adds no page height when the Table view replaces the charts",
     async () => {
       for (const [width, height] of SIZES) {
-        for (const tab of TABS) {
+        for (const tab of TABLE_TABS) {
           const where = `${tab} ${width}x${height}`;
           const page = await renderAt({
             page: PAGE,
@@ -234,7 +236,7 @@ describeRendered("Telemetry mockup in a browser", () => {
     "holds the worst case: a long verdict, a 300-character title and 50 tickets",
     async () => {
       for (const [width, height] of SIZES) {
-        for (const tab of TABS) {
+        for (const tab of TABLE_TABS) {
           const where = `worst ${tab} ${width}x${height}`;
           const page = await renderAt({
             page: PAGE,

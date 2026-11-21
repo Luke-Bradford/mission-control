@@ -21,21 +21,22 @@ const MOCKUP = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="100
 const ASSETS = { [PICTURE]: { contentType: "image/svg+xml", body: MOCKUP } };
 
 const KEY = "decision:layout";
-const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 
 const LONG = Array.from(
   { length: 9 },
   (_, i) => `Line ${i + 1} of a longer reply that explains the trade-off in some detail.`,
 ).join("\n");
 
+/** The stored FLIGHT thread: the operator's messages sent from this question, and FLIGHT's replies. */
 function messages(n: number) {
   return Array.from({ length: n }, (_, i) => ({
-    id: `m${i}`,
-    itemKey: KEY,
-    correlationId: "d1",
-    role: i % 2 ? "operator" : "flight",
-    text: i % 5 === 0 ? LONG : `Message ${i + 1}: short and plain.`,
+    id: `comms:${i + 1}`,
     at: NOW - (n - i) * MIN,
+    from: i % 2 ? "CAPCOM" : "flight-1",
+    to: i % 2 ? "flight-1" : "CAPCOM",
+    text: i % 5 === 0 ? LONG : `Message ${i + 1}: short and plain.`,
+    operator: i % 2 === 1,
+    ...(i % 2 ? { itemKey: KEY } : {}),
   }));
 }
 
@@ -76,15 +77,13 @@ function api(n = 6, optionCount = 2, extraAsks = 0) {
     ),
   ];
   const base = desktopFixture().api;
-  const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: messages(n) };
   return {
     ...base,
     "/api/attention": asks,
     "/api/attention/answered": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
-    [discussionPath(KEY)]: discussion,
-    [`${discussionPath(KEY)}?id=d1`]: discussion,
+    "/api/comms/flight": { messages: messages(n) },
   };
 }
 
@@ -268,11 +267,11 @@ describeRendered("Needs you page", () => {
         });
         try {
           await ready(page);
-          await page.boxes("#needsMsgs .dmsg");
+          await page.boxes("#needsSide .flight-thread-message");
           const before = await page.box(".needs-band");
           for (const to of ["top", "bottom"] as const) {
             await page.evaluate((where) => {
-              const log = document.getElementById("needsMsgs") as HTMLElement;
+              const log = document.querySelector("#needsSide .flight-thread-log") as HTMLElement;
               log.scrollTop = where === "top" ? 0 : log.scrollHeight;
             }, to);
             expect(
@@ -281,18 +280,18 @@ describeRendered("Needs you page", () => {
             ).toEqual(before);
           }
           if (width >= 1920) {
-            const message = await page.box("#needsMsgs .dmsg");
+            const message = await page.box("#needsSide .flight-thread-message");
             expect(
               message.width,
               `${label}: messages are wide enough to read`,
             ).toBeGreaterThanOrEqual(400);
           }
           expect(
-            await page.reachable("#needsMsgs .dmsg:last-of-type"),
+            await page.reachable("#needsSide .flight-thread-message:last-of-type"),
             `${label}: last message`,
           ).toEqual([true]);
           expect(
-            await page.reachable("#needsDiscussionForm textarea"),
+            await page.reachable("#needsSide .flight-thread-form textarea"),
             `${label}: composer`,
           ).toEqual([true]);
           expect(before.height, `${label}: the band stays within its limit`).toBeLessThanOrEqual(
@@ -331,7 +330,7 @@ describeRendered("Needs you page", () => {
             last.y + last.height,
             `${label}: the last option is inside the side column`,
           ).toBeLessThanOrEqual(side.y + side.height);
-          const log = await page.box("#needsMsgs");
+          const log = await page.box("#needsSide .flight-thread-log");
           expect(
             log.height,
             `${label}: the conversation log is tall enough`,
@@ -361,12 +360,12 @@ describeRendered("Needs you page", () => {
         });
         try {
           await ready(page);
-          const composer = await page.box("#needsDiscussionForm");
-          const area = await page.box("#needsDiscussionForm textarea");
+          const composer = await page.box("#needsSide .flight-thread-form");
+          const area = await page.box("#needsSide .flight-thread-form textarea");
           expect(
             area.width / composer.width,
-            `${label}: the conversation textarea fills its row`,
-          ).toBeGreaterThanOrEqual(0.9);
+            `${label}: the conversation textarea takes the row beside Send`,
+          ).toBeGreaterThanOrEqual(0.7);
           const answer = await page.boxes(".needs-answer .composer textarea");
           expect(answer.length, `${label}: the answer composer is there`).toBeGreaterThan(0);
           if (SHOTS) {
@@ -409,13 +408,14 @@ describeRendered("Needs you page", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it(
-    "every nav tab is fully visible at 1280 with a two-digit Needs you count",
-    async () => {
+  it.each(["light", "dark"] as const)(
+    "every nav tab is fully visible and separate at 1280 with a two-digit Needs you count, %s",
+    async (colorScheme) => {
       const page = await renderAt({
         page: "test/needsBrowser.html",
         width: 1280,
         height: 900,
+        colorScheme,
         api: api(6, 2, 34),
         assets: ASSETS,
       });
@@ -435,14 +435,45 @@ describeRendered("Needs you page", () => {
             outside: [...tabs.querySelectorAll("a")]
               .filter((a) => {
                 const r = a.getBoundingClientRect();
-                return r.right > box.right + 1 || (status && r.right > status.left + 1);
+                const sharesRow =
+                  !!status && r.bottom > status.top + 1 && r.top < status.bottom - 1;
+                return r.right > box.right + 1 || (sharesRow && r.right > (status?.left ?? 0) + 1);
               })
               .map((a) => a.textContent),
+            separation: [...tabs.querySelectorAll("a")].every((a, index, all) => {
+              if (index === 0) return a.getBoundingClientRect().height >= 24;
+              const previous = all[index - 1].getBoundingClientRect();
+              const current = a.getBoundingClientRect();
+              return current.height >= 24 && current.left - previous.right >= 2;
+            }),
           };
         }, undefined);
         expect(clipped.scrolls, "the tabs need no sideways scroll").toBe(false);
         expect(clipped.outside, "no tab sits under the status readout").toEqual([]);
-        if (SHOTS) await page.screenshot(join(SHOTS, "needs-1280x900-nav.png"));
+        expect(clipped.separation, "each page tab keeps a visible gap and target size").toBe(true);
+        const session = await page.evaluate(() => {
+          const select = document.querySelector<HTMLSelectElement>("#sess");
+          return {
+            label: select?.selectedOptions[0]?.textContent,
+            fits: !!select && select.scrollWidth <= select.clientWidth + 1,
+            painted:
+              !!select &&
+              (() => {
+                const style = getComputedStyle(select);
+                const canvas = document.createElement("canvas");
+                const context = canvas.getContext("2d");
+                if (!context) return false;
+                context.font = `${style.fontSize} ${style.fontFamily}`;
+                return select.clientWidth >= context.measureText("All sessions").width + 32;
+              })(),
+            height: select?.getBoundingClientRect().height ?? 0,
+          };
+        }, undefined);
+        expect(session.label).toBe("All sessions");
+        expect(session.fits, "the session label is clipped").toBe(true);
+        expect(session.painted, "the complete session label has room to paint").toBe(true);
+        expect(session.height, "the session picker is a usable control").toBeGreaterThanOrEqual(24);
+        if (SHOTS) await page.screenshot(join(SHOTS, `needs-1280x900-nav-${colorScheme}.png`));
       } finally {
         await page.close();
       }
@@ -451,39 +482,191 @@ describeRendered("Needs you page", () => {
   );
 
   it(
-    "captures the design views",
+    "send, reply, pick and the question leaving the list work on the page and in the fly-out at the evidence sizes, light and dark",
     async () => {
+      const ASKED = "Why this layout?";
+      const REPLY = "It keeps every ask one click away.";
+      const PICKED = "List and open item";
+      const choosePath = `/api/attention/${encodeURIComponent(KEY)}/choose`;
+      /** The hub for one walk: it stores what the page sends, and FLIGHT's reply is the fixture's. */
+      const hub = () => {
+        const base = api(2);
+        const [first, ...others] = base["/api/attention"];
+        if (!first?.brief) throw new Error("the fixture's first ask has a brief");
+        // FLIGHT's brief to the operator: its options go through the choose route
+        const open = { ...first, brief: { ...first.brief, for: "operator" as const } };
+        const earlier = base["/api/comms/flight"].messages;
+        let sent = false;
+        let chosen = false;
+        const said = (id: number, operator: boolean, more: object) => ({
+          id: `comms:${id}`,
+          at: NOW,
+          from: operator ? "CAPCOM" : "flight-1",
+          to: operator ? "flight-1" : "CAPCOM",
+          text: "",
+          operator,
+          ...more,
+        });
+        return {
+          ...base,
+          "/api/attention": () => (chosen ? others : [open, ...others]),
+          "/api/comms/flight": () => ({
+            messages: [
+              ...earlier,
+              ...(sent
+                ? [
+                    said(901, true, { text: ASKED, itemKey: KEY }),
+                    said(902, false, { text: REPLY }),
+                  ]
+                : []),
+              ...(chosen ? [said(903, true, { itemKey: KEY, choice: { label: PICKED } })] : []),
+            ],
+          }),
+          "/api/comms": (method: string) => {
+            if (method === "POST") sent = true;
+            return { ok: true };
+          },
+          [choosePath]: (method: string) => {
+            if (method === "POST") chosen = true;
+            return {
+              key: KEY,
+              optionId: "list",
+              label: PICKED,
+              to: "flight-1",
+              target: "flight",
+              chosenAt: NOW,
+              deliveredAt: null,
+              alreadyChosen: false,
+            };
+          },
+        };
+      };
+      /** Waits for `count` messages of the thread under `scope` to hold `words`; answers how many do. */
+      const inThread = (page: RenderedPage, scope: string, words: string, count = 1) =>
+        page.evaluate(
+          ([css, text, n]) =>
+            new Promise<number>((resolve) => {
+              const started = performance.now();
+              const look = () => {
+                const found = [
+                  ...document.querySelectorAll(`${css} .flight-thread-message`),
+                ].filter((m) => m.textContent?.includes(text)).length;
+                if (found === n || performance.now() - started > 5000) resolve(found);
+                else setTimeout(look, 50);
+              };
+              look();
+            }),
+          [scope, words, count] as const,
+        );
+      /** Waits for the Needs you tab to count `n` waiting questions; answers what it shows. */
+      const waiting = (page: RenderedPage, n: string) =>
+        page.evaluate(
+          (want) =>
+            new Promise<string>((resolve) => {
+              const started = performance.now();
+              const look = () => {
+                const shown = document.querySelector(".tabs a.needs-tab b")?.textContent ?? "";
+                if (shown === want || performance.now() - started > 5000) resolve(shown);
+                else setTimeout(look, 50);
+              };
+              look();
+            }),
+          n,
+        );
+      const posts = (page: RenderedPage, path: string) =>
+        page.requests().filter((r) => r.method === "POST" && r.path === path).length;
+      const SURFACES = [
+        // the Needs you page (it opens its first question), and the fly-out for the same item over
+        // Overview
+        { name: "page", path: "/needs-you", scope: "#needsSide", opts: "#needsOpts" },
+        { name: "flyout", path: `/?item=${KEY}`, scope: "#discuss", opts: "#dsOpts" },
+      ] as const;
       for (const scheme of ["light", "dark"] as const) {
         for (const [width, height] of [
-          [2560, 1200],
+          [1280, 900],
+          [1600, 1000],
           [1920, 940],
+          [2560, 1200],
         ] as const) {
-          const page = await renderAt({
-            page: "test/needsBrowser.html",
-            width,
-            height,
-            colorScheme: scheme,
-            api: api(),
-            assets: ASSETS,
-          });
-          try {
-            await ready(page);
-            await pictureLoaded(page);
-            // populated: the question, the picture, the options and the conversation are all there
-            await page.boxes(".needs-band-title");
-            await page.boxes("#needsMsgs .dmsg");
-            await page.boxes(".needs-row");
-            if (SHOTS) {
+          for (const surface of SURFACES) {
+            const page = await renderAt({
+              page: "test/needsBrowser.html",
+              search: `?path=${encodeURIComponent(surface.path)}`,
+              width,
+              height,
+              colorScheme: scheme,
+              api: hub(),
+              assets: ASSETS,
+            });
+            const at = `${surface.name} ${width}x${height} ${scheme}`;
+            const shot = async (step: string, onThread = true) => {
+              if (!SHOTS) return;
               mkdirSync(SHOTS, { recursive: true });
-              await page.screenshot(join(SHOTS, `needs-${width}x${height}-${scheme}.png`));
+              // after a send or a pick, bring the thread's newest message and its box into the picture
+              if (onThread)
+                await page.evaluate((css) => {
+                  document
+                    .querySelector(`${css} .flight-thread-form`)
+                    ?.scrollIntoView({ block: "end" });
+                }, surface.scope);
+              await page.screenshot(
+                join(SHOTS, `needs-${surface.name}-${width}x${height}-${scheme}-${step}.png`),
+              );
+            };
+            try {
+              if (surface.name === "page") {
+                await ready(page);
+                await pictureLoaded(page);
+              }
+              await page.boxes(`${surface.scope} .flight-thread-message`);
+              await page.boxes(`${surface.opts} button`);
+              expect(await waiting(page, "3"), at).toBe("3");
+              const heading = await page.evaluate(
+                (css) => document.querySelector(`${css} .flight-thread-about`)?.textContent ?? "",
+                surface.scope,
+              );
+              expect(heading, at).toBe(
+                "About: Which layout should the Needs you page use: a list and the open item, or one long column?",
+              );
+              await shot("1-open", false);
+
+              // send beside the question, as the operator does: click the box, type, press Enter
+              await page.click(`${surface.scope} .flight-thread-input`);
+              for (const key of ASKED) await page.press(key === " " ? "Space" : key);
+              await page.press("Enter");
+              expect(await inThread(page, surface.scope, ASKED), at).toBe(1);
+              expect(await inThread(page, surface.scope, REPLY), at).toBe(1);
+              expect(posts(page, "/api/comms"), at).toBe(1);
+              await shot("2-reply");
+
+              // pick an option: one receipt in the thread, and the question leaves the list (the
+              // page moves on to the next question, whose thread is the same stored conversation)
+              await page.click(`${surface.opts} button`);
+              expect(await inThread(page, surface.scope, `You chose: ${PICKED}`), at).toBe(1);
+              expect(await inThread(page, surface.scope, "You chose"), at).toBe(1);
+              expect(posts(page, choosePath), at).toBe(1);
+              expect(await waiting(page, "2"), at).toBe("2");
+              if (surface.name === "page") {
+                const list = await page.evaluate(
+                  () => document.querySelector(".needs-list")?.textContent ?? "",
+                  undefined,
+                );
+                expect(list, at).not.toContain("Which layout should the Needs you page use");
+                expect(list, at).toContain("Second ask");
+              }
+              // the send and the reply are still there, once each, beside the receipt
+              expect(await inThread(page, surface.scope, ASKED), at).toBe(1);
+              expect(await inThread(page, surface.scope, REPLY), at).toBe(1);
+              expect(page.errors(), at).toEqual([]);
+              await shot("3-picked");
+            } finally {
+              await page.close();
             }
-          } finally {
-            await page.close();
           }
         }
       }
     },
-    BROWSER_TEST_TIMEOUT_MS,
+    BROWSER_TEST_TIMEOUT_MS * 2,
   );
   it(
     "clicking an option on a briefed protected item from an unwatched repo records the answer",
@@ -549,17 +732,37 @@ describeRendered("Needs you page", () => {
         text: "Decision recorded. No external action was performed.",
         actor: { operator: true },
       };
+      const other = item({
+        key: "question:other",
+        kind: "question",
+        escalationId: null,
+        text: "Another ask still waiting",
+      });
+      let chosen = false;
+      const choiceMessage = {
+        id: "comms:900",
+        at: NOW,
+        from: "CAPCOM",
+        to: "flight-1",
+        text: "",
+        operator: true,
+        itemKey: key,
+        choice: { label: "Not now, clear it" },
+      };
       const page = await renderAt({
         page: "test/needsBrowser.html",
         width: 1600,
         height: 1000,
         api: {
           ...api(),
-          "/api/attention": [protectedAsk],
-          [discussionPath(key)]: { id: "d2", itemKey: key, version: "v1", messages: [] },
-          [`${discussionPath(key)}?id=d2`]: { id: "d2", itemKey: key, version: "v1", messages: [] },
-          // the harness answers by path, so the receipt route's GET and the choice POST share it
-          [choicePath]: receipt,
+          // the question is listed until the choice is posted, then the refetch leaves it out
+          "/api/attention": () => (chosen ? [other] : [protectedAsk, other]),
+          "/api/comms/flight": () => ({ messages: chosen ? [choiceMessage] : [] }),
+          // the receipt route's GET and the choice POST share the path
+          [choicePath]: (method: string) => {
+            if (method === "POST") chosen = true;
+            return receipt;
+          },
         },
       });
       try {
@@ -585,19 +788,48 @@ describeRendered("Needs you page", () => {
           await page.screenshot(join(SHOTS, "needs-protected-before-1600x1000.png"));
         }
         await page.click("#needsOpts button");
-        await page.boxes("[data-testid=choice-line]");
-        expect(
-          await page.evaluate(
-            () => document.querySelector("#needsOpts")?.textContent ?? "",
-            undefined,
-          ),
-        ).toContain("Decision recorded. No external action was performed.");
+        // The options block unmounts once the question leaves the list, so its receipt line
+        // and disabled options are checked in the ItemPanel test; here the POST and the list prove it.
         expect(
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
-        expect((await buttons()).filter((b) => b.text !== "Discuss").every((b) => b.disabled)).toBe(
-          true,
-        );
+        // the answered question leaves "Waiting on you" (and its count); the thread shows the pick once
+        const listText = () =>
+          page.evaluate(
+            () =>
+              new Promise<string>((resolve) => {
+                const started = Date.now();
+                const look = () => {
+                  const text = document.querySelector(".needs-list")?.textContent ?? "";
+                  if (
+                    !text.includes("Should the old studio switch-over stay open?") ||
+                    Date.now() - started > 5000
+                  )
+                    resolve(text);
+                  else setTimeout(look, 50);
+                };
+                look();
+              }),
+            undefined,
+          );
+        const after = await listText();
+        expect(after).not.toContain("Should the old studio switch-over stay open?");
+        expect(after).toContain("Waiting on you · 1");
+        expect(
+          await page.evaluate(
+            () => document.querySelector(".needs-list")?.textContent ?? "",
+            undefined,
+          ),
+        ).toContain("Another ask still waiting");
+        expect(
+          await page.evaluate(
+            () =>
+              [...document.querySelectorAll("#needsSide .flight-thread-message")].filter((m) =>
+                m.textContent?.includes("You chose: Not now, clear it"),
+              ).length,
+            undefined,
+          ),
+        ).toBe(1);
         if (SHOTS) await page.screenshot(join(SHOTS, "needs-protected-after-1600x1000.png"));
       } finally {
         await page.close();

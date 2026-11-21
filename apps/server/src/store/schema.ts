@@ -11,11 +11,6 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, started_at);
 -- Kept apart from runs so run queries stay small; written on its own change check.
 CREATE TABLE IF NOT EXISTS run_digests (run_id TEXT PRIMARY KEY, digest TEXT NOT NULL);
--- Map snapshot parts that never change for their key (a commit's tree and imports, a merge's files).
-CREATE TABLE IF NOT EXISTS map_cache (
-  kind TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
-  PRIMARY KEY (kind, scope, key)
-);
 -- HUD state changes that matter (#26 B14): into or out of a notable state.
 CREATE TABLE IF NOT EXISTS agent_events (
   agent_id TEXT NOT NULL, at INTEGER NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL,
@@ -55,26 +50,6 @@ CREATE TABLE IF NOT EXISTS pr_files (
   repo_id TEXT NOT NULL, pr_number INTEGER NOT NULL, path TEXT NOT NULL, change_type TEXT NOT NULL,
   PRIMARY KEY (repo_id, pr_number, path)
 );
--- A bug filed after a PR merged that names it, a commit of it or a file only it changed. Kept
--- after the card leaves the board; seat and model are the PR branch's author run.
-CREATE TABLE IF NOT EXISTS escaped_defects (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, pr_number INTEGER NOT NULL,
-  via TEXT NOT NULL, filed_at INTEGER NOT NULL, merged_at INTEGER NOT NULL, seat TEXT, model TEXT,
-  PRIMARY KEY (repo_id, issue_number, pr_number)
-);
-CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
--- A closed bug traced to the commit and PR that introduced it, and why it was missed; one row per bug.
-CREATE TABLE IF NOT EXISTS bug_escapes (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, filed_at INTEGER NOT NULL,
-  fix_pr INTEGER NOT NULL, commit_sha TEXT NOT NULL, introduced_pr INTEGER,
-  merged_at INTEGER NOT NULL, missed TEXT NOT NULL, PRIMARY KEY (repo_id, issue_number)
-);
--- When a bug's trace was last tried and failed, so a pass moves on to the bugs tried least recently.
-CREATE TABLE IF NOT EXISTS bug_escape_tries (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, tried_at INTEGER NOT NULL,
-  PRIMARY KEY (repo_id, issue_number)
-);
-CREATE INDEX IF NOT EXISTS bug_escapes_filed ON bug_escapes(filed_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)
@@ -88,33 +63,15 @@ CREATE TABLE IF NOT EXISTS prompt_sections (
   PRIMARY KEY (run_id, wake, section)
 );
 CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
-CREATE TABLE IF NOT EXISTS run_token_audit (
-  run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
-  median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
-  output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
-  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL,
-  timestamps_checked INTEGER NOT NULL DEFAULT 0
-);
 -- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
 CREATE TABLE IF NOT EXISTS mcp_tool_calls (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, run_id TEXT NOT NULL,
   tool TEXT NOT NULL, written INTEGER NOT NULL, returned INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
-CREATE TABLE IF NOT EXISTS run_token_calls (
-  run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
-  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL, at INTEGER,
-  PRIMARY KEY (run_id, idx)
-);
-CREATE TABLE IF NOT EXISTS controller_messages (
-  message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL,
-  cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, output INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS controller_messages_at ON controller_messages(at);
-CREATE TABLE IF NOT EXISTS controller_files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
-  done_at INTEGER, PRIMARY KEY (repo_id, number)
+  done_at INTEGER, title TEXT, PRIMARY KEY (repo_id, number)
 );
 CREATE TABLE IF NOT EXISTS flow_column_moves (
   id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, number INTEGER NOT NULL,
@@ -235,23 +192,12 @@ CREATE TABLE IF NOT EXISTS loop_events (
   key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
-CREATE TABLE IF NOT EXISTS run_handoffs (
-  run_id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, ticket TEXT NOT NULL, at INTEGER NOT NULL,
-  record TEXT NOT NULL, accepted_by TEXT, accepted_run_id TEXT, claim_token TEXT
-);
-CREATE INDEX IF NOT EXISTS run_handoffs_ticket ON run_handoffs(repo_id, ticket, at DESC);
-CREATE INDEX IF NOT EXISTS run_handoffs_received ON run_handoffs(accepted_run_id);
 -- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
 CREATE TABLE IF NOT EXISTS comms (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
   to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
--- Each exact repeat of a stored message that was turned away, for the count in Audit.
-CREATE TABLE IF NOT EXISTS comms_repeats (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
-  to_id TEXT NOT NULL, message_id INTEGER NOT NULL
-);
 CREATE INDEX IF NOT EXISTS comms_from_id ON comms(from_id, id);
 CREATE INDEX IF NOT EXISTS comms_to_id ON comms(to_id, id);
 CREATE TABLE IF NOT EXISTS comms_reads (
@@ -306,19 +252,11 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
--- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
-CREATE TABLE IF NOT EXISTS run_reads (
-  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
-  compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, agent_id, path)
-);
-CREATE TABLE IF NOT EXISTS run_rereads (
-  run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
-);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
-  branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, UNIQUE (run_id, sha)
+  branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, followed INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (run_id, sha)
 );
 CREATE TABLE IF NOT EXISTS commit_lines (
   sha TEXT PRIMARY KEY, additions INTEGER, deletions INTEGER
@@ -335,11 +273,6 @@ CREATE INDEX IF NOT EXISTS run_attempts_run ON run_attempts(run_id, id);
 -- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
 -- it to be the branch's tip.
 CREATE TABLE IF NOT EXISTS run_pushes (run_id TEXT PRIMARY KEY, sha TEXT NOT NULL, at INTEGER NOT NULL);
--- Paths a refused commit had outside the seat's area (Needs you). key: strayKey(session, path).
-CREATE TABLE IF NOT EXISTS strays (
-  key TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, agent_id TEXT NOT NULL,
-  kind TEXT NOT NULL, at INTEGER NOT NULL
-);
 -- A seat's ask_flight questions; answered_at is set by a message to the seat, or the run's end.
 CREATE TABLE IF NOT EXISTS seat_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
@@ -352,11 +285,6 @@ CREATE TABLE IF NOT EXISTS question_closures (
   at INTEGER NOT NULL, PRIMARY KEY (key, ask_at)
 );
 CREATE INDEX IF NOT EXISTS question_closures_at ON question_closures(at);
--- Failures of the mc tools that the operator is told of (Needs you, until acked).
-CREATE TABLE IF NOT EXISTS crew_errors (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT, text TEXT NOT NULL,
-  at INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0
-);
 -- What the FLIGHT seat decided, with its basis ("Decided without you").
 CREATE TABLE IF NOT EXISTS flight_decisions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, seat_id TEXT,
@@ -367,7 +295,7 @@ CREATE INDEX IF NOT EXISTS flight_decisions_at ON flight_decisions(at);
 -- The test lock's held calls (one row per tool call of the holding run), so a restart restores them.
 CREATE TABLE IF NOT EXISTS test_lock_holds (
   run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
-  since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
+  since INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (run_id, tool_use_id)
 );
 -- One row per hold, retained for QA_RETENTION_DAYS. outcome: pass or fail from the Post hook event.
 CREATE TABLE IF NOT EXISTS test_lock_runs (
@@ -402,13 +330,6 @@ CREATE TABLE IF NOT EXISTS profile_overrides (
   repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
   by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
 );
--- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
-CREATE TABLE IF NOT EXISTS holds (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
-  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0,
-  told_state TEXT
-);
-CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
 -- FLIGHT's living brief: one row per crew session and section.
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
@@ -453,22 +374,16 @@ CREATE TABLE IF NOT EXISTS notifications (
   updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
   first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
 );
--- Waste alarms: spend that bought no progress, one per check and subject while it stands. Open until
--- the cause ends (closed_at) or FLIGHT or the operator resolves the hold with a basis (resolved_at).
-CREATE TABLE IF NOT EXISTS waste_alarms (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, check_id TEXT NOT NULL, subject TEXT NOT NULL, repo_id TEXT,
-  ticket TEXT, seat_id TEXT, run_id TEXT, level INTEGER NOT NULL, evidence TEXT NOT NULL,
-  opened_at INTEGER NOT NULL, closed_at INTEGER, resolved_at INTEGER, basis TEXT
-);
-CREATE INDEX IF NOT EXISTS waste_alarms_subject ON waste_alarms(check_id, subject, opened_at);
 -- Worktree paths a crew start is making (worktree add, then the install); one still here at the
 -- next start was left half-made, and is removed and made again.
 CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
--- Hub-owned ticket waits do not change the GitHub Project Status field. They make the ticket
--- unowned while it waits, so a free seat can take other Ready work.
-CREATE TABLE IF NOT EXISTS ticket_waits (
-  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, reason TEXT NOT NULL, frees_when TEXT NOT NULL,
-  at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
+-- A ticket's plan and the operator's sign-off: one row per ticket. proposal is the text the planner
+-- also wrote under ## Plan; mockups is a JSON list of kept pictures; required holds the ticket.
+CREATE TABLE IF NOT EXISTS ticket_plans (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, state TEXT NOT NULL, required INTEGER NOT NULL,
+  asks TEXT, proposal TEXT, size_estimate TEXT, risks TEXT, mockups TEXT NOT NULL DEFAULT '[]',
+  note TEXT, requested_at INTEGER NOT NULL, planned_at INTEGER, decided_at INTEGER,
+  PRIMARY KEY (repo_id, issue)
 );
 CREATE TABLE IF NOT EXISTS attention_materials (
   id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL

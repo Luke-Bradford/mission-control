@@ -15,7 +15,6 @@ import type {
   ReportedTest,
   Run,
   SeatState,
-  StrayKind,
 } from "@mc/core";
 
 export const COMMS_RETENTION_DAYS = 90;
@@ -65,30 +64,6 @@ export interface FlightBriefRow {
   updatedBy: string;
 }
 
-/** A card FLIGHT holds in Backlog behind an open PR. */
-export interface Hold {
-  ref: string;
-  waitsOn: number;
-  basis: string;
-  at: number;
-  releasedAt: number | null;
-  /** The stored board has shown the card in Backlog since the hold; until then a Ready card is just stale. */
-  seen: boolean;
-  /** The PR state FLIGHT was last woken for on this hold, or null. */
-  toldState: string | null;
-}
-
-/** One path a refused commit had outside the seat's area. */
-export interface Stray {
-  key: string;
-  sessionId: string;
-  path: string;
-  /** The seat whose commit had it. */
-  agentId: AgentId;
-  kind: StrayKind;
-  at: number;
-}
-
 /** A seat's open `ask_flight` question. */
 export interface SeatQuestion {
   id: number;
@@ -105,15 +80,6 @@ export interface SeatQuestion {
   asideAt: number | null;
 }
 
-/** An mc tool failure the operator is told of. */
-export interface CrewError {
-  id: number;
-  agentId: AgentId;
-  runId: string | null;
-  text: string;
-  at: number;
-}
-
 /** The seat states that still hold a run: the supervisor reattaches these after a restart. */
 export const ACTIVE_SEAT_STATES: readonly SeatState[] = ["idle", "starting", "running", "parked"];
 
@@ -126,6 +92,8 @@ export interface LockHoldRow {
   seatId: string;
   command: string;
   since: number;
+  /** Kept until the run ends, whatever its calls report (a suite left running in the background). */
+  pinned?: boolean;
 }
 
 /** What the hub has acted on of a run's keeper: the lines of keeper `spawn` below `line`. */

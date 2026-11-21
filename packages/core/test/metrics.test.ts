@@ -102,7 +102,12 @@ describe("metric registry", () => {
     }
     expect(isAgentBlocked(row({ hudState: "waiting" }))).toBe(false);
     const openRun = { id: "r", seq: 1, startedAt: 0, endedAt: null } as MetricRow["run"];
-    const parkedLoop = { phase: "parked", text: "", prNumber: null, parked: "why" } as const;
+    const parkedLoop = {
+      phase: "parked",
+      text: "",
+      prNumber: null,
+      hold: { kind: "ci", reason: "why", offSeat: false },
+    } as const;
     const loopParked = row({ hudState: "idle", loop: parkedLoop, run: openRun });
     expect(isAgentBlocked(loopParked)).toBe(true);
     expect(isAgentLive(loopParked)).toBe(false);
@@ -112,7 +117,13 @@ describe("metric registry", () => {
     expect(isAgentLive(limited)).toBe(false);
     expect(
       isAgentBlocked(
-        row({ loop: { ...parkedLoop, parked: "Rate-limited until 14:00" }, run: openRun }),
+        row({
+          loop: {
+            ...parkedLoop,
+            hold: { kind: "rate-limit", reason: "Rate-limited until 14:00", offSeat: false },
+          },
+          run: openRun,
+        }),
       ),
     ).toBe(false);
   });

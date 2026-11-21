@@ -246,7 +246,8 @@ export interface QaFlowView {
   days: number;
   since: number;
   metrics: typeof QA_FLOW_METRICS;
-  escapedDefects: EscapedDefectView[];
+  /** Never filled now; the web page that read it goes in the web cut. */
+  escapedDefects?: EscapedDefectView[];
   reviewTimings: ReturnType<typeof reviewTimings> & {
     heads: (ReviewHeadTiming & { repoId: string; prNumber: number; sha: string })[];
   };

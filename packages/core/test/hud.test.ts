@@ -42,6 +42,7 @@ import {
   prSweepCollector,
   prYouAction,
   RETRY_NOTE,
+  RUNTIME_LIMITS,
   runPill,
   STALL_MS,
   STALL_TEXT,
@@ -598,9 +599,16 @@ describe("crewHudState", () => {
 describe("guard and test lock copy", () => {
   it("pins the exact text", () => {
     expect(GUARD_NONE_TEXT).toBe("Guard: nothing blocked this week.");
-    expect(GUARD_NOTE).toBe(
+    expect(GUARD_NOTE).toContain(
       "The guard catches agent mistakes and ordinary spellings, not deliberate evasion.",
     );
+    expect(RUNTIME_LIMITS).toHaveLength(3);
+    for (const limit of RUNTIME_LIMITS) expect(GUARD_NOTE).toContain(limit);
+    expect(GUARD_NOTE).toContain("may use the network");
+    expect(GUARD_NOTE).not.toContain("no network");
+    expect(GUARD_NOTE).toContain("a full suite run with & or nohup");
+    expect(GUARD_NOTE).toContain("FLIGHT runs with full access");
+    expect(GUARD_NOTE).toContain("separate from the refusal counts above");
     expect(guardSummary(1, 0)).toBe("Guard: 1 blocked command (for information)");
     expect(guardSummary(3, 2)).toBe("Guard: 3 blocked commands, 2 new (for information)");
     expect(LOCK_FREE_TEXT).toBe("No full-suite run in progress.");

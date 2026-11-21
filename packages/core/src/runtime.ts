@@ -52,13 +52,10 @@ export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
 
 /** The mc tools FLIGHT holds by grant; writers have a separate sync_main tool of their own. */
 export const FLIGHT_TOOLS: readonly McToolName[] = [
-  MC_TOOL_NAMES.codeHealth,
   MC_TOOL_NAMES.logDecision,
-  MC_TOOL_NAMES.waitOn,
   MC_TOOL_NAMES.readTicket,
   MC_TOOL_NAMES.answerQuestion,
   MC_TOOL_NAMES.startSeat,
-  MC_TOOL_NAMES.reassignTicket,
   MC_TOOL_NAMES.messageSeat,
   MC_TOOL_NAMES.instructSeat,
   MC_TOOL_NAMES.revokeInstruction,
@@ -66,6 +63,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.flightState,
   MC_TOOL_NAMES.screenshotHud,
   MC_TOOL_NAMES.promote,
+  MC_TOOL_NAMES.sendToPlanner,
   MC_TOOL_NAMES.endRun,
   MC_TOOL_NAMES.resumeSeat,
   MC_TOOL_NAMES.acceptRuling,
@@ -75,7 +73,6 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.rerunCi,
   MC_TOOL_NAMES.editCard,
   MC_TOOL_NAMES.dismissItem,
-  MC_TOOL_NAMES.resolveWasteAlarm,
   MC_TOOL_NAMES.syncMain,
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,
@@ -121,7 +118,6 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.prBody,
-      MC_TOOL_NAMES.publishPreview,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -216,7 +212,7 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     model: "opus",
     mode: "read-only",
     loop: "plan",
-    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket, MC_TOOL_NAMES.codeHealth],
+    tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
     here: hereOf("FAO"),
   },
 };
@@ -283,6 +279,9 @@ export function modeOfSeat(seat: { role: string; mode?: ConfigSeatMode; def?: Se
  * skills (docs/spikes/2026-10-29-seat-skills.md). Its job, keeping the operator's own commands out,
  * is done by `--restricted` (no user, project or local settings) and by `--plugin-dir`, whose folder
  * the hub builds from the repo commit with skills only: no hooks, bin or MCP config.
+ *
+ * FLIGHT's profile drops `--restricted` (it needs Bash and the whole filesystem) and keeps the
+ * operator's set-up out with `--setting-sources project,local` instead (`crewCliArgs`).
  */
 export const CREW_ISOLATION_FLAGS = ["--restricted", "--strict-mcp-config"] as const;
 
@@ -332,10 +331,10 @@ export const WRITER_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebSearch",
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.prBody,
-  MC_TOOLS.publishPreview,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -352,6 +351,7 @@ export const READONLY_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebSearch",
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -370,6 +370,7 @@ export const SCRATCH_TOOLS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebSearch",
   MC_TOOLS.callFlight,
   MC_TOOLS.reportFindings,
   MC_TOOLS.restoreFile,
@@ -398,8 +399,17 @@ export const WRITER_BUILTINS = [
   "TodoWrite",
   "Bash",
   "Skill",
+  "WebSearch",
 ] as const;
-export const READONLY_BUILTINS = ["Read", "Grep", "Glob", "TodoWrite", "Bash", "Skill"] as const;
+export const READONLY_BUILTINS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "TodoWrite",
+  "Bash",
+  "Skill",
+  "WebSearch",
+] as const;
 
 /** Where a repo keeps its skills; the hub builds a seat's plugin folder from this path at the run's commit. */
 export const SKILLS_DIR = ".claude/skills";
@@ -499,8 +509,8 @@ export const FLIGHT_FULL_BUILTINS = [
 ] as const;
 
 /**
- * No git writes, no GitHub writes and no network from a crew process: commits, pushes and PRs go
- * through the mc tools. `git add` and `git commit` could only fail in the sandbox now; denying
+ * No git writes and no GitHub writes from a crew process: commits, pushes and PRs go
+ * through the mc tools. Network is open through the sandbox: curl, wget and WebSearch work; WebFetch does not. `git add` and `git commit` could only fail in the sandbox now; denying
  * them by name says so before they run.
  */
 export const DENIED_TOOLS = [
@@ -514,14 +524,13 @@ export const DENIED_TOOLS = [
   "Bash(git diff --output*)",
   "Bash(git log --output*)",
   "Bash(git show --output*)",
-  "Bash(curl:*)",
-  "Bash(wget:*)",
   // typed calls only; code a seat writes and runs is kept off the login keychain file by the
   // sandbox's denyRead on Library/Keychains
   "Bash(security:*)",
   "Bash(/usr/bin/security:*)",
+  // runs outside the sandbox's proxy, so it could reach the hub on loopback; curl and wget go
+  // through the sandbox and cover a page fetch. WebSearch runs at Anthropic and stays allowed.
   "WebFetch",
-  "WebSearch",
   "Task",
 ] as const;
 
@@ -860,10 +869,9 @@ export const SEAT_SANDBOX_ENV = "MC_SEAT_SANDBOX";
  * Env every crew process gets:
  * - Bash returns to the worktree after each command, so a `cd` never moves the working directory
  *   the rules and `--restricted` resolve against (#41);
- * - no background Bash: otherwise a Bash timeout moves the command to the background and fires a
- *   successful PostToolUse while it keeps running, which would free the test lock early, and
- *   `run_in_background` returns at once (spike 2026-10-21). With it off, a timeout kills the
- *   command and `run_in_background` is refused before any hook;
+ * - background Bash is allowed (`run_in_background`, a timeout that moves a command to the
+ *   background). Such a call fires its PostToolUse at once, so the hub keeps the test lock of a
+ *   suite started that way until the seat's turn ends, and never counts it as a passed check;
  * - subprocess credential scrub: Claude removes recognized credentials from Bash, hooks and
  *   MCP subprocess environments; the parent CLI keeps authentication for its own API calls. It
  *   also forces the permission mode to `default`, so a seat's tools must be listed with
@@ -877,7 +885,6 @@ export const CREW_CLI_ENV = {
   [SEAT_SANDBOX_ENV]: "1",
   BASH_MAX_TIMEOUT_MS: String(CHECK_BASH_TIMEOUT_MS),
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
-  CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
   DISABLE_AUTOUPDATER: "1",
 } as const;
@@ -1062,20 +1069,13 @@ const POST_HOOK_MATCHER = "Bash";
 /**
  * The `hooks` block (spike 2026-10-21): the guard before every tool call
  * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
- * a call that holds the test lock releases it, and when the seat stops (Stop), which may carry it on.
+ * a call that holds the test lock releases it.
  */
 function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
   const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
-  // exit 2 from a Stop hook blocks the stop: a Stop that gets no verdict must let the stop stand
-  const stopCommand = hook.command.replace(/ \|\| exit 2$/, " || true");
   const out = {} as Record<GuardHookEvent, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) {
-    // a Stop has no tool to match: the CLI ignores a matcher there, so none is written
-    out[e] = [
-      e === "Stop"
-        ? { hooks: [{ ...run, command: stopCommand }] }
-        : { matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] },
-    ];
+    out[e] = [{ matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] }];
   }
   if (hook.trim !== undefined) {
     out.PostToolUse.push({
@@ -1149,9 +1149,22 @@ function sandboxReadAllows(i: CrewSandboxInput, denied: string[]): string[] {
 }
 
 /**
+ * What a seat's network may not reach: the hub and every other service on this Mac's loopback, and
+ * the link-local range (cloud metadata). The hub's own routes trust loopback callers more than the
+ * open internet, so opening the network does not open these.
+ */
+export const SEAT_DENIED_HOSTS = [
+  "localhost",
+  "127.0.0.0/8",
+  "::1",
+  "0.0.0.0",
+  "169.254.0.0/16",
+] as const;
+
+/**
  * The `--settings` JSON for a seat: the guard hook, and the sandbox around every Bash it runs. The
  * sandbox writes only inside the working directory (a writer's) and temp dirs, never the clone's
- * or the worktree's git dir; no network, and no escape hatch. `failIfUnavailable` stops the seat
+ * or the worktree's git dir; the network is open, and no escape hatch. `failIfUnavailable` stops the seat
  * rather than run unsandboxed.
  */
 export function crewSandboxSettings(
@@ -1183,7 +1196,8 @@ export function crewSandboxSettings(
       allowUnsandboxedCommands: false,
       // Defaults to true: every Bash not explicitly denied would be allowed, bypassing the allowlist.
       autoAllowBashIfSandboxed: false,
-      network: { allowedDomains: [] },
+      // a bare "*" matches every host: seats may reach the network
+      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
       filesystem: {
         // Nothing under a git dir. When the cwd is a linked worktree the CLI itself opens most of
         // the clone's git dir to sandboxed Bash; an explicit denyWrite on the whole
@@ -1357,9 +1371,23 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     i.sessionId,
   ];
   if (profile === "flight-full") {
-    // Keep the guard hooks and the controller's tools and filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
+    // Keep the guard hooks and the whole filesystem. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
     // (CREW_CLI_ENV, every Claude seat) makes the CLI force the permission mode back to `default`,
     // so bypassPermissions would be ignored and FLIGHT's hub tools refused: list them.
+    // Only the built-ins the role uses are defined to the model, and nothing of the operator's own
+    // Claude set-up is loaded (user settings and their installed plugins, with those plugins'
+    // skills, agents and hooks; user-level skills; the user CLAUDE.md), as for every other seat:
+    // all of it was re-read on every model call. The repo's own settings and CLAUDE.md and the
+    // hub's `--settings`, `--plugin-dir` and `--mcp-config` still apply. A name in the list the
+    // installed CLI does not have (TodoWrite, WebFetch on 2.1.322) defines nothing.
+    args.splice(
+      args.indexOf("--settings"),
+      0,
+      "--tools",
+      FLIGHT_FULL_BUILTINS.join(","),
+      "--setting-sources",
+      "project,local",
+    );
     args.splice(
       args.indexOf("--append-system-prompt-file"),
       0,
@@ -1425,7 +1453,14 @@ export type SessionEvent =
     }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
+  | {
+      kind: "exit";
+      code: number | null;
+      signal: string | null;
+      reason?: string;
+      /** The run did not end on its own (its keeper was lost, or a reattach could not confirm the CLI in time): the supervisor takes it back once instead of failing it. */
+      retake?: true;
+    }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
 

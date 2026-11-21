@@ -2,23 +2,13 @@ import {
   type ConfigView,
   type Crew,
   type CrewChanges,
-  FREE_SUITE_HINT,
   GITHUB_SLOWED_PREFIX,
-  GUARD_NOTE,
-  GUARD_RULES,
-  type GuardHitsView,
-  type GuardRule,
   type HealthRow,
   type LimitRow,
-  LOCK_FREE_TEXT,
-  LOCK_WAIT_MS,
-  type MapSnapshot,
-  mapSnapshotFixture,
   PREVIEW_SERVER,
   RETRY_NOTE,
   type RepoPreview,
-  ROLES,
-  type TestLockState,
+  type RepoRulesView,
   UP_TO_DATE_MAIN,
   UPDATE_UNAVAILABLE,
   type VersionInfo,
@@ -58,6 +48,36 @@ import {
   SESSION_CONFIG,
   seatRow,
 } from "./fixtures.ts";
+
+const repoRules = (planSignoff: "every" | "larger" | "never"): RepoRulesView =>
+  ({
+    base: "b".repeat(64),
+    rules: Object.fromEntries(
+      [
+        "pick_from",
+        "needs",
+        "areas",
+        "promote_backlog",
+        "plan_signoff",
+        "protected",
+        "hard_rules",
+        "hard_rules_by",
+        "commands.writer",
+        "commands.review",
+        "full_suite",
+        "required_checks",
+        "checks",
+        "uat.labels",
+        "uat.paths",
+        "always_ask",
+        "autonomy",
+        "flight_powers",
+      ].map((key) => [
+        key,
+        { value: key === "plan_signoff" ? planSignoff : "", source: "default" },
+      ]),
+    ),
+  }) as unknown as RepoRulesView;
 
 const CFG: ConfigView = {
   ...CONFIG,
@@ -139,7 +159,7 @@ describe("Setup tabs", () => {
     expect(SETUP_TABS).toHaveLength(7);
     fireEvent.click(within(tabs).getByRole("button", { name: "Accounts" }));
     expect(window.location.pathname).toBe("/setup/accounts");
-    fireEvent.click(within(tabs).getByRole("button", { name: "Roles" }));
+    fireEvent.click(within(tabs).getByRole("button", { name: "Roles & guards" }));
     expect(window.location.pathname).toBe("/setup/roles");
     fireEvent.click(within(tabs).getByRole("button", { name: "Sources" }));
     expect(window.location.pathname).toBe("/setup/sources");
@@ -604,108 +624,6 @@ describe("Setup tabs", () => {
     expect(screen.queryByRole("region", { name: "Auto-approve" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Refresh" })).toHaveLength(CFG.accounts.length);
-  });
-
-  const FREE: TestLockState = { holder: null, waiting: [] };
-  const NO_HITS: GuardHitsView = {
-    hits: [],
-    counts: Object.fromEntries(
-      Object.keys(GUARD_RULES).map((r) => [r, 0]),
-    ) as GuardHitsView["counts"],
-  };
-
-  it("Roles: the call signs", async () => {
-    load({ "/api/test-lock": FREE, "/api/guard/hits?days=7": NO_HITS });
-    at("roles");
-    const roles = within(await screen.findByRole("region", { name: "Roles" })).getByRole("table");
-    expect(within(roles).getAllByRole("row")).toHaveLength(ROLES.length + 1);
-    expect(roles.textContent).toContain("Flight Dynamics Officer");
-    expect(roles.textContent).toContain("backend developer, test-first in its area");
-  });
-
-  it("Roles: the long Here, Rule and Runs freely cells wrap and carry the full text as a title", async () => {
-    load({ "/api/test-lock": FREE, "/api/guard/hits?days=7": NO_HITS });
-    at("roles");
-    const roles = within(await screen.findByRole("region", { name: "Roles" })).getByRole("table");
-    const here = within(roles).getByText(ROLES[0]?.here as string);
-    expect(here.classList.contains("wrap")).toBe(true);
-    expect(here.getAttribute("title")).toBe(ROLES[0]?.here);
-    const guard = within(screen.getByRole("region", { name: "Guard" })).getByText(
-      GUARD_RULES[Object.keys(GUARD_RULES)[0] as GuardRule],
-    );
-    expect(guard.classList.contains("wrap")).toBe(true);
-    expect(guard.getAttribute("title")).toBe(guard.textContent);
-    const lock = await screen.findByRole("region", { name: "Test lock" });
-    const free = within(lock).getAllByText(FREE_SUITE_HINT)[0] as HTMLElement;
-    expect(free.classList.contains("wrap")).toBe(true);
-    expect(free.getAttribute("title")).toBe(FREE_SUITE_HINT);
-  });
-
-  it("Roles: the guard lists each rule with its hits this week, and the note", async () => {
-    load({
-      "/api/test-lock": FREE,
-      "/api/guard/hits?days=7": {
-        ...NO_HITS,
-        counts: { ...NO_HITS.counts, "git-write": 3, "full-suite": 2 },
-      },
-    });
-    at("roles");
-    const guard = await screen.findByRole("region", { name: "Guard" });
-    await waitFor(() => expect(guard.textContent).toContain("3"));
-    const rows = within(guard).getAllByRole("row");
-    expect(rows).toHaveLength(Object.keys(GUARD_RULES).length + 1);
-    expect(rows[0]?.textContent).toBe("RuleHits");
-    const byRule = (text: string) =>
-      rows.find((r) => r.textContent?.startsWith(text)) as HTMLElement;
-    expect(byRule(GUARD_RULES["git-write"]).textContent).toBe(`${GUARD_RULES["git-write"]}3`);
-    expect(byRule(GUARD_RULES["full-suite"]).textContent).toBe(`${GUARD_RULES["full-suite"]}2`);
-    expect(byRule(GUARD_RULES.network).textContent).toBe(`${GUARD_RULES.network}0`);
-    expect(within(guard).getByText(GUARD_NOTE)).toBeTruthy();
-  });
-
-  it("Roles: the test lock lists each repo profile's full-suite commands and what runs freely", async () => {
-    load({ "/api/test-lock": FREE, "/api/guard/hits?days=7": NO_HITS });
-    at("roles");
-    const lock = await screen.findByRole("region", { name: "Test lock" });
-    await within(lock).findByText(LOCK_FREE_TEXT);
-    const rows = within(lock).getAllByRole("row");
-    expect(rows[0]?.textContent).toBe("Repo profileFull suite (takes the lock)Runs freely");
-    const shopApp = rows.find((r) => r.textContent?.startsWith("shop-app")) as HTMLElement;
-    expect(shopApp.textContent).toBe(`shop-apppnpm test, pnpm -s test${FREE_SUITE_HINT}`);
-    const other = rows.find((r) => r.textContent?.startsWith("site-builder")) as HTMLElement;
-    expect(other.textContent).toBe(`site-builder—${FREE_SUITE_HINT}`);
-  });
-
-  it("Roles: the test lock names the holder and the seats waiting", async () => {
-    load({
-      "/api/test-lock": {
-        holder: { runId: "r-1", seatId: "guido-2", command: "pnpm test", since: NOW - 83_000 },
-        waiting: [
-          { runId: "r-2", seatId: "guido-3", command: "pnpm -s test", since: NOW - 12_000 },
-          { runId: "r-3", seatId: "network-1", command: "pnpm -s test", since: NOW - 4_000 },
-        ],
-      } satisfies TestLockState,
-      "/api/guard/hits?days=7": NO_HITS,
-    });
-    at("roles");
-    const lock = await screen.findByRole("region", { name: "Test lock" });
-    await within(lock).findByText("GUIDO-2 holds it: pnpm test · 1:23");
-    expect(within(lock).getByText("GUIDO-3 waiting · 0:12")).toBeTruthy();
-    expect(within(lock).getByText("NETWORK-1 waiting · 0:04")).toBeTruthy();
-    expect(lock.textContent).not.toContain(LOCK_FREE_TEXT);
-  });
-
-  it("Roles: explains the full-suite lock policy and single-file bypass", async () => {
-    load();
-    at("roles");
-    const lock = await screen.findByRole("region", { name: "Test lock" });
-    expect(lock.textContent).toContain(
-      "One full suite at a time across the machine; others wait in line, oldest first.",
-    );
-    expect(lock.textContent).toContain(
-      `A full-suite command an agent types is held in the same line and runs when it reaches the front; after about ${LOCK_WAIT_MS / MIN} minutes it is told to retry later or run a single file. Max at once: 1.`,
-    );
-    expect(lock.textContent).toContain("Single-file runs go straight through.");
   });
 
   it("Sources: GitHub connected, a note is not a failure, last poll per repo", async () => {
@@ -1427,6 +1345,8 @@ describe("Setup is read-only (except Repos, Sessions and Accounts)", () => {
       const body = document.querySelector(".sgrid") as HTMLElement;
       for (const el of body.querySelectorAll("input, select, textarea")) {
         if (tab === "loops" && el.id === "loop-run-picker") continue;
+        // the repo picker chooses which repo's rules to read; it changes nothing
+        if (tab === "roles" && el.closest(".rg-picker")) continue;
         expect((el as HTMLInputElement).disabled).toBe(true);
       }
       for (const b of body.querySelectorAll("button")) fireEvent.click(b);
@@ -1470,57 +1390,6 @@ function expandCard(card: HTMLElement): HTMLElement {
 }
 
 describe("Setup › Repos & seats cards", () => {
-  it("a crew repo card opens an Ownership table with area globs and hard-rule files", async () => {
-    const value: MapSnapshot = structuredClone(mapSnapshotFixture);
-    value.repoId = "shop-app";
-    value.tree = [
-      { path: "apps/web/a.ts", lines: 10 },
-      { path: "CLAUDE.md", lines: 4 },
-    ];
-    value.rules = { areas: { "area:web": ["apps/web/**"] }, hardRules: ["CLAUDE.md"] };
-    value.seats[0] = {
-      ...value.seats[0],
-      scope: { read: [], modified: [{ file: "CLAUDE.md", add: 2, rem: 0, source: "diff" }] },
-    };
-    load({
-      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
-      "/api/repos/shop-app/map": value,
-    });
-    at("repos");
-    const card = expandCard(await screen.findByLabelText("shop-app"));
-    const summary = within(card).getByText("Ownership · areas and hard-rule files");
-    // nothing is read until the section is opened
-    expect(fetchFn.mock.calls.some(([path]) => String(path).endsWith("/map"))).toBe(false);
-    const details = summary.closest("details") as HTMLDetailsElement;
-    details.open = true;
-    fireEvent(details, new Event("toggle"));
-    expect(await within(card).findByText("Hard-rule files changed · 1 of 1")).toBeTruthy();
-    expect(fetchFn.mock.calls.some(([path]) => path === "/api/repos/shop-app/map")).toBe(true);
-    expect(card.textContent).toContain("area:web");
-    expect(card.textContent).toContain("apps/web/**");
-    // an observed repo has no crew checkout to map
-    const observed = await screen.findByLabelText("site-builder");
-    expect(within(observed).queryByText("Ownership · areas and hard-rule files")).toBeNull();
-  });
-
-  it("says why Ownership cannot be shown when the map is unreadable", async () => {
-    load({
-      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
-      "/api/repos/shop-app/map": () => ({
-        status: 503,
-        body: { error: "map snapshot unavailable" },
-      }),
-    });
-    at("repos");
-    const card = expandCard(await screen.findByLabelText("shop-app"));
-    const details = within(card)
-      .getByText("Ownership · areas and hard-rule files")
-      .closest("details") as HTMLDetailsElement;
-    details.open = true;
-    fireEvent(details, new Event("toggle"));
-    expect(await within(card).findByText(/Could not read the map for shop-app/)).toBeTruthy();
-  });
-
   it("shows each repo as one collapsed row of name, kind, account and seats, and opens it on demand", async () => {
     load({ "/api/config": { ...CREW_CONFIG, loops: CFG.loops } });
     at("repos");
@@ -1572,6 +1441,79 @@ describe("Setup › Repos & seats cards", () => {
         defaultAccountId: "codex-main",
         guidance: { priority: ["P1"], labelMode: "any" },
       });
+    });
+  });
+
+  it("shows each repo's plan sign-off setting and saves a change to it", async () => {
+    const writes: string[] = [];
+    load({
+      "/api/repos/shop-app/rules": repoRules("every"),
+      "POST /api/repos/shop-app/setup": () => {
+        writes.push("setup");
+        return { status: 200, body: { backup: "c.bak" } };
+      },
+      "POST /api/repos/shop-app/rules": () => {
+        writes.push("rules");
+        return { status: 200, body: {} };
+      },
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    const select = (await within(card).findByLabelText("Plan sign-off")) as HTMLSelectElement;
+    expect(select.value).toBe("every");
+    expect([...select.options].map((o) => o.textContent)).toEqual([
+      "Every ticket",
+      "Larger work only",
+      "Never",
+    ]);
+    fireEvent.change(select, { target: { value: "never" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(
+        ([path, init]) => path === "/api/repos/shop-app/rules" && init?.method === "POST",
+      );
+      expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+        rules: { plan_signoff: "never" },
+      });
+      expect(writes).toEqual(["rules", "setup"]);
+    });
+  });
+
+  it("does not write plan rules when the setting is unchanged", async () => {
+    load({
+      "/api/repos/shop-app/rules": repoRules("every"),
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    await within(card).findByLabelText("Plan sign-off");
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() =>
+      expect(
+        fetchFn.mock.calls.some(
+          ([path, init]) => path === "/api/repos/shop-app/setup" && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
+    expect(
+      fetchFn.mock.calls.some(
+        ([path, init]) => path === "/api/repos/shop-app/rules" && init?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not save plan sign-off until the repo rules load", async () => {
+    load({
+      "POST /api/repos/shop-app/setup": () => ({ status: 200, body: { backup: "c.bak" } }),
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    expect(within(card).queryByLabelText("Plan sign-off")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Save guidance" }));
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([path]) => path === "/api/repos/shop-app/setup");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call?.[1]?.body))).not.toHaveProperty("planSignOff");
     });
   });
 

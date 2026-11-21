@@ -725,10 +725,6 @@ details.guard > summary {
   overflow: visible;
 }
 
-.item-conversation > summary {
-  margin: var(--sp-2) var(--sp-3);
-}
-
 .brief-section {
   min-width: 0;
 }
