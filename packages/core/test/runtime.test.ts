@@ -156,8 +156,6 @@ describe("crewCliArgs", () => {
 
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
-    // FLIGHT decides fix or park on a waste alarm; without this grant a review it holds never runs
-    expect(FLIGHT_TOOLS).toContain("resolve_waste_alarm");
     const argv = crewCliArgs({ ...base, mode: "read-only", mcTools: ["draft_reply"] });
     const allowed = argv.slice(
       argv.indexOf("--allowedTools") + 1,
@@ -403,7 +401,6 @@ describe("the allowlist in phase 2b", () => {
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
       moveReview: "mcp__mc__move_review",
-      resolveWasteAlarm: "mcp__mc__resolve_waste_alarm",
       operator: "mcp__mc__operator",
       ghWrite: "mcp__mc__gh_write",
       crewTidy: "mcp__mc__crew_tidy",
@@ -745,7 +742,6 @@ describe("crew constants", () => {
           "rerun_ci",
           "edit_card",
           "dismiss_item",
-          "resolve_waste_alarm",
           "sync_main",
           "create_ticket",
           "comment_ticket",
@@ -879,7 +875,6 @@ describe("mc tool grants", () => {
       "rerun_ci",
       "edit_card",
       "dismiss_item",
-      "resolve_waste_alarm",
       "sync_main",
       "create_ticket",
       "comment_ticket",

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,7 +37,6 @@ import { protectedDecisionItem } from "../src/attention/holds.ts";
 import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
 import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
-import { setReviewHold } from "../src/engine/review-hold.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
   agentViews,
@@ -1549,7 +1547,7 @@ describe("crew seats in the rows", () => {
       ],
       NOW,
     );
-    const id = store.requestReview({
+    store.requestReview({
       authorRunId: "external-pr:shop-app#12",
       repoId: "shop-app",
       seatId: "RETRO-1",
@@ -1563,8 +1561,6 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toBe(
       "Waiting for the reviewer to become available.",
     );
-    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #7.", prNumber: 7 });
-    expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toBe("Waiting for older PR #7.");
   });
 
   it("carries the CLI version, configured effort and active template dollar cap; a loop has neither", () => {
@@ -2177,68 +2173,6 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
   const items = (c: CcConfig, lock: TestLockState = NO_LOCK) =>
     attentionItems(c, store, NOW, lock).filter((i) => i.agentId?.startsWith("GUIDO"));
 
-  it("lists a stray outside every area, and one in another writer's area, by its key", () => {
-    const c = withCrew();
-    store.addStrays([
-      {
-        sessionId: "shop-app-1",
-        path: "docs/c.md",
-        agentId: "GUIDO-1",
-        kind: "outside",
-        at: NOW - 2 * MIN,
-      },
-      {
-        sessionId: "shop-app-1",
-        path: "web/b.ts",
-        agentId: "GUIDO-1",
-        kind: "other-area",
-        at: NOW - MIN,
-      },
-    ]);
-    const strays = store.strays();
-    expect(strays.map((s) => s.key)).toEqual(
-      ["docs/c.md", "web/b.ts"].map(
-        (p) =>
-          `stray:${createHash("sha256").update(`shop-app-1\0${p}`).digest("hex").slice(0, 16)}`,
-      ),
-    );
-    expect(items(c)).toEqual([
-      {
-        key: strays[0]?.key,
-        kind: "stray",
-        path: "docs/c.md",
-        sessionId: "shop-app-1",
-        agentId: "GUIDO-1",
-        repoId: "shop-app",
-        text: "docs/c.md changed in s/shop-app-1 outside every agent's area",
-        tool: null,
-        at: NOW - 2 * MIN,
-        url: null,
-        escalationId: null,
-        ticket: null,
-        owner: "operator",
-        acked: false,
-      },
-      expect.objectContaining({
-        key: strays[1]?.key,
-        kind: "stray",
-        text: "web/b.ts changed in s/shop-app-1 inside GUIDO-2's area",
-      }),
-    ]);
-    store.clearStrays("shop-app-1", ["docs/c.md"]);
-    expect(items(c).map((i) => i.text)).toEqual([
-      "web/b.ts changed in s/shop-app-1 inside GUIDO-2's area",
-    ]);
-  });
-
-  it("re-recording a stray moves it to the latest seat, keeping its first time so a read holds", () => {
-    store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-1", kind: "outside", at: 1 }]);
-    store.ack([store.strays()[0]?.key ?? ""], 1);
-    store.addStrays([{ sessionId: "s", path: "x", agentId: "GUIDO-2", kind: "outside", at: 2 }]);
-    expect(store.strays()).toMatchObject([{ path: "x", agentId: "GUIDO-2", at: 1 }]);
-    expect(attentionItems(config, store, NOW).find((i) => i.kind === "stray")?.acked).toBe(true);
-  });
-
   it("lists a seat's open question until it is answered", () => {
     const c = withCrew();
     const id = store.addQuestion({
@@ -2497,29 +2431,6 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(keys).toEqual([]);
     expect(keys).not.toContain(`ask:${other}`);
     expect(keys).not.toContain(`ask:${mine}`);
-  });
-
-  it("lists an unacked crew error as an error item", () => {
-    const c = withCrew();
-    const id = store.addCrewError({
-      agentId: "GUIDO-1",
-      runId: "c1",
-      text: "the clone failed an object check",
-      at: NOW - MIN,
-    });
-    expect(items(c)).toEqual([
-      expect.objectContaining({
-        key: `crew-error:${id}`,
-        kind: "error",
-        agentId: "GUIDO-1",
-        repoId: "shop-app",
-        text: "the clone failed an object check",
-        at: NOW - MIN,
-        acked: false,
-      }),
-    ]);
-    store.ackCrewError(id);
-    expect(items(c)).toEqual([]);
   });
 
   it("shows a seat waiting for the test lock as waiting, never stalled", () => {
@@ -4563,19 +4474,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     );
     raise("blocked:r-uat:0", "blocked", "r-uat");
     expect(isOperatorCall({ key: "note:blocked:r-uat:0", kind: "blocked" }, store)).toBe(true);
-    // an error a seat is stuck on stays raw too, so it still pings
-    store.addCrewError({
-      agentId: "guido-1",
-      runId: "r-guido",
-      text: "commit failed",
-      at: NOW - 30 * MIN,
-    });
-    const error = all().find((i) => i.kind === "error");
-    // unbriefed, an error fails the Needs you entry check: FLIGHT's, counted by the alert (#1543)
-    expect(error).toMatchObject({ owner: "flight", flightTriage: "missed" });
     // the controller-check and acceptance parks need FLIGHT's brief too: counted, not raw
     expect(aggregate()?.notTriaging?.keys).toEqual([
-      error?.key,
       "note:plain",
       "note:blocked:r-cc:0",
       "note:blocked:r-uat:0",
@@ -4585,7 +4485,6 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
     expect(all().find((i) => i.key === "note:blocked:other")?.owner).toBe("flight");
     expect(aggregate()?.notTriaging?.keys).toEqual([
-      error?.key,
       "note:plain",
       "note:blocked:other",
       "note:blocked:r-cc:0",

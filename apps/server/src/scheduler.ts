@@ -128,7 +128,6 @@ import {
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
-import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
 import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
@@ -1559,13 +1558,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           });
         } else {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
-        }
-        // Waste alarms are read once a minute: a restart storm shows within minutes. They never
-        // raise a Needs-you item; one about a ticket going round wakes FLIGHT once.
-        try {
-          syncWasteAlarms(deps.config, store, at);
-        } catch (e) {
-          deps.log?.(`waste alarms: ${e instanceof Error ? e.message : String(e)}`);
         }
         emit("attention");
       }

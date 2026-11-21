@@ -113,7 +113,6 @@ import {
   reworkRatios,
   type SeatSessionRow,
   type StoredFinding,
-  type StrayKind,
   type Telemetry,
   type TestLockRun,
   TICKET_SIZES,
@@ -129,7 +128,6 @@ import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
 import { auditItems, recordAuditItem } from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
-import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
 import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
 import * as reviewsStore from "./store/reviews.ts";
@@ -159,7 +157,6 @@ import {
   type CommsReadScope,
   type CommsRow,
   type CommsSettlement,
-  type CrewError,
   type Evidence,
   type FinancialRun,
   FLIGHT_DECISIONS_RETENTION_DAYS,
@@ -179,10 +176,9 @@ import {
   type QueueRow,
   type SeatLine,
   type SeatQuestion,
-  type Stray,
 } from "./store/types.ts";
 import { usageQueries } from "./store/usage.ts";
-import { RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
+import { wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
   messageImprovements,
@@ -501,15 +497,9 @@ export class Store {
     return ticketPlanQueries(this.db);
   }
 
-  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  /** The spend report's and the retrospective's queries (spend/waste.ts). */
   get waste(): ReturnType<typeof wasteQueries> {
     return wasteQueries(this.db);
-  }
-
-  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
-  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
-  addResumeAttempt(runId: string, at: number): void {
-    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
@@ -1290,14 +1280,12 @@ export class Store {
       // A seat's question to FLIGHT and FLIGHT's answer to it are kept as long as a run.
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", AUDIT_RETENTION_DAYS],
       ["flight_decisions", `at < ? AND kind IN (${DECISION_KINDS_KEPT_SQL})`, AUDIT_RETENTION_DAYS],
-      ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["mcp_tool_calls", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["question_choices", "chosen_at < ?", AUDIT_RETENTION_DAYS],
       // a question message and the replies to it outlive the 90-day message log
       ["comms", `at < ? AND (${COMMS_QUESTION_THREAD_SQL})`, AUDIT_RETENTION_DAYS],
       ["question_closures", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
-      ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
       [
         "briefs",
         `at < ? AND NOT (
@@ -4189,11 +4177,6 @@ export class Store {
     return this.commsStore.addComms(row, rate, repeatSince, flightContextTitle);
   }
 
-  /** How many exact repeats of a stored message were turned away at or after `since`. */
-  commsRepeatCount(since: number): number {
-    return this.commsStore.commsRepeatCount(since);
-  }
-
   /** Records that the recipient took a message; the first time wins. */
   markCommsDelivered(id: string, at: number): void {
     this.commsStore.markCommsDelivered(id, at);
@@ -5328,41 +5311,6 @@ export class Store {
     return r ? { sha: r.sha, at: r.at } : null;
   }
 
-  /** Records strays; one already there (same session and path) takes the new seat, kind and time. */
-  addStrays(strays: Omit<Stray, "key">[]): void {
-    this.transaction(() => {
-      const ins = this.db.prepare(
-        // `at` stays first-seen: a retry of the same stray is not a new one (its ack holds)
-        `INSERT INTO strays (key, session_id, path, agent_id, kind, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind`,
-      );
-      for (const x of strays) {
-        ins.run(strayKey(x.sessionId, x.path), x.sessionId, x.path, x.agentId, x.kind, x.at);
-      }
-    });
-  }
-
-  /** Every stray, oldest first (then by path). */
-  strays(): Stray[] {
-    const rows = this.db.prepare("SELECT * FROM strays ORDER BY at ASC, path ASC").all() as Row[];
-    return rows.map((r) => ({
-      key: r.key as string,
-      sessionId: r.session_id as string,
-      path: r.path as string,
-      agentId: r.agent_id as string,
-      kind: r.kind as StrayKind,
-      at: r.at as number,
-    }));
-  }
-
-  /** Drops the session's strays on `paths` (reverted, or the run that made them ended). */
-  clearStrays(sessionId: string, paths: readonly string[]): void {
-    this.transaction(() => {
-      const del = this.db.prepare("DELETE FROM strays WHERE key = ?");
-      for (const p of paths) del.run(strayKey(sessionId, p));
-    });
-  }
-
   /** Records a seat's question; returns its id. */
   addQuestion(q: Omit<SeatQuestion, "id" | "passedAt" | "asideAt">): number {
     return this.seatQ.addQuestion(q);
@@ -5483,10 +5431,7 @@ export class Store {
       stored = this.insertClosure(c);
       if (!stored) return;
       if (c.key.startsWith("note:")) this.dismissNote(c.key.slice("note:".length), c.at);
-      else if (c.key.startsWith("crew-error:")) {
-        const id = Number(c.key.slice("crew-error:".length));
-        if (Number.isSafeInteger(id) && id > 0) this.ackCrewError(id);
-      } else if (c.key.startsWith(COMMS_OPEN_PREFIX))
+      else if (c.key.startsWith(COMMS_OPEN_PREFIX))
         this.settleCommsItem(c.key.slice(COMMS_OPEN_PREFIX.length), c.by, c.reason, c.at);
       this.db
         .prepare(`INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
@@ -5573,32 +5518,6 @@ export class Store {
   /** The seat has no run now: each of its open questions closes, with that reason. */
   endSeatQuestions(agentId: AgentId, at: number): void {
     this.endQuestions("agent_id", agentId, at);
-  }
-
-  /** Records an mc tool failure for the operator; returns its id. */
-  addCrewError(e: Omit<CrewError, "id">): number {
-    const r = this.db
-      .prepare("INSERT INTO crew_errors (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
-      .run(e.agentId, e.runId, e.text, e.at);
-    return Number(r.lastInsertRowid);
-  }
-
-  /** Crew errors not yet acked, oldest first. */
-  crewErrors(): CrewError[] {
-    const rows = this.db
-      .prepare("SELECT * FROM crew_errors WHERE acked = 0 ORDER BY id ASC")
-      .all() as Row[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      agentId: r.agent_id as string,
-      runId: r.run_id as string | null,
-      text: r.text as string,
-      at: r.at as number,
-    }));
-  }
-
-  ackCrewError(id: number): void {
-    this.db.prepare("UPDATE crew_errors SET acked = 1 WHERE id = ?").run(id);
   }
 
   addDraft(

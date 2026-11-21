@@ -555,7 +555,17 @@ describe("Store", () => {
   it("removes the retired handoff tables from old and fresh databases", () => {
     const old = join(dir, "retired-tables.sqlite");
     const db = new DatabaseSync(old);
-    const retired = ["run_handoffs", "ticket_waits", "holds", "run_reads", "run_rereads"];
+    const retired = [
+      "run_handoffs",
+      "ticket_waits",
+      "holds",
+      "run_reads",
+      "run_rereads",
+      "strays",
+      "crew_errors",
+      "waste_alarms",
+      "comms_repeats",
+    ];
     for (const table of retired) {
       db.exec(`CREATE TABLE ${table} (id TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX ${table}_value ON ${table}(value)`);
@@ -583,6 +593,12 @@ describe("Store", () => {
     const fresh = new Store(join(dir, "fresh.sqlite"));
     expect(fresh.getSetting("missing")).toBeNull();
     fresh.close();
+    const freshDb = new DatabaseSync(join(dir, "fresh.sqlite"));
+    const freshTables = freshDb
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as { name: string }[];
+    expect(freshTables.filter((r) => retired.includes(r.name))).toEqual([]);
+    freshDb.close();
   });
 
   it("runs returns newest first and respects the limit", () => {
@@ -4483,23 +4499,15 @@ describe("hub retention", () => {
         INSERT INTO hub_events (at,text) VALUES (0,'old');
         INSERT INTO drafts (target,kind,text,created_at,state) VALUES
           ('old','plan','old',0,'done'), ('pending','plan','pending',0,'pending');
-        INSERT INTO crew_errors (agent_id,text,at,acked) VALUES
-          ('seat','old',0,1), ('seat','unacked',0,0);
         INSERT INTO question_closures (key,ask_at,kind,reason,by,question,ticket,operator,at) VALUES
           ('ask:1',0,'returned','r','flight-1','q',NULL,1,0);`);
       for (let i = 0; i < 24; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
         { key: "open" },
       ]);
-      for (const table of [
-        "guard_hits",
-        "hub_events",
-        "drafts",
-        "crew_errors",
-        "question_closures",
-      ])
+      for (const table of ["guard_hits", "hub_events", "drafts", "question_closures"])
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual(
-          table === "drafts" || table === "crew_errors" ? { n: 1 } : { n: 0 },
+          table === "drafts" ? { n: 1 } : { n: 0 },
         );
       expect(db.prepare("SELECT state FROM board_moves").all()).toEqual([{ state: "pending" }]);
       // an answered question to FLIGHT is kept a year, not ninety days

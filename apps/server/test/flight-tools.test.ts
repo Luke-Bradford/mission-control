@@ -160,7 +160,6 @@ import {
   SEAT_ID,
 } from "../src/config.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
-import { setReviewHold } from "../src/engine/review-hold.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
 import {
@@ -173,7 +172,7 @@ import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
-import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud/hud.ts";
+import { attentionItems, isOperatorCall } from "../src/hud/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -754,30 +753,6 @@ describe("move_review", () => {
         decision: "Not started: RETRO-CX's account codex-main is at its usage stop.",
       }),
     ]);
-  });
-
-  it("resolve_waste_alarm lifts a hold with a recorded basis and refuses an alarm that is not open", async () => {
-    const id = store.waste.insertAlarm(
-      {
-        check: "retry-loop",
-        subject: "mc#7",
-        repoId: "mc",
-        ticket: "mc#7",
-        seatId: null,
-        runId: null,
-        level: 2,
-        evidence: "mc#7 is parked: 2 failed attempts.",
-      },
-      NOW,
-    );
-    const done = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
-    expect(done.isError).toBeUndefined();
-    expect(store.waste.alarms("WHERE id = ?", id)[0]).toMatchObject({
-      resolvedAt: expect.any(Number),
-      basis: "park it; take the next",
-    });
-    const again = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
-    expect(again.isError).toBe(true);
   });
 
   it("moves a queued review while the target account's pace passes 100%: pace never holds it", async () => {
@@ -1386,7 +1361,6 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
-      "resolve_waste_alarm",
       "move_review",
       "resume_seat",
       "merge_pr",
@@ -3642,14 +3616,6 @@ describe("flight_state", () => {
 
     const id = queuedReview();
     expect(id).not.toBeNull();
-    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #3.", prNumber: 3 });
-    expect(
-      (
-        (await state()) as {
-          reviewQueue: { seats: { seat: string; holds: unknown[] }[] };
-        }
-      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1")?.holds,
-    ).toEqual([{ prNumber: 7, reason: "Waiting for older PR #3.", waitsOn: 3 }]);
     writeCrewPause(
       store,
       { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
@@ -5536,47 +5502,6 @@ describe("brief_item", () => {
       flightTriage: "handling",
       brief: { for: "flight", at: nowMs },
     });
-  });
-
-  it.each(["operator", "flight"])(
-    "keeps a %s brief when the same stray is recorded again (its time stays first-seen)",
-    async (forWhom) => {
-      const stray = {
-        sessionId: "s1",
-        path: "outside.ts",
-        agentId: "guido-1",
-        kind: "outside" as const,
-        at: NOW,
-      };
-      store.addStrays([stray]);
-      const key = store.strays()[0]?.key;
-      const briefed = await call("brief_item", B({ key, for: forWhom }));
-      // a stray names no ticket or PR, so a brief for the operator is refused (#1543) and the
-      // item stays FLIGHT's; its time stays first-seen either way
-      if (forWhom === "operator") expect(briefed.isError).toBe(true);
-      else expect(briefed.isError).toBeUndefined();
-      nowMs += 1000;
-      store.addStrays([{ ...stray, at: nowMs }]);
-      const item = attentionItems(cfg, store, nowMs).find((i) => i.key === key);
-      if (forWhom === "operator") {
-        expect(item).toMatchObject({ owner: "flight", at: NOW });
-      } else {
-        expect(item).toMatchObject({
-          owner: "flight",
-          flightTriage: "handling",
-          at: NOW,
-          brief: { for: "flight" },
-        });
-      }
-    },
-  );
-
-  it.each([undefined, "operator"])("requires an ask when for is %s", async (forWhom) => {
-    for (const ask of [undefined, "", " \n\t"]) {
-      expect((await call("brief_item", B({ for: forWhom, ask }))).isError).toBe(true);
-      expect(store.briefs().size).toBe(0);
-      expect(seen).toEqual([]);
-    }
   });
 
   it("keeps context uncut, allows no options for FLIGHT's own brief, and rejects oversized text", async () => {
@@ -10021,18 +9946,6 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(store.acks().has(key)).toBe(true);
       // acked, so it no longer asks for anyone
       expect(items().find((i) => i.key === key)?.acked ?? true).toBe(true);
-      // a crew error is acked and its row marked
-      const errorId = store.addCrewError({
-        agentId: "guido-1",
-        runId: null,
-        at: NOW,
-        text: "an mc tool failed",
-      });
-      const errKey = `${CREW_ERROR_KEY}${errorId}`;
-      expect(items().some((i) => i.key === errKey)).toBe(true);
-      expect((await call("dismiss_item", { key: errKey })).isError).toBeUndefined();
-      expect(store.acks().has(errKey)).toBe(true);
-      expect(store.crewErrors().some((e) => e.id === errorId)).toBe(false);
     });
     it("dismiss_item settles an ordinary flag the engine raised about a run, but not one with no run", async () => {
       live("guido-1", "r-fm", { ticket: "mc#7" });

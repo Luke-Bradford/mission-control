@@ -2,11 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** `stray:` + the first 16 hex characters of SHA-256 of `session\0path`: one item per path. */
-export function strayKey(sessionId: string, path: string): string {
-  return `stray:${createHash("sha256").update(`${sessionId}\0${path}`).digest("hex").slice(0, 16)}`;
-}
-
 /** `{dir of the DB}/crew/`: every crew run's files. Created with mode 0700. */
 export function crewDir(dbPath: string): string {
   const dir = crewDirPath(dbPath);

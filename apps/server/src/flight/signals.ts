@@ -3,7 +3,6 @@ import {
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
   COMMS_CONTROLLER,
-  FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_COST_DAYS,
   FLIGHT_GITHUB_LOW_FRACTION,
@@ -35,15 +34,9 @@ import {
   seatDef,
   WAITING_OPERATOR_LABEL,
   WAKE_STUCK_KEY_SUFFIX,
-  WASTE_CHECK_TITLES,
-  WASTE_WAKES_FLIGHT,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
-import { dueStuckPrs, prFitsSeat, type StuckPr } from "../engine/stuck-prs.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
-import { blockedWork, endedVerb, observeWaits, releasedLines } from "../queue/dependencies.ts";
-import { ownsCard } from "../queue/ownership.ts";
-import { openWasteAlarms } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -316,10 +309,6 @@ export function flightSignals(i: {
   session: CrewSessionConfig;
   seats: FlightState["seats"];
   aside?: FlightState["aside"];
-  /** The repo's area labels and their globs; absent: any seat may take any stuck PR. */
-  areas?: Record<string, string[]>;
-  /** The open crew PRs that conflict or are red with no run on them, whatever the wait. */
-  stuckPrs?: StuckPr[];
   /** Items awaiting FLIGHT's triage, with when each arrived. */
   triageItems?: { key: string; kind: string; at: number; text: string }[];
   /** Open PRs whose run reported them ready to merge, with when it did. */
@@ -371,17 +360,6 @@ export function flightSignals(i: {
       triage(ref, "new", now, `${ref} arrived in ${column}: ${card.title}`);
     }
   }
-  // a wait that ended wakes FLIGHT once, naming what merged and the tickets it freed
-  const record = observeWaits(store, repo, now);
-  const verb = endedVerb(store, repo);
-  for (const line of releasedLines(
-    record.released.filter((r) => onBoard.has(r.ref)),
-    verb,
-    (ref) => ownsCard(store, repo, Number(ref.slice(ref.lastIndexOf("#") + 1))),
-  )) {
-    triage(line.ref, "dependency", line.at, line.text);
-  }
-
   const parks = new Map<string, { at: number; evidence: string }[]>();
   /** When each run last parked, for the park that has gone unsettled too long. */
   const parkedAt = new Map<string, number>();
@@ -501,9 +479,6 @@ export function flightSignals(i: {
     );
   }
 
-  // a stuck PR the hub would hand a free seat counts as queued work for that seat
-  const areaRules = i.areas === undefined ? null : { areas: i.areas };
-  const stuck = dueStuckPrs(i.stuckPrs ?? [], now);
   for (const seat of seats) {
     const row = store.seatSession(seat.id);
     const since = row ? Math.max(row.updatedAt, row.lastTurnEndedAt ?? row.updatedAt) : undefined;
@@ -518,70 +493,20 @@ export function flightSignals(i: {
             (b) => b.issueNumber === q.issue && !b.closed && !b.blockedBy.some((d) => !d.closed),
           ),
       );
-    const stuckWork =
-      seat.loop === "build"
-        ? stuck.find((p) => prFitsSeat(areaRules, seat.area, board, p))
-        : undefined;
     if (
       seat.free &&
       row?.state === "idle" &&
       !seat.atStop &&
       since !== undefined &&
       now - since >= FLIGHT_IDLE_MS &&
-      (work || stuckWork)
+      work
     ) {
       raise(
         "idle_seat",
         `${seat.id}:${since}`,
         since,
-        `${seat.id} idle since ${new Date(since).toISOString()}; ${
-          work
-            ? `eligibleToStart queued ${work.repoId}#${work.issue}`
-            : `open PR #${stuckWork?.number} (${stuckWork?.ticket}) has no run and is ${stuckWork?.kind === "conflict" ? "in conflict with main" : "red"}`
-        }`,
+        `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
-    }
-  }
-  // a stuck PR no seat of its area can take is FLIGHT's to place; one a seat can take is the hub's
-  for (const p of stuck) {
-    const takers = seats.filter(
-      (s) =>
-        s.loop === "build" &&
-        s.pause === null &&
-        s.stop === null &&
-        !s.atStop &&
-        prFitsSeat(areaRules, s.area, board, p),
-    );
-    if (takers.length > 0) continue;
-    raise(
-      "stuck_pr",
-      `${p.ticket}:${p.number}:${p.headSha}:${p.kind}`,
-      p.since,
-      `PR #${p.number} (${p.ticket}) has been ${p.kind === "conflict" ? "in conflict with main" : `red${p.failing.length > 0 ? ` (${p.failing.join(", ")})` : ""}`} with no run since ${new Date(p.since).toISOString()}, and no seat can take it`,
-    );
-  }
-  // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or
-  // ended before FLIGHT heard of it is dropped, not told
-  const stalled = blockedWork(store, repo, now, (card) =>
-    inLane(card.labels, config.crew?.lane, config.crew?.laneDefault ?? false),
-  ).filter((b) => b.waitedMin * 60_000 >= FLIGHT_CHAIN_STALL_MS);
-  for (const b of stalled) {
-    // a chain that is the tail of a longer one is told with the longer one
-    const tail = stalled.some(
-      (o) =>
-        o !== b && o.chain.length > b.chain.length && o.chain.join(">").endsWith(b.chain.join(">")),
-    );
-    if (tail) continue;
-    raise(
-      "chain_stalled",
-      b.chain.join(">"),
-      now - b.waitedMin * 60_000,
-      `${b.chain.join(" waits on ")} has stood still for ${b.waitedMin} min: ${b.ref} waits on ${b.waitsOn.join(", ")}`,
-    );
-  }
-  for (const [id, signal] of Object.entries(state.signals)) {
-    if (signal.kind === "chain_stalled" && signal.toldAt === null && !active.has(id)) {
-      delete state.signals[id];
     }
   }
   for (const seat of session.seats) {
@@ -742,19 +667,6 @@ export function flightSignals(i: {
       if (closure?.by === "hub")
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
-  }
-  // An alarm about one ticket going round wakes FLIGHT, once: left unsaid, a ticket in its third
-  // review round or its fourth run stands unseen. The spend alarms are stored; GET
-  // /api/waste serves the open ones.
-  for (const alarm of openWasteAlarms(store)) {
-    if (alarm.repoId !== repo) continue;
-    if (!WASTE_WAKES_FLIGHT.includes(alarm.check)) continue;
-    raise(
-      "waste_alarm",
-      String(alarm.id),
-      alarm.openedAt,
-      `${WASTE_CHECK_TITLES[alarm.check]}: ${alarm.evidence}`,
-    );
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {
