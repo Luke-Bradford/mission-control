@@ -2193,6 +2193,7 @@ export class Store {
     }[];
     const changes: AuditChange[] = [];
     const previous = new Map<string, (typeof runs)[number]>();
+    const metrics = this.auditMetricsReader(since - AUDIT_CHANGE_WINDOW_MS, until);
     for (const run of runs) {
       const last = previous.get(run.agent_id);
       previous.set(run.agent_id, run);
@@ -2214,8 +2215,8 @@ export class Store {
           from,
           to,
           windowMs,
-          before: this.auditMetrics(run.started_at - windowMs, run.started_at - 1),
-          after: this.auditMetrics(run.started_at, run.started_at + windowMs - 1),
+          before: metrics(run.started_at - windowMs, run.started_at - 1),
+          after: metrics(run.started_at, run.started_at + windowMs - 1),
         });
       }
     }
@@ -2329,39 +2330,70 @@ export class Store {
     };
   }
 
-  /** Crew-wide metrics over one window, both ends inclusive. */
-  private auditMetrics(from: number, to: number): AuditMetrics {
-    const merged = this.db
-      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
-      .get(from, to) as { n: number };
+  /**
+   * The metrics of any window inside `[low, high]`, worked out from one read of the merged PRs,
+   * reported reviews and per-ticket costs in that span, so a long list of changes does not run
+   * a handful of queries per change.
+   */
+  private auditMetricsReader(
+    low: number,
+    high: number,
+  ): (from: number, to: number) => AuditMetrics {
+    const merged = (
+      this.db
+        .prepare(
+          `SELECT merged_at AS at, repo_id AS repoId, json_extract(record, '$.ticket') AS ticket
+           FROM pr_history WHERE merged_at >= ? AND merged_at <= ? ORDER BY merged_at`,
+        )
+        .all(low, high) as { at: number; repoId: string; ticket: string | null }[]
+    ).filter((m) => m.at !== null);
     const reviews = this.db
       .prepare(
-        `SELECT COUNT(*) AS n, COALESCE(SUM(blocking > 0), 0) AS failed FROM reviews
-         WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?`,
+        `SELECT ended_at AS at, blocking > 0 AS failed, author_run_id AS authorRunId, round
+         FROM reviews WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ? ORDER BY ended_at`,
       )
-      .get(from, to) as { n: number; failed: number };
-    const costs = this.db
+      .all(low, high) as { at: number; failed: number; authorRunId: string; round: number }[];
+    const cost = new Map<string, number>();
+    for (const c of this.db
       .prepare(
-        `WITH merged_tickets AS (
-           SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
-           WHERE merged_at >= ? AND merged_at <= ?
-         ) SELECT SUM(r.cost_usd) AS costUsd FROM merged_tickets t
-         JOIN runs r ON r.repo_id = t.repo_id AND r.ticket = t.ticket
-         GROUP BY t.repo_id, t.ticket HAVING costUsd IS NOT NULL`,
+        `SELECT repo_id AS repoId, ticket, SUM(cost_usd) AS costUsd FROM runs
+         WHERE ticket IS NOT NULL GROUP BY repo_id, ticket HAVING costUsd IS NOT NULL`,
       )
-      .all(from, to) as { costUsd: number }[];
-    const rework = this.db
-      .prepare(
-        `SELECT COALESCE(SUM(rounds), 0) AS n FROM (
-           SELECT MAX(0, MAX(round) - 1) AS rounds FROM reviews
-           WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ? GROUP BY author_run_id)`,
-      )
-      .get(from, to) as { n: number };
-    return {
-      merged: merged.n,
-      reviewFailRate: reviews.n === 0 ? null : reviews.failed / reviews.n,
-      medianCostPerMergedTicket: median(costs.map((c) => c.costUsd)),
-      reworkRounds: rework.n,
+      .all() as { repoId: string; ticket: string; costUsd: number }[])
+      cost.set(`${c.repoId}\0${c.ticket}`, c.costUsd);
+    // First index whose time is at or after `t`.
+    const lower = (rows: readonly { at: number }[], t: number): number => {
+      let lo = 0;
+      let hi = rows.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if ((rows[mid] as { at: number }).at < t) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    return (from, to) => {
+      const prs = merged.slice(lower(merged, from), lower(merged, to + 1));
+      const reviewed = reviews.slice(lower(reviews, from), lower(reviews, to + 1));
+      const costs = new Set<string>();
+      for (const m of prs) {
+        const key = `${m.repoId}\0${m.ticket}`;
+        if (m.ticket !== null && cost.has(key)) costs.add(key);
+      }
+      const topRound = new Map<string, number>();
+      for (const r of reviewed)
+        topRound.set(r.authorRunId, Math.max(topRound.get(r.authorRunId) ?? r.round, r.round));
+      let rework = 0;
+      for (const top of topRound.values()) rework += Math.max(0, top - 1);
+      return {
+        merged: prs.length,
+        reviewFailRate:
+          reviewed.length === 0
+            ? null
+            : reviewed.reduce((n, r) => n + (r.failed ? 1 : 0), 0) / reviewed.length,
+        medianCostPerMergedTicket: median([...costs].map((k) => cost.get(k) as number)),
+        reworkRounds: rework,
+      };
     };
   }
 
