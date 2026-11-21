@@ -253,7 +253,16 @@ export function useItemDetail(key: string | null) {
   const thread = currentThread ?? savedPerson?.thread;
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
   const handledHow = handled?.how ?? justHandled[k];
-  const options = item?.brief?.person ? [] : (item?.brief?.options ?? []);
+  // A person-source brief may now carry the same complete, bound decision contract as every
+  // other ask. Keep the legacy reply controls only for older person records without that contract.
+  const completePersonBrief = Boolean(
+    item?.brief?.person && item.brief.decision && item.brief.binding,
+  );
+  const options = completePersonBrief
+    ? (item?.brief?.options ?? [])
+    : item?.brief?.person
+      ? []
+      : (item?.brief?.options ?? []);
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
   return {
@@ -287,6 +296,7 @@ export function useItemDetail(key: string | null) {
     receipts,
     handledHow,
     options,
+    completePersonBrief,
     currentItem,
     submit,
     pick,
@@ -336,6 +346,7 @@ export function ItemDetail({
     receipts,
     handledHow,
     options,
+    completePersonBrief,
     currentItem,
     submit,
     pick,
@@ -444,7 +455,7 @@ export function ItemDetail({
     : "FLIGHT named no recommended option.";
   const showFacts =
     brief !== undefined &&
-    !brief.person &&
+    (!brief.person || completePersonBrief) &&
     !holding &&
     (brief.for === "operator" || options.length > 0);
   const answerBlock = (
@@ -458,82 +469,93 @@ export function ItemDetail({
           <Recommendation text={item.brief.recommendation} />
         </div>
       )}
-      {item && !item.brief?.person && !holding && (esc || options.length > 0) && (
-        <div className="composer" id={`${p}Opts`}>
-          {options.length > 0 && (
-            <>
-              {chosen[k] && (
-                <p>
-                  You chose: <b>{chosen[k]}</b>
-                  {recorded && (
-                    <span className="note" data-testid="choice-line">
-                      {" "}
-                      · {choiceLine(recorded, tz ?? "UTC")}
-                    </span>
-                  )}
-                  {!recorded && boundReceipt && (
-                    <span className="note" data-testid="choice-line">
-                      {" "}
-                      · {receiptLine(boundReceipt)}
-                    </span>
-                  )}
-                </p>
-              )}
-              <BriefOptions
-                options={options}
-                recommendedOptionId={item.brief?.recommendedOptionId}
-                recommendation={item.brief?.recommendation}
-                live={sendable || target?.to !== "github"}
-                disabled={busy || Boolean(chosen[k])}
-                canPick={(o) => blockerOf(o) === null}
-                title={githubOnly ? "Reply on GitHub to answer this item." : undefined}
-                variant={item.kind === "approval" ? "row" : "panel"}
-                rowLabel={item.kind === "approval" ? "Your call:" : undefined}
-                primaryFirst={item.kind === "approval"}
-                pictures={
-                  materials.packets.length > 0
-                    ? (o) => (
-                        <OptionPictures option={o} packets={materials.packets} open={viewer.open} />
-                      )
-                    : undefined
-                }
-                onPick={pick}
-              />
-              {recommended && !(githubOnly && acceptBlock === null) && (
-                <div className="answer-actions">
-                  <button
-                    type="button"
-                    className="primary"
-                    disabled={busy || Boolean(chosen[k]) || acceptBlock !== null}
-                    onClick={() => pick(recommended)}
-                  >
-                    Accept recommendation: {recommended.label}
-                  </button>
-                  <button type="button" onClick={discuss}>
-                    Discuss
-                  </button>
-                  {acceptBlock !== null && !chosen[k] && <p className="note">{acceptBlock}</p>}
-                </div>
-              )}
-              {!recommended && (
-                <div className="answer-actions">
-                  <button type="button" onClick={discuss}>
-                    Discuss
-                  </button>
-                  {acceptBlock !== null && !githubOnly && <p className="note">{acceptBlock}</p>}
-                </div>
-              )}
-              {!queueApproval && target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
-            </>
-          )}
-          {esc && (
-            <div className="row">
-              <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
-            </div>
-          )}
-        </div>
+      {item &&
+        (!item.brief?.person || completePersonBrief) &&
+        !holding &&
+        (esc || options.length > 0) && (
+          <div className="composer" id={`${p}Opts`}>
+            {options.length > 0 && (
+              <>
+                {chosen[k] && (
+                  <p>
+                    You chose: <b>{chosen[k]}</b>
+                    {recorded && (
+                      <span className="note" data-testid="choice-line">
+                        {" "}
+                        · {choiceLine(recorded, tz ?? "UTC")}
+                      </span>
+                    )}
+                    {!recorded && boundReceipt && (
+                      <span className="note" data-testid="choice-line">
+                        {" "}
+                        · {receiptLine(boundReceipt)}
+                      </span>
+                    )}
+                  </p>
+                )}
+                <BriefOptions
+                  options={options}
+                  recommendedOptionId={item.brief?.recommendedOptionId}
+                  recommendation={item.brief?.recommendation}
+                  live={sendable || target?.to !== "github"}
+                  disabled={busy || Boolean(chosen[k])}
+                  canPick={(o) => blockerOf(o) === null}
+                  title={githubOnly ? "Reply on GitHub to answer this item." : undefined}
+                  variant={item.kind === "approval" ? "row" : "panel"}
+                  rowLabel={item.kind === "approval" ? "Your call:" : undefined}
+                  primaryFirst={item.kind === "approval"}
+                  pictures={
+                    materials.packets.length > 0
+                      ? (o) => (
+                          <OptionPictures
+                            option={o}
+                            packets={materials.packets}
+                            open={viewer.open}
+                          />
+                        )
+                      : undefined
+                  }
+                  onPick={pick}
+                />
+                {recommended && !(githubOnly && acceptBlock === null) && (
+                  <div className="answer-actions">
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={busy || Boolean(chosen[k]) || acceptBlock !== null}
+                      onClick={() => pick(recommended)}
+                    >
+                      Accept recommendation: {recommended.label}
+                    </button>
+                    <button type="button" onClick={discuss}>
+                      Discuss
+                    </button>
+                    {acceptBlock !== null && !chosen[k] && <p className="note">{acceptBlock}</p>}
+                  </div>
+                )}
+                {!recommended && (
+                  <div className="answer-actions">
+                    <button type="button" onClick={discuss}>
+                      Discuss
+                    </button>
+                    {acceptBlock !== null && !githubOnly && <p className="note">{acceptBlock}</p>}
+                  </div>
+                )}
+                {!queueApproval && target?.to === "flight" && (
+                  <FlightStoppedNote seat={flightSeat} />
+                )}
+              </>
+            )}
+            {esc && (
+              <div className="row">
+                <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
+              </div>
+            )}
+          </div>
+        )}
+      {item?.brief?.person && !completePersonBrief && (
+        <PersonChoices key={item.key} item={item} thread={thread} />
       )}
-      {item?.brief?.person && <PersonChoices key={item.key} item={item} thread={thread} />}
       {item?.kind === "person" && !item.brief?.person && !holding && (
         <div className="composer" id={`${p}Person`}>
           {handledHow ? (
@@ -565,38 +587,41 @@ export function ItemDetail({
   );
   const replyBlock = (
     <>
-      {item && !holding && (target?.to === "seat" || target?.to === "flight") && (
-        <form className="composer" id={`${p}Form`} onSubmit={submit}>
-          {page ? (
-            <textarea
-              id={`${p}Input`}
-              aria-label="Your answer"
-              placeholder="Type your answer… (Ctrl or ⌘ + Enter sends)"
-              rows={3}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit(e);
-              }}
-              disabled={!replyOk}
-            />
-          ) : (
-            <input
-              id={`${p}Input`}
-              autoComplete="off"
-              aria-label="Your answer"
-              placeholder="Type your answer…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={!replyOk}
-            />
-          )}
-          <button type="submit" className="primary" disabled={!replyOk || busy}>
-            Reply
-          </button>
-          {target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
-        </form>
-      )}
+      {item &&
+        !completePersonBrief &&
+        !holding &&
+        (target?.to === "seat" || target?.to === "flight") && (
+          <form className="composer" id={`${p}Form`} onSubmit={submit}>
+            {page ? (
+              <textarea
+                id={`${p}Input`}
+                aria-label="Your answer"
+                placeholder="Type your answer… (Ctrl or ⌘ + Enter sends)"
+                rows={3}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit(e);
+                }}
+                disabled={!replyOk}
+              />
+            ) : (
+              <input
+                id={`${p}Input`}
+                autoComplete="off"
+                aria-label="Your answer"
+                placeholder="Type your answer…"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                disabled={!replyOk}
+              />
+            )}
+            <button type="submit" className="primary" disabled={!replyOk || busy}>
+              Reply
+            </button>
+            {target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
+          </form>
+        )}
     </>
   );
   const discussionBlock = (

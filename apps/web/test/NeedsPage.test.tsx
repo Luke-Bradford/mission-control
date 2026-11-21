@@ -1047,4 +1047,38 @@ describe("Needs you page, a complete brief", () => {
     await screen.findByText("Suggested replies");
     expect((document.querySelector(".needs-more") as HTMLDetailsElement).open).toBe(true);
   });
+
+  it("uses the complete bound decision contract for a person-source brief on the page", async () => {
+    const person = item({
+      key: "person:bound:1",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      brief: boundBrief({
+        person: { source: { kind: "github", messageId: "1", revision: "source-v1" } },
+      }),
+    });
+    const path = `/api/attention/${encodeURIComponent(person.key)}/choice`;
+    const fn = routes([person], {
+      [`POST ${path}`]: {
+        epoch: "e1",
+        requestId: "r",
+        optionId: "a",
+        at: NOW,
+        state: "applied",
+        text: "Answer sent.",
+        actor: { operator: true },
+      },
+    });
+    render(<Needs item={person.key} />);
+    expect(await screen.findByText("Why it needs you")).toBeTruthy();
+    expect(screen.getByText("Consequence of 5174.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Accept recommendation: 5174" }));
+    await waitFor(() => expect(posts(fn, path)).toHaveLength(1));
+    expect(posts(fn, path)[0]).toMatchObject({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+    });
+  });
 });

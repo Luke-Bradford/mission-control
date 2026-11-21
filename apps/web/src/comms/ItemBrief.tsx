@@ -6,6 +6,7 @@ import type {
   BriefReadState,
 } from "@mc/core";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useSecond } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
@@ -111,11 +112,13 @@ export function DecisionFacts({
       <div className="fact">
         <h3 className="bsec">If nobody answers</h3>
         <p className="s qtext">
-          {why
-            ? "Waits for your answer. Nothing happens automatically."
-            : defaultDueAt !== undefined
-              ? `If nobody answers ${tz ? `by ${hhmm(defaultDueAt, tz)}` : "soon"}, FLIGHT applies its recommendation: ${effect}`
-              : "Nothing is scheduled to happen automatically."}
+          {why ? (
+            "Waits for your answer. Nothing happens automatically."
+          ) : defaultDueAt !== undefined ? (
+            <FYITiming dueAt={defaultDueAt} effect={effect} tz={tz} />
+          ) : (
+            "Nothing is scheduled to happen automatically."
+          )}
           {decision.waiting && <> {decision.waiting}</>}
         </p>
       </div>
@@ -124,6 +127,23 @@ export function DecisionFacts({
         <p className="s qtext">{decision.costOfDelay}</p>
       </div>
     </section>
+  );
+}
+
+/** The only second-by-second part of a brief, so a FYI clock cannot rerender its list or refetch it. */
+function FYITiming({ dueAt, effect, tz }: { dueAt: number; effect: string; tz: string | null }) {
+  const now = useSecond();
+  const remaining = Math.max(0, Math.ceil((dueAt - now) / 1000));
+  const minutes = Math.floor(remaining / 60);
+  const seconds = String(remaining % 60).padStart(2, "0");
+  const when = tz ? hhmm(dueAt, tz) : "soon";
+  return (
+    <>
+      FLIGHT will {effect} at {when} unless you choose.
+      <span className="fyi-countdown" aria-live="polite">
+        {remaining > 0 ? ` ${minutes}:${seconds} remaining.` : " Deadline reached."}
+      </span>
+    </>
   );
 }
 

@@ -843,6 +843,7 @@ describeRendered("Needs you page", () => {
       const BIG = "A long sentence that must be read in full. ".repeat(190).slice(0, 8000);
       const variants = [
         { name: "two", options: 2, asks: 0, big: false },
+        { name: "person", options: 2, asks: 0, big: false },
         { name: "four", options: 4, asks: 0, big: false },
         { name: "three-asks", options: 2, asks: 2, big: false },
         { name: "fifty-asks", options: 2, asks: 49, big: false },
@@ -882,7 +883,25 @@ describeRendered("Needs you page", () => {
                   if (o.reversibility) o.reversibility.detail = BIG;
                 }
               const asks = (base["/api/attention"] as ReturnType<typeof item>[]).map((a) =>
-                a.key === KEY ? { ...a, brief: decisionBrief } : a,
+                a.key === KEY
+                  ? {
+                      ...a,
+                      ...(variant.name === "person" ? { kind: "person" as const } : {}),
+                      brief:
+                        variant.name === "person"
+                          ? {
+                              ...decisionBrief,
+                              person: {
+                                source: {
+                                  kind: "github" as const,
+                                  messageId: "needs-person-brief",
+                                  revision: "source-v1",
+                                },
+                              },
+                            }
+                          : decisionBrief,
+                    }
+                  : a,
               );
               const page = await renderAt({
                 page: "test/needsBrowser.html",

@@ -1,5 +1,5 @@
 import type { BriefBinding } from "@mc/core";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BRIEF_LINES, BriefOptions, DecisionFacts, ItemBrief } from "../src/comms/ItemBrief.tsx";
 import { boundBrief, brief, NOW } from "./fixtures.ts";
@@ -438,7 +438,7 @@ describe("DecisionFacts", () => {
       <DecisionFacts brief={fyi} defaultDueAt={Date.UTC(2026, 9, 17, 14, 40)} tz="UTC" />,
     );
     expect(
-      screen.getByText(`If nobody answers by 14:40, FLIGHT applies its recommendation: ${effect}`),
+      screen.getByText(`FLIGHT will ${effect} at 14:40 unless you choose.`, { exact: false }),
     ).toBeTruthy();
     expect(screen.getByText("Within FLIGHT's standing authority")).toBeTruthy();
     unmount();
@@ -447,5 +447,28 @@ describe("DecisionFacts", () => {
       screen.getByText(/Waits for your answer\. Nothing happens automatically\./),
     ).toBeTruthy();
     expect(screen.queryByText(/applies its recommendation/)).toBeNull();
+  });
+
+  it("ticks only the FYI deadline clock and settles at its deadline", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const base = boundBrief();
+    const fyi = boundBrief({
+      decision: { consulted: [], costOfDelay: "Slower." },
+      binding: {
+        ...(base.binding as BriefBinding),
+        actions: (base.binding as BriefBinding).actions.map((a) => ({
+          ...a,
+          effect: "Guidance delivered",
+        })),
+      },
+    });
+    render(<DecisionFacts brief={fyi} defaultDueAt={NOW + 90_000} tz="UTC" />);
+    expect(screen.getByText(/1:30 remaining/)).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.getByText(/1:29 remaining/)).toBeTruthy();
+    act(() => vi.advanceTimersByTime(89_000));
+    expect(screen.getByText(/Deadline reached/)).toBeTruthy();
+    vi.useRealTimers();
   });
 });

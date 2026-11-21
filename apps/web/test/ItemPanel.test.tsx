@@ -463,6 +463,31 @@ describe("ItemPanel, acting on an item", () => {
     expect((await ui.findByTestId("choice-line")).textContent).toContain("Answer sent.");
   });
 
+  it("uses the complete bound decision contract for a person-source brief", async () => {
+    const current = {
+      ...personItem,
+      brief: boundBrief({
+        person: { source: { kind: "github", messageId: "101", revision: "source-v1" } },
+      }),
+    };
+    const path = `/api/attention/${encodeURIComponent(current.key)}/choice`;
+    const fn = acting([current], { [`POST ${path}`]: applied() });
+    const ui = within(panel());
+    await ui.findByText("Why it needs you");
+    expect(ui.getByText("Who FLIGHT consulted")).toBeTruthy();
+    expect(ui.getByText("Cost of delay")).toBeTruthy();
+    expect(ui.getByText("Consequence of 5174.")).toBeTruthy();
+    expect(ui.getAllByText("Can be undone.")).toHaveLength(2);
+    fireEvent.click(await enabled("Accept recommendation: 5174"));
+    await waitFor(() => expect(posts(fn, path)).toHaveLength(1));
+    expect(posts(fn, path)[0]).toMatchObject({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+    });
+    expect((await ui.findByTestId("choice-line")).textContent).toContain("Answer sent.");
+  });
+
   it("Discuss opens and focuses the conversation and sends no choice", async () => {
     const fn = acting([BOUND_SEAT]);
     fireEvent.click(await enabled("Discuss"));
