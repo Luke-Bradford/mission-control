@@ -2100,11 +2100,12 @@ export class Store {
       const lastSeenAt = auditEventLastSeen(this.db, event.kind);
       if (lastSeenAt === null) continue;
       const total = event.kind === "seat-run-started" ? seatStartQuietTotal : quietTotal;
-      if (active && event.kind === "seat-run-started" && quiet.readyWorkForIdleSeat !== true)
-        continue;
       const quietAtSeen = this.silenceQuietAtSeen(event.kind, lastSeenAt, total);
       const silent = at - lastSeenAt - (total - quietAtSeen) > event.gapMs;
-      if (!active && silent) continue; // a quiet period opens no alarm, but a resumed event still clears its own
+      // Opening needs a live crew (and, for seat starts, Ready work an idle seat could take); a resumed event always clears its own alarm.
+      const canOpen =
+        active && (event.kind !== "seat-run-started" || quiet.readyWorkForIdleSeat === true);
+      if (silent && !canOpen) continue;
       const detail = silent
         ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
         : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;

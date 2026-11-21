@@ -162,6 +162,21 @@ describe("the silence timer's quiet periods", () => {
       { subject: "seat-run-started", state: "open" },
     ]);
   });
+  it("clears a seat-start alarm when the resuming start takes the last Ready ticket", () => {
+    const live = { crewPaused: false, budgetStopped: false, noSeatRan: false };
+    store.recordSilenceEvent("seat-run-started", NOW);
+    store.checkSilenceAlarms(NOW, { ...live, readyWorkForIdleSeat: true });
+    const later = NOW + gap("seat-run-started") + 60_000;
+    store.checkSilenceAlarms(later, { ...live, readyWorkForIdleSeat: true });
+    expect(
+      store.audit(NOW - 7 * 24 * HOUR, later).items?.filter((i) => i.state === "open"),
+    ).toHaveLength(1);
+    store.recordSilenceEvent("seat-run-started", later + 1);
+    store.checkSilenceAlarms(later + 60_000, { ...live, readyWorkForIdleSeat: false });
+    expect(
+      store.audit(NOW - 7 * 24 * HOUR, later + 60_000).items?.filter((i) => i.state === "open"),
+    ).toEqual([]);
+  });
   it("raises none when the only run has ended", () => {
     store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok" }));
     silent();
