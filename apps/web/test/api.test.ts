@@ -175,7 +175,7 @@ describe("api", () => {
       ...Object.values(stringActions).map((action) =>
         typeof action === "string" ? action : action("id", "topic"),
       ),
-      RESOURCES.discussion("key").path,
+      RESOURCES.itemThread("key").path,
       RESOURCES.teamsSelection.path,
     ];
     for (const path of paths) await expect(apiPost(path)).resolves.toEqual({ ok: true });

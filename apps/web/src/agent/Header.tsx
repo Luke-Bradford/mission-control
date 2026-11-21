@@ -671,8 +671,8 @@ function ParkedLine({ row }: { row: CrewRow }) {
   const runLoop = view?.loop;
   const events = view?.events;
   const note = parkNote(
-    runLoop?.parked?.reason ?? row.loop?.parked ?? row.loop?.text ?? "",
-    runLoop?.parked?.kind,
+    runLoop?.hold?.reason ?? row.loop?.hold?.reason ?? row.loop?.text ?? "",
+    runLoop?.hold?.kind,
     runLoop?.pushFor,
     blockingOf(events, runLoop?.pushFor),
   );

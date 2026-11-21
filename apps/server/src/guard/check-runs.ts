@@ -12,7 +12,6 @@ import {
   type CheckDropReason,
   type RepoRules,
   splitCommands,
-  unchangedRerunText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
@@ -23,17 +22,30 @@ import { NOT_PLAIN, plainCall } from "./plain-call.ts";
 
 export { plainCall };
 
+/** The related-tests run, as a repo's `checks` list spells it. */
+export const RELATED_CHECK = "pnpm -s test:related";
+
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
- * EVERY trimmed segment is a configured check. Anything else in the chain (`cd x`, `exit 0`, a
- * shell function, an edit) could change what the check sees or whether it runs, so it counts for
- * nothing. A command holding `|`, `||`, `;` or a line break counts for nothing too.
+ * EVERY trimmed segment is a configured check. When it is not configured, `pnpm -s test:related`
+ * is allowed only at the end as a companion, not a recorded check. Anything else in the chain
+ * (`cd x`, `exit 0`, a shell function, an edit) could change what the check sees or whether it
+ * runs, so it counts for nothing. A command holding `|`, `||`, `;` or a line break counts for
+ * nothing too.
  */
 export function checksRun(command: string, checks: readonly string[]): string[] {
   if (checks.length === 0 || NOT_PLAIN.test(command)) return [];
   const segments = command.split("&&").map((s) => s.trim());
-  if (segments.some((s) => !checks.includes(s))) return [];
-  return checks.filter((c) => segments.includes(c));
+  const relatedAtEnd =
+    !checks.includes(RELATED_CHECK) && segments.length > 1 && segments.at(-1) === RELATED_CHECK;
+  const checkSegments = relatedAtEnd ? segments.slice(0, -1) : segments;
+  if (checkSegments.some((s) => !checks.includes(s))) return [];
+  return checks.filter((c) => checkSegments.includes(c));
+}
+
+function hasRelatedTestsCompanion(command: string): boolean {
+  const segments = command.split("&&");
+  return segments.length > 1 && segments.at(-1)?.trim() === RELATED_CHECK;
 }
 
 /** A leading `cd <path>` joined to the rest by `&&` or `;`; the path is bare, or in single or double quotes. */
@@ -54,7 +66,8 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
 }
 
 /**
- * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
+ * The configured check a shell command runs, even inside a chain or a pipe. It serves the test
+ * lock (the related-tests check) and the note that says why a chained check was not counted. The guard's shell parser reads the
  * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
@@ -117,15 +130,12 @@ export interface CheckRecorder {
   ): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
-  /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
-  lockedBy(runId: string, command: string): Promise<string | null>;
-  /**
-   * The text that refuses this shell call as an unchanged rerun (the same configured check already
-   * ran on this commit and no file has changed), or null. A refusal is recorded for the waste alarm.
-   */
-  rerun?(runId: string, command: string): Promise<string | null>;
+  /** RELATED_CHECK when this shell command runs it, which takes the test lock (it can run the whole suite); else null. */
+  lockedBy(command: string): string | null;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
+  /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
+  lost(runId: string, command: string): boolean;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
   /** Configured checks still executing or validating their completion, once per command. */
@@ -137,8 +147,7 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun"> &
-    Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
+  store: Pick<Store, "addCheckRun">;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
@@ -156,6 +165,8 @@ interface StartedCall {
   head: string;
   startedAt: number;
   timeoutMs: number;
+  /** The related-tests companion is last, so its failure must not exhaust a check retry. */
+  relatedTests: boolean;
 }
 
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
@@ -192,43 +203,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     else dropped.set(runId, rest);
   };
   return {
-    async lockedBy(runId, command) {
-      try {
-        return lockedCheck(command, await d.checks(runId));
-      } catch (e) {
-        d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
-        return null;
-      }
-    },
-    async rerun(runId, command) {
-      try {
-        const checks = await d.checks(runId);
-        const own = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
-        const matched = checksRun(withoutOwnCd(command, own), checks);
-        if (matched.length === 0 || d.store.latestCheckRun === undefined) return null;
-        const at = await d.state(runId);
-        // a dirty tree is a change: the check would run on something no commit holds
-        if (at === null || !at.clean) return null;
-        for (const check of matched) {
-          const last = d.store.latestCheckRun(runId, check, at.head);
-          // a run that passed, or failed with an exit code, is a result. One killed by the Bash
-          // timeout, or that failed with no exit code (a missing install), is not: it may run again.
-          if (last === null || (!last.ok && last.exitCode === null)) continue;
-          // one retry after a failure is allowed (a flaky test, a busy machine); a pass, or a
-          // second failure on the same commit, is final
-          if (!last.ok) {
-            const results = d.store.latestCheckResults?.(runId, check, at.head, 2) ?? [];
-            if (results.length < 2 || results.some((x) => x.ok)) continue;
-          }
-          d.store.addRerunRefusal?.(runId, check, at.head, now());
-          return unchangedRerunText(check, at.head);
-        }
-        return null;
-      } catch (e) {
-        d.log?.(`checks: could not test a rerun for ${runId}: ${(e as Error).message}`);
-        return null;
-      }
-    },
+    lockedBy: (command) => lockedCheck(command, [RELATED_CHECK]),
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);
@@ -268,7 +243,19 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
             CHECK_BASH_TIMEOUT_MS,
           ),
+          relatedTests: !matched.includes(RELATED_CHECK) && hasRelatedTestsCompanion(command),
         };
+        // A new Codex call with the same command replaces an earlier one that never delivered a
+        // completion. Its exec cell no longer exists, so keeping the old receipt pending would
+        // block both this fresh call and the eventual push until the turn ends.
+        const replaced = new Set<StartedCall>();
+        for (const [id, startedCall] of started) {
+          if (startedCall.runId !== key.runId || startedCall.command !== command) continue;
+          started.delete(id);
+          replaced.add(startedCall);
+        }
+        for (const prior of replaced)
+          noteDrop(key.runId, "session-lost", prior.matched, prior.head, prior.command);
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
@@ -303,7 +290,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             invokedCommand: call.command,
             headSha: call.head,
             ok,
-            exitCode,
+            // The shell only returns one status. When related tests are last, a failure could be
+            // theirs, so it cannot be evidence that a configured check failed or consume its retry.
+            exitCode: !ok && call.relatedTests ? null : exitCode,
             at: now(),
           });
         }
@@ -327,6 +316,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
       for (const call of calls)
         noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+    },
+    lost(runId, command) {
+      const calls = new Set<StartedCall>();
+      for (const [id, call] of started) {
+        if (call.runId !== runId || !call.matched.includes(command)) continue;
+        started.delete(id);
+        calls.add(call);
+      }
+      for (const call of calls)
+        noteDrop(runId, "session-lost", call.matched, call.head, call.command);
+      return calls.size > 0;
     },
     drops(runId) {
       return dropped.get(runId) ?? [];

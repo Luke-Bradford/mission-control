@@ -37,6 +37,14 @@ export function compactAttentionItem(i: AttentionItem): AttentionCompactItem {
 declare const NEEDS_YOU: unique symbol;
 
 /**
+ * Whether the operator has answered this item: its chosen option was applied and the item is read.
+ * A changed source is unread again, so it is no longer answered.
+ */
+export function answeredItem(i: AttentionItem): boolean {
+  return i.acked && i.brief?.choice?.state === "applied";
+}
+
+/**
  * `needsYouItems` output, and only that: a function that takes `NeedsYou` (the Board's
  * `cardNeeds`, `needsMe`) is handed the canonical set, never a raw or session-narrowed list.
  */
@@ -54,7 +62,7 @@ export type NeedsYou = readonly AttentionItem[] & { readonly [NEEDS_YOU]: true }
 export function needsYouItems(items: readonly AttentionItem[] | undefined): NeedsYou {
   const seen = new Set<string>();
   return (items ?? []).filter((i) => {
-    if (!isOperatorItem(i) || seen.has(i.key)) return false;
+    if (!isOperatorItem(i) || answeredItem(i) || seen.has(i.key)) return false;
     seen.add(i.key);
     return true;
   }) as unknown as NeedsYou;

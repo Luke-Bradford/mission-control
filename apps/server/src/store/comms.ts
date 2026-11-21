@@ -52,7 +52,7 @@ export function cutCommsText(text: string): string {
     : text;
 }
 
-/** The queries over the comms, comms_reads and comms_repeats tables (and the tables they join). */
+/** The queries over the comms and comms_reads tables (and the tables they join). */
 export class CommsQueries {
   private readonly db: DatabaseSync;
   private readonly host: CommsHost;
@@ -151,9 +151,6 @@ export class CommsQueries {
         if (same !== undefined) {
           id = same.id;
           repeat = true;
-          this.db
-            .prepare("INSERT INTO comms_repeats (at, from_id, to_id, message_id) VALUES (?,?,?,?)")
-            .run(row.at, row.from, row.to, same.id);
           return;
         }
       }
@@ -187,15 +184,6 @@ export class CommsQueries {
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
     return stored !== null && repeat ? { ...stored, repeat: true } : stored;
-  }
-
-  /** How many exact repeats of a stored message were turned away at or after `since`. */
-  commsRepeatCount(since: number): number {
-    return (
-      this.db.prepare("SELECT COUNT(*) AS n FROM comms_repeats WHERE at >= ?").get(since) as {
-        n: number;
-      }
-    ).n;
   }
 
   /** Opens one durable FLIGHT-facing note when a pair first crosses the rolling chatter limit. */
@@ -629,6 +617,16 @@ export class CommsQueries {
       AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`)
       .get(flightId, COMMS_CAPCOM) as Row;
     return row.at as number | null;
+  }
+
+  /** When FLIGHT sent the operator a message of its own (not a hub notice), oldest first. */
+  flightOperatorMessageTimes(flightId: string): number[] {
+    const rows = this.db
+      .prepare(`SELECT at FROM comms WHERE from_id = ? AND to_id = ? AND sender_kind IS NOT 'hub'
+      AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'
+      ORDER BY at`)
+      .all(flightId, COMMS_CAPCOM) as Row[];
+    return rows.map((r) => r.at as number);
   }
 
   flightConversationUnread(

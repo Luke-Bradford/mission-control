@@ -11,6 +11,7 @@ import { collectFlow } from "../src/collectors/flow.ts";
 import { type Gql, GqlError, makeGql } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
+import { telemetry } from "../src/telemetry/telemetry.ts";
 
 const NOW = Date.parse("2026-10-18T12:00:00Z");
 const DAY = 86_400_000;
@@ -148,9 +149,14 @@ describe("collectFlow issues", () => {
         repoId: "shop-app",
         number: 1,
         size: null,
+        title: "t1",
         startAt: Date.parse(at(3)),
         doneAt: null,
       },
+    ]);
+    expect(store.flowColumnMoves()).toEqual([
+      { repoId: "shop-app", number: 1, at: Date.parse(at(3)), column: "Ready" },
+      { repoId: "shop-app", number: 1, at: Date.parse(at(2)), column: "In progress" },
     ]);
   });
 
@@ -166,9 +172,100 @@ describe("collectFlow issues", () => {
       repoId: "shop-app",
       number: 1,
       size: null,
+      title: "t1",
       startAt: Date.parse(at(3)),
       doneAt: null,
     });
+  });
+
+  it("keeps a recent In progress -> Backlog transition for telemetry across collections", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+    ]);
+    await run(stub({ 1: timeline(ev("In Progress", 2)) }).gql);
+
+    store.replaceBoard("shop-app", [
+      board(1, { status: "Backlog", state: "planned", closed: false }),
+    ]);
+    await run(stub({ 1: timeline(ev("In Progress", 2), ev("Backlog", 1)) }).gql);
+
+    expect(store.flowColumnMoves()).toEqual([
+      { repoId: "shop-app", number: 1, at: Date.parse(at(2)), column: "In progress" },
+      { repoId: "shop-app", number: 1, at: Date.parse(at(1)), column: "Backlog" },
+    ]);
+    const series = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "6h",
+      NOW,
+      { agent: null, account: null },
+    ).series?.ticketsInProgress;
+    expect(series?.find((point) => point.day === "2026-10-16")?.tickets).toBe(1);
+    expect(series?.find((point) => point.day === "2026-10-17")?.tickets).toBe(0);
+  });
+
+  it("keeps an In progress entry before the window as telemetry's opening state", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+    ]);
+    await run(stub({ 1: timeline(ev("In Progress", FLOW_DAYS + 1)) }).gql);
+
+    expect(store.flowColumnMoves()).toEqual([
+      {
+        repoId: "shop-app",
+        number: 1,
+        at: Date.parse(at(FLOW_DAYS + 1)),
+        column: "In progress",
+      },
+    ]);
+    const series = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "6h",
+      NOW,
+      { agent: null, account: null },
+    ).series?.ticketsInProgress;
+    expect(series?.every((point) => point.tickets === 1)).toBe(true);
+  });
+
+  it("fills recent history for a ticket already returned to Backlog on the first collection", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+      board(2, { status: "Backlog", state: "planned", closed: false }),
+    ]);
+    await run(
+      stub({
+        1: timeline(ev("In Progress", 5)),
+        2: timeline(ev("In Progress", 4), ev("Backlog", 1)),
+      }).gql,
+    );
+
+    const series = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "6h",
+      NOW,
+      { agent: null, account: null },
+    ).series?.ticketsInProgress;
+    expect(series?.find((point) => point.day === "2026-10-15")?.tickets).toBe(2);
   });
 
   it("clears an earlier Done timestamp when a ticket is active again", async () => {
@@ -183,6 +280,7 @@ describe("collectFlow issues", () => {
       repoId: "shop-app",
       number: 1,
       size: null,
+      title: "t1",
       startAt: Date.parse(at(3)),
       doneAt: null,
     });
@@ -205,6 +303,7 @@ describe("collectFlow issues", () => {
         repoId: "shop-app",
         number: 1,
         size: "M",
+        title: "t1",
         startAt: Date.parse(at(5)),
         doneAt: Date.parse(at(1)),
       },
@@ -236,10 +335,59 @@ describe("collectFlow issues", () => {
     const { gql } = stub({ 1: timeline(ev("Backlog", 5), ev("Done", 1)) });
     await run(gql);
     expect(store.flowIssues(since)).toEqual([
-      { repoId: "shop-app", number: 1, size: null, startAt: null, doneAt: Date.parse(at(1)) },
+      {
+        repoId: "shop-app",
+        number: 1,
+        size: null,
+        title: "t1",
+        startAt: null,
+        doneAt: Date.parse(at(1)),
+      },
     ]);
     expect(status()).toMatchObject({ ok: true });
     expect(status()?.error).toContain("1 done issue(s) without a start");
+  });
+
+  it("keeps a done ticket's row, with its title, after its card leaves the board", async () => {
+    store.replaceBoard("shop-app", [board(1)]);
+    const { gql } = stub({ 1: timeline(ev("Ready", 5), ev("Done", 1)) });
+    await run(gql);
+
+    store.replaceBoard("shop-app", []);
+    await run(gql);
+
+    expect(store.flowIssues(since)).toEqual([
+      {
+        repoId: "shop-app",
+        number: 1,
+        size: null,
+        title: "t1",
+        startAt: Date.parse(at(5)),
+        doneAt: Date.parse(at(1)),
+      },
+    ]);
+  });
+
+  it("fills a stored done row's missing title from GitHub once its card is gone", async () => {
+    store.replaceFlow(
+      "shop-app",
+      [{ repoId: "shop-app", number: 7, size: "S", startAt: NOW - 5 * DAY, doneAt: NOW - DAY }],
+      [],
+    );
+    const { gql } = stub({ 7: { title: "Fetched title", ...timeline() } });
+
+    await run(gql);
+
+    expect(store.flowIssues(since)).toEqual([
+      {
+        repoId: "shop-app",
+        number: 7,
+        size: "S",
+        title: "Fetched title",
+        startAt: NOW - 5 * DAY,
+        doneAt: NOW - DAY,
+      },
+    ]);
   });
 
   it("uses the last move into Done and ignores events on another project", async () => {
@@ -281,7 +429,14 @@ describe("collectFlow issues", () => {
         NOW,
       );
       expect(store.flowIssues(since)).toEqual([
-        { repoId: "shop-app", number: 1, size: null, startAt: null, doneAt: Date.parse(at(1)) },
+        {
+          repoId: "shop-app",
+          number: 1,
+          size: null,
+          title: "t1",
+          startAt: null,
+          doneAt: Date.parse(at(1)),
+        },
       ]);
       expect(status()?.error).toContain("1 done issue(s) without a start");
     },

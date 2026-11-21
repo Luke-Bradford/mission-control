@@ -38,7 +38,7 @@ const loopOf = (over: Partial<CrewLoop>): CrewLoop => ({
   phase: "ci",
   text: "CI is running",
   prNumber: 77,
-  parked: null,
+  hold: null,
   ...over,
 });
 
@@ -88,9 +88,16 @@ describe("Loop steps as a list", () => {
       tryAt("review", 1, "parked", { reason: FINDINGS }),
     ];
     const { container } = show(
-      loopOf({ phase: "parked", text: `Blocked: ${FINDINGS}`, parked: FINDINGS }),
+      loopOf({
+        phase: "parked",
+        text: `Blocked: ${FINDINGS}`,
+        hold: { kind: "review", reason: FINDINGS, offSeat: false },
+      }),
       tries,
-      { pushFor: SHA, parked: { kind: "review", reason: FINDINGS, ended: false } },
+      {
+        pushFor: SHA,
+        hold: { kind: "review", reason: FINDINGS, ended: false, worktree: null, wake: false },
+      },
     );
     const text = container.textContent ?? "";
     expect(text).toContain("waiting: 1 finding held on c74cdfc");
@@ -127,7 +134,7 @@ describe("the held step's count and mark", () => {
       loop: {
         phase: "parked",
         pushFor: SHA,
-        parked: { kind: "review", reason: park, ended: false },
+        hold: { kind: "review", reason: park, ended: false, worktree: null, wake: false },
       },
       tries,
       events: [
@@ -138,7 +145,11 @@ describe("the held step's count and mark", () => {
     const { container } = render(
       <LoopSteps
         row={crewRow({
-          loop: loopOf({ phase: "parked", parked: park, text: park }),
+          loop: loopOf({
+            phase: "parked",
+            hold: { kind: "review", reason: park, offSeat: false },
+            text: park,
+          }),
           hudState: "idle",
         })}
         view={view}
@@ -154,9 +165,13 @@ describe("the held step's count and mark", () => {
     const marks = (kind: string, step: LoopTry["step"]) => {
       const tries = [tryAt("working", 1, "pass"), tryAt(step, 1, "parked", { reason: "x" })];
       const { container } = show(
-        loopOf({ phase: "parked", parked: "x", text: "Blocked: x" }),
+        loopOf({
+          phase: "parked",
+          hold: { kind, reason: "x", offSeat: false },
+          text: "Blocked: x",
+        }),
         tries,
-        { pushFor: SHA, parked: { kind, reason: "x", ended: false } },
+        { pushFor: SHA, hold: { kind, reason: "x", ended: false, worktree: null, wake: false } },
       );
       const held = container.querySelector(".vstep.fail, .vstep.warn") as HTMLElement;
       return [held.className, held.querySelector(".tdot")?.textContent];

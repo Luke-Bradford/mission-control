@@ -13,15 +13,13 @@ import {
   crewDetailPath,
   crewSummaryPath,
   dockStreamPath,
+  FLOW_DAYS,
   type FlightLedgerView,
   GUARD_WINDOW_DAYS,
-  type MapPayload,
-  type MapSnapshot,
   type PullRequestView,
   prListPath,
   TOPICS,
   type Topic,
-  unpackMap,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet, apiOperatorGet, openStream, type StreamSource } from "./api.ts";
@@ -31,30 +29,6 @@ export interface Resource<T> {
   data: T | undefined;
   error: Error | null;
   loading: boolean;
-}
-
-/** Preserve unchanged repository-analysis data across a refetch. */
-function shareMap(previous: MapSnapshot | undefined, next: MapSnapshot): MapSnapshot {
-  if (!previous || previous.repoId !== next.repoId) return next;
-  const out = { ...next };
-  for (const key of [
-    "tree",
-    "rules",
-    "imports",
-    "hist",
-    "seats",
-    "findings",
-    "conflicts",
-    "conflictsUnchecked",
-  ] as const) {
-    if (previous[key] === next[key] || JSON.stringify(previous[key]) === JSON.stringify(next[key]))
-      Object.assign(out, { [key]: previous[key] });
-  }
-  return Object.keys(out).every(
-    (key) => out[key as keyof MapSnapshot] === previous[key as keyof MapSnapshot],
-  )
-    ? previous
-    : out;
 }
 
 /**
@@ -78,6 +52,7 @@ const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
 const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
+const PLAN_TOPICS: readonly Topic[] = ["boards", "plans"];
 const FLIGHT_MEMORY_PATH = "/api/flight/memory";
 
 type PageDocument = {
@@ -128,10 +103,6 @@ export const RESOURCES = {
   crewStatus: { path: "/api/crew/status", topic: "agents" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
-  discussion: (key: string, id = ""): ResourceRef => ({
-    path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
-    topic: "attention",
-  }),
   /** One item's conversation: the messages sent from it and their replies, from Comms. */
   itemThread: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/thread`,
@@ -141,6 +112,11 @@ export const RESOURCES = {
   attentionMaterials: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}/materials`,
     topic: "attention",
+  }),
+  /** Plans to sign off and past ones; every repo's when `repoId` is empty. */
+  plans: (repoId = ""): ResourceRef => ({
+    path: `/api/plans${repoId ? `?repoId=${enc(repoId)}` : ""}`,
+    topic: PLAN_TOPICS,
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
   answeredAttention: { path: "/api/attention/answered", topic: "attention" },
@@ -196,23 +172,6 @@ export const RESOURCES = {
       (account === "" ? "" : `&account=${enc(account)}`) +
       (ticket === "" ? "" : `&ticket=${enc(ticket)}`),
     topic: "agents",
-  }),
-  codeHealth: (repo: string, window = "30d", tab = "overview"): ResourceRef => ({
-    path: `/api/code-health?repo=${enc(repo)}&window=${enc(window)}&tab=${enc(tab)}`,
-    topic: ["agents", "boards", "flight", "health"],
-  }),
-  codeHealthEvidence: (repo: string, id: string, cursor = "0"): ResourceRef => ({
-    path: `/api/code-health/evidence/${enc(id)}?repo=${enc(repo)}&cursor=${enc(cursor)}`,
-    topic: null,
-  }),
-  codeHealthHistory: (repo: string, cursor = "0"): ResourceRef => ({
-    path: `/api/code-health/recommendations?repo=${enc(repo)}&cursor=${enc(cursor)}`,
-    topic: ["agents", "flight"],
-  }),
-  /** Where each run's tokens went; read on opening and on Refresh, not on every crew event. */
-  tokenAudit: (days: number): ResourceRef => ({
-    path: `/api/audit/tokens?days=${days}`,
-    topic: null,
   }),
   audit: (range: string): ResourceRef => ({
     path: `/api/audit?range=${enc(range)}`,
@@ -277,6 +236,11 @@ export const RESOURCES = {
     path: prListPath(repoId),
     topic: "boards",
   }),
+  /** One retained PR, including older work which the default list no longer returns. */
+  pr: (repoId: string, number: number): ResourceRef => ({
+    path: `/api/repos/${enc(repoId)}/prs/${number}`,
+    topic: "boards",
+  }),
   // Runs git in the worktree on each fetch, so it is fetched once per visit.
   files: (agentId: string): ResourceRef => ({
     path: `/api/agents/${enc(agentId)}/files`,
@@ -288,12 +252,12 @@ export const RESOURCES = {
     topic: null,
   }),
   escalations: { path: "/api/escalations", topic: "escalations" },
-  /** The branch builds the hub keeps to show; the server drops one when its PR closes. Read once per visit. */
-  designPreviews: { path: "/api/design-previews", topic: null },
   /** Who holds the full-suite lock and who waits; the server emits "guard" when that changes. */
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
   guardHits: { path: `/api/guard/hits?days=${GUARD_WINDOW_DAYS}`, topic: "guard" },
+  /** Guard blocks over the Quality tab's fixed window. */
+  guardHitsFlow: { path: `/api/guard/hits?days=${FLOW_DAYS}`, topic: "guard" },
   accountStatus: { path: "/api/accounts/status", topic: "config" },
   allAccountModels: { path: "/api/accounts/models", topic: "config" },
   accountModels: (id: string): ResourceRef => ({
@@ -308,8 +272,12 @@ export const RESOURCES = {
     path: `/api/boards/${enc(repoId)}/setup`,
     topic: null,
   }),
-  repoMap: (id: string): ResourceRef => ({ path: `/api/repos/${enc(id)}/map`, topic: null }),
   repos: { path: "/api/repos", topic: "config" },
+  /** One repo's rules with where each value comes from (Setup › Roles & guards). */
+  repoRules: (id: string): ResourceRef => ({
+    path: `/api/repos/${enc(id)}/rules`,
+    topic: "config",
+  }),
   repoProfiles: { path: "/api/repos/profiles", topic: "boards" },
   health: { path: "/api/health", topic: "health" },
   // Run-derived: refetched when runs change.
@@ -352,7 +320,7 @@ export const RESOURCES = {
     path: `/api/agents/${enc(agentId)}/runs?limit=${RUNS_LIMIT}`,
     topic: "agents",
   }),
-  /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.aside` is set while it is off its seat. */
+  /** A run's loop (`RunLoopView`: loop, events, tries, round, budget, review); `loop.hold` says why it waits. */
   runHandoff: (runId: string): ResourceRef => ({
     path: `/api/runs/${enc(runId)}/handoff`,
     topic: "agents",
@@ -378,8 +346,6 @@ export const ACTIONS = {
     seatId === null
       ? `/api/flight/orders/${id}/revoke`
       : `/api/seats/${enc(seatId)}/instructions/${id}/revoke`,
-  codeHealthDecision: (repo: string, id: string) =>
-    `/api/code-health/recommendations/${enc(id)}?repo=${enc(repo)}`,
   /** Body `{ pr }`; starts a branch preview and returns its URL. */
   startPreview: "/api/previews",
   /** Body `{ base, profile }`; returns the refreshed template profiles. */
@@ -408,6 +374,8 @@ export const ACTIONS = {
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{ briefId, sourceRevision, optionId, requestId }`; answers a `BriefChoiceReceipt`. */
+  briefChoice: (key: string) => `/api/attention/${enc(key)}/choice`,
   /** Body `{ optionId, briefAt }`; answers a `ChoiceReceipt`. */
   choose: (key: string) => `/api/attention/${enc(key)}/choose`,
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */
@@ -424,14 +392,21 @@ export const ACTIONS = {
   /** Atomically writes a new/converted repo, its setup fields and optional empty crew session. */
   onboardRepo: "/api/repos/onboard",
   /** Body `{ defaultAccountId, guidance }`; saves a repo card's configuration. */
+  approvePlan: (repoId: string, issue: number | string) =>
+    `/api/plans/${enc(repoId)}/${issue}/approve`,
+  /** Body `{ note }`. */
+  sendBackPlan: (repoId: string, issue: number | string) =>
+    `/api/plans/${enc(repoId)}/${issue}/send-back`,
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
+  /** Body `{ base, rules }`; saves the editable repo rules. */
+  repoRules: (repoId: string) => `/api/repos/${enc(repoId)}/rules`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */
   boardSetup: (repoId: string) => RESOURCES.boardSetup(repoId).path,
   /** Body `{ accountId }`; answers resumed, fresh or refused with a reason. */
   seatTransfer: (seatId: string) => `/api/seats/${enc(seatId)}/transfer`,
   /** Body `{ issue }`, or `{}` for FLIGHT; answers `{ runId, branch? }`. */
   seatStart: (seatId: string) => `/api/seats/${enc(seatId)}/start`,
-  /** Body `{ text, interrupt? }`. */
+  /** Body `{ text, interrupt?, question?, itemKey?, choice? }`; `choice` is a picked option: `{ briefAt, option }`. */
   seatMessage: (seatId: string) => `/api/seats/${enc(seatId)}/message`,
   /** Body `{}`. */
   seatInterrupt: (seatId: string) => `/api/seats/${enc(seatId)}/interrupt`,
@@ -518,26 +493,12 @@ interface Entry {
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
 /** Only PR flow needs a protected JSON read. */
-const mapSnapshots = new Map<string, MapSnapshot>();
-const readResource = async <T>(path: string): Promise<T> => {
-  if (/^\/api\/repos\/[^/]+\/map$/.test(path)) {
-    const next = shareMap(
-      mapSnapshots.get(path),
-      unpackMap(await apiGet<MapPayload | MapSnapshot>(path)),
-    );
-    if (mapSnapshots.size >= 16 && !mapSnapshots.has(path))
-      mapSnapshots.delete(mapSnapshots.keys().next().value as string);
-    mapSnapshots.set(path, next);
-    return next as T;
-  }
-  return path === RESOURCES.prFlow.path ||
-    path === RESOURCES.dependencies.path ||
-    path === RESOURCES.designPreviews.path ||
-    /^\/api\/attention\/[^/]+\/materials$/.test(path) ||
-    path.startsWith("/api/code-health")
+const readResource = async <T>(path: string): Promise<T> =>
+  path === RESOURCES.prFlow.path ||
+  path === RESOURCES.dependencies.path ||
+  /^\/api\/attention\/[^/]+\/materials$/.test(path)
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);
-};
 
 class Hub {
   private readonly entries = new Map<string, Entry>();
@@ -545,22 +506,6 @@ class Hub {
   private generation = 0;
   /** Stamps each request as it starts, so answers can be told apart by age. */
   private seq = 0;
-
-  /** A new tree must not retain every older analysis graph for the lifetime of the HUD. */
-  private pruneGraphs(): void {
-    const unused = [...this.entries.values()].filter(
-      (e) =>
-        /^\/api\/repos\/[^/]+\/map\/graph\?key=/.test(e.path) &&
-        e.listeners.size === 0 &&
-        e.settledListeners.size === 0 &&
-        !e.inflight &&
-        !e.queued &&
-        !e.again &&
-        !e.fullAgain,
-    );
-    for (const entry of unused.slice(0, Math.max(0, unused.length - 16)))
-      this.entries.delete(entry.path);
-  }
 
   private entry(path: string, topic: Topic | readonly Topic[] | null): Entry {
     let e = this.entries.get(path);
@@ -577,7 +522,6 @@ class Hub {
         settledListeners: new Set(),
       };
       this.entries.set(path, e);
-      if (path.includes("/map/graph?key=")) this.pruneGraphs();
     }
     return e;
   }
@@ -610,14 +554,12 @@ class Hub {
     e.settledListeners.add(fn);
     return () => {
       e.settledListeners.delete(fn);
-      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
     };
   }
 
   private settle(e: Entry): void {
     e.settled++;
     for (const fn of [...e.settledListeners]) fn();
-    if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
   }
 
   subscribe(path: string, topic: Topic | readonly Topic[] | null, fn: () => void): () => void {
@@ -629,7 +571,6 @@ class Hub {
     }
     return () => {
       e.listeners.delete(fn);
-      if (e.path.includes("/map/graph?key=")) this.pruneGraphs();
       if (e.listeners.size === 0) {
         clearTimeout(e.activityTimer);
         e.activityTimer = undefined;
@@ -838,7 +779,6 @@ class Hub {
    * unless `refetch` is false (a switch between Live and Demo: the new tree fetches for itself).
    */
   clear({ refetch = true }: { refetch?: boolean } = {}): void {
-    mapSnapshots.clear();
     this.generation++;
     for (const e of this.entries.values()) {
       e.inflight = false;

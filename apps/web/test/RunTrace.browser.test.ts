@@ -25,7 +25,7 @@ const tries: LoopTry[] = STEPS.map((step, index) => ({
 // A finished run with every section present: edges, timeline, events, tokens, caps and next.
 const view: RunLoopView = {
   runId: RUN,
-  loop: { phase: "review", ciFails: 1, parked: null } as RunLoopView["loop"] & object,
+  loop: { phase: "review", ciFails: 1, hold: null } as RunLoopView["loop"] & object,
   events: [
     ...tries.map((try_, index) => ({
       key: `e${index}`,
@@ -116,7 +116,16 @@ describeRendered("Run Trace, rendered", () => {
           tabs.x + tabs.width + 0.5,
         );
       }
-      expect(tabs.x + tabs.width, "tabs run under the meters").toBeLessThanOrEqual(status.x + 0.5);
+      const sharesRow = tabs.y < status.y + status.height && tabs.y + tabs.height > status.y;
+      if (sharesRow) {
+        expect(tabs.x + tabs.width, "tabs run under the meters").toBeLessThanOrEqual(
+          status.x + 0.5,
+        );
+      } else {
+        expect(status.y, "the status row sits below the page tabs").toBeGreaterThanOrEqual(
+          tabs.y + tabs.height - 0.5,
+        );
+      }
       expect(await page.unclipped(".top .tabs"), "the tabs scroll sideways").not.toContain(false);
       // The trace uses the panel: its grid reaches the panel body's right edge to within a gutter.
       if (width >= 1600) {

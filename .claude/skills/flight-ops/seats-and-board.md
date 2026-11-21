@@ -5,9 +5,9 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 ## Free developer seats
 
 - **Draft workspace:** start eligible tickets with `mc start_seat`.
-- **Merge workspace:** the hub deals Ready work to idle seats. It never deals to a seat in `error`, stopped or paused; an errored seat is yours to start. Your part is to promote complete tickets (`mc promote`), and to start an idle planner on complete Size M, L or XL tickets that have no plan.
+- **Merge workspace:** the hub deals Ready work to idle seats. It never deals to a seat in `error`, stopped or paused; an errored seat is yours to start. Your part is to promote the complete tickets the working list allows (`mc promote`), and to start an idle planner on complete Size M, L or XL tickets that have no plan.
 - **Triage the board:** triage the digest's `triage` list (new Backlog and Refinement tickets, finished plans, resolved dependencies), including when Ready is empty.
-- **Choosing work:** the order is in `roles/FLIGHT.md` (Each wake, step 4): the pinned working list, then milestone where tickets have one, then Priority, oldest first within a Priority. Size never keeps a complete ticket out; M, L or XL with no plan go to the planner first. `mc list_tickets` does not show milestones; read them with `mc gh_read` when the board uses them. Match the ticket's one area label to the seat's area. Keep `research` tickets out of developer seats.
+- **Choosing work:** the order is in `roles/FLIGHT.md` (Each wake, step 5): the pinned working list and only what it allows; in a repo with no working list, milestone where tickets have one, then Priority, oldest first within a Priority. A seat with nothing it may start stays idle. Size never keeps a complete ticket out; M, L or XL with no plan go to the planner first. `mc list_tickets` does not show milestones; read them with `mc gh_read` when the board uses them. Match the ticket's one area label to the seat's area. Keep `research` tickets out of developer seats.
 - **Readiness:** a `## Plan` heading or a Ready column is not enough. Check the requirements, size and done-when.
 - **Controller check:** if a done-when item needs evidence from a running hub, add it with `mc add_controller_check` before promoting (`mc edit_issue` refuses that section); you produce it at merge (`stalls.md`).
   - How a controller-check park behaves: `stalls.md`.
@@ -16,8 +16,8 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 ## Dependencies
 
 - Read every `Depends on` reference, and hold the ticket until that work has merged. A closed issue doesn't prove it merged.
-- Hold a Ready or Refinement ticket behind an unmerged PR with `mc promote { issue, to: "Backlog", waits_on: <PR number>, basis }`. Leave a Backlog ticket where it is.
-- The hub wakes you when that PR merges or closes. When it merged, promote the held ticket again in that wake. When it closed unmerged, re-plan the ticket or keep it in Backlog.
+- Move a Ready or Refinement ticket that waits on an unmerged PR back with `mc promote { issue, to: "Backlog", basis }`, and give it a `Depends on` line. Leave a Backlog ticket where it is.
+- When that PR merges, promote the waiting ticket again in that wake. When it closed unmerged, re-plan the ticket or keep it in Backlog.
 - How to write a `Depends on` line: `tickets.md`.
 
 ## Lanes

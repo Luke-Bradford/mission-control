@@ -148,3 +148,73 @@ it("a card with an agent on it opens the ticket page, not the agent", () => {
   fireEvent.click(container.querySelector(".ktitle") as Element);
   expect(window.location.pathname).toBe(ticketPath("shop-app", 3349));
 });
+
+it("an idle card shows its idle line in place of the no-PR and no-reviewer lines", () => {
+  render(
+    <Card
+      item={boardItem({ status: "In review" })}
+      showRepo={false}
+      agent={null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={null}
+      idle="Nobody on it since 15 Oct"
+      mine={false}
+      unacked={false}
+      outcome="Closed"
+      when=""
+      statusOutOfDate={null}
+      you={null}
+    />,
+  );
+  expect(screen.getByText("Nobody on it since 15 Oct")).toBeTruthy();
+  expect(screen.queryByText("No PR yet")).toBeNull();
+  expect(screen.queryByText("No reviewer on it now")).toBeNull();
+});
+
+it("a card whose PR is closed shows the idle line, not a bare Closed badge", () => {
+  render(
+    <Card
+      item={boardItem({ status: "Blocked" })}
+      showRepo={false}
+      agent={null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={prView({ state: "closed" })}
+      idle="PR closed, nothing open"
+      mine={false}
+      unacked={false}
+      outcome="Closed"
+      when=""
+      statusOutOfDate={null}
+      you={null}
+    />,
+  );
+  expect(screen.getByText("PR closed, nothing open")).toBeTruthy();
+  expect(screen.queryByText("Closed")).toBeNull();
+});
+
+it("a card whose only PR is merged shows the PR and says nobody is on it", () => {
+  render(
+    <Card
+      item={boardItem({ status: "In progress" })}
+      showRepo={false}
+      agent={null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={prView({ state: "merged" })}
+      idle="Nobody on it since 15 Oct"
+      mine={false}
+      unacked={false}
+      outcome="Merged"
+      when=""
+      statusOutOfDate={null}
+      you={null}
+    />,
+  );
+  expect(screen.getByText("Nobody on it since 15 Oct")).toBeTruthy();
+  expect(screen.getByText("Merged")).toBeTruthy();
+});

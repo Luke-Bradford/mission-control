@@ -464,6 +464,8 @@ export const readyHardRuleText = (ref: string, pr: number, paths: readonly strin
   `${ref}: PR #${pr} passed every check but touches hard-rule files (${paths.join(", ")}); merge it yourself`;
 export const headMovedText = (ref: string, pr: number, head: string, pushed: string): string =>
   `${ref}: PR #${pr}'s head ${head.slice(0, 7)} is not the commit Mission Control pushed (${pushed.slice(0, 7)}); it is not reviewed, so check it before merging`;
+export const reviewHeldParkText = (retro: string, sha: string, round: number): string =>
+  `${retro}'s review of ${sha.slice(0, 7)} is held: the change is past its review rounds (round ${round}); FLIGHT decides`;
 export const reviewParkText = (
   retro: string,
   sha: string,
@@ -613,7 +615,7 @@ export const minorIssueFailedText = (pr: number, why: string): string =>
 /** What of the author run's loop decides whether a reviewed PR can merge. */
 export type ReviewCheckLoop = Pick<
   RunLoop,
-  "mergeHold" | "uat" | "awaitingFlight" | "controllerCheck" | "phase" | "parked"
+  "mergeHold" | "uat" | "awaitingFlight" | "controllerCheck" | "phase" | "hold"
 >;
 
 /** Who holds a reviewed PR back from merging, or null when nothing does. */
@@ -622,7 +624,7 @@ function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
   const held = (by: "FLIGHT" | "CAPCOM" | "operator" | "hub"): ReviewCheckState => ({
     kind: "held",
     by,
-    ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
+    ...(loop.hold?.reason ? { reason: loop.hold.reason } : {}),
   });
   if (loop.controllerCheck && !loop.controllerCheck.pass) return held("FLIGHT");
   if (loop.uat && !loop.uat.accepted) return held("operator");
@@ -668,7 +670,7 @@ export function reviewCheckOf(
         ? {
             kind: "held",
             by: "hub",
-            ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
+            ...(loop.hold?.reason ? { reason: loop.hold.reason } : {}),
           }
         : { kind: "queued", position: queueAhead + 1 };
     default:

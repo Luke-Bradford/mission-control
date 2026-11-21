@@ -240,6 +240,43 @@ export function telemetry(
   }
   const throughput = days.map((day) => ({ day, merged: perDay.get(day) ?? 0 }));
 
+  // Each stored column move gives a ticket's state from that point onward. We do not infer a
+  // state before the first recorded move, so days without history stay visibly unknown.
+  const moves = store.flowColumnMoves().filter((move) => move.at <= now);
+  const dayStarts = [dayStart];
+  while (dayStarts.length < CYCLE_TIME_DAYS) {
+    dayStarts.unshift(startOfLocalDay((dayStarts[0] as number) - 1, tz));
+  }
+  const ticketColumns = new Map<string, string>();
+  let moveIndex = 0;
+  let inProgress = 0;
+  const ticketsInProgress: NonNullable<TelemetrySeries["ticketsInProgress"]> = days.map(
+    (day, index) => {
+      const live = index === days.length - 1;
+      const end = live ? now : (dayStarts[index + 1] as number);
+      while (
+        moveIndex < moves.length &&
+        ((moves[moveIndex]?.at ?? Infinity) < end || (live && moves[moveIndex]?.at === end))
+      ) {
+        const move = moves[moveIndex] as (typeof moves)[number];
+        const ticket = `${move.repoId}#${move.number}`;
+        const wasInProgress = ticketColumns.get(ticket) === "In progress";
+        const isInProgress = move.column === "In progress";
+        if (wasInProgress !== isInProgress) inProgress += isInProgress ? 1 : -1;
+        ticketColumns.set(ticket, move.column);
+        moveIndex += 1;
+      }
+      const firstMove = moves[0]?.at;
+      return {
+        day,
+        tickets:
+          firstMove === undefined || firstMove > end || (!live && firstMove === end)
+            ? null
+            : inProgress,
+      };
+    },
+  );
+
   const flowSince = now - CYCLE_TIME_DAYS * DAY_MS;
   const bySize = new Map<string, number[]>();
   let excluded = 0;
@@ -323,8 +360,37 @@ export function telemetry(
     commitsPerRun:
       commitRuns.length === 0
         ? null
-        : commitRuns.reduce((sum, r) => sum + store.runCommits(r.id).length, 0) / commitRuns.length,
+        : commitRuns.reduce((sum, r) => sum + store.authoredCommitCount(r.id), 0) /
+          commitRuns.length,
   };
+
+  // Daily counts over the same window as the ticket series, whatever range was asked for.
+  const dayIndex = new Map(days.map((day, index) => [day, index]));
+  const quality14: NonNullable<Telemetry["quality14"]> = days.map((day) => ({
+    day,
+    ciPrs: 0,
+    ciGreenPrs: 0,
+    reviewedPrs: 0,
+    firstPassPrs: 0,
+    roundsSum: 0,
+  }));
+  for (const p of ciKnown) {
+    if (p.mergedAt > now) continue;
+    const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
+    if (!entry) continue;
+    entry.ciPrs += 1;
+    if (p.firstPushCi === "passing") entry.ciGreenPrs += 1;
+  }
+  for (const p of prs) {
+    if (p.mergedAt === null || p.mergedAt > now) continue;
+    const key = `${p.repoId}#${p.number}`;
+    const rvs = reviewsByPr.get(key);
+    const entry = quality14[dayIndex.get(dayOf(p.mergedAt)) ?? -1];
+    if (!rvs || !entry || !mergedKeys.has(key)) continue;
+    entry.reviewedPrs += 1;
+    if (firstPass.includes(rvs)) entry.firstPassPrs += 1;
+    entry.roundsSum += Math.max(...rvs.map((r) => r.round));
+  }
 
   const throughputBucketMs = rangeMs <= DAY_MS ? HOUR_MS : DAY_MS;
   const throughputPoints = Array.from(
@@ -434,14 +500,27 @@ export function telemetry(
     const lockWaits = lockRuns
       .filter((l) => l.seatId === agent.id)
       .map((l): Interval => [Math.max(dayStart, l.queuedAt), Math.min(now, l.startedAt)]);
-    const waits = [
-      ...lockWaits,
-      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["ready", "review"]),
-    ];
-    const blocked = [
-      ...questions,
-      ...store.telemetryNoteIntervals(agent.id, dayStart, now, ["blocked"]),
-    ];
+    // A note speaks for the seat only while its own run is the seat's current one: from that
+    // run's start until it ends or the seat starts another run after the note opened (a run
+    // woken from aside keeps its first start, so the note's own opening is the mark). A set-aside
+    // run is off the seat, so its note, open for days, must not hide the seat's live state.
+    const noteIntervals = (kinds: string[]): Interval[] =>
+      store.telemetryNoteEpisodes(agent.id, dayStart, now, kinds).flatMap((e): Interval[] => {
+        const owner = e.runId === null ? null : store.run(e.runId);
+        if (owner === null) return [e.interval];
+        if (owner.loop?.hold?.worktree) return [];
+        const clipped: Interval = [
+          Math.max(e.interval[0], owner.startedAt),
+          Math.min(
+            e.interval[1],
+            store.nextRunStart(agent.id, Math.max(owner.startedAt, e.openedAt)) ?? Infinity,
+            owner.endedAt ?? Infinity,
+          ),
+        ];
+        return clipped[0] < clipped[1] ? [clipped] : [];
+      });
+    const waits = [...lockWaits, ...noteIntervals(["ready", "review"])];
+    const blocked = [...questions, ...noteIntervals(["blocked"])];
     // Ordinary loop transitions are not recorded. Bound carried state by run activity,
     // using the same foreground/background silence threshold as the HUD.
     const active = runs
@@ -480,7 +559,12 @@ export function telemetry(
       const overlaps = (intervals: Interval[]) =>
         intervals.some(([start, end]) => start < b && end > a);
       const recordedAt = events[eventIndex - 1]?.at ?? -Infinity;
-      const supported = active.some(([start, end]) => start <= recordedAt && start < b && end > a);
+      // A crew seat records every state change, so its last event still holds while any run is
+      // active, even a run (a resume, a later attempt) that began after that event. A loop's
+      // ordinary transitions are not recorded, so its event must predate the run it supports.
+      const supported = active.some(
+        ([start, end]) => (agent.kind === "crew" || start <= recordedAt) && start < b && end > a,
+      );
       const carried = state !== null && state !== "idle" && !supported ? "idle" : state;
       const category =
         overlaps(blocked) ||
@@ -669,8 +753,10 @@ export function telemetry(
     }),
   );
 
+  // Always the last CYCLE_TIME_DAYS days, whatever the range: the Throughput tab's cycle-time chart
+  // and Tickets table draw 14 days of tickets.
   const tickets: TelemetrySeries["tickets"] = store
-    .flowIssues(since)
+    .flowIssues(flowSince)
     .filter((issue) => issue.doneAt === null || issue.doneAt <= now)
     .map((issue) => {
       const ticket = `${issue.repoId}#${issue.number}`;
@@ -682,6 +768,8 @@ export function telemetry(
           .sort((a, b) => a - b)[0] ?? null;
       return {
         ticket,
+        title: issue.title ?? store.boardItem(issue.repoId, issue.number)?.title ?? null,
+        size: issue.size,
         readyAt: issue.startAt,
         startedAt: store.ticketStartedAt(ticket),
         mergedAt,
@@ -714,6 +802,7 @@ export function telemetry(
     quota: chartQuota,
     tickets,
     throughput: throughputPoints,
+    ticketsInProgress,
     quality: qualityPoints,
     annotations,
   };
@@ -866,6 +955,7 @@ export function telemetry(
     throughput,
     cycleTime,
     quality,
+    quality14,
     tokensPerMinute,
     liveMinutes,
     utilisation,

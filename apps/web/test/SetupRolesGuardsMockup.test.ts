@@ -43,7 +43,6 @@ const PAGES = [
   "Board",
   "Agent",
   "Trace",
-  "Map",
   "Comms",
   "QA",
   "Telemetry",
@@ -224,7 +223,7 @@ describe("Setup Roles & guards mockup", () => {
     expect(rows.map((r) => r.querySelector(".rule")?.textContent)).toEqual(
       Object.values(GUARD_RULES),
     );
-    expect(rows).toHaveLength(13);
+    expect(rows).toHaveLength(11);
     expect(document.querySelector("#guard")?.textContent).toContain(GUARD_NOTE);
     expect(document.querySelector("#guard")?.textContent).toContain(
       "Hard stops in code · refusals in the last 7 days",

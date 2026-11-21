@@ -5,6 +5,7 @@ import {
   AUDIT_TICKET_TEXT_FLOOR,
   type AuditImprovement,
   type AuditThresholds,
+  COMMS_CAPCOM,
   COMMS_CONTROLLER,
 } from "@mc/core";
 
@@ -81,14 +82,27 @@ export function messageImprovements(
     return (c?.ticket as string | undefined) ?? null;
   };
 
-  // The operator's first reply to a question was a question.
+  // The operator's first reply to a question was a question: from the shared thread's operator
+  // messages, or an older per-item discussion; the earliest of the two counts.
+  const firstReply = new Map<string, { text: string; at: number }>();
+  const note = (key: string, text: string, at: number) => {
+    const seen = firstReply.get(key);
+    if (seen === undefined || at < seen.at) firstReply.set(key, { text, at });
+  };
   for (const d of all("SELECT item_key, messages FROM item_discussions")) {
     const first = (JSON.parse(d.messages as string) as { role: string; text: string; at: number }[])
       .filter((m) => m.role === "operator")
       .sort((a, b) => a.at - b.at)[0];
-    if (first === undefined || first.at < since || first.at > until) continue;
+    if (first !== undefined) note(d.item_key as string, first.text, first.at);
+  }
+  for (const m of all(
+    "SELECT item_key, text, at FROM comms WHERE item_key IS NOT NULL AND from_id = ? ORDER BY at, id",
+    COMMS_CAPCOM,
+  ))
+    note(m.item_key as string, m.text as string, m.at as number);
+  for (const [key, first] of firstReply) {
+    if (first.at < since || first.at > until) continue;
     if (!first.text.trim().endsWith("?")) continue;
-    const key = d.item_key as string;
     out.push({
       kind: "question-asked-back",
       subject: key,
@@ -189,22 +203,6 @@ export function messageImprovements(
       pr: null,
       detail: `${c.from} and ${c.to} went ${c.rounds} rounds on one ticket.`,
       at: until,
-    });
-  }
-
-  // The same message sent more than once (the exact-repeat guard's count).
-  for (const r of all(
-    `SELECT p.message_id, COUNT(*) AS n, MAX(p.at) AS at FROM comms_repeats p
-     WHERE p.at >= ? AND p.at <= ? GROUP BY p.message_id ORDER BY p.message_id`,
-    since,
-    until,
-  )) {
-    out.push({
-      kind: "repeat-message",
-      subject: `comms:${r.message_id as number}`,
-      ...commsLink(r.message_id as number),
-      detail: `The same message was sent ${(r.n as number) + 1} times; the hub stored it once.`,
-      at: r.at as number,
     });
   }
 

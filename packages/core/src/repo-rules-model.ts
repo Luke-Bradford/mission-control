@@ -1,4 +1,5 @@
 /** Shared data and helpers; independent of domain control flow. */
+import type { PlanSignoff } from "./ticket-plan.ts";
 
 export const REPO_NEEDS = ["done_when", "size"] as const;
 
@@ -17,6 +18,8 @@ export interface RepoRules {
   pickFrom: string[];
   /** Whether the hub may promote Backlog tickets to a pickable status. */
   promoteBacklog: boolean;
+  /** Whether a ticket waits for the operator's sign-off of its plan before it goes to Ready. */
+  planSignoff?: PlanSignoff;
   /** What makes a Backlog ticket complete enough to promote to Ready. */
   needs: RepoNeed[];
   /** Area label → the globs it covers. */

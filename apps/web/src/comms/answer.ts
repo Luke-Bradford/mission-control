@@ -1,4 +1,10 @@
-import type { AttentionItem, BriefOption, ChoiceReceipt, CrewRow, ItemDiscussion } from "@mc/core";
+import type {
+  AttentionItem,
+  BriefChoiceReceipt,
+  BriefOption,
+  ChoiceReceipt,
+  CrewRow,
+} from "@mc/core";
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
@@ -22,17 +28,6 @@ export function answerTarget(
   return { to: "flight" };
 }
 
-/** The line that tells FLIGHT which item a message is about. */
-export function itemLead(key: string, about: string): string {
-  // one line, so the item's conversation can drop it at the first blank line
-  const line = about.replace(/\s+/g, " ").trim();
-  return line === "" ? `Re: ${key}` : `Re: ${key} · ${line}`;
-}
-
-export function flightText(key: string, about: string, body: string): string {
-  return `${itemLead(key, about)}\n\n${body}`;
-}
-
 /** The question id behind an `ask:<id>` item, or null for any other kind. */
 export function askedQuestion(key: string): number | null {
   const match = /^ask:(\d+)$/.exec(key);
@@ -42,18 +37,30 @@ export function askedQuestion(key: string): number | null {
 
 const failure = (e: unknown): string => (e instanceof ApiError ? e.message : "server unreachable");
 
-/** Sends `body` to the target. Resolves to an error message to show, or null when it went through. */
+/**
+ * Sends `body` to the target. Resolves to an error message to show, or null when it went through.
+ * `picked` is the option of the item's brief that `body` answers with: the hub stores the pick
+ * with the message, so the FLIGHT thread draws it as the choice.
+ */
 export async function sendAnswer(
   target: AnswerTarget,
   flight: FlightSeat | null,
   item: AttentionItem,
-  about: string,
   body: string,
-  /** False for a picked option: its receipt shows the pick, so the item's conversation does not. */
-  inThread = true,
+  picked?: BriefOption,
 ): Promise<string | null> {
   if (target.to === "github") return null;
-  const thread = inThread ? { itemKey: item.key } : {};
+  // A brief the hub wrote acts through its own buttons: the hub takes no pick for it, so its
+  // option goes as the plain message it always was.
+  const place =
+    picked === undefined || item.brief?.by === "hub"
+      ? -1
+      : (item.brief?.options.indexOf(picked) ?? -1);
+  // The item names the message, so it and every reply show in the one FLIGHT thread beside it.
+  const thread = {
+    itemKey: item.key,
+    ...(item.brief && place >= 0 ? { choice: { briefAt: item.brief.at, option: place } } : {}),
+  };
   try {
     if (target.to === "seat") {
       // Name the question, so the answer reaches the run that asked it even if another run is on the seat now.
@@ -65,27 +72,15 @@ export async function sendAnswer(
     } else {
       // FLIGHT may be stopped: the hub keeps the message and FLIGHT reads it when it starts.
       if (flight === null) return FLIGHT_NO_SEAT;
-      // The item names the message, so it and every reply show in the item's conversation.
-      await apiPost(ACTIONS.seatMessage(flight.id), {
-        text: flightText(item.key, about, body),
-        ...thread,
-      });
+      await apiPost(ACTIONS.seatMessage(flight.id), { text: body, ...thread });
     }
     hub.refetch(RESOURCES.attention.path);
-    hub.refetch(RESOURCES.itemThread(item.key).path);
+    hub.refetchTopic("agents");
     return null;
   } catch (e) {
     return e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e);
   }
 }
-
-/** Item chat is persisted separately from the global FLIGHT conversation. */
-export const askFlight = (
-  key: string,
-  version: string,
-  messageId: string,
-  text: string,
-): Promise<ItemDiscussion> => apiPost(RESOURCES.discussion(key).path, { version, messageId, text });
 
 /** Sets the item aside. Resolves to the server's refusal text to show, or null on success. */
 export async function dismissItem(key: string): Promise<string | null> {
@@ -113,6 +108,60 @@ export function choosable(item: AttentionItem, option: BriefOption): boolean {
   );
 }
 
+/**
+ * The brief and source the server bound `option` to, when it prepared a typed action for it and
+ * the plain choose route would refuse the item: an escalation, or a brief the hub wrote (a hold
+ * or a protected decision). The page sends only these ids; the server holds the action.
+ */
+export function boundChoice(
+  item: AttentionItem,
+  option: BriefOption,
+): { briefId: number; sourceRevision: string } | null {
+  const brief = item.brief;
+  if (!brief || brief.id === undefined || !brief.binding || option.id === undefined) return null;
+  if (item.escalationId === null && brief.by !== "hub") return null;
+  const id = option.id;
+  if (!brief.binding.actions.some((a) => a.optionId === id)) return null;
+  return { briefId: brief.id, sourceRevision: brief.binding.sourceRevision };
+}
+
+/** Whether a receipt means the choice stands (or may yet), so its options stay shut. */
+export const boundChoiceStands = (r: BriefChoiceReceipt): boolean =>
+  r.state !== "refused" && r.state !== "stale";
+
+/**
+ * A fresh request id. crypto.randomUUID is missing on a hub served over plain http from a
+ * non-local address, so fall back to random bytes; the server accepts letters, digits, `:_-`.
+ */
+const requestId = (): string =>
+  typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `req-${Date.now().toString(36)}-${Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+
+/**
+ * Picks `option` through the bound choice route. Resolves to the server's receipt, or the text
+ * of its refusal. A refused or stale receipt comes back as an error so the options stay open.
+ */
+export async function sendBoundChoice(
+  item: AttentionItem,
+  option: BriefOption,
+): Promise<{ receipt: BriefChoiceReceipt } | { error: string }> {
+  const bound = boundChoice(item, option);
+  if (!bound || option.id === undefined) return { error: "That option cannot be picked here." };
+  try {
+    const receipt = await apiPost<BriefChoiceReceipt>(ACTIONS.briefChoice(item.key), {
+      ...bound,
+      optionId: option.id,
+      requestId: requestId(),
+    });
+    hub.refetch(RESOURCES.attention.path);
+    hub.refetchTopic("agents");
+    return boundChoiceStands(receipt) ? { receipt } : { error: receipt.text };
+  } catch (e) {
+    return { error: e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e) };
+  }
+}
+
 /** Picks `option` on the item's brief. Resolves to the server's receipt, or the text of its refusal. */
 export async function sendChoice(
   item: AttentionItem,
@@ -126,6 +175,7 @@ export async function sendChoice(
       briefAt: item.brief.at,
     });
     hub.refetch(RESOURCES.attention.path);
+    hub.refetchTopic("agents");
     return { receipt };
   } catch (e) {
     return { error: e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e) };

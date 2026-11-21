@@ -11,10 +11,9 @@ Read this before you fold work into a ticket or file one. Where this file and `r
 
 ## Otherwise, file one
 
-- File with `mc create_ticket` when no open ticket fits, or when the one it belongs to has started.
+- File with `mc create_ticket` only when Close the ticket in `roles/FLIGHT.md` allows a new ticket and no open ticket fits. A gap in started work goes into that work's PR, not a new ticket.
 - Give an outcome, a reason, what to change and done-when. Done-when holds only what the seat can produce and prove.
 - Put evidence that needs a running hub (a screenshot, repeated CI runs, a live seat start) under `## Controller check`; you produce it at merge.
 - Give one area label and the lane of the machine that should build it. Never add a second area to a ticket.
-- Add `Follows #N` after a started ticket.
 - Add `Depends on #N` whenever the ticket is cut from or builds on an open PR, naming the ticket that PR carries. Use `After PR N` only when no ticket can be identified.
 - Don't write a PR number in a `Depends on` line: the board holds issues only, so the ticket would stay held after the merge.

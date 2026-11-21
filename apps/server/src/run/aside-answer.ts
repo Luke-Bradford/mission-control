@@ -15,6 +15,8 @@ export async function answerAsideQuestion(
   questionId: number,
   from: string,
   text: string,
+  /** Told the stored message's id as soon as it is stored, before the run is woken. */
+  onStored?: (messageId: string) => void,
 ): Promise<void> {
   const target = () => {
     deps.beforeWrite?.();
@@ -26,7 +28,7 @@ export async function answerAsideQuestion(
       question.passedAt === null ||
       !run ||
       run.endedAt !== null ||
-      !run.loop?.aside
+      !run.loop?.hold?.worktree
     )
       throw new AsideAnswerChanged(
         "The preserved question changed or ended; refresh before answering.",
@@ -34,7 +36,7 @@ export async function answerAsideQuestion(
     return { question, run };
   };
   const { question, run } = target();
-  await sendComms(
+  const sent = await sendComms(
     {
       ...deps,
       senderKind: deps.senderKind,
@@ -50,6 +52,7 @@ export async function answerAsideQuestion(
       targetRunId: run.id,
     },
   );
+  onStored?.(sent.id);
   try {
     deps.store.answerQuestion(questionId, deps.now?.() ?? Date.now());
     deps.bus.emit("attention");

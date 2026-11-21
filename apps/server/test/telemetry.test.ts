@@ -342,6 +342,40 @@ describe("flow of work", () => {
     expect(throughput.every((point) => point.at >= NOW - 6 * HOUR && point.at <= NOW)).toBe(true);
   });
 
+  it("serves end-of-day tickets in progress from stored column moves", () => {
+    store.replaceFlow(
+      "shop-app",
+      [],
+      [],
+      [
+        // Ticket 1 enters and leaves on the sixth, then returns on the eighth.
+        { repoId: "shop-app", number: 1, at: at("2026-10-06T09:00:00Z"), column: "In progress" },
+        { repoId: "shop-app", number: 1, at: at("2026-10-06T15:00:00Z"), column: "In review" },
+        { repoId: "shop-app", number: 2, at: at("2026-10-07T09:00:00Z"), column: "In progress" },
+        { repoId: "shop-app", number: 1, at: at("2026-10-08T09:00:00Z"), column: "In progress" },
+        { repoId: "shop-app", number: 3, at: at("2026-10-09T09:00:00Z"), column: "In progress" },
+        { repoId: "shop-app", number: 3, at: at("2026-10-09T15:00:00Z"), column: "Done" },
+      ],
+    );
+
+    expect(tel().series?.ticketsInProgress).toEqual([
+      { day: "2026-10-04", tickets: null },
+      { day: "2026-10-05", tickets: null },
+      { day: "2026-10-06", tickets: 0 },
+      { day: "2026-10-07", tickets: 1 },
+      { day: "2026-10-08", tickets: 2 },
+      { day: "2026-10-09", tickets: 2 },
+      { day: "2026-10-10", tickets: 2 },
+      { day: "2026-10-11", tickets: 2 },
+      { day: "2026-10-12", tickets: 2 },
+      { day: "2026-10-13", tickets: 2 },
+      { day: "2026-10-14", tickets: 2 },
+      { day: "2026-10-15", tickets: 2 },
+      { day: "2026-10-16", tickets: 2 },
+      { day: "2026-10-17", tickets: 2 },
+    ]);
+  });
+
   it("cycle time: p50 and p85 by size in XS S M L XL order then none, and the excluded count", () => {
     const issue = (number: number, size: string | null, days: number | null): FlowIssue => ({
       repoId: "shop-app",
@@ -672,6 +706,8 @@ describe("capacity", () => {
       tickets: [
         {
           ticket: "shop-app#42",
+          title: null,
+          size: "S",
           readyAt: since,
           startedAt: since + HOUR,
           mergedAt: since + 3 * HOUR,
@@ -681,6 +717,10 @@ describe("capacity", () => {
       throughput: Array.from({ length: 6 }, (_, index) => ({
         at: since + index * HOUR,
         merged: index === 3 ? 1 : 0,
+      })),
+      ticketsInProgress: Array.from({ length: 14 }, (_, index) => ({
+        day: `2026-10-${String(index + 4).padStart(2, "0")}`,
+        tickets: null,
       })),
       quality: [
         {
@@ -733,6 +773,8 @@ describe("capacity", () => {
     expect(tel("6h", NOW).series?.tickets).toEqual([
       {
         ticket: "shop-app#43",
+        title: null,
+        size: "S",
         readyAt: since - 4 * HOUR,
         startedAt: since - 3 * HOUR,
         mergedAt: since - 2 * HOUR,
@@ -755,10 +797,89 @@ describe("capacity", () => {
     expect(tel("6h", NOW).series?.tickets).toEqual([
       {
         ticket: "shop-app#44",
+        title: null,
+        size: "S",
         readyAt: since + HOUR,
         startedAt: null,
         mergedAt: null,
         doneAt: null,
+      },
+    ]);
+  });
+
+  it("covers 14 days of tickets whatever the range, with each title and board size", () => {
+    const card = (issueNumber: number, title: string, size: string | null) => ({
+      repoId: "shop-app",
+      issueNumber,
+      title,
+      status: "Done",
+      state: "done" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: NOW,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size,
+      closed: true,
+      prioritySource: null,
+      createdAt: NOW,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [card(50, "Ten days ago", "M")]);
+    store.replaceFlow(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 50,
+          size: "M",
+          startAt: NOW - 11 * DAY,
+          doneAt: NOW - 10 * DAY,
+        },
+        {
+          repoId: "shop-app",
+          number: 51,
+          size: null,
+          title: "Collected, then off the board",
+          startAt: NOW - 15 * DAY,
+          doneAt: NOW - 14 * DAY,
+        },
+        {
+          repoId: "shop-app",
+          number: 52,
+          size: "S",
+          startAt: NOW - 20 * DAY,
+          doneAt: NOW - 14 * DAY - 1,
+        },
+      ],
+      [],
+    );
+
+    expect(tel("1h", NOW).series?.tickets).toEqual([
+      {
+        ticket: "shop-app#51",
+        title: "Collected, then off the board",
+        size: null,
+        readyAt: NOW - 15 * DAY,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: NOW - 14 * DAY,
+      },
+      {
+        ticket: "shop-app#50",
+        title: "Ten days ago",
+        size: "M",
+        readyAt: NOW - 11 * DAY,
+        startedAt: null,
+        mergedAt: null,
+        doneAt: NOW - 10 * DAY,
       },
     ]);
   });
@@ -775,6 +896,8 @@ describe("capacity", () => {
     expect(tel("6h", NOW).series?.tickets).toEqual([
       {
         ticket: "shop-app#44",
+        title: null,
+        size: "S",
         readyAt: since - HOUR,
         startedAt: null,
         mergedAt: null,
@@ -1006,7 +1129,55 @@ describe("capacity", () => {
       diskTotalBytes: null,
       agents: null,
     });
-    expect(tel("1h").machine).toEqual([{ at: NOW - MIN, cpuPct: null, memPct: null }]);
+    expect(tel("1h").machine).toEqual([
+      {
+        at: NOW - MIN,
+        cpuPct: null,
+        memPct: null,
+        swapPct: null,
+        pressurePct: null,
+        agentGb: null,
+        testRunGb: null,
+      },
+    ]);
+  });
+
+  it("serves swap, memory pressure and agent and test-run memory as 24 h series within the point cap", () => {
+    const GB = 1024 ** 3;
+    for (let i = 0; i < 24 * 60; i += 1) {
+      const old = i < 600; // the oldest samples predate the new fields
+      store.addMachineSample({
+        at: NOW - (24 * 60 - i) * MIN,
+        cpuPct: 10,
+        cores: 8,
+        memUsedBytes: 4,
+        memTotalBytes: 8,
+        diskFreeBytes: null,
+        diskTotalBytes: null,
+        ...(old
+          ? { agents: null }
+          : {
+              swapUsedBytes: 2 * GB,
+              swapTotalBytes: 8 * GB,
+              memoryPressureFreePct: 60,
+              agents: { count: 3, rssBytes: 6 * GB, cpuPct: 1 },
+              testRun: i % 2 === 0 ? { count: 5, rssBytes: 4 * GB, cpuPct: 9 } : null,
+            }),
+      });
+    }
+    const m = tel("24h").machine;
+    expect(m.length).toBeLessThanOrEqual(72);
+    expect(m[0]).toMatchObject({ swapPct: null, pressurePct: null, agentGb: null });
+    expect(m[m.length - 1]).toMatchObject({
+      swapPct: 25,
+      pressurePct: 40,
+      agentGb: 6,
+      testRunGb: 4,
+    });
+    // Only the old buckets are gaps, and none of them reads zero.
+    expect(m.filter((p) => p.swapPct === null).length).toBeGreaterThan(0);
+    expect(m.some((p) => p.swapPct === 0 || p.agentGb === 0)).toBe(false);
+    // The whole route response is held to its byte budget in api.test.ts.
   });
 });
 
@@ -1657,6 +1828,66 @@ describe("crew seats", () => {
     });
   });
 
+  describe("quality14, daily counts over the flow window", () => {
+    const MIDNIGHT = at("2026-10-16T23:00:00Z"); // local midnight starting 2026-10-17 (BST)
+    const seed = () => {
+      store.replaceFlow(
+        "shop-app",
+        [],
+        [
+          { repoId: "shop-app", number: 1, mergedAt: MIDNIGHT - 1, firstPushCi: "passing" },
+          { repoId: "shop-app", number: 2, mergedAt: MIDNIGHT, firstPushCi: "failing" },
+          { repoId: "shop-app", number: 3, mergedAt: MIDNIGHT + HOUR, firstPushCi: "passing" },
+          { repoId: "shop-app", number: 4, mergedAt: MIDNIGHT + 2 * HOUR, firstPushCi: null },
+        ],
+      );
+      store.replacePullRequests(
+        "shop-app",
+        [pr(1, MIDNIGHT - 1), pr(2, MIDNIGHT), pr(3, MIDNIGHT + HOUR)],
+        0,
+      );
+      reported("a1", 1, 1, 0);
+      reported("a2", 2, 1, 1);
+      reported("b2", 2, 2, 0);
+      reported("a3", 3, 1, 0);
+    };
+
+    it("counts a PR on its local day, with zeros for a day with no activity", () => {
+      seed();
+      const q = tel("7d").quality14 ?? [];
+      expect(q).toHaveLength(14);
+      expect(q[13]).toEqual({
+        day: "2026-10-17",
+        ciPrs: 2,
+        ciGreenPrs: 1,
+        reviewedPrs: 2,
+        firstPassPrs: 1,
+        roundsSum: 3,
+      });
+      expect(q[12]).toEqual({
+        day: "2026-10-16",
+        ciPrs: 1,
+        ciGreenPrs: 1,
+        reviewedPrs: 1,
+        firstPassPrs: 1,
+        roundsSum: 1,
+      });
+      expect(q[0]).toEqual({
+        day: "2026-10-04",
+        ciPrs: 0,
+        ciGreenPrs: 0,
+        reviewedPrs: 0,
+        firstPassPrs: 0,
+        roundsSum: 0,
+      });
+    });
+
+    it("is the same whichever range is asked for", () => {
+      seed();
+      expect(tel("1h").quality14).toEqual(tel("7d").quality14);
+    });
+  });
+
   describe("a seat's waiting share", () => {
     const NOON = at("2026-10-17T15:00:00Z");
     // local midnight 2026-10-16T23:00Z: 16h elapsed at NOON
@@ -1717,12 +1948,186 @@ describe("crew seats", () => {
       });
     });
 
+    describe("a run set aside (never ended, off the seat)", () => {
+      const note = (kind: "blocked" | "review", runId: string) =>
+        store.raiseNote({
+          key: `${kind}:${runId}`,
+          kind,
+          runId,
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: kind,
+          at: at("2026-10-15T09:00:00Z"),
+        });
+      const setAside = (over: Partial<Run> = {}) =>
+        store.upsertRun(
+          run({
+            id: "aside",
+            agentId: "GUIDO-1",
+            startedAt: at("2026-10-15T07:00:00Z"),
+            endedAt: null,
+            loop: {
+              hold: { kind: null, reason: null, ended: false, worktree: "/w/p", wake: false },
+            } as Run["loop"],
+            ...over,
+          }),
+        );
+      const between = () =>
+        store.upsertRun(
+          run({
+            id: "between",
+            agentId: "GUIDO-1",
+            startedAt: at("2026-10-15T10:00:00Z"),
+            endedAt: at("2026-10-15T12:00:00Z"),
+          }),
+        );
+
+      it("does not hide the seat's live work or the idle hours before it", () => {
+        setAside();
+        between();
+        note("blocked", "aside");
+        note("review", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0, idle: 75 });
+      });
+
+      it("is not current even when no run followed it", () => {
+        setAside();
+        note("blocked", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, waiting: 0, blocked: 0 });
+      });
+
+      it("a note on a not-aside run left open is still cut off when the seat starts another run", () => {
+        setAside({ loop: null });
+        between();
+        note("blocked", "aside");
+        ran();
+        expect(seatShare()).toMatchObject({ working: 25, blocked: 0 });
+      });
+
+      it("a run woken from aside keeps the hold it raises after waking", () => {
+        ran();
+        setAside({ id: "woken", loop: null });
+        between();
+        store.raiseNote({
+          key: "hold:woken",
+          kind: "blocked",
+          runId: "woken",
+          seatId: "GUIDO-1",
+          repoId: "shop-app",
+          text: "held",
+          at: at("2026-10-17T11:00:00Z"),
+        });
+        expect(seatShare()).toMatchObject({ working: 25, blocked: 25 });
+      });
+
+      it("agrees with the chart's running share for the same seat and day", () => {
+        setAside();
+        between();
+        note("blocked", "aside");
+        ran();
+        const t = tel("24h", NOON);
+        const dayStart = at("2026-10-16T23:00:00Z");
+        const running = (t.series?.stateSpans ?? [])
+          .filter((x) => x.agentId === "GUIDO-1" && x.state === "running")
+          .reduce((sum, x) => sum + Math.max(0, x.endedAt - Math.max(x.startedAt, dayStart)), 0);
+        const share = (running / (NOON - dayStart)) * 100;
+        const u = t.utilisation.find((x) => x.agentId === "GUIDO-1");
+        expect(u?.working).toBeCloseTo(share);
+        expect(u?.blocked).toBe(0);
+      });
+    });
+
+    it("a run's blocked note still counts while that run is the seat's latest", () => {
+      ran();
+      store.raiseNote({
+        key: "hold:c1",
+        kind: "blocked",
+        runId: "c1",
+        seatId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "held",
+        at: at("2026-10-17T09:00:00Z"),
+      });
+      expect(seatShare()?.blocked).toBeGreaterThan(0);
+    });
+
     it("an unanswered question blocks until now", () => {
       ask("GUIDO-1", "2026-10-17T13:00:00Z");
       expect(seatShare()).toMatchObject({ working: 0, waiting: 0, blocked: 12.5, unknown: 87.5 });
     });
   });
 
+  it("carries a state recorded before midnight over midnight while a run is active", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    // The seat went running yesterday, and its run has been active since.
+    store.addAgentEvent({
+      agentId: "GUIDO-1",
+      at: midnight - 5 * HOUR,
+      from: "idle",
+      to: "running",
+      text: "state",
+    });
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 5 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 100,
+      unknown: 0,
+    });
+  });
+  it("carries a pre-midnight state when the run started after the last state event", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    store.addAgentEvent({
+      agentId: "GUIDO-1",
+      at: midnight - 5 * HOUR,
+      from: "idle",
+      to: "running",
+      text: "state",
+    });
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 4 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 100,
+      unknown: 0,
+    });
+  });
+  it("still counts a seat with no recorded event at all as unknown", () => {
+    const midnight = at("2026-10-16T23:00:00Z");
+    const now = midnight + 4 * HOUR;
+    store.upsertRun(
+      run({
+        id: "long",
+        agentId: "GUIDO-1",
+        startedAt: midnight - 4 * HOUR,
+        endedAt: null,
+        status: "running",
+      }),
+    );
+    store.setDigest("long", digest({ lastEventAt: now - MIN }));
+    expect(tel("6h", now).utilisation.find((u) => u.agentId === "GUIDO-1")).toMatchObject({
+      working: 0,
+      unknown: 100,
+    });
+  });
   it("scopes to a seat by id or by its account", () => {
     store.upsertRun(
       run({

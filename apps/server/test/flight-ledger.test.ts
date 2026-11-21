@@ -209,7 +209,13 @@ describe("flightMetrics", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed 3 times", ended: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed 3 times",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         },
       }),
     );
@@ -311,7 +317,11 @@ describe("flightMetrics", () => {
     ).entries())
       store.upsertRun(
         run(`park-${n}`, "guido-1", {
-          loop: { ...NEW_LOOP, phase: "parked", parked: { kind, reason: kind, ended: false } },
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            hold: { kind, reason: kind, ended: false, worktree: null, wake: false },
+          },
         }),
       );
     store.upsertRun(
@@ -320,7 +330,7 @@ describe("flightMetrics", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "review", reason: "ended", ended: true },
+          hold: { kind: "review", reason: "ended", ended: true, worktree: null, wake: false },
         },
       }),
     );
@@ -597,6 +607,15 @@ describe("retrospective measures", () => {
     store.upsertRun(run("dev", "guido-1", { costUsd: 3 }));
     store.upsertRun(run("cheap", "guido-1", { costUsd: 1 }));
     store.upsertRun(run("foreign", "guido-1", { repoId: "other", costUsd: 100 }));
+    store.addFlightWake("flight", NOW - 10 * MIN, ["prs"]);
+    store.addFlightWake("flight", NOW - 5 * MIN, ["q"]);
+    store.recordToolCall({
+      at: NOW - 9 * MIN,
+      runId: "flight",
+      tool: "merge_pr",
+      written: 0,
+      returned: 0,
+    });
     store.addLoopEvent("dev:park", "dev", "parked: failed checks", NOW);
     observeFlightMain(store, "mc", { sha: "red", ci: "failing", at: NOW - MIN });
     observeFlightMain(store, "mc", { sha: "green", ci: "passing", at: NOW });
@@ -653,6 +672,7 @@ describe("retrospective measures", () => {
           "/telemetry",
           "/audit",
           "/setup",
+          "/planner",
           "/agent/flight-1",
           "/agent/guido-1",
         ],

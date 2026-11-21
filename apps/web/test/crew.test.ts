@@ -45,7 +45,7 @@ import {
 
 const ids = (rows: CrewRow[]) => rows.map((r) => r.id);
 
-const ENDED_LOOP = { phase: "review" as const, text: "", prNumber: null, parked: null };
+const ENDED_LOOP = { phase: "review" as const, text: "", prNumber: null, hold: null };
 
 describe("crewOrder", () => {
   it("puts agents with an attention item first, then by state rank, then config order", () => {
@@ -181,7 +181,7 @@ describe("stopLine", () => {
   });
 
   it("doingLine shows the loop's step only for an idle seat with no note", () => {
-    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
+    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, hold: null };
     const seat = stoppedSeat({ hudState: "idle", note: null, loop, run: crewRow().run });
     expect(doingLine(seat, now, TZ)).toBe("CI on abc1234");
     expect(loopLine(seat)).toBe("CI on abc1234");
@@ -202,7 +202,11 @@ describe("stopLine", () => {
   });
 
   it("isLoopInFlight needs an unfinished loop on a run that has not ended", () => {
-    const parked = { ...ENDED_LOOP, phase: "parked" as const, parked: "CI failed" };
+    const parked = {
+      ...ENDED_LOOP,
+      phase: "parked" as const,
+      hold: { kind: "ci", reason: "CI failed", offSeat: false },
+    };
     const ended = stoppedSeat({ loop: parked });
     expect(isLoopInFlight(ended)).toBe(false);
     const open = {
@@ -234,7 +238,7 @@ describe("stopLine", () => {
   });
 
   it("doingLine for a running looped seat shows the tool in hand, not the loop text", () => {
-    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
+    const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, hold: null };
     const running = stoppedSeat({ hudState: "running", loop });
     expect(doingLine(running, now, TZ)).not.toContain("CI on");
     expect(doingLine(running, now, TZ)).toMatch(/^run #/);
@@ -244,14 +248,14 @@ describe("stopLine", () => {
   });
 
   it("doingLine ignores a done loop on an idle seat", () => {
-    const done = { phase: "done" as const, text: "Done · PR #9", prNumber: 9, parked: null };
+    const done = { phase: "done" as const, text: "Done · PR #9", prNumber: 9, hold: null };
     expect(
       doingLine(stoppedSeat({ hudState: "idle", note: null, loop: done }), now, TZ),
     ).not.toContain("Done");
   });
 
   it("doingLine ignores a done loop: a stopped seat still says why its run ended", () => {
-    const done = { phase: "done" as const, text: "Done", prNumber: 9, parked: null };
+    const done = { phase: "done" as const, text: "Done", prNumber: 9, hold: null };
     expect(doingLine(stoppedSeat({ loop: done }), now, TZ)).toBe("Run ended by you");
   });
 
@@ -694,7 +698,7 @@ describe("loopMarks", () => {
     phase,
     text: "x",
     prNumber: null,
-    parked: null,
+    hold: null,
   });
 
   it.each([
@@ -726,7 +730,7 @@ describe("stepMarks", () => {
     phase: "working",
     text: "Working",
     prNumber: null,
-    parked: null,
+    hold: null,
     steps: feature?.steps,
   };
 
@@ -857,7 +861,7 @@ describe("waitText", () => {
     phase,
     text: "x",
     prNumber: null,
-    parked: null,
+    hold: null,
     ...over,
   });
   const CALL = "GUIDO-1";
@@ -872,9 +876,17 @@ describe("waitText", () => {
 
   it("operator: a park reason, none, and in review", () => {
     expect(
-      waitText(loop("parked", { wait: "operator", parked: "CI failed 3 times" }), CALL, null, NOW),
-    ).toBe("waiting on you: CI failed 3 times");
-    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+      waitText(
+        loop("parked", {
+          wait: "operator",
+          hold: { kind: "ci", reason: "CI failed 3 times", offSeat: false },
+        }),
+        CALL,
+        null,
+        NOW,
+      ),
+    ).toBe("Held: CI failed 3 times");
+    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("Held");
     expect(waitText(loop("review", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
   });
 
@@ -913,7 +925,7 @@ describe("lockSince", () => {
 });
 
 describe("loopTryText", () => {
-  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  const base = { phase: "ci", text: "x", prNumber: null, hold: null } as const;
   it("shows the try from the second on", () => {
     expect(loopTryText({ ...base, tries: { n: 2, max: 3 } })).toBe(" · try 2 of 3");
     expect(loopTryText({ ...base, tries: { n: 1, max: 3 } })).toBe("");
@@ -923,7 +935,7 @@ describe("loopTryText", () => {
 });
 
 describe("loopStepLabel", () => {
-  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  const base = { phase: "ci", text: "x", prNumber: null, hold: null } as const;
   it("is the profile's step, else the phase label", () => {
     expect(loopStepLabel({ ...base, step: "verify" })).toBe("verify");
     expect(loopStepLabel(base)).toBe("CI");
@@ -931,7 +943,7 @@ describe("loopStepLabel", () => {
 });
 
 describe("loopTemplate", () => {
-  const base = { phase: "ci", text: "x", prNumber: null, parked: null } as const;
+  const base = { phase: "ci", text: "x", prNumber: null, hold: null } as const;
   it("is the run's profile, else the build loop", () => {
     expect(loopTemplate({ ...base, profile: "hotfix" })).toBe("hotfix");
     expect(loopTemplate(base)).toBe("build");
@@ -954,7 +966,7 @@ describe("seatStatus", () => {
     phase,
     text: "",
     prNumber: null,
-    parked: null,
+    hold: null,
   });
 
   it.each([
@@ -1004,7 +1016,7 @@ describe("seatStatus", () => {
       phase: "parked",
       text: "x",
       prNumber: null,
-      parked: "needs you",
+      hold: { kind: "operator", reason: "needs you", offSeat: false },
       wait: "operator",
     };
     const status = seatStatus(seat({ hudState: "blocked", note: null, loop: parked }));

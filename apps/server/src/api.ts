@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
@@ -16,13 +15,10 @@ import {
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
-  type BoardItem,
   type ChangedFiles,
   CI_TRIES,
   type CiRunsView,
   type CliAccountStatus,
-  CODE_HEALTH_TABS,
-  CODE_HEALTH_WINDOWS,
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
@@ -61,10 +57,8 @@ import {
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
-  DISCUSSION_TEXT_MAX,
   DRAFT_BAD_TARGET,
   ENGINE_TICK_MS,
-  effectiveHardRules,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
   FLIGHT_CONTROLLER_CHECK_PATHS,
@@ -72,6 +66,7 @@ import {
   fixesSent,
   flightShellBreakerWrite,
   flightShellWrite,
+  freezeRules,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -86,7 +81,6 @@ import {
   globMatches,
   guardAckKey,
   guardDenyOutput,
-  guardStopOutput,
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   isOperatorItem,
@@ -97,10 +91,6 @@ import {
   lockBusyText,
   type MachineSample,
   type MachineView,
-  type MapGraph,
-  type MapLive,
-  type MapPayload,
-  type MapTree,
   MC_TEXT_MAX,
   type McToolName,
   METER_FULL_PCT,
@@ -113,6 +103,8 @@ import {
   OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
+  PLAN_NO_SUCH,
+  PLAN_NOTE_MAX,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
   type PrUatView,
@@ -121,7 +113,6 @@ import {
   type PullRequestSummary,
   type PullRequestView,
   pace5h,
-  packMapTree,
   percentile,
   QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
@@ -138,12 +129,11 @@ import {
   type RunLoopView,
   type RunView,
   reviewStatusOf,
-  STOP_BLOCK_TRIES,
+  runsInBackground,
   type StreamEvent,
   seatCallSign,
   seatDef,
   startOfLocalDay,
-  stopBlockReason,
   stopForecast,
   TELEMETRY_RANGES,
   TEST_LOCK_UNAVAILABLE_TEXT,
@@ -152,10 +142,6 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
-  TOKEN_AUDIT_DAYS_DEFAULT,
-  TOKEN_AUDIT_DAYS_MAX,
-  TOKEN_AUDIT_HOURS_MAX,
-  type TokenAuditView,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -169,7 +155,6 @@ import {
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
-  type FastifyBaseLogger,
   type FastifyInstance,
   type FastifyReply,
   type FastifyRequest,
@@ -209,6 +194,7 @@ import {
   offersFor,
   setAsideQuestions,
 } from "./attention/needs-you-actions.ts";
+import { withRepoWatch } from "./attention/unwatched-repos.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -217,15 +203,17 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
+import {
+  ChoiceRefused,
+  choiceReceipt,
+  chooseOption,
+  claimMessagePick,
+  MESSAGE_PICK_SENDERS,
+  type MessagePick,
+} from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { cleanCodeHealth } from "./code-health/clean.ts";
-import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
-import { RecommendationMutation } from "./code-health/recommendations.ts";
-import { TestQaProposal } from "./code-health/test-qa.ts";
-import { TEST_REPORT_BYTES_MAX, TestReport } from "./code-health/test-reports.ts";
 import { fetchTicket, type Gql, githubToken, makeGql, projectUrlOf } from "./collectors/github.ts";
 import {
   makeRest,
@@ -272,10 +260,13 @@ import {
   onboardRepo,
   RepoLocation,
   RepoOnboardBody,
+  RepoRolesBody,
   RepoSetupBody,
+  readRepoRolesConfig,
   removeAccount,
   SeatsBody,
   setAccount,
+  setRepoRoles,
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
@@ -289,6 +280,7 @@ import {
 } from "./config/crew-pause.ts";
 import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
+import { repoRulesView } from "./config/repo-roles-view.ts";
 import {
   agentIds,
   type CcConfig,
@@ -300,10 +292,9 @@ import {
   TeamsSelection,
 } from "./config.ts";
 import type { CrewReloader } from "./crew-apply.ts";
-import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
-import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { RepoRulesError, readRepoBlock } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   askExternalReview,
@@ -314,7 +305,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -340,12 +330,10 @@ import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
-import { rereadDenial } from "./guard/rereads.ts";
 import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
-  CREW_ERROR_KEY,
   crew,
   forgetViews,
   hubAlert,
@@ -365,10 +353,6 @@ import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
 import { loopTries } from "./loop/history.ts";
-import { MapConflicts } from "./map/conflicts.ts";
-import { CallRing, type RingSource } from "./map/ring.ts";
-import { mapSeats } from "./map/seats.ts";
-import { type MapPersist, mapHead, mapTree } from "./map/snapshot.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
 import type { RunIdentity, RunTokens } from "./mcp/tokens.ts";
@@ -380,6 +364,15 @@ import {
   seatPlace,
 } from "./mcp/tools.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
+import { readPlanAsset } from "./plans/assets.ts";
+import {
+  approvePlan,
+  plansView,
+  type SignoffDeps,
+  type SignoffResult,
+  sendBackPlan,
+  ticketPlan,
+} from "./plans/signoff.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -420,7 +413,6 @@ import {
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
 import { compressResponse } from "./run/compress.ts";
-import { publicHandoff } from "./run/handoffs.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
@@ -439,7 +431,6 @@ import {
 import { type CodexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
-import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
@@ -449,7 +440,6 @@ import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/ma
 import { metricsView } from "./telemetry/metrics.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
-import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
@@ -495,6 +485,7 @@ export const STUDIO_PAUSE_ERROR = "pause for studio-loop arrives with cutover";
 export const HEARTBEAT_MS = 25_000;
 export const LOOP_WRITES_DISABLED = "loop writes are disabled on this server";
 export const CONFIG_WRITES_UNAVAILABLE = "config writes are not available on this server";
+export const CONFIG_FILE_UNAVAILABLE = "this server has no config.yaml to read";
 export const CONFIG_WRITE_FAILED = "could not write config.yaml";
 /** The check route's answer to a failure outside the updater's own (502) errors. */
 export const CHECK_FAILED = "could not check for updates";
@@ -532,16 +523,16 @@ const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 export interface AppDeps {
   attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
+  /** Moves a card on the board: approving a held plan moves its ticket to Ready; absent: the card stays. */
+  ticketMove?: SignoffDeps["move"];
+  /** Reads one card live from the board: approving a held plan checks the card as it is now. */
+  ticketRead?: SignoffDeps["readCard"];
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
-  /** Shared bounded reader; the MCP read handler can use this same instance. */
-  codeHealth?: CodeHealthReader;
   /** The live hub's bounded set of branch-preview children; absent on preview hubs and unit apps. */
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
   previewRepoId?: RepoId;
-  /** The hub's design previews (a branch's built app, shown with Demo data); absent on preview hubs. */
-  designPreviews?: DesignPreviews;
   /** A child preview reports browser activity to its parent without exposing an operator token. */
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
@@ -553,11 +544,6 @@ export interface AppDeps {
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
   reviewShots?: HudShotStore;
   queueReorder?: QueueReorderDeps;
-  mapRing?: CallRing;
-  /** Reads the map's file tree; default: git at the checkout. Tests count the builds. */
-  mapTree?: typeof mapTree;
-  /** Build each repo's map payload in the background once the app is ready (the hub's start). */
-  warmMap?: boolean;
   config: CcConfig;
   /** Cached Codex model catalogs, isolated by each account's CLI binding. */
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
@@ -611,6 +597,11 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /**
+   * The config.yaml the server loaded, for routes that only read it. A preview on the live file
+   * has this and no `configPath`: it shows that file's rules and can never write them.
+   */
+  configReadPath?: string;
   /** Trusted embedded hosts may override the path used to validate crew path containment. */
   configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
@@ -713,6 +704,17 @@ const MessageBody = z.strictObject({
   question: z.number().int().positive().optional(),
   /** The Needs-you item this reply is about: it shows in that item's conversation. */
   itemKey: z.string().min(1).max(200).optional(),
+  /**
+   * The text is an option of that item's brief, picked on the page: the brief the page showed and
+   * the option's place in it. The pick is stored with the message, so the FLIGHT conversation
+   * draws it as the choice. Used for an option the choose route does not take.
+   */
+  choice: z
+    .strictObject({
+      briefAt: z.number().int().nonnegative(),
+      option: z.number().int().nonnegative(),
+    })
+    .optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -759,16 +761,6 @@ const EndBody = z.strictObject({
     .optional(),
 });
 
-/**
- * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
- * event carries no input.
- */
-const isStopEvent = (body: unknown): boolean =>
-  typeof body === "object" &&
-  body !== null &&
-  (body as { hook_event_name?: unknown }).hook_event_name === "Stop";
-
-/** A Stop: the event alone. */
 /** `POST /api/flight/approvals`: a controller approves FLIGHT past one rule, for one scope. */
 const FlightApprovalBody = z.strictObject({
   rule: z.enum(FLIGHT_APPROVAL_RULES),
@@ -779,8 +771,10 @@ const FlightApprovalBody = z.strictObject({
 /** The answer to a seat that calls a route only the operator may. */
 const SEAT_REFUSED = "a seat cannot use the operator's routes";
 
-const GuardStopBody = z.strictObject({ hook_event_name: z.literal("Stop") });
-
+/**
+ * `POST /api/guard/check`: what the guard hook sends (`guard/hook.ts`), and nothing else. A Post
+ * event carries no input.
+ */
 const GuardCheckBody = z.strictObject({
   hook_event_name: z.enum(GUARD_HOOK_EVENTS),
   tool_name: z.string().min(1).max(256),
@@ -788,6 +782,8 @@ const GuardCheckBody = z.strictObject({
   agent_id: z.string().min(1).max(256).optional(),
   cwd: z.string().max(4096).optional(),
   exit_code: z.number().int().min(0).nullable().optional(),
+  /** The call left its command running in the background (a Post hook only). */
+  background: z.literal(true).optional(),
   tool_input: z
     .strictObject({
       command: z.string().optional(),
@@ -928,12 +924,6 @@ const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
 /** An unchanged store, lock and login is not reconciled for notifications again before this. */
 const NOTIFICATION_REPEAT_MS = 60_000;
-/** Longest a map payload is reused: the backstop for fields that age without any input changing. */
-const MAP_CACHE_MS = 15_000;
-/** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
-const MAP_TREE_MS = 60 * 60_000;
-type MapTreeBuilt = { etag: string; tree: MapTree; graph: MapGraph };
-
 export function buildApp(deps: AppDeps): FastifyInstance {
   const { config, store, bus } = deps;
   const qaReports =
@@ -953,250 +943,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       now: deps.now,
     });
   const now = deps.now ?? Date.now;
-  const codeHealth = deps.codeHealth ?? new CodeHealthReader(store, config, now);
   let transcriptFootprintCache: {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
-  const mapConflicts = new MapConflicts(undefined, {
-    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
-    put: (kind, scope, key, value, exclusive) =>
-      store.mapCachePut(kind, scope, key, value, exclusive),
-  });
-  const mapSources = new Map<string, RingSource>();
-  const mapRing = new CallRing(() => {
-    const sources: RingSource[] = [];
-    const recent = store.runsActiveSince(now() - 15 * 60_000);
-    for (const agent of configuredAgents(config)) {
-      if (agent.kind !== "crew") continue;
-      const seat = store.seatSession(agent.id);
-      const current = store.seatRun(agent.id);
-      const flight = agent.seat.role === "FLIGHT";
-      const runs = [
-        ...new Map(
-          [
-            ...(current ? [current] : []),
-            ...(!flight
-              ? [
-                  ...store.mapAsideRuns(agent.id),
-                  ...recent.filter((r) => r.agentId === agent.id && r.repoId === agent.repoId),
-                ]
-              : []),
-          ].map((r) => [r.id, r]),
-        ).values(),
-      ];
-      for (const run of runs) {
-        const repos = flight ? config.repos : config.repos.filter((r) => r.id === run.repoId);
-        for (const repo of repos) {
-          const id = flight ? `${run.id}:${repo.id}` : run.id;
-          const cwd = flight
-            ? config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout
-            : ((seat?.runId === run.id ? seat.worktree : null) ??
-              run.loop?.aside?.worktree ??
-              mapSources.get(id)?.cwd);
-          if (!cwd) continue;
-          const source: RingSource = {
-            id,
-            seat: agent.id,
-            repoId: repo.id,
-            cwd,
-            transcriptPath: run.transcriptPath,
-            vendor: run.vendor ?? seat?.vendor,
-            turnScoped: flight,
-            current: current?.id === run.id,
-          };
-          sources.push(source);
-          mapSources.set(id, source);
-        }
-      }
-    }
-    const active = new Set(sources.map((s) => s.id));
-    for (const id of mapSources.keys()) if (!active.has(id)) mapSources.delete(id);
-    return sources;
-  });
-  let stopMapRing: (() => void) | undefined;
-  const mapStore: MapPersist = {
-    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
-    put: (kind, scope, key, value, exclusive) =>
-      store.mapCachePut(kind, scope, key, value, exclusive),
-  };
-  const mapPayloads = new Map<string, { key: string; at: number; payload: Promise<MapPayload> }>();
-  const mapTrees = new Map<string, { key: string; at: number; built: Promise<MapTreeBuilt> }>();
-  const buildTree = deps.mapTree ?? mapTree;
-  /** The tree part for the default-branch `head`: built once, kept until an input of it moves. */
-  const mapTreeFor = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    head: string,
-    prs: PullRequestView[],
-    board: BoardItem[],
-  ): Promise<MapTreeBuilt> => {
-    // The tree reads only the head, the merged PRs and the bug-labelled tickets (the history),
-    // and the rules: nothing about the crew, so a seat moving never reaches this key.
-    const key = JSON.stringify([
-      head,
-      prs
-        .filter((p) => p.state === "merged" && p.mergeCommitSha)
-        .map((p) => [p.number, p.mergeCommitSha, p.mergedAt, p.branch, p.ticket]),
-      board.filter((item) => item.labels.includes("bug")).map((item) => item.issueNumber),
-      flightPowersOf(config, repo.id),
-      repo.rules,
-    ]);
-    const at = now();
-    const cached = mapTrees.get(repo.id);
-    if (cached && cached.key === key && at - cached.at < MAP_TREE_MS) return await cached.built;
-    const built = (async (): Promise<MapTreeBuilt> => {
-      const tree = await buildTree(checkout, "origin/HEAD", prs, board, at, mapStore);
-      const read = await readRepoRules(repo.github, checkout, repo.rules);
-      // Unreadable repo rules leave the configured ones: the map still draws.
-      const rules = read instanceof RepoRulesError ? (repo.rules ?? DEFAULT_REPO_RULES) : read;
-      const graphKey = createHash("sha256")
-        .update(JSON.stringify([tree.tree, tree.imports, tree.hist]))
-        .digest("hex");
-      const indexes = new Map(tree.tree.map((file, index) => [file.path, index]));
-      const graph: MapGraph = {
-        key: graphKey,
-        imports: tree.imports.flatMap(({ from, to }) => {
-          const a = indexes.get(from),
-            b = indexes.get(to);
-          return a === undefined || b === undefined ? [] : [[a, b] as [number, number]];
-        }),
-        hist: tree.hist,
-      };
-      return {
-        etag: `"${createHash("sha256").update(key).digest("hex").slice(0, 32)}"`,
-        graph,
-        tree: {
-          repoId: repo.id,
-          ...tree,
-          rules: {
-            areas: rules.areas,
-            hardRules: effectiveHardRules(rules, flightPowersOf(config, repo.id)),
-          },
-        },
-      };
-    })();
-    const entry = { key, at, built };
-    mapTrees.set(repo.id, entry);
-    built.catch(() => {
-      if (mapTrees.get(repo.id) === entry) mapTrees.delete(repo.id);
-    });
-    return await built;
-  };
-  /** The crew's rows for the map: the summary view, which builds no event timelines. */
-  const mapCrewRows = (repo: (typeof config.repos)[number]) => {
-    const lock = deps.lock?.state() ?? NO_LOCK;
-    // Map keys include mutable seat configuration. Unlike GET /crew, this path must also serve
-    // an in-memory config edit before its reloader emits `config` (the editor preview does this).
-    const rows = crew(config, store, now(), lock, undefined, true)
-      .rows.filter((r) => r.kind === "crew" && (r.repoId === repo.id || r.role === "FLIGHT"))
-      .map((r) => (r.role === "FLIGHT" ? { ...r, repoId: repo.id } : r));
-    return { rows, lock };
-  };
-  const buildMapLive = async (
-    checkout: string,
-    repoId: string,
-    crewRows: CrewRow[],
-    lock: typeof NO_LOCK,
-    prs: PullRequestView[],
-    log: FastifyBaseLogger,
-  ): Promise<MapLive> => {
-    const data = mapSeats(
-      crewRows,
-      store,
-      mapRing,
-      lock,
-      now(),
-      flightSeat(config)?.seat.id ?? null,
-    );
-    const seq = mapRing.sequence(repoId);
-    for (const seat of data.seats) {
-      const context = store.seatSession(
-        seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
-      )?.runId
-        ? await deps.supervisor
-            ?.contextUsage(
-              seat.seat === "FLIGHT" ? (flightSeat(config)?.seat.id ?? seat.seat) : seat.seat,
-            )
-            .catch(() => null)
-        : null;
-      seat.context = context ? { total: context.total, window: context.window } : null;
-    }
-    const conflicts = await mapConflicts.check(checkout, prs);
-    for (const failure of conflicts.failures)
-      log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-    return {
-      ...data,
-      conflicts: conflicts.conflicts,
-      conflictsUnchecked: conflicts.unchecked,
-      seq,
-    };
-  };
-  /** Starts the ring on first use and brings it up to date: the live part reads from it. */
-  const mapRingReady = () => {
-    if (!stopMapRing) stopMapRing = mapRing.start();
-    mapRing.poll();
-  };
-  /** The tree part and its ETag: built once per default-branch head, however many ask. */
-  const mapTreePayload = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-  ): Promise<MapTreeBuilt> =>
-    await mapTreeFor(
-      repo,
-      checkout,
-      await mapHead(checkout),
-      store.pullRequests(repo.id),
-      store.board(repo.id),
-    );
-  /** The cached map payload, built (once, however many ask) when an input has changed. */
-  const mapPayloadFor = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    log: FastifyBaseLogger,
-  ): Promise<MapPayload> => {
-    const head = await mapHead(checkout);
-    mapRingReady();
-    const { rows: crewRows, lock } = mapCrewRows(repo);
-    const prs = store.pullRequests(repo.id);
-    const board = store.board(repo.id);
-    // reused until the default branch, the ring, the seats (rows and lock), the PRs, the
-    // board or the rules change; the time-driven fields (ages, context) get the backstop
-    const key = JSON.stringify([
-      head,
-      mapRing.revision(repo.id),
-      crewRows,
-      lock,
-      prs,
-      board,
-      flightPowersOf(config, repo.id),
-      repo.rules,
-    ]);
-    const at = now();
-    const cached = mapPayloads.get(repo.id);
-    if (cached && cached.key === key && at - cached.at < MAP_CACHE_MS) return await cached.payload;
-    // the tree part is its own cache: a changed seat or ring rebuilds only the live part
-    const payload = (async (): Promise<MapPayload> => {
-      const [{ tree, graph }, live] = await Promise.all([
-        mapTreeFor(repo, checkout, head, prs, board),
-        buildMapLive(checkout, repo.id, crewRows, lock, prs, log),
-      ]);
-      return {
-        repoId: tree.repoId,
-        rules: tree.rules,
-        tree: packMapTree(tree.tree),
-        graphKey: graph.key,
-        ...live,
-      };
-    })();
-    const entry = { key, at, payload };
-    mapPayloads.set(repo.id, entry);
-    payload.catch(() => {
-      if (mapPayloads.get(repo.id) === entry) mapPayloads.delete(repo.id);
-    });
-    return await payload;
-  };
-
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountModels = new Map<string, AccountModels>();
   let localAccountUpdate: Promise<void> | null = null;
@@ -1752,7 +1502,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
     unsubscribeNotifications();
-    stopMapRing?.();
     clearTimeout(notificationTimer);
     clearTimeout(repeatTimer);
     for (const end of [...streams]) end();
@@ -1783,13 +1532,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
 
-      // Reader: apps/web/src/agent/HandoffPanel.tsx
+      // Reader: apps/web/src/agent/HandoffPanel.tsx (runs are no longer handed off: always null)
       api.get<{ Params: { id: string } }>("/runs/:id/handoff", async (req, reply) => {
         const run = store.run(req.params.id);
         if (!run || !config.repos.some((r) => r.id === run.repoId))
           return reply.code(404).send({ error: "unknown run" });
-        const h = store.handoff(run.id) ?? store.receivedHandoff(run.id);
-        return h ? publicHandoff(h) : null;
+        return null;
       });
 
       // The latest run's transcript (a loop's or a seat's), read on demand. Responses carry fixed
@@ -2629,8 +2377,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const agent = agentById(id);
         if (agent?.kind !== "crew") return null;
         const checkout = config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout;
-        const worktree =
-          store.seatSession(id)?.worktree ?? store.seatRun(id)?.loop?.aside?.worktree;
+        const worktree = store.seatSession(id)?.worktree ?? store.seatRun(id)?.loop?.hold?.worktree;
         if (!checkout || !worktree) return null;
         const isDir = await stat(worktree).then(
           (st) => st.isDirectory(),
@@ -2737,32 +2484,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const checks = deps.checks;
       const seatMode = deps.seatMode ?? (() => "read-only");
       const caller = (req: FastifyRequest) => tokens?.resolve(bearer(req)) ?? null;
-      // Stops blocked so far, by run and the report the loop last took in: a report starts afresh
-      const stopBlocks = new Map<string, number>();
-      // A seat that stops with its report missing and checklist items open is sent back to them,
-      // up to STOP_BLOCK_TRIES times; Codex seats have no Stop hook and keep the hub's resume.
-      const stopVerdict = (runId: string): string => {
-        const run = store.run(runId);
-        const loop = run?.loopKind;
-        if (run === null || loop == null || loop === "none" || loop === "watch") {
-          return GUARD_ALLOW_OUTPUT;
-        }
-        if (runReported(store, run, loop)) return GUARD_ALLOW_OUTPUT;
-        // a run in review, in CI, parked or done owes no work now: a budget or operator hold is not
-        // for the seat to push through, and its report would be refused
-        if (run.loop != null && run.loop.phase !== "working") return GUARD_ALLOW_OUTPUT;
-        // the seat asked a question and waits for the answer: that stop is not an early one
-        if (store.openQuestions().some((q) => q.runId === runId)) return GUARD_ALLOW_OUTPUT;
-        const open = (store.digest(runId)?.tasks ?? [])
-          .filter((t) => t.status !== "done")
-          .map((t) => t.text);
-        if (open.length === 0) return GUARD_ALLOW_OUTPUT;
-        const key = `${runId}:${store.latestEvidence(runId)?.id ?? 0}`;
-        const used = stopBlocks.get(key) ?? 0;
-        if (used >= STOP_BLOCK_TRIES) return GUARD_ALLOW_OUTPUT;
-        stopBlocks.set(key, used + 1);
-        return guardStopOutput(stopBlockReason(open));
-      };
       // Reader: apps/server/src/guard/hook.ts (the guard hook each seat's CLI runs before every tool call)
       api.post(
         GUARD_CHECK_ROUTE,
@@ -2782,12 +2503,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (who === null || seat === undefined) {
             return reply.code(401).send({ error: UNKNOWN_RUN });
           }
-          // a Stop names no tool: it is the seat ending a turn, and may carry it on
-          if (isStopEvent(req.body)) {
-            const stop = GuardStopBody.safeParse(req.body);
-            if (!stop.success) return reply.code(400).send({ error: zodError(stop.error) });
-            return reply.type("application/json").send(stopVerdict(who.runId));
-          }
           const body = GuardCheckBody.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           const key = { runId: who.runId, toolUseId: body.data.tool_use_id };
@@ -2803,7 +2518,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ) === "flight-full";
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
-            if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
             const command = body.data.tool_input?.command;
             // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
             // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
@@ -2811,6 +2525,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             // the hook sends a null exit code for an interrupted or background call: unknown, so
             // it neither passes the lock row nor counts toward the push gate
             const unknown = body.data.exit_code === null;
+            // a command left running keeps the lock until the turn ends, whatever its call reports
+            if (body.data.background) lock?.pin(key);
             lock?.release(key, failed ? true : wrapped || unknown ? undefined : false);
             await checks?.end(key, !failed && !unknown, body.data.exit_code ?? null);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
@@ -2878,37 +2594,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               cwd: body.data.cwd,
               rules: deps.repoRules,
             });
-          // a large file this run already read whole, unchanged, is not given again
-          if (verdict.kind === "allow") {
-            const reread = rereadDenial(
-              store,
-              { ...key, agentId: body.data.agent_id ?? "" },
-              store.seatSession(who.seatId)?.worktree ?? undefined,
-              { tool: body.data.tool_name, input: body.data.tool_input ?? {} },
-              now(),
-            );
-            if (reread !== null) return answer(reread);
-          }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
-          // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
-          // the same check on the same commit with nothing changed is not run again (waste alarm);
-          // a suite the guard already sends to the lock is a check too
-          if (
-            (verdict.kind === "allow" || verdict.kind === "lock") &&
-            body.data.tool_name === "Bash" &&
-            typeof command === "string"
-          ) {
-            const rerun = await checks?.rerun?.(who.runId, command);
-            if (rerun) return answer(rerun);
-          }
+          // the related-tests check runs `pnpm test --changed`, which is the whole suite when the
+          // package or the config changes: it takes the lock too (lint and typecheck do not)
           if (
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
             typeof command === "string"
           ) {
-            const check = await checks?.lockedBy(who.runId, command);
-            if (check) verdict = { kind: "lock", command: check };
+            const related = checks?.lockedBy(command);
+            if (related)
+              verdict = runsInBackground(command, body.data.tool_input?.run_in_background === true)
+                ? { kind: "lock", command: related, background: true }
+                : { kind: "lock", command: related };
           }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {
@@ -2962,6 +2661,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               res.once("close", () => {
                 if (!delivered) lock.release(key);
               });
+              // a suite left running in the background holds the lock until the turn ends
+              if (verdict.background) lock.pin(key);
               await startCheck();
               return answer();
             }
@@ -3488,6 +3189,87 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
+      const rolesError = (reply: FastifyReply, e: unknown) => {
+        captureError(reply, e);
+        if (e instanceof ConfigWriteError) {
+          const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+            missing: 404,
+            invalid: 400,
+            current: 409,
+            conflict: 409,
+          };
+          const code = status[e.kind];
+          if (code !== undefined) return reply.code(code).send({ error: e.message });
+        }
+        return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+      };
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        // A read needs no writable config: a preview shows the rules of the file it loaded.
+        const configPath = deps.configPath ?? deps.configReadPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_FILE_UNAVAILABLE });
+        try {
+          // Every value comes from the same config.yaml bytes the version is taken from, so the
+          // page can never save a version it did not show.
+          const { base, repo, raw } = await readRepoRolesConfig(configPath, req.params.repoId);
+          const checkout = config.crew?.sessions.find(
+            (session) => session.repoId === repo.id,
+          )?.checkout;
+          const repoFile =
+            checkout === undefined
+              ? null
+              : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+          return repoRulesView({
+            base,
+            repo,
+            raw,
+            repoFile: repoFile instanceof RepoRulesError ? repoFile.message : repoFile,
+          });
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoRolesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoRoles(
+            configPath,
+            req.params.repoId,
+            body.data.base,
+            body.data.rules,
+            now(),
+          );
+          const live = config.repos.find((repo) => repo.id === req.params.repoId);
+          const saved = result.config.repos.find((repo) => repo.id === req.params.repoId);
+          if (!live || !saved) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can hold unapplied Authority, crew or rotation changes. This route owns only
+          // the rule, command, check and protected-file fields; nothing else goes live.
+          live.protectedFiles = saved.protectedFiles;
+          live.commands = saved.commands;
+          live.fullSuite = saved.fullSuite;
+          live.requiredChecks = saved.requiredChecks;
+          if (saved.rules === undefined) delete live.rules;
+          else {
+            const { templates, techDebtIssue } = live.rules ?? {};
+            live.rules = freezeRules({
+              ...saved.rules,
+              ...(templates === undefined ? {} : { templates }),
+              ...(techDebtIssue === undefined ? {} : { techDebtIssue }),
+            });
+          }
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
@@ -3684,68 +3466,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { repo: view, backup: basename(result.backup) };
       });
 
-      /** Answers a map route for a known repo with a readable checkout; 404 / 503 otherwise. */
-      const mapRoute =
-        <T>(
-          read: (
-            repo: (typeof config.repos)[number],
-            checkout: string,
-            req: FastifyRequest<{ Params: { repoId: string } }>,
-            reply: FastifyReply,
-          ) => Promise<T>,
-        ) =>
-        async (
-          req: FastifyRequest<{ Params: { repoId: string } }>,
-          reply: FastifyReply,
-        ): Promise<T | FastifyReply> => {
-          const repo = config.repos.find((r) => r.id === req.params.repoId);
-          if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
-          try {
-            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
-              return reply.code(503).send({ error: "map checkout unavailable" });
-            }
-            return await read(repo, checkout, req, reply);
-          } catch (e) {
-            reply.log.warn(
-              { reason: e instanceof Error ? e.message : String(e) },
-              "map snapshot unavailable",
-            );
-            const message = e instanceof Error ? e.message : "";
-            // git's own failure text carries paths and flags; the page gets a plain sentence instead
-            const reason =
-              message.startsWith("Command failed") ||
-              message === "the checkout has no files at this commit"
-                ? "git could not read the checkout"
-                : message;
-            return reply.code(503).send({
-              error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
-            });
-          }
-        };
-
-      // The map snapshot: apps/web/src/qa/useRepoGraph.ts and the Setup repo list read it through RESOURCES.repoMap.
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map",
-        mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
-      );
-
-      // Reader: apps/web/src/qa/useRepoGraph.ts (lazy QA Impact and History analysis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/graph",
-        mapRoute(async (repo, checkout, req, reply) => {
-          const { graph } = await mapTreePayload(repo, checkout);
-          const expected = (req.query as { key?: string }).key;
-          if (expected !== undefined && expected !== graph.key)
-            return reply.code(409).send({ error: "Map graph changed; reload the map" });
-          const etag = `"${graph.key}"`;
-          reply.header("etag", etag).header("cache-control", "private, no-cache");
-          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          return graph;
-        }),
-      );
-
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
       // A list is the open PRs plus those updated in the last PR_LIST_DAYS (`?days=N` reaches
       // back further, `?all=1` is every one), each with its checks as name and state; `?detail=1`
@@ -3844,33 +3564,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return deps.previews?.list() ?? [];
       });
 
-      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you lists previews)
-      api.get("/design-previews", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        return deps.designPreviews?.list() ?? [];
-      });
-
-      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you opens one)
-      api.post<{ Params: { ticket: string } }>(
-        "/design-previews/:ticket/open",
-        async (req, reply) => {
-          if (
-            operatorToken !== undefined &&
-            !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-          )
-            return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-          const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
-          const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
-          if (view === null)
-            return reply.code(404).send({ error: "No stored preview for this ticket." });
-          return view;
-        },
-      );
-
       // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
       api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
         const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
@@ -3923,25 +3616,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { repoId: string } }>("/boards/:repoId", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
-        const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
-        return store.board(repo.id).map((card) => {
-          const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
-          const waiting = store.ticketWait(repo.id, card.issueNumber);
-          return {
-            ...card,
-            ...(waiting ? { waiting, assignees: [], owner: null } : {}),
-            ...(h
-              ? {
-                  handoff: {
-                    runId: h.runId,
-                    fromSeat: h.fromSeat,
-                    at: h.at,
-                    acceptedBy: h.acceptedBy,
-                  },
-                }
-              : {}),
-          };
-        });
+        return store.board(repo.id);
       });
 
       // Read live from GitHub (the board's rows carry no body); the number is validated here.
@@ -4036,8 +3711,77 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? null
               : { at: questionCursor.at, id: Number(questionCursor.key.slice("question:".length)) },
         });
-        return history ?? reply.code(404).send({ error: "unknown issue" });
+        return history === null
+          ? reply.code(404).send({ error: "unknown issue" })
+          : { ...history, plan: ticketPlan(store, config, repo.id, n) };
       });
+
+      // Reader: docs/runbook.md#plan-sign-off (the Planner tab's lists: waiting, and signed off)
+      api.get("/plans", () => plansView(store, config));
+
+      // Reader: docs/runbook.md#plan-sign-off (a plan's pictures, kept by content hash)
+      api.get<{ Params: { id: string } }>("/plan-assets/:id", async (req, reply) => {
+        // Not a mutating route, so the operator-token hook skips it: check the token here.
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = readPlanAsset(deps.store.path, req.params.id);
+        if (asset === null) return reply.code(404).send({ error: "not found" });
+        return reply
+          .header("cache-control", "private, max-age=31536000, immutable")
+          .header("x-content-type-options", "nosniff")
+          .type(asset.mediaType)
+          .send(asset.bytes);
+      });
+
+      const planDeps = (): SignoffDeps => ({
+        store,
+        config,
+        now,
+        rules: deps.repoRules ?? (async () => DEFAULT_REPO_RULES),
+        ...(deps.ticketMove === undefined ? {} : { move: deps.ticketMove }),
+        ...(deps.ticketRead === undefined ? {} : { readCard: deps.ticketRead }),
+        ...(deps.needsYou === undefined ? {} : { fetchTicket: deps.needsYou.fetchTicket }),
+      });
+      const planIssue = (raw: string): number =>
+        /^[1-9]\d*$/.test(raw) && Number(raw) <= MAX_ISSUE_NUMBER ? Number(raw) : 0;
+      const planAnswer = (reply: FastifyReply, result: SignoffResult) => {
+        if (!result.ok) return reply.code(result.status).send({ error: result.error });
+        bus.emit("plans");
+        if (result.moved) bus.emit("boards");
+        return { plan: result.plan, moved: result.moved, moveError: result.moveError };
+      };
+
+      // Reader: docs/runbook.md#plan-sign-off (Approve on the Planner tab; a held ticket moves to Ready)
+      api.post<{ Params: { repoId: string; issue: string } }>(
+        "/plans/:repoId/:issue/approve",
+        async (req, reply) => {
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const issue = planIssue(req.params.issue);
+          if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
+          return planAnswer(reply, await approvePlan(planDeps(), req.params.repoId, issue));
+        },
+      );
+
+      // Reader: docs/runbook.md#plan-sign-off (Send back on the Planner tab, with the operator's note)
+      api.post<{ Params: { repoId: string; issue: string } }>(
+        "/plans/:repoId/:issue/send-back",
+        async (req, reply) => {
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const body = z
+            .strictObject({ note: z.string().trim().min(1).max(PLAN_NOTE_MAX) })
+            .safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          const issue = planIssue(req.params.issue);
+          if (issue === 0) return reply.code(404).send({ error: PLAN_NO_SUCH });
+          return planAnswer(
+            reply,
+            await sendBackPlan(planDeps(), req.params.repoId, issue, body.data.note),
+          );
+        },
+      );
 
       // Setup runs one at a time per repo, so a second tab pressing it waits and then finds the fields.
       const setupLocks = new Map<string, Promise<unknown>>();
@@ -4215,47 +3959,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ),
         );
       });
-      // Reader: docs/runbook.md#audit-api (the fix-session trial's receipts; the operator and FLIGHT read it)
-      api.get("/audit/fix-sessions", async (req, reply) => {
-        if (Object.keys(req.query as Record<string, unknown>).length > 0) {
-          return reply.code(400).send({ error: "send no query" });
-        }
-        return fixSessionTrialView(store, config);
-      });
-      // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
-      api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
-        "/audit/tokens",
-        async (req, reply) => {
-          const { days: rawDays, hours: rawHours, shape } = req.query;
-          if (rawDays !== undefined && rawHours !== undefined) {
-            return reply.code(400).send({ error: "send days or hours, not both" });
-          }
-          if (shape !== undefined && shape !== "summary") {
-            return reply.code(400).send({ error: "shape must be summary" });
-          }
-          let view: TokenAuditView;
-          if (rawHours !== undefined) {
-            const hours = /^\d{1,2}$/.test(rawHours) ? Number(rawHours) : 0;
-            if (hours < 1 || hours > TOKEN_AUDIT_HOURS_MAX) {
-              return reply.code(400).send({
-                error: `hours must be a whole number from 1 to ${TOKEN_AUDIT_HOURS_MAX}`,
-              });
-            }
-            view = tokenAuditWindowView(store, config, now(), hours);
-          } else {
-            const raw = rawDays ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
-            const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-            if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
-              return reply
-                .code(400)
-                .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
-            }
-            view = tokenAuditView(store, config, now(), days);
-          }
-          return shape === "summary" ? tokenAuditSummary(view) : view;
-        },
-      );
-      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      // Reader: docs/runbook.md#spend-report (spend per merged change and the building share; the Audit page reads it)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
@@ -4799,10 +4503,43 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             named.passedAt !== null &&
             named.runId !== runId &&
             store.run(named.runId)?.endedAt === null &&
-            store.run(named.runId)?.loop?.aside != null
+            store.run(named.runId)?.loop?.hold?.worktree != null
               ? named
               : undefined;
+          // A picked option is claimed before its text is sent, and tied to the stored message.
+          let pick: MessagePick | null | undefined;
+          if (b.choice !== undefined) {
+            // the operator token lets FLIGHT send a message here; it does not let FLIGHT pick
+            if (!MESSAGE_PICK_SENDERS.includes(sender.kind))
+              throw new SupervisorError(
+                403,
+                "FLIGHT cannot pick an option with a message. Send the text without `choice`.",
+              );
+            if (b.itemKey === undefined)
+              throw new SupervisorError(400, "A picked option names its item.");
+            try {
+              pick = claimMessagePick(
+                {
+                  store,
+                  now,
+                  sender,
+                  crew: commsCrew,
+                  flightId: flightSeat(config)?.seat.id ?? null,
+                },
+                currentChoiceItem(b.itemKey),
+                b.itemKey,
+                b.choice,
+                { to: id, text: b.text, question: b.question },
+              );
+            } catch (e) {
+              if (e instanceof ChoiceRefused) throw new SupervisorError(e.status, e.message);
+              throw e;
+            }
+            // the brief already has a pick: its message is stored, and nothing is sent twice
+            if (pick === null) return { ok: true };
+          }
           if (parked !== undefined) {
+            let stored = false;
             try {
               await answerAsideQuestion(
                 {
@@ -4818,8 +4555,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 parked.id,
                 sender.from,
                 b.text,
+                (messageId) => {
+                  stored = true;
+                  pick?.sent(messageId);
+                },
               );
             } catch (e) {
+              if (!stored) pick?.release();
               throw new SupervisorError(
                 e instanceof AsideAnswerChanged
                   ? 409
@@ -4841,6 +4583,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   .itemThreadNow(b.itemKey)
                   .filter((m) => m.from === id && m.to === sender.from)
                   .at(-1)?.id;
+          let stored = false;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4878,17 +4621,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            stored = true;
+            pick?.sent(sent.id);
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
             // a retry of the same text wakes the seat again
             if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
             // the reply names its question: that one closes, and no other
-            if (named !== null) {
-              store.answerQuestion(named.id, now());
-              bus.emit("attention");
-            }
+            if (named !== null) store.answerQuestion(named.id, now());
+            // a closed question leaves Needs you, and a pick shows on its item
+            if (named !== null || pick != null) bus.emit("attention");
             return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
+            // nothing was stored: let the operator pick again
+            if (!stored) pick?.release();
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
               400,
@@ -5002,241 +4748,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return repos
           .flatMap((repo) => readDependencyChains(store, repo.id, at))
           .sort(compareDependencyChains);
-      });
-      const CodeHealthQuery = z.strictObject({
-        repo: z.string().trim().min(1).max(128),
-        window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
-        tab: z.enum(CODE_HEALTH_TABS).default("overview"),
-      });
-      const codeHealthOutput = async (value: unknown) =>
-        cleanCodeHealth(value, [
-          operatorToken ?? "",
-          ...(await (deps.knownSecrets?.() ?? Promise.resolve([]))),
-        ]);
-      const codeHealthFailure = (error: unknown, reply: FastifyReply) =>
-        reply.code(error instanceof CodeHealthReadError ? error.status : 503).send({
-          error:
-            error instanceof CodeHealthReadError
-              ? error.message
-              : "Code-health evidence could not be read. Retry collection or choose a shorter window.",
-        });
-      const codeHealthImportSecrets = async () => {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          const known = await Promise.race([
-            deps.knownSecrets?.() ?? Promise.resolve([]),
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error("Secret lookup unavailable")), 5000);
-            }),
-          ]);
-          return [operatorToken ?? "", ...known];
-        } finally {
-          clearTimeout(timer);
-        }
-      };
-      const testEvidenceAuth = async (req: FastifyRequest, reply: FastifyReply) => {
-        if (
-          operatorToken === undefined ||
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        if (deps.tokens?.resolve(bearer(req)) != null)
-          return reply.code(403).send({
-            error: "Test evidence imports require operator authority, not a seat identity.",
-          });
-      };
-      // Reader: docs/runbooks/code-health-test-evidence.md (operator imports result data only).
-      api.post(
-        "/code-health/test-reports",
-        {
-          bodyLimit: TEST_REPORT_BYTES_MAX,
-          onRequest: testEvidenceAuth,
-        },
-        async (req, reply) => {
-          const parsed = TestReport.safeParse(req.body);
-          if (!parsed.success)
-            return reply.code(400).send({ error: "Invalid version 1 test report." });
-          if (!config.repos.some((repo) => repo.id === parsed.data.repo))
-            return reply.code(404).send({ error: "Unknown code-health repo" });
-          try {
-            const known = await codeHealthImportSecrets();
-            const result = store.importCodeHealthTestReport(
-              parsed.data,
-              flightActor(req)?.seatId ?? config.operator.id,
-              now(),
-              known,
-            );
-            if (!result.reused) bus.emit("health");
-            return reply
-              .code(result.reused ? 200 : 201)
-              .header("cache-control", "no-store")
-              .send(result);
-          } catch (error) {
-            return codeHealthFailure(error, reply);
-          }
-        },
-      );
-      // Reader: docs/runbooks/code-health-test-evidence.md (links existing QA findings only).
-      api.post(
-        "/code-health/test-qa",
-        {
-          bodyLimit: 16384,
-          onRequest: testEvidenceAuth,
-        },
-        async (req, reply) => {
-          const body = TestQaProposal.safeParse(req.body);
-          if (!body.success) return reply.code(400).send({ error: "Invalid test QA proposal." });
-          if (!config.repos.some((repo) => repo.id === body.data.repo))
-            return reply.code(404).send({ error: "Unknown code-health repo" });
-          try {
-            const result = store.linkCodeHealthTestQa(
-              body.data,
-              flightActor(req)?.seatId ?? config.operator.id,
-              now(),
-              await codeHealthImportSecrets(),
-            );
-            if (!result.reused) bus.emit("health");
-            return reply
-              .code(result.reused ? 200 : 201)
-              .header("cache-control", "no-store")
-              .send(result);
-          } catch (error) {
-            return codeHealthFailure(error, reply);
-          }
-        },
-      );
-      // Reader: docs/runbook.md (the approved code-health dashboard's repo/window/tab summaries)
-      api.get("/code-health", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const parsed = CodeHealthQuery.safeParse(req.query);
-        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
-        reply.header("cache-control", "no-store");
-        try {
-          const { repo, window, tab } = parsed.data;
-          return await codeHealthOutput(codeHealth.read(repo, window, tab));
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (the Audit page's stored first-screen summary)
-      api.get("/code-health/overview", async (req, reply) => {
-        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const parsed = z
-          .strictObject({
-            repo: z.string().trim().min(1).max(128),
-            window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
-          })
-          .safeParse(req.query);
-        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
-        reply.header("cache-control", "no-store");
-        try {
-          const { view, changed } = codeHealth.overview(parsed.data.repo, parsed.data.window);
-          // Only a rebuild that changed what the page shows tells open pages to read again.
-          if (changed) bus.emit("health");
-          return await codeHealthOutput(view);
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
-      api.get("/code-health/evidence/:id", async (req, reply) => {
-        if (
-          operatorToken !== undefined &&
-          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
-        )
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const params = z.strictObject({ id: z.string().min(1).max(64) }).safeParse(req.params);
-        const parsed = z
-          .strictObject({
-            repo: z.string().trim().min(1).max(128),
-            cursor: z.string().min(1).max(5).optional(),
-          })
-          .safeParse(req.query);
-        if (!params.success || !parsed.success)
-          return reply.code(400).send({ error: "Invalid code-health evidence query" });
-        reply.header("cache-control", "no-store");
-        try {
-          return await codeHealthOutput(
-            codeHealth.evidence(parsed.data.repo, params.data.id, parsed.data.cursor),
-          );
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (bounded recommendation history, including accepted work and assessments)
-      api.get("/code-health/recommendations", async (req, reply) => {
-        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const query = z
-          .strictObject({
-            repo: z.string().min(1).max(128),
-            cursor: z
-              .string()
-              .regex(/^(0|[1-9][0-9]{0,5})$/)
-              .default("0"),
-          })
-          .safeParse(req.query);
-        if (!query.success || Number(query.data.cursor) % 50 !== 0)
-          return reply.code(400).send({ error: "Invalid recommendation history query" });
-        if (!config.repos.some((row) => row.id === query.data.repo))
-          return reply.code(404).send({ error: "Unknown code-health repo" });
-        reply.header("cache-control", "no-store");
-        try {
-          return await codeHealthOutput(
-            codeHealth.recommendationHistory(query.data.repo, Number(query.data.cursor)),
-          );
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
-      });
-      // Reader: docs/runbook.md (operator decisions on durable code-health recommendations)
-      api.post("/code-health/recommendations/:id", async (req, reply) => {
-        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
-          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const params = z
-          .strictObject({ id: z.string().regex(/^chr_[a-f0-9]{32}$/) })
-          .safeParse(req.params);
-        const query = z
-          .strictObject({ repo: z.string().trim().min(1).max(128) })
-          .safeParse(req.query);
-        const body = RecommendationMutation.safeParse(req.body);
-        if (!params.success || !query.success || !body.success)
-          return reply.code(400).send({ error: "Invalid recommendation decision" });
-        if (!config.repos.some((repo) => repo.id === query.data.repo))
-          return reply.code(404).send({ error: "Unknown code-health repo" });
-        reply.header("cache-control", "no-store");
-        try {
-          const cleaned = await codeHealthOutput(body.data);
-          if (JSON.stringify(cleaned) !== JSON.stringify(body.data))
-            return reply.code(400).send({
-              error: "Decision contains unsafe text or credentials. Remove it before retrying.",
-            });
-          if (
-            body.data.change.action === "assess" &&
-            !store.codeHealthDecisionRecorded(query.data.repo, body.data.requestId)
-          )
-            codeHealth.evidence(query.data.repo, body.data.change.evidenceId, undefined);
-          const result = store.decideCodeHealthRecommendation(
-            query.data.repo,
-            params.data.id,
-            body.data,
-            config.operator.id,
-            now(),
-            flightSeat(config)?.session.repoId === query.data.repo
-              ? flightSeat(config)?.seat.id
-              : undefined,
-          );
-          bus.emit("flight");
-          bus.emit("agents");
-          return await codeHealthOutput(result);
-        } catch (error) {
-          return codeHealthFailure(error, reply);
-        }
       });
       // Reader: apps/web/src/shell/Dock.tsx#Dock (FLIGHT page brief)
       api.get("/flight/brief", async () =>
@@ -5591,16 +5102,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (deps.engine?.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
-        if (run.loop.parked?.kind === CONTROLLER_CHECK_PARK) {
+        if (run.loop.hold?.kind === CONTROLLER_CHECK_PARK) {
           return reply
             .code(409)
             .send({ error: `nothing to resume: ${CONTROLLER_CHECK_USE_ROUTE}` });
         }
-        if (run.loop.parked?.kind === UAT_PARK) {
+        if (run.loop.hold?.kind === UAT_PARK) {
           return reply.code(409).send({ error: `nothing to resume: ${UAT_USE_ROUTE}` });
         }
         const reviewWaiver =
-          run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
+          run.loop.hold?.kind === "review" || run.loop.hold?.kind === "review-ruling";
         const by = flightActor(req) ? "FLIGHT" : "CAPCOM";
         checkBriefDispatch();
         const guard = boundBriefGuard();
@@ -5965,7 +5476,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 r.repoId === repo.id &&
                 r.endedAt === null &&
                 r.loop?.prNumber === n &&
-                r.loop.parked?.kind === UAT_PARK,
+                r.loop.hold?.kind === UAT_PARK,
             );
           if (run === undefined || !run.loop?.uat) {
             const target = await externalTarget(repo.id, n, body.data.sha, reply);
@@ -6068,7 +5579,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           if (deps.engine?.status().on !== true)
             return reply.code(409).send({ error: "the loop engine is off" });
-          const kind = run.loop.parked?.kind;
+          const kind = run.loop.hold?.kind;
           if (kind !== "review" && kind !== "review-ruling")
             return reply.code(409).send({ error: "rework is only available for review parks" });
           const knownSecrets = deps.knownSecrets ?? (async () => []);
@@ -6419,7 +5930,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const offers = needsYou === null ? undefined : offersFor(needsYou, item);
         return isOperatorItem(item)
           ? {
-              ...pinned(item, store, config),
+              ...withRepoWatch(pinned(item, store, config), config),
               ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
               ...(offers === undefined ? {} : { offers }),
             }
@@ -6626,8 +6137,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true };
       });
 
-      const discussionSends = new Set<string>();
-      const currentDiscussionItem = (key: string) => {
+      const currentChoiceItem = (key: string) => {
         const item = attentionItems(
           config,
           store,
@@ -6639,97 +6149,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ).find((item) => item.key === key && (!item.acked || isOperatorItem(item)));
         return item ? { ...item, version: attentionVersion(item) } : undefined;
       };
-      const openDiscussion = (item: AttentionItem & { version: string }) => {
-        const brief = item.brief;
-        const recommended = brief?.recommendedOptionId
-          ? brief.options.find((o) => o.id === brief.recommendedOptionId)
-          : undefined;
-        const text = recommended?.description
-          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description.replace(/[.\s]+$/, "")}. What would help you decide? I can pull the Teams thread or the code.`
-          : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
-        return store.ensureDiscussion(item.key, item.version, { text, at: now() });
-      };
-      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      // Reader: apps/web/src/data.ts (the item thread read)
       api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
         const key = req.params.key;
         if (key.length > 200) return reply.code(400).send({ error: "key too long" });
         // A note key is raised again later: only this run of the note owns the conversation.
         // Other item keys name one message, question or issue, so all of theirs is the item's.
         return itemThread(store.itemThreadNow(key));
-      });
-      // Reader: apps/web/src/shell/ItemPanel.tsx
-      api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
-        "/attention/:key/discussion",
-        async (req, reply) => {
-          const { key } = req.params;
-          if (req.query.id) {
-            const thread = store.discussion(key, req.query.id);
-            return thread ?? reply.code(404).send({ error: "Unknown discussion." });
-          }
-          const item = currentDiscussionItem(key);
-          if (!item?.version) {
-            const thread = store.discussionForItem(key);
-            return thread ?? reply.code(404).send({ error: "No current item." });
-          }
-          return openDiscussion({ ...item, version: item.version });
-        },
-      );
-      // Reader: apps/web/src/shell/ItemPanel.tsx
-      api.post<{ Params: { key: string } }>("/attention/:key/discussion", async (req, reply) => {
-        const body = z
-          .strictObject({
-            version: z.string().min(1).max(100),
-            messageId: z.string().regex(/^[a-zA-Z0-9:_-]{1,100}$/),
-            text: z.string().trim().min(1).max(DISCUSSION_TEXT_MAX),
-          })
-          .safeParse(req.body);
-        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        const item = currentDiscussionItem(req.params.key);
-        if (!item || item.version !== body.data.version)
-          return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
-        // no FLIGHT seat is configured: nothing would ever pick the reply up
-        const flight = flightSeat(config);
-        if (!flight) return reply.code(409).send({ error: "This hub has no FLIGHT seat." });
-        const thread = openDiscussion({ ...item, version: body.data.version });
-        const { messageId, text } = body.data;
-        try {
-          store.askDiscussion(thread.id, messageId, text, now());
-        } catch {
-          return reply.code(409).send({ error: "Message id already used." });
-        }
-        if (store.discussionSent(thread.id, messageId))
-          return store.discussion(item.key, thread.id);
-        // The reply is stored whether or not FLIGHT is running: an unsent one is in FLIGHT's wake
-        // (pendingDiscussions) when it starts, so nothing here answers "FLIGHT is unavailable".
-        const flightOn = supervisor?.status().enabled === true;
-        if (!supervisor || !flightOn) return store.discussion(item.key, thread.id);
-        const sendKey = `${thread.id}:${messageId}`;
-        if (discussionSends.has(sendKey))
-          return reply.code(409).send({ error: "Message is being sent." });
-        discussionSends.add(sendKey);
-        try {
-          await supervisor.message(
-            flight.seat.id,
-            JSON.stringify({
-              kind: "item-discussion",
-              discussion: { id: thread.id, replyTo: messageId },
-              item,
-              question: text,
-              instruction:
-                "Reply using log_decision with discussion.id, discussion.replyTo and a stable discussion.messageId. Discussion is chat only; do not execute a choice.",
-            }),
-            { interrupt: false, questions: "none" },
-          );
-          store.markDiscussionSent(thread.id, messageId);
-          bus.emit("attention");
-          return store.discussion(item.key, thread.id);
-        } catch (e) {
-          // not pushed now (FLIGHT is down or between turns): it stays stored, and the wake carries it
-          captureError(reply, e);
-          return store.discussion(item.key, thread.id);
-        } finally {
-          discussionSends.delete(sendKey);
-        }
       });
 
       api.register(async (api) => {
@@ -6809,7 +6235,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                       deps.engine?.reconcileRun?.(runId) ?? Promise.resolve(),
                   }),
             },
-            currentDiscussionItem(key),
+            currentChoiceItem(key),
             key,
             body.data,
           );
@@ -6832,11 +6258,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const keys = [...new Set(body.data.keys)];
         store.ack(keys, now());
-        // a crew error stays listed until acked: its row is marked, so it leaves Needs you
-        for (const k of keys) {
-          const id = k.startsWith(CREW_ERROR_KEY) ? k.slice(CREW_ERROR_KEY.length) : "";
-          if (/^[1-9]\d{0,15}$/.test(id)) store.ackCrewError(Number(id));
-        }
         bus.emit("attention");
         if (keys.some((k) => k.startsWith(GUARD_ACK_PREFIX))) bus.emit("guard");
         return { acked: keys.length };
@@ -7105,7 +6526,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     { prefix: API_PREFIX },
   );
 
-  app.addHook("onClose", async () => stopMapRing?.());
   return app;
 }
 

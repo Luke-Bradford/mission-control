@@ -38,11 +38,7 @@ export async function diskUse(i: DiskUseSource): Promise<DiskUse> {
       at(DATA_DIRS.attentionMaterials),
     ),
     evidence: await sum(at(DATA_DIRS.evidence)),
-    scratch: await sum(
-      at(DATA_DIRS.controller),
-      at(DATA_DIRS.evidenceWork),
-      at(DATA_DIRS.designPreviews),
-    ),
+    scratch: await sum(at(DATA_DIRS.controller), at(DATA_DIRS.evidenceWork)),
     database: await sum(...DATABASE_FILES.map(at)),
   };
   return { ...use, total: Object.values(use).reduce((a, b) => a + b, 0) };

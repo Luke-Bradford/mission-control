@@ -150,7 +150,7 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
           epoch: 1,
           phase: "parked",
           prNumber: 70,
-          parked: { kind: UAT_PARK, reason: "accept", ended: false },
+          hold: { kind: UAT_PARK, reason: "accept", ended: false, worktree: null, wake: false },
           uat: { sha: "sha3", from: "review", accepted: false },
         },
       }),
@@ -293,7 +293,7 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
           phase: "parked",
           prNumber: 50,
           epoch: 2,
-          parked: { kind: UAT_PARK, reason: "waiting", ended: false },
+          hold: { kind: UAT_PARK, reason: "waiting", ended: false, worktree: null, wake: false },
           uat: { sha: "abc1234def", from: "ci", accepted: false },
         },
       }),
@@ -331,9 +331,12 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
   it.each([
     [
       "parked for CI",
-      { phase: "parked" as const, parked: { kind: "ci", reason: "r", ended: false } },
+      {
+        phase: "parked" as const,
+        hold: { kind: "ci", reason: "r", ended: false, worktree: null, wake: false },
+      },
     ],
-    ["still working", { phase: "working" as const, parked: null }],
+    ["still working", { phase: "working" as const, hold: null }],
   ])(
     "says a PR is not waiting while its run is %s, though loop.uat is not accepted",
     async (_, state) => {

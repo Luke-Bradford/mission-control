@@ -183,7 +183,7 @@ export const RunRow = memo(function RunRow({
           Trace
         </a>
       )}
-      {run.endedAt === null && run.loop?.aside && run.id !== row.run?.id && (
+      {run.endedAt === null && run.loop?.hold?.worktree && run.id !== row.run?.id && (
         // a set-aside run the seat has moved on from; the wrapper keeps the click off the row
         // biome-ignore lint/a11y/useKeyWithClickEvents: the button inside is the keyboard route
         // biome-ignore lint/a11y/noStaticElementInteractions: as above; this only stops bubbling

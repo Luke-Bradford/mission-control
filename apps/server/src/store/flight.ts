@@ -177,7 +177,12 @@ export function flightQueries(
         .prepare(
           "SELECT run_id, at, reasons, wake_id FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
         )
-        .all(since) as { run_id: string; at: number; reasons: string; wake_id: string | null }[];
+        .all(since) as {
+        run_id: string;
+        at: number;
+        reasons: string;
+        wake_id: string | null;
+      }[];
       return rows.map((r) => ({
         runId: r.run_id,
         at: r.at,
@@ -243,15 +248,6 @@ export function flightQueries(
         .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
         .all(since, limit) as Row[];
       return rows.map(toFlightDecision);
-    },
-
-    /** When FLIGHT decided to wait, at or after `since`, oldest first. */
-    flightWaitTimes(since: number): number[] {
-      return (
-        db
-          .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
-          .all(since) as { at: number }[]
-      ).map((r) => r.at);
     },
 
     /** The decisions of one kind about one ticket, newest first. */

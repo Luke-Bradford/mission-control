@@ -6,6 +6,7 @@ import {
   type ReactNode,
   Suspense,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -14,6 +15,7 @@ import { stepRoster } from "./agent/roster.ts";
 import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
+import { FLIGHT_THREAD_INPUT } from "./flight/FlightThread.tsx";
 import type { FlightView } from "./flight/flightTypes.ts";
 import {
   FULL_WIDTH_PAGES,
@@ -42,6 +44,7 @@ import {
   closeItem,
   ITEM_GONE,
   openHelp,
+  setDockCover,
   syncItem,
   toggleDock,
   useBuildStatus,
@@ -58,9 +61,6 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
-const CommsChartPage = lazy(() =>
-  import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
-);
 const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
@@ -72,6 +72,7 @@ const Telemetry = lazy(() =>
   import("./pages/Telemetry.tsx").then((m) => ({ default: m.Telemetry })),
 );
 const Audit = lazy(() => import("./pages/Audit.tsx").then((m) => ({ default: m.Audit })));
+const Planner = lazy(() => import("./pages/Planner.tsx").then((m) => ({ default: m.Planner })));
 const QaReadiness = lazy(() =>
   import("./pages/QaReadiness.tsx").then((m) => ({ default: m.QaReadiness })),
 );
@@ -154,9 +155,14 @@ function Shell({
   const dock = useDock();
   const overview = shown.page === "overview" && !notFound;
   const overviewOverlay = useOverviewDockOverlay(overview, dock);
-  // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
-  // keeps its own workspace instead of duplicating it beside the page.
-  const showDock = !notFound && tabOf(shown) !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
+  // The fly-out is site-wide except on a page that was not found. Comms and the full-width pages
+  // have no column for it, so on a wide screen it covers their right edge, as the narrow drawer does.
+  const showDock = !notFound;
+  const coversShell = tabOf(shown) === "comms" || FULL_WIDTH_PAGES.has(tabOf(shown));
+  useLayoutEffect(() => {
+    setDockCover(showDock && coversShell);
+    return () => setDockCover(false);
+  }, [showDock, coversShell]);
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -164,6 +170,7 @@ function Shell({
     overviewOverlay && "overview-flight-overlay",
     dock.wide && !dock.visible && "dock-hidden",
     dock.visible && dock.collapsed && "dock-collapsed",
+    showDock && coversShell && "dock-cover",
     !dock.wide && dock.visible && "dock-open",
     buildStatus && "bs-on",
   ]
@@ -222,7 +229,7 @@ function Shell({
         </a>
       )}
       <Header page={notFound ? null : tabOf(shown)} />
-      <div className={`shell${showDock ? "" : " shell-full"}`}>
+      <div className={`shell${!showDock ? " shell-full" : coversShell ? " shell-cover" : ""}`}>
         <main>
           <AwayDigest>
             <Suspense fallback={<p>Loading…</p>}>
@@ -260,9 +267,9 @@ const PAGE_TITLES: Record<Route["page"], string> = {
   ticket: "Board",
   agent: "Agents",
   comms: "Comms",
-  commsChart: "Comms",
   telemetry: "Telemetry",
   qa: "QA",
+  planner: "Planner",
   audit: "Audit",
   setup: "Setup",
 };
@@ -367,9 +374,6 @@ function PageView({ route: r }: { route: Route }) {
     case "comms":
       page = <Comms item={r.item} view={r.view} />;
       break;
-    case "commsChart":
-      page = <CommsChartPage />;
-      break;
     case "telemetry":
       page = <Telemetry />;
       break;
@@ -378,6 +382,9 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "qa":
       page = <QaReadiness />;
+      break;
+    case "planner":
+      page = <Planner />;
       break;
     case "setup":
       page = <Setup tab={r.tab} />;
@@ -433,11 +440,12 @@ function useShellKeys(current: Route, popout: boolean) {
         if (route(to)?.page !== latest.current.current.page) navigate(to);
       },
       toggleDock: () => {
-        const { current: on, popout: isPopout } = latest.current;
-        // The full FLIGHT page opens the conversation in Comms. Comms and pop-outs already own
-        // their workspace; every other page has the same site-wide rail.
-        if (isPopout || tabOf(on) === "comms") return;
-        if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
+        const { popout: isPopout } = latest.current;
+        // A pop-out is the Agent page alone. Where a thread box is already on screen outside the
+        // fly-out (Comms), `f` moves to it; everywhere else it opens the fly-out.
+        if (isPopout) return;
+        const box = document.querySelector<HTMLElement>(`#${FLIGHT_THREAD_INPUT}:not(:disabled)`);
+        if (box) box.focus();
         else toggleDock();
       },
       help: openHelp,

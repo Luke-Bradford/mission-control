@@ -532,8 +532,8 @@ export function resolvedCommsReason(
   const controls = run?.loop;
   if (
     run &&
-    (controls?.parked?.kind === "budget" ||
-      controls?.parked?.kind === "account" ||
+    (controls?.hold?.kind === "budget" ||
+      controls?.hold?.kind === "account" ||
       pendingRunApproval(store, run) ||
       store.seatSession(run.agentId)?.state === "stopped")
   )
@@ -546,7 +546,7 @@ export function resolvedCommsReason(
   if (
     run &&
     message.label === "blocker" &&
-    controls?.parked == null &&
+    !controls?.hold?.kind &&
     (controls?.unparkedAt ?? 0) > at
   )
     return "The related park was lifted.";

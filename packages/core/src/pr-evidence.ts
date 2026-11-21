@@ -9,17 +9,19 @@ export const EVIDENCE_SCHEMES = ["light", "dark"] as const;
 export type EvidenceScheme = (typeof EVIDENCE_SCHEMES)[number];
 /** The viewport of every evidence screenshot. */
 export const EVIDENCE_VIEWPORT = { width: 1600, height: 1000 } as const;
-/** Audit has three independent views; a shot of its default tab cannot prove the others. */
 export const EVIDENCE_PAGE_PATHS = {
   ...HUD_PAGE_PATHS,
-  readiness: "/audit?evidence-tab=readiness",
-  hotspots: "/audit?evidence-tab=hotspots",
   setup_repos: "/setup/repos",
   setup_loops: "/setup/loops",
   setup_accounts: "/setup/accounts",
   setup_roles: "/setup/roles",
   setup_sources: "/setup/sources",
   setup_access: "/setup/access",
+  // The Telemetry tabs; the bare address is the Crew tab.
+  telemetry_cost: "/telemetry?tab=cost",
+  telemetry_throughput: "/telemetry?tab=throughput",
+  telemetry_quality: "/telemetry?tab=quality",
+  telemetry_machine: "/telemetry?tab=machine",
 } as const;
 export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
 export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
@@ -90,8 +92,8 @@ const PAGE_DIRS: Record<string, EvidencePage> = {
 const PAGE_ALIASES: Record<string, EvidencePage> = {
   qareadiness: "qa",
   "qa-readiness": "qa",
-  qahotspots: "hotspots",
-  "qa-hotspots": "hotspots",
+  qahotspots: "qa",
+  "qa-hotspots": "qa",
   legacyaudit: "audit",
 };
 
@@ -150,11 +152,9 @@ export function prEvidenceAffectedPages(
   const hit = new Set<EvidencePage>();
   const add = (page: EvidencePage) => {
     hit.add(page);
-    if (page === "audit") {
-      hit.add("readiness");
-      hit.add("hotspots");
-    }
-    if (page === "setup") for (const p of EVIDENCE_PAGES) if (p.startsWith("setup_")) hit.add(p);
+    for (const family of ["setup", "telemetry"])
+      if (page === family)
+        for (const p of EVIDENCE_PAGES) if (p.startsWith(`${family}_`)) hit.add(p);
   };
   for (const path of paths) {
     if (!path.startsWith(WEB_PREFIX) || TEST_FILE.test(path)) continue;
@@ -252,7 +252,7 @@ export const evidenceImageName = (
 /** Whether `name` is one a capture can have stored; anything else is never turned into a path. */
 export const isEvidenceImageName = (name: string): boolean => IMAGE_NAME.test(name);
 
-const CLOSES = /^Closes #\d+\.$/;
+const CLOSES = /^(?:Closes|Part of) #\d+\.$/;
 const isHeading = (line: string): boolean => /^## /.test(line);
 
 /** The `heading` section of a PR body (the heading line included), or null when it has none. */
@@ -308,17 +308,6 @@ export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string)
     ...demoLines,
   ].join("\n");
 }
-
-/**
- * The labels the evidence capture clicks on the Audit page. The page renders them and the capture
- * finds its controls by them, so each lives here once; a rename on either side then fails a test
- * (apps/server/test/qa-labels.test.ts) instead of timing out a live capture.
- */
-export const QA_VIEW_LABEL = "QA view";
-export const QA_DISCLOSURE_LABEL = "Workflow history and earlier proposals";
-/** The button text of each Audit tab a capture selects. */
-export const QA_TAB_LABELS = { readiness: "PR readiness", hotspots: "Hotspots" } as const;
-export type QaTab = keyof typeof QA_TAB_LABELS;
 
 /**
  * What the Demo render relies on in the web app: the sessionStorage key that turns Demo on, and the

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartHref, commsHrefFor, filterPath } from "../src/comms/chartPaths.ts";
+import { commsHrefFor, filterPath } from "../src/comms/chartPaths.ts";
 import { pairFilter } from "../src/comms/commsFilter.ts";
 import { commsAgentPath, commsContactPath, commsCrewPath, commsFlightPath } from "../src/router.ts";
 
@@ -25,10 +25,8 @@ describe("the conversation a chart filter opens in Comms", () => {
     expect(filterPath(pairFilter(a, b), FLIGHT)).toBe(path);
   });
 
-  it("keeps the chart narrowed on the way to Comms and back out to the pop-out", () => {
+  it("keeps the chart narrowed on the way to Comms", () => {
     const seat = { kind: "seat", id: "dev-1" } as const;
     expect(commsHrefFor(seat, FLIGHT)).toBe(`${commsAgentPath("dev-1")}?focus=seat%3Adev-1`);
-    expect(chartHref(seat)).toBe("/comms/chart?focus=seat%3Adev-1");
-    expect(chartHref(null)).toBe("/comms/chart");
   });
 });

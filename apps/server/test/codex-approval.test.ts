@@ -2,10 +2,16 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/core";
+import {
+  CODEX_LOCK_WAIT_MS,
+  type CrewMode,
+  GUARD_RULES,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
@@ -23,11 +29,21 @@ function approver(
   checks?: CheckRecorder,
   lock = new TestLock(),
   fullAccess = false,
+  tell?: (text: string) => void,
 ) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
     accounts: [],
-    repos: [{ id: "repo", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
+    repos: [
+      {
+        id: "repo",
+        github: "o/r",
+        project: 1,
+        statusMap: {},
+        autonomy: "draft",
+        fullSuite: ["pnpm -s test"],
+      },
+    ],
     loops: [],
     poll: { usageMinutes: 30, githubSeconds: 60 },
   };
@@ -47,6 +63,7 @@ function approver(
     seatGrants,
     ...(runGrants === undefined ? {} : { runGrants }),
     ...(checks === undefined ? {} : { checks }),
+    ...(tell === undefined ? {} : { tell }),
   });
   return { approve, record, seatGrants, config };
 }
@@ -176,8 +193,6 @@ describe("Codex refusal records", () => {
   it.each([
     ["git commit -m x", "git-write"],
     ["gh pr view 1", "gh-cli"],
-    ["curl https://example.com", "network"],
-    ["sleep 1 &", "background"],
   ] as const)(
     "routes the retained hard gate for %s through the shared guard",
     async (command, rule) => {
@@ -189,7 +204,7 @@ describe("Codex refusal records", () => {
 
   it("includes the whole refused chain, even when its amendment matches an allowed segment", async () => {
     const h = approver();
-    const command = "sed -n 1p a && curl x";
+    const command = "sed -n 1p a && git commit -m x";
     expect(
       await h.approve(
         {
@@ -206,7 +221,10 @@ describe("Codex refusal records", () => {
         signal(),
       ),
     ).toBe("decline");
-    expect(h.record).toHaveBeenCalledWith("network", `${GUARD_RULES.network}: curl: ${command}`);
+    expect(h.record).toHaveBeenCalledWith(
+      "git-write",
+      `${GUARD_RULES["git-write"]}: git commit: ${command}`,
+    );
   });
 
   it.each([false, true])(
@@ -324,8 +342,9 @@ describe("Codex check records", () => {
     const checks: CheckRecorder = {
       begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
       end: async () => {},
-      lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
+      lockedBy: (c) => lockedCheck(c, ["pnpm -s test:related"]),
       dropRun: () => {},
+      lost: () => false,
       drops: () => [],
       pending: () => [],
     };
@@ -359,17 +378,31 @@ describe("Codex check records", () => {
     ]);
   });
 
-  it("declines a configured check the recorder says is an unchanged rerun, and never starts its record", async () => {
-    const { begun, checks } = recorder();
-    checks.rerun = async (_run, c) => (c === "pnpm -s typecheck" ? "Not run: unchanged." : null);
-    const h = approver("writer", [], undefined, checks, new TestLock());
-    expect(
-      await h.approve(request("pnpm -s typecheck", { itemId: "item-3" }), undefined, signal()),
-    ).toBe("decline");
-    expect(begun).toEqual([]);
+  it("tells the seat the rule's text when a guard rule refuses", async () => {
+    const tell = vi.fn();
+    const h = approver("writer", [], undefined, undefined, new TestLock(), false, tell);
+    const out = await h.approve(
+      request("git push origin x", { itemId: "item-31" }),
+      undefined,
+      signal(),
+    );
+    expect(out).toBe("decline");
+    expect(tell).toHaveBeenCalledTimes(1);
+    expect(tell).toHaveBeenCalledWith(`${GUARD_RULES["git-write"]}: git push`);
   });
 
-  it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
+  it("tells the seat nothing when the signal is aborted", async () => {
+    const tell = vi.fn();
+    const h = approver("writer", [], undefined, undefined, new TestLock(), false, tell);
+    const stopped = new AbortController();
+    stopped.abort();
+    expect(await h.approve(request("ls", { itemId: "item-32" }), undefined, stopped.signal)).toBe(
+      "decline",
+    );
+    expect(tell).not.toHaveBeenCalled();
+  });
+
+  it("takes the test lock for a full suite but not a configured check, while another seat holds the lock", async () => {
     const { checks } = recorder();
     const lock = new TestLock();
     await lock.acquire(
@@ -380,9 +413,12 @@ describe("Codex check records", () => {
       signal(),
     );
     const h = approver("writer", [], undefined, checks, lock);
+    expect(
+      await h.approve(request("pnpm -s typecheck", { itemId: "item-8" }), undefined, signal()),
+    ).toBe("accept");
     const busy = new AbortController();
     const waiting = h.approve(
-      request("pnpm -s typecheck", { itemId: "item-9" }),
+      request("pnpm -s test", { itemId: "item-9" }),
       undefined,
       busy.signal,
     );
@@ -392,6 +428,112 @@ describe("Codex check records", () => {
     expect(await h.approve(request("ls", { itemId: "item-10" }), undefined, signal())).toBe(
       "accept",
     );
+  });
+
+  it("keeps the lock for a suite sent to the background after the item completes", async () => {
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, undefined, lock);
+    expect(
+      await h.approve(request("pnpm -s test &", { itemId: "item-bg" }), undefined, signal()),
+    ).toBe("accept");
+    lock.release({ runId: "run", toolUseId: "item-bg" });
+    expect(lock.state().holder).not.toBeNull();
+    lock.releaseRun("run");
+    expect(lock.state().holder).toBeNull();
+  });
+
+  it.each([
+    "printf 'pnpm -s test\\n' | crontab -",
+    `echo 'do shell script "pnpm -s test"' | osascript`,
+  ])(
+    "declines a full suite fed to a launcher on stdin (a Codex seat cannot pipe at all): %s",
+    async (command) => {
+      const h = approver("writer", [], undefined, undefined, new TestLock());
+      expect(await h.approve(request(command, { itemId: "item-30" }), undefined, signal())).toBe(
+        "decline",
+      );
+    },
+  );
+
+  it("keeps the lock of a related-tests run left in the background", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, checks, lock);
+    expect(
+      await h.approve(
+        request("pnpm run test:related &", { itemId: "item-rel" }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("accept");
+    lock.release({ runId: "run", toolUseId: "item-rel" });
+    expect(lock.state().holder).not.toBeNull();
+    lock.releaseRun("run");
+    expect(lock.state().holder).toBeNull();
+  });
+
+  it("takes the test lock for the related-tests check", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    await lock.acquire(
+      { runId: "other", toolUseId: "x" },
+      "other-seat",
+      "pnpm -s test",
+      1000,
+      signal(),
+    );
+    const h = approver("writer", [], undefined, checks, lock);
+    const busy = new AbortController();
+    const waiting = h.approve(
+      request("pnpm -s test:related", { itemId: "item-11" }),
+      undefined,
+      busy.signal,
+    );
+    busy.abort();
+    expect(await waiting).not.toBe("accept");
+  });
+
+  describe("a check queued behind a long lock hold", () => {
+    const holdLock = async () => {
+      const lock = new TestLock();
+      const key = { runId: "other", toolUseId: "x" };
+      await lock.acquire(key, "other-seat", "pnpm -s test", 1000, signal());
+      return { lock, key };
+    };
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("keeps waiting past 10 minutes and runs once the lock frees", async () => {
+      const { checks } = recorder();
+      const { lock, key } = await holdLock();
+      const h = approver("writer", [], undefined, checks, lock);
+      const waiting = h.approve(
+        request("pnpm -s test", { itemId: "item-20" }),
+        undefined,
+        signal(),
+      );
+      await vi.advanceTimersByTimeAsync(13 * 60_000);
+      lock.release(key);
+      expect(await waiting).toBe("accept");
+    });
+
+    it("tells the seat who holds the lock when the wait runs out", async () => {
+      const { checks } = recorder();
+      const { lock } = await holdLock();
+      const tell = vi.fn();
+      const h = approver("writer", [], undefined, checks, lock, false, tell);
+      const waiting = h.approve(
+        request("pnpm -s test", { itemId: "item-21" }),
+        undefined,
+        signal(),
+      );
+      await vi.advanceTimersByTimeAsync(CODEX_LOCK_WAIT_MS);
+      expect(await waiting).toBe("decline");
+      expect(tell).toHaveBeenCalledTimes(1);
+      expect(tell.mock.calls[0]?.[0]).toContain("The test lock is busy");
+      expect(tell.mock.calls[0]?.[0]).toContain("OTHER-SEAT");
+      expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test");
+    });
   });
 
   it("starts no record for a command run from a subfolder of the worktree", async () => {

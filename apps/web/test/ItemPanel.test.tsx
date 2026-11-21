@@ -12,11 +12,6 @@ import { installKeys } from "../src/shell/keys.ts";
 import { closeItem, openItem, syncItem, toggleDock, useItem } from "../src/shell/overlays.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
 
-function openConversation() {
-  const summary = screen.getByText("Conversation with FLIGHT");
-  if (!summary.closest("details")?.open) fireEvent.click(summary);
-}
-
 const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
   const items = routes["/api/attention"];
@@ -28,7 +23,7 @@ function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
       discussions[`${discussionPath(item.key)}?id=${encodeURIComponent(thread.id)}`] = thread;
       discussions[`POST ${discussionPath(item.key)}`] = thread;
     }
-  return fetchRoutes({ ...discussions, ...routes });
+  return fetchRoutes({ "/api/comms/flight": { messages: [] }, ...discussions, ...routes });
 }
 
 import { brief, CONFIG, crewRow, escalation, HOUR, item, NOW, SEAT_Q } from "./fixtures.ts";
@@ -124,48 +119,50 @@ describe("ItemPanel, Ask FLIGHT", () => {
       "/api/config": CONFIG,
       "/api/flight": flight,
       "POST /api/seats/flight-1/message": {},
+      "POST /api/comms": {},
     });
     render(<ItemPanel />);
     act(() => openItem(item().key));
     return fn;
   };
 
-  it("stays usable with no live seat, and says there is no seat", async () => {
+  it("says there is no seat when none is configured", async () => {
     withFlight({ seat: null, decisions: [] });
     await screen.findByText("Which eviction policy should the quote cache use?");
-    const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
-    expect(input.disabled).toBe(false);
-    fireEvent.change(input, { target: { value: "why?" } });
-    expect((screen.getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect((screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement).disabled).toBe(true);
     expect(screen.getByText(FLIGHT_NO_SEAT)).toBeTruthy();
   });
 
-  it("posts the text to the item discussion with its version and message id", async () => {
+  it("heads the thread About: the item's title", async () => {
+    withFlight({
+      seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
+      decisions: [],
+    });
+    await screen.findByText("Which eviction policy should the quote cache use?");
+    expect(screen.getByRole("heading", { name: /^About: / })).toBeTruthy();
+  });
+
+  it("sends the text to FLIGHT with the item key, to the one stored thread", async () => {
     const fn = withFlight({
       seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
       decisions: [],
     });
-    const input = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLInputElement;
+    const input = (await screen.findByLabelText("Message FLIGHT")) as HTMLTextAreaElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: " why? " } });
-    fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(input.value).toBe(""));
-    const call = fn.mock.calls.find(
-      ([p, init]) => p === discussionPath(item().key) && init?.method === "POST",
-    );
-    const text = JSON.parse(call?.[1]?.body as string).text as string;
-    expect(text).toBe("why?");
-    expect(JSON.parse(call?.[1]?.body as string)).toMatchObject({
-      version: "v1",
-      messageId: expect.any(String),
+    const call = fn.mock.calls.find(([p, init]) => p === "/api/comms" && init?.method === "POST");
+    expect(JSON.parse(call?.[1]?.body as string)).toEqual({
+      to: "flight-1",
+      text: "why?",
+      itemKey: item().key,
     });
-    expect(fn.mock.calls.some(([p]) => p === "/api/seats/flight-1/message")).toBe(false);
+    expect(fn.mock.calls.some(([p]) => p === discussionPath(item().key))).toBe(false);
   });
 
   const sent = async (items: AttentionItem[]) => {
-    const fn = stubFetch({
+    stubFetch({
       "/api/attention": items,
       "/api/escalations": [],
       "/api/crew?shape=summary": {
@@ -177,36 +174,40 @@ describe("ItemPanel, Ask FLIGHT", () => {
         seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "idle", live: true },
         decisions: [],
       },
-      "POST /api/seats/flight-1/message": {},
     });
     render(<ItemPanel />);
     act(() => openItem(items[0]?.key ?? ""));
-    const input = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLInputElement;
-    await waitFor(() => expect(input.disabled).toBe(false));
-    fireEvent.change(input, { target: { value: " why? " } });
-    fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
-    await waitFor(() => expect(input.value).toBe(""));
-    const call = fn.mock.calls.find(
-      ([p, init]) => p === discussionPath(item().key) && init?.method === "POST",
-    );
-    expect(call).toBeTruthy();
-    return JSON.parse(call?.[1]?.body as string).text as string;
+    return (await screen.findByRole("heading", { name: /^About: / })).textContent;
   };
 
-  it("discusses an item with no title", async () => {
-    expect(await sent([item({ escalationId: null, text: "" })])).toBe("why?");
+  it("names an item with no title by its key", async () => {
+    expect(await sent([item({ escalationId: null, text: "" })])).toBe(`About: ${item().key}`);
   });
 
-  it("discusses an item with a whitespace-only title", async () => {
-    expect(await sent([item({ escalationId: null, text: "   " })])).toBe("why?");
+  it("names an item with a whitespace-only title by its key", async () => {
+    expect(await sent([item({ escalationId: null, text: "   " })])).toBe(`About: ${item().key}`);
   });
 
-  it("keeps the question text separate from the item title", async () => {
-    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })])).toBe("why?");
+  it("heads the thread with the item's title", async () => {
+    expect(await sent([item({ escalationId: null, text: "Stalled on tests" })])).toBe(
+      "About: Stalled on tests",
+    );
   });
 });
 
 describe("ItemPanel, an escalation with a question", () => {
+  it("heads the thread with the Needs-you item title, not the source issue's", async () => {
+    const asked = item({ text: "Clear it from Needs you?" });
+    open(
+      [asked],
+      [escalation({ title: "[studio] cutover — point repo front-door", question: QUESTION })],
+    );
+    expect(
+      await screen.findByRole("heading", { name: "About: Clear it from Needs you?" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: /cutover/ })).toBeNull();
+  });
+
   it("heads it with the kind, the agent and when it opened", async () => {
     const { container } = open([item()]);
     await screen.findByText("Which eviction policy should the quote cache use?");
@@ -219,10 +220,13 @@ describe("ItemPanel, an escalation with a question", () => {
   it("uses only the question section and conversation without a brief", async () => {
     open([item()]);
     await screen.findByText(QUESTION.question);
-    expect(screen.getAllByRole("heading", { level: 3 }).map((el) => el.textContent)).toEqual([
-      "The question",
-    ]);
-    expect(screen.getByLabelText("Ask FLIGHT about this")).toBeTruthy();
+    expect(
+      screen
+        .getAllByRole("heading", { level: 3 })
+        .map((el) => el.textContent)
+        .filter((t) => !t?.startsWith("About: ")),
+    ).toEqual(["The question"]);
+    expect(screen.getByLabelText("Message FLIGHT")).toBeTruthy();
   });
 
   it("renders the question's Markdown", async () => {
@@ -276,7 +280,7 @@ describe("ItemPanel, an escalation with a question", () => {
       [...document.querySelectorAll(".source-answers li .qtext")].map((el) => el.textContent),
     ).toEqual(QUESTION.answers);
     expect(document.querySelector("#dsOpts .opt")).toBeNull();
-    expect(screen.getByLabelText("Ask FLIGHT about this")).toBeTruthy();
+    expect(screen.getByLabelText("Message FLIGHT")).toBeTruthy();
   });
 
   it("links to the issue on GitHub, in a new tab", async () => {
@@ -289,12 +293,11 @@ describe("ItemPanel, an escalation with a question", () => {
     expect(a.rel).toBe("noopener noreferrer");
   });
 
-  it("keeps the chat open while FLIGHT's state is unknown", async () => {
+  it("keeps the thread open while FLIGHT's state is unknown", async () => {
     open([item()]);
     await screen.findByText(QUESTION.question);
-    const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
-    expect(input.disabled).toBe(false);
-    expect(input.placeholder).toBe("Ask FLIGHT about this…");
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("Ask FLIGHT to assign, reprioritise or report…");
   });
 });
 
@@ -331,6 +334,7 @@ describe("ItemPanel, acting on an item", () => {
       "/api/flight": { seat: FLIGHT_SEAT, decisions: [] },
       "POST /api/seats/mc-dev-1/message": {},
       "POST /api/seats/flight-1/message": {},
+      "POST /api/comms": {},
       ...routes,
     });
     render(
@@ -343,6 +347,8 @@ describe("ItemPanel, acting on an item", () => {
     return fn;
   }
   const panel = () => document.querySelector("#discuss") as HTMLElement;
+  /** What a pick of SEAT_Q's first option carries: the brief shown and the option's place in it. */
+  const PICK_5174 = { briefAt: NOW, option: 0 };
   const enabled = async (name: string) => {
     const b = (await within(panel()).findByRole("button", { name })) as HTMLButtonElement;
     await waitFor(() => expect(b.disabled).toBe(false));
@@ -362,23 +368,32 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7 },
+        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
       ]),
     );
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
-  it("an option on FLIGHT's own question posts to its discussion and keeps the dock closed", async () => {
+  it("an option on a brief the hub wrote, with no action of its own, goes as a plain message with no pick", async () => {
+    const fn = acting([{ ...SEAT_Q, brief: brief({ by: "hub" }) }]);
+    fireEvent.click(await enabled("5174"));
+    await waitFor(() =>
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
+        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+      ]),
+    );
+  });
+
+  it("an option on FLIGHT's own question posts to FLIGHT with the item key and keeps the dock closed", async () => {
     act(() => toggleDock(false));
     const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }]);
     fireEvent.click(await enabled("5180"));
     await waitFor(() =>
-      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
-        { version: "v1", messageId: expect.any(String), text: "Use port 5180." },
+      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
+        { text: "Use port 5180.", itemKey: SEAT_Q.key, choice: { briefAt: NOW, option: 1 } },
       ]),
     );
     await waitFor(() => expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true));
-    expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 
   it("an escalation's options are text beside Reply on GitHub, and nothing is posted", async () => {
@@ -395,18 +410,18 @@ describe("ItemPanel, acting on an item", () => {
 
   const STOPPED = { "/api/flight": { seat: { ...FLIGHT_SEAT, live: false }, decisions: [] } };
 
-  it("with FLIGHT stopped, a seat's item still replies and Ask FLIGHT is enabled with a Start button", async () => {
+  it("with FLIGHT stopped, a seat's item still replies and FLIGHT can be messaged with a Start button", async () => {
     const fn = acting([SEAT_Q], STOPPED);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7 },
+        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
       ]),
     );
-    const input = within(panel()).getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
+    const input = within(panel()).getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
     fireEvent.change(input, { target: { value: "why?" } });
-    const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
+    const ask = within(panel()).getByRole("button", { name: "Send" }) as HTMLButtonElement;
     expect(ask.disabled).toBe(false);
     expect(within(panel()).getByText(FLIGHT_STOPPED_NOTICE)).toBeTruthy();
     expect(within(panel()).getByRole("button", { name: "Start FLIGHT" })).toBeTruthy();
@@ -419,8 +434,8 @@ describe("ItemPanel, acting on an item", () => {
     expect(within(panel()).getAllByText(FLIGHT_STOPPED_NOTICE).length).toBeGreaterThan(0);
     fireEvent.click(opt);
     await waitFor(() =>
-      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
-        { version: "v1", messageId: expect.any(String), text: "Use port 5174." },
+      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
+        { text: "Use port 5174.", itemKey: SEAT_Q.key, choice: PICK_5174 },
       ]),
     );
   });
@@ -492,7 +507,7 @@ describe("ItemPanel, acting on an item", () => {
       expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
         "Recorded. mc-dev-1 took it at",
       );
-      expect(within(panel()).getByText("You chose:").textContent).toContain("5174");
+      expect(within(panel()).queryByText(/You chose/)).toBeNull();
       const pick = (await within(panel()).findByRole("button", {
         name: "5174",
       })) as HTMLButtonElement;
@@ -514,6 +529,130 @@ describe("ItemPanel, acting on an item", () => {
     });
   });
 
+  describe("an option with a prepared action (a hub brief or an escalation)", () => {
+    const BOUND = "/api/attention/hold%3Astudio/choice";
+    const REVISION = "c".repeat(64);
+    const bound = (over: Partial<AttentionItem> = {}) =>
+      item({
+        key: "hold:studio",
+        kind: "decision",
+        agentId: "studio",
+        escalationId: null,
+        ticket: null,
+        url: null,
+        text: "The studio switch-over is still open.",
+        brief: {
+          ...brief({
+            for: "operator",
+            by: "hub",
+            options: [
+              { id: "clear", label: "Not now, clear it", answer: "Clear it." },
+              { id: "keep", label: "Keep it", answer: "Keep it open." },
+            ],
+          }),
+          id: 31,
+          binding: {
+            version: 2,
+            sourceRevision: REVISION,
+            meaningKey: "m",
+            epoch: "e1",
+            epochId: 31,
+            preparedAt: NOW,
+            preparedBy: { service: "stalled-comms" },
+            actions: [
+              {
+                optionId: "clear",
+                action: { kind: "record-decision" },
+                defaultable: false,
+                effect: "Records the decision.",
+              },
+              {
+                optionId: "keep",
+                action: {
+                  kind: "attention-hold",
+                  reason: "Kept open",
+                  condition: { kind: "date", at: NOW + HOUR },
+                },
+                defaultable: false,
+                effect: "Holds the item.",
+              },
+            ],
+          },
+        },
+        ...over,
+      });
+    const applied = (over: object = {}) => ({
+      epoch: "e1",
+      requestId: "r",
+      optionId: "clear",
+      at: NOW + 1,
+      state: "applied",
+      text: "Decision recorded. No external action was performed.",
+      actor: { operator: true },
+      ...over,
+    });
+
+    const choices = [
+      { label: "Not now, clear it", id: "clear", other: "Keep it", text: "Decision recorded." },
+      { label: "Keep it", id: "keep", other: "Not now, clear it", text: "Held until later." },
+    ];
+    it.each(
+      choices.flatMap((c) => [
+        [`a hub brief, ${c.id}`, bound(), c] as const,
+        [
+          `an escalation, ${c.id}`,
+          bound({ key: "hold:studio", escalationId: "shop-app#4001" }),
+          c,
+        ] as const,
+      ]),
+    )("%s: clicking posts that option's bound choice and shows it recorded", async (_n, ask, c) => {
+      const fn = acting([ask], {
+        [`POST ${BOUND}`]: applied({ optionId: c.id, text: `${c.text} No external action.` }),
+      });
+      fireEvent.click(await enabled(c.label));
+      await waitFor(() => expect(posts(fn, BOUND)).toHaveLength(1));
+      expect(posts(fn, BOUND)[0]).toMatchObject({
+        briefId: 31,
+        sourceRevision: REVISION,
+        optionId: c.id,
+      });
+      expect(typeof posts(fn, BOUND)[0].requestId).toBe("string");
+      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
+      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(c.text);
+      expect(within(panel()).queryByText(/You chose/)).toBeNull();
+      for (const name of [c.label, c.other])
+        expect((within(panel()).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
+          true,
+        );
+    });
+
+    it("still posts when the page is served over plain http, where crypto.randomUUID is missing", async () => {
+      const original = crypto.randomUUID;
+      Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+      try {
+        const fn = acting([bound()], { [`POST ${BOUND}`]: applied() });
+        fireEvent.click(await enabled("Not now, clear it"));
+        await waitFor(() => expect(posts(fn, BOUND)).toHaveLength(1));
+        expect(posts(fn, BOUND)[0].requestId).toMatch(/^[a-zA-Z0-9:_-]{1,100}$/);
+      } finally {
+        Object.defineProperty(crypto, "randomUUID", { value: original, configurable: true });
+      }
+    });
+
+    it("shows the server's refusal and leaves the options clickable", async () => {
+      acting([bound()], {
+        [`POST ${BOUND}`]: () => ({
+          status: 409,
+          body: { error: "This decision is held; a choice cannot release it implicitly." },
+        }),
+      });
+      fireEvent.click(await enabled("Keep it"));
+      expect((await within(panel()).findByRole("alert")).textContent).toContain("is held");
+      expect(within(panel()).queryByTestId("choice-line")).toBeNull();
+      await enabled("Keep it");
+    });
+  });
+
   it("Dismiss posts the dismiss route, refreshes the list and closes the panel", async () => {
     const fn = acting([BLOCKED], { [DISMISS]: { dismissed: BLOCKED.key } });
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
@@ -530,7 +669,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     expect((await within(panel()).findByRole("alert")).textContent).toBe(refusal);
     expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-      { text: "Use port 5174.", question: 7 },
+      { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key, choice: PICK_5174 },
     ]);
   });
 
@@ -561,30 +700,30 @@ describe("ItemPanel, acting on an item", () => {
       fireEvent.click(await enabled("Reply"));
       await waitFor(() =>
         expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-          {
-            text: `Re: ${current.key} · ${current.text}\n\nUse my custom answer`,
-            itemKey: current.key,
-          },
+          { text: "Use my custom answer", itemKey: current.key },
         ]),
       );
-      expect(posts(fn, discussionPath(current.key))).toEqual([]);
       await waitFor(() => expect((input as HTMLInputElement).value).toBe(""));
     },
   );
 
-  it("sends legacy person options through sendAnswer", async () => {
+  it("sends legacy person options through sendAnswer, with the pick, and shuts the options", async () => {
     const current = { ...SEAT_Q, kind: "person" as const, agentId: "flight-1" };
     const fn = acting([current]);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: `Re: ${current.key} · ${current.text}\n\nUse port 5174.` },
+        { text: "Use port 5174.", itemKey: current.key, choice: PICK_5174 },
       ]),
     );
-    expect(posts(fn, discussionPath(current.key))).toEqual([]);
+    await waitFor(() =>
+      expect(
+        (within(panel()).getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled,
+      ).toBe(true),
+    );
   });
 
-  it("an item without a brief still offers Reply, Ask FLIGHT and Dismiss", async () => {
+  it("an item without a brief still offers Reply, the FLIGHT thread and Dismiss", async () => {
     const fn = acting([{ ...SEAT_Q, brief: undefined }]);
     const input = (await screen.findByLabelText("Your answer")) as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(false));
@@ -598,16 +737,15 @@ describe("ItemPanel, acting on an item", () => {
       ]),
     );
     await waitFor(() => expect(input.value).toBe(""));
-    fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
+    fireEvent.change(within(panel()).getByLabelText("Message FLIGHT"), {
       target: { value: " port? " },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
+    fireEvent.click(within(panel()).getByRole("button", { name: "Send" }));
     await waitFor(() =>
-      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
-        { text: "port?", version: "v1", messageId: expect.any(String) },
+      expect(posts(fn, "/api/comms")).toEqual([
+        { to: "flight-1", text: "port?", itemKey: SEAT_Q.key },
       ]),
     );
-    expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
   });
 });
 
@@ -1177,7 +1315,7 @@ describe("ItemPanel choice state", () => {
     act(() => openItem(SEAT_Q.key));
     const choice = await screen.findByRole("button", { name: "5174" });
     fireEvent.click(choice);
-    await screen.findByText("You chose:");
+    await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(true));
     expect((choice as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "5180" }) as HTMLButtonElement).disabled).toBe(true);
   });
@@ -1203,57 +1341,95 @@ describe("ItemPanel choice state", () => {
   });
 });
 
-describe("ItemPanel item chat isolation", () => {
-  it("interleaves two items with global chat, keeps the dock closed and echoes an answer", async () => {
-    const a = { ...SEAT_Q, key: "ask:a" };
-    const b = { ...SEAT_Q, key: "ask:b", text: "Another decision" };
-    const chat = (key: string) => ({
-      id: `thread:${key}`,
-      itemKey: key,
-      version: "v1",
-      messages: [] as {
-        id: string;
-        itemKey: string;
-        correlationId: string;
-        replyTo?: string;
-        role: "operator" | "flight";
-        text: string;
-        at: number;
-      }[],
-    });
-    const first = chat(a.key);
-    const second = chat(b.key);
-    const fn = stubFetch({
-      "/api/attention": [a, b],
-      "/api/config": CONFIG,
+describe("ItemPanel beside the one FLIGHT thread", () => {
+  const FLIGHT = { id: "flight-1", live: true, call: "FLIGHT-1", model: "opus", state: "idle" };
+  const stored = (extra: object[] = []) => ({
+    messages: [
+      {
+        id: "comms:1",
+        at: NOW,
+        from: "CAPCOM",
+        to: "flight-1",
+        text: "Why this port?",
+        operator: true,
+        itemKey: "ask:7",
+      },
+      {
+        id: "comms:2",
+        at: NOW + 1,
+        from: "flight-1",
+        to: "CAPCOM",
+        text: "The port is available.",
+        operator: false,
+      },
+      ...extra,
+    ],
+  });
+
+  it("shows the same sent message and reply in the fly-out and in the dock", async () => {
+    stubFetch({
+      "/api/attention": [SEAT_Q],
       "/api/crew?shape=summary": {
         rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
         firstRunToday: null,
       },
-      "/api/flight": {
-        seat: { id: "flight-1", live: true, call: "FLIGHT-1", model: "opus", state: "idle" },
-        decisions: [],
+      "/api/flight": { seat: FLIGHT, decisions: [] },
+      "/api/comms/flight": stored(),
+    });
+    render(
+      <>
+        <Dock />
+        <ItemPanel />
+      </>,
+    );
+    act(() => {
+      toggleDock(true);
+      openItem(SEAT_Q.key);
+    });
+    const inPanel = within(document.querySelector("#discuss") as HTMLElement);
+    const inDock = within(document.querySelector("#dock") as HTMLElement);
+    for (const view of [inPanel, inDock]) {
+      expect(await view.findByText("Why this port?")).toBeTruthy();
+      expect(view.getByText("The port is available.")).toBeTruthy();
+    }
+    expect(inPanel.getByRole("heading", { name: `About: ${SEAT_Q.text}` })).toBeTruthy();
+    expect(inDock.queryByRole("heading", { name: /^About: / })).toBeNull();
+  });
+
+  it("shows a picked option once, as the choice the hub stores from the click, and sends no second message", async () => {
+    // No choice exists before the click. The stub does what the hub does: a message that carries
+    // a pick is stored with it, and the thread reads it back as the choice.
+    let extra: object[] = [];
+    const fn = stubFetch({
+      "/api/attention": [SEAT_Q],
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
+        firstRunToday: null,
       },
-      "/api/agents/flight-1/stream?limit=20": {
-        events: [{ id: "global", kind: "msg", text: "Global conversation", at: NOW }],
-        total: 1,
-      },
-      "POST /api/seats/mc-dev-1/message": {},
-      [discussionPath(a.key)]: first,
-      [`${discussionPath(a.key)}?id=${encodeURIComponent(first.id)}`]: first,
-      [discussionPath(b.key)]: second,
-      [`${discussionPath(b.key)}?id=${encodeURIComponent(second.id)}`]: second,
-      [`POST ${discussionPath(a.key)}`]: (init: RequestInit | undefined) => {
-        const body = JSON.parse(init?.body as string);
-        first.messages.push({
-          id: body.messageId,
-          itemKey: a.key,
-          correlationId: first.id,
-          role: "operator",
-          text: body.text,
-          at: NOW,
-        });
-        return { status: 200, body: first };
+      "/api/flight": { seat: FLIGHT, decisions: [] },
+      "/api/comms/flight": () => ({ status: 200, body: stored(extra) }),
+      "POST /api/seats/mc-dev-1/message": (init: RequestInit | undefined) => {
+        const sent = JSON.parse(init?.body as string) as {
+          text: string;
+          itemKey: string;
+          choice?: { briefAt: number; option: number };
+        };
+        const picked = sent.choice && SEAT_Q.brief?.options[sent.choice.option];
+        extra = [
+          {
+            id: "comms:3",
+            at: NOW + 2,
+            from: "CAPCOM",
+            to: "mc-dev-1",
+            text: sent.text,
+            operator: true,
+            itemKey: sent.itemKey,
+            ...(picked && sent.choice?.briefAt === SEAT_Q.brief?.at
+              ? { choice: { label: picked.label } }
+              : {}),
+          },
+        ];
+        return { status: 200, body: { ok: true } };
       },
     });
     render(
@@ -1262,197 +1438,81 @@ describe("ItemPanel item chat isolation", () => {
         <ItemPanel />
       </>,
     );
-    act(() => toggleDock(true));
-    await screen.findByText("Global conversation");
     act(() => {
-      toggleDock(false);
-      openItem(a.key);
+      toggleDock(true);
+      openItem(SEAT_Q.key);
     });
-    await screen.findByText("No messages yet.");
-    openConversation();
-    fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
-      target: { value: "Why this port?" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Ask FLIGHT" }));
-    await screen.findByText("Why this port?");
-    act(() => openItem(b.key));
-    await screen.findByText("No messages yet.");
-    openConversation();
-    expect(screen.queryByText("Why this port?")).toBeNull();
-    first.messages.push({
-      id: "reply",
-      replyTo: first.messages[0]?.id,
-      itemKey: a.key,
-      correlationId: first.id,
-      role: "flight",
-      text: "The port is available.",
-      at: NOW,
-    });
-    act(() => {
-      openItem(a.key);
-      hub.refetchTopic("attention");
-    });
-    await screen.findByText("The port is available.");
-    fireEvent.click(screen.getByRole("button", { name: "5174" }));
-    await screen.findByText("You chose:");
-    await waitFor(() =>
-      expect(first.messages.some((m) => m.text === "You chose: 5174")).toBe(true),
-    );
-    expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true);
+    const flyout = within(document.querySelector("#discuss") as HTMLElement);
+    const dock = within(document.querySelector("#dock") as HTMLElement);
+    for (const view of [flyout, dock]) {
+      expect(await view.findByText("The port is available.")).toBeTruthy();
+      expect(view.queryByText(/You chose/)).toBeNull();
+    }
+    fireEvent.click(flyout.getByRole("button", { name: "5174" }));
+    for (const view of [flyout, dock]) {
+      expect(await view.findByText("You chose: 5174")).toBeTruthy();
+      expect(view.getAllByText(/You chose/)).toHaveLength(1);
+    }
     expect(
-      fn.mock.calls.some(
-        ([path, init]) => path === "/api/seats/flight-1/message" && init?.method === "POST",
+      fn.mock.calls
+        .filter(([p, init]) => p === "/api/seats/mc-dev-1/message" && init?.method === "POST")
+        .map(([, init]) => JSON.parse(init?.body as string)),
+    ).toEqual([
+      {
+        text: "Use port 5174.",
+        question: 7,
+        itemKey: SEAT_Q.key,
+        choice: { briefAt: NOW, option: 0 },
+      },
+    ]);
+    expect(
+      fn.mock.calls.filter(([p, init]) => p === "/api/comms" && init?.method === "POST"),
+    ).toHaveLength(0);
+    await waitFor(() =>
+      expect((flyout.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
+        true,
       ),
-    ).toBe(false);
+    );
   });
-});
 
-it("retains the brief and choices while sending, and a late failure stays with its item", async () => {
-  const a = { ...SEAT_Q, key: "ask:pending" };
-  const b = { ...SEAT_Q, key: "ask:other" };
-  const base = stubFetch({
-    "/api/attention": [a, b],
-    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-    "/api/crew?shape=summary": {
-      rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
-      firstRunToday: null,
-    },
-  });
-  let finish: (response: Response) => void = () => {};
-  vi.stubGlobal("fetch", (path: string, init?: RequestInit) =>
-    path === discussionPath(a.key) && init?.method === "POST"
-      ? new Promise<Response>((resolve) => {
-          finish = resolve;
-        })
-      : base(path, init),
-  );
-  render(<ItemPanel />);
-  act(() => openItem(a.key));
-  await screen.findByText("No messages yet.");
-  openConversation();
-  fireEvent.change(screen.getByLabelText("Ask FLIGHT about this"), {
-    target: { value: "Check the evidence" },
-  });
-  fireEvent.submit(
-    screen.getByRole("button", { name: "Ask FLIGHT" }).closest("form") as HTMLFormElement,
-  );
-  await screen.findByText("Sending…");
-  expect(screen.getByText("The dev seat asks which port to preview on.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "5174" })).toBeTruthy();
-  act(() => openItem(b.key));
-  await screen.findByText("No messages yet.");
-  openConversation();
-  const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
-  fireEvent.change(input, { target: { value: "A different question" } });
-  await act(async () =>
-    finish(new Response(JSON.stringify({ error: "First send failed" }), { status: 503 })),
-  );
-  expect(input.value).toBe("A different question");
-  expect(screen.queryByText("First send failed")).toBeNull();
-  expect(document.querySelector("#discuss")).toBeTruthy();
-});
-
-it("sends a FLIGHT choice through the item discussion without opening the dock", async () => {
-  const q = { ...SEAT_Q, agentId: "flight-1" };
-  const discussion = { id: "flight-choice", itemKey: q.key, version: "v1", messages: [] };
-  const fn = stubFetch({
-    "/api/attention": [q],
-    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-    [discussionPath(q.key)]: discussion,
-    [`${discussionPath(q.key)}?id=flight-choice`]: discussion,
-    [`POST ${discussionPath(q.key)}`]: discussion,
-    "POST /api/seats/flight-1/message": {},
-  });
-  render(
-    <>
-      <Dock />
-      <ItemPanel />
-    </>,
-  );
-  act(() => {
-    toggleDock(false);
-    openItem(q.key);
-  });
-  await screen.findByText("No messages yet.");
-  openConversation();
-  fireEvent.click(screen.getByRole("button", { name: "5174" }));
-  await waitFor(() =>
-    expect(fn).toHaveBeenCalledWith(
-      discussionPath(q.key),
-      expect.objectContaining({
-        method: "POST",
-        body: expect.stringContaining(q.brief?.options[0]?.answer ?? "missing"),
-      }),
-    ),
-  );
-  expect(
-    fn.mock.calls.some(
-      ([path, init]) => path === "/api/seats/flight-1/message" && init?.method === "POST",
-    ),
-  ).toBe(false);
-  expect(document.querySelector("#dock")?.hasAttribute("hidden")).toBe(true);
-  expect(
-    within(screen.getByRole("log", { name: "Item discussion" })).getByText(
-      q.brief?.options[0]?.answer ?? "missing",
-      { exact: false },
-    ),
-  ).toBeTruthy();
-});
-
-it.each(["offline", "load failed", "echo failed"])(
-  "keeps a successful seat answer in the discussion when %s",
-  async (mode) => {
-    const fn = stubFetch({
+  it("keeps the brief and options while a thread send is pending, and a late failure stays with the send", async () => {
+    const base = stubFetch({
       "/api/attention": [SEAT_Q],
+      "/api/flight": { seat: FLIGHT, decisions: [] },
       "/api/crew?shape=summary": {
         rows: [crewRow({ id: "mc-dev-1", kind: "crew" })],
         firstRunToday: null,
       },
-      "/api/flight": {
-        seat: mode === "offline" ? null : { id: "flight-1", live: true },
-        decisions: [],
-      },
-      "POST /api/seats/mc-dev-1/message": {},
-      ...(mode === "load failed"
-        ? {
-            [discussionPath(SEAT_Q.key)]: () => ({
-              status: 503,
-              body: { error: "Discussion unavailable" },
-            }),
-          }
-        : {}),
-      [`POST ${discussionPath(SEAT_Q.key)}`]: () => ({
-        status: 503,
-        body: { error: "FLIGHT unavailable" },
-      }),
     });
+    let finish: (response: Response) => void = () => {};
+    vi.stubGlobal("fetch", (path: string, init?: RequestInit) =>
+      path === "/api/comms" && init?.method === "POST"
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : base(path, init),
+    );
     render(<ItemPanel />);
     act(() => openItem(SEAT_Q.key));
-    if (mode === "load failed") await screen.findByText("Discussion unavailable");
-    else await screen.findByText("No messages yet.");
-    openConversation();
-    fireEvent.click(screen.getByRole("button", { name: "5174" }));
-    await screen.findByText("You chose:");
-    const log = within(screen.getByRole("log", { name: "Item discussion" }));
+    const input = (await screen.findByLabelText("Message FLIGHT")) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.disabled).toBe(false));
+    fireEvent.change(input, { target: { value: "Check the evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() =>
-      expect(
-        log.getByText(SEAT_Q.brief?.options[0]?.answer ?? "missing", { exact: false }),
-      ).toBeTruthy(),
-    );
-    await waitFor(() =>
-      expect(
-        log.getByText(
-          mode === "load failed" ? /discussion couldn't be loaded/i : /FLIGHT hasn't replied yet/i,
-        ),
-      ).toBeTruthy(),
-    );
-    expect(
-      fn.mock.calls.filter(
-        ([path, init]) => path === "/api/seats/mc-dev-1/message" && init?.method === "POST",
+      expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+        true,
       ),
-    ).toHaveLength(1);
-  },
-);
+    );
+    expect(screen.getByText("The dev seat asks which port to preview on.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "5174" })).toBeTruthy();
+    await act(async () =>
+      finish(new Response(JSON.stringify({ error: "First send failed" }), { status: 503 })),
+    );
+    expect(await screen.findByText(/First send failed/)).toBeTruthy();
+    expect(input.value).toBe("Check the evidence");
+    expect(document.querySelector("#discuss")).toBeTruthy();
+  });
+});
 
 describe("Needs-you brief layout", () => {
   const full = brief({
@@ -1483,74 +1543,16 @@ describe("Needs-you brief layout", () => {
         "What FLIGHT did",
         "What FLIGHT needs from you",
         "Your answer",
+        // the thread is headed with the title the page shows: the brief's ask, not the item's text
+        `About: ${full.ask}`,
       ]);
       expect(screen.getByText(`checked: ${full.basis}`)).toBeTruthy();
       expect(document.querySelector(".opt.rec")?.textContent).toContain("FLIGHT recommends");
       expect(screen.getByText(full.recommendation.trim())).toBeTruthy();
       expect(screen.getByRole("button", { name: "A" })).toBeTruthy();
-      expect(screen.getByText("Conversation with FLIGHT").closest("details")?.open).toBe(false);
+      expect(screen.getByRole("region", { name: "Conversation with FLIGHT" })).toBeTruthy();
     },
   );
-
-  it.each(["question", "person"] as const)(
-    "focuses the conversation without options for %s",
-    async (kind) => {
-      const current = { ...SEAT_Q, kind, brief: { ...full, options: [], did: [] } };
-      stubFetch({
-        "/api/attention": [current],
-        "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-      });
-      render(<ItemPanel />);
-      act(() => openItem(current.key));
-      const input = await screen.findByRole("textbox", { name: "Ask FLIGHT about this" });
-      await waitFor(() => expect(document.activeElement).toBe(input));
-      expect(screen.queryByRole("heading", { name: "What FLIGHT did" })).toBeNull();
-    },
-  );
-});
-
-it("keeps focus out of a folded conversation and returns it to the opener", async () => {
-  const opener = document.createElement("button");
-  document.body.append(opener);
-  opener.focus();
-  stubFetch({
-    "/api/attention": [SEAT_Q],
-    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-  });
-  render(<ItemPanel />);
-  act(() => openItem(SEAT_Q.key));
-  const summary = await screen.findByText("Conversation with FLIGHT");
-  const first = screen.getByRole("button", { name: "Dismiss" });
-  first.focus();
-  fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
-  expect(document.activeElement).toBe(summary);
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(document.activeElement).toBe(opener);
-  opener.remove();
-});
-
-it("returns focus after opening a cached item directly into its conversation", async () => {
-  const current = { ...SEAT_Q, brief: brief({ options: [] }) };
-  stubFetch({
-    "/api/attention": [current],
-    "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
-  });
-  render(<ItemPanel />);
-  act(() => openItem(current.key));
-  await waitFor(() =>
-    expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
-  );
-  act(() => closeItem());
-  const opener = document.createElement("button");
-  document.body.append(opener);
-  opener.focus();
-  act(() => openItem(current.key));
-  await waitFor(() =>
-    expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
-  expect(document.activeElement).toBe(opener);
-  opener.remove();
 });
 
 it.each([QUESTION, null])(
@@ -1786,8 +1788,7 @@ it.each(["seat", "flight"] as const)(
   async (target) => {
     const first = { ...SEAT_Q, agentId: target === "flight" ? "flight-1" : "mc-dev-1" };
     const other = { ...first, key: "ask:other" };
-    const postPath =
-      target === "flight" ? discussionPath(first.key) : "/api/seats/mc-dev-1/message";
+    const postPath = `/api/seats/${target === "flight" ? "flight-1" : "mc-dev-1"}/message`;
     const fn = stubFetch({
       "/api/attention": [first, other],
       "/api/crew?shape=summary": {
@@ -1796,6 +1797,7 @@ it.each(["seat", "flight"] as const)(
       },
       "/api/flight": { seat: { id: "flight-1", live: true }, decisions: [] },
       "POST /api/seats/mc-dev-1/message": {},
+      "POST /api/seats/flight-1/message": {},
     });
     const answer = fn.getMockImplementation() as (...args: unknown[]) => Promise<Response>;
     let release = () => {};
@@ -1810,9 +1812,6 @@ it.each(["seat", "flight"] as const)(
     act(() => openItem(first.key));
     const choice = await screen.findByRole("button", { name: "5174" });
     await waitFor(() => expect((choice as HTMLButtonElement).disabled).toBe(false));
-    await waitFor(() =>
-      expect(hub.snapshot(RESOURCES.discussion(first.key).path, "attention").data).toBeTruthy(),
-    );
     fireEvent.click(choice);
     await waitFor(() =>
       expect(
@@ -1824,14 +1823,15 @@ it.each(["seat", "flight"] as const)(
       release();
       await gate;
     });
-    expect(screen.queryByText("You chose:")).toBeNull();
     expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
       false,
     );
     act(() => openItem(first.key));
-    await screen.findByText("You chose:");
-    expect(screen.getByText(/You chose: 5174/)).toBeTruthy();
-    expect(screen.getByText("Conversation with FLIGHT").closest("details")?.open).toBe(true);
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "5174" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
     for (const label of ["5174", "5180"]) {
       const button = screen.getByRole("button", { name: label }) as HTMLButtonElement;
       expect(button.disabled).toBe(true);

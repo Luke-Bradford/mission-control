@@ -38,7 +38,7 @@ const tile = (label: string): HTMLElement => screen.getByText(label).closest(".k
 describe("Guard tile", () => {
   it("shows the week's blocks and the top rule, linking to the Comms guard drawer", async () => {
     stubFetch({
-      [HITS]: { hits: [], counts: { "git-write": 7, network: 3, secret: 2 } },
+      [HITS]: { hits: [], counts: { "git-write": 7, "full-suite": 3, secret: 2 } },
       [LOCK]: FREE,
     });
     render(<Kpis t={undefined} />);
@@ -50,13 +50,13 @@ describe("Guard tile", () => {
   });
 
   it("names the earlier-declared rule when counts tie", async () => {
-    stubFetch({ [HITS]: { hits: [], counts: { network: 2, "git-write": 2 } }, [LOCK]: FREE });
+    stubFetch({ [HITS]: { hits: [], counts: { "full-suite": 2, "git-write": 2 } }, [LOCK]: FREE });
     render(<Kpis t={undefined} />);
     await screen.findByText("blocked · most: git-write (2)");
   });
 
   it("reads 0 blocked this week when nothing was blocked", async () => {
-    stubFetch({ [HITS]: { hits: [], counts: { "git-write": 0, network: 0 } }, [LOCK]: FREE });
+    stubFetch({ [HITS]: { hits: [], counts: { "git-write": 0, "full-suite": 0 } }, [LOCK]: FREE });
     render(<Kpis t={undefined} />);
     await waitFor(() => expect(tile("Guard").textContent).toContain("blocked this week"));
     expect(tile("Guard").textContent).toContain("0");
@@ -71,11 +71,11 @@ describe("Guard tile", () => {
   });
 
   it("refreshes on a guard event", async () => {
-    let counts: Record<string, number> = { network: 1 };
+    let counts: Record<string, number> = { "full-suite": 1 };
     stubFetch({ [HITS]: () => ({ status: 200, body: { hits: [], counts } }), [LOCK]: FREE });
     render(<Kpis t={undefined} />);
-    await screen.findByText("most: network (1)", { exact: false });
-    counts = { network: 1, secret: 4 };
+    await screen.findByText("most: full-suite (1)", { exact: false });
+    counts = { "full-suite": 1, secret: 4 };
     hub.refetchTopic("guard");
     await screen.findByText("most: secret (4)", { exact: false });
   });

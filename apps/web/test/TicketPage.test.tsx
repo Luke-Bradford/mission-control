@@ -458,26 +458,25 @@ describe("questions on the ticket", () => {
     stubFetch({
       "/api/config": CONFIG,
       [PATH]: withQuestions([question(1, { discussionKey: key })]),
-      [`/api/attention/${encodeURIComponent(key)}/discussion`]: {
-        id: "d1",
-        itemKey: key,
-        version: "v1",
+      [`/api/attention/${encodeURIComponent(key)}/thread`]: {
         messages: [
           {
             id: "m1",
-            itemKey: key,
-            correlationId: "c1",
-            role: "operator",
-            text: "Which one?",
             at: 8_100,
+            from: "capcom",
+            to: "flight-1",
+            text: "Which one?",
+            operator: true,
+            deliveredAt: 8_150,
           },
           {
             id: "m2",
-            itemKey: key,
-            correlationId: "c1",
-            role: "flight",
-            text: "The LRU one.",
             at: 8_200,
+            from: "flight-1",
+            to: "capcom",
+            text: "The LRU one.",
+            operator: false,
+            deliveredAt: null,
           },
         ],
       },
@@ -487,6 +486,11 @@ describe("questions on the ticket", () => {
     fireEvent.click(within(p).getByText("Conversation"));
     expect(await within(p).findByText("Which one?")).toBeTruthy();
     expect(within(p).getByText("The LRU one.")).toBeTruthy();
+    const rows = within(
+      within(p).getByRole("list", { name: "Conversation on this question" }),
+    ).getAllByRole("listitem");
+    expect(within(rows[0] as HTMLElement).getByText("YOU")).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText("FLIGHT")).toBeTruthy();
     expect(within(p).queryByRole("textbox")).toBeNull();
   });
 
@@ -495,12 +499,7 @@ describe("questions on the ticket", () => {
     stubFetch({
       "/api/config": CONFIG,
       [PATH]: withQuestions([question(2, { discussionKey: key })]),
-      [`/api/attention/${encodeURIComponent(key)}/discussion`]: {
-        id: "d2",
-        itemKey: key,
-        version: "v0",
-        messages: [],
-      },
+      [`/api/attention/${encodeURIComponent(key)}/thread`]: { messages: [] },
     });
     render(<TicketPage repoId="shop-app" number={3349} />);
     const p = await panel();

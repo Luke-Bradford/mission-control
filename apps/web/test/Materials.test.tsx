@@ -4,11 +4,10 @@ import {
   DEFAULT_AWAY,
   type TicketHistory,
 } from "@mc/core";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { mainTicket, planSection, retainedImageId } from "../src/needs/materials.ts";
-import { PREVIEW_ORIGIN } from "../src/needs/PreviewFrame.tsx";
 import { pictureRoute } from "../src/needs/pictures.ts";
 import { Needs } from "../src/pages/Needs.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -129,6 +128,8 @@ function routes(
     "/api/settings/away": DEFAULT_AWAY,
     "/api/machine": { latest: null },
     "/api/limits": [],
+    // the FLIGHT thread beside the question reads the stored conversation
+    "/api/comms/flight": { messages: [] },
     ...more,
   });
   const inner = fn.getMockImplementation() as (i: string, init?: RequestInit) => Promise<Response>;
@@ -193,6 +194,22 @@ describe("plan and ticket reading", () => {
 });
 
 describe("Plan and mockups in the question", () => {
+  it("says plainly that the repo is not watched, and fetches no materials for it", async () => {
+    const text = "The plan and materials are not loaded: shop-app is not watched by this hub.";
+    const fn = routes([ask("q1", { repoUnwatched: { repoId: "shop-app", text } })], {
+      [TICKET]: () => ({ status: 401, body: { error: "operator token required" } }),
+      [matPath("q1")]: () => ({ status: 401, body: { error: "operator token required" } }),
+    });
+    render(<Needs item="q1" />);
+    const mat = await screen.findByRole("region", { name: "Plan and mockups" });
+    expect(within(mat).getByText(text)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/operator token required/)).toBeNull();
+    expect(screen.queryByText(/Could not load/)).toBeNull();
+    const urls = fn.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes("/materials") || u.startsWith("/api/tickets/"))).toBe(false);
+  });
+
   it("shows the main ticket's full plan with no packet registered", async () => {
     routes([ask()], { [TICKET]: history(ticketBody("1. First\n### Detail\n- nested point")) });
     render(<Needs item="q1" />);
@@ -377,46 +394,6 @@ describe("review fixes", () => {
     expect(nextAtEnd.getAttribute("aria-disabled")).toBe("true");
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
     expect(await screen.findByRole("dialog", { name: "Picture: Before" })).toBeTruthy();
-  });
-});
-
-describe("Preview of a PR-labelled item", () => {
-  const view = (over = {}) => ({
-    ticket: 1513,
-    repoId: "shop-app",
-    branch: "feature/1513-old",
-    sha: "b".repeat(40),
-    publishedAt: NOW - 5 * HOUR,
-    pr: 1600,
-    running: false,
-    url: `${PREVIEW_ORIGIN}/`,
-    ...over,
-  });
-  const prItem = () =>
-    ask("pr", {
-      ticket: "PR 1600",
-      brief: brief({
-        ticket: "shop-app#1513",
-        options: [{ id: "a", label: "Yes", answer: "Yes" }],
-      }),
-    });
-
-  it("finds the preview by the brief's ticket and labels its branch and source", async () => {
-    routes([prItem()], { "/api/design-previews": [view()] });
-    render(<Needs item="pr" />);
-    expect(await screen.findByRole("button", { name: "Open preview" })).toBeTruthy();
-    expect(screen.getByText(/Branch preview of feature\/1513-old at bbbbbbb/)).toBeTruthy();
-    expect(screen.getByText(/not the mockup this question asks about/)).toBeTruthy();
-  });
-
-  it("offers nothing for another repo's build of the same number", async () => {
-    routes([prItem()], { "/api/design-previews": [view({ repoId: "site-builder" })] });
-    render(<Needs item="pr" />);
-    await screen.findAllByText("Question pr");
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    expect(screen.queryByRole("button", { name: "Open preview" })).toBeNull();
   });
 });
 

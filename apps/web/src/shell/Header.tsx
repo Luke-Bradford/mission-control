@@ -14,9 +14,10 @@ import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { DEMO_MARKER_TEXT, useDemo } from "../demo/mode.ts";
+import { FLIGHT_THREAD_INPUT } from "../flight/FlightThread.tsx";
 import { hhmm, hms, MONTHS, percent, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
-import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
+import { followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
 import { useOperatorUnread } from "./operatorMessages.ts";
@@ -33,6 +34,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
   { page: "qa", label: "QA", to: PAGE_PATHS.qa },
+  { page: "planner", label: "Planner", to: PAGE_PATHS.planner },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
   { page: "audit", label: "Audit", to: PAGE_PATHS.audit },
 ];
@@ -399,24 +401,19 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
  */
 function DockButton({ page, unread }: { page: Page; unread: number }) {
   const dock = useDock();
-  const inComms = page === "comms";
-  const fullWidth = FULL_WIDTH_PAGES.has(page);
-  const title = inComms
-    ? "FLIGHT chat is open in Comms"
-    : fullWidth
-      ? "Open FLIGHT chat in Comms (f)"
-      : "Show or hide FLIGHT's chat (f)";
+  const open = dock.visible && !dock.collapsed;
   return (
     <button
       type="button"
-      className={`iconbtn${inComms || (!fullWidth && dock.visible && !dock.collapsed) ? " on" : ""}`}
-      title={title}
+      className={`iconbtn${open ? " on" : ""}`}
+      title="Show or hide FLIGHT's chat (f)"
       aria-label={unread > 0 ? `FLIGHT chat, ${unread} unread to you` : "FLIGHT chat"}
-      aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible && !dock.collapsed}
+      aria-pressed={open}
       onClick={() => {
-        if (fullWidth) navigate(PAGE_PATHS.comms);
-        // Comms already is FLIGHT's full conversation; the dock is not mounted here.
-        else if (!inComms) dock.toggle();
+        // Where the thread's box is already on screen (Comms), the button moves to it.
+        const box = page === "comms" ? document.getElementById(FLIGHT_THREAD_INPUT) : null;
+        if (box instanceof HTMLElement && !(box as HTMLTextAreaElement).disabled) box.focus();
+        else dock.toggle();
       }}
     >
       <svg viewBox="0 0 16 16" aria-hidden="true">

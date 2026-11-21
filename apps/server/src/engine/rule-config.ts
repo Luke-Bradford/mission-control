@@ -3,6 +3,7 @@ import {
   DEFAULT_REPO_RULES,
   freezeRules,
   HARD_RULES_BY,
+  PLAN_SIGNOFFS,
   REPO_NEEDS,
   type RepoRules,
 } from "@mc/core";
@@ -33,6 +34,7 @@ export const repoRulesSchema = z.strictObject({
   templates: z.record(nonEmpty, nonEmpty).optional(),
   pick_from: z.array(nonEmpty).min(1).optional(),
   promote_backlog: z.boolean().optional(),
+  plan_signoff: z.enum(PLAN_SIGNOFFS).optional(),
   needs: z.array(z.enum(REPO_NEEDS)).optional(),
   areas: z
     .unknown()
@@ -58,6 +60,9 @@ export const repoRulesSchema = z.strictObject({
   checks: z.array(checkCommand).optional(),
 });
 
+/** What a repo block or the config.yaml `rules` key declares, before defaults fill in. */
+export type RepoBlock = z.infer<typeof repoRulesSchema>;
+
 /** Resolve user config over defaults; supplied maps and lists replace defaults. */
 export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules {
   const base = DEFAULT_REPO_RULES;
@@ -67,6 +72,7 @@ export function resolveRepoRules(r: z.infer<typeof repoRulesSchema>): RepoRules 
     ...(r.templates === undefined ? {} : { templates: r.templates }),
     pickFrom: r.pick_from ?? base.pickFrom,
     promoteBacklog: r.promote_backlog ?? base.promoteBacklog,
+    ...(r.plan_signoff === undefined ? {} : { planSignoff: r.plan_signoff }),
     needs: r.needs ?? base.needs,
     areas: r.areas === undefined ? base.areas : Object.fromEntries(Object.entries(r.areas)),
     hardRules: r.hard_rules ?? base.hardRules,
@@ -94,6 +100,9 @@ export function overlayRepoBlock(
     promoteBacklog: keys?.includes("promote_backlog")
       ? base.promoteBacklog
       : (block.promote_backlog ?? base.promoteBacklog),
+    planSignoff: keys?.includes("plan_signoff")
+      ? base.planSignoff
+      : (block.plan_signoff ?? base.planSignoff),
     needs: keys?.includes("needs") ? base.needs : (block.needs ?? base.needs),
     pickFrom: block.pick_from ?? base.pickFrom,
     areas: block.areas ?? base.areas,

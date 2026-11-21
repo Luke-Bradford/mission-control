@@ -1,15 +1,9 @@
-import {
-  AUDIT_PR_OUTLIER_LINES,
-  type AuditView,
-  type ConfigView,
-  type MapSnapshot,
-  mapSnapshotFixture,
-} from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { AUDIT_PR_OUTLIER_LINES, type AuditView, type ConfigView } from "@mc/core";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import "../src/hud.css";
 import { hub } from "../src/data.ts";
-import { LegacyAudit as Audit } from "../src/pages/LegacyAudit.tsx";
+import { Audit } from "../src/pages/Audit.tsx";
 import { stubFetch } from "./fetchStub.ts";
 
 const HOUR = 60 * 60 * 1000;
@@ -31,9 +25,9 @@ const AUDIT = {
   ],
   deathLoops: [{ runId: "run/death", agentId: "retro-cx", parks: 4 }],
   reworkRounds: [{ runId: "run/rework", agentId: "guido-cx", rounds: 3, maxRound: 4 }],
-  refusalsByRule: [{ rule: "no-network", count: 8 }],
+  refusalsByRule: [{ rule: "full-suite", count: 8 }],
   refusals: [
-    { agentId: "inco-cx", runId: "run/alpha", rule: "no-network", count: 8 },
+    { agentId: "inco-cx", runId: "run/alpha", rule: "full-suite", count: 8 },
     { agentId: "retro-cx", runId: null, rule: "read-only", count: 2 },
   ],
   refusalSpikes: [{ agentId: "retro-cx", day: NOW - 2 * 24 * HOUR, count: 12 }],
@@ -230,7 +224,7 @@ it("labels retained evidence as stale and reports a failed newly-selected range"
 it("renders the audit panels, links each trace, and keeps the selected range shared", async () => {
   render(<Audit />);
 
-  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
+  await screen.findByRole("heading", { level: 1, name: "Audit" });
   for (const name of [
     "Improvements to consider",
     "PR size",
@@ -241,27 +235,35 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
     expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
   }
   expect(
-    screen.getByRole("link", { name: "Long runner · 9h 0m · run/alpha" }).getAttribute("href"),
+    screen
+      .getByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ })
+      .getAttribute("href"),
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(screen.getByRole("link", { name: /PR #701/i }).getAttribute("href")).toBe(
     "/board/mission-control",
   );
   expect(
-    screen.getByRole("link", { name: "Death loop · 4 parks · run/death" }).getAttribute("href"),
+    screen.getByRole("link", { name: "Death loop · 4 parks · retro-cx" }).getAttribute("href"),
   ).toBe("/agent/retro-cx?trace=run%2Fdeath");
   expect(
-    screen.getByRole("link", { name: "Rework · 3 rounds · run/rework" }).getAttribute("href"),
+    screen.getByRole("link", { name: "Rework · 3 rounds · guido-cx" }).getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Frework");
   expect(
     screen
-      .getByRole("link", { name: "Guard refusal · no-network · 8 · run/alpha" })
+      .getByRole("link", {
+        name: "Guard refusal · Full test suites only through Mission Control (one at a time) · 8 · inco-cx",
+      })
       .getAttribute("href"),
   ).toBe("/agent/inco-cx?trace=run%2Falpha");
   expect(
     screen
-      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · run/expensive" })
+      .getByRole("link", { name: "Spend outlier · mission-control#700 · ~$42.50 · guido-cx" })
       .getAttribute("href"),
   ).toBe("/agent/guido-cx?trace=run%2Fexpensive");
+  for (const link of screen.getAllByRole("link"))
+    expect(link.textContent, "no raw run id or rule key in link text").not.toMatch(
+      /run\/|full-suite/,
+    );
   expect(screen.getByText(auditChangeWith("Prompt change · before → after"))).toBeTruthy();
   expect(
     screen.getByText(
@@ -286,7 +288,11 @@ it("renders the audit panels, links each trace, and keeps the selected range sha
   expect(screen.getByRole("link", { name: "Guard refusal spike · 12" }).getAttribute("href")).toBe(
     "/agent/retro-cx",
   );
-  expect(screen.getByText("Guard refusal spike · no-network · 8")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Guard refusal spike · Full test suites only through Mission Control (one at a time) · 8",
+    ),
+  ).toBeTruthy();
 
   fireEvent.click(
     within(screen.getByRole("group", { name: "Range" })).getByRole("button", { name: "7d" }),
@@ -395,7 +401,7 @@ it("does not present stale, observed-loop, or FLIGHT watch runs as improvements"
   });
   render(<Audit />);
 
-  await screen.findByRole("link", { name: "Long runner · 9h 0m · run/alpha" });
+  await screen.findByRole("link", { name: /^Long runner · 9h 0m · inco-cx · started .+/ });
   expect(screen.queryByText(/run\/stale/)).toBeNull();
   expect(screen.queryByText(/run\/observed/)).toBeNull();
   expect(screen.queryByText(/run\/watch/)).toBeNull();
@@ -417,113 +423,4 @@ it("sizes a one-line PR as 1 line", async () => {
   });
   render(<Audit />);
   expect(await screen.findByText(/^1 line$/)).toBeTruthy();
-});
-
-it("Hotspots tab shows History and Review findings for the picked repo", async () => {
-  const map = (repoId: string, file: string): MapSnapshot => {
-    const value: MapSnapshot = structuredClone(mapSnapshotFixture);
-    value.repoId = repoId;
-    value.hist = {
-      since: 0,
-      prCount: 9,
-      fixCount: 4,
-      files: { "0": [9, 4, 1, [11]] },
-      coupling: [],
-    };
-    value.findings = [{ ...(value.findings[0] as MapSnapshot["findings"][number]), file }];
-    return value;
-  };
-  const config = {
-    ...CONFIG,
-    crew: {
-      sessions: [
-        { id: "s1", repoId: "mission-control", seats: [] },
-        { id: "s2", repoId: "other", seats: [] },
-      ],
-    },
-  } as unknown as ConfigView;
-  const fetch = stubFetch({
-    "/api/audit?range=30d": AUDIT,
-    "/api/config": config,
-    "/api/repos": [
-      { id: "mission-control", github: "Luke-Bradford/mission-control" },
-      { id: "other", github: "Luke-Bradford/other" },
-      { id: "observed", github: "Luke-Bradford/observed" },
-    ],
-    "/api/crew?shape=summary": { rows: [] },
-    "/api/repos/mission-control/map": map("mission-control", "src/main.ts"),
-    "/api/repos/other/map": map("other", "lib/other.ts"),
-  });
-  render(<Audit />);
-  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
-  fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
-
-  const history = await screen.findByRole("region", { name: "History lens" });
-  expect(history.textContent).toContain("9 merged PRs · 4 fixed a bug");
-  const review = screen.getByRole("region", { name: "Review lens" });
-  expect(review.textContent).toContain("Review findings");
-  expect(review.textContent).toContain("src/main.ts");
-  // a repo with no crew session cannot be mapped, so it is not offered
-  const repo = screen.getByLabelText("Repo") as HTMLSelectElement;
-  expect([...repo.options].map((o) => o.value)).toEqual(["mission-control", "other"]);
-
-  fireEvent.change(repo, { target: { value: "other" } });
-  await waitFor(() =>
-    expect(screen.getByRole("region", { name: "Review lens" }).textContent).toContain(
-      "lib/other.ts",
-    ),
-  );
-  expect(fetch.mock.calls.filter(([path]) => path === "/api/repos/other/map")).toHaveLength(1);
-});
-
-it("Hotspots counts crew seats without FLIGHT, and falls back to configured seats", async () => {
-  const config = {
-    ...CONFIG,
-    crew: {
-      sessions: [
-        {
-          id: "s1",
-          repoId: "mission-control",
-          seats: [{ loop: "dev" }, { loop: "watch" }, { loop: "dev", retiring: true }],
-        },
-      ],
-    },
-  } as unknown as ConfigView;
-  const base = {
-    "/api/audit?range=30d": AUDIT,
-    "/api/config": config,
-    "/api/repos": [{ id: "mission-control", github: "Luke-Bradford/mission-control" }],
-    "/api/repos/mission-control/map": structuredClone(mapSnapshotFixture),
-  };
-  stubFetch({
-    ...base,
-    "/api/crew?shape=summary": {
-      rows: [
-        { id: "guido-1", kind: "crew", role: "GUIDO", repoId: "mission-control" },
-        { id: "flight-1", kind: "crew", role: "FLIGHT", repoId: "mission-control" },
-      ],
-    },
-  });
-  render(<Audit />);
-  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
-  fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
-  const option = await screen.findByRole("option", { name: "mission-control · 1 crew seat" });
-  expect(option).toBeTruthy();
-});
-
-it("Hotspots tab says so when no repo has a crew session", async () => {
-  stubFetch({
-    "/api/audit?range=30d": AUDIT,
-    "/api/config": CONFIG,
-    "/api/repos": [{ id: "mission-control", github: "Luke-Bradford/mission-control" }],
-    "/api/crew?shape=summary": { rows: [] },
-  });
-  render(<Audit />);
-  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
-  fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
-  expect(
-    await screen.findByText(
-      "No repo has a crew session yet, so there is no history or review heat to show.",
-    ),
-  ).toBeTruthy();
 });

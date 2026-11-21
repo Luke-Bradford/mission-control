@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FLIGHT_LEFT_NOTE_KEY, FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
+import { FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
 import { guardAckKey } from "../src/guard.ts";
 import {
   BRIEF_TITLE_MAX,
@@ -64,10 +64,6 @@ describe("needsYouEntryFaults", () => {
     );
     // another approval (a loop's mvp-ready escalation) needs FLIGHT's brief like anything else
     expect(needsYouAlert({ key: "esc:shop#9", kind: "approval" })).toBe(false);
-  });
-
-  it("keeps unfinished-wake reminders outside the operator's own alerts", () => {
-    expect(needsYouAlert({ key: `note:${FLIGHT_LEFT_NOTE_KEY}`, kind: "blocked" })).toBe(false);
   });
 
   it("treats an old brief with no `for` as the operator's", () => {
@@ -146,6 +142,20 @@ describe("needsYouEntryFaults", () => {
     ["Run mc flight_state first?", "a tool name"],
   ])("refuses an id in the question, naming it: %s", (ask, what) => {
     expect(asking(ask)).toEqual([`the question has ${what}: say it in words`]);
+  });
+
+  it("lets a hub screenshot image into the context but still refuses a bare commit code", () => {
+    const image = "![the page](/api/screenshots/0123456789abcdef0123456789abcdef.png)";
+    expect(
+      context(
+        `The page changed last week, see ${image} for how. Nothing happens until you decide.`,
+      ),
+    ).toEqual([]);
+    expect(
+      context(
+        `The page changed in deadbee1, see ${image} for how. Nothing happens until you decide.`,
+      ),
+    ).toEqual(["the context has a commit code: say it in words"]);
   });
 
   it("refuses the same ids in the context, naming the part", () => {
