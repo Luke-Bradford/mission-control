@@ -31,6 +31,27 @@ describe("trustedPullRequest", () => {
   it("accepts an open same-repo PR from a collaborator", async () => {
     expect(await check(ghFor(pull(), "write"))).toBe(true);
   });
+  it("reads the permission again, so a revoked collaborator is refused at once", async () => {
+    const store = new Store(":memory:");
+    expect(
+      await trustedPullRequest(store, ghFor(pull(), "write"), "/repo", REPO, 7, SHA, NOW),
+    ).toBe(true);
+    const revoked = ghFor(pull(), "read");
+    expect(await trustedPullRequest(store, revoked, "/repo", REPO, 7, SHA, NOW + 1000)).toBe(false);
+    const manager = new PreviewManager({
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      trusted: ({ pr, sha }) =>
+        trustedPullRequest(store, revoked, "/repo", REPO, pr, sha, NOW + 2000),
+      start: vi.fn(async () => ({ stop: () => {} })),
+      remove: async () => {},
+    });
+    await expect(
+      manager.start({ pr: 7, branch: "b", checkout: "/repo", sha: SHA }),
+    ).rejects.toMatchObject({
+      code: "untrusted",
+    });
+  });
   it("refuses a fork, even from a collaborator", async () => {
     const fork = pull({ head: { sha: SHA, repo: { full_name: "stranger/repo" } } });
     expect(await check(ghFor(fork, "admin"))).toBe(false);

@@ -8,7 +8,8 @@ export const UNTRUSTED_PR = "only pull requests from the crew or a collaborator 
 /**
  * Whether the hub may build and run this PR head: it is open, on this repo's own branch (never a
  * fork) and its author has write access. The repo is public, so a stranger's code never runs here.
- * Read fresh from GitHub; any failure is a refusal.
+ * Read fresh from GitHub, the author's permission included (never the 24-hour cache, so a
+ * revoked collaborator is refused at once); any failure is a refusal.
  */
 export async function trustedPullRequest(
   store: Store,
@@ -37,5 +38,5 @@ export async function trustedPullRequest(
     current.head?.repo?.full_name?.toLowerCase() !== repo.toLowerCase()
   )
     return false;
-  return await collaborator(store, gh, cwd, repo, current.user?.login, now);
+  return await collaborator(store, gh, cwd, repo, current.user?.login, now, true);
 }
