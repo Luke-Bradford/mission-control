@@ -9117,7 +9117,7 @@ vi.mock("../src/accounts/accounts.ts", () => ({
   }),
 }));
 
-it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {
+it("batches uncached telemetry reads, filters first and persists immutable counts", async () => {
   store.upsertRun(
     run({
       id: "many",
@@ -9135,26 +9135,27 @@ it("bounds uncached telemetry reads, filters first and persists immutable counts
     });
   let active = 0;
   let peak = 0;
-  const read = vi.spyOn(files, "committedLines").mockImplementation(async () => {
-    peak = Math.max(peak, ++active);
-    await new Promise((resolve) => setTimeout(resolve, 1));
-    active--;
-    return { additions: 2, deletions: 1 };
-  });
+  const read = vi
+    .spyOn(files, "committedLinesBatch")
+    .mockImplementation(async (_worktree, shas) => {
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return new Map(shas.map((sha) => [sha, { additions: 2, deletions: 1 }]));
+    });
   try {
     await get("/api/telemetry?ticket=shop-app%238");
     expect(read).toHaveBeenCalledTimes(0);
     const first = (await get("/api/telemetry")).json<Telemetry>();
-    expect(read).toHaveBeenCalledTimes(32);
-    expect(peak).toBeLessThanOrEqual(4);
-    expect(peak).toBeGreaterThan(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(peak).toBe(1);
     expect(first.totals[0]?.additions).toBeNull();
     const second = (await get("/api/telemetry")).json<Telemetry>();
-    expect(read).toHaveBeenCalledTimes(50);
-    expect(new Set(read.mock.calls.map((c) => c[1])).size).toBe(50);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(new Set(read.mock.calls.flatMap(([, shas]) => shas)).size).toBe(50);
     expect(second.totals[0]?.additions).toBe(100);
     await get("/api/telemetry");
-    expect(read).toHaveBeenCalledTimes(50);
+    expect(read).toHaveBeenCalledTimes(2);
   } finally {
     read.mockRestore();
   }

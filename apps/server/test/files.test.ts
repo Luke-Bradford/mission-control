@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   changedFiles,
   committedLines,
+  committedLinesBatch,
   FILES_MAX,
   FILTERS_NOTE,
   fileDiff,
@@ -584,6 +585,20 @@ describe("realGitExec on a scratch repo", () => {
     expect(await committedLines(dir, sha)).toEqual({ additions: 1, deletions: 1 });
   });
 
+  it("counts several commit trees in one Git read", async () => {
+    const root = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(dir, "a.txt"), "two\n");
+    git("add", "a.txt");
+    git("commit", "-q", "-m", "change");
+    const change = git("rev-parse", "HEAD").trim();
+    expect(await committedLinesBatch(dir, [root, change])).toEqual(
+      new Map([
+        [root, { additions: 2, deletions: 0 }],
+        [change, { additions: 1, deletions: 1 }],
+      ]),
+    );
+  });
+
   it("reads uncommitted and untracked files with the note when there is no origin/HEAD", async () => {
     writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
     writeFileSync(join(dir, "new file.txt"), "x\n");
@@ -933,6 +948,22 @@ describe("realGitExec on a scratch repo", () => {
 });
 
 describe("committed line counts", () => {
+  it("reads many immutable commit trees in one Git call", async () => {
+    const calls: string[][] = [];
+    const exec: GitExec = async (args) => {
+      calls.push(args);
+      if (args.includes("version")) return "git";
+      return [SHA, "3\t2\tfirst.ts", OTHER_SHA, "4\t1\tsecond.ts", ""].join("\0");
+    };
+    expect(await committedLinesBatch(WT, [SHA, OTHER_SHA], exec)).toEqual(
+      new Map([
+        [SHA, { additions: 3, deletions: 2 }],
+        [OTHER_SHA, { additions: 4, deletions: 1 }],
+      ]),
+    );
+    expect(calls.filter((args) => args.includes("show"))).toHaveLength(1);
+  });
+
   it("reads immutable commit trees, preserving binary and missing counts as unknown", async () => {
     const calls: string[][] = [];
     const exec: GitExec = async (args) => {

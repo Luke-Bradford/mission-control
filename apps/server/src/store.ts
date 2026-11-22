@@ -5135,6 +5135,21 @@ export class Store {
     );
   }
 
+  /** Cached line counts for several commit hashes, read in one query. */
+  commitLinesFor(
+    shas: readonly string[],
+  ): Map<string, { additions: number | null; deletions: number | null }> {
+    const unique = [...new Set(shas)];
+    if (unique.length === 0) return new Map();
+    const marks = unique.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`SELECT sha, additions, deletions FROM commit_lines WHERE sha IN (${marks})`)
+      .all(...unique) as { sha: string; additions: number | null; deletions: number | null }[];
+    return new Map(
+      rows.map((row) => [row.sha, { additions: row.additions, deletions: row.deletions }]),
+    );
+  }
+
   setCommitLines(
     sha: string,
     counts: { additions: number | null; deletions: number | null },
