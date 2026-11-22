@@ -134,6 +134,54 @@ describe("closed-work asks", () => {
   });
 });
 
+describe("closed-ask reconcile on upgrade", () => {
+  it("settles asks about work the hub's records show closed after the rows are gone, and keeps live asks", () => {
+    const path = join(dir, "upgrade.sqlite");
+    const first = new Store(path);
+    const ask = (ticket: string | null, ref?: string) =>
+      first.addComms({
+        at: 1,
+        from: "alpha",
+        to: "beta",
+        ticket,
+        text: "Q",
+        ref,
+        label: "question",
+      });
+    const doneCard = ask("shop-app#901");
+    const mergedHistory = ask("shop-app#902", "PR 912");
+    const closedQuestion = ask("shop-app#903");
+    const live = ask("shop-app#904");
+    const db = (first as unknown as { db: DatabaseSync }).db;
+    // the closure rows are gone from board_items and pull_requests; only the hub's records remain
+    db.prepare(
+      "INSERT INTO board_moves (run_id, repo_id, issue, board_column, state, at) VALUES ('r', 'shop-app', 901, 'Done', 'done', 1)",
+    ).run();
+    db.prepare(
+      "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES ('shop-app', 912, 1, ?)",
+    ).run(JSON.stringify({ ticket: "shop-app#902" }));
+    db.prepare(
+      "INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at) VALUES ('ask:1', 1, 'ticket-closed', 'r', 'hub', 'q', 'shop-app#903', 0, 1)",
+    ).run();
+    // the state before this code ran: no reconcile has happened
+    db.prepare("DELETE FROM settings WHERE key = 'comms.closed-asks-reconciled'").run();
+    expect(first.openCommsItems().map((i) => i.id)).toContain(doneCard?.id);
+    first.close();
+    const second = new Store(path);
+    try {
+      const open = second.openCommsItems().map((i) => i.id);
+      expect(open).toEqual([live?.id]);
+      expect(second.commsSettlement(doneCard?.id ?? "")?.reason).toBe(
+        "Its ticket or PR was closed",
+      );
+      expect(second.commsSettlement(mergedHistory?.id ?? "")).not.toBeNull();
+      expect(second.commsSettlement(closedQuestion?.id ?? "")).not.toBeNull();
+    } finally {
+      second.close();
+    }
+  });
+});
+
 describe("Store", () => {
   it("batches recent runs by agent without dropping empty agents", () => {
     store.upsertRun(run({ id: "a-old", agentId: "a", seq: 1, startedAt: 1 }));

@@ -1123,6 +1123,45 @@ export class CommsQueries {
   }
 
   /**
+   * Settles the open asks about a ticket the hub's own records show closed or merged, even when
+   * the board and PR caches no longer hold its row: a card moved to Done by a run, a merged PR kept
+   * in `pr_history`, or a question closed because its ticket closed or its PR merged or closed.
+   * Reads first and writes only when it settles something. Returns how many it settled.
+   */
+  reconcileAsksOfClosedTickets(at: number): number {
+    const asks = this.db
+      .prepare(
+        `SELECT c.id, c.ticket FROM comms c
+         WHERE c.label IN ('question', 'blocker') AND c.ticket GLOB '*#*'
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)`,
+      )
+      .all() as { id: number; ticket: string }[];
+    if (asks.length === 0) return 0;
+    const closed = new Set<string>();
+    const collect = (sql: string) => {
+      for (const r of this.db.prepare(sql).all() as { ticket: string | null }[])
+        if (r.ticket) closed.add(r.ticket);
+    };
+    collect(
+      "SELECT DISTINCT repo_id || '#' || issue AS ticket FROM board_moves WHERE state = 'done'",
+    );
+    collect("SELECT DISTINCT json_extract(record, '$.ticket') AS ticket FROM pr_history");
+    collect(
+      "SELECT DISTINCT ticket FROM question_closures WHERE kind IN ('ticket-closed', 'pr-merged', 'pr-closed')",
+    );
+    const stale = asks.filter((a) => closed.has(a.ticket));
+    if (stale.length === 0) return 0;
+    const settle = this.db.prepare(
+      `INSERT INTO comms_settlements (message_id, settled_by, reason, at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(message_id) DO NOTHING`,
+    );
+    this.host.transaction(() => {
+      for (const a of stale) settle.run(a.id, COMMS_MC, "Its ticket or PR was closed", at);
+    }, true);
+    return stale.length;
+  }
+
+  /**
    * Labelled direct questions and blockers still awaiting a reply or the addressee's reaction. A
    * reply from anyone but the asker answers it; so does its ticket or PR being closed or merged.
    */
