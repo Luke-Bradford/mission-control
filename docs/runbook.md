@@ -169,8 +169,9 @@ file. The live config needs `paused_by: { issue: autonomy-engine#1818 }` on the 
 studio loop's own setting, if it has one); without it the hub cannot tell the loop is paused.
 
 The config is rejected at start-up if an id repeats within `accounts`, `repos` or `loops`, or if
-two accounts share a vendor: the usage readers use this Mac's single Claude login (Keychain
-OAuth) and single Codex login, so a second account would report the first one's usage.
+two account labels use the same CLI profile. Claude accounts use this Mac's machine login and
+cannot use separate profiles. Codex accounts can share a vendor when each uses a separate profile
+directory and Codex login.
 
 ## Template profiles
 
@@ -268,8 +269,8 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 | What | Path |
 |---|---|
 | Config | `~/.config/mission-control/config.yaml` (override with `MC_CONFIG`) |
-| Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every write the server makes to `config.yaml` (a repo added from Setup › Repos, or a session's seats replaced), the newest 10 kept, mode 0600 |
-| Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
+| Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every server write to `config.yaml`, including account, repository-rule, setup, session and Teams-source changes; the newest 10 kept, mode 0600 |
+| Template profiles | `profiles.yaml` beside `config.yaml` (optional; you can create it, and Setup can add a validated profile); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
 | Update log | `update.log` beside the database: the last update's commands and output, mode 0600; Setup → **Update log** shows its end |
@@ -1706,7 +1707,7 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 
 Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
-from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
+from a repo block. Changes to these repo settings, including `rules`, apply live when saved.
 
 **Roles & guards API.** `GET /api/repos/:repoId/rules` reads config.yaml fresh and returns 18 keys,
 each as `{ value, source }`: `pick_from`, `needs`, `areas`, `promote_backlog`, `plan_signoff`, `protected`,
