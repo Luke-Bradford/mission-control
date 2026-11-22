@@ -1,7 +1,7 @@
-import { FLIGHT_APPROVAL_RULES } from "@mc/core";
+import { FLIGHT_APPROVAL_RULES, type PullRequestView } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
-import { ACTIONS } from "../data.ts";
+import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 
 /** Operator-only safety controls. The server checks authority and validates every request. */
 export function OperatorActions() {
@@ -13,6 +13,21 @@ export function OperatorActions() {
     until: "",
     reason: "",
   });
+  const [repoId, setRepoId] = useState("");
+  const [prNumber, setPrNumber] = useState("");
+  const [prReason, setPrReason] = useState("");
+  const [prNote, setPrNote] = useState("");
+  const config = useResource<{ repos: { id: string }[] }>(RESOURCES.config).data;
+  const prs = useResource<PullRequestView[]>(repoId ? RESOURCES.allPrs(repoId) : null).data;
+  const open = (prs ?? []).filter((pr) => pr.state === "open" && pr.headSha !== null);
+  const chosen = open.find((pr) => String(pr.number) === prNumber);
+  const prAction = (path: string, body: Record<string, unknown>) => {
+    if (!chosen?.headSha) {
+      setMessage("Choose a repo and an open PR first.");
+      return;
+    }
+    void post(path, { sha: chosen.headSha, ...body });
+  };
   const post = async (path: string, body: unknown) => {
     try {
       await apiPost(path, body);
@@ -128,6 +143,90 @@ export function OperatorActions() {
           }
         >
           Grant approval
+        </button>
+      </fieldset>
+      <fieldset className="fgroup">
+        <legend>Hand-opened PR</legend>
+        <label>
+          Repo{" "}
+          <select
+            value={repoId}
+            onChange={(e) => {
+              setRepoId(e.target.value);
+              setPrNumber("");
+            }}
+          >
+            <option value="">Choose a repo</option>
+            {config?.repos.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Open PR{" "}
+          <select value={prNumber} onChange={(e) => setPrNumber(e.target.value)}>
+            <option value="">Choose a PR</option>
+            {open.map((pr) => (
+              <option key={pr.number} value={pr.number}>
+                #{pr.number} {pr.title}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          PR reason <input value={prReason} onChange={(e) => setPrReason(e.target.value)} />
+        </label>
+        <label>
+          PR note <input value={prNote} onChange={(e) => setPrNote(e.target.value)} />
+        </label>
+        <button
+          type="button"
+          onClick={() => prAction(ACTIONS.prReviewRequest(repoId, prNumber), { action: "ask" })}
+        >
+          Ask for review
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            prAction(ACTIONS.prReviewRequest(repoId, prNumber), { action: "withdraw" })
+          }
+        >
+          Withdraw ask
+        </button>
+        <button
+          type="button"
+          disabled={!prReason.trim()}
+          onClick={() =>
+            prAction(ACTIONS.prMergeHold(repoId, prNumber), { action: "hold", reason: prReason })
+          }
+        >
+          Hold merge
+        </button>
+        <button
+          type="button"
+          onClick={() => prAction(ACTIONS.prMergeHold(repoId, prNumber), { action: "release" })}
+        >
+          Release hold
+        </button>
+        <button
+          type="button"
+          onClick={() => prAction(ACTIONS.prControllerCheck(repoId, prNumber), { verdict: "pass" })}
+        >
+          Pass controller check
+        </button>
+        <button
+          type="button"
+          disabled={!prNote.trim()}
+          onClick={() =>
+            prAction(ACTIONS.prControllerCheck(repoId, prNumber), {
+              verdict: "fail",
+              note: prNote,
+            })
+          }
+        >
+          Fail controller check
         </button>
       </fieldset>
       {message && <p role="status">{message}</p>}

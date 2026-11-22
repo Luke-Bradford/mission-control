@@ -1,3 +1,4 @@
+import { APPLIES_TEXT, HUB_SETTINGS } from "@mc/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { HubSettings } from "../src/setup/HubSettings.tsx";
@@ -22,4 +23,26 @@ it("shows a setting and saves its value", async () => {
     key: "poll.usage_minutes",
     value: 15,
   });
+});
+
+it("shows every hub setting with its value and when it applies", async () => {
+  const values = {
+    "operator.timezone": "Europe/Paris",
+    "crew.max_seats": 5,
+    "crew.lane": "work",
+    "crew.deny_read": ["~/.ssh", "~/.aws"],
+  };
+  stubFetch({ "/api/config/settings": { base: "base", values, repos: {} } });
+  render(<HubSettings />);
+  await screen.findByText("Time zone");
+  for (const [key, def] of Object.entries(HUB_SETTINGS)) {
+    if (key.startsWith("repo.")) continue;
+    expect(screen.getAllByText(def.label).length, key).toBeGreaterThan(0);
+  }
+  expect(screen.getAllByText(APPLIES_TEXT.now).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(APPLIES_TEXT.restart).length).toBeGreaterThan(0);
+  expect(screen.getByLabelText("Time zone")).toHaveProperty("value", "Europe/Paris");
+  expect(screen.getByLabelText("Maximum seats")).toHaveProperty("value", "5");
+  expect(screen.getByLabelText("Read deny list")).toHaveProperty("value", "~/.ssh\n~/.aws");
+  expect(screen.getByLabelText("Crew lane")).toHaveProperty("value", "work");
 });

@@ -180,6 +180,9 @@ export function withoutAddAgentParam(): string {
   const qs = q.toString();
   return pathname + (qs ? `?${qs}` : "") + hash;
 }
+/** `?addRepo=1` opens Repos & seats with the Add repo form showing. */
+export const ADD_REPO_PARAM = "addRepo";
+export const addRepoPath = (): string => `${setupPath("repos")}?${ADD_REPO_PARAM}=1`;
 /** The query parameter that names the seat whose edit form should open (`?edit=s1:guido-1`). */
 export const EDIT_SEAT_PARAM = "edit";
 /** The session and seat a URL's edit query names; null when it names none. */

@@ -324,3 +324,15 @@ button.rg-chip {
     grid-template-columns: 160px minmax(0, 1fr) 112px 56px;
   }
 }
+
+.rg-edit {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+.rg-edit textarea {
+  min-width: 320px;
+  min-height: 80px;
+}

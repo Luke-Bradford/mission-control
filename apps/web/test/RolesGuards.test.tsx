@@ -15,7 +15,7 @@ import { hub } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
 import { editSeatParam } from "../src/router.ts";
 import { SEATS_RULE_LINE } from "../src/setup/Roles.tsx";
-import { EDIT_SOON, RULE_GROUPS } from "../src/setup/repoRules.ts";
+import { RULE_GROUPS } from "../src/setup/repoRules.ts";
 import { ROLE_HEADINGS } from "../src/setup/roleHeadings.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CREW_CONFIG, REPOS } from "./fixtures.ts";
@@ -98,7 +98,7 @@ async function rulesPanel(): Promise<HTMLElement> {
 }
 
 describe("Setup › Roles & guards", () => {
-  it("Repo rules: 17 keys in 5 groups, each with its source badge, every Edit off", async () => {
+  it("Repo rules: 17 keys in 5 groups, each with its source badge, Edit on for editable rules", async () => {
     load();
     page();
     const rules = await rulesPanel();
@@ -109,9 +109,7 @@ describe("Setup › Roles & guards", () => {
     ).toHaveLength(17);
     expect(within(rules).getByText("Repo file wins")).toBeTruthy();
     expect(within(rules).getAllByText("Config file")).toHaveLength(2);
-    expect(
-      within(rules).getAllByText("Only config.yaml sets this. A change restarts FLIGHT."),
-    ).toHaveLength(2);
+    expect(within(rules).getAllByText("Set on Repos & seats.")).toHaveLength(2);
     // the repo file's additions show as dashed chips beside the user's own
     const checks = rules.querySelector("[data-key=checks]") as HTMLElement;
     expect(within(checks).getByText("pnpm -s test:related").parentElement?.className).toContain(
@@ -119,10 +117,7 @@ describe("Setup › Roles & guards", () => {
     );
     const edits = within(rules).getAllByRole("button", { name: /^Edit / });
     expect(edits.length).toBeGreaterThan(0);
-    for (const b of edits) {
-      expect((b as HTMLButtonElement).disabled).toBe(true);
-      expect(b.getAttribute("title")).toBe(EDIT_SOON);
-    }
+    for (const b of edits) expect((b as HTMLButtonElement).disabled).toBe(false);
     // a key the repo file sets, or only config.yaml sets, has no Edit
     expect(
       within(rules.querySelector("[data-key=areas]") as HTMLElement).queryByRole("button", {
@@ -134,6 +129,36 @@ describe("Setup › Roles & guards", () => {
         name: /Edit/,
       }),
     ).toBeNull();
+  });
+
+  it("Repo rules: Edit saves one list as lines and one leaf of commands, then says it applies now", async () => {
+    const fetch = load({
+      [`POST /api/repos/${REPO}/rules`]: { backup: "config.yaml.bak" },
+    });
+    page();
+    const rules = await rulesPanel();
+    fireEvent.click(within(row(rules, "needs")).getByRole("button", { name: "Edit needs" }));
+    fireEvent.change(within(row(rules, "needs")).getByRole("textbox", { name: "needs" }), {
+      target: { value: "done_when\nsize\nplan" },
+    });
+    fireEvent.click(within(row(rules, "needs")).getByRole("button", { name: "Save" }));
+    await within(row(rules, "needs")).findByText("Applies now");
+    const bodies = () =>
+      fetch.mock.calls
+        .filter(([, init]) => init?.method === "POST")
+        .map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies()).toEqual([
+      { base: `sha-${REPO}`, rules: { needs: ["done_when", "size", "plan"] } },
+    ]);
+    fireEvent.click(
+      within(row(rules, "commands.writer")).getByRole("button", { name: "Edit commands.writer" }),
+    );
+    fireEvent.click(within(row(rules, "commands.writer")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(bodies()).toHaveLength(2));
+    expect(bodies()[1]).toEqual({
+      base: `sha-${REPO}`,
+      rules: { commands: { writer: ["pnpm -s lint", "pnpm -s typecheck"] } },
+    });
   });
 
   it("Repo rules: reads the repo's rules before the route answers, and says so when it fails", async () => {

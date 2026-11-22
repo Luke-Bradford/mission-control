@@ -1,8 +1,6 @@
 import {
   type AttentionItem,
-  type CliAccountStatus,
   type ConfigView,
-  CREW_EFFORTS,
   type Crew,
   type CrewChanges,
   type CrewEffort,
@@ -32,14 +30,7 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import {
-  addAgentParam,
-  agentPath,
-  editSeatParam,
-  navigate,
-  withoutAddAgentParam,
-  withoutEditSeatParam,
-} from "../router.ts";
+import { addAgentPath, agentPath, editSeatPath, navigate } from "../router.ts";
 import {
   getSession,
   inSession,
@@ -89,7 +80,7 @@ interface SaveFailure {
 }
 const failureText = (failure: SaveFailure) =>
   failure.uncertain ? `Not confirmed: ${failure.text}` : refusedText(failure.text);
-const seatFormKey = (form: Pick<FormState, "sessionId" | "editId">) =>
+const _seatFormKey = (form: Pick<FormState, "sessionId" | "editId">) =>
   `${form.sessionId}:${form.editId ?? "new"}`;
 
 type SessionView = NonNullable<ConfigView["crew"]>["sessions"][number];
@@ -113,7 +104,7 @@ interface FormState {
 const rolesOf = (config: ConfigView): RoleView[] =>
   [...(config.crew?.roles ?? [])].sort((a, b) => a.name.localeCompare(b.name));
 
-function seatForm(
+function _seatForm(
   config: ConfigView,
   sessionId: string,
   editing: SeatInput | null = null,
@@ -155,7 +146,7 @@ interface TableSeat {
   input: SeatInput | null;
 }
 
-const globsOf = (text: string): string[] =>
+const _globsOf = (text: string): string[] =>
   text
     .split(",")
     .map((g) => g.trim())
@@ -195,310 +186,14 @@ function Seat({ id, area, row }: { id: string; area: string; row: CrewRow | unde
   );
 }
 
-/** The add and edit form of one seat: the fields of a SeatInput, and nothing the server decides. */
-function SeatForm({
-  session,
-  config,
-  roles,
-  form,
-  setForm,
-  busy,
-  failure,
-  onSave,
-  onCancel,
-}: {
-  session: SessionView;
-  config: ConfigView;
-  roles: RoleView[];
-  form: FormState;
-  setForm: (f: FormState | null) => void;
-  busy: boolean;
-  failure: SaveFailure | null;
-  onSave: (seat: SeatInput) => void;
-  onCancel: () => void;
-}) {
-  const adding = form.editId === null;
-  const role = roles.find((r) => r.name === form.role);
-  const writer = role?.mode === "writer";
-  const accounts = config.accounts;
-  const vendor = accounts.find((a) => a.id === form.accountId)?.vendor;
-  const statuses = useResource<CliAccountStatus[]>(RESOURCES.accountStatus);
-  const status = statuses.data?.find((a) => a.accountId === form.accountId);
-  const unavailable = session.seats.find((s) => s.id === form.editId)?.unavailable;
-  const cliHint = unavailable || statuses.error || (status && status.status !== "logged-in");
-  const id = form.editId ?? form.id;
-  const patch = (p: Partial<FormState>) => setForm({ ...form, ...p });
-  const base = useId();
-  const ids = {
-    role: `${base}-role`,
-    sign: `${base}-sign`,
-    account: `${base}-account`,
-    model: `${base}-model`,
-    effort: `${base}-effort`,
-    area: `${base}-area`,
-    scratch: `${base}-scratch`,
-  };
-  const [attempted, setAttempted] = useState(false);
-  const [attempts, setAttempts] = useState(0);
-  // Only what applies to this role and mode: a hidden or disabled field never blocks a save.
-  const found: FieldIssue[] = [];
-  if (adding && !CALL_SIGN.test(id))
-    found.push({ id: ids.sign, message: `Call sign: ${CALL_SIGN_HINT}, starting with a letter.` });
-  if (form.accountId === "")
-    found.push({ id: ids.account, message: "Account: none is configured; add one in Accounts." });
-  if (form.model.trim() === "") found.push({ id: ids.model, message: "Model is required." });
-  const issues = attempted ? found : [];
-  const signError = issueOf(issues, ids.sign);
-  const accountError = issueOf(issues, ids.account);
-  const modelError = issueOf(issues, ids.model);
-  const loginState = statuses.error
-    ? "Could not read this machine's login state."
-    : status
-      ? status.status === "logged-in"
-        ? "Signed in on this machine."
-        : "Not signed in on this machine."
-      : null;
-
-  function onRole(name: string) {
-    const next = roles.find((r) => r.name === name);
-    patch({
-      role: name,
-      ...(form.idAuto ? { id: freeCallSign(config, name) } : {}),
-      model: vendor === "codex" ? "gpt-5.6-sol" : (next?.model ?? form.model),
-      scratch: false,
-      area: next?.mode === "writer" ? form.area : "",
-    });
-  }
-
-  function save() {
-    const seat: SeatInput = {
-      id,
-      role: form.role,
-      accountId: form.accountId,
-      model: form.model.trim(),
-      area: writer ? globsOf(form.area) : [],
-    };
-    if (form.effort !== "") seat.effort = form.effort;
-    if (form.scratch) seat.mode = "scratch";
-    onSave(seat);
-  }
-
-  const shown = failure?.formKey === seatFormKey(form) ? failure : null;
-  const title =
-    issues.length > 0 ? "Fix before saving" : shown?.uncertain ? "Result unknown" : "Not saved";
-  return (
-    <form
-      className="seatform fform fform-480"
-      aria-label={adding ? `Add agent to s/${session.id}` : `Edit ${id}`}
-      noValidate
-      onKeyDown={(e) => {
-        // Esc cancels an unsent form; while a save is out it must not close the form under it.
-        if (e.key === "Escape") {
-          e.preventDefault();
-          if (!busy) onCancel();
-        }
-      }}
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (busy) return;
-        setAttempted(true);
-        if (found.length > 0) {
-          setAttempts((n) => n + 1);
-          return;
-        }
-        save();
-      }}
-    >
-      <fieldset className="fgroup">
-        <legend>Identity</legend>
-        <div className="ffield">
-          <label htmlFor={ids.role}>Role</label>
-          <select
-            id={ids.role}
-            value={form.role}
-            disabled={busy}
-            onChange={(e) => onRole(e.target.value)}
-          >
-            {!roles.some((r) => r.name === form.role) && (
-              <option value={form.role}>{`${form.role} · not in config`}</option>
-            )}
-            {roles.map((r) => (
-              <option key={r.name} value={r.name}>
-                {`${r.name} · ${r.mode}`}
-              </option>
-            ))}
-          </select>
-        </div>
-        {adding ? (
-          <div className="ffield">
-            <label htmlFor={ids.sign}>Call sign</label>
-            <span id={`${ids.sign}-hint`} className="fhint xs">
-              {CALL_SIGN_HINT}
-            </span>
-            <input
-              {...fieldProps(ids.sign, signError, `${ids.sign}-hint`)}
-              value={id}
-              disabled={busy}
-              onChange={(e) => patch({ id: e.target.value, idAuto: false })}
-            />
-            <FieldError id={ids.sign} error={signError} />
-          </div>
-        ) : (
-          <div className="ffield">
-            <span>Call sign</span>
-            <div className="mono">{id}</div>
-            <span className="fhint xs">A call sign cannot change once the agent exists.</span>
-          </div>
-        )}
-        <div className="ffield">
-          <label htmlFor={ids.account}>Account</label>
-          {loginState && (
-            <span id={`${ids.account}-hint`} className="fhint xs">
-              {loginState}
-            </span>
-          )}
-          <select
-            {...fieldProps(
-              ids.account,
-              accountError,
-              loginState ? `${ids.account}-hint` : undefined,
-            )}
-            value={form.accountId}
-            disabled={busy}
-            onChange={(e) => {
-              const accountId = e.target.value;
-              const nextVendor = accounts.find((a) => a.id === accountId)?.vendor;
-              patch({
-                accountId,
-                ...(nextVendor !== vendor
-                  ? {
-                      model:
-                        nextVendor === "codex"
-                          ? "gpt-5.6-sol"
-                          : role?.model && !role.model.startsWith("gpt-")
-                            ? role.model
-                            : "sonnet",
-                      effort: "",
-                    }
-                  : {}),
-              });
-            }}
-          >
-            {form.accountId !== "" && !accounts.some((a) => a.id === form.accountId) && (
-              <option value={form.accountId}>{`${form.accountId} · not configured`}</option>
-            )}
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.id}
-              </option>
-            ))}
-          </select>
-          <FieldError id={ids.account} error={accountError} />
-        </div>
-      </fieldset>
-      <fieldset className="fgroup">
-        <legend>Model</legend>
-        <div className="fpair">
-          <div className="ffield">
-            <label htmlFor={ids.model}>Model</label>
-            <input
-              {...fieldProps(ids.model, modelError)}
-              value={form.model}
-              disabled={busy}
-              onChange={(e) => patch({ model: e.target.value })}
-            />
-            <FieldError id={ids.model} error={modelError} />
-          </div>
-          <div className="ffield">
-            <label htmlFor={ids.effort}>Effort</label>
-            <select
-              id={ids.effort}
-              value={form.effort}
-              disabled={busy}
-              onChange={(e) => patch({ effort: e.target.value as CrewEffort | "" })}
-            >
-              <option value="">CLI default</option>
-              {CREW_EFFORTS.map((x) => (
-                <option key={x} value={x}>
-                  {x}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </fieldset>
-      <fieldset className="fgroup">
-        <legend>Work area</legend>
-        <div className="ffield">
-          <label htmlFor={ids.area}>Area</label>
-          <span id={`${ids.area}-hint`} className="fhint xs">
-            {AREA_HINT}
-          </span>
-          <input
-            id={ids.area}
-            aria-describedby={`${ids.area}-hint`}
-            value={form.area}
-            disabled={!writer || busy}
-            onChange={(e) => patch({ area: e.target.value })}
-          />
-        </div>
-        {role?.mode === "read-only" && role.loop === "none" && (
-          <div className="ffield ffield-check">
-            <input
-              id={ids.scratch}
-              type="checkbox"
-              checked={form.scratch}
-              disabled={busy}
-              onChange={(e) => patch({ scratch: e.target.checked })}
-            />
-            <label htmlFor={ids.scratch}>{SCRATCH_LABEL}</label>
-          </div>
-        )}
-      </fieldset>
-      <ErrorSummary
-        title={title}
-        issues={issues}
-        message={shown ? failureText(shown) : null}
-        focusKey={attempts + (shown?.seq ?? 0)}
-      >
-        {shown?.uncertain && issues.length === 0 && <p className="s">{UNCERTAIN_TEXT}</p>}
-      </ErrorSummary>
-      {busy && (
-        <p role="status" className="fstatus s">
-          {adding ? `Adding agent to s/${session.id}…` : `Saving ${id}…`}
-        </p>
-      )}
-      <div className="fact">
-        <button type="submit" className="primary" disabled={busy}>
-          {adding ? "Add agent" : `Save ${id}`}
-        </button>
-        <button type="button" disabled={busy} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-      {cliHint && (
-        <p className="note s">
-          Sign in with the CLI on this machine. Mission Control reads this machine's CLI login,
-          identity and plan.
-        </p>
-      )}
-      <p className="note s">{SAVE_NOTE}</p>
-    </form>
-  );
-}
-
-/** One crew session (config.yaml): its seats, who owns each top folder, and the seats table. */
 function CrewSession({
   session,
   config,
   crew,
   folders,
   changes,
-  form,
-  setForm,
   busy,
   failure,
-  clearFailure,
   save,
   close,
 }: {
@@ -507,11 +202,8 @@ function CrewSession({
   crew: Crew | undefined;
   folders: CrewSessionFolders | undefined;
   changes: CrewChanges | undefined;
-  form: FormState | null;
-  setForm: (f: FormState | null) => void;
   busy: boolean;
   failure: SaveFailure | null;
-  clearFailure: () => void;
   save: SaveSeats;
   close: (opener: HTMLButtonElement) => void;
 }) {
@@ -528,8 +220,6 @@ function CrewSession({
   const repo = config.repos.find((r) => r.id === session.repoId);
   const roles = rolesOf(config);
   const base = changes?.sessions.find((s) => s.id === session.id)?.seats ?? [];
-  const mine = form?.sessionId === session.id ? form : null;
-  const pickable = mine !== null && roles.find((r) => r.name === mine.role)?.mode === "writer";
   const tableSeats: TableSeat[] = [
     ...base.map((input) => ({ ...input, input })),
     ...session.seats.filter((s) => s.retiring).map((s) => ({ ...s, input: null })),
@@ -547,32 +237,6 @@ function CrewSession({
     return s.area.length > 0 ? s.area.join(", ") : "whole checkout";
   };
 
-  // Where focus goes when an unsent form is cancelled: the button that opened it.
-  const addButton = useRef<HTMLButtonElement>(null);
-  const opener = useRef<HTMLElement | null>(null);
-  const restoreTo = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (mine !== null || !restoreTo.current) return;
-    const target = restoreTo.current;
-    restoreTo.current = null;
-    (target.isConnected ? target : addButton.current)?.focus();
-  });
-
-  function open(editing: SeatInput | null, from: HTMLElement) {
-    setRemoving(null);
-    opener.current = from;
-    clearFailure();
-    setForm(seatForm(config, session.id, editing));
-  }
-
-  function toggleTile(name: string) {
-    if (!mine) return;
-    const glob = `${name}/**`;
-    const globs = globsOf(mine.area);
-    const next = globs.includes(glob) ? globs.filter((g) => g !== glob) : [...globs, glob];
-    setForm({ ...mine, area: next.join(", ") });
-  }
-
   return (
     <Panel
       title={`s/${session.id}`}
@@ -587,8 +251,7 @@ function CrewSession({
               type="button"
               disabled={roles.length === 0 || busy}
               title={roles.length === 0 ? NO_ROLES : undefined}
-              ref={addButton}
-              onClick={(e) => open(null, e.currentTarget)}
+              onClick={() => navigate(addAgentPath(session.id))}
             >
               Add agent
             </button>
@@ -640,19 +303,7 @@ function CrewSession({
               );
               return (
                 <li key={f.name} className={`tile${stray.length > 0 ? " stray" : ""}`}>
-                  {pickable ? (
-                    <button
-                      type="button"
-                      className="tilepick"
-                      disabled={busy}
-                      aria-pressed={globsOf(mine.area).includes(`${f.name}/**`)}
-                      onClick={() => toggleTile(f.name)}
-                    >
-                      {inner}
-                    </button>
-                  ) : (
-                    inner
-                  )}
+                  {inner}
                 </li>
               );
             })}
@@ -723,7 +374,7 @@ function CrewSession({
                             <button
                               type="button"
                               disabled={busy}
-                              onClick={(e) => open(input, e.currentTarget)}
+                              onClick={() => navigate(editSeatPath(session.id, s.id))}
                             >
                               Edit
                             </button>
@@ -740,37 +391,7 @@ function CrewSession({
             </table>
           </div>
         )}
-        {mine && changes && (
-          <SeatForm
-            key={seatFormKey(mine)}
-            session={session}
-            config={config}
-            roles={roles}
-            form={mine}
-            setForm={setForm}
-            busy={busy}
-            failure={failure}
-            onCancel={() => {
-              restoreTo.current = opener.current;
-              setForm(null);
-            }}
-            onSave={(seat) =>
-              save(
-                session,
-                base,
-                mine.editId === null
-                  ? [...base, seat]
-                  : base.map((x) => (x.id === mine.editId ? seat : x)),
-                (b) =>
-                  mine.editId === null
-                    ? addedText(nameOf(seat.id), session.id, b)
-                    : savedText(nameOf(seat.id), b),
-                seatFormKey(mine),
-              )
-            }
-          />
-        )}
-        {!mine && failure !== null && (
+        {failure !== null && (
           <p role="alert" className="crit-t s">
             {failureText(failure)}
           </p>
@@ -828,56 +449,6 @@ export function Sessions({ config }: { config: ConfigView }) {
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "") ||
     "";
-  // Read once on mount: Overview's Add agent arrives from another page, so Setup mounts fresh.
-  const [requestedSessionId] = useState(() => addAgentParam(window.location.search));
-  const [form, setForm] = useState<FormState | null>(() => {
-    const target = config.crew?.sessions.find((s) => s.id === requestedSessionId);
-    return target ? seatForm(config, target.id) : null;
-  });
-  useEffect(() => {
-    if (
-      changes &&
-      form?.sessionId === requestedSessionId &&
-      addAgentParam(window.location.search) === requestedSessionId
-    ) {
-      navigate(withoutAddAgentParam(), { replace: true });
-    }
-  }, [changes, form?.sessionId, requestedSessionId]);
-  // Roles & guards links each seat here with `?edit=session:seat`: open that seat's form once the
-  // seats as config.yaml lists them have loaded. A seat the snapshot lacks opens from the configured
-  // seat; a seat in neither is named in an error, and the parameter goes either way.
-  const [requestedEdit] = useState(() => editSeatParam(window.location.search));
-  const editOpened = useRef(false);
-  const [editMissing, setEditMissing] = useState<string | null>(null);
-  useEffect(() => {
-    if (!requestedEdit || editOpened.current || !changes) return;
-    editOpened.current = true;
-    const { sessionId, seatId } = requestedEdit;
-    const fromChanges = changes.sessions
-      .find((s) => s.id === sessionId)
-      ?.seats.find((s) => s.id === seatId);
-    const configured = config.crew?.sessions
-      .find((s) => s.id === sessionId)
-      ?.seats.find((s) => s.id === seatId);
-    const input: SeatInput | null =
-      fromChanges ??
-      (configured
-        ? {
-            id: configured.id,
-            role: configured.role,
-            accountId: configured.accountId,
-            model: configured.model,
-            ...(configured.mode === "scratch" ? { mode: "scratch" as const } : {}),
-            area: configured.area,
-          }
-        : null);
-    if (input) setForm(seatForm(config, sessionId, input));
-    else
-      setEditMissing(
-        `${seatId} is not a seat of session ${sessionId}, so there is no form to open.`,
-      );
-    navigate(withoutEditSeatParam(), { replace: true });
-  }, [changes, config, requestedEdit]);
   const [busy, setBusy] = useState(false);
   // Restore only after the form unmounts and its opener is enabled again.
   useEffect(() => {
@@ -920,7 +491,7 @@ export function Sessions({ config }: { config: ConfigView }) {
     });
   const sessionIssues = sessionAttempted ? sessionFound : [];
   const crewSessions = allSessions.filter(
-    (s) => !closed.includes(s.id) && (inSession(session, s.id) || s.id === requestedSessionId),
+    (s) => !closed.includes(s.id) && inSession(session, s.id),
   );
 
   const refetch = () => {
@@ -967,7 +538,6 @@ export function Sessions({ config }: { config: ConfigView }) {
         },
       ]);
       setSession(done.id);
-      setForm(seatForm(currentConfig, done.id));
       dismissSessionForm();
       toast(
         `s/${done.id} added${draft.checkoutStrategy === "separate" ? " with its own checkout" : ""}. Now add its first agent.`,
@@ -1005,7 +575,6 @@ export function Sessions({ config }: { config: ConfigView }) {
       focusReturn.current = opener;
       setClosed((s) => [...s, done.id]);
       if (getSession() === done.id) resetSession();
-      setForm(null);
       refetch();
     } catch (err) {
       toast(errorText(err));
@@ -1025,7 +594,6 @@ export function Sessions({ config }: { config: ConfigView }) {
         { base, seats },
       );
       toast(toastOf(done.backup));
-      setForm(null);
       refetch();
     } catch (err) {
       fail(s.id, formKey, err);
@@ -1225,19 +793,6 @@ export function Sessions({ config }: { config: ConfigView }) {
         )}
         {config.repos.length === 0 && <p className="note s">Add a repo in Setup first.</p>}
       </div>
-      {changes?.error && (
-        <p role="alert" className="crit-t s">
-          {loadErrorText(changes.error)}
-        </p>
-      )}
-      {changes && changes.restartNeeded.length > 0 && (
-        <p className="note wide">{restartText(changes.restartNeeded)}</p>
-      )}
-      {editMissing && (
-        <p role="alert" className="crit-t s">
-          {editMissing}
-        </p>
-      )}
       {failure?.sessionId === null && failure.formKey !== SESSION_FORM_KEY && (
         <p role="alert" className="crit-t s">
           {failureText(failure)}
@@ -1289,11 +844,8 @@ export function Sessions({ config }: { config: ConfigView }) {
             folders?.find((f) => f.id === s.id) ?? returnedFolders.find((f) => f.id === s.id)
           }
           changes={changes}
-          form={form}
-          setForm={setForm}
           busy={busy}
           failure={failure?.sessionId === s.id ? failure : null}
-          clearFailure={() => setFailure(null)}
           save={save}
           close={(opener) => void closeSession(s.id, opener)}
         />
