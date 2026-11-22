@@ -161,7 +161,7 @@ export const RESOURCES = {
     path: `/api/away/digest${since ? `?since=${enc(since)}` : ""}`,
     topic: "settings",
   }),
-  crewPause: { path: "/api/settings/crew-pause", topic: "settings" },
+  crewPause: { path: "/api/settings/crew-pause", topic: ["settings", "agents"] },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
@@ -497,8 +497,8 @@ interface Entry {
 
 /** The least time between stream-driven reads of one resource on `agents` events. */
 const AGENTS_PACE_MS = 6000;
-/** The history chart changes with seat output, but does not need a redraw for each running turn. */
-const OVERVIEW_TIMELINE_AGENTS_PACE_MS = 30_000;
+/** Background history and pause audits change with seat output, but not on every running turn. */
+const BACKGROUND_AGENTS_PACE_MS = 30_000;
 /** Keep a completed response through a brief unmount/remount caused by a page layout update. */
 const VISIT_REUSE_MS = 2000;
 
@@ -786,8 +786,8 @@ class Hub {
         if (!e.queued) {
           e.queued = true;
           const paceMs =
-            e.path === RESOURCES.overviewTimeline.path
-              ? OVERVIEW_TIMELINE_AGENTS_PACE_MS
+            e.path === RESOURCES.overviewTimeline.path || e.path === RESOURCES.crewPause.path
+              ? BACKGROUND_AGENTS_PACE_MS
               : AGENTS_PACE_MS;
           const wait = pace
             ? Math.max(0, (e.fetchedAt ?? 0) + paceMs - Date.now())
