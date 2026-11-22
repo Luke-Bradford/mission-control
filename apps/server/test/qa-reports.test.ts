@@ -663,6 +663,67 @@ describe("durable QA report archive", () => {
     expect(store.qaReportForReview(next)?.prNumber).toBe(8);
   });
 
+  it("archives submitted review evidence with its caption, viewport and side", async () => {
+    const evidence = prEvidenceStore(join(dir, "evidence"));
+    const name = `submitted-${"a".repeat(64)}.png`;
+    evidence.save(
+      {
+        repoId: "sample",
+        pr: 7,
+        sha: SHA,
+        mainSha: BASE,
+        capturedAt: NOW - 100,
+        pairs: [],
+        submitted: [
+          {
+            name,
+            caption: "Audit empty state",
+            viewport: { width: 1280, height: 900 },
+            side: "reference",
+            path: "docs/evidence/audit.png",
+          },
+        ],
+      },
+      [{ name, png: PNG }],
+    );
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - 100,
+    });
+    if (!id) throw new Error("review missing");
+    store.setReviewState(id, ["queued"], "running", { at: NOW - 50, runId: "retro:review" });
+    const row = store.review(id);
+    if (!row) throw new Error("review missing");
+    const reports = service();
+    const report = await reports.prepareNative(
+      row,
+      {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "Reviewed submitted visual evidence.",
+        findings: [],
+        worksWell: ["The submitted screenshot is available."],
+      },
+      NOW,
+    );
+    expect(report.visual.screenshots).toMatchObject([
+      {
+        label: "Audit empty state (1280×900, reference)",
+        source: "controlled-fixture",
+        provenance: "Committed review evidence: docs/evidence/audit.png",
+      },
+    ]);
+    const hash = report.visual.screenshots?.[0]?.sha256;
+    store.putQaReport(report);
+    expect(hash && reports.asset(hash)).toEqual(PNG);
+  });
+
   it("a native report carries a frozen copy of the ticket's signed-off plan", async () => {
     store.upsertRun({
       id: "author",

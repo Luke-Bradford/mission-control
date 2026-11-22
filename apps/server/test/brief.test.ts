@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import {
   DEFAULT_PROFILES,
+  MC_PLAN_STEPS_HINT,
   OLDER_FINDINGS_MAX,
   type Profile,
   type ProfileRoute,
@@ -222,8 +223,11 @@ describe("ticketBrief profile lines", () => {
       profile: chosen(profile, { by: "size", size: "M" }),
       profileNames: ["feature", "bugfix"],
     });
-    expect(out.split("\n").at(-1)).toBe(
+    expect(out.split("\n").at(-2)).toBe(
       "To use another template, call mc report_plan with profile (one of: feature, bugfix) and profile_reason; the developer still runs every CI check the picked template requires.",
+    );
+    expect(out.split("\n").at(-1)).toBe(
+      `${MC_PLAN_STEPS_HINT} Pass them as steps to mc report_plan.`,
     );
     expect(
       lines({ profile: chosen(profile, { by: "size", size: "M" }), profileNames: ["feature"] }),
@@ -739,6 +743,7 @@ describe("reviewBrief", () => {
           },
           { page: "board", scheme: "dark", changedPixels: 0, changedPercent: 0, regions: [] },
         ],
+        submitted: [],
       },
     });
     expect(out).toContain("## Screenshot evidence");
@@ -747,6 +752,29 @@ describe("reviewBrief", () => {
     expect(out).toContain("board, dark: no change");
     expect(out).toContain("main ccccccc");
     expect(reviewBrief(review)).not.toContain("Screenshot evidence");
+  });
+
+  it("lists submitted screenshot evidence with its review metadata", () => {
+    const out = reviewBrief({
+      ...review,
+      evidence: {
+        dir: ".mc-review/evidence",
+        mainSha: "c".repeat(40),
+        pairs: [],
+        submitted: [
+          {
+            name: `submitted-${"d".repeat(64)}.png`,
+            caption: "Audit empty state",
+            viewport: { width: 1280, height: 900 },
+            side: "reference",
+            path: "docs/evidence/audit.png",
+          },
+        ],
+      },
+    });
+    expect(out).toContain("Audit empty state: 1280×900, reference; docs/evidence/audit.png");
+    expect(out).toContain(`.mc-review/evidence/submitted-${"d".repeat(64)}.png`);
+    expect(out).toContain("Submitted pictures name their own viewport and side.");
   });
 
   it("tells the reviewer when a web PR has no pairs", () => {

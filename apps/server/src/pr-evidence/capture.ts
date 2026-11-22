@@ -378,6 +378,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
         }
       }
       signal.throwIfAborted();
+      const prior = deps.store.manifest(deps.repoId, t.pr, t.sha);
       deps.store.save(
         {
           repoId: deps.repoId,
@@ -387,6 +388,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
           capturedAt: now(),
           pairs,
           ...(deps.renderDemo ? { demos } : {}),
+          ...(prior?.submitted ? { submitted: prior.submitted } : {}),
         },
         images,
       );

@@ -16,9 +16,11 @@ import {
   EVIDENCE_KINDS,
   EVIDENCE_VIEWPORT,
   type EvidencePair,
+  type EvidenceSubmission,
   evidenceImageName,
   type LoopKind,
   MC_LINE_PREFIX,
+  MC_PLAN_STEPS_HINT,
   MC_TOOL_NAMES,
   OLDER_FINDINGS_MAX,
   profileRouteText,
@@ -175,6 +177,7 @@ function profileLines(i: Pick<BriefInput, "profile" | "loop" | "profileNames">):
     ...(i.loop === "plan" && i.profileNames !== undefined
       ? [
           `To use another template, call mc report_plan with profile (one of: ${i.profileNames.join(", ")}) and profile_reason; the developer still runs every CI check the picked template requires.`,
+          `${MC_PLAN_STEPS_HINT} Pass them as steps to mc report_plan.`,
         ]
       : []),
   ];
@@ -324,7 +327,12 @@ export interface ReviewBriefInput {
   /** The repo's whole-suite commands, which wait for the test lock. */
   fullSuite: readonly string[];
   /** The screenshot pairs of a web PR's head, with the directory in the scratch copy holding them. */
-  evidence?: { dir: string; mainSha: string; pairs: readonly EvidencePair[] };
+  evidence?: {
+    dir: string;
+    mainSha: string;
+    pairs: readonly EvidencePair[];
+    submitted: readonly EvidenceSubmission[];
+  };
   /** Set instead of `evidence` when a web PR's pairs could not be made: the reviewer is told. */
   evidenceMissing?: string;
   /** FLIGHT's second review of a blocking floor review: its reason and the first review's blocking findings. */
@@ -371,6 +379,10 @@ function evidenceLine(p: EvidencePair, dir: string): string {
   return `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${count} (${where}${more})`} — ${files.join(", ")}`;
 }
 
+function submittedEvidenceLine(p: EvidenceSubmission, dir: string): string {
+  return `- ${p.caption}: ${p.viewport.width}×${p.viewport.height}, ${p.side}; ${p.path} — ${dir}/${p.name}`;
+}
+
 /** RETRO's first message: the PR, what it has to read, how to review, the ticket and the notes. */
 export function reviewBrief(i: ReviewBriefInput): string {
   const sha7 = i.sha.slice(0, 7);
@@ -401,7 +413,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
       : []),
     ...(i.evidence
       ? [
-          `- ${i.evidence.dir}/: screenshots of the HUD pages this PR changes, main against this head, with a pixel diff. Read them (the Read tool shows an image); the list is below.`,
+          `- ${i.evidence.dir}/: screenshot evidence for this head. Captured pairs compare main against the head with a pixel diff; submitted pictures are committed repository PNGs. Read them (the Read tool shows an image); the list is below.`,
         ]
       : []),
     ...(i.evidenceMissing ? [`- ${EVIDENCE_HEADING.slice(3)}: ${i.evidenceMissing}`] : []),
@@ -460,9 +472,10 @@ export function reviewBrief(i: ReviewBriefInput): string {
       ? [
           EVIDENCE_HEADING,
           "",
-          `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} on the same data, this head against main ${i.evidence.mainSha.slice(0, 7)}. Changed pixels are red in the diff. Judge each changed region as the design pass asks, and a page the PR should have changed but did not.`,
+          `Captured pairs render at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} on the same data, this head against main ${i.evidence.mainSha.slice(0, 7)}. Changed pixels are red in the diff. Submitted pictures name their own viewport and side. Judge each changed region as the design pass asks, and a page the PR should have changed but did not.`,
           "",
           ...i.evidence.pairs.map((p) => evidenceLine(p, i.evidence?.dir ?? "")),
+          ...i.evidence.submitted.map((p) => submittedEvidenceLine(p, i.evidence?.dir ?? "")),
           "",
         ]
       : []),

@@ -221,6 +221,10 @@ CREATE TABLE IF NOT EXISTS audit_items (
   UNIQUE (kind, subject)
 );
 CREATE INDEX IF NOT EXISTS audit_items_at ON audit_items(at);
+-- The last successful occurrence of each routine event watched by Audit for a silence.
+CREATE TABLE IF NOT EXISTS audit_events (
+  kind TEXT PRIMARY KEY, last_seen_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
   text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
@@ -329,6 +333,15 @@ CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
 CREATE TABLE IF NOT EXISTS profile_overrides (
   repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
   by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
+);
+-- The model and effort recommended for a ticket's step, with the reason; the latest write wins.
+CREATE TABLE IF NOT EXISTS model_advice (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, step TEXT NOT NULL, model TEXT, effort TEXT,
+  reason TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue, step)
+);
+-- Every step-up recommendation ever recorded, append-only: model_advice keeps only the latest per step.
+CREATE TABLE IF NOT EXISTS model_step_ups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, issue INTEGER NOT NULL, at INTEGER NOT NULL
 );
 -- FLIGHT's living brief: one row per crew session and section.
 CREATE TABLE IF NOT EXISTS flight_brief (

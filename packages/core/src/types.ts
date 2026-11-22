@@ -1,5 +1,6 @@
 import type { AttentionHold } from "./attention-model.ts";
 import type { Owner, Stage } from "./board-model.ts";
+import type { ModelAdvice } from "./model-advice.ts";
 
 export type {
   AttentionHold,
@@ -131,6 +132,8 @@ export interface Run {
   accountId?: AccountId | null;
   /** Immutable launch effort, absent when the CLI used its default. */
   effort?: string | null;
+  /** The model and effort recommended for the run's step when it started; absent on a run with none. */
+  advice?: ModelAdvice;
   /** The loop kind of the seat that started the run, kept so Audit still knows it after the seat is gone; absent on older runs. */
   loopKind?: LoopKind | null;
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */

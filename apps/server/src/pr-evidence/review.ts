@@ -11,6 +11,7 @@ export interface StagedEvidence {
   dir: string;
   mainSha: string;
   pairs: EvidencePair[];
+  submitted: NonNullable<import("@mc/core").EvidenceManifest["submitted"]>;
 }
 
 /** Copies the head's images into the scratch copy; undefined when the head has no pairs. */
@@ -25,7 +26,7 @@ export async function stageReviewEvidence(
   if (store === undefined || manifest === null) return undefined;
   // A stored manifest may name a page that is no longer captured; its images are not staged.
   const pairs = manifest.pairs.filter((p) => EVIDENCE_PAGES.includes(p.page));
-  if (pairs.length === 0) return undefined;
+  if (pairs.length === 0 && (manifest.submitted?.length ?? 0) === 0) return undefined;
   await mkdir(join(scratchPath, ".mc-review"), { recursive: true });
   const stage = await mkdtemp(join(scratchPath, ".mc-review", ".evidence-"));
   try {
@@ -37,9 +38,19 @@ export async function stageReviewEvidence(
         await writeFile(join(stage, name), png, { flag: "wx", mode: 0o600 });
       }
     }
+    for (const image of manifest.submitted ?? []) {
+      const png = store.image(repoId, pr, sha, image.name);
+      if (!png) throw new Error(`submitted screenshot evidence image is missing: ${image.name}`);
+      await writeFile(join(stage, image.name), png, { flag: "wx", mode: 0o600 });
+    }
     await rename(stage, join(scratchPath, REVIEW_EVIDENCE_DIR));
   } finally {
     await rm(stage, { recursive: true, force: true });
   }
-  return { dir: REVIEW_EVIDENCE_DIR, mainSha: manifest.mainSha, pairs };
+  return {
+    dir: REVIEW_EVIDENCE_DIR,
+    mainSha: manifest.mainSha,
+    pairs,
+    submitted: manifest.submitted ?? [],
+  };
 }

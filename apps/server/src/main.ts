@@ -71,6 +71,7 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { recordingShotSaves, runSilenceCheck } from "./engine/silence.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { flightConflicts } from "./flight/conflicts.ts";
@@ -722,7 +723,7 @@ export async function main(): Promise<void> {
             ready: (runId) => reviewPreviews.ready(runId),
             identity: (runId) => reviewPreviews.identity(runId),
             browse: (job, guard) => previewBrowserInHelper(job, guard),
-            saveShot: (png) => reviewShots.save(png),
+            saveShot: recordingShotSaves(store, (png) => reviewShots.save(png), Date.now),
           },
         }),
   };
@@ -898,6 +899,7 @@ export async function main(): Promise<void> {
     operator: operatorCall(() => hubApp, operatorToken),
     tidy: crewTidy,
     hudShots,
+    evidence: evidenceStore,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
@@ -1214,6 +1216,16 @@ export async function main(): Promise<void> {
       setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
     }
   }
+  // Local only: Audit checks routine hub activity without GitHub work.
+  const silence = () => {
+    try {
+      runSilenceCheck({ store, config, now: Date.now });
+    } catch (e) {
+      log(`silence check failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  setInterval(silence, 60_000).unref();
+  setTimeout(silence, 60_000).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = () => {
     try {

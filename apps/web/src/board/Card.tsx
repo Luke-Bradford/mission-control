@@ -289,8 +289,11 @@ export const Card = memo(function Card({
       </PillButton>
     ),
     statusOutOfDate && (
-      <span key="stale" className="xs warn-t" title={statusOutOfDate}>
-        {STATUS_OUT_OF_DATE}
+      <span key="stale" className="kwait">
+        <span className="xs warn-t" title={statusOutOfDate}>
+          {STATUS_OUT_OF_DATE}
+        </span>
+        <span className="xs muted">{statusOutOfDate}</span>
       </span>
     ),
     blocker && (

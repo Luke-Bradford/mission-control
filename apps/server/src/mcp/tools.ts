@@ -11,6 +11,8 @@
 import { lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  ADVICE_REASON_MAX,
+  ADVICE_STEPS,
   ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
@@ -24,6 +26,7 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CREW,
+  COMMS_MC,
   COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
   COMMS_REF,
@@ -97,6 +100,9 @@ import {
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_PROFILE_ONLY,
+  MC_PLAN_STEPS_HINT,
+  MC_PLAN_STEPS_ONCE,
+  MC_PLAN_STEPS_PLANNER_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_BODY_EMPTY,
@@ -124,6 +130,7 @@ import {
   MC_TEXT_MAX,
   MC_TOOL_NAMES,
   MINOR_HEADING,
+  MODEL_ADVICE_FIELD_MAX,
   mcToolHitText,
   NOTHING_TO_COMMIT,
   NOTHING_TO_PUSH,
@@ -179,6 +186,8 @@ import {
   REVIEW_FINDINGS_MAX,
   REVIEW_SUMMARY_MAX,
   type RepoRules,
+  type ReviewFinding,
+  type ReviewRow,
   type Run,
   readOnlyToolText,
   removedText,
@@ -195,6 +204,7 @@ import {
   seatDef,
   sectionOf,
   specialPathsText,
+  stepUpAdvice,
   unclosedMarkdown,
   VERDICTS,
   withSection,
@@ -412,9 +422,22 @@ const CommsReactArgs = z
     if (value.reaction !== "cant" && value.reason !== undefined)
       ctx.addIssue({ code: "custom", message: "reason is only allowed for cant" });
   });
+const PlanStepArgs = z.strictObject({
+  step: z.enum(ADVICE_STEPS),
+  model: text(MODEL_ADVICE_FIELD_MAX),
+  effort: text(MODEL_ADVICE_FIELD_MAX).optional(),
+  reason: text(ADVICE_REASON_MAX),
+});
 const PlanArgs = z
   .strictObject({
     plan: text(MC_PLAN_MAX),
+    steps: z
+      .array(PlanStepArgs)
+      .max(ADVICE_STEPS.length)
+      .refine((a) => new Set(a.map((s) => s.step)).size === a.length, {
+        message: MC_PLAN_STEPS_ONCE,
+      })
+      .optional(),
     profile: z.string().regex(PROFILE_NAME).optional(),
     profile_reason: text(PROFILE_REASON_MAX).optional(),
     // the parts the operator reads on the Planner tab, beside the plan itself
@@ -2797,9 +2820,57 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       reviewedEventText(seatCallSign(ctx.seatId), review.sha, blocking, findings.length - blocking),
       at,
     );
+    recordStepUp(ctx, review, findings, at);
     bus.emit("agents");
     deps.onFindings?.(ctx.seatId, ctx.runId);
     return { text: `${FINDINGS_RECORDED}\nQA report: ${qaReport.permalink}` };
+  }
+
+  /**
+   * From round 2, a class of blocking finding that repeats the previous reported review of the same
+   * author run and epoch records build-step advice to raise effort or the model, tells the watch
+   * seat, and notes it on the ticket's loop; it is recorded once per review.
+   */
+  function recordStepUp(
+    ctx: McToolContext,
+    review: ReviewRow,
+    findings: readonly ReviewFinding[],
+    at: number,
+  ): void {
+    if (review.round < 2) return;
+    const previous = store
+      .reviewsOfRun(review.authorRunId)
+      .filter((r) => r.id < review.id && r.state === "reported" && r.epoch === review.epoch)
+      .at(-1);
+    const author = store.run(review.authorRunId);
+    const issue = author === null ? null : issueOf(author);
+    if (previous === undefined || author === null || issue === null) return;
+    const advice = stepUpAdvice({
+      round: review.round,
+      previous: store.findingsOf(previous.id),
+      current: findings,
+      model: author.model,
+      effort: author.effort ?? null,
+      at,
+    });
+    if (advice === null) return;
+    store.setModelAdvice(review.repoId, issue, advice);
+    store.addLoopEvent(
+      `${review.authorRunId}:stepup:${review.id}`,
+      review.authorRunId,
+      advice.reason,
+      at,
+    );
+    const place = seatPlace(config, ctx.seatId);
+    const watcher = place?.session.seats.find((x) => !x.retiring && seatDef(x).loop === "watch");
+    store.addComms({
+      at,
+      from: COMMS_MC,
+      senderKind: "hub",
+      to: watcher?.id ?? COMMS_CAPCOM,
+      ticket: author.ticket ?? null,
+      text: advice.reason,
+    });
   }
 
   /** The repo's plan sign-off setting, from its rules as the engine reads them. */
@@ -2833,6 +2904,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       (parsed.data.profile !== undefined || parsed.data.profile_reason !== undefined)
     )
       return { text: MC_PLAN_PROFILE_ONLY, isError: true };
+    if (loop === "build" && parsed.data.steps !== undefined)
+      return { text: MC_PLAN_STEPS_PLANNER_ONLY, isError: true };
     const override: ProfileOverride | undefined =
       parsed.data.profile !== undefined && parsed.data.profile_reason !== undefined
         ? { profile: parsed.data.profile, reason: parsed.data.profile_reason, by: "planner" }
@@ -3032,6 +3105,16 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const at = now();
     if (loop === "plan" && override !== undefined)
       store.setProfileOverride(run.repoId, issue, override, at);
+    if (loop === "plan")
+      for (const s of parsed.data.steps ?? [])
+        store.setModelAdvice(run.repoId, issue, {
+          step: s.step,
+          model: s.model,
+          effort: s.effort ?? null,
+          reason: s.reason,
+          by: "planner",
+          at,
+        });
     if (toTab) {
       // FLIGHT's mark for larger work is kept by the row; whether the ticket is held follows the
       // repo's current setting (planHolds), so it is never stored here
@@ -3473,6 +3556,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             minLength: 1,
             maxLength: PROFILE_REASON_MAX,
             description: "Why that template fits better; recorded with the choice.",
+          },
+          steps: {
+            type: "array",
+            maxItems: ADVICE_STEPS.length,
+            description: `${MC_PLAN_STEPS_HINT} Each step may appear once.`,
+            items: {
+              type: "object",
+              properties: {
+                step: { type: "string", enum: [...ADVICE_STEPS] },
+                model: { type: "string", minLength: 1, maxLength: MODEL_ADVICE_FIELD_MAX },
+                effort: { type: "string", minLength: 1, maxLength: MODEL_ADVICE_FIELD_MAX },
+                reason: { type: "string", minLength: 1, maxLength: ADVICE_REASON_MAX },
+              },
+              required: ["step", "model", "reason"],
+              additionalProperties: false,
+            },
           },
         },
         required: ["plan"],

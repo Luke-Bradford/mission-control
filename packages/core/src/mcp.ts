@@ -67,6 +67,7 @@ export const MC_TOOL_NAMES = {
   withdrawQuestion: "withdraw_question",
   attachMaterials: "attach_materials",
   screenshotHud: "screenshot_hud",
+  addReviewEvidence: "add_review_evidence",
   previewBrowser: "preview_browser",
   editIssue: "edit_issue",
   setFields: "set_fields",
@@ -142,6 +143,7 @@ export const MC_TOOLS = {
   withdrawQuestion: mcTool(MC_TOOL_NAMES.withdrawQuestion),
   attachMaterials: mcTool(MC_TOOL_NAMES.attachMaterials),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
+  addReviewEvidence: mcTool(MC_TOOL_NAMES.addReviewEvidence),
   previewBrowser: mcTool(MC_TOOL_NAMES.previewBrowser),
   editIssue: mcTool(MC_TOOL_NAMES.editIssue),
   setFields: mcTool(MC_TOOL_NAMES.setFields),
@@ -564,6 +566,10 @@ export const MC_PLAN_WRITTEN_CONTINUE =
 export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner or build seats.";
 export const MC_PLAN_PROFILE_ONLY =
   "Not written: profile and profile_reason are for planner seats.";
+export const MC_PLAN_STEPS_ONCE = "each step may appear once";
+export const MC_PLAN_STEPS_PLANNER_ONLY = "Only the planner records model advice; leave steps out.";
+export const MC_PLAN_STEPS_HINT =
+  "Recommend a model and effort per step with the reason only when Audit's model table or a trial result supports it.";
 export const MC_PLAN_ALREADY =
   "Not written: the ticket already has a ## Plan section. Ask FLIGHT with mc ask_flight if it needs replacing.";
 export const MC_PLAN_ISSUE_CLOSED = "Not written: the ticket is closed.";

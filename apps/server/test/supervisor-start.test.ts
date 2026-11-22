@@ -47,6 +47,7 @@ import {
   grantUngrantableText,
   guardDenyOutput,
   HOOK_RETRY_ENV,
+  HUB_DEFAULT_REASON,
   lockBusyText,
   MC_MCP_SERVER,
   MC_TMP_DIR_NAME,
@@ -488,6 +489,63 @@ describe("startRun eligibility", () => {
       const { runId } = await sup.startRun("guido-1", 42);
       expect(runPathGrants(store, runId)).toEqual([]);
     });
+  });
+
+  it("a build run snapshots the planner's advice, or the hub default", async () => {
+    store.setModelAdvice("mc", 42, {
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "medium",
+      reason: "small change",
+      by: "planner",
+      at: 1,
+    });
+    const { sup } = make();
+    sup.start();
+    const planned = await sup.startRun("guido-1", 42);
+    expect(store.run(planned.runId)?.advice).toMatchObject({
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "medium",
+      reason: "small change",
+      by: "planner",
+    });
+  });
+
+  it("a hub default follows the seat: a later run on another seat gets its own model", async () => {
+    const { sup } = make({
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "opus-5.5",
+        effort: "high",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await sup.endRun("guido-1");
+    const second = await sup.startRun("guido-2", 42);
+    expect(store.run(second.runId)?.advice).toMatchObject({
+      model: "opus-5.5",
+      effort: "high",
+      by: "hub",
+    });
+  });
+
+  it("a build run snapshots the hub default when the planner recorded no advice", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    const started = store.run(runId);
+    expect(started?.advice).toMatchObject({
+      step: "build",
+      model: started?.model,
+      reason: HUB_DEFAULT_REASON,
+      by: "hub",
+    });
+    expect(store.modelAdvice("mc", 42, "build")?.by).toBe("hub");
   });
 
   it("10: starts Size M with no plan so its seat can write it", async () => {

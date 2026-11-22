@@ -297,6 +297,33 @@ describe("GET /api/tickets/:repoId/:number", () => {
     });
   });
 
+  it("a run event carries actual and recommended model", async () => {
+    store.upsertRun(
+      run("dev-3", {
+        model: "sonnet-5.5",
+        effort: "medium",
+        advice: {
+          step: "build",
+          model: "opus-5.5",
+          effort: "high",
+          reason: "hard change",
+          by: "planner",
+          at: NOW,
+        },
+      }),
+    );
+    store.upsertRun(run("dev-4"));
+    const t = (await read("/api/tickets/shop-app/7")).json() as TicketHistory;
+    const ev = (id: string) => t.timeline.find((e) => e.kind === "run" && e.runId === id);
+    expect(ev("dev-3")).toMatchObject({
+      model: "sonnet-5.5",
+      effort: "medium",
+      advice: { model: "opus-5.5", effort: "high", by: "planner", reason: "hard change" },
+    });
+    expect(ev("dev-4")).toMatchObject({ model: "opus", effort: null });
+    expect(ev("dev-4")).not.toHaveProperty("advice");
+  });
+
   it("returns the fields and an empty timeline for a ticket with no runs", async () => {
     store.replaceBoard("shop-app", [card(7)]);
     const t = (await read("/api/tickets/shop-app/7")).json() as TicketHistory;

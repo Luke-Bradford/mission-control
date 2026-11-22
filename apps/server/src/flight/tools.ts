@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { EvidenceManifest, EvidenceSubmission } from "@mc/core";
 /**
  * FLIGHT's mc tools. Each is hidden from every seat whose role does not grant it (`modes: []`,
  * `grantable: ["read-only"]`) and re-checks the run and the seat's loop on every call, so a token
@@ -373,6 +375,7 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
+import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { cleanText } from "../repo/clean.ts";
@@ -421,6 +424,7 @@ export interface FlightToolsDeps {
   hubOrigin?: string;
   /** Where screenshots are kept for a durable reference; absent: the image is not stored. */
   hudShots?: HudShotStore;
+  evidence?: PrEvidenceStore;
   queueReorder?: (
     seatId: string,
     move: string,
@@ -3609,8 +3613,140 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     seat: z.string().regex(SEAT_ID),
     basis: basisArg,
   });
+  const AddReviewEvidenceArgs = z.strictObject({
+    pr: issueNumber,
+    head: z.string().regex(/^[a-f0-9]{40}$/),
+    images: z
+      .array(
+        z.strictObject({
+          path: z.string().regex(/^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._/-]+\.png$/),
+          caption: text(300),
+          viewport: z.strictObject({
+            width: z.number().int().positive().max(10000),
+            height: z.number().int().positive().max(10000),
+          }),
+          side: z.enum(["head", "base", "reference"]),
+        }),
+      )
+      .min(1)
+      .max(100),
+    basis: basisArg,
+  });
 
   const superTools = [
+    superTool(
+      MC_TOOL_NAMES.addReviewEvidence,
+      "Add committed PNG pictures to one exact PR head's review evidence. Each picture has a caption, viewport and side. GitHub is read only; the hub verifies and retains the repository blobs.",
+      AddReviewEvidenceArgs,
+      "status",
+      async (a, repo) => {
+        if (!deps.evidence) return fail("Review evidence storage is unavailable.");
+        const pull = await deps.gh(["api", `repos/${repo.github}/pulls/${a.pr}`], {
+          cwd: deps.dbPath,
+          timeoutMs: 5000,
+          maxBuffer: 256 * 1024,
+        });
+        let pr: { head?: { sha?: unknown } };
+        try {
+          pr = JSON.parse(pull.stdout);
+        } catch {
+          return fail("The PR head could not be verified.");
+        }
+        if (pull.code !== 0 || pr.head?.sha !== a.head)
+          return fail("The PR head changed. Refresh its evidence before adding pictures.");
+        const saved: { name: string; png: Buffer }[] = [];
+        const submitted: EvidenceSubmission[] = [];
+        for (const image of a.images) {
+          const result = await deps.gh(
+            [
+              "api",
+              `repos/${repo.github}/contents/${image.path}?ref=${a.head}`,
+              "-H",
+              "Accept: application/vnd.github.object+json",
+            ],
+            { cwd: deps.dbPath, timeoutMs: 5000, maxBuffer: 2 * 1024 * 1024 },
+          );
+          let file: {
+            type?: unknown;
+            path?: unknown;
+            sha?: unknown;
+            size?: unknown;
+            encoding?: unknown;
+            content?: unknown;
+          };
+          try {
+            file = JSON.parse(result.stdout);
+          } catch {
+            return fail(`Picture could not be read: ${image.path}.`);
+          }
+          if (
+            result.code !== 0 ||
+            file.type !== "file" ||
+            file.path !== image.path ||
+            typeof file.sha !== "string" ||
+            !/^[a-f0-9]{40}$/.test(file.sha) ||
+            typeof file.size !== "number" ||
+            !Number.isSafeInteger(file.size) ||
+            typeof file.content !== "string" ||
+            file.size < 8 ||
+            file.size > 8 * 1024 * 1024
+          )
+            return fail(`Picture could not be verified: ${image.path}.`);
+          let content = file;
+          if (file.encoding === "none" && file.content === "") {
+            const blob = await deps.gh(
+              [
+                "api",
+                `repos/${repo.github}/git/blobs/${file.sha}`,
+                "-H",
+                "Accept: application/vnd.github+json",
+              ],
+              { cwd: deps.dbPath, timeoutMs: 5000, maxBuffer: 12 * 1024 * 1024 },
+            );
+            try {
+              content = JSON.parse(blob.stdout);
+            } catch {
+              return fail(`Picture could not be read: ${image.path}.`);
+            }
+            if (blob.code !== 0 || content.sha !== file.sha || content.size !== file.size)
+              return fail(`Picture could not be verified: ${image.path}.`);
+          }
+          if (content.encoding !== "base64" || typeof content.content !== "string")
+            return fail(`Picture could not be verified: ${image.path}.`);
+          const encoded = content.content.replace(/[\r\n]/g, "");
+          const png = Buffer.from(encoded, "base64");
+          if (
+            png.length !== file.size ||
+            png.toString("base64") !== encoded ||
+            !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ||
+            createHash("sha1").update(`blob ${png.length}\0`).update(png).digest("hex") !== file.sha
+          )
+            return fail(`Picture is not a committed PNG: ${image.path}.`);
+          const name = `submitted-${createHash("sha256").update(`${image.path}\0${image.caption}\0${image.side}\0${image.viewport.width}x${image.viewport.height}`).digest("hex")}.png`;
+          saved.push({ name, png });
+          submitted.push({ name, ...image });
+        }
+        const old = deps.evidence.manifest(repo.id, a.pr, a.head);
+        const manifest: EvidenceManifest = {
+          repoId: repo.id,
+          pr: a.pr,
+          sha: a.head,
+          mainSha: old?.mainSha ?? a.head,
+          capturedAt: old?.capturedAt ?? now(),
+          pairs: old?.pairs ?? [],
+          ...(old?.demos ? { demos: old.demos } : {}),
+          submitted: [...(old?.submitted ?? []), ...submitted].filter(
+            (image, index, all) => all.findIndex((other) => other.name === image.name) === index,
+          ),
+        };
+        deps.evidence.save(manifest, saved);
+        return {
+          text: `Added ${saved.length} committed picture${saved.length === 1 ? "" : "s"} to review evidence for this PR head.`,
+        };
+      },
+      undefined,
+      { engine: false },
+    ),
     superTool(
       MC_TOOL_NAMES.moveReview,
       "Move one queued review to a named review seat. The target account must not be at its usage stop. The basis is recorded. The queued review keeps its head, round and review model rule.",
@@ -4816,6 +4952,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       // a ruling still pending leaves no decision row: it is a read
       const rowsBefore = store.flightDecisions(0, 1)[0]?.id ?? 0;
       const result = await tool.call(ctx, args);
+      if (result.isError !== true) store.recordSilenceEvent("flight-tool-succeeded", now());
       if (!write) return result;
       const rowAdded = (store.flightDecisions(0, 1)[0]?.id ?? 0) !== rowsBefore;
       const landed =
