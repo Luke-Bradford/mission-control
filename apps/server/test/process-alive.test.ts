@@ -8,17 +8,19 @@ import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 
 skipTestsIf(await blockedHere("ps"));
 
-it("sees a shell running the command in the worktree, and not once it exits", async () => {
+it("sees a node process running in the worktree, and not once it exits or elsewhere", async () => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "alive-")));
-  const command = `sleep 30 # mc-alive-${process.pid}`;
-  const child = spawn("/bin/sh", ["-c", command], { cwd: dir, stdio: "ignore" });
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], {
+    cwd: dir,
+    stdio: "ignore",
+  });
   try {
-    expect(await processAlive(dir, command)).toBe(true);
-    expect(await processAlive(join(dir, "elsewhere"), command)).toBe(false);
-    expect(await processAlive(dir, `${command}-other`)).toBe(false);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await processAlive(dir)).toBe(true);
+    expect(await processAlive(join(dir, "elsewhere"))).toBe(false);
   } finally {
     child.kill();
   }
   await new Promise((r) => child.once("exit", r));
-  expect(await processAlive(dir, command)).toBe(false);
+  expect(await processAlive(dir)).toBe(false);
 });

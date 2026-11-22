@@ -611,6 +611,35 @@ describe("why the recorder dropped a check call", () => {
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
     });
 
+    it("keeps a vitest or pnpm test hold while its process runs, and frees it when it is gone", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      const test = "pnpm -s test";
+      await r.admit?.(KEY, test);
+      r.dropRun("r1"); // not a receipt check: no started call, only the reservation
+      await wait(20);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, test)).toBe(test);
+      alive.now = false;
+      await wait(40);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, test)).toBeNull();
+    });
+
+    it("keeps the checkout when a completion has no exit code while the process runs", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      await r.end(KEY, false);
+      expect(rows).toEqual([]);
+      expect(r.pending("r1")).toEqual([LINT]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      await wait(20);
+      alive.now = false;
+      await wait(40);
+      expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
     it("records no receipt when the head moved before the late exit", async () => {
       const r = watching({ now: true });
       await r.begin(KEY, LINT);
@@ -627,6 +656,7 @@ describe("why the recorder dropped a check call", () => {
       await r.admit?.(KEY, LINT);
       await r.begin(KEY, LINT);
       r.dropRun("r1");
+      await wait(20);
       alive.now = false;
       await wait(40);
       expect(r.pending("r1")).toEqual([]);

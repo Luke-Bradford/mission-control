@@ -176,10 +176,10 @@ export interface CheckRecorderDeps {
   /** The run's seat worktree, or null when unknown (a leading `cd` then counts for nothing). */
   worktree?: (runId: string) => Promise<string | null>;
   /**
-   * Whether a process in this worktree is still running this exact command: for a call whose tool
-   * handed back before it ended. Without it, a hand-back drops the call.
+   * Whether a check or test process (node, pnpm, vitest, tsc, eslint) still runs in this worktree:
+   * for a call whose tool handed back before it ended. Without it, a hand-back drops the call.
    */
-  processAlive?: (worktree: string, command: string) => Promise<boolean>;
+  processAlive?: (worktree: string) => Promise<boolean>;
   /** How often a kept call's process is looked at (ms). */
   pollMs?: number;
   now?: () => number;
@@ -232,41 +232,55 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     if (rest.length === 0) dropped.delete(runId);
     else dropped.set(runId, rest);
   };
-  /** Calls whose tool handed back while their process still ran: a watcher holds each. */
-  const lingering = new Set<StartedCall>();
-  /** The call is over without a receipt: forget it, say why, and free the checkout it held. */
+  /** The call is over without a receipt: forget it, say why. */
   const forget = (call: StartedCall, reason: CheckDropReason): void => {
-    lingering.delete(call);
     let was = false;
     for (const [id, c] of started)
       if (c === call) {
         started.delete(id);
         was = true;
       }
-    if (!was) return;
-    noteDrop(call.runId, reason, call.matched, call.head, call.command);
-    if (reservations.get(call.runId)?.command === call.command) reservations.delete(call.runId);
+    if (was) noteDrop(call.runId, reason, call.matched, call.head, call.command);
   };
-  /** Polls the process of a call kept past its tool's hand-back until it ends or its timeout passes. */
-  const watch = async (call: StartedCall): Promise<void> => {
+  const reading = async (runId: string): Promise<boolean> => {
+    const wt = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
+    return wt !== null && (await d.processAlive?.(wt).catch(() => false)) === true;
+  };
+  /** Runs whose reservation or calls a watcher holds. */
+  const watched = new Set<string>();
+  /**
+   * The tool handed back (or its completion came with no exit code) while a check or test process
+   * may still run in the checkout: keep the reservation and the calls until no such process is left,
+   * or the Bash timeout has passed. A completion with an exit code ends them sooner (`end`).
+   */
+  const watch = async (runId: string): Promise<void> => {
+    if (watched.has(runId)) return;
+    watched.add(runId);
     const pollMs = d.pollMs ?? 2_000;
-    const alive = async (): Promise<boolean> => {
-      const wt = d.worktree === undefined ? null : await d.worktree(call.runId).catch(() => null);
-      return wt !== null && (await d.processAlive?.(wt, call.command).catch(() => false)) === true;
-    };
+    const since = now();
+    let sawAlive = false;
     let gone = 0;
     try {
       while (true) {
-        // its completion came (or the call was lost): `end` recorded it, or `lost` noted it
-        if (![...started.values()].includes(call)) return;
-        if (now() - call.startedAt >= call.timeoutMs) return forget(call, "session-lost");
-        if (await alive()) gone = 0;
-        // one more look after the process is gone, for a completion that is on its way
-        else if (++gone > 1) return forget(call, "session-lost");
+        const calls = new Set([...started.values()].filter((c) => c.runId === runId));
+        // its completion came (or the call was lost): nothing is held any more
+        if (calls.size === 0 && !reservations.has(runId)) return;
+        const expired = now() - since >= CHECK_BASH_TIMEOUT_MS;
+        if (!expired && (await reading(runId))) {
+          sawAlive = true;
+          gone = 0;
+        } else if (expired || !sawAlive || ++gone > 1) {
+          // a process never seen is a plain turn end; one that went with no completion is lost
+          const reason = sawAlive || expired ? "session-lost" : "turn-ended";
+          for (const call of calls) forget(call, reason);
+          reservations.delete(runId);
+          return;
+        }
+        // else one more look after the process is gone, for a completion on its way
         await new Promise((r) => setTimeout(r, pollMs).unref());
       }
     } finally {
-      lingering.delete(call);
+      watched.delete(runId);
     }
   };
   return {
@@ -353,6 +367,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     async end(key, ok, exitCode = null) {
       const call = started.get(callId(key));
+      // a failure with no exit code while the process still runs is no result: keep watching it
+      if (!ok && exitCode === null && d.processAlive !== undefined && (await reading(key.runId))) {
+        void watch(key.runId);
+        return;
+      }
       const held = reservations.get(key.runId);
       if (
         held !== undefined &&
@@ -402,26 +421,12 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     dropRun(runId) {
-      // a call can sit under two ids (Codex): it is one call
-      const calls = new Set<StartedCall>();
-      for (const call of started.values()) if (call.runId === runId) calls.add(call);
-      if (d.processAlive === undefined) {
-        for (const call of calls) forget(call, "turn-ended");
-        reservations.delete(runId);
+      if (d.processAlive !== undefined) {
+        void watch(runId);
         return;
       }
-      // the tool may have handed back while the process still runs: watch it, keep the checkout
-      // reserved, and let its late completion record the exit code against the start commit
-      let watching = false;
-      for (const call of calls) {
-        if (lingering.has(call)) watching = true;
-        else {
-          lingering.add(call);
-          watching = true;
-          void watch(call);
-        }
-      }
-      if (!watching) reservations.delete(runId);
+      for (const call of started.values()) if (call.runId === runId) forget(call, "turn-ended");
+      reservations.delete(runId);
     },
     lost(runId, command) {
       if (reservations.get(runId)?.command === command) reservations.delete(runId);
