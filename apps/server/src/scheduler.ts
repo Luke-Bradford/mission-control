@@ -110,7 +110,7 @@ import {
   latestTranscriptLimits,
   UsageRateLimited,
 } from "./collectors/usage-sources.ts";
-import type { CcConfig } from "./config.ts";
+import type { AdoptedLoop, CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import type { DiskUse } from "./disk/use.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
@@ -126,6 +126,7 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import { loopPause } from "./loop/pause.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
@@ -1132,12 +1133,25 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       recordStatus("sessions", true, null);
     });
 
+  /**
+   * A paused loop's driver is stopped on purpose, so a read that fails because of it is not a
+   * failure: it shows as paused (ok, with the cause as the note), and a retry clears it on resume.
+   */
+  const notePaused = (loop: AdoptedLoop) => {
+    const collector = collectorName(loop.kind, loop.id);
+    const row = store.status().find((s) => s.collector === collector);
+    if (!row || row.ok) return;
+    if (!loopPause(loop, store).paused) return;
+    recordStatus(collector, true, `paused (read failed: ${row.error ?? "collector failed"})`);
+  };
+
   const jobs: Record<Job, () => Promise<void>> = {
     ta: async () => {
       for (const loop of config.loops.filter((l) => l.kind === "ta-loop")) {
         await guarded(collectorName(loop.kind, loop.id), () =>
           c.ta(loop, store, now(), taState, undefined, c.launchctl),
         );
+        notePaused(loop);
       }
       emitIfChanged("agents", "health", "attention");
       afterLoopTick();
@@ -1158,6 +1172,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             c.launchctl,
           ),
         );
+        notePaused(loop);
       }
       emitIfChanged("agents", "health", "attention");
       afterLoopTick();

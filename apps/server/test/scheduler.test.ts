@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -397,6 +397,29 @@ describe("scheduler", () => {
       "Europe/London",
       NOW,
     ]);
+  });
+
+  it("shows a paused loop's failing read as paused, not as a failure from days ago", async () => {
+    mkdirSync(join(dir, "ta"), { recursive: true });
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    const c = stubs({
+      ta: vi.fn(async (loop: { id: string }) => {
+        store.setStatus(`ta-loop:${loop.id}`, false, "launchd job not running");
+      }),
+      studio: vi.fn(async (loop: { id: string }) => {
+        store.setStatus(`studio-loop:${loop.id}`, false, "launchd job not running");
+      }),
+    });
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+    await s.tick("ta");
+    await s.tick("studio");
+    const row = (name: string) => store.status().find((r) => r.collector === name);
+    expect(row("ta-loop:shop-app-ta")).toMatchObject({
+      ok: true,
+      error: "paused (read failed: launchd job not running)",
+    });
+    // the studio loop is not paused: its failure stays
+    expect(row("studio-loop:studio-builder")).toMatchObject({ ok: false });
   });
 
   it("hands both loop collectors the launchctl runner", async () => {
