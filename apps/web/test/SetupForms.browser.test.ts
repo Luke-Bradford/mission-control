@@ -50,12 +50,12 @@ const api = {
 const FORMS = [
   {
     id: "F01",
-    tab: "sessions",
-    open: "Add agent",
-    form: 'form[aria-label^="Add agent"]',
-    cap: 480,
+    tab: "repos",
+    open: "+ Add seat to this repo",
+    form: 'form[aria-label="Add seat"]',
+    cap: 640,
   },
-  { id: "F02", tab: "sessions", open: "Edit", form: 'form[aria-label^="Edit "]', cap: 480 },
+  { id: "F02", tab: "repos", open: "Edit", form: 'form[aria-label^="Edit "]', cap: 640 },
   {
     id: "F03",
     tab: "sessions",
@@ -151,14 +151,17 @@ const attempt = (page: RenderedPage, form: (typeof FORMS)[number]) =>
       const set = (label: string, value: string) => {
         const input = field(label);
         if (!input) return;
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        // a select takes its own prototype's setter and answers `change`
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set?.call(
           input,
           value,
         );
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(
+          new Event(input.tagName === "SELECT" ? "change" : "input", { bubbles: true }),
+        );
       };
       if (arg.id === "F01") set("Call sign", "Bad Name");
-      if (arg.id === "F02") set("Model", " ");
+      if (arg.id === "F02") set("Model", "");
       if (arg.id === "F05") {
         set("Alert at", "95");
         set("Stop at", "90");
@@ -317,7 +320,7 @@ describeRendered("Setup agent, session and account forms, rendered", () => {
   // The value each form is typed with, and the field label it sits in.
   const TYPED = {
     F01: ["Call sign", "keep-me"],
-    F02: ["Model", "kept-model"],
+    F02: ["Area", "kept-area/**"],
     F03: ["Repo", "/fictional/harbor"],
     F04: ["Name", "kept-name"],
     F05: ["Alert at", "61"],
