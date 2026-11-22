@@ -640,6 +640,26 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
 // no credential prompt: a remote that wants one fails instead of hanging until the timeout
 const gitEnvironment = () => ({ ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0" });
 
+/** Whether `ancestor` is in the history of `descendant` in `root`; false when either is unknown to git. */
+export async function isAncestor(
+  root: string,
+  ancestor: string,
+  descendant: string,
+  exec: Exec = realExec,
+): Promise<boolean> {
+  if (!/^[0-9a-f]{40,64}$/.test(ancestor) || !/^[0-9a-f]{40,64}$/.test(descendant)) return false;
+  try {
+    await exec("git", [...SAFE_CONFIG, "merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd: root,
+      env: gitEnvironment(),
+      timeoutMs: UPDATE_STEP_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** HEAD of `root` through the same safe git as Update (main.ts reads it once, at startup). */
 export async function headSha(root: string, exec: Exec = realExec): Promise<string | null> {
   try {

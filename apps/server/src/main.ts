@@ -64,7 +64,13 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
+import { notLivePrKeys } from "./disk/live.ts";
+import {
+  DISK_CLEAN_SETTING,
+  DISK_SWEEP_EVERY_MS,
+  diskBudgetBytes,
+  sweepDataFolder,
+} from "./disk/sweep.ts";
 import { cachedDiskUse } from "./disk/use.ts";
 import { releaseAtAccountStop } from "./engine/account-release.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
@@ -146,6 +152,7 @@ import {
   createUpdater,
   crewRefusal,
   headSha,
+  isAncestor,
   raiseUpdatePersonNote,
   UPDATE_LOG,
 } from "./update.ts";
@@ -1181,26 +1188,36 @@ export async function main(): Promise<void> {
   if (!preview) {
     const dataDir = dirname(dbPath);
     let sweeping = false;
-    const diskSweep = () => {
+    const diskSweep = (graceMs?: number) => {
       if (sweeping) return;
       sweeping = true;
-      sweepDataFolder({
-        dataDir,
-        now: Date.now,
-        openPrs: store.openPrKeys(),
-        citedAssets: store.qaAssetIdsOfOpenPrs(),
-        keptShots: store.reviewShotIdsOfOpenPrs(),
-        keptMaterials: store.attentionMaterialAssetIds(
-          new Set(
-            attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
-              (item) => item.key,
+      void (async () => {
+        // a merged PR's pictures stay until the hub runs code that holds its merge commit
+        const notLive = await notLivePrKeys(
+          store.mergedPrs(),
+          (await updater?.version().catch(() => null))?.sha || null,
+          (mergeSha, running) =>
+            hubRoot === null ? Promise.resolve(false) : isAncestor(hubRoot, mergeSha, running),
+        );
+        return sweepDataFolder({
+          dataDir,
+          now: Date.now,
+          openPrs: new Set([...store.openPrKeys(), ...notLive]),
+          citedAssets: store.qaAssetIdsOfOpenPrs(notLive),
+          keptShots: store.reviewShotIdsOfOpenPrs(notLive),
+          keptMaterials: store.attentionMaterialAssetIds(
+            new Set(
+              attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
+                (item) => item.key,
+              ),
             ),
           ),
-        ),
-        budgetBytes: diskBudgetBytes(process.env),
-        holdings: () => hubDiskUse.read(),
-        log,
-      })
+          budgetBytes: diskBudgetBytes(process.env),
+          holdings: () => hubDiskUse.read(),
+          ...(graceMs === undefined ? {} : { graceMs }),
+          log,
+        });
+      })()
         .catch((e: unknown) => {
           log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
         })
@@ -1208,8 +1225,14 @@ export async function main(): Promise<void> {
           sweeping = false;
         });
     };
-    setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
-    setTimeout(diskSweep, 2 * 60_000).unref();
+    setInterval(() => diskSweep(), DISK_SWEEP_EVERY_MS).unref();
+    // The first boot after the cap and live-removal rule: one clean with no grace period, so what
+    // merged PRs already left behind goes at once. Later boots use the plain sweep.
+    setTimeout(() => {
+      const firstClean = store.getSetting(DISK_CLEAN_SETTING) === null;
+      if (firstClean) store.setSetting(DISK_CLEAN_SETTING, String(Date.now()));
+      diskSweep(firstClean ? 0 : undefined);
+    }, 2 * 60_000).unref();
     // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
     if (engineOn) {
       const worktreeTidy = () => {

@@ -111,4 +111,45 @@ describe("sweepDataFolder", () => {
     expect(existsSync(join(outside, "precious.txt"))).toBe(true);
     expect(SCRATCH_MAX_AGE_MS).toBe(3 * DAY);
   });
+
+  it("removes a finished PR's kept work folder with its pictures, and keeps an open PR's", async () => {
+    const data = tmp();
+    file(join(data, "pr-evidence-work", "kept-5", "x"), 60_000, 10);
+    file(join(data, "pr-evidence-work", "kept-6", "x"), 5 * DAY, 10);
+    await sweepDataFolder({ dataDir: data, now: () => NOW, ...open, log: () => {} });
+    expect(existsSync(join(data, "pr-evidence-work", "kept-5"))).toBe(true);
+    expect(existsSync(join(data, "pr-evidence-work", "kept-6"))).toBe(false);
+  });
+
+  it("the one-off clean (no grace) removes what a merged PR just left", async () => {
+    const data = tmp();
+    file(join(data, "pr-evidence", "mc", "7", "c".repeat(40), "m.png"), 60_000);
+    file(join(data, "pr-evidence-work", "kept-7", "x"), 60_000);
+    await sweepDataFolder({ dataDir: data, now: () => NOW, ...open, graceMs: 0, log: () => {} });
+    expect(existsSync(join(data, "pr-evidence", "mc", "7"))).toBe(false);
+    expect(existsSync(join(data, "pr-evidence-work", "kept-7"))).toBe(false);
+  });
+
+  it("over a store's cap the oldest pictures go first, cited or not", async () => {
+    const data = tmp();
+    file(join(data, "qa-report-assets", `${hash("a")}.png`), 3 * DAY, 100); // cited, oldest
+    file(join(data, "qa-report-assets", `${hash("e")}.png`), 2 * DAY, 100);
+    file(join(data, "qa-report-assets", `${hash("f")}.png`), 1 * DAY, 100);
+    file(join(data, "pr-evidence", "mc", "5", "a".repeat(40), "m.png"), 3 * DAY, 100);
+    file(join(data, "pr-evidence", "mc", "5", "b".repeat(40), "m.png"), 1 * DAY, 100);
+    const r = await sweepDataFolder({
+      dataDir: data,
+      now: () => NOW,
+      ...open,
+      citedAssets: new Set([hash("a"), hash("e"), hash("f")]),
+      caps: { "qa-report-assets": 200, "pr-evidence": 100 },
+      log: () => {},
+    });
+    expect(existsSync(join(data, "qa-report-assets", `${hash("a")}.png`))).toBe(false);
+    expect(existsSync(join(data, "qa-report-assets", `${hash("e")}.png`))).toBe(true);
+    expect(existsSync(join(data, "qa-report-assets", `${hash("f")}.png`))).toBe(true);
+    expect(existsSync(join(data, "pr-evidence", "mc", "5", "a".repeat(40)))).toBe(false);
+    expect(existsSync(join(data, "pr-evidence", "mc", "5", "b".repeat(40)))).toBe(true);
+    expect(r.bytes).toBe(200);
+  });
 });
