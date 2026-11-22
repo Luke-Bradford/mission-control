@@ -400,7 +400,7 @@ import {
 import { cleanText } from "./repo/clean.ts";
 import {
   changedFiles,
-  committedLines,
+  committedLinesBatch,
   fileDiff,
   type GitExec,
   GitFailed,
@@ -458,7 +458,6 @@ import {
 import { webHandler } from "./web.ts";
 
 export const TELEMETRY_COMMIT_READ_LIMIT = 32;
-const TELEMETRY_COMMIT_CONCURRENCY = 4;
 
 /** The only Host names (and Origin hosts) the server answers: loopback, any port. */
 /** GitHub issue numbers are 32-bit; anything larger cannot exist. */
@@ -503,7 +502,6 @@ const HOUR_MS = 3600e3;
 const DAY_MS = 24 * HOUR_MS;
 const FIVE_HOURS_MS = 5 * HOUR_MS;
 
-/** Never log credentials: request/response headers that can carry them are censored. */
 /** Request headers that carry a credential or name the acting seat: never logged. */
 const SECRET_REQUEST_HEADERS = [
   "authorization",
@@ -514,6 +512,7 @@ const SECRET_REQUEST_HEADERS = [
   CONTROLLER_HEADER,
   FLIGHT_OPERATOR_ACTOR_HEADER,
   PREVIEW_ACTIVITY_HEADER,
+  HUD_RENDERER_HEADER,
 ];
 
 /** Never log credentials: request/response headers that can carry them are censored. */
@@ -3963,7 +3962,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ]),
         );
         return capAudit(
-          store.audit(
+          await store.auditStepped(
             until - Number(match[1]) * 86_400_000,
             until,
             kinds,
@@ -4308,8 +4307,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           account: account === undefined || account === "" ? null : (account as string),
         };
         const counts = new Map<string, { additions: number | null; deletions: number | null }>();
-        const scopedCommits: { key: string; sha: string }[] = [];
-        const pending = new Map<string, { key: string; worktree: string }>();
+        const scopedCommits: { key: string; sha: string; worktree: string | null }[] = [];
         const agents = configuredAgents(config);
         for (const c of store.telemetryCommits(
           at - TELEMETRY_RANGES[range as TelemetryRange] * 60_000,
@@ -4327,36 +4325,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (scope.ticket !== null && runTicket(run, runPrs(config, store, run)) !== scope.ticket)
           )
             continue;
-          scopedCommits.push({ key, sha: c.sha });
-          const cached = store.commitLines(c.sha);
-          if (cached) {
-            counts.set(key, cached);
-            continue;
-          }
           const worktree =
             agent?.kind === "crew"
               ? config.crew?.sessions.find((s) => s.id === agent.sessionId)?.checkout
               : agent?.loop.worktree;
-          if (worktree && pending.size < TELEMETRY_COMMIT_READ_LIMIT && !pending.has(c.sha))
-            pending.set(c.sha, { key, worktree });
+          scopedCommits.push({ key, sha: c.sha, worktree: worktree ?? null });
         }
-        const jobs = [...pending];
-        let next = 0;
-        await Promise.all(
-          Array.from({ length: TELEMETRY_COMMIT_CONCURRENCY }, async () => {
-            while (next < jobs.length) {
-              const job = jobs[next++];
-              if (!job) break;
-              const [sha, { key, worktree }] = job;
-              const lines = await committedLines(worktree, sha);
-              store.setCommitLines(sha, lines);
-              counts.set(key, lines);
+        const cached = store.commitLinesFor(scopedCommits.map((commit) => commit.sha));
+        const pending = new Map<string, Set<string>>();
+        let pendingCount = 0;
+        for (const commit of scopedCommits) {
+          const lines = cached.get(commit.sha);
+          if (lines) {
+            counts.set(commit.key, lines);
+            continue;
+          }
+          if (commit.worktree && pendingCount < TELEMETRY_COMMIT_READ_LIMIT) {
+            const worktree = commit.worktree;
+            const shas = pending.get(worktree) ?? new Set<string>();
+            if (!shas.has(commit.sha)) {
+              shas.add(commit.sha);
+              pending.set(worktree, shas);
+              pendingCount++;
             }
+          }
+        }
+        await Promise.all(
+          [...pending].map(async ([worktree, shas]) => {
+            for (const [sha, lines] of await committedLinesBatch(worktree, [...shas]))
+              store.setCommitLines(sha, lines);
           }),
         );
         // A sha can occur in more than one repository.
+        const measured = store.commitLinesFor(scopedCommits.map((commit) => commit.sha));
         for (const { key, sha } of scopedCommits) {
-          const lines = store.commitLines(sha);
+          const lines = measured.get(sha);
           if (lines) counts.set(key, lines);
         }
         return telemetry(config, store, range as TelemetryRange, at, scope, counts);

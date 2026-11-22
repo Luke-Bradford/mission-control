@@ -314,6 +314,7 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
       CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
+      CREATE INDEX IF NOT EXISTS runs_ticket_started ON runs(ticket, started_at);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
       CREATE INDEX IF NOT EXISTS runs_loop_off_seat ON runs(ended_at, json_extract(loop, '$.hold.worktree'), started_at, seq);
@@ -337,6 +338,9 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
       CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS run_attempts_kind_at ON run_attempts(kind, at);
+      CREATE INDEX IF NOT EXISTS run_attempts_run_kind ON run_attempts(run_id, kind, id);
+      CREATE INDEX IF NOT EXISTS review_findings_author ON review_findings(author_run_id, severity);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
