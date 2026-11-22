@@ -597,6 +597,14 @@ describe("why the recorder dropped a check call", () => {
       });
     const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+    it("frees an admitted check that never starts after one watcher poll", async () => {
+      const r = watching({ now: false });
+      await r.admit?.(KEY, LINT);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      await wait(20);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
     it("keeps the checkout reserved and records the late exit against the start commit", async () => {
       const alive = { now: true };
       const r = watching(alive);
