@@ -45,6 +45,29 @@ type Row = Record<string, SQLInputValue>;
 /** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
 const COMMS_LINK_PREVIEW = 200;
 
+// The ask's repo and PR or issue number, read out of its `ticket` ("repo#n") and `ref` ("PR n") so
+// each closure table is reached by its primary key (repo_id, number) and not scanned.
+const ASK_REPO_SQL = "substr(c.ticket, 1, instr(c.ticket, '#') - 1)";
+const ASK_ISSUE_SQL = "CAST(substr(c.ticket, instr(c.ticket, '#') + 1) AS INTEGER)";
+const ASK_PR_SQL = "CAST(substr(c.ref, 4) AS INTEGER)";
+/** True for an ask whose ticket is closed, or whose PR is merged or closed. `c` is the ask. */
+export const CLOSED_WORK_SQL = `(
+  EXISTS (
+    SELECT 1 FROM board_items b
+    WHERE b.repo_id = ${ASK_REPO_SQL} AND b.issue_number = ${ASK_ISSUE_SQL} AND b.closed = 1
+  )
+  OR (c.ref GLOB 'PR [0-9]*' AND c.ticket GLOB '*#*' AND (
+    EXISTS (
+      SELECT 1 FROM pull_requests p
+      WHERE p.repo_id = ${ASK_REPO_SQL} AND p.number = ${ASK_PR_SQL}
+        AND p.state IN ('merged', 'closed')
+    )
+    OR EXISTS (
+      SELECT 1 FROM pr_history h WHERE h.repo_id = ${ASK_REPO_SQL} AND h.number = ${ASK_PR_SQL}
+    )
+  ))
+)`;
+
 export function cutCommsText(text: string): string {
   const chars = Array.from(text);
   return chars.length > COMMS_TEXT_MAX
@@ -1092,22 +1115,8 @@ export class CommsQueries {
       .prepare(
         `INSERT INTO comms_settlements (message_id, settled_by, reason, at)
          SELECT c.id, ?, 'Its ticket or PR was closed', ? FROM comms c
-         WHERE c.label IN ('question', 'blocker')
-           AND (
-             EXISTS (
-               SELECT 1 FROM board_items b
-               WHERE b.closed = 1 AND c.ticket = b.repo_id || '#' || b.issue_number
-             )
-             OR EXISTS (
-               SELECT 1 FROM pull_requests p
-               WHERE p.state IN ('merged', 'closed') AND c.ref = 'PR ' || p.number
-                 AND c.ticket LIKE p.repo_id || '#%'
-             )
-             OR EXISTS (
-               SELECT 1 FROM pr_history h
-               WHERE c.ref = 'PR ' || h.number AND c.ticket LIKE h.repo_id || '#%'
-             )
-           )
+         WHERE c.label IN ('question', 'blocker') AND ${CLOSED_WORK_SQL}
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
          ON CONFLICT(message_id) DO NOTHING`,
       )
       .run(COMMS_MC, at);
@@ -1129,19 +1138,7 @@ export class CommsQueries {
              SELECT 1 FROM comms reply
              WHERE reply.reply_to = c.id AND reply.from_id != c.from_id
            )
-           AND NOT EXISTS (
-             SELECT 1 FROM board_items b
-             WHERE b.closed = 1 AND c.ticket = b.repo_id || '#' || b.issue_number
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM pull_requests p
-             WHERE p.state IN ('merged', 'closed') AND c.ref = 'PR ' || p.number
-               AND c.ticket LIKE p.repo_id || '#%'
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM pr_history h
-             WHERE c.ref = 'PR ' || h.number AND c.ticket LIKE h.repo_id || '#%'
-           )
+           AND NOT (${CLOSED_WORK_SQL})
            AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
          ORDER BY c.at ASC, c.id ASC`,
       )

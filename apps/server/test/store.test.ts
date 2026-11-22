@@ -32,7 +32,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pendingRunApproval } from "../src/attention/subjects.ts";
-import { CommsQueries } from "../src/store/comms.ts";
+import { CLOSED_WORK_SQL, CommsQueries } from "../src/store/comms.ts";
 import { crewPromptPath, crewTranscriptPath } from "../src/store/crew-paths.ts";
 import {
   ACK_ABSENT_MS,
@@ -103,6 +103,35 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
   background: [{ taskId: "b1", description: "suite", type: "local_bash" }],
   compactions: 2,
   ...over,
+});
+
+describe("closed-work asks", () => {
+  it("reach each closure table by its primary key and settle a large history fast", () => {
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN SELECT c.id FROM comms c WHERE ${CLOSED_WORK_SQL}`)
+      .all()
+      .map((r) => String(r.detail))
+      .join("\n");
+    for (const alias of ["b", "p", "h"])
+      expect(plan, plan).toMatch(new RegExp(`SEARCH ${alias} USING`));
+    expect(plan).not.toMatch(/SCAN [bph]\b/);
+    db.exec("BEGIN");
+    for (let i = 0; i < 2000; i++)
+      db.prepare(
+        "INSERT INTO comms (at, from_id, to_id, ticket, ref, text, label) VALUES (?, 'a', 'b', ?, ?, 'q', 'question')",
+      ).run(i, `shop-app#${i}`, `PR ${i}`);
+    for (let i = 0; i < 2500; i++)
+      db.prepare(
+        "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES ('shop-app', ?, 1, '{}')",
+      ).run(10_000 + i);
+    db.exec("COMMIT");
+    const started = performance.now();
+    const queries = (store as unknown as { commsStore: CommsQueries }).commsStore;
+    queries.settleAsksOfClosedWork(1);
+    queries.openCommsItems();
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });
 
 describe("Store", () => {

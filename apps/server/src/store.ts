@@ -1631,14 +1631,12 @@ export class Store {
             .all(repoId) as { number: number; read_at: number }[]
         ).map((r) => [r.number, r.read_at]),
       );
+      this.commsStore.settleAsksOfClosedWork(readAt);
       const seen = new Set(prs.map((p) => p.number));
       const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
-        if (!seen.has(number) && !kept.has(number) && at < readAt) {
-          this.commsStore.settleAsksOfClosedWork(readAt);
-          del.run(repoId, number);
-        }
+        if (!seen.has(number) && !kept.has(number) && at < readAt) del.run(repoId, number);
       }
       this.writePullRequests(
         repoId,
