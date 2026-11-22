@@ -1,13 +1,28 @@
 // Minimal cmux CLI fixture. State lives in the first argument so each test owns its workspaces.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 
 const [statePath, command, ...args] = process.argv.slice(2);
+// Several runs poll at once: take a lock around each read-modify-write so no call is lost.
+const lockPath = `${statePath}.lock`;
+for (let tries = 0; ; tries++) {
+  try {
+    mkdirSync(lockPath);
+    break;
+  } catch {
+    if (tries > 2000) rmSync(lockPath, { recursive: true, force: true });
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+}
+process.on("exit", () => rmSync(lockPath, { recursive: true, force: true }));
 const state = existsSync(statePath)
   ? JSON.parse(readFileSync(statePath, "utf8"))
   : { sessions: [], calls: [] };
-const save = () => writeFileSync(statePath, JSON.stringify(state));
+const save = () => {
+  writeFileSync(`${statePath}.tmp${process.pid}`, JSON.stringify(state));
+  renameSync(`${statePath}.tmp${process.pid}`, statePath);
+};
 state.calls.push([command, ...args]);
 if (command === "ping") process.exit(0);
 if (command === "new-workspace") {
