@@ -235,6 +235,11 @@ it("opens the model panels from a button, and shows who decides in the open row"
   expect(document.querySelector(".more")?.textContent).toMatch(/Decides: (FLIGHT|You), /);
   fireEvent.click(screen.getByRole("button", { name: "Rework and cost by model" }));
   expect(await screen.findByRole("heading", { name: "Rework and cost by model" })).toBeTruthy();
+  // The panels take the place of the columns, and Back returns them intact.
+  expect(screen.queryByRole("heading", { level: 2, name: "Do next" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Back to Do next" }));
+  expect(screen.getByRole("heading", { level: 2, name: "Do next" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Rework and cost by model" })).toBeNull();
 });
 
 it("links each row's detail to the seat and run, in words rather than raw ids", async () => {

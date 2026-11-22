@@ -220,6 +220,42 @@ describeRendered("Audit first screen in a browser", () => {
     );
   }
 
+  for (const colorScheme of ["light", "dark"] as const) {
+    it(
+      `swaps the model panels in for the columns at 1920×940 in ${colorScheme}, then back`,
+      async () => {
+        const page = await renderAt({
+          page: "test/auditBarBrowser.html",
+          width: 1920,
+          height: 940,
+          colorScheme,
+          api: {
+            ...api,
+            "/api/audit/models?range=30d": {
+              groups: { none: [], type: [], size: [], plan: [] },
+              changes: [],
+            },
+          },
+        });
+        await page.click(".audit-verdict .audit-retry");
+        for (let i = 0; i < 50; i++) {
+          if ((await page.boxes(".audit-models h2")).length > 0) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        const models = await page.box(".audit-models");
+        expect(models.y + models.height).toBeLessThanOrEqual(940);
+        // No column panel is left to draw over the model panels.
+        expect(await page.boxes(".audit-col > .panel")).toHaveLength(0);
+        expect(await page.boxes(".audit-models h2")).not.toHaveLength(0);
+        await page.click(".audit-verdict .audit-retry");
+        expect((await page.box(".audit-next")).height).toBeGreaterThanOrEqual(200);
+        expect(await page.boxes(".audit-models")).toHaveLength(0);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
   for (const n of [0, 1, "all"] as const) {
     it(
       `holds ${n} rows inside the panel at 1920×940: page still, every row reachable by keyboard`,

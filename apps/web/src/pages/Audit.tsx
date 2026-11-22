@@ -103,11 +103,11 @@ function AuditDashboard() {
           aria-expanded={models}
           onClick={() => setModels(!models)}
         >
-          Rework and cost by model
+          {models ? "Back to Do next" : "Rework and cost by model"}
         </button>
         <Seg label="Range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>
-      {audit && (
+      {audit && !models && (
         <div className="audit-cols">
           <div className="audit-col">
             <DoNext
@@ -125,7 +125,11 @@ function AuditDashboard() {
           </div>
         </div>
       )}
-      {models && <ModelPanels range={range} />}
+      {models && (
+        <div className="audit-models">
+          <ModelPanels range={range} />
+        </div>
+      )}
     </div>
   );
 }
