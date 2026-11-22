@@ -474,7 +474,7 @@ export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
-/** The default seat commands as fresh arrays: what a repo with no `commands` loads with. */
+/** The default seat commands as fresh arrays: what the hub's own repo uses when it sets no `commands`. */
 export const defaultSeatCommands = (): SeatCommands => ({
   writer: [...DEFAULT_SEAT_COMMANDS.writer],
   review: [...DEFAULT_SEAT_COMMANDS.review],
@@ -773,7 +773,7 @@ const fileSchema = z
         fullSuite: r.full_suite,
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         requiredChecks: r.required_checks,
-        commands: r.commands ?? defaultSeatCommands(),
+        ...(r.commands === undefined ? {} : { commands: r.commands }),
         protectedFiles: r.protected,
         keepBranches: r.keep_branches,
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),

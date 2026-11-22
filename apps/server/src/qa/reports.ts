@@ -10,6 +10,7 @@ import {
   FINDING_RESOLUTION_OUTCOMES,
   FINDING_SEVERITIES,
   type FindingResolution,
+  hubReachable,
   inertNegatedClosingRefs,
   NEGATED_CLOSING_REFS_NOTE,
   prEvidenceAffectedPages,
@@ -1040,26 +1041,6 @@ export function qaReportMarkdown(report: QaReport): string {
     `Report permalink: ${report.permalink}`,
   ];
   return `${lines.join("\n")}\n`;
-}
-
-/** Whether GitHub readers can open `baseUrl`: not empty and not a loopback or `.local` address. */
-function hubReachable(baseUrl: string): boolean {
-  if (baseUrl === "") return false;
-  try {
-    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, "");
-    return !(
-      host === "localhost" ||
-      host === "::1" ||
-      host === "::" ||
-      host === "0.0.0.0" ||
-      host.endsWith(".local") ||
-      /^127\./.test(host) ||
-      /^(?:10|192\.168)\./.test(host) ||
-      /^172\.(?:1[6-9]|2\d|3[01])\./.test(host)
-    );
-  } catch {
-    return false;
-  }
 }
 
 /** A compact index for GitHub comments; detailed notes stay in the retained report. */

@@ -505,7 +505,7 @@ describe("external PR review subjects", () => {
     });
   });
 
-  it.each([false, true])(
+  it.each([false, true, "loopback"] as const)(
     "posts one durable report with actual screenshot availability (%s)",
     async (screenshots) => {
       const h = harness();
@@ -514,7 +514,8 @@ describe("external PR review subjects", () => {
         ...(screenshots
           ? {
               evidence: {
-                baseUrl: "http://preview.test",
+                baseUrl:
+                  screenshots === "loopback" ? "http://127.0.0.1:7420" : "http://preview.test",
                 ensure: async () => {},
                 pages: async () => [],
                 gate: () => null,
@@ -562,6 +563,8 @@ describe("external PR review subjects", () => {
         expect(h.comments[0]?.body).toContain(`/${SHA}/overview-light-before.png`);
         expect(h.comments[0]?.body).toContain(`/${SHA}/overview-light-after.png`);
         expect(h.comments[0]?.body).toContain(NEXT.slice(0, 7));
+        // an address only the operator's machine can open is never posted to GitHub
+        if (screenshots === "loopback") expect(h.comments[0]?.body).not.toContain("127.0.0.1");
       } else
         expect(h.comments[0]?.body).toContain("No before/after screenshot pairs were captured");
       expect(h.writes.at(-1)?.body).toMatchObject({ state: "success", context: "mc/review" });

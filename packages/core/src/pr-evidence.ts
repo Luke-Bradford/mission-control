@@ -300,22 +300,50 @@ export function withSection(body: string, heading: string, section: string | nul
 
 const regionsText = (n: number): string => (n === 1 ? "1 region" : `${n} regions`);
 
-/** The PR-body section: one line per pair, with links to its before, after and diff images. */
+/** Whether GitHub readers can open `baseUrl`: not empty and not a loopback or `.local` address. */
+export function hubReachable(baseUrl: string): boolean {
+  if (baseUrl === "") return false;
+  try {
+    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, "");
+    return !(
+      host === "localhost" ||
+      host === "::1" ||
+      host === "::" ||
+      host === "0.0.0.0" ||
+      host.endsWith(".local") ||
+      /^127\./.test(host) ||
+      /^(?:10|192\.168)\./.test(host) ||
+      /^172\.(?:1[6-9]|2\d|3[01])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The PR-body section: one line per pair, with links to its before, after and diff images. On a hub
+ * address GitHub readers cannot open (loopback, private, empty) each image is named as its route in
+ * code instead of linked.
+ */
 export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string): string {
+  const reachable = hubReachable(baseUrl);
+  const at = (file: string): string => `/api/prs/${manifest.pr}/evidence/${manifest.sha}/${file}`;
+  const ref = (label: string, file: string): string =>
+    reachable ? `[${label}](${baseUrl}${at(file)})` : `${label} \`${at(file)}\``;
   const link = (p: EvidencePair, kind: EvidenceKind): string =>
-    `[${kind}](${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}/${evidenceImageName(p.page, p.scheme, kind)})`;
+    ref(kind, evidenceImageName(p.page, p.scheme, kind));
   const lines = manifest.pairs.map(
     (p) =>
       `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${regionsText(p.regions.length)}`} (${EVIDENCE_KINDS.map((k) => link(p, k)).join(" · ")})`,
   );
   const demoLines = (manifest.demos ?? []).map(
     (d) =>
-      `- ${d.page}, Demo at its busiest, ${d.width}×${d.height} ([demo](${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}/${evidenceDemoImageName(d.page, d.width)}))`,
+      `- ${d.page}, Demo at its busiest, ${d.width}×${d.height} (${ref("demo", evidenceDemoImageName(d.page, d.width))})`,
   );
   return [
     EVIDENCE_HEADING,
     "",
-    `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, on the same data; the Demo renders are the head alone, in Demo. Links open on the hub that rendered them.`,
+    `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, on the same data; the Demo renders are the head alone, in Demo. ${reachable ? "Links open on the hub that rendered them." : "The routes are on the hub that rendered them."}`,
     "",
     ...lines,
     ...demoLines,

@@ -3065,5 +3065,5 @@ labels decide what merges, what a seat runs and which seat takes a ticket. The h
 runs from (`hubRepo`, found at startup from the checkout's origin); another repo's floor is its
 `CLAUDE.md` and `.github/**`. A seat on another repo also gets the hub's skills (the repo's own skill
 wins a name clash). Branch previews and PR screenshots work only for the hub's own repo. A QA report
-comment posted to GitHub names the hub route in code, not a link, unless the hub has a public address.
+comment and the PR screenshot links posted to GitHub name the hub route in code, not a link, unless the hub has a public address. A repo with no `commands` gets this repo's pnpm defaults only if it is the hub's own repo; any other repo gets the `checks` from its `CLAUDE.md` Mission Control block (writer and review seats alike).
 Times show in `operator.timezone`; dates and clock times keep the HUD's fixed shape.

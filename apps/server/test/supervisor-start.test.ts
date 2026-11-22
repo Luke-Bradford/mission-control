@@ -1699,6 +1699,30 @@ describe("startRun", () => {
     expect(brief).not.toContain("pnpm");
   });
 
+  it("a repo with no commands that is not the hub's gets its CLAUDE.md checks, not pnpm", async () => {
+    const { sup } = make({
+      hubRepo: "hub",
+      rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [], checks: ["pytest -q"] }),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("Configured validation commands: `pytest -q`.");
+    expect(brief).not.toContain("pnpm");
+  });
+
+  it("the hub's own repo with no commands still gets the pnpm defaults", async () => {
+    const { sup } = make({
+      hubRepo: "mc",
+      rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [], checks: ["pytest -q"] }),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0] as string).toContain("`pnpm -s lint`");
+  });
+
   it("a planner's brief names the repo's review commands, not the writer's", async () => {
     // roles/FAO.md is the controller's file; this test brings its own role brief
     const rolesDir = join(dir, "roles");

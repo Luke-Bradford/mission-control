@@ -19,6 +19,7 @@ import {
   mergeSkills,
   readHubSkills,
   readRepoSkills,
+  sharedSkillsFor,
   writeSkillPlugin,
 } from "../src/runtime/skills.ts";
 
@@ -78,6 +79,16 @@ describe("the repo's skills reach a seat (#1051)", () => {
     expect(merged.skills[0]?.files[0]?.body.toString()).toBe("mine");
     expect(merged.refused).toEqual(["x: why"]);
     expect(await readHubSkills(join(dir, "missing"))).toEqual({ skills: [], refused: [] });
+  });
+
+  it("adds the hub's skills only to a repo other than the hub's own, and only when the hub's repo is known", async () => {
+    snapshot();
+    const names = async (hubRepo: string | undefined, repoId: string) =>
+      (await sharedSkillsFor(hubRepo, dir, repoId))?.skills.map((s) => s.name);
+    expect(await names("hub", "other")).toEqual(["hud-design", "plain-talk"]);
+    expect(await names("hub", "hub")).toBeUndefined();
+    expect(await names(undefined, "other")).toBeUndefined();
+    expect(await sharedSkillsFor("hub", "", "other")).toBeUndefined();
   });
 
   it("has no skills when the repo has none", async () => {

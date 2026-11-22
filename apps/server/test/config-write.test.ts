@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DEFAULT_SEAT_COMMANDS, type NewRepo, OPERATOR_HEADER, type SeatInput } from "@mc/core";
+import { type NewRepo, OPERATOR_HEADER, type SeatInput } from "@mc/core";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
@@ -132,7 +132,6 @@ describe("addRepo", () => {
           needsYouLabels: ["needs-design"],
           fullSuite: [],
           requiredChecks: [],
-          commands: DEFAULT_SEAT_COMMANDS,
           protectedFiles: [],
           keepBranches: [],
           autonomy: "draft",
@@ -140,7 +139,7 @@ describe("addRepo", () => {
         },
       ],
     });
-    expect(config.repos.at(-1)?.commands).toEqual(DEFAULT_SEAT_COMMANDS);
+    expect(config.repos.at(-1)?.commands).toBeUndefined();
     expect(config.repos.at(-1)?.protectedFiles).toEqual([]);
     expect(backup).toBe(join(dir, "config.yaml.bak-20261019T120000Z"));
     expect(readFileSync(backup, "utf8")).toBe(COMMENTED);

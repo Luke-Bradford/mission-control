@@ -996,6 +996,29 @@ describe("idle-seat wakes", () => {
     expect(sentKeys().filter((key) => key === `evidence-remind:${RUN}:${SHA}`)).toHaveLength(1);
   });
 
+  it("wakes an idle seat for a message from FLIGHT whatever FLIGHT's seat id is, and not for any other seat", async () => {
+    config.crew?.sessions[0]?.seats.push({
+      id: "fl-main",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    setLoop({ phase: "working", hold: null, prNumber: 12 });
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    store.addComms({ at: clock, from: "stranger-1", to: SEAT, ticket: null, text: "hello" });
+    await h.engine.tick();
+    expect(sentKeys().some((key) => key.startsWith(`wake:${RUN}:`))).toBe(false);
+    const at = clock + 1;
+    store.addComms({ at, from: "fl-main", to: SEAT, ticket: null, text: "please look" });
+    clock += 2;
+    await h.engine.tick();
+    expect(sentKeys().filter((key) => key.startsWith(`wake:${RUN}:`))).toEqual([
+      `wake:${RUN}:message:${at}:fl-main`,
+    ]);
+  });
+
   it("does not wake or remind a rate-limited, account-stopped, or parked seat", async () => {
     const setup = () => {
       store.setSeatTurnStarted(SEAT, clock);

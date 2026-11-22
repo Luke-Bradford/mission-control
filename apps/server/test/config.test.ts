@@ -17,7 +17,6 @@ import {
   CREW_EFFORTS,
   DEFAULT_CREW_NODE,
   DEFAULT_REPO_RULES,
-  DEFAULT_SEAT_COMMANDS,
   FLIGHT_TOOLS,
 } from "@mc/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -33,6 +32,7 @@ import {
   flightPowersOf,
   isPreview,
   loadConfig,
+  ownsHubFiles,
   parseConfig,
   portFromEnv,
   seatUnavailable,
@@ -1727,9 +1727,9 @@ describe("repo commands and protected files", () => {
     expect(e.path).toBe("repos[0].requiredChecks[0]");
   });
 
-  it("a repo with neither key loads with the default commands and no extra protected files", () => {
+  it("a repo with neither key loads with no commands (the hub fills in its own defaults) and no extra protected files", () => {
     const r = parse(text).repos[0];
-    expect(r?.commands).toEqual(DEFAULT_SEAT_COMMANDS);
+    expect(r?.commands).toBeUndefined();
     expect(r?.protectedFiles).toEqual([]);
   });
 
@@ -1981,4 +1981,16 @@ it("rejects an invalid operator timezone at config load", () => {
   const path = tmpConfig((s) => s.replace("timezone: UTC", "timezone: Mars/Olympus"));
   expect(() => loadConfig(path)).toThrow(ConfigError);
   expect(() => loadConfig(path)).toThrow(/timezone/);
+});
+
+describe("ownsHubFiles", () => {
+  it("is true for every repo when the hub's own repo is unknown", () => {
+    expect(ownsHubFiles({}, "a")).toBe(true);
+    expect(ownsHubFiles({}, "b")).toBe(true);
+  });
+
+  it("is true only for the hub's own repo once it is known", () => {
+    expect(ownsHubFiles({ hubRepo: "a" }, "a")).toBe(true);
+    expect(ownsHubFiles({ hubRepo: "a" }, "b")).toBe(false);
+  });
 });

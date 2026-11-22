@@ -134,6 +134,20 @@ export async function readHubSkills(hubRoot: string): Promise<RepoSkills> {
 }
 
 /**
+ * The shared skills a start on `repoId` adds: the hub's, for a repo other than the one the hub's own
+ * code lives in. None when the hub's repo is unknown, when it is `repoId` itself (it has them), or
+ * when there is no hub checkout.
+ */
+export async function sharedSkillsFor(
+  hubRepo: string | undefined,
+  hubRoot: string,
+  repoId: string,
+): Promise<RepoSkills | undefined> {
+  if (hubRepo === undefined || hubRepo === repoId || hubRoot === "") return undefined;
+  return await readHubSkills(hubRoot);
+}
+
+/**
  * What a start reads from the base commit: CLAUDE.md, AGENTS.md and the skills. With `shared` (the
  * hub's skills, for a seat on another repo) the seat also gets each of those the repo has no skill of
  * the same name for: the repo's own always wins.

@@ -360,6 +360,8 @@ function make(
     autonomy?: "merge" | "draft";
     claim?: SupervisorDeps["claim"];
     repo?: Partial<CcConfig["repos"][number]>;
+    /** The repo the hub's own code lives in; unset: every repo is the hub's. */
+    hubRepo?: string;
     cliHold?: CliHold;
     cliVersion?: SupervisorDeps["cliVersion"];
     rules?: SupervisorDeps["rules"];
@@ -377,6 +379,7 @@ function make(
   const cfg = config();
   if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
   if (over.repo && cfg.repos[0]) Object.assign(cfg.repos[0], over.repo);
+  if (over.hubRepo !== undefined) cfg.hubRepo = over.hubRepo;
   const guido = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1");
   if (over.guidoArea !== undefined && guido) guido.area = over.guidoArea;
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;

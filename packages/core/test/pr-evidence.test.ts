@@ -243,13 +243,27 @@ describe("withSection on a staged body ending Part of", () => {
 });
 
 describe("evidenceSectionText", () => {
-  it("links each pair's before, after and diff under the head sha", () => {
-    const text = evidenceSectionText(manifest(), "http://127.0.0.1:7421");
+  it("links each pair's before, after and diff under the head sha on a hub GitHub readers can reach", () => {
+    const text = evidenceSectionText(manifest(), "https://hub.example.com");
     expect(text.startsWith(EVIDENCE_HEADING)).toBe(true);
     expect(text).toContain(
-      `http://127.0.0.1:7421/api/prs/7/evidence/${"a".repeat(40)}/board-light-diff.png`,
+      `https://hub.example.com/api/prs/7/evidence/${"a".repeat(40)}/board-light-diff.png`,
     );
     expect(text).toContain("1 region");
+  });
+
+  it("names the image routes as code, with no link, on an address only the operator's machine opens", () => {
+    for (const base of [
+      "",
+      "http://127.0.0.1:7421",
+      "http://localhost:7420",
+      "http://[::1]:7420",
+    ]) {
+      const text = evidenceSectionText(manifest(), base);
+      expect(text).not.toContain("http://");
+      expect(text).not.toContain("](");
+      expect(text).toContain(`\`/api/prs/7/evidence/${"a".repeat(40)}/board-light-diff.png\``);
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { COMMS_MESSAGE_MAX, type ConfigView } from "@mc/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { hub, streamStatus } from "../src/data.ts";
 import { FlightThread } from "../src/flight/FlightThread.tsx";
 import { FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
@@ -145,6 +146,43 @@ describe("FlightThread", () => {
       timeZone: "Asia/Tokyo",
     }).format(NOW);
     await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
+  });
+
+  it("shows the Comms thread's Delivered time in the operator's configured zone, not London's", async () => {
+    stubFetch({
+      "/api/comms/crew": {
+        messages: [
+          {
+            ...msg("comms:1", "go", true),
+            to: "crew",
+            label: null,
+            ref: null,
+            ticket: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            pinned: false,
+            state: "delivered",
+            deliveredAt: NOW,
+          },
+        ],
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": seat(true),
+      "/api/config": { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    const expected = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "Asia/Tokyo",
+    }).format(NOW);
+    await waitFor(() =>
+      expect(screen.getByTestId("message-state").textContent).toBe(`Delivered ${expected}`),
+    );
   });
 
   it("shows a configured repo's PR link as its text only, naming the host to screen readers", async () => {
