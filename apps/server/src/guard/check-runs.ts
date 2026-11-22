@@ -145,11 +145,14 @@ export interface CheckRecorder {
   /** RELATED_CHECK when this shell command runs it, which takes the test lock (it can run the whole suite); else null. */
   lockedBy(command: string): string | null;
   /**
-   * The check or test call still running in this run's checkout that stops this command from
-   * starting (one at a time per checkout); null when this command is no check or test, or none runs.
-   * A call past its own Bash timeout is gone, not running.
+   * Reserves this run's checkout for a check, vitest or pnpm test command, or names the one that
+   * holds it (one at a time per checkout). Null when this command is none of those, or the
+   * reservation is made. The reservation ends with the call's end, its refusal (`release`), the turn
+   * ending, or its own Bash timeout.
    */
-  running?(runId: string, command: string): Promise<string | null>;
+  admit?(key: CallKey, command: string): Promise<string | null>;
+  /** The reserved call will not run (refused, or its lock wait failed): free the checkout. */
+  release?(key: CallKey): void;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
   /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
@@ -194,6 +197,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
   const finishing = new Set<StartedCall>();
+  /** The one check or test call each run may have in flight, whether or not it is a receipt check. */
+  const reservations = new Map<string, { key: CallKey; command: string; at: number }>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
   const noteDrop = (
@@ -222,21 +227,27 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   };
   return {
     lockedBy: (command) => lockedCheck(command, [RELATED_CHECK]),
-    async running(runId, command) {
+    async admit(key, command) {
       try {
-        const checks = await d.checks(runId);
+        const checks = await d.checks(key.runId);
         if (lockedCheck(command, [...checks, RELATED_CHECK]) === null && !testCommand(command))
           return null;
+        // no await from here: the check and the reservation are one step
         const at = now();
-        return (
-          [...started.values()].find(
-            (call) => call.runId === runId && at - call.startedAt < call.timeoutMs,
-          )?.command ?? null
-        );
+        const held = reservations.get(key.runId);
+        if (held !== undefined && at - held.at < CHECK_BASH_TIMEOUT_MS) {
+          return callId(held.key) === callId(key) ? null : held.command;
+        }
+        reservations.set(key.runId, { key, command, at });
+        return null;
       } catch (e) {
-        d.log?.(`checks: could not find a running check for ${runId}: ${(e as Error).message}`);
+        d.log?.(`checks: could not admit a check for ${key.runId}: ${(e as Error).message}`);
         return null;
       }
+    },
+    release(key) {
+      const held = reservations.get(key.runId);
+      if (held !== undefined && callId(held.key) === callId(key)) reservations.delete(key.runId);
     },
     async begin(key, command, aliases = [], options = {}) {
       try {
@@ -298,6 +309,12 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     async end(key, ok, exitCode = null) {
       const call = started.get(callId(key));
+      const held = reservations.get(key.runId);
+      if (
+        held !== undefined &&
+        (callId(held.key) === callId(key) || held.command === call?.command)
+      )
+        reservations.delete(key.runId);
       if (call === undefined) return;
       finishing.add(call);
       for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
@@ -341,6 +358,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     dropRun(runId) {
+      reservations.delete(runId);
       // a call can sit under two ids (Codex): it is one call
       const calls = new Set<StartedCall>();
       for (const [id, call] of started) {
@@ -352,6 +370,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
     },
     lost(runId, command) {
+      if (reservations.get(runId)?.command === command) reservations.delete(runId);
       const calls = new Set<StartedCall>();
       for (const [id, call] of started) {
         if (call.runId !== runId || !call.matched.includes(command)) continue;

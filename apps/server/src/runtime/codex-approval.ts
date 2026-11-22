@@ -91,7 +91,14 @@ export function createCodexApprover(i: {
       .filter((c) => c.charCodeAt(0) >= 32 && (c.charCodeAt(0) < 127 || c.charCodeAt(0) > 159))
       .join("")
       .slice(0, REFUSAL_DETAIL_MAX);
+    const callId = params.approvalId ?? params.itemId;
+    const callKey =
+      typeof callId === "string" || typeof callId === "number"
+        ? { runId: i.runId, toolUseId: String(callId) }
+        : null;
     const refuse = (rule: GuardRule, text: string = GUARD_RULES[rule]): "decline" => {
+      // a declined command never runs: it frees the checkout it reserved
+      if (callKey !== null) i.checks?.release?.(callKey);
       i.record(rule, `${text}: ${excerpt}`);
       // a declined command shows the seat only `rejected by user`: say why, unless the seat is stopping
       if (!signal.aborted) i.tell?.(text);
@@ -211,7 +218,8 @@ export function createCodexApprover(i: {
         event.tool === "Bash" &&
         event.input.command !== undefined
       ) {
-        const busy = await i.checks?.running?.(i.runId, event.input.command);
+        const busy =
+          callKey === null ? null : await i.checks?.admit?.(callKey, event.input.command);
         if (busy) return refuse("full-suite", checkRunningText(busy));
       }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);

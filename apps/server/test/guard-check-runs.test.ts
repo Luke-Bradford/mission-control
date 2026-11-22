@@ -556,7 +556,7 @@ describe("why the recorder dropped a check call", () => {
     expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
   });
 
-  it("names the check still running in the same run, until it ends or outlives its timeout", async () => {
+  it("reserves the checkout for one check or test at a time, vitest and pnpm test included", async () => {
     let t = 1_000;
     const r = createCheckRecorder({
       store: { addCheckRun: (row) => void rows.push(row) },
@@ -564,18 +564,24 @@ describe("why the recorder dropped a check call", () => {
       state: async () => state,
       now: () => t,
     });
-    expect(await r.running?.("r1", LINT)).toBeNull();
-    await r.begin(KEY, LINT);
-    expect(await r.running?.("r1", TYPES)).toBe(LINT);
-    expect(await r.running?.("r1", "pnpm -s vitest run a.test.ts")).toBe(LINT);
-    expect(await r.running?.("r1", "ls")).toBeNull();
-    expect(await r.running?.("other", TYPES)).toBeNull();
-    t += CHECK_BASH_TIMEOUT_MS + 1_000;
-    expect(await r.running?.("r1", TYPES)).toBeNull();
-    await r.begin({ runId: "r1", toolUseId: "t2" }, TYPES);
-    expect(await r.running?.("r1", LINT)).toBe(TYPES);
-    await r.end({ runId: "r1", toolUseId: "t2" }, true, 0);
-    expect(await r.running?.("r1", LINT)).toBeNull();
+    const key = (id: string) => ({ runId: "r1", toolUseId: id });
+    expect(await r.admit?.(key("t0"), "ls")).toBeNull();
+    // two parallel requests: exactly one gets the checkout
+    const both = await Promise.all([r.admit?.(key("t1"), LINT), r.admit?.(key("t2"), TYPES)]);
+    expect(both).toEqual([null, LINT]);
+    expect(await r.admit?.(key("t3"), "pnpm -s vitest run a.test.ts")).toBe(LINT);
+    expect(await r.admit?.({ runId: "r2", toolUseId: "o" }, TYPES)).toBeNull(); // another run's checkout is free
+    r.release?.(key("t1"));
+    // a vitest run, not a receipt check, holds the checkout as well
+    expect(await r.admit?.(key("t4"), "pnpm -s vitest run a.test.ts")).toBeNull();
+    expect(await r.admit?.(key("t5"), TYPES)).toBe("pnpm -s vitest run a.test.ts");
+    await r.end(key("t4"), true, 0);
+    expect(await r.admit?.(key("t6"), "pnpm -s test")).toBeNull();
+    expect(await r.admit?.(key("t7"), LINT)).toBe("pnpm -s test");
+    r.dropRun("r1");
+    expect(await r.admit?.(key("t8"), LINT)).toBeNull();
+    t += CHECK_BASH_TIMEOUT_MS + 1_000; // past its own timeout, a call is gone
+    expect(await r.admit?.(key("t9"), TYPES)).toBeNull();
   });
 
   it("says the turn ended before a check reported its end", async () => {

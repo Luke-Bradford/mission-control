@@ -995,7 +995,7 @@ describe("POST /api/guard/check", () => {
     it("refuses a second check or test while one runs in the checkout, naming the running one", async () => {
       const { checks } = spy();
       let running: string | null = null;
-      checks.running = async () => running;
+      checks.admit = async () => running;
       await app.close();
       app = await build({ checks });
       expect((await check(tokA, bash("a1", "pnpm -s lint"))).body).toBe("{}");
