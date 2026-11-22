@@ -48,6 +48,14 @@ it("seat state follows cmux and /clear keeps the run", async () => {
   const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
   sup.start();
   const run = await sup.startRun("guido-1", 42);
+  await until(() => expect(readFileSync(state, "utf8")).toContain("workspace_id"));
+  edit(state, (session) => {
+    session.agent_lifecycle = "running";
+  });
+  await until(() => expect(seatState("guido-1")).toBe("running"));
+  edit(state, (session) => {
+    session.agent_lifecycle = "idle";
+  });
   await until(() => expect(seatState("guido-1")).toBe("idle"));
 
   edit(state, (session) => {
