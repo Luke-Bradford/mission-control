@@ -382,10 +382,15 @@ describe("startStream", () => {
       [
         "/api/activity?since=0",
         "/api/crew?shape=summary",
+        "/api/flight/brief",
         "/api/overview",
-        "/api/overview/timeline",
       ].sort(),
     );
+    const beforeTimeline = fetchMock.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_000);
+    });
+    expect(fetched(fetchMock).slice(beforeTimeline)).toEqual(["/api/overview/timeline"]);
   });
 
   it("a local refetch of agents (after a send) is not paced", async () => {

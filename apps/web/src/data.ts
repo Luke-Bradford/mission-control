@@ -497,6 +497,8 @@ interface Entry {
 
 /** The least time between stream-driven reads of one resource on `agents` events. */
 const AGENTS_PACE_MS = 6000;
+/** The history chart changes with seat output, but does not need a redraw for each running turn. */
+const OVERVIEW_TIMELINE_AGENTS_PACE_MS = 30_000;
 /** Keep a completed response through a brief unmount/remount caused by a page layout update. */
 const VISIT_REUSE_MS = 2000;
 
@@ -760,7 +762,8 @@ class Hub {
         e.path === RESOURCES.activity.path &&
         (topic === "guard" || topic === "health" || topic === "boards");
       const timelineChanged = e.path === RESOURCES.overviewTimeline.path && topic === "guard";
-      const briefChanged = e.path === RESOURCES.flightBrief.path && topic === "guard";
+      const briefChanged =
+        e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
       const notificationSettingsChanged =
         topic === "settings" && e.path === RESOURCES.notificationEvents.path;
       const summaryChanged =
@@ -782,8 +785,12 @@ class Hub {
       if (pace || Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
         if (!e.queued) {
           e.queued = true;
+          const paceMs =
+            e.path === RESOURCES.overviewTimeline.path
+              ? OVERVIEW_TIMELINE_AGENTS_PACE_MS
+              : AGENTS_PACE_MS;
           const wait = pace
-            ? Math.max(0, (e.fetchedAt ?? 0) + AGENTS_PACE_MS - Date.now())
+            ? Math.max(0, (e.fetchedAt ?? 0) + paceMs - Date.now())
             : summaryChanged && topic === "agents"
               ? 100
               : 0;
