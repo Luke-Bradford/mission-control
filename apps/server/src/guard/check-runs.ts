@@ -195,6 +195,8 @@ interface StartedCall {
   timeoutMs: number;
   /** The related-tests companion is last, so its failure must not exhaust a check retry. */
   relatedTests: boolean;
+  /** Its end came after its Bash timeout: that is already noted, so a later forget says no more. */
+  timedOut?: true;
 }
 
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
@@ -240,7 +242,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         started.delete(id);
         was = true;
       }
-    if (was) noteDrop(call.runId, reason, call.matched, call.head, call.command);
+    if (was && !call.timedOut) noteDrop(call.runId, reason, call.matched, call.head, call.command);
   };
   const reading = async (runId: string): Promise<boolean> => {
     const wt = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
@@ -369,6 +371,15 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       const call = started.get(callId(key));
       // a failure with no exit code while the process still runs is no result: keep watching it
       if (!ok && exitCode === null && d.processAlive !== undefined && (await reading(key.runId))) {
+        // one the CLI moved to the background at its Bash timeout says so, not that a session was lost
+        if (
+          call !== undefined &&
+          !call.timedOut &&
+          now() - call.startedAt >= call.timeoutMs - 1_000
+        ) {
+          call.timedOut = true;
+          noteDrop(key.runId, "timeout", call.matched, call.head, call.command);
+        }
         void watch(key.runId);
         return;
       }

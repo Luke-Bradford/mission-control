@@ -640,6 +640,31 @@ describe("why the recorder dropped a check call", () => {
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
     });
 
+    it("notes a timeout at once for a call past its Bash timeout, and keeps the checkout while it runs", async () => {
+      let t = 1_000;
+      const alive = { now: true };
+      const r = createCheckRecorder({
+        store: { addCheckRun: (row) => void rows.push(row) },
+        checks: async () => CHECKS,
+        state: async () => state,
+        worktree: async () => "/work/trees/guido-1-9",
+        processAlive: async () => alive.now,
+        pollMs: 5,
+        now: () => t,
+      });
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      t += 120_000;
+      await r.end(KEY, false);
+      expect(rows).toEqual([]);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      alive.now = false;
+      await wait(40);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
     it("records no receipt when the head moved before the late exit", async () => {
       const r = watching({ now: true });
       await r.begin(KEY, LINT);
