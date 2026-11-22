@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS runs (
   model TEXT, branch TEXT, ticket TEXT, cost_usd REAL, tokens TEXT, transcript_path TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, started_at);
+CREATE INDEX IF NOT EXISTS runs_ticket_started ON runs(ticket, started_at);
 -- Kept apart from runs so run queries stay small; written on its own change check.
 CREATE TABLE IF NOT EXISTS run_digests (run_id TEXT PRIMARY KEY, digest TEXT NOT NULL);
 -- HUD state changes that matter (#26 B14): into or out of a notable state.
@@ -256,6 +257,7 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
+CREATE INDEX IF NOT EXISTS guard_hits_run ON guard_hits(run_id);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,

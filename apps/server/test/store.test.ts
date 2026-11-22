@@ -32,7 +32,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pendingRunApproval } from "../src/attention/subjects.ts";
-import { CommsQueries } from "../src/store/comms.ts";
+import { CLOSED_WORK_SQL, CommsQueries } from "../src/store/comms.ts";
 import { crewPromptPath, crewTranscriptPath } from "../src/store/crew-paths.ts";
 import {
   ACK_ABSENT_MS,
@@ -103,6 +103,88 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
   background: [{ taskId: "b1", description: "suite", type: "local_bash" }],
   compactions: 2,
   ...over,
+});
+
+describe("closed-work asks", () => {
+  it("reach each closure table by its primary key and settle a large history fast", () => {
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN SELECT c.id FROM comms c WHERE ${CLOSED_WORK_SQL}`)
+      .all()
+      .map((r) => String(r.detail))
+      .join("\n");
+    for (const alias of ["b", "p", "h"])
+      expect(plan, plan).toMatch(new RegExp(`SEARCH ${alias} USING`));
+    expect(plan).not.toMatch(/SCAN [bph]\b/);
+    db.exec("BEGIN");
+    for (let i = 0; i < 2000; i++)
+      db.prepare(
+        "INSERT INTO comms (at, from_id, to_id, ticket, ref, text, label) VALUES (?, 'a', 'b', ?, ?, 'q', 'question')",
+      ).run(i, `shop-app#${i}`, `PR ${i}`);
+    for (let i = 0; i < 2500; i++)
+      db.prepare(
+        "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES ('shop-app', ?, 1, '{}')",
+      ).run(10_000 + i);
+    db.exec("COMMIT");
+    const started = performance.now();
+    const queries = (store as unknown as { commsStore: CommsQueries }).commsStore;
+    queries.settleAsksOfClosedWork(1);
+    queries.openCommsItems();
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});
+
+describe("closed-ask reconcile on upgrade", () => {
+  it("settles asks about work the hub's records show closed after the rows are gone, and keeps live asks", () => {
+    const path = join(dir, "upgrade.sqlite");
+    const first = new Store(path);
+    const ask = (ticket: string | null, ref?: string) =>
+      first.addComms({
+        at: 1,
+        from: "alpha",
+        to: "beta",
+        ticket,
+        text: "Q",
+        ref,
+        label: "question",
+      });
+    const doneCard = ask("shop-app#901");
+    const mergedHistory = ask("shop-app#902", "PR 912");
+    const closedQuestion = ask("shop-app#903");
+    const live = ask("shop-app#904");
+    const inReview = ask("shop-app#905");
+    const db = (first as unknown as { db: DatabaseSync }).db;
+    // the closure rows are gone from board_items and pull_requests; only the hub's records remain
+    db.prepare(
+      "INSERT INTO board_moves (run_id, repo_id, issue, board_column, state, at) VALUES ('r', 'shop-app', 901, 'Done', 'done', 1)",
+    ).run();
+    db.prepare(
+      "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES ('shop-app', 912, 1, ?)",
+    ).run(JSON.stringify({ ticket: "shop-app#902" }));
+    db.prepare(
+      "INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at) VALUES ('ask:1', 1, 'ticket-closed', 'r', 'hub', 'q', 'shop-app#903', 0, 1)",
+    ).run();
+    // a successful move to a column other than Done does not close the ticket
+    db.prepare(
+      "INSERT INTO board_moves (run_id, repo_id, issue, board_column, state, at) VALUES ('r', 'shop-app', 905, 'Review', 'done', 1)",
+    ).run();
+    // the state before this code ran: no reconcile has happened
+    db.prepare("DELETE FROM settings WHERE key = 'comms.closed-asks-reconciled'").run();
+    expect(first.openCommsItems().map((i) => i.id)).toContain(doneCard?.id);
+    first.close();
+    const second = new Store(path);
+    try {
+      const open = second.openCommsItems().map((i) => i.id);
+      expect(open).toEqual([live?.id, inReview?.id]);
+      expect(second.commsSettlement(doneCard?.id ?? "")?.reason).toBe(
+        "Its ticket or PR was closed",
+      );
+      expect(second.commsSettlement(mergedHistory?.id ?? "")).not.toBeNull();
+      expect(second.commsSettlement(closedQuestion?.id ?? "")).not.toBeNull();
+    } finally {
+      second.close();
+    }
+  });
 });
 
 describe("Store", () => {
@@ -4178,6 +4260,21 @@ it("deduplicates a large history with an indexed first-commit lookup", () => {
       )
       .all("repo", "1");
     expect(plan.map((r) => r.detail).join(" ")).toContain("USING COVERING INDEX run_commits_first");
+  } finally {
+    db.close();
+  }
+});
+
+it("looks up a ticket's first run with the telemetry index", () => {
+  store.upsertRun(run({ id: "first", ticket: "repo#1", startedAt: 10 }));
+  store.upsertRun(run({ id: "later", ticket: "repo#1", startedAt: 20 }));
+  expect(store.ticketStartedAt("repo#1")).toBe(10);
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    const plan = db
+      .prepare("EXPLAIN QUERY PLAN SELECT MIN(started_at) FROM runs WHERE ticket = ?")
+      .all("repo#1");
+    expect(plan.map((r) => r.detail).join(" ")).toContain("runs_ticket_started");
   } finally {
     db.close();
   }

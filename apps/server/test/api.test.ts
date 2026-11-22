@@ -40,6 +40,7 @@ import {
   CI_TRIES,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  CONTROLLER_HEADER,
   type ConfigView,
   type Crew,
   type CrewChanges,
@@ -1061,6 +1062,223 @@ describe("Comms API", () => {
           }),
         ]),
       );
+    });
+  });
+
+  it("stops counting an ask as open once anyone answers it or its ticket or PR is closed", async () => {
+    const ask = (text: string, ticket: string | null, ref?: string) =>
+      commsRow("alpha", "beta", text, clock, ticket, ref, "question");
+    const answeredByOther = ask("Answered by FLIGHT", null);
+    store.addComms({
+      at: clock++,
+      from: "flight",
+      to: "alpha",
+      ticket: null,
+      text: "Use the contract.",
+      replyTo: answeredByOther.id,
+    });
+    const ticketClosed = ask("Ticket closed", "shop-app#801");
+    const prMerged = ask("PR merged", "shop-app#802", "PR 812");
+    const real = ask("Still waiting", "shop-app#803");
+    const board = (n: number, closed: boolean) => ({
+      repoId: "shop-app",
+      issueNumber: n,
+      title: `Issue ${n}`,
+      status: closed ? "Done" : "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [board(801, true), board(802, false), board(803, false)]);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 812,
+          title: "merged",
+          url: "",
+          branch: "fix/802",
+          ticket: "shop-app#802",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: clock,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    await withCommsApp(async (comms) => {
+      const ids = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(ids).toContain(real.id);
+      expect(ids).not.toContain(answeredByOther.id);
+      expect(ids).not.toContain(ticketClosed.id);
+      expect(ids).not.toContain(prMerged.id);
+      // the PR cache dropping the merged row does not reopen its ask
+      store.sweepPullRequests("shop-app", [], clock + 1);
+      const later = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(later).toContain(real.id);
+      expect(later).not.toContain(prMerged.id);
+      // nor does the board dropping the closed ticket's row
+      store.replaceBoard("shop-app", [board(802, false), board(803, false)]);
+      const afterBoard = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(afterBoard).toContain(real.id);
+      expect(afterBoard).not.toContain(ticketClosed.id);
+    });
+  });
+
+  describe("an ask about closed work stays settled when the cache drops its row", () => {
+    const REASON = "Its ticket or PR was closed";
+    const openIds = (comms: Awaited<ReturnType<typeof buildApp>>) =>
+      comms
+        .inject({ method: "GET", url: "/api/comms/open" })
+        .then((r) => r.json().items.map((i: { id: string }) => i.id) as string[]);
+    const issue = (n: number, closed: boolean) => ({
+      repoId: "shop-app",
+      issueNumber: n,
+      title: `Issue ${n}`,
+      status: closed ? "Done" : "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    const closedPr = (number: number) => ({
+      repoId: "shop-app",
+      number,
+      title: "closed",
+      url: "",
+      branch: `fix/${number}`,
+      ticket: `shop-app#${number}`,
+      state: "closed" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: clock,
+      updatedAt: clock,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+    });
+
+    it("when the board refresh drops the closed ticket", async () => {
+      const ask = commsRow("alpha", "beta", "Q", clock, "shop-app#801", undefined, "question");
+      const real = commsRow(
+        "alpha",
+        "beta",
+        "Waiting",
+        clock,
+        "shop-app#803",
+        undefined,
+        "question",
+      );
+      store.replaceBoard("shop-app", [issue(801, true), issue(803, false)]);
+      store.replaceBoard("shop-app", [issue(803, false)]);
+      await withCommsApp(async (comms) => {
+        const ids = await openIds(comms);
+        expect(ids).toContain(real.id);
+        expect(ids).not.toContain(ask.id);
+      });
+      expect(store.commsSettlement(ask.id)?.reason).toBe(REASON);
+    });
+
+    it.each([
+      ["a PR sweep", (at: number) => store.sweepPullRequests("shop-app", [], at)],
+      ["a PR replace", (at: number) => store.replacePullRequests("shop-app", [], at)],
+    ])("when %s drops a closed, unmerged PR", async (_name, drop) => {
+      const ask = commsRow("alpha", "beta", "Q", clock, "shop-app#813", "PR 813", "question");
+      const real = commsRow(
+        "alpha",
+        "beta",
+        "Waiting",
+        clock,
+        "shop-app#814",
+        "PR 814",
+        "question",
+      );
+      store.upsertPullRequests("shop-app", [closedPr(813)], clock);
+      drop(clock + 1);
+      await withCommsApp(async (comms) => {
+        const ids = await openIds(comms);
+        expect(ids).toContain(real.id);
+        expect(ids).not.toContain(ask.id);
+      });
+      expect(store.commsSettlement(ask.id)?.reason).toBe(REASON);
+    });
+  });
+
+  it("keeps an ask whose merged PR survives only in the history out of the open list", async () => {
+    const ask = commsRow("alpha", "beta", "Old PR", clock, "shop-app#810", "PR 820", "question");
+    const real = commsRow("alpha", "beta", "Waiting", clock, "shop-app#811", "PR 821", "question");
+    store.upsertPullRequests(
+      "shop-app",
+      [820].map((number) => ({
+        repoId: "shop-app",
+        number,
+        title: "old",
+        url: "",
+        branch: "fix/810",
+        ticket: "shop-app#810",
+        state: "merged" as const,
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: clock,
+        updatedAt: clock,
+        mergedAt: clock,
+        headSha: null,
+        mergeable: null,
+      })),
+      clock,
+    );
+    // the live row is gone before this code ran: only the history is left
+    (store as unknown as { db: { exec(sql: string): void } }).db.exec("DELETE FROM pull_requests");
+    await withCommsApp(async (comms) => {
+      const ids = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(ids).toContain(real.id);
+      expect(ids).not.toContain(ask.id);
     });
   });
 
@@ -9115,7 +9333,7 @@ vi.mock("../src/accounts/accounts.ts", () => ({
   }),
 }));
 
-it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {
+it("batches uncached telemetry reads, filters first and persists immutable counts", async () => {
   store.upsertRun(
     run({
       id: "many",
@@ -9133,26 +9351,27 @@ it("bounds uncached telemetry reads, filters first and persists immutable counts
     });
   let active = 0;
   let peak = 0;
-  const read = vi.spyOn(files, "committedLines").mockImplementation(async () => {
-    peak = Math.max(peak, ++active);
-    await new Promise((resolve) => setTimeout(resolve, 1));
-    active--;
-    return { additions: 2, deletions: 1 };
-  });
+  const read = vi
+    .spyOn(files, "committedLinesBatch")
+    .mockImplementation(async (_worktree, shas) => {
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return new Map(shas.map((sha) => [sha, { additions: 2, deletions: 1 }]));
+    });
   try {
     await get("/api/telemetry?ticket=shop-app%238");
     expect(read).toHaveBeenCalledTimes(0);
     const first = (await get("/api/telemetry")).json<Telemetry>();
-    expect(read).toHaveBeenCalledTimes(32);
-    expect(peak).toBeLessThanOrEqual(4);
-    expect(peak).toBeGreaterThan(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(peak).toBe(1);
     expect(first.totals[0]?.additions).toBeNull();
     const second = (await get("/api/telemetry")).json<Telemetry>();
-    expect(read).toHaveBeenCalledTimes(50);
-    expect(new Set(read.mock.calls.map((c) => c[1])).size).toBe(50);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(new Set(read.mock.calls.flatMap(([, shas]) => shas)).size).toBe(50);
     expect(second.totals[0]?.additions).toBe(100);
     await get("/api/telemetry");
-    expect(read).toHaveBeenCalledTimes(50);
+    expect(read).toHaveBeenCalledTimes(2);
   } finally {
     read.mockRestore();
   }
@@ -9823,6 +10042,37 @@ describe("operator token", () => {
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
   });
 
+  it("refuses the token to a caller that is a seat or started by one", async () => {
+    const ports: Array<number | undefined> = [];
+    let seat = true;
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      operatorToken: "tok-1",
+      seatPeer: (port) => {
+        ports.push(port);
+        return seat;
+      },
+    });
+    await app.ready();
+    const ask = () =>
+      app.inject({
+        method: "GET",
+        url: OPERATOR_BOOTSTRAP_PATH,
+        headers: { "sec-fetch-site": "same-origin" },
+        remoteAddress: "127.0.0.1",
+      });
+    const refused = await ask();
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect(refused.body).not.toContain("tok-1");
+    expect(ports).toHaveLength(1);
+    seat = false;
+    expect((await ask()).json()).toEqual({ token: "tok-1" });
+    await app.close();
+  });
+
   it("refuses the token to the HUD screenshot browser, whatever spelling of the path it uses", async () => {
     for (const url of [OPERATOR_BOOTSTRAP_PATH, "/api/operator/%62ootstrap"]) {
       const shot = await guarded.inject({
@@ -10254,6 +10504,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     NOW,
   );
   const heldPreviews = new PreviewManager({
+    trusted: async () => true,
     exists: () => false,
     capacity: () => ({ blocked: true, reason: "memory free is 8.0%" }),
     start: async () => ({ stop: () => {} }),
@@ -10282,6 +10533,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
   const stop = vi.fn();
   let activityToken = "";
   const previews = new PreviewManager({
+    trusted: async () => true,
     exists: () => false,
     capacity: () => ({ blocked: false, reason: null }),
     start: async ({ token }) => {
@@ -10556,5 +10808,33 @@ describe("lighter reads and compressed responses", () => {
       });
       expect(health.headers["content-encoding"]).toBeUndefined();
     });
+  });
+});
+
+describe("request log redaction", () => {
+  it("hides every request header that carries a credential or an actor identity", async () => {
+    const out: string[] = [];
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      logger: { stream: { write: (s: string) => void out.push(s) } },
+    });
+    await a.ready();
+    const names = [
+      "authorization",
+      "proxy-authorization",
+      "cookie",
+      OPERATOR_HEADER,
+      CONTROLLER_HEADER,
+      FLIGHT_OPERATOR_ACTOR_HEADER,
+      PREVIEW_ACTIVITY_HEADER,
+      "x-api-key",
+    ];
+    const headers = Object.fromEntries(names.map((n) => [n, `secret-${n}`]));
+    a.log.info({ req: { headers }, headers }, "request");
+    await a.close();
+    const line = out.join("");
+    for (const n of names) expect(line).not.toContain(`secret-${n}`);
   });
 });

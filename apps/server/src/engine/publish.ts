@@ -1007,10 +1007,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return { ok: false, text: prNotRunsText(0), transient: false };
       }
       const note = deps.store.latestEvidence(run.id)?.note ?? "";
-      const title =
-        run.ticketTitle ??
-        deps.store.board(run.repoId).find((b) => b.issueNumber === issue)?.title ??
-        "";
+      const title = run.ticketTitle ?? deps.store.boardItem(run.repoId, issue)?.title ?? "";
       const ticket = { issue, title };
       const known = await readKnown(deps, "pr_body");
       const own = { repo, issue, known, label: "PR body", unclosed: true };
@@ -2082,7 +2079,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               })
             : [];
         const prAreas = areas(pr.labels);
-        const ticket = deps.store.board(run.repoId).find((b) => b.issueNumber === issueOf(run));
+        const ticket =
+          issueOf(run) === null
+            ? undefined
+            : deps.store.boardItem(run.repoId, issueOf(run) as number);
         const labels = [
           ...new Set([...(prAreas.length > 0 ? prAreas : areas(ticket?.labels)), "chore"]),
         ];

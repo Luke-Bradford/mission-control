@@ -996,7 +996,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const pr = findPr(run, loop);
     const repo = config.repos.find((r) => r.id === run.repoId);
     const verdict = ciVerdict(pr?.checks ?? [], repo?.requiredChecks ?? []);
-    const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
+    const item = store.boardItem(run.repoId, issue) ?? undefined;
     const pushed = store.runPush(run.id);
     const turnEnded = row?.lastTurnEndedAt ?? null;
     const reviewer = reviewerFor(run);
@@ -1182,7 +1182,10 @@ export function createEngine(deps: EngineDeps): Engine {
     const away = activeAway(store, now(), config.operator.timezone);
     if (!away?.may.safePr || !away.may.pickUp || flightHeld(run)) return null;
     const rules = await rulesFor(run.repoId);
-    const card = store.board(run.repoId).find((b) => b.issueNumber === issueOf(run));
+    const card =
+      issueOf(run) === null
+        ? undefined
+        : (store.boardItem(run.repoId, issueOf(run) as number) ?? undefined);
     const type = card && rules ? awayTicketType(card, rules.templates) : null;
     const sha = store.runPush(run.id)?.sha;
     if (!rules?.hardRulesSet || type === null || !sha) return null;
@@ -1317,7 +1320,7 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** A PR head and its changed files, with the PR-body write that follows its capture. */
   function evidenceTarget(run: Run, pr: number, sha: string) {
-    const row = store.pullRequests(run.repoId).find((p) => p.number === pr);
+    const row = store.pullRequest(run.repoId, pr);
     const paths = store.prFilePaths(run.repoId, pr);
     // Old rows may still contain the former first-100-file snapshot. Until a complete read,
     // photograph the whole HUD so a web file past that boundary cannot bypass the gate.
@@ -1347,7 +1350,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const { labels, paths } = rules?.uat ?? { labels: [], paths: [] };
     if (labels.length === 0 && paths.length === 0) return null;
     const issue = issueOf(run);
-    const card = store.board(run.repoId).find((b) => b.issueNumber === issue);
+    const card = issue === null ? undefined : (store.boardItem(run.repoId, issue) ?? undefined);
     // without the ticket's labels the rule cannot be judged: the operator decides
     if (labels.length > 0 && card === undefined) return "its ticket's labels could not be read";
     const wanted = new Set(labels.map((l) => l.toLowerCase()));
@@ -1561,10 +1564,7 @@ export function createEngine(deps: EngineDeps): Engine {
       case "open-pr": {
         const ticket = {
           issue,
-          title:
-            run.ticketTitle ??
-            store.board(run.repoId).find((b) => b.issueNumber === issue)?.title ??
-            "",
+          title: run.ticketTitle ?? store.boardItem(run.repoId, issue)?.title ?? "",
         };
         const r = await publisher.openPr(run, ticket, store.latestEvidence(run.id)?.note ?? "");
         if (!r.ok) return refused(r);
@@ -2547,7 +2547,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (pr !== null && pr.state !== "open") return true;
     if (store.hasNewerRunOnTicket(run)) return true;
     const repo = config.repos.find((r) => r.id === run.repoId);
-    const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
+    const item = store.boardItem(run.repoId, issue) ?? undefined;
     // Only a card the hub moved to Blocked can have left it: a draft repo's card is never moved,
     // and a move that failed leaves the card wherever it was.
     const moves = store.boardMovesOfRun(run.id);

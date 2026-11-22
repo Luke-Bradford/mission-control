@@ -752,6 +752,7 @@ describe("startReview", () => {
         repoId: "mc",
         workDir: join(dir, "evidence-work"),
         baseUrl: "http://localhost",
+        trusted: async () => true,
         mainSha: async () => r.fork,
         snapshot: async () => {},
         startSide: async () => {

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { UNTRUSTED_PR } from "./trust.ts";
 
 /** The ports reserved for branch preview hubs. */
 export const PREVIEW_PORTS = [7431, 7432, 7433, 7434, 7435, 7436, 7437, 7438, 7439] as const;
@@ -7,7 +8,13 @@ export const PREVIEW_IDLE_MS = 20 * 60_000;
 export const PREVIEW_START_MS = 5 * 60_000;
 export const PREVIEW_ACTIVITY_HEADER = "x-mc-preview-activity";
 
-export type PreviewErrorCode = "capacity" | "limit" | "already-running" | "no-port" | "head";
+export type PreviewErrorCode =
+  | "capacity"
+  | "limit"
+  | "already-running"
+  | "no-port"
+  | "head"
+  | "untrusted";
 
 /** A refusal a route can safely show to the operator. */
 export class PreviewHubError extends Error {
@@ -60,6 +67,8 @@ export interface PreviewManagerDeps {
   /** Whether another local listener owns this candidate port. */
   exists(port: number): boolean | Promise<boolean>;
   capacity(): { blocked: boolean; reason: string | null };
+  /** Whether this PR head is from the crew or a collaborator; an untrusted head is never built. */
+  trusted(input: { pr: number; sha?: string }): Promise<boolean>;
   /** Creates its private DB, worktree and child before returning the live child handle. */
   start(
     input: PreviewStart & { port: number; token: string; signal: AbortSignal },
@@ -103,6 +112,13 @@ export class PreviewManager {
   async start(input: PreviewStart): Promise<PreviewView> {
     if (input.sha !== undefined && !/^[a-f0-9]{40}$/i.test(input.sha))
       throw new PreviewHubError("head", "a preview head must be a full commit SHA");
+    if (
+      !(await this.deps.trusted({
+        pr: input.pr,
+        ...(input.sha === undefined ? {} : { sha: input.sha }),
+      }))
+    )
+      throw new PreviewHubError("untrusted", UNTRUSTED_PR);
     const pending = await this.reserve(input.pr);
     const abort = () => pending.controller.abort();
     input.signal?.addEventListener("abort", abort, { once: true });

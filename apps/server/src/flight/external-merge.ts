@@ -40,7 +40,7 @@ export async function mergeExternalPr(i: {
 }): Promise<{ text: string; isError?: boolean; paths?: string[]; ticket?: number }> {
   const fail = (text: string) => ({ text, isError: true as const });
   const { repo, store, number } = i;
-  const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
+  const cached = store.pullRequest(repo.id, number);
   const sha = cached?.headSha;
   if (cached?.state !== "open" || !sha || repo.autonomy !== "merge")
     return fail("No open external PR in this merge workspace.");
@@ -320,7 +320,7 @@ export async function mergeExternalPr(i: {
       !finalChecks.some((check) => check.name !== REVIEW_STATUS_CONTEXT) ||
       (final.reviewDecision !== null && !["", "APPROVED"].includes(String(final.reviewDecision))) ||
       externalControlReason(store, repo.id, number, sha) !== null ||
-      store.pullRequests(repo.id).find((pr) => pr.number === number)?.headSha !== sha ||
+      store.pullRequest(repo.id, number)?.headSha !== sha ||
       branchOwned(i.config, store, repo.id, finalSubject.branch, cached.ticket) ||
       store.branchMergeHold(repo.id, finalSubject.branch)
     )
