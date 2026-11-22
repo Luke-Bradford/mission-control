@@ -605,6 +605,37 @@ describe("why the recorder dropped a check call", () => {
       expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
     });
 
+    it("keeps an admitted check when its process starts after the first watcher poll", async () => {
+      let firstRead: (() => void) | undefined;
+      let finishFirstRead: ((alive: boolean) => void) | undefined;
+      const seenFirstRead = new Promise<void>((resolve) => {
+        firstRead = resolve;
+      });
+      let reads = 0;
+      const r = createCheckRecorder({
+        store: { addCheckRun: (row) => void rows.push(row) },
+        checks: async () => CHECKS,
+        state: async () => state,
+        worktree: async () => WORKTREE,
+        processAlive: async () => {
+          reads += 1;
+          if (reads > 1) return true;
+          firstRead?.();
+          return new Promise<boolean>((resolve) => {
+            finishFirstRead = resolve;
+          });
+        },
+        pollMs: 5,
+      });
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      await seenFirstRead;
+      finishFirstRead?.(false);
+      await wait(20);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      await r.end(KEY, true, 0);
+    });
+
     it("keeps the checkout reserved and records the late exit against the start commit", async () => {
       const alive = { now: true };
       const r = watching(alive);

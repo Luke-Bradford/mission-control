@@ -274,7 +274,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         if (!expired && (await reading(runId))) {
           sawAlive = true;
           gone = 0;
-        } else if (expired || !sawAlive || ++gone > 1) {
+        } else if (expired || (!sawAlive && calls.size === 0) || ++gone > 1) {
           // a process never seen is a plain turn end; one that went with no completion is lost
           const reason = sawAlive || expired ? "session-lost" : "turn-ended";
           for (const call of calls) forget(call, reason);
