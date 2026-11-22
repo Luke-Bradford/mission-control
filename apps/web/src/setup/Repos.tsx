@@ -10,7 +10,7 @@ import {
   type SeatInput,
 } from "@mc/core";
 import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ApiError, apiPost } from "../api.ts";
+import { ApiError, apiDelete, apiPost } from "../api.ts";
 import {
   ErrorSummary,
   FieldError,
@@ -133,6 +133,7 @@ function RepoCard({
   const rules = useResource<RepoRulesView>(open ? RESOURCES.repoRules(repo.id) : null);
   const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   useEffect(() => {
     setPlanSignOff((rules.data?.rules.plan_signoff?.value as PlanSignoff | undefined) ?? "never");
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
@@ -162,6 +163,20 @@ function RepoCard({
       toast(errorText(error));
     } finally {
       setSaving(false);
+    }
+  };
+  const removeRepo = async () => {
+    if (!window.confirm(`Remove ${repo.id}?`)) return;
+    setRemoving(true);
+    try {
+      await apiDelete(ACTIONS.removeRepo(repo.id));
+      toast(`${repo.id} will be removed after restart.`);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crewChanges.path);
+    } catch (error) {
+      toast(errorText(error));
+    } finally {
+      setRemoving(false);
     }
   };
   return (
@@ -280,6 +295,14 @@ function RepoCard({
           <div className="repo-save">
             <button type="button" className="sm" disabled={saving} onClick={() => void save()}>
               {saving ? "Saving…" : "Save guidance"}
+            </button>
+            <button
+              type="button"
+              className="sm warn"
+              disabled={removing}
+              onClick={() => void removeRepo()}
+            >
+              {removing ? "Removing…" : "Remove repo"}
             </button>
           </div>
           <details className="repo-board-configuration">

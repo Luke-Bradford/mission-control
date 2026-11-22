@@ -47,6 +47,7 @@ export const useHash = (): string =>
   useSyncExternalStore(subscribeHash, () => window.location.hash);
 
 export const SETUP_TABS = [
+  "hub",
   "sessions",
   "repos",
   "loops",
@@ -198,9 +199,9 @@ export function withoutEditSeatParam(): string {
 }
 /** Setup › Sessions with one seat's edit form open. */
 export const editSeatPath = (sessionId: string, seatId: string): string =>
-  `${setupPath("sessions")}?${EDIT_SEAT_PARAM}=${enc(`${sessionId}:${seatId}`)}`;
+  `${setupPath("repos")}?${EDIT_SEAT_PARAM}=${enc(`${sessionId}:${seatId}`)}`;
 export const addAgentPath = (sessionId: string): string =>
-  `${setupPath("sessions")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
+  `${setupPath("repos")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
 
 /** A popped-out window (`?popout=1`, the Agent header's Pop out): the page alone, no chrome. */
 export const isPopout = (search: string): boolean =>

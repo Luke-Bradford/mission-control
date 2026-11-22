@@ -22,6 +22,7 @@ import {
   tryMinutes,
 } from "./loopView.ts";
 import { Reason } from "./Reason.tsx";
+import { RunPrActions } from "./RunPrActions.tsx";
 import { reviewPark, WaiveReviewFindings } from "./reviewPark.tsx";
 import { endAsideConfirm, endAsideRun, seatError } from "./seat.ts";
 
@@ -164,6 +165,12 @@ export function LoopSteps({
     </div>
   );
   const reason = currentReason(loop, runLoop, view?.events);
+  const actions = row.run && loop.prNumber !== null && loop.prNumber > 0 && (
+    <RunPrActions
+      runId={row.run.id}
+      sha={prs?.find((pr) => pr.number === loop.prNumber)?.headSha ?? ""}
+    />
+  );
 
   if (!runLoop || tries.length === 0) {
     // a parked loop does not say which step it held at: its held line stands, and no step is current
@@ -180,6 +187,7 @@ export function LoopSteps({
           </div>
         )}
         {endAside}
+        {actions}
         {reviewParked && row.run && (
           <WaiveReviewFindings runId={row.run.id} park={reviewParked} findings={false} />
         )}
