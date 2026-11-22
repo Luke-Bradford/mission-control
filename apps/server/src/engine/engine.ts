@@ -583,6 +583,9 @@ export function createEngine(deps: EngineDeps): Engine {
     return reviewTokenBudgetOf(account?.vendor ?? "claude", account?.reviewTokenBudget);
   };
   const chains = new Map<string, Promise<void>>();
+  /** A seat wake reads several tables before it claims its delivery line. */
+  const waking = new Set<string>();
+  let noteSweep: Promise<void> | null = null;
   const ruleNotes = new Map<RepoId, string>();
   /** Whether each repo's rules set `hard_rules` at their last good read. */
   const hardRulesSet = new Map<RepoId, boolean>();
@@ -803,38 +806,44 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Wake an idle seat exactly once for each hub record that arrived during its prior turn. */
   async function wakePendingWork(runId: string): Promise<void> {
-    const run = store.run(runId);
-    if (!run || run.endedAt !== null || !mayWakeSeat(run)) return;
-    const row = supervisor.seat(run.agentId);
-    if (!row) return;
-    const woken = Object.keys(store.claimedKeys(run.id))
-      .filter((key) => key.startsWith(`wake:${run.id}:`))
-      .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
-    const claimed = store.claimedKeys(run.id);
-    const epoch = run.loop?.epoch ?? 0;
-    const work = pendingSeatWork({
-      lastTurnStartedAt: row.lastTurnStartedAt ?? null,
-      reviews: store.reviewsOfRun(run.id),
-      events: store.loopEventsOfRun(run.id),
-      messages: store
-        .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER, run.id)
-        .filter((m) => m.to === run.agentId)
-        .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
-      woken,
-      // the fix line carries the findings' text and wakes the seat itself, so a findings item
-      // whose fix line is still unsent is left to it
-    }).filter(
-      (x) =>
-        x.kind !== "findings" ||
-        fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in claimed,
-    );
-    if (work.length === 0) return;
-    const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
-    await send(
-      run.id,
-      key,
-      pendingWakeText(work, run.ticket ?? "this run", config.operator.timezone),
-    );
+    if (waking.has(runId)) return;
+    waking.add(runId);
+    try {
+      const run = store.run(runId);
+      if (!run || run.endedAt !== null || !mayWakeSeat(run)) return;
+      const row = supervisor.seat(run.agentId);
+      if (!row) return;
+      const woken = Object.keys(store.claimedKeys(run.id))
+        .filter((key) => key.startsWith(`wake:${run.id}:`))
+        .flatMap((key) => key.slice(`wake:${run.id}:`.length).split("|"));
+      const claimed = store.claimedKeys(run.id);
+      const epoch = run.loop?.epoch ?? 0;
+      const work = pendingSeatWork({
+        lastTurnStartedAt: row.lastTurnStartedAt ?? null,
+        reviews: store.reviewsOfRun(run.id),
+        events: store.loopEventsOfRun(run.id),
+        messages: store
+          .comms(row.lastTurnStartedAt ?? Number.MAX_SAFE_INTEGER, run.id)
+          .filter((m) => m.to === run.agentId)
+          .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
+        woken,
+        // the fix line carries the findings' text and wakes the seat itself, so a findings item
+        // whose fix line is still unsent is left to it
+      }).filter(
+        (x) =>
+          x.kind !== "findings" ||
+          fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in claimed,
+      );
+      if (work.length === 0) return;
+      const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
+      await send(
+        run.id,
+        key,
+        pendingWakeText(work, run.ticket ?? "this run", config.operator.timezone),
+      );
+    } finally {
+      waking.delete(runId);
+    }
   }
 
   /** A green head without any evidence needs one prompt, then operator attention. */
@@ -2561,25 +2570,33 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   async function sweepNotes(notes = store.notes()): Promise<void> {
-    const at = now();
-    for (const n of notes) {
-      const run = n.runId === null ? null : store.run(n.runId);
-      if (run === null || run.endedAt === null) continue;
-      if (n.key === `${run.id}:file-minor`) continue;
-      // a merged run's leftover branch waits (its PR is done by design) until the branch is gone
-      if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) {
-        if (await publisher.localBranchGone(run)) {
+    if (noteSweep !== null) return noteSweep;
+    noteSweep = (async () => {
+      const at = now();
+      for (const n of notes) {
+        const run = n.runId === null ? null : store.run(n.runId);
+        if (run === null || run.endedAt === null) continue;
+        if (n.key === `${run.id}:file-minor`) continue;
+        // a merged run's leftover branch waits (its PR is done by design) until the branch is gone
+        if (n.runId !== null && n.key === cleanupBranchNoteKey(n.runId)) {
+          if (await publisher.localBranchGone(run)) {
+            store.clearNote(n.key, at);
+            bus.emit("attention");
+          }
+          continue;
+        }
+        // (and a merged run's cleanup note: the PR is done, so the branch it names still waits)
+        if (n.key === `cleanup:${run.id}` && mergedRun(run)) continue;
+        if (n.kind === "blocked" ? blockedGone(run) : n.kind !== "question") {
           store.clearNote(n.key, at);
           bus.emit("attention");
         }
-        continue;
       }
-      // (and a merged run's cleanup note: the PR is done, so the branch it names still waits)
-      if (n.key === `cleanup:${run.id}` && mergedRun(run)) continue;
-      if (n.kind === "blocked" ? blockedGone(run) : n.kind !== "question") {
-        store.clearNote(n.key, at);
-        bus.emit("attention");
-      }
+    })();
+    try {
+      await noteSweep;
+    } finally {
+      noteSweep = null;
     }
   }
 

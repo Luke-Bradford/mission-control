@@ -1069,6 +1069,14 @@ export async function main(): Promise<void> {
   hubApp = app;
   log = (line) => app.log.warn(line);
   installHubErrorHandlers(log);
+  const backgroundTimers: NodeJS.Timeout[] = [];
+  const trackTimer = <T extends NodeJS.Timeout>(timer: T): T => {
+    backgroundTimers.push(timer);
+    return timer;
+  };
+  app.addHook("onClose", async () => {
+    for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
+  });
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
@@ -1143,7 +1151,7 @@ export async function main(): Promise<void> {
       const unsubscribe = bus.subscribe((topic) => {
         if (topic === "boards") void sweep.tick();
       });
-      const retry = setInterval(() => void sweep.tick(), 60_000);
+      const retry = trackTimer(setInterval(() => void sweep.tick(), 60_000));
       retry.unref();
       void sweep.tick();
       stopEvidenceSweep = () => {
@@ -1162,9 +1170,9 @@ export async function main(): Promise<void> {
       });
     };
     const everyTenMinutes = quietly("local prune", () => tidy.pruneLocal());
-    setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
-    setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
-    setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
+    trackTimer(setInterval(everyTenMinutes, TIDY_EVERY_MS)).unref();
+    trackTimer(setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS)).unref();
   }
   // Local only: pictures, evidence and scratch of finished work are removed from the data folder.
   if (!preview) {
@@ -1197,8 +1205,8 @@ export async function main(): Promise<void> {
           sweeping = false;
         });
     };
-    setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
-    setTimeout(diskSweep, 2 * 60_000).unref();
+    trackTimer(setInterval(diskSweep, DISK_SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(diskSweep, 2 * 60_000)).unref();
     // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
     if (engineOn) {
       const worktreeTidy = () => {
@@ -1214,8 +1222,8 @@ export async function main(): Promise<void> {
             log(`worktree tidy failed: ${e instanceof Error ? e.message : String(e)}`);
           });
       };
-      setInterval(worktreeTidy, TIDY_EVERY_MS).unref();
-      setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
+      trackTimer(setInterval(worktreeTidy, TIDY_EVERY_MS)).unref();
+      trackTimer(setTimeout(worktreeTidy, TIDY_EVERY_MS)).unref();
     }
   }
   // Local only: Audit checks routine hub activity without GitHub work.
@@ -1226,8 +1234,8 @@ export async function main(): Promise<void> {
       log(`silence check failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  setInterval(silence, 60_000).unref();
-  setTimeout(silence, 60_000).unref();
+  trackTimer(setInterval(silence, 60_000)).unref();
+  trackTimer(setTimeout(silence, 60_000)).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = () => {
     try {
@@ -1237,8 +1245,8 @@ export async function main(): Promise<void> {
       log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  setInterval(leftovers, LEFTOVERS_EVERY_MS).unref();
-  setTimeout(leftovers, 5_000).unref();
+  trackTimer(setInterval(leftovers, LEFTOVERS_EVERY_MS)).unref();
+  trackTimer(setTimeout(leftovers, 5_000)).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({
