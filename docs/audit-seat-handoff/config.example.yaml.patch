@@ -1,0 +1,10 @@
+diff --git a/config.example.yaml b/config.example.yaml
+index 8eae1a196..07663b585 100644
+--- a/config.example.yaml
++++ b/config.example.yaml
+@@ -148,3 +148,5 @@ crew:
+         - { id: inco-1, role: INCO, account_id: claude-main, model: sonnet, area: ["apps/web/**"] }
+         # A review seat (mode: scratch) may set light_model: the model for small changes (Size XS or S, or a chore, test or docs ticket).
+         - { id: retro-1, role: RETRO, account_id: claude-main, model: opus }
++        # The auditor: read-only, runs on a timer (audit.report_every_hours) and saves one report.
++        # - { id: audit-1, role: AUDIT, account_id: claude-main, model: opus }

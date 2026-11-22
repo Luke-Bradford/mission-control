@@ -29,6 +29,7 @@ import {
   type AuditMetrics,
   type AuditOveruseFacts,
   type AuditPrSize,
+  type AuditReport,
   type AuditRunKind,
   type AuditThresholds,
   type AuditTokenOveruse,
@@ -1959,6 +1960,52 @@ export class Store {
         )
         .all(repoId, since, until) as { report: string }[]
     ).map((r) => JSON.parse(r.report));
+  }
+
+  /** Saves the AUDIT seat's report for a run; false when the run already saved one. */
+  recordAuditReport(r: Omit<AuditReport, "id">): boolean {
+    const done = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO audit_reports (repo_id, run_id, at, verdict, findings) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(r.repoId, r.runId, r.at, r.verdict, JSON.stringify(r.findings));
+    return Number(done.changes) > 0;
+  }
+
+  /** The newest AUDIT report of a repo, or null before the first. */
+  latestAuditReport(repoId: RepoId): AuditReport | null {
+    return this.auditReportRow(
+      "SELECT * FROM audit_reports WHERE repo_id = ? ORDER BY at DESC, id DESC LIMIT 1",
+      repoId,
+    );
+  }
+
+  /** The report a run saved, or null. */
+  auditReportOfRun(runId: string): AuditReport | null {
+    return this.auditReportRow("SELECT * FROM audit_reports WHERE run_id = ?", runId);
+  }
+
+  private auditReportRow(sql: string, arg: string): AuditReport | null {
+    const row = this.db.prepare(sql).get(arg) as
+      | {
+          id: number;
+          repo_id: string;
+          run_id: string;
+          at: number;
+          verdict: string;
+          findings: string;
+        }
+      | undefined;
+    return row === undefined
+      ? null
+      : {
+          id: row.id,
+          repoId: row.repo_id,
+          runId: row.run_id,
+          at: row.at,
+          verdict: row.verdict,
+          findings: JSON.parse(row.findings) as AuditReport["findings"],
+        };
   }
 
   /**

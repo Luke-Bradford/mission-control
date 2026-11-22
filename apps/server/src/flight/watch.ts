@@ -48,6 +48,7 @@ import {
   wakeLine,
 } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
+import { markAuditShown } from "../audit/wake.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -520,6 +521,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markPrsShown(store, state);
         markItemsShown(store, state);
         markRetrospectiveShown(store, state);
+        markAuditShown(store, state);
         markPointersShown(store, config, state, t);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
@@ -660,6 +662,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markPrsShown(store, state);
         markItemsShown(store, state);
         markRetrospectiveShown(store, state);
+        markAuditShown(store, state);
         markPointersShown(store, config, state, t);
         const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
         lastFacts = deliveredFacts(state);

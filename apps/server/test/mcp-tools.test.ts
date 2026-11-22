@@ -23,6 +23,8 @@ import {
   AWAY_PLAN_REFUSED,
   AWAY_SETTING,
   alreadyOnOriginText,
+  auditBadLinkText,
+  auditTooManyText,
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
   type CheckDrop,
@@ -52,6 +54,8 @@ import {
   FLIGHT_SIGNALS_SETTING,
   findingFileText,
   fixKey,
+  MC_AUDIT_ALREADY,
+  MC_AUDIT_NOT_AUDIT,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
   MC_COMMS_READ_MAX,
@@ -364,6 +368,7 @@ describe("the mc tools", () => {
       [MC_TOOL_NAMES.previewBrowser, ["scratch"]],
       [MC_TOOL_NAMES.restoreFile, ["scratch"]],
       ["report_findings", ["scratch"]],
+      ["report_audit", []],
       ["report_plan", []],
     ]);
     expect(tools.map((t) => `mcp__mc__${t.name}`)).toEqual([
@@ -380,6 +385,7 @@ describe("the mc tools", () => {
       MC_TOOLS.previewBrowser,
       MC_TOOLS.restoreFile,
       MC_TOOLS.reportFindings,
+      MC_TOOLS.reportAudit,
       MC_TOOLS.reportPlan,
     ]);
   });
@@ -412,6 +418,91 @@ describe("the mc tools", () => {
       board: { move: vi.fn() },
     });
     expect(flight.find((t) => t.name === "sync_main")?.grantable).toEqual(["read-only"]);
+  });
+});
+
+describe("report_audit", () => {
+  const AUDIT_RUN = "audit-1:20261020T115000Z";
+  const finding = (rank: number, over: Record<string, unknown> = {}) => ({
+    rank,
+    area: "flow",
+    problem: `problem ${rank}`,
+    evidence: "1 of 4 build seats is running; Ready has 0 and Backlog 12",
+    cause: "nothing was promoted",
+    links: [{ label: "PR", href: "https://github.com/o/mc/pull/7" }],
+    owner: "flight",
+    ...over,
+  });
+  /** The config with an AUDIT seat added; its run is live. */
+  const auditTools = (over: Partial<McToolsDeps> = {}) => {
+    const c = config();
+    c.crew?.sessions[0]?.seats.push({
+      id: "audit-1",
+      role: "AUDIT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    liveSeat("audit-1", AUDIT_RUN);
+    return make({ config: c, ...over });
+  };
+  const call = (
+    ts: McTool[],
+    args: unknown,
+    ctx: McToolContext = { seatId: "audit-1", runId: AUDIT_RUN },
+  ) => tool("report_audit", ts).call(ctx, args);
+
+  it("saves one report, ranked, emits agents and ends the run; a second call is refused", async () => {
+    const ended: string[] = [];
+    const ts = auditTools({ onAudited: (_s, r) => ended.push(r) });
+    const out = await call(ts, {
+      verdict: "One of four build seats is working.",
+      findings: [finding(2), finding(1, { owner: "operator" })],
+    });
+    expect(out.isError).not.toBe(true);
+    const saved = store.auditReportOfRun(AUDIT_RUN);
+    expect(saved?.verdict).toBe("One of four build seats is working.");
+    expect(saved?.findings.map((f) => [f.rank, f.problem, f.owner])).toEqual([
+      [1, "problem 1", "operator"],
+      [2, "problem 2", "flight"],
+    ]);
+    expect(saved?.at).toBe(NOW);
+    expect(emitted).toContain("agents");
+    expect(ended).toEqual([AUDIT_RUN]);
+    const again = await call(ts, { verdict: "v", findings: [] });
+    expect(again).toMatchObject({ isError: true, text: MC_AUDIT_ALREADY });
+    expect(ended).toEqual([AUDIT_RUN]);
+  });
+
+  it("refuses a seat that is not the AUDIT seat", async () => {
+    const out = await tool("report_audit").call(CTX, { verdict: "v", findings: [] });
+    expect(out).toMatchObject({ isError: true, text: MC_AUDIT_NOT_AUDIT });
+    expect(store.auditReportOfRun(RUN)).toBeNull();
+  });
+
+  it("refuses 11 findings, a link off the allowed hosts and a secret, and saves nothing", async () => {
+    const ts = auditTools();
+    const eleven = await call(ts, {
+      verdict: "v",
+      findings: Array.from({ length: 11 }, (_, i) => finding(i + 1)),
+    });
+    expect(eleven).toMatchObject({ isError: true, text: auditTooManyText(11) });
+    const bad = await call(ts, {
+      verdict: "v",
+      findings: [finding(1, { links: [{ label: "x", href: "https://example.com/a" }] })],
+    });
+    expect(bad).toMatchObject({
+      isError: true,
+      text: auditBadLinkText("https://example.com/a"),
+    });
+    const leaked = await call(ts, {
+      verdict: "v",
+      findings: [
+        finding(1, { evidence: `token ${["gh", "p_"].join("")}${"a1B2".repeat(9)} leaked` }),
+      ],
+    });
+    expect(leaked.isError).toBe(true);
+    expect(store.auditReportOfRun(AUDIT_RUN)).toBeNull();
   });
 });
 

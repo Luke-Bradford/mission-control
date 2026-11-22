@@ -225,6 +225,7 @@ export const MC_SCRATCH_DENIED_TOOLS = [
   MC_TOOLS.askFlight,
   MC_TOOLS.reportEvidence,
   MC_TOOLS.reportPlan,
+  MC_TOOLS.reportAudit,
 ] as const;
 
 const READ_ONLY_BUILTINS = ["Edit", "Write", "NotebookEdit"] as const;
