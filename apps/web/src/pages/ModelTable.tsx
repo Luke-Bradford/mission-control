@@ -9,6 +9,7 @@ import {
 } from "@mc/core";
 import { useEffect, useState } from "react";
 import { type ResourceRef, useResource } from "../data.ts";
+import { DEMO_NO_DATA, useDemo } from "../demo/mode.ts";
 import { cost, kTokens, percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
@@ -51,6 +52,25 @@ const dash = (v: number | null, f: (n: number) => string) => (v === null ? "—"
 
 /** Audit's model panels: rework and cost by model and effort, then before and after each change. */
 export function ModelPanels({ range }: { range: string }) {
+  // Demo has no model data to show, and its pages must not ask the hub for any.
+  if (useDemo()) return <DemoPanels />;
+  return <LivePanels range={range} />;
+}
+
+function DemoPanels() {
+  return (
+    <>
+      <Panel title="Rework and cost by model" className="audit-panel audit-wide">
+        <p className="pb s fg2">{DEMO_NO_DATA}</p>
+      </Panel>
+      <Panel title="Before and after each change" className="audit-panel audit-wide">
+        <p className="pb s fg2">{DEMO_NO_DATA}</p>
+      </Panel>
+    </>
+  );
+}
+
+function LivePanels({ range }: { range: string }) {
   const res = useResource<ModelsView>(auditModels(range));
   const [last, setLast] = useState<{ range: string; data: ModelsView }>();
   useEffect(() => {
