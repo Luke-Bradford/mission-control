@@ -743,6 +743,7 @@ describe("reviewBrief", () => {
           },
           { page: "board", scheme: "dark", changedPixels: 0, changedPercent: 0, regions: [] },
         ],
+        submitted: [],
       },
     });
     expect(out).toContain("## Screenshot evidence");
@@ -751,6 +752,29 @@ describe("reviewBrief", () => {
     expect(out).toContain("board, dark: no change");
     expect(out).toContain("main ccccccc");
     expect(reviewBrief(review)).not.toContain("Screenshot evidence");
+  });
+
+  it("lists submitted screenshot evidence with its review metadata", () => {
+    const out = reviewBrief({
+      ...review,
+      evidence: {
+        dir: ".mc-review/evidence",
+        mainSha: "c".repeat(40),
+        pairs: [],
+        submitted: [
+          {
+            name: `submitted-${"d".repeat(64)}.png`,
+            caption: "Audit empty state",
+            viewport: { width: 1280, height: 900 },
+            side: "reference",
+            path: "docs/evidence/audit.png",
+          },
+        ],
+      },
+    });
+    expect(out).toContain("Audit empty state: 1280×900, reference; docs/evidence/audit.png");
+    expect(out).toContain(`.mc-review/evidence/submitted-${"d".repeat(64)}.png`);
+    expect(out).toContain("Submitted pictures name their own viewport and side.");
   });
 
   it("tells the reviewer when a web PR has no pairs", () => {
