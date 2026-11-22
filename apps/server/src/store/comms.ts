@@ -1082,7 +1082,10 @@ export class CommsQueries {
     }));
   }
 
-  /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
+  /**
+   * Labelled direct questions and blockers still awaiting a reply or the addressee's reaction. A
+   * reply from anyone but the asker answers it; so does its ticket or PR being closed or merged.
+   */
   openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
     const rows = this.db
       .prepare(
@@ -1093,7 +1096,16 @@ export class CommsQueries {
            )
            AND NOT EXISTS (
              SELECT 1 FROM comms reply
-             WHERE reply.reply_to = c.id AND reply.from_id = c.to_id
+             WHERE reply.reply_to = c.id AND reply.from_id != c.from_id
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM board_items b
+             WHERE b.closed = 1 AND c.ticket = b.repo_id || '#' || b.issue_number
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM pull_requests p
+             WHERE p.state IN ('merged', 'closed') AND c.ref = 'PR ' || p.number
+               AND c.ticket LIKE p.repo_id || '#%'
            )
            AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
          ORDER BY c.at ASC, c.id ASC`,

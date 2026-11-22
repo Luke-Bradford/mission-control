@@ -1065,6 +1065,79 @@ describe("Comms API", () => {
     });
   });
 
+  it("stops counting an ask as open once anyone answers it or its ticket or PR is closed", async () => {
+    const ask = (text: string, ticket: string | null, ref?: string) =>
+      commsRow("alpha", "beta", text, clock, ticket, ref, "question");
+    const answeredByOther = ask("Answered by FLIGHT", null);
+    store.addComms({
+      at: clock++,
+      from: "flight",
+      to: "alpha",
+      text: "Use the contract.",
+      replyTo: answeredByOther.id,
+    });
+    const ticketClosed = ask("Ticket closed", "shop-app#801");
+    const prMerged = ask("PR merged", "shop-app#802", "PR 812");
+    const real = ask("Still waiting", "shop-app#803");
+    const board = (n: number, closed: boolean) => ({
+      repoId: "shop-app",
+      issueNumber: n,
+      title: `Issue ${n}`,
+      status: closed ? "Done" : "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("shop-app", [board(801, true), board(802, false), board(803, false)]);
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 812,
+          title: "merged",
+          url: "",
+          branch: "fix/802",
+          ticket: "shop-app#802",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: clock,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      clock,
+    );
+    await withCommsApp(async (comms) => {
+      const ids = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(ids).toContain(real.id);
+      expect(ids).not.toContain(answeredByOther.id);
+      expect(ids).not.toContain(ticketClosed.id);
+      expect(ids).not.toContain(prMerged.id);
+    });
+  });
+
   it("lists recent Comms messages newest first, after the since cursor, within the cap", async () => {
     const first = commsRow("alpha", "beta", "one", clock, null, "PR 1", "question");
     const second = commsRow("beta", "alpha", "two");
