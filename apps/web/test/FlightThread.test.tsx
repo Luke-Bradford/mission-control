@@ -125,9 +125,18 @@ describe("FlightThread", () => {
         flight: { live: true, since: Date.UTC(2026, 10, 14, 9, 5), runId: "r" },
       },
       "/api/flight": seat(true),
+      "/api/config": CONFIG,
     });
     render(<FlightThread />);
     expect(await screen.findByText("FLIGHT is working… since 09:05")).toBeTruthy();
+  });
+
+  it("shows times in the operator's configured zone, not London's", async () => {
+    stub([msg("comms:1", "hi")], true, undefined, { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } });
+    const { container } = render(<FlightThread />);
+    await screen.findByText("hi");
+    const expected = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Tokyo" }).format(NOW);
+    await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
   });
 
   it("shows a configured repo's PR link as its text only, naming the host to screen readers", async () => {
