@@ -1216,6 +1216,21 @@ describe("scheduler", () => {
     expect(row("scheduler:maintenance")).toMatchObject({ ok: false, error: "database is locked" });
   });
 
+  it("finishes a job when its heartbeat write fails, so its next tick can run", async () => {
+    const original = store.setSetting.bind(store);
+    vi.spyOn(store, "setSetting").mockImplementation((key, value) => {
+      if (key === FLIGHT_LOOPS_SETTING) throw new Error("heartbeat database is locked");
+      original(key, value);
+    });
+    const ta = vi.fn(async () => {});
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs({ ta }) });
+
+    await expect(s.tick("ta")).resolves.toBe("ran");
+    await expect(s.tick("ta")).resolves.toBe("ran");
+
+    expect(ta).toHaveBeenCalledTimes(2);
+  });
+
   it("emits attention whenever it emits agents or escalations, and not otherwise", async () => {
     vi.useFakeTimers();
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });

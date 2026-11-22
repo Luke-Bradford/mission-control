@@ -128,6 +128,7 @@ import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
+import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
@@ -1067,6 +1068,7 @@ export async function main(): Promise<void> {
   });
   hubApp = app;
   log = (line) => app.log.warn(line);
+  installHubErrorHandlers(log);
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());

@@ -49,6 +49,34 @@ describe("onSignal", () => {
     expect(h.log.warn).not.toHaveBeenCalled();
   });
 
+  it("runs later shutdown steps when an earlier step fails", async () => {
+    const h = harness(
+      async () => {
+        throw new Error("scheduler stop failed");
+      },
+      async () => {},
+      async () => {
+        throw new Error("crew stop failed");
+      },
+      async (calls) => {
+        calls.push("drain");
+      },
+    );
+
+    await h.shutdown("SIGTERM");
+
+    expect(h.calls).toEqual([
+      "info SIGTERM: shutting down",
+      "drain",
+      "stopCrew",
+      expect.stringMatching(/^warn SIGTERM: stopCrew failed: crew stop failed$/),
+      "stop",
+      expect.stringMatching(/^warn SIGTERM: stop failed: scheduler stop failed$/),
+      "close",
+      "exit 0",
+    ]);
+  });
+
   it(`exits 0 with a warning when stopping takes longer than ${SHUTDOWN_TIMEOUT_MS} ms`, async () => {
     expect(SHUTDOWN_TIMEOUT_MS).toBe(10_000);
     const h = harness(() => new Promise<void>(() => {})); // a stop that never finishes

@@ -1567,19 +1567,26 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /** Never rejects: the timers call it as `void tick(job)`, where a rejection would kill the process. */
   const tick = async (job: Job): Promise<"ran" | "skipped"> => {
     if (inFlight.has(job)) return "skipped";
-    const p = (async () => {
+    let p: Promise<void> | undefined;
+    p = (async () => {
       try {
         await jobs[job]();
       } catch (e) {
         recordStatus(`scheduler:${job}`, false, msg(e));
+      } finally {
+        try {
+          if (SIGNAL_LOOPS.includes(job)) {
+            flightLoopHeartbeat(store, job, now(), intervals[job]);
+          }
+        } catch (e) {
+          recordStatus(`scheduler:${job}:heartbeat`, false, msg(e));
+        } finally {
+          if (p !== undefined && inFlight.get(job) === p) inFlight.delete(job);
+        }
       }
     })();
     inFlight.set(job, p);
     await p;
-    if (SIGNAL_LOOPS.includes(job)) {
-      flightLoopHeartbeat(store, job, now(), intervals[job]);
-    }
-    inFlight.delete(job);
     return "ran";
   };
 

@@ -25,14 +25,23 @@ export function onSignal(i: {
     if (stopping) return;
     stopping = true;
     i.log.info(`${signal}: shutting down`);
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       i.log.warn(`${signal}: still stopping after ${SHUTDOWN_TIMEOUT_MS} ms; exiting`);
       i.exit(0);
     }, SHUTDOWN_TIMEOUT_MS).unref();
-    await i.drain();
-    await i.stopCrew();
-    await i.stop();
-    await i.close();
+    for (const [name, step] of [
+      ["drain", i.drain],
+      ["stopCrew", i.stopCrew],
+      ["stop", i.stop],
+      ["close", i.close],
+    ] as const) {
+      try {
+        await step();
+      } catch (e) {
+        i.log.warn(`${signal}: ${name} failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    clearTimeout(timeout);
     i.exit(0);
   };
 }
