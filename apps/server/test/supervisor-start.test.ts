@@ -3199,7 +3199,7 @@ describe("repo guidance at launch", () => {
 
   it("starts the AUDIT seat with its brief and pack, and refuses a ticket start on it", async () => {
     const AUDIT: CrewSeatConfig = { ...FLIGHT, id: "audit-1", role: "AUDIT" };
-    const { sup } = make({ extraSeat: AUDIT });
+    const { sup } = make({ extraSeat: AUDIT, auditPack: () => '{"buildSeats":{"configured":4}}' });
     sup.start();
     await expect(sup.startRun("audit-1", 5)).rejects.toMatchObject({
       status: 409,
