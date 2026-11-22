@@ -1,5 +1,6 @@
 import { act, waitFor } from "@testing-library/react";
 import { expect, vi } from "vitest";
+import { hub } from "../src/data.ts";
 
 type Answer = { status: number; body: unknown };
 type Handler = (init: RequestInit | undefined) => Answer | Promise<Answer>;
@@ -18,6 +19,9 @@ export function stubFetch(routes: Record<string, Handler | unknown>) {
     return new Response(JSON.stringify(out.body), { status: out.status });
   });
   vi.stubGlobal("fetch", fn);
+  // A new route table represents a new mocked server state. The real server announces this on
+  // the stream; discard a previous fixture response so a remounted component asks this table.
+  hub.clear();
   return fn;
 }
 
