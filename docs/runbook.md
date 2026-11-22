@@ -1945,8 +1945,11 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
 - **Review previews and screenshots.** When a PR changes web files (paths under the repo's
-  `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
-  the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
+  `area:web` globs, read from `pr_files`; `apps/web/**` is only the default on the hub's own repo),
+  the review run gets a preview of the PR head. A repo other than the hub's own is previewed by
+  its configured `run_command`, started in a worktree of the PR head with `PORT` set; with no
+  `run_command` the preview does not start and the brief says why. The hub's own repo runs the
+  branch preview (`POST /api/previews`) on a
   copy of the live data with loop writes off. The preview is pinned to the reviewed commit; an operator preview is reused only for that same head. Browser requests are GET-only, and queued calls recheck the running review and preview instance before returning results. It is built in the background when the review run
   starts, so the review does not wait for it, and the brief says it is starting. The hub touches it
   every minute while the run is open, so the 20-minute idle expiry does not close it, and closes it
@@ -3067,6 +3070,6 @@ labels decide what merges, what a seat runs and which seat takes a ticket. The h
 (its floor-enforcing and controller-check paths, `DEFAULT_HARD_RULES`) apply only to the repo the hub
 runs from (`hubRepo`, found at startup from the checkout's origin); another repo's floor is its
 `CLAUDE.md` and `.github/**`. A seat on another repo also gets the hub's skills (the repo's own skill
-wins a name clash). Branch previews and PR screenshots work only for the hub's own repo. A QA report
+wins a name clash). Another repo's web PR is previewed by its `run_command`; PR screenshots work only for the hub's own repo. A QA report
 comment and the PR screenshot links posted to GitHub name the hub route in code, not a link, unless the hub has a public address. A repo with no `commands` gets this repo's pnpm defaults only if it is the hub's own repo; any other repo gets the `checks` from its `CLAUDE.md` Mission Control block (writer and review seats alike).
-Times show in `operator.timezone`. `operator.locale` (a BCP 47 tag, default `en-GB`) is read into the config view and used by the core and server formatters; the HUD keeps its fixed clock and month shape, and the web files that still name `en-GB` are listed on the #2183 PR until a web change moves them to the setting. The web-change fact the review and design flow use comes from each repo's own `area:web` globs (`apps/web/**` only for the hub's own repo). Branch previews and PR screenshots run the hub's own app, so they stay hub-only.
+Times show in `operator.timezone`. `operator.locale` (a BCP 47 tag, default `en-GB`) is read into the config view and used by the core and server formatters; the HUD keeps its fixed clock and month shape, and the web files that still name `en-GB` are listed on the #2183 PR until a web change moves them to the setting. The web-change fact the review and design flow use comes from each repo's own `area:web` globs (`apps/web/**` only for the hub's own repo). A non-hub repo's review preview runs its own `run_command`; PR screenshots stay hub-only.

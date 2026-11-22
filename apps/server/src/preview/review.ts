@@ -92,7 +92,14 @@ export function createReviewPreviews(deps: ReviewPreviewDeps): ReviewPreviews {
 
   async function start(
     entry: Entry,
-    input: { pr: number; branch: string; checkout: string; sha: string; signal: AbortSignal },
+    input: {
+      repoId: string;
+      pr: number;
+      branch: string;
+      checkout: string;
+      sha: string;
+      signal: AbortSignal;
+    },
   ): Promise<void> {
     try {
       entry.view = await deps.previews.start(input);
@@ -158,7 +165,14 @@ export function createReviewPreviews(deps: ReviewPreviewDeps): ReviewPreviews {
       const checkout = deps.checkout(repoId);
       if (checkout === null) entry.note = "the repo has no crew clone to build the PR head in";
       else
-        entry.done = start(entry, { pr, branch, checkout, sha, signal: entry.controller.signal });
+        entry.done = start(entry, {
+          repoId,
+          pr,
+          branch,
+          checkout,
+          sha,
+          signal: entry.controller.signal,
+        });
       return true;
     },
     async ready(runId) {

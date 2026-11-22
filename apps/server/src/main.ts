@@ -114,6 +114,7 @@ import {
 import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
+import { appPreviewPaths, startAppPreview } from "./preview/app.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
 import { resolvePreviewRepo } from "./preview/repo.ts";
@@ -202,8 +203,8 @@ export async function main(): Promise<void> {
     );
   }
   // Read at call time: `gh` is built below, and a build only starts once the hub is serving.
-  const trustedHead = async (pr: number, sha?: string): Promise<boolean> => {
-    const github = config.repos.find((r) => r.id === previewRepoId)?.github;
+  const trustedHead = async (pr: number, sha?: string, repoId?: string): Promise<boolean> => {
+    const github = config.repos.find((r) => r.id === (repoId ?? previewRepoId))?.github;
     if (github === undefined || hubRoot === null) return false;
     return await trustedPullRequest(store, gh, hubRoot, github, pr, sha, Date.now());
   };
@@ -211,7 +212,7 @@ export async function main(): Promise<void> {
   const previews = isPreview(port, process.env)
     ? undefined
     : new PreviewManager({
-        trusted: ({ pr, sha }) => trustedHead(pr, sha),
+        trusted: ({ pr, sha, repoId }) => trustedHead(pr, sha, repoId),
         capacity: () => {
           const capacityConfig = config.crew?.machineCapacity;
           const c = capacityConfig ?? MACHINE_CAPACITY_DEFAULTS;
@@ -223,11 +224,68 @@ export async function main(): Promise<void> {
             probe.once("error", () => resolve(true));
             probe.listen({ host: HOST, port: candidate }, () => probe.close(() => resolve(false)));
           }),
-        start: async ({ pr, sha, port: previewPort, token, signal }) => {
+        start: async ({
+          repoId,
+          pr,
+          sha,
+          port: previewPort,
+          token,
+          signal,
+          checkout: repoCheckout,
+        }) => {
           if (hubRoot === null) throw new Error("the hub checkout is unavailable for previews");
-          const checkout = hubRoot;
           const root = join(previewRoot, String(pr));
           const previewDb = join(root, "mc.sqlite");
+          if (repoId !== undefined && repoId !== previewRepoId) {
+            // Another repo's app: its own run command in a worktree of its own clone.
+            const { worktree, ref } = appPreviewPaths(root, pr);
+            const runCommand = config.repos.find((r) => r.id === repoId)?.runCommand;
+            await rm(root, { recursive: true, force: true });
+            mkdirSync(root, { recursive: true, mode: 0o700 });
+            previewCheckouts.set(previewDb, { checkout: repoCheckout, worktree, ref });
+            try {
+              const app = await startAppPreview(
+                {
+                  run: runPreviewCommand,
+                  spawnApp: (command, cwd, env, sig) =>
+                    spawn("sh", ["-c", command], {
+                      cwd,
+                      env: { ...process.env, ...env },
+                      stdio: "ignore",
+                      signal: sig,
+                    }),
+                  wait: (child, p, sig) => waitForPreview(child as ChildProcess, p, sig, "any"),
+                  stop: (child) => stopPreview(child as ChildProcess),
+                },
+                {
+                  checkout: repoCheckout,
+                  root,
+                  pr,
+                  ...(sha === undefined ? {} : { sha }),
+                  runCommand,
+                  port: previewPort,
+                  signal,
+                },
+              );
+              return { dbPath: previewDb, stop: app.stop };
+            } catch (e) {
+              await runPreviewCommand("git", [
+                "-C",
+                repoCheckout,
+                "worktree",
+                "remove",
+                "--force",
+                worktree,
+              ]).catch(() => {});
+              await runPreviewCommand("git", ["-C", repoCheckout, "update-ref", "-d", ref]).catch(
+                () => {},
+              );
+              previewCheckouts.delete(previewDb);
+              await rm(root, { recursive: true, force: true });
+              throw e;
+            }
+          }
+          const checkout = hubRoot;
           const worktree = join(root, "worktree");
           const previewRef = `refs/mc-preview/${pr}`;
           let child: ChildProcess | null = null;
@@ -553,15 +611,18 @@ export async function main(): Promise<void> {
     keep: 2_000,
     maxAgeMs: QA_RETENTION_DAYS * 86_400_000,
   });
-  // Only Mission Control's own branches can be previewed (the manager builds this repo's web app).
+  // A repo's web PR is previewed by its own `run_command` (the hub's repo: the hub's web app).
   const reviewPreviews =
     previews === undefined
       ? undefined
       : createReviewPreviews({
           previews,
           files: (repoId, pr) => store.prFilePaths(repoId, pr),
-          webGlobs: async (repoId) =>
-            repoId !== previewRepoId ? [] : ((await flightAreas(repoId))?.[WEB_AREA_LABEL] ?? []),
+          // the repo's own web area; `apps/web/**` is only the default on the hub's own repo
+          webGlobs: async (repoId) => {
+            const configured = (await flightAreas(repoId))?.[WEB_AREA_LABEL] ?? [];
+            return configured.length > 0 || repoId !== previewRepoId ? configured : ["apps/web/**"];
+          },
           checkout: (repoId) =>
             config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout ?? null,
           log: (line) => log(line),
@@ -1352,20 +1413,23 @@ async function runPreviewCommand(
   });
 }
 
+/** `health` waits for the hub's `/api/health`; `any` for any HTTP answer (another repo's app). */
 async function waitForPreview(
   child: ChildProcess,
   previewPort: number,
   signal?: AbortSignal,
+  ready: "health" | "any" = "health",
 ): Promise<void> {
   const deadline = Date.now() + PREVIEW_READY_MS;
   while (Date.now() < deadline) {
     if (signal?.aborted) throw new Error("preview start cancelled");
     if (child.exitCode !== null) throw new Error("preview server stopped before it was ready");
     try {
-      const response = await fetch(`http://${HOST}:${previewPort}/api/health`, {
-        signal: signal ?? AbortSignal.timeout(500),
-      });
-      if (response.ok) return;
+      const response = await fetch(
+        `http://${HOST}:${previewPort}${ready === "health" ? "/api/health" : "/"}`,
+        { signal: signal ?? AbortSignal.timeout(500) },
+      );
+      if (ready === "any" || response.ok) return;
     } catch {
       // The child is still loading its server modules.
     }

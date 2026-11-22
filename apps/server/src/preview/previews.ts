@@ -30,6 +30,8 @@ export interface PreviewProcess {
 }
 
 export interface PreviewStart {
+  /** The repo the PR belongs to; absent means the hub's own repo. */
+  repoId?: string;
   pr: number;
   branch: string;
   checkout: string;
@@ -68,7 +70,7 @@ export interface PreviewManagerDeps {
   exists(port: number): boolean | Promise<boolean>;
   capacity(): { blocked: boolean; reason: string | null };
   /** Whether this PR head is from the crew or a collaborator; an untrusted head is never built. */
-  trusted(input: { pr: number; sha?: string }): Promise<boolean>;
+  trusted(input: { pr: number; sha?: string; repoId?: string }): Promise<boolean>;
   /** Creates its private DB, worktree and child before returning the live child handle. */
   start(
     input: PreviewStart & { port: number; token: string; signal: AbortSignal },
@@ -115,6 +117,7 @@ export class PreviewManager {
     if (
       !(await this.deps.trusted({
         pr: input.pr,
+        ...(input.repoId === undefined ? {} : { repoId: input.repoId }),
         ...(input.sha === undefined ? {} : { sha: input.sha }),
       }))
     )
