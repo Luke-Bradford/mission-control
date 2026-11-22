@@ -105,18 +105,27 @@ describe("the AUDIT seat's timer", () => {
     expect(startAudit).not.toHaveBeenCalled();
   });
 
-  it("does not start while the operator is away and the account is at its reserve", async () => {
+  it("does not start while the operator is away and the account is over its away reserve", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true, until: "" }));
-    store.addUsage({
-      accountId: "main",
-      window: "7d",
-      at: NOW,
-      pct: 99,
-      resetAt: NOW + HOUR,
-      source: "t",
-    });
+    for (const [window, pct] of [
+      ["5h", 10],
+      ["7d", 80],
+    ] as const)
+      store.addUsage({ accountId: "main", window, at: NOW, pct, resetAt: NOW + HOUR, source: "t" });
     expect(await tick(NOW)).toEqual([]);
     expect(startAudit).not.toHaveBeenCalled();
+  });
+
+  it("does not start while away with no usage reading, and starts when not away at the same usage", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true, until: "" }));
+    expect(await tick(NOW)).toEqual([]);
+    store.setSetting(AWAY_SETTING, JSON.stringify(DEFAULT_AWAY));
+    for (const [window, pct] of [
+      ["5h", 10],
+      ["7d", 80],
+    ] as const)
+      store.addUsage({ accountId: "main", window, at: NOW, pct, resetAt: NOW + HOUR, source: "t" });
+    expect(await tick(NOW)).toEqual(["audit-1"]);
   });
 
   it("stores one report per run, and the next report's pack carries the last", () => {
