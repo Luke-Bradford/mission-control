@@ -1153,6 +1153,100 @@ describe("Comms API", () => {
     });
   });
 
+  describe("an ask about closed work stays settled when the cache drops its row", () => {
+    const REASON = "Its ticket or PR was closed";
+    const openIds = (comms: Awaited<ReturnType<typeof buildApp>>) =>
+      comms
+        .inject({ method: "GET", url: "/api/comms/open" })
+        .then((r) => r.json().items.map((i: { id: string }) => i.id) as string[]);
+    const issue = (n: number, closed: boolean) => ({
+      repoId: "shop-app",
+      issueNumber: n,
+      title: `Issue ${n}`,
+      status: closed ? "Done" : "In progress",
+      state: "in progress" as const,
+      labels: [],
+      assignees: [],
+      priority: null,
+      updatedAt: clock,
+      url: "",
+      stage: null,
+      owner: "Agent" as const,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed,
+      prioritySource: null,
+      createdAt: clock,
+      itemId: null,
+      projectId: null,
+    });
+    const closedPr = (number: number) => ({
+      repoId: "shop-app",
+      number,
+      title: "closed",
+      url: "",
+      branch: `fix/${number}`,
+      ticket: `shop-app#${number}`,
+      state: "closed" as const,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: clock,
+      updatedAt: clock,
+      mergedAt: null,
+      headSha: null,
+      mergeable: null,
+    });
+
+    it("when the board refresh drops the closed ticket", async () => {
+      const ask = commsRow("alpha", "beta", "Q", clock, "shop-app#801", undefined, "question");
+      const real = commsRow(
+        "alpha",
+        "beta",
+        "Waiting",
+        clock,
+        "shop-app#803",
+        undefined,
+        "question",
+      );
+      store.replaceBoard("shop-app", [issue(801, true), issue(803, false)]);
+      store.replaceBoard("shop-app", [issue(803, false)]);
+      await withCommsApp(async (comms) => {
+        const ids = await openIds(comms);
+        expect(ids).toContain(real.id);
+        expect(ids).not.toContain(ask.id);
+      });
+      expect(store.commsSettlement(ask.id)?.reason).toBe(REASON);
+    });
+
+    it.each([
+      ["a PR sweep", (at: number) => store.sweepPullRequests("shop-app", [], at)],
+      ["a PR replace", (at: number) => store.replacePullRequests("shop-app", [], at)],
+    ])("when %s drops a closed, unmerged PR", async (_name, drop) => {
+      const ask = commsRow("alpha", "beta", "Q", clock, "shop-app#813", "PR 813", "question");
+      const real = commsRow(
+        "alpha",
+        "beta",
+        "Waiting",
+        clock,
+        "shop-app#814",
+        "PR 814",
+        "question",
+      );
+      store.upsertPullRequests("shop-app", [closedPr(813)], clock);
+      drop(clock + 1);
+      await withCommsApp(async (comms) => {
+        const ids = await openIds(comms);
+        expect(ids).toContain(real.id);
+        expect(ids).not.toContain(ask.id);
+      });
+      expect(store.commsSettlement(ask.id)?.reason).toBe(REASON);
+    });
+  });
+
   it("keeps an ask whose merged PR survives only in the history out of the open list", async () => {
     const ask = commsRow("alpha", "beta", "Old PR", clock, "shop-app#810", "PR 820", "question");
     const real = commsRow("alpha", "beta", "Waiting", clock, "shop-app#811", "PR 821", "question");
