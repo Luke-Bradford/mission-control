@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { TEAMS_TEXT_MAX } from "@mc/core";
 import type { CcConfig, TeamsConfig } from "../config.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 import { isObj } from "./github.ts";
 import { snippetOf } from "./notifications.ts";
@@ -56,7 +57,7 @@ export function teamsToken(argv: string[]): Promise<string> {
 
 function state(store: Store): PollState {
   try {
-    return JSON.parse(store.getSetting(STATE) ?? "{}");
+    return parseJson(store.getSetting(STATE), {});
   } catch {
     return {};
   }
@@ -154,7 +155,7 @@ export async function collectTeams(
       const key = `teams.watermark:${source.kind}:${source.id}${source.teamId ? `:${source.teamId}` : ""}`;
       let watermark = store.getSetting(`${key}:pending`) || store.getSetting(key) || "";
       const threadsKey = `${key}:participated`;
-      const participated = new Set<string>(JSON.parse(store.getSetting(threadsKey) ?? "[]"));
+      const participated = new Set<string>(parseJson(store.getSetting(threadsKey), []));
       const committed = store.getSetting(key) ?? "";
       const cursorKey = key.replace("watermark", "cursor");
       const first = new URL(

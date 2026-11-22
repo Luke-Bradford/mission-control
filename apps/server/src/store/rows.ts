@@ -25,6 +25,7 @@ import type {
   TokenUsage,
 } from "@mc/core";
 import { FLIGHT_WAKE_STORED_BYTES } from "@mc/core";
+import { parseJson } from "../json.ts";
 import type { Evidence, QueueRow, SeatQuestion } from "../store.ts";
 
 type Row = Record<string, SQLInputValue>;
@@ -34,9 +35,9 @@ export const evidenceOf = (r: Row): Evidence => ({
   runId: r.run_id as string,
   note: r.note as string,
   at: r.at as number,
-  tests: JSON.parse(r.tests as string) as ReportedTest[],
-  testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
-  doneWhen: JSON.parse(r.done_when as string) as DoneWhenEntry[],
+  tests: parseJson<ReportedTest[]>(r.tests, []),
+  testsAdded: parseJson<Evidence["testsAdded"]>(r.tests_added, []),
+  doneWhen: parseJson<DoneWhenEntry[]>(r.done_when, []),
 });
 
 /** A run's stored plan fact; a value that won't parse is dropped rather than failing every run read. */
@@ -77,7 +78,7 @@ export const toRun = (r: Row): Run => ({
   // Absent, not null, on a run no loop drives or that has no recorded ender.
   ...(r.loop === null || r.loop === undefined
     ? {}
-    : { loop: JSON.parse(r.loop as string) as RunLoop }),
+    : { loop: parseJson<RunLoop>(r.loop, undefined as never) }),
   ...(r.plan == null ? {} : parsePlan(r.plan as string)),
   ...(r.advice == null ? {} : parseAdvice(r.advice as string)),
   // Absent, not null, on a run that started without a profile.
@@ -85,16 +86,14 @@ export const toRun = (r: Row): Run => ({
     ? {}
     : {
         profile: {
-          ...(JSON.parse(r.profile as string) as ChosenProfile),
+          ...parseJson<ChosenProfile>(r.profile, {} as ChosenProfile),
           hash: r.profile_hash as string,
         },
       }),
   ...(r.ended_by === null || r.ended_by === undefined
     ? {}
     : { endedBy: r.ended_by as NonNullable<Run["endedBy"]> }),
-  ...(r.no_report == null
-    ? {}
-    : { noReport: JSON.parse(r.no_report as string) as Run["noReport"] }),
+  ...(r.no_report == null ? {} : { noReport: parseJson<Run["noReport"]>(r.no_report, undefined) }),
   id: r.id as string,
   agentId: r.agent_id as string,
   repoId: r.repo_id as string,
@@ -107,9 +106,9 @@ export const toRun = (r: Row): Run => ({
   branch: r.branch as string | null,
   ticket: r.ticket as string | null,
   costUsd: r.cost_usd as number | null,
-  tokens: r.tokens === null ? null : (JSON.parse(r.tokens as string) as TokenUsage),
+  tokens: r.tokens === null ? null : parseJson<TokenUsage>(r.tokens, {} as TokenUsage),
   transcriptPath: r.transcript_path as string,
-  prs: JSON.parse(r.prs as string) as Run["prs"],
+  prs: parseJson<Run["prs"]>(r.prs, []),
   summary: r.summary as string | null,
   reviewId: (r.review_id ?? null) as number | null,
 });
@@ -120,8 +119,8 @@ export const toBoardItem = (r: Row): BoardItem => ({
   title: r.title as string,
   status: r.status as string,
   state: r.state as BoardItem["state"],
-  labels: JSON.parse(r.labels as string) as string[],
-  assignees: JSON.parse(r.assignees as string) as string[],
+  labels: parseJson<string[]>(r.labels, []),
+  assignees: parseJson<string[]>(r.assignees, []),
   ...(typeof r.author === "string" ? { author: r.author } : {}),
   priority: r.priority as string | null,
   updatedAt: r.updated_at as number,
@@ -131,12 +130,12 @@ export const toBoardItem = (r: Row): BoardItem => ({
   parent: r.parent as number | null,
   subIssues:
     r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
-  blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
+  blockedBy: parseJson<BoardItem["blockedBy"]>(r.blocked_by, []),
   ...(typeof r.after_deps === "string"
-    ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
+    ? { after: parseJson<NonNullable<BoardItem["after"]>>(r.after_deps, { issues: [], prs: [] }) }
     : {}),
   ...(typeof r.defect_refs === "string"
-    ? { defectRefs: JSON.parse(r.defect_refs) as DefectRefs }
+    ? { defectRefs: parseJson<DefectRefs>(r.defect_refs, {} as DefectRefs) }
     : {}),
   milestone: r.milestone as string | null,
   size: r.size as string | null,
@@ -186,7 +185,7 @@ export const toEscalation = (r: Row): Escalation => ({
   openedAt: r.opened_at as number,
   url: r.url as string,
   question:
-    r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
+    r.question === null ? null : parseJson<Escalation["question"]>(r.question, null as never),
 });
 
 export const toReview = (r: Row): ReviewRow => ({
@@ -201,7 +200,7 @@ export const toReview = (r: Row): ReviewRow => ({
   round: r.round as number,
   state: r.state as ReviewState,
   runId: r.run_id as string | null,
-  verdict: r.verdict === null ? null : (JSON.parse(r.verdict as string) as ReviewVerdict),
+  verdict: r.verdict === null ? null : parseJson<ReviewVerdict | null>(r.verdict, null),
   summary: r.summary as string | null,
   blocking: r.blocking as number,
   minor: r.minor as number,

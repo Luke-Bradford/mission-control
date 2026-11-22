@@ -51,6 +51,7 @@ import { runAccountId } from "../accounts/bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { parseJson } from "../json.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { wakePieces } from "../telemetry/prompt-cost.ts";
@@ -187,7 +188,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
    */
   const readGuard = (): { retryAt: number | null; restartedAt: number | null } => {
     try {
-      const v = JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) || "null") as {
+      const v = parseJson(store.getSetting(FLIGHT_GUARD_SETTING), null) as {
         retryAt?: unknown;
         restartedAt?: unknown;
       } | null;

@@ -637,7 +637,12 @@ describe("external PR review subjects", () => {
     );
     store.setReviewState(id, ["queued"], "running", { at: 4, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
-      verdict: { spec: "pass", quality: "pass" }, summary: "Checked.", findings: [], checked: [], tests: [], at: 5,
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      checked: [],
+      tests: [],
+      at: 5,
     });
     const h = harness();
     await Promise.all([createExternalReviews(h.deps).sync(), createExternalReviews(h.deps).sync()]);

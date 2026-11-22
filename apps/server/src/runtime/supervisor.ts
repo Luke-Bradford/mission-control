@@ -164,6 +164,7 @@ import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
+import { parseJson } from "../json.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -2840,7 +2841,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           return;
         }
-        const denied = JSON.parse(store.getSetting(profilePolicyKey(run.id)) ?? "[]") as string[];
+        const denied = parseJson(store.getSetting(profilePolicyKey(run.id)), []) as string[];
         const flight = crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full";
         const credentialsChanged =
           flight &&

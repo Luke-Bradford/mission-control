@@ -125,6 +125,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { StandingInstructions } from "./instructions/standing.ts";
+import { parseJson } from "./json.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
@@ -220,7 +221,7 @@ function median(values: number[]): number | null {
 }
 
 const notificationRow = (r: Row): NotificationRow => ({
-  ...(r.source_content ? JSON.parse(r.source_content as string) : {}),
+  ...(r.source_content ? parseJson<object>(r.source_content, {}) : {}),
   id: r.id as string,
   repoId: r.repo_id as string,
   subjectType: r.subject_type as string,
@@ -263,7 +264,12 @@ const pressurePct = (s: MachineSample): number | null =>
  * `compactions` existed has none counted, one before `lastText` existed has no text.
  */
 const parseDigest = (json: string): RunDigest => {
-  const d = { background: [], compactions: 0, lastText: null, ...JSON.parse(json) } as RunDigest;
+  const d = {
+    background: [],
+    compactions: 0,
+    lastText: null,
+    ...parseJson<object>(json, {}),
+  } as unknown as RunDigest;
   // One before the live tool's `detail` existed names it with nothing.
   return d.liveTool ? { ...d, liveTool: { detail: null, ...d.liveTool } } : d;
 };
@@ -290,7 +296,7 @@ const _toTokenCall = (r: Row): TokenCall => ({
   cacheRead: r.cache_read as number,
   cacheWrite: r.cache_write as number,
   output: r.output as number,
-  added: JSON.parse(r.added as string) as TokenSourceAdd[],
+  added: parseJson<TokenSourceAdd[]>(r.added, []),
 });
 
 /** How many of a repo's latest merged PRs feed a job's p90 run time. */
@@ -994,7 +1000,7 @@ export class Store {
         if (r.usage === null) continue;
         const run = byId.get(r.run_id);
         if (run === undefined) continue;
-        for (const u of JSON.parse(r.usage) as { at: number | null; tokens: number }[])
+        for (const u of parseJson<{ at: number | null; tokens: number }[]>(r.usage, []))
           run.attemptUsage.push({ at: u.at, tokens: u.tokens });
       }
     }
@@ -1162,7 +1168,7 @@ export class Store {
     const row = this.db
       .prepare("SELECT sample FROM machine_samples WHERE at <= ? ORDER BY at DESC LIMIT 1")
       .get(until) as { sample: string } | undefined;
-    return row ? (JSON.parse(row.sample) as MachineSample) : null;
+    return row ? parseJson<MachineSample | null>(row.sample, null) : null;
   }
 
   /** Records a card move; returns its id. */
@@ -1940,7 +1946,9 @@ export class Store {
           "SELECT record FROM pr_history WHERE repo_id = ? AND merged_at >= ? AND merged_at <= ? ORDER BY merged_at DESC",
         )
         .all(repoId, since, until) as { record: string }[]
-    ).map((r) => JSON.parse(r.record) as PullRequestView);
+    )
+      .map((r) => parseJson<PullRequestView | null>(r.record, null))
+      .filter((p): p is PullRequestView => p !== null);
   }
 
   recordRetrospective(repoId: RepoId, day: string, at: number, report: unknown): void {
@@ -1958,7 +1966,10 @@ export class Store {
           "SELECT report FROM retrospectives WHERE repo_id = ? AND at >= ? AND at <= ? ORDER BY at DESC",
         )
         .all(repoId, since, until) as { report: string }[]
-    ).map((r) => JSON.parse(r.report));
+    ).flatMap((r) => {
+      const v = parseJson<unknown>(r.report, null);
+      return v === null ? [] : [v];
+    });
   }
 
   /**
@@ -2272,7 +2283,8 @@ export class Store {
     for (const row of this.db
       .prepare("SELECT repo_id, record FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
       .all(since, until) as { repo_id: string; record: string }[]) {
-      const pr = JSON.parse(row.record) as PullRequestView;
+      const pr = parseJson<PullRequestView | null>(row.record, null);
+      if (!pr) continue;
       if (pr.additions == null || pr.deletions == null || pr.changedFiles == null) continue;
       sized.push({
         repoId: row.repo_id,
@@ -2302,7 +2314,7 @@ export class Store {
     for (const { value } of stored) {
       let flakes: Record<string, { key?: unknown; at?: unknown }> = {};
       try {
-        flakes = JSON.parse(value)?.flakes ?? {};
+        flakes = parseJson<{ flakes?: typeof flakes }>(value, {}).flakes ?? {};
       } catch {}
       for (const flake of Object.values(flakes ?? {})) {
         if (typeof flake?.key !== "string" || typeof flake.at !== "number") continue;
@@ -2398,7 +2410,7 @@ export class Store {
     // the loop kind stored at the run's start; a seat since removed still counts, and a row from
     // before it was stored falls back to the seat's kind now
     const isBuild = (r: Row): boolean => (r.loopKind ?? kinds.get(r.agentId as string)) === "build";
-    const usage = (r: Row): TokenUsage => JSON.parse(r.tokens as string) as TokenUsage;
+    const usage = (r: Row): TokenUsage => parseJson<TokenUsage>(r.tokens, {} as TokenUsage);
     const baselines = tokenBaselines(
       runRows(
         `SELECT r.agent_id AS agentId, r.loop_kind AS loopKind, b.size AS size, r.tokens AS tokens ${from}
@@ -2547,7 +2559,7 @@ export class Store {
     ).all(repoId, CI_P90_PRS) as Row[];
     const byName = new Map<string, number[]>();
     for (const r of rows) {
-      for (const c of JSON.parse(r.checks as string) as PrCheck[]) {
+      for (const c of parseJson<PrCheck[]>(r.checks, [])) {
         if (c.kind !== "check" || c.state !== "passing") continue;
         if (c.startedAt === undefined || c.completedAt === undefined) continue;
         const ms = c.completedAt - c.startedAt;
@@ -2694,7 +2706,7 @@ export class Store {
       repoId: r.repo_id as string,
       number: r.number as number,
       ticket: r.ticket as string | null,
-      closingIssues: JSON.parse(r.closing_issues as string) as number[],
+      closingIssues: parseJson<number[]>(r.closing_issues, []),
     }));
   }
 
@@ -2832,9 +2844,9 @@ export class Store {
       mergeCommitSha: r.merge_commit_sha as string | null,
       mergeable: r.mergeable as PullRequestView["mergeable"],
       author: (r.author as string | null) ?? null,
-      assignees: JSON.parse(r.assignees as string) as string[],
-      checks: JSON.parse(r.checks as string) as PrCheck[],
-      closingIssues: JSON.parse(r.closing_issues as string) as number[],
+      assignees: parseJson<string[]>(r.assignees, []),
+      checks: parseJson<PrCheck[]>(r.checks, []),
+      closingIssues: parseJson<number[]>(r.closing_issues, []),
       ...(r.is_cross_repository == null ? {} : { isCrossRepository: r.is_cross_repository === 1 }),
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
@@ -2971,7 +2983,10 @@ export class Store {
     const rows = this.db
       .prepare("SELECT sample FROM machine_samples WHERE at >= ? ORDER BY at ASC")
       .all(sinceMs) as { sample: string }[];
-    return rows.map((r) => JSON.parse(r.sample) as MachineSample);
+    return rows.flatMap((r) => {
+      const s = parseJson<MachineSample | null>(r.sample, null);
+      return s ? [s] : [];
+    });
   }
 
   /**
@@ -3113,7 +3128,7 @@ export class Store {
   refuseBriefChoice(epoch: string, requestKey: string, fingerprint: string, record: string): void {
     this.transaction(() => {
       const raw = this.getSetting(`brief-choice:${epoch}`);
-      if (!raw || (JSON.parse(raw) as { fingerprint: string }).fingerprint !== fingerprint) return;
+      if (!raw || parseJson<{ fingerprint?: string }>(raw, {}).fingerprint !== fingerprint) return;
       this.setSetting(`${requestKey}:receipt`, record);
       this.setSetting(`brief-last-choice:${epoch}`, record);
       this.deleteSetting(`brief-choice:${epoch}`);
@@ -3169,7 +3184,7 @@ export class Store {
       this.getSetting(`brief-choice:${epoch}`) ?? this.getSetting(`brief-last-choice:${epoch}`);
     if (!raw) return null;
     try {
-      return (JSON.parse(raw) as { receipt: BriefChoiceReceipt }).receipt;
+      return parseJson<{ receipt?: BriefChoiceReceipt }>(raw, {}).receipt ?? null;
     } catch {
       return null;
     }
@@ -3604,7 +3619,7 @@ export class Store {
       | Row
       | undefined;
     try {
-      return row ? (JSON.parse(row.report as string) as QaReport) : null;
+      return row ? parseJson<QaReport | null>(row.report, null) : null;
     } catch {
       return null;
     }
@@ -3625,7 +3640,7 @@ export class Store {
     const row = this.db.prepare("SELECT packet FROM attention_materials WHERE id = ?").get(id) as
       | { packet: string }
       | undefined;
-    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
+    return row ? parseJson<AttentionMaterials | null>(row.packet, null) : null;
   }
 
   /** Every packet saved for one item, oldest first; the per-question image cap sums over them. */
@@ -3636,7 +3651,10 @@ export class Store {
           "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') ASC, rowid ASC",
         )
         .all(itemKey) as { packet: string }[]
-    ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
+    ).flatMap((row) => {
+      const p = parseJson<AttentionMaterials | null>(row.packet, null);
+      return p ? [p] : [];
+    });
   }
 
   qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {
@@ -3728,11 +3746,11 @@ export class Store {
       prNumber: r.pr_number as number,
       headSha: r.head_sha as string,
       title: r.title as string,
-      reviewer: JSON.parse(r.reviewer as string),
+      reviewer: parseJson<QaHistoryEntry["reviewer"]>(r.reviewer, null as never),
       reviewedAt: r.reviewed_at as number | null,
       recordedAt: r.recorded_at as number,
       state: r.state as string,
-      verdict: r.verdict ? JSON.parse(r.verdict as string) : null,
+      verdict: r.verdict ? parseJson<QaHistoryEntry["verdict"]>(r.verdict, null as never) : null,
       evidence: r.evidence as QaHistoryEntry["evidence"],
       ci: r.ci as QaHistoryEntry["ci"],
       visual: r.visual as QaHistoryEntry["visual"],
@@ -3946,7 +3964,7 @@ export class Store {
       // late: a later round's finding on a file the author did not touch since the last review
       const changed =
         (row.round as number) >= 2 && row.changed_since !== null
-          ? new Set(JSON.parse(row.changed_since as string) as string[])
+          ? new Set(parseJson<string[]>(row.changed_since, []))
           : null;
       // a finding the reviewer holds from the last round was raised then, so it is carried, not late
       const heldFile = this.db.prepare(
@@ -4131,7 +4149,7 @@ export class Store {
       prNumber: r.pr_number as number,
       round: r.round as number,
       sha: r.sha as string,
-      verdict: JSON.parse(r.verdict as string) as QaReviewRoundView["verdict"],
+      verdict: parseJson<QaReviewRoundView["verdict"]>(r.verdict, null as never),
       blocking: r.blocking as number,
       minor: r.minor as number,
       endedAt: r.ended_at as number,
@@ -5559,7 +5577,7 @@ export class Store {
         .get(key) as Row | undefined;
       if (
         !row?.structured ||
-        (JSON.parse(row.structured as string) as AttentionBrief).by !== "flight"
+        parseJson<Partial<AttentionBrief>>(row.structured, {}).by !== "flight"
       )
         return;
       this.setSetting(`withdrawn-brief:${key}`, String(row.id));
@@ -5596,7 +5614,10 @@ export class Store {
     const r = this.db
       .prepare("SELECT structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
       .get(key) as { structured: string | null } | undefined;
-    return r?.structured != null && (JSON.parse(r.structured) as AttentionBrief).for === "operator";
+    return (
+      r?.structured != null &&
+      parseJson<Partial<AttentionBrief>>(r.structured, {}).for === "operator"
+    );
   }
 
   private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
@@ -5663,7 +5684,15 @@ export class Store {
     const row = this.db.prepare("SELECT source, state FROM drafts WHERE id = ?").get(id) as
       | Row
       | undefined;
-    return row?.source ? { ...JSON.parse(row.source as string), state: row.state as string } : null;
+    return row?.source
+      ? {
+          ...parseJson<{ itemKey: string; replyId: string; source: PersonSource }>(
+            row.source,
+            {} as never,
+          ),
+          state: row.state as string,
+        }
+      : null;
   }
 
   drafts(includeDone = false): ReplyDraft[] {
@@ -5701,7 +5730,7 @@ export class Store {
       to: r.target,
       via: "GitHub",
       where: r.target,
-      ...(metadata ? JSON.parse(metadata as string) : {}),
+      ...parseJson<object>(metadata, {}),
       ...(completedAt === null ? {} : { completedAt }),
     })) as ReplyDraft[];
   }
@@ -5831,7 +5860,7 @@ export class Store {
       | Row
       | undefined;
     const saved = previous
-      ? (JSON.parse(previous.entry as string) as FlightArrivalDisposition)
+      ? parseJson<FlightArrivalDisposition | null>(previous.entry, null)
       : null;
     if (saved?.outcome === entry.outcome && saved.detail === entry.detail) return;
     this.db
@@ -6048,7 +6077,9 @@ export class Store {
       const last = this.db
         .prepare("SELECT at, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
         .get(key) as { at: number; structured: string | null } | undefined;
-      const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
+      const prior: AttentionBrief | null = last?.structured
+        ? parseJson<AttentionBrief | null>(last.structured, null)
+        : null;
       if (
         last !== undefined &&
         prior?.for === structured.for &&
@@ -6108,7 +6139,7 @@ export class Store {
       rows
         .filter((r) => {
           const person = r.structured
-            ? (JSON.parse(r.structured as string) as AttentionBrief).person
+            ? parseJson<Partial<AttentionBrief>>(r.structured, {}).person
             : undefined;
           if (!person) return true;
           const thread = /^person:(\d+):(\d+)$/.exec(r.key as string);
@@ -6121,11 +6152,11 @@ export class Store {
         .map((r) => [
           r.key as string,
           {
-            ...(r.structured ? JSON.parse(r.structured as string) : {}),
+            ...parseJson<object>(r.structured, {}),
             id: r.id as number,
             context: r.context as string,
             recommendation: r.recommendation as string,
-            options: JSON.parse(r.options as string) as BriefOption[],
+            options: parseJson<BriefOption[]>(r.options, []),
             basis: r.basis as string,
             at: r.at as number,
           },

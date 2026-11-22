@@ -5,6 +5,7 @@ import {
   type FlightConversationPage,
   type StreamEvent,
 } from "@mc/core";
+import { parseJson } from "./json.ts";
 import { statNoted } from "./repo/file-deps.ts";
 import { readStreamPage } from "./run/stream.ts";
 import { timeOf } from "./run/streamjson.ts";
@@ -44,7 +45,7 @@ export class FlightConversationCursorError extends Error {}
 
 function readBound(store: Store, flightId: string): (Rank & { id: string }) | null {
   try {
-    const value = JSON.parse(store.getSetting(readKey(flightId)) ?? "null") as
+    const value = parseJson(store.getSetting(readKey(flightId)), null) as
       | (Rank & { id: string })
       | null;
     return value &&

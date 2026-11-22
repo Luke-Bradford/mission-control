@@ -13,6 +13,7 @@ import { pendingRunApproval } from "../attention/subjects.ts";
 import { flightQuestionMessageId } from "../comms/question.ts";
 import type { CcConfig } from "../config.ts";
 import { externalMergeHold, externalPrControl } from "../external-pr-control.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 // FLIGHT's brief keeps its `parked` and `aside` keys: they are its tool contract.
@@ -95,7 +96,7 @@ export function briefSourceRevision(
   }
   for (const key of queueKeys) {
     try {
-      const proposal = JSON.parse(store.getSetting(key) ?? "null") as { seat?: string } | null;
+      const proposal = parseJson(store.getSetting(key), null) as { seat?: string } | null;
       if (proposal?.seat) seatIds.add(proposal.seat);
     } catch {
       /* The unreadable original proposal still participates in the fingerprint below. */
@@ -228,11 +229,17 @@ export function briefSourceRevision(
         : undefined,
     };
   });
-  let hold: unknown = null;
-  try {
-    hold = JSON.parse(store.getSetting("attention-holds") ?? "{}")[item.key] ?? null;
-  } catch {
-    hold = "unreadable";
+  let hold: unknown;
+  {
+    let unreadable = false;
+    const holds = parseJson<Record<string, unknown>>(
+      store.getSetting("attention-holds"),
+      {},
+      () => {
+        unreadable = true;
+      },
+    );
+    hold = unreadable ? "unreadable" : (holds[item.key] ?? null);
   }
   const person = /^person:(\d+):(\d+)$/.exec(item.key);
   const notification = person ? store.notification(person[1] ?? "") : null;

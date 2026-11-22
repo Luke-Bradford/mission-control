@@ -126,6 +126,7 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import { parseJson } from "./json.ts";
 import { loopPause } from "./loop/pause.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
@@ -514,7 +515,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const restarts = (until: number): number[] => {
       let list: unknown;
       try {
-        list = JSON.parse(store.getSetting(FILE_SERVICE_RESTARTS_SETTING) ?? "[]");
+        list = parseJson(store.getSetting(FILE_SERVICE_RESTARTS_SETTING), []);
       } catch {
         list = [];
       }

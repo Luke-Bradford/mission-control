@@ -13,6 +13,7 @@ import {
 import type { CcConfig } from "../config.ts";
 import { flightSeat, ownReply } from "../flight/state.ts";
 import { attentionItems, NO_LOCK } from "../hud/hud.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 import { protectedDecisionItem, questionAskAt } from "./holds.ts";
 
@@ -153,7 +154,7 @@ type Sight = QuestionFacts["sight"];
 /** The first look at a question's ticket and PR, kept until the question leaves the watch. */
 function sightOf(store: Store, s: QuestionSubject, f: QuestionFacts): Sight {
   const id = subjectId(s);
-  const all = JSON.parse(store.getSetting(SIGHT_SETTING) ?? "{}") as Record<string, Sight>;
+  const all = parseJson(store.getSetting(SIGHT_SETTING), {}) as Record<string, Sight>;
   const now: Sight = {
     ticketClosed: f.ticket === "closed",
     pr: f.pr === null ? null : { number: f.pr.number, state: f.pr.state },
@@ -175,7 +176,7 @@ function sightOf(store: Store, s: QuestionSubject, f: QuestionFacts): Sight {
 
 /** Forgets the sights of questions no longer watched. */
 export function forgetSights(store: Store, watched: readonly QuestionSubject[]): void {
-  const all = JSON.parse(store.getSetting(SIGHT_SETTING) ?? "{}") as Record<string, Sight>;
+  const all = parseJson(store.getSetting(SIGHT_SETTING), {}) as Record<string, Sight>;
   const keep = new Set(watched.map(subjectId));
   const next = Object.fromEntries(Object.entries(all).filter(([id]) => keep.has(id)));
   if (Object.keys(next).length !== Object.keys(all).length)

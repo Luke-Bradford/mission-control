@@ -353,6 +353,7 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { parseJson } from "./json.ts";
 import { loopTries } from "./loop/history.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -6581,14 +6582,17 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
     let nextTryAt: number | undefined;
     if (acct.vendor === "claude") {
       try {
-        const backoff = JSON.parse(store.getSetting(USAGE_BACKOFF_SETTING) ?? "null");
+        const backoff = parseJson<{ waitMs?: number; notBefore?: number } | null>(
+          store.getSetting(USAGE_BACKOFF_SETTING),
+          null,
+        );
         if (
           backoff &&
           Number.isFinite(backoff.waitMs) &&
-          backoff.waitMs > 0 &&
+          backoff.waitMs! > 0 &&
           Number.isFinite(backoff.notBefore)
         ) {
-          const capped = Math.min(backoff.notBefore, now + USAGE_BACKOFF_CAP_MS);
+          const capped = Math.min(backoff.notBefore!, now + USAGE_BACKOFF_CAP_MS);
           if (capped > now) nextTryAt = capped;
         }
       } catch {
