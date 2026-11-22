@@ -52,6 +52,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  checkRunningText,
   compactAttentionItem,
   compareDependencyChains,
   crewProfileOf,
@@ -2616,6 +2617,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ? { kind: "lock", command: related, background: true }
                 : { kind: "lock", command: related };
           }
+          // one check or test at a time per checkout: a second one waits for the first
+          if (
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const busy = await checks?.admit?.(key, command);
+            if (busy) return answer(checkRunningText(busy));
+          }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {
             if (body.data.tool_name !== "Bash" || typeof command !== "string") return;
@@ -2639,7 +2649,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             bus.emit("guard");
             return answer(verdict.text);
           }
-          if (lock === undefined) return answer(TEST_LOCK_UNAVAILABLE_TEXT);
+          if (lock === undefined) {
+            checks?.release?.(key);
+            return answer(TEST_LOCK_UNAVAILABLE_TEXT);
+          }
           // The hook hung up (killed, or its CLI interrupted) when the reply closes unanswered. The
           // request's own close is not it: that fires once the body has been read.
           const res = reply.raw;
@@ -2675,6 +2688,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
             // a grant that landed after the hang-up: nobody will run that call
             if (granted) lock.release(key);
+            checks?.release?.(key);
             const h = lock.state().holder;
             return answer(
               lockBusyText(

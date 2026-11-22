@@ -194,6 +194,11 @@ export function lockBusyText(call: string, command: string): string {
   return `The test lock is busy: ${call} is running ${command}. Run ${FREE_SUITE_HINT}, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.`;
 }
 
+/** A check or test that would start while `running` still runs in the same checkout. */
+export function checkRunningText(running: string): string {
+  return `Another check is still running in this checkout: ${running}. Wait for it to finish and read its result; do not start another check or test until it ends.`;
+}
+
 /** `GET /api/test-lock`. */
 export interface TestLockState {
   holder: { runId: string; seatId: string; command: string; since: number } | null;
