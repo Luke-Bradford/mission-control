@@ -448,15 +448,6 @@
   color: var(--muted);
 }
 
-.audit-fulltitle {
-  margin: 0 0 var(--sp-1);
-  font-size: var(--fs);
-  line-height: var(--lh);
-  font-weight: 500;
-  color: var(--fg);
-  white-space: normal;
-}
-
 .audit-retry {
   font: inherit;
   color: var(--accent);
@@ -482,10 +473,16 @@
   color: var(--muted);
 }
 
-/* A file path wraps so its whole name stays readable; the rows of this table grow to fit it. */
+/* Keep the ranked file table compact; the full path remains available as the path title. */
 .audit-files .audit-table .hrow td {
-  height: auto;
-  min-height: 24px;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  height: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-files .audit-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

@@ -205,6 +205,7 @@ it("opens the first row, toggles rows, and filters by decider", async () => {
   const buttons = () =>
     screen.getAllByRole("button").filter((b) => b.classList.contains("audit-rt"));
   expect(buttons()[0]?.getAttribute("aria-expanded")).toBe("true");
+  expect(document.querySelector(".audit-fulltitle")).toBeNull();
   expect(screen.getByText("What this does not show")).toBeTruthy();
   fireEvent.click(buttons()[1] as HTMLElement);
   expect(buttons()[0]?.getAttribute("aria-expanded")).toBe("false");
@@ -284,6 +285,10 @@ it("ranks Where findings land by findings per touch, with a dash where no touch 
     "Touches",
     "Per touch",
   ]);
+  const longPath = panel.querySelector(".audit-path") as HTMLElement;
+  expect(longPath.title).toBe(
+    "apps/web/src/pages/a-very-long-directory-name/another-long-directory/File.tsx",
+  );
 });
 
 it("leaves out stale, observed-loop and FLIGHT watch runs", async () => {
@@ -496,10 +501,11 @@ it("keeps recommendation results separate from prompt and model comparisons", as
   ).toBeTruthy();
 });
 
-it("shows a row's whole title in its open detail and an end-of-list cue", async () => {
+it("keeps an open row's title in its trigger and shows its detail once", async () => {
   render(<Audit />);
   await screen.findByRole("heading", { level: 2, name: "Do next" });
-  const first = document.querySelector("tr.rec .audit-rt")?.textContent;
-  expect(document.querySelector(".audit-fulltitle")?.textContent).toBe(first?.replace(/^[▸▾]/, ""));
+  expect(document.querySelector(".audit-fulltitle")).toBeNull();
+  expect(screen.getByRole("button", { expanded: true }).textContent).toMatch(/Fix what makes/);
+  expect(screen.getByRole("heading", { level: 3, name: "Evidence" })).toBeTruthy();
   expect(screen.getByText(/End of list: \d+ rows\./)).toBeTruthy();
 });

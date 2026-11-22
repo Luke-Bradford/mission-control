@@ -301,7 +301,6 @@ function DoNext({
                     {isOpen && (
                       <tr className="more">
                         <td colSpan={5}>
-                          <p className="audit-fulltitle">{a.title}</p>
                           <div className="audit-mg">
                             <div>
                               <h3>Evidence</h3>
@@ -598,7 +597,9 @@ function WhereFindingsLand({ audit }: { audit: AuditData }) {
               {ranked.map((r) => (
                 <tr key={r.file} className="hrow">
                   <td className="lab">
-                    <span className="audit-path">{r.file}</span>
+                    <span className="audit-path" title={r.file}>
+                      {r.file}
+                    </span>
                   </td>
                   <td className="num">{r.findings}</td>
                   <td className="num">{r.touches === 0 ? "–" : r.touches}</td>

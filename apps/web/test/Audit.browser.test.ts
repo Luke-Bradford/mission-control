@@ -122,14 +122,22 @@ const withRows = (n: 0 | 1 | "all") => {
 };
 
 describeRendered("Audit first screen in a browser", () => {
-  for (const [width, height] of [
-    [1920, 940],
-    [2560, 1145],
+  for (const [width, height, colorScheme] of [
+    [1920, 940, "light"],
+    [1920, 940, "dark"],
+    [2560, 1145, "light"],
+    [2560, 1145, "dark"],
   ] as const) {
     it(
-      `shows the verdict, five ranked rows and the three right-hand panels at ${width}×${height} without page scroll`,
+      `shows the verdict, five ranked rows and the three right-hand panels at ${width}×${height} in ${colorScheme} without page scroll`,
       async () => {
-        const page = await renderAt({ page: "test/auditBarBrowser.html", width, height, api });
+        const page = await renderAt({
+          page: "test/auditBarBrowser.html",
+          width,
+          height,
+          colorScheme,
+          api,
+        });
         const rows = await page.boxes("tr.rec");
         expect(rows.length).toBeGreaterThanOrEqual(5);
         const verdict = await page.box(".audit-verdict-text");
@@ -139,6 +147,23 @@ describeRendered("Audit first screen in a browser", () => {
           const box = await page.box(panel);
           expect(box.y + box.height).toBeLessThanOrEqual(height);
         }
+        const path = await page.evaluate(
+          () => {
+            const el = document.querySelector<HTMLElement>(".audit-files .audit-path");
+            return el
+              ? {
+                  title: el.title,
+                  whiteSpace: getComputedStyle(el.closest("td") ?? el).whiteSpace,
+                  rowHeight: el.closest("tr")?.getBoundingClientRect().height ?? 0,
+                }
+              : null;
+          },
+          null,
+        );
+        expect(path?.title).toContain("another-long-directory/Audit.tsx");
+        expect(path?.whiteSpace).toBe("nowrap");
+        // The regular 40 px table row remains compact even when the path is much longer.
+        expect(path?.rowHeight).toBeLessThanOrEqual(40);
         for (const toggle of await page.boxes(".audit-rt")) {
           expect(toggle.height).toBeGreaterThanOrEqual(24);
         }
@@ -222,19 +247,22 @@ describeRendered("Audit first screen in a browser", () => {
           }, null);
           expect(scrollable).toBe(true);
         }
-        // The full title of the last row is reachable by opening it.
-        const last = [...focused].pop() ?? "";
+        // The title stays in its expanded trigger, while the detail begins with its evidence.
         await page.evaluate(() => {
           const all = document.querySelectorAll<HTMLElement>(".audit-rt");
           const el = all[all.length - 1];
           // The first row starts open, so a single row is already showing its full title.
           if (el?.getAttribute("aria-expanded") !== "true") el?.click();
         }, null);
-        const full = await page.evaluate(
-          () => document.querySelector(".audit-fulltitle")?.textContent ?? "",
+        const detail = await page.evaluate(
+          () => ({
+            fullTitle: document.querySelector(".audit-fulltitle"),
+            evidence: document.querySelector(".more .audit-mg h3")?.textContent,
+          }),
           null,
         );
-        expect(last.endsWith(full.trim().slice(-20))).toBe(true);
+        expect(detail.fullTitle).toBeNull();
+        expect(detail.evidence).toBe("Evidence");
         expect(await pageScrolls()).toBe(false);
         await page.close();
       },
