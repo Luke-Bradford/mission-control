@@ -3953,7 +3953,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ]),
         );
         return capAudit(
-          store.audit(
+          await store.auditStepped(
             until - Number(match[1]) * 86_400_000,
             until,
             kinds,
