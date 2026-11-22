@@ -2638,10 +2638,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const keepsWorktree = (run: Run): boolean => {
     if (run.reviewId != null || !run.ticket || !run.branch || run.loop?.phase === "done")
       return false;
-    const card = store
-      .board(run.repoId)
-      .find((candidate) => `${run.repoId}#${candidate.issueNumber}` === run.ticket);
-    if (card?.closed) return false;
+    const card = store.boardCardOf(run.ticket);
+    if (card?.repoId === run.repoId && card.closed) return false;
     return !store
       .pullRequestsOnTicket(run.repoId, run.ticket)
       .some((pr) => pr.branch === run.branch && pr.state === "merged");
@@ -3699,8 +3697,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
       // Every way a run starts ends here: the one eligibility check, before a worktree or a claim.
-      const board = store.board(info.repo.id);
-      const card = board.find((i) => i.issueNumber === issue);
+      const card = store.boardItem(info.repo.id, issue) ?? undefined;
       if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
       const rules = await deps.rules(info.repo.id);
       if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
@@ -3754,7 +3751,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         lane: config.crew?.lane,
         laneDefault: config.crew?.laneDefault ?? false,
         body: ticket.body,
-        closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+        closed: (n) => store.boardItem(info.repo.id, n)?.closed,
         waits: waitReader(store, info.repo.id)(card),
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);
@@ -4625,7 +4622,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
-      const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      const card = store.boardItem(info.repo.id, issue);
       // FLIGHT's second review of a blocking floor review: the most capable model, and it reads
       // the first review's findings and FLIGHT's reason
       const secondOf = author?.loop?.flightSecondReview?.[review.sha];

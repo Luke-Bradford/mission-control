@@ -207,6 +207,8 @@ const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 
 type Row = Record<string, SQLInputValue>;
 
+/** Set once the audit-history backfill has run: merges are recorded as they happen, so it never repeats. */
+const AUDIT_BACKFILL_SETTING = "audit_history_backfilled";
 const DAY_MS = 86_400_000;
 const SILENCE_CLOCK = "silence";
 const SILENCE_SEAT_START_CLOCK = "silence-seat-start";
@@ -370,6 +372,7 @@ export class Store {
 
   /** One-time-safe reconstruction from sources that already survived retention. */
   private backfillAuditHistory(): void {
+    if (this.getSetting(AUDIT_BACKFILL_SETTING) !== null) return;
     this.transaction(() => {
       const merged = this.pullRequestRows(
         this.db.prepare("SELECT * FROM pull_requests WHERE merged_at IS NOT NULL").all() as Row[],
@@ -394,6 +397,7 @@ export class Store {
           // A malformed settings value must not prevent the hub from opening.
         }
       }
+      this.setSetting(AUDIT_BACKFILL_SETTING, "1");
     });
   }
 
@@ -1518,9 +1522,13 @@ export class Store {
     return row ? toEscalation(row) : null;
   }
 
-  /** True when any stored row changed. */
+  /**
+   * Makes the repo's cards match `items`, writing only the cards that changed and deleting only
+   * those that left the board. True when any stored row changed.
+   */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
-    return this.changed("board_items", repoId, () => {
+    let changed = false;
+    this.transaction(() => {
       this.boardViews.delete(repoId);
       const before = new Map(
         (
@@ -1529,35 +1537,22 @@ export class Store {
             .all(repoId) as Row[]
         ).map((r) => [r.issue_number as number, r]),
       );
-      this.db.prepare("DELETE FROM board_items WHERE repo_id = ?").run(repoId);
-      const ins = this.db.prepare(
-        `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
-           updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id, assignees, author, after_deps,
-           defect_refs)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
-           status = excluded.status, state = excluded.state, labels = excluded.labels,
-           priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
-           stage = excluded.stage, owner = excluded.owner, parent = excluded.parent,
-           sub_done = excluded.sub_done, sub_total = excluded.sub_total,
-           blocked_by = excluded.blocked_by, milestone = excluded.milestone,
-           size = excluded.size, closed = excluded.closed,
-           priority_source = excluded.priority_source, created_at = excluded.created_at,
-           item_id = excluded.item_id, project_id = excluded.project_id,
-           assignees = excluded.assignees, author = excluded.author,
-           after_deps = excluded.after_deps, defect_refs = excluded.defect_refs`,
+      const columns = `title, status, state, labels, priority, updated_at, url, stage, owner, parent,
+           sub_done, sub_total, blocked_by, milestone, size, closed, priority_source, created_at,
+           item_id, project_id, assignees, author, after_deps, defect_refs`;
+      const names = columns.split(",").map((c) => c.trim());
+      const ins = this.statement(
+        `INSERT INTO board_items (repo_id, issue_number, ${columns})
+         VALUES (?, ?, ${names.map(() => "?").join(", ")})
+         ON CONFLICT(repo_id, issue_number) DO UPDATE SET
+           ${names.map((c) => `${c} = excluded.${c}`).join(", ")}
+         WHERE (${names.map((c) => `${c} IS NOT excluded.${c}`).join(" OR ")})`,
       );
+      const seen = new Set<number>();
       for (const i of items) {
+        seen.add(i.issueNumber);
         const old = before.get(i.issueNumber);
-        if (old !== undefined && (old.status !== i.status || Boolean(old.closed) !== i.closed))
-          this.markFlightPointers(
-            "ticket",
-            `${repoId}#${i.issueNumber}`,
-            i.closed ? "closed" : `moved to ${i.status}`,
-            Date.now(),
-          );
-        ins.run(
+        const written = ins.run(
           repoId,
           i.issueNumber,
           i.title,
@@ -1587,8 +1582,23 @@ export class Store {
             : null,
           i.defectRefs ? JSON.stringify(i.defectRefs) : null,
         );
+        if (Number(written.changes) > 0) changed = true;
+        if (old !== undefined && (old.status !== i.status || Boolean(old.closed) !== i.closed))
+          this.markFlightPointers(
+            "ticket",
+            `${repoId}#${i.issueNumber}`,
+            i.closed ? "closed" : `moved to ${i.status}`,
+            Date.now(),
+          );
+      }
+      const del = this.statement("DELETE FROM board_items WHERE repo_id = ? AND issue_number = ?");
+      for (const n of before.keys()) {
+        if (seen.has(n)) continue;
+        del.run(repoId, n);
+        changed = true;
       }
     });
+    return changed;
   }
 
   board(repoId: RepoId): BoardItem[] {
@@ -1616,6 +1626,13 @@ export class Store {
     RepoId,
     { version: string; cards: readonly Readonly<BoardItem>[] }
   >();
+
+  /** The card a `<repo>#<number>` reference names, else null. */
+  boardCardOf(ref: string): BoardItem | null {
+    const at = ref.lastIndexOf("#");
+    const number = /^[1-9]\d*$/.test(ref.slice(at + 1)) ? Number(ref.slice(at + 1)) : 0;
+    return at < 0 || number === 0 ? null : this.boardItem(ref.slice(0, at), number);
+  }
 
   /** One board card from the last read, else null. */
   boardItem(repoId: RepoId, issueNumber: number): BoardItem | null {
@@ -4364,6 +4381,10 @@ export class Store {
   commsPins(): CommsRow[] {
     return this.commsStore.commsPins();
   }
+  commsReactionsFor(messageIds: readonly string[]): Map<string, CommsReaction[]> {
+    return this.commsStore.commsReactionsFor(messageIds);
+  }
+
   commsReactions(messageId: string): CommsReaction[] {
     return this.commsStore.commsReactions(messageId);
   }
@@ -5172,6 +5193,23 @@ export class Store {
     return r.n;
   }
 
+  /** How many refusals each of `runIds` has had, in one query; a run with none is absent. */
+  guardHitCountsByRun(runIds: readonly string[]): Map<string, number> {
+    const counts = new Map<string, number>();
+    const batchSize = 400;
+    for (let start = 0; start < runIds.length; start += batchSize) {
+      const batch = runIds.slice(start, start + batchSize);
+      const rows = this.db
+        .prepare(
+          `SELECT run_id, COUNT(*) AS n FROM guard_hits
+           WHERE run_id IN (${batch.map(() => "?").join(",")}) GROUP BY run_id`,
+        )
+        .all(...batch) as { run_id: string; n: number }[];
+      for (const r of rows) counts.set(r.run_id, r.n);
+    }
+    return counts;
+  }
+
   /** Hits at or after `sinceMs` per rule; every rule is present, 0 when it has none. */
   guardHitCounts(sinceMs: number): Record<GuardRule, number> {
     const counts = Object.fromEntries(Object.keys(GUARD_RULES).map((k) => [k, 0])) as Record<
@@ -5799,11 +5837,7 @@ export class Store {
     const id = JSON.stringify([entry.source, entry.arrivalId, entry.version]);
     const notification = entry.source === "Board" ? null : this.notification(entry.arrivalId);
     const board =
-      entry.source === "Board"
-        ? this.board(entry.arrivalId.split("#")[0] ?? "").find(
-            (c) => `${c.repoId}#${c.issueNumber}` === entry.arrivalId,
-          )
-        : undefined;
+      entry.source === "Board" ? (this.boardCardOf(entry.arrivalId) ?? undefined) : undefined;
     const repoId = notification?.repoId || board?.repoId || null;
     const kind =
       entry.source === "Teams"
