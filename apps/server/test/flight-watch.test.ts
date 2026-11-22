@@ -79,8 +79,8 @@ import {
   flightSeat,
   flightSeatView,
   flightState,
-  flightWake,
   flightView,
+  flightWake,
   flightWakeHistory,
   markItemsShown,
   markPrsShown,
@@ -5303,7 +5303,10 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
   });
 
   it("puts every open idle ticket in the wake beyond the normal digest cap", () => {
-    store.replaceBoard("mc", Array.from({ length: 40 }, (_, n) => card(n + 1, "Backlog")));
+    store.replaceBoard(
+      "mc",
+      Array.from({ length: 40 }, (_, n) => card(n + 1, "Backlog")),
+    );
     tick(T0);
     const digest = flightWake(read(T0 + FLIGHT_IDLE_SEAT_WAKE_MS)).digest;
     expect(digest.idleTickets).toEqual(

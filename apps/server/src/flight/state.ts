@@ -859,7 +859,9 @@ function idleSeats(
       .sort(),
     ready: [...new Set(seats.flatMap((x) => fit[x.id] ?? []))].sort(),
     delivered: stored.delivered,
-    tickets: tickets.map((t) => ({ ref: t.ref, title: t.title })).sort((a, b) => a.ref.localeCompare(b.ref)),
+    tickets: tickets
+      .map((t) => ({ ref: t.ref, title: t.title }))
+      .sort((a, b) => a.ref.localeCompare(b.ref)),
   };
 }
 
@@ -875,7 +877,10 @@ export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: n
   const delivered = before.delivered.filter((key) =>
     Object.entries(after).some(([id, since]) => key === `${id}:${since}`),
   );
-  if (JSON.stringify(before.seats) === JSON.stringify(after) && before.delivered.length === delivered.length)
+  if (
+    JSON.stringify(before.seats) === JSON.stringify(after) &&
+    before.delivered.length === delivered.length
+  )
     return;
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
