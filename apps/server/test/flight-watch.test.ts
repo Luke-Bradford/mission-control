@@ -5311,8 +5311,8 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     const digest = flightWake(read(T0 + FLIGHT_IDLE_SEAT_WAKE_MS)).digest;
     expect(digest.idleTickets).toEqual(
       expect.arrayContaining([
-        { ref: "mc#1", title: "Ticket 1" },
-        { ref: "mc#40", title: "Ticket 40" },
+        "mc#1 [untrusted] Ticket 1",
+        "mc#40 [untrusted] Ticket 40",
       ]),
     );
     expect(digest.idleTickets).toHaveLength(40);

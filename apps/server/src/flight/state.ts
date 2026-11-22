@@ -860,7 +860,7 @@ function idleSeats(
     ready: [...new Set(seats.flatMap((x) => fit[x.id] ?? []))].sort(),
     delivered: stored.delivered,
     tickets: tickets
-      .map((t) => ({ ref: t.ref, title: t.title }))
+      .map((t) => ({ ref: t.ref, title: t.title, untrustedAuthor: t.untrustedAuthor === true }))
       .sort((a, b) => a.ref.localeCompare(b.ref)),
   };
 }
@@ -1655,7 +1655,12 @@ export function flightWake(
         ),
       },
       ...(wake?.idle?.seats.some((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
-        ? { idleTickets: wake.idle.tickets }
+        ? {
+            idleTickets: wake.idle.tickets.map(
+              (ticket) =>
+                `${ticket.ref} ${ticket.untrustedAuthor ? "[untrusted] " : ""}${ticket.title}`,
+            ),
+          }
         : {}),
       facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
     },

@@ -1292,7 +1292,7 @@ export interface FlightIdleSeats {
   /** Idle-spell keys that have already been delivered successfully. */
   delivered: string[];
   /** Every open ticket near an idle seat, uncapped for the idle wake. */
-  tickets: { ref: string; title: string }[];
+  tickets: { ref: string; title: string; untrustedAuthor: boolean }[];
 }
 
 /** The 30-minute period a seat's idle spell is in once it has stood FLIGHT_IDLE_MS; null before. */
@@ -1364,7 +1364,7 @@ export interface FlightWake
   signals: FlightWakeList<FlightSignal>;
   facts: Record<string, unknown[]>;
   /** Every ticket relevant to a 30-minute idle-seat wake, beyond the normal digest cap. */
-  idleTickets?: { ref: string; title: string }[];
+  idleTickets?: string[];
 }
 
 export const FLIGHT_TICKETS_LISTED = 30;
