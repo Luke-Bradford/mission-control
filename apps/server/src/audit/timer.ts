@@ -1,8 +1,9 @@
 import { AUDIT_EVERY_HOURS_DEFAULT, auditStartedKey, seatDef } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
+import { activeAway } from "../away.ts";
 import { pausedSeat } from "../config/crew-pause.ts";
 import type { CcConfig } from "../config.ts";
-import { accountAtStop } from "../engine/queue.ts";
+import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 
@@ -40,7 +41,7 @@ export function nextAuditDueAt(config: CcConfig, store: Store, repoId: string): 
 export async function auditTick(i: {
   config: CcConfig;
   store: Store;
-  supervisor: Pick<Supervisor, "startAudit" | "busy">;
+  supervisor: Pick<Supervisor, "startAudit" | "busy" | "endRunByEngine">;
   now: number;
   log?: (line: string) => void;
 }): Promise<string[]> {
@@ -49,9 +50,27 @@ export async function auditTick(i: {
   for (const seat of auditSeats(config)) {
     if (pausedSeat(store, seat.id, null) !== null) continue;
     if (supervisor.busy().some((b) => b.seatId === seat.id)) continue;
-    const runId = store.seatSession(seat.id)?.runId ?? null;
-    if (runId !== null && store.run(runId)?.endedAt === null) continue;
-    if (accountAtStop(config, store, runAccountId(store, null, seat.accountId), now)) continue;
+    const session = store.seatSession(seat.id);
+    // The operator stopped this seat: it stays stopped until they start it.
+    if (session?.state === "stopped") continue;
+    const runId = session?.runId ?? null;
+    const open = runId === null ? undefined : store.run(runId);
+    if (runId !== null && open?.endedAt === null) {
+      // A run that ended its turn without report_audit never exits by itself: end it after one
+      // interval, so the no-report flag is recorded and the next pass can start a new run.
+      if (now - open.startedAt >= auditIntervalMs(config) && store.auditReportOfRun(runId) === null)
+        await supervisor.endRunByEngine(runId).catch(() => {});
+      continue;
+    }
+    const accountId = runAccountId(store, null, seat.accountId);
+    if (accountAtStop(config, store, accountId, now)) continue;
+    // Away, the auditor spends no reserve: the test startRun applies to every other non-operator start.
+    if (
+      activeAway(store, now, config.operator.timezone) &&
+      (awayQuotaUnknown(config, store, accountId, now) ||
+        awayQuotaReserve(config, store, accountId, now))
+    )
+      continue;
     const last = Number(store.getSetting(auditStartedKey(seat.id)));
     if (Number.isFinite(last) && last > 0 && now - last < auditIntervalMs(config)) continue;
     store.setSetting(auditStartedKey(seat.id), String(now));

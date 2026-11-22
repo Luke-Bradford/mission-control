@@ -1997,6 +1997,24 @@ export class Store {
     );
   }
 
+  /**
+   * What the AUDIT pack reads of QA over a window: review findings filed under the `scope` category
+   * (outside the ask) and reviews thrown away (superseded or failed before a verdict).
+   */
+  reviewWaste(since: number): { scopeFindings: number; superseded: number; failed: number } {
+    const n = (sql: string): number => (this.db.prepare(sql).get(since) as { n: number }).n;
+    return {
+      scopeFindings: n(
+        `SELECT COUNT(*) AS n FROM review_findings f JOIN reviews r ON r.id = f.review_id
+         WHERE f.category = 'scope' AND r.created_at >= ?`,
+      ),
+      superseded: n(
+        "SELECT COUNT(*) AS n FROM reviews WHERE state = 'superseded' AND created_at >= ?",
+      ),
+      failed: n("SELECT COUNT(*) AS n FROM reviews WHERE state = 'failed' AND created_at >= ?"),
+    };
+  }
+
   /** The report a run saved, or null. */
   auditReportOfRun(runId: string): AuditReport | null {
     return this.auditReportRow("SELECT * FROM audit_reports WHERE run_id = ?", runId);

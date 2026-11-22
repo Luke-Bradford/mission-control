@@ -11721,3 +11721,59 @@ describe("plan sign-off", () => {
     expect((await call("send_to_planner", { issue: 99, basis: "x" })).isError).toBe(true);
   });
 });
+
+describe("the AUDIT seat's read tools", () => {
+  beforeEach(() => {
+    cfg.crew?.sessions[0]?.seats.push(seat("audit-1", "AUDIT"));
+    live("audit-1", "r-audit");
+    live("guido-1", "r-guido");
+    ghImpl = async () => json({ data: { repository: { issues: { pageInfo: {}, nodes: [] } } } });
+  });
+
+  it.each(["list_tickets", "read_pr"])(
+    "%s passes the seat check for the AUDIT seat",
+    async (name) => {
+      const r = await call(
+        name,
+        name === "read_pr" ? { pr: 9 } : { limit: 10 },
+        ctx("audit-1", "r-audit"),
+      );
+      expect(r.text).not.toBe(MC_FLIGHT_ONLY);
+    },
+  );
+
+  it.each(["list_tickets", "read_pr"])("%s still refuses a build seat", async (name) => {
+    const r = await call(
+      name,
+      name === "read_pr" ? { pr: 9 } : { limit: 10 },
+      ctx("guido-1", "r-guido"),
+    );
+    expect(r).toEqual({ text: MC_FLIGHT_ONLY, isError: true });
+  });
+});
+
+describe("flight_state and the AUDIT report", () => {
+  it("shows the report once, then marks it told", async () => {
+    store.recordAuditReport({
+      repoId: "mc",
+      runId: "audit-1:r",
+      at: NOW,
+      verdict: "Three seats idle.",
+      findings: [
+        {
+          rank: 1,
+          area: "flow",
+          problem: "p",
+          evidence: "e",
+          cause: "c",
+          links: [],
+          owner: "flight",
+        },
+      ],
+    });
+    expect(JSON.parse((await call("flight_state", {})).text).audit).toMatchObject({
+      verdict: "Three seats idle.",
+    });
+    expect(JSON.parse((await call("flight_state", {})).text).audit).toBeUndefined();
+  });
+});

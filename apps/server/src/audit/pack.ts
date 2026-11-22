@@ -67,6 +67,18 @@ export function buildAuditPack(i: {
     .runsSince(now - DAY_MS)
     .filter((r) => r.agentId === flightId).length;
   const audit = store.audit(since, now);
+  // Decisions on one subject more than once: the ones that may have gone round in circles.
+  const bySubject = new Map<string, { about: string; count: number; kinds: Set<string> }>();
+  for (const d of store.flightDecisions(since, 500)) {
+    const row = bySubject.get(d.about) ?? { about: d.about, count: 0, kinds: new Set<string>() };
+    row.count += 1;
+    row.kinds.add(d.kind);
+    bySubject.set(d.about, row);
+  }
+  const repeatedDecisions = [...bySubject.values()]
+    .filter((r) => r.count >= 2)
+    .sort((a, b) => b.count - a.count)
+    .map((r) => ({ about: wrapExternalText(r.about), count: r.count, kinds: [...r.kinds] }));
   return JSON.stringify({
     at: now,
     repo: state.repo,
@@ -134,7 +146,9 @@ export function buildAuditPack(i: {
       rounds: top(audit.reviewRounds?.prs ?? []),
       late: top(audit.reviewRounds?.late ?? []),
       specBounces: top(audit.specBounces?.counts ?? []),
+      ...store.reviewWaste(since),
     },
+    flightRepeatedDecisions7d: top(repeatedDecisions),
     previous: previousOf(repoId === "" ? null : store.latestAuditReport(repoId), now),
   });
 }

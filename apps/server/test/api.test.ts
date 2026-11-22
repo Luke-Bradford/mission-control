@@ -6548,6 +6548,44 @@ describe("crew routes", () => {
     ]);
   });
 
+  describe("the AUDIT seat", () => {
+    beforeEach(() => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "audit-1",
+        role: "AUDIT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+    });
+
+    it("starts with {} through startAudit", async () => {
+      const r = await postBody("/api/seats/audit-1/start", {});
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ runId: "r-4" });
+      expect(supervisorCalls).toEqual([["startAudit", "audit-1"]]);
+    });
+
+    it("refuses an issue with 400", async () => {
+      const r = await postBody("/api/seats/audit-1/start", { issue: 5 });
+      expect(r.statusCode).toBe(400);
+      expect(supervisorCalls).toEqual([]);
+    });
+
+    it("reports nothing and a due time of 0 before the first report, then the saved report", async () => {
+      expect((await get("/api/audit/report")).json()).toEqual({ report: null, nextDueAt: 0 });
+      store.recordAuditReport({
+        repoId: "shop-app",
+        runId: "audit-1:r",
+        at: 1_000,
+        verdict: "Two seats idle.",
+        findings: [],
+      });
+      const saved = (await get("/api/audit/report")).json();
+      expect(saved.report).toMatchObject({ runId: "audit-1:r", verdict: "Two seats idle." });
+    });
+  });
+
   describe("the watch seat", () => {
     beforeEach(() => {
       config.crew?.sessions[0]?.seats.push({
