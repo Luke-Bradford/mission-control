@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -177,6 +178,8 @@ import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
+import { stageReviewEvidence } from "../src/pr-evidence/review.ts";
+import { type PrEvidenceStore, prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -308,6 +311,7 @@ let operatorImpl: () => Promise<{ status: number; body: string }>;
 let tidyImpl: CrewTidy;
 let resumeImpl: (runId: string) => Promise<void>;
 let shotsKnown: string[];
+let reviewEvidence: PrEvidenceStore;
 
 const run = (id: string, agentId: string, over: Partial<Run> = {}): Run => ({
   id,
@@ -419,6 +423,7 @@ beforeEach(() => {
   screenshotCalls = [];
   screenshotImpl = async () => Buffer.from("png");
   shotsKnown = [];
+  reviewEvidence = prEvidenceStore(join(dir, "evidence"));
   shotsSaved = [];
   shotsSaveImpl = (png) => {
     shotsSaved.push(png);
@@ -441,6 +446,7 @@ beforeEach(() => {
       save: (png) => shotsSaveImpl(png),
       read: (id) => (shotsKnown.includes(id) ? Buffer.from("png") : null),
     },
+    evidence: reviewEvidence,
     screenshotHud: async (url) => {
       screenshotCalls.push(url);
       return screenshotImpl(url);
@@ -1395,6 +1401,148 @@ describe("tool list", () => {
       expect(t).toMatchObject({ modes: [], grantable: ["read-only"] });
       expect(t.inputSchema).toMatchObject({ type: "object", additionalProperties: false });
     }
+  });
+});
+
+describe("add_review_evidence", () => {
+  const picture = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  const blob = createHash("sha1").update(`blob ${picture.length}\0`).update(picture).digest("hex");
+
+  it("archives a verified committed PNG for this head and stages it for review", async () => {
+    const previous = `submitted-${"c".repeat(64)}.png`;
+    reviewEvidence.save(
+      {
+        repoId: "mc",
+        pr: 9,
+        sha: SHA,
+        mainSha: MAIN,
+        capturedAt: NOW,
+        pairs: [],
+        submitted: [
+          {
+            name: previous,
+            caption: "Earlier picture",
+            viewport: { width: 1600, height: 1000 },
+            side: "head",
+            path: "docs/earlier.png",
+          },
+        ],
+      },
+      [{ name: previous, png: picture }],
+    );
+    ghImpl = async (call) => {
+      if (call[1]?.endsWith("/pulls/9"))
+        return { code: 0, stdout: JSON.stringify({ head: { sha: SHA } }), stderr: "" };
+      if (call[1]?.includes("/contents/docs/audit.png"))
+        return {
+          code: 0,
+          stdout: JSON.stringify({
+            type: "file",
+            path: "docs/audit.png",
+            sha: blob,
+            size: picture.length,
+            encoding: "base64",
+            content: picture.toString("base64"),
+          }),
+          stderr: "",
+        };
+      throw new Error(`Unexpected GitHub call: ${call.join(" ")}`);
+    };
+    const tool = need(tools.find((candidate) => candidate.name === "add_review_evidence"));
+    await expect(
+      tool.call(ctx(), {
+        pr: 9,
+        head: SHA,
+        images: [
+          {
+            path: "docs/audit.png",
+            caption: "Audit empty state",
+            viewport: { width: 1280, height: 900 },
+            side: "reference",
+          },
+        ],
+        basis: "Checked the committed PNG.",
+      }),
+    ).resolves.toMatchObject({
+      text: "Added 1 committed picture to review evidence for this PR head.",
+    });
+    const manifest = reviewEvidence.manifest("mc", 9, SHA);
+    expect(manifest?.submitted).toHaveLength(2);
+    const scratch = join(dir, "scratch");
+    mkdirSync(scratch);
+    await expect(stageReviewEvidence(reviewEvidence, "mc", 9, SHA, scratch)).resolves.toMatchObject(
+      {
+        submitted: [
+          { caption: "Earlier picture" },
+          {
+            caption: "Audit empty state",
+            viewport: { width: 1280, height: 900 },
+            side: "reference",
+          },
+        ],
+      },
+    );
+    expect(ghCalls.every((call) => call[0] === "api" && !call.includes("--method"))).toBe(true);
+  });
+
+  it("refuses a changed head and a blob that is not PNG", async () => {
+    const tool = need(tools.find((candidate) => candidate.name === "add_review_evidence"));
+    ghImpl = async () => ({
+      code: 0,
+      stdout: JSON.stringify({ head: { sha: SHA_B } }),
+      stderr: "",
+    });
+    await expect(
+      tool.call(ctx(), {
+        pr: 9,
+        head: SHA,
+        images: [
+          {
+            path: "docs/audit.png",
+            caption: "Audit",
+            viewport: { width: 1, height: 1 },
+            side: "head",
+          },
+        ],
+        basis: "Checked the head.",
+      }),
+    ).resolves.toMatchObject({
+      isError: true,
+      text: expect.stringContaining("The PR head changed."),
+    });
+    ghImpl = async (call) =>
+      call[1]?.endsWith("/pulls/9")
+        ? { code: 0, stdout: JSON.stringify({ head: { sha: SHA } }), stderr: "" }
+        : {
+            code: 0,
+            stdout: JSON.stringify({
+              type: "file",
+              path: "docs/audit.png",
+              sha: "a".repeat(40),
+              size: 8,
+              encoding: "base64",
+              content: Buffer.alloc(8).toString("base64"),
+            }),
+            stderr: "",
+          };
+    await expect(
+      tool.call(ctx(), {
+        pr: 9,
+        head: SHA,
+        images: [
+          {
+            path: "docs/audit.png",
+            caption: "Audit",
+            viewport: { width: 1, height: 1 },
+            side: "head",
+          },
+        ],
+        basis: "Checked the blob.",
+      }),
+    ).resolves.toMatchObject({
+      isError: true,
+      text: "Picture is not a committed PNG: docs/audit.png.",
+    });
   });
 });
 
