@@ -1,7 +1,7 @@
 import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type { AgentId, LoopKind, PullRequestView, RepoId, Run, RunLoop, RunStatus } from "@mc/core";
 import { toRun } from "./rows.ts";
-import { MAX_OPEN_RUN_AGE_MS } from "./types.ts";
+import { MAX_OPEN_RUN_AGE_MS, RUN_ATTEMPTS_KEEP_MS, RUN_SNAPSHOT_KEEP_MS } from "./types.ts";
 
 type Row = Record<string, SQLInputValue>;
 
@@ -28,6 +28,40 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         at: r.at as number,
         data: JSON.parse(r.data as string) as Record<string, unknown>,
       }));
+    },
+
+    /**
+     * Retention for run_attempts; returns the rows deleted. A `run` snapshot a later one of its run
+     * supersedes goes after `RUN_SNAPSHOT_KEEP_MS` (every run keeps its final snapshot); any other
+     * attempt but `loop` (the Audit death-loop list reads those) goes after `RUN_ATTEMPTS_KEEP_MS`.
+     */
+    pruneAttempts(now: number): number {
+      const rules = [
+        [
+          `kind = 'run' AND at < ? AND id < (SELECT MAX(b.id) FROM run_attempts b
+             WHERE b.run_id = run_attempts.run_id AND b.kind = 'run')`,
+          now - RUN_SNAPSHOT_KEEP_MS,
+        ],
+        ["kind NOT IN ('loop', 'run') AND at < ?", now - RUN_ATTEMPTS_KEEP_MS],
+      ] as const;
+      let deleted = 0;
+      for (const [where, cutoff] of rules) {
+        for (;;) {
+          // read first: a database with nothing to prune is not written, so opening it never waits
+          // on another connection's write lock
+          const ids = (
+            db.prepare(`SELECT id FROM run_attempts WHERE ${where} LIMIT 5000`).all(cutoff) as {
+              id: number;
+            }[]
+          ).map((r) => r.id);
+          if (ids.length === 0) break;
+          db.prepare(`DELETE FROM run_attempts WHERE id IN (${ids.map(() => "?").join(",")})`).run(
+            ...ids,
+          );
+          deleted += ids.length;
+        }
+      }
+      return deleted;
     },
 
     appendAttempt(runId: string, kind: string, at: number, data: object): void {

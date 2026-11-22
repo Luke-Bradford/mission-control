@@ -108,7 +108,7 @@ describe("statusColumns and missingColumns", () => {
 describe("githubBudget", () => {
   it("counts a board poll, the PR sweep and the flow batches", () => {
     expect(GITHUB_POINTS_PER_HOUR).toBe(5000);
-    expect(PR_MAX_PAGES).toBe(10);
+    expect(PR_MAX_PAGES).toBe(20);
     expect(FLOW_BATCH).toBe(20);
     expect(FLOW_TIMELINE_MAX_PAGES).toBe(5);
     // poll: ceil(250/100)=3 pages + 3 markers + 1 label + 1 milestones + 1 PR page = 9; 60 polls/h.
@@ -117,9 +117,9 @@ describe("githubBudget", () => {
     expect(FLOW_LONG_TIMELINES).toBe(5);
     expect(githubBudget({ items: 250, needsYouLabels: 1, githubSeconds: 60 })).toEqual({
       boardPerHour: 540,
-      sweepPerHour: 10,
+      sweepPerHour: 20,
       flowPerHour: 46,
-      totalPerHour: 596,
+      totalPerHour: 606,
     });
     // Fewer items than the allowance: no more long issues than items.
     expect(githubBudget({ items: 2, needsYouLabels: 1, githubSeconds: 60 }).flowPerHour).toBe(

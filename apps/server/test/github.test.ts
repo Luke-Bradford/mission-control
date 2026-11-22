@@ -1,4 +1,11 @@
-import { type BoardItem, columnOf, FLIGHT_MAIN_SETTING, hudColumnOf } from "@mc/core";
+import {
+  type BoardItem,
+  columnOf,
+  FLIGHT_MAIN_SETTING,
+  hudColumnOf,
+  PR_MAX_PAGES,
+  PR_PAGE_SIZE,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   call,
@@ -2135,6 +2142,17 @@ describe("sweepPullRequests", () => {
     expect(sweepStatus()).toMatchObject({ ok: true, error: null });
   });
 
+  it("asks for PR_PAGE_SIZE pull requests a page, not 100 (a 100-PR page got HTTP 502)", async () => {
+    const queries: string[] = [];
+    const gql: Gql = async (query) => {
+      queries.push(query);
+      return prPage([recent(1)], null);
+    };
+    await sweepPullRequests(repo, store, gql, NOW);
+    expect(PR_PAGE_SIZE).toBe(50);
+    expect(queries[0]).toContain(`pullRequests(first: ${PR_PAGE_SIZE},`);
+  });
+
   it("stops at PR_MAX_PAGES on a source that never ends", async () => {
     let n = 0;
     const calls: number[] = [];
@@ -2143,8 +2161,8 @@ describe("sweepPullRequests", () => {
       return prPage([recent(++n)], `C${n}`);
     };
     await sweepPullRequests(repo, store, gql, NOW);
-    expect(calls).toHaveLength(10);
-    expect(store.pullRequests("shop-app")).toHaveLength(10);
+    expect(calls).toHaveLength(PR_MAX_PAGES);
+    expect(store.pullRequests("shop-app")).toHaveLength(PR_MAX_PAGES);
   });
 
   // GitHub does not bump a PR's updatedAt when its CI finishes: the sweep read `pending`, the

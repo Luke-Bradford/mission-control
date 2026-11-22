@@ -21,6 +21,7 @@ import {
   type Owner,
   PR_KEEP_MS,
   PR_MAX_PAGES,
+  PR_PAGE_SIZE,
   type PrCheck,
   type PrFileInput,
   type PullRequestView,
@@ -251,7 +252,7 @@ const prsQuery = (
   ${RATE_LIMIT_SELECTION}
   repository(owner: $owner, name: $name) {
     ${observe ? MAIN_SELECTION : ""}
-    pullRequests(first: 100, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
+    pullRequests(first: ${PR_PAGE_SIZE}, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {${PR_FIELDS}}
     }

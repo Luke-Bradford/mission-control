@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS runs (
   model TEXT, branch TEXT, ticket TEXT, cost_usd REAL, tokens TEXT, transcript_path TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, started_at);
+CREATE INDEX IF NOT EXISTS runs_ticket_started ON runs(ticket, started_at);
 -- Kept apart from runs so run queries stay small; written on its own change check.
 CREATE TABLE IF NOT EXISTS run_digests (run_id TEXT PRIMARY KEY, digest TEXT NOT NULL);
 -- HUD state changes that matter (#26 B14): into or out of a notable state.
