@@ -152,6 +152,7 @@ describe("closed-ask reconcile on upgrade", () => {
     const mergedHistory = ask("shop-app#902", "PR 912");
     const closedQuestion = ask("shop-app#903");
     const live = ask("shop-app#904");
+    const inReview = ask("shop-app#905");
     const db = (first as unknown as { db: DatabaseSync }).db;
     // the closure rows are gone from board_items and pull_requests; only the hub's records remain
     db.prepare(
@@ -163,6 +164,10 @@ describe("closed-ask reconcile on upgrade", () => {
     db.prepare(
       "INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at) VALUES ('ask:1', 1, 'ticket-closed', 'r', 'hub', 'q', 'shop-app#903', 0, 1)",
     ).run();
+    // a successful move to a column other than Done does not close the ticket
+    db.prepare(
+      "INSERT INTO board_moves (run_id, repo_id, issue, board_column, state, at) VALUES ('r', 'shop-app', 905, 'Review', 'done', 1)",
+    ).run();
     // the state before this code ran: no reconcile has happened
     db.prepare("DELETE FROM settings WHERE key = 'comms.closed-asks-reconciled'").run();
     expect(first.openCommsItems().map((i) => i.id)).toContain(doneCard?.id);
@@ -170,7 +175,7 @@ describe("closed-ask reconcile on upgrade", () => {
     const second = new Store(path);
     try {
       const open = second.openCommsItems().map((i) => i.id);
-      expect(open).toEqual([live?.id]);
+      expect(open).toEqual([live?.id, inReview?.id]);
       expect(second.commsSettlement(doneCard?.id ?? "")?.reason).toBe(
         "Its ticket or PR was closed",
       );

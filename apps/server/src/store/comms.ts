@@ -1151,7 +1151,7 @@ export class CommsQueries {
 
   /**
    * Settles the open asks about a ticket the hub's own records show closed or merged, even when
-   * the board and PR caches no longer hold its row: a card moved to Done by a run, a merged PR kept
+   * the board and PR caches no longer hold its row: a card moved into Done by a run, a merged PR kept
    * in `pr_history`, or a question closed because its ticket closed or its PR merged or closed.
    * Reads first and writes only when it settles something. Returns how many it settled.
    */
@@ -1170,7 +1170,7 @@ export class CommsQueries {
         if (r.ticket) closed.add(r.ticket);
     };
     collect(
-      "SELECT DISTINCT repo_id || '#' || issue AS ticket FROM board_moves WHERE state = 'done'",
+      "SELECT DISTINCT repo_id || '#' || issue AS ticket FROM board_moves WHERE state = 'done' AND board_column = 'Done'",
     );
     collect("SELECT DISTINCT json_extract(record, '$.ticket') AS ticket FROM pr_history");
     collect(
