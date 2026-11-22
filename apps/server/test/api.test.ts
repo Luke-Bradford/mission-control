@@ -1143,6 +1143,48 @@ describe("Comms API", () => {
         .items.map((i: { id: string }) => i.id);
       expect(later).toContain(real.id);
       expect(later).not.toContain(prMerged.id);
+      // nor does the board dropping the closed ticket's row
+      store.replaceBoard("shop-app", [board(802, false), board(803, false)]);
+      const afterBoard = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(afterBoard).toContain(real.id);
+      expect(afterBoard).not.toContain(ticketClosed.id);
+    });
+  });
+
+  it("keeps an ask whose merged PR survives only in the history out of the open list", async () => {
+    const ask = commsRow("alpha", "beta", "Old PR", clock, "shop-app#810", "PR 820", "question");
+    const real = commsRow("alpha", "beta", "Waiting", clock, "shop-app#811", "PR 821", "question");
+    store.upsertPullRequests(
+      "shop-app",
+      [820].map((number) => ({
+        repoId: "shop-app",
+        number,
+        title: "old",
+        url: "",
+        branch: "fix/810",
+        ticket: "shop-app#810",
+        state: "merged" as const,
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: clock,
+        updatedAt: clock,
+        mergedAt: clock,
+        headSha: null,
+        mergeable: null,
+      })),
+      clock,
+    );
+    // the live row is gone before this code ran: only the history is left
+    (store as unknown as { db: { exec(sql: string): void } }).db.exec("DELETE FROM pull_requests");
+    await withCommsApp(async (comms) => {
+      const ids = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(ids).toContain(real.id);
+      expect(ids).not.toContain(ask.id);
     });
   });
 

@@ -1083,20 +1083,34 @@ export class CommsQueries {
   }
 
   /**
-   * Settles the open asks naming a merged or closed PR of `repoId` (all of them, or just `number`).
-   * The PR cache drops such a row later, and the ask must not reopen when it does.
+   * Settles the open asks whose ticket is closed or whose PR is merged or closed, as the stored
+   * boards and PRs show now. The caches drop those rows later (a board refresh, a PR sweep), and
+   * the ask must not reopen when they do; merged PRs also stay in `pr_history`. Safe to repeat.
    */
-  settleAsksOfClosedPrs(repoId: string, at: number, number?: number): void {
+  settleAsksOfClosedWork(at: number): void {
     this.db
       .prepare(
         `INSERT INTO comms_settlements (message_id, settled_by, reason, at)
-         SELECT c.id, ?, 'Its PR was closed', ? FROM comms c
-         JOIN pull_requests p ON c.ref = 'PR ' || p.number AND c.ticket LIKE p.repo_id || '#%'
-         WHERE p.repo_id = ? AND p.state IN ('merged', 'closed') AND (? IS NULL OR p.number = ?)
-           AND c.label IN ('question', 'blocker')
+         SELECT c.id, ?, 'Its ticket or PR was closed', ? FROM comms c
+         WHERE c.label IN ('question', 'blocker')
+           AND (
+             EXISTS (
+               SELECT 1 FROM board_items b
+               WHERE b.closed = 1 AND c.ticket = b.repo_id || '#' || b.issue_number
+             )
+             OR EXISTS (
+               SELECT 1 FROM pull_requests p
+               WHERE p.state IN ('merged', 'closed') AND c.ref = 'PR ' || p.number
+                 AND c.ticket LIKE p.repo_id || '#%'
+             )
+             OR EXISTS (
+               SELECT 1 FROM pr_history h
+               WHERE c.ref = 'PR ' || h.number AND c.ticket LIKE h.repo_id || '#%'
+             )
+           )
          ON CONFLICT(message_id) DO NOTHING`,
       )
-      .run(COMMS_MC, at, repoId, number ?? null, number ?? null);
+      .run(COMMS_MC, at);
   }
 
   /**
@@ -1123,6 +1137,10 @@ export class CommsQueries {
              SELECT 1 FROM pull_requests p
              WHERE p.state IN ('merged', 'closed') AND c.ref = 'PR ' || p.number
                AND c.ticket LIKE p.repo_id || '#%'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM pr_history h
+             WHERE c.ref = 'PR ' || h.number AND c.ticket LIKE h.repo_id || '#%'
            )
            AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
          ORDER BY c.at ASC, c.id ASC`,

@@ -1494,6 +1494,7 @@ export class Store {
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
     return this.changed("board_items", repoId, () => {
       this.boardViews.delete(repoId);
+      this.commsStore.settleAsksOfClosedWork(Date.now());
       const before = new Map(
         (
           this.db
@@ -1608,7 +1609,7 @@ export class Store {
   /** Replaces the repo's rows with `prs`. True when any stored row changed. */
   replacePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): boolean {
     return this.changed("pull_requests", repoId, () => {
-      this.commsStore.settleAsksOfClosedPrs(repoId, readAt);
+      this.commsStore.settleAsksOfClosedWork(readAt);
       this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ?").run(repoId);
       this.writePullRequests(repoId, prs, readAt);
     });
@@ -1635,7 +1636,7 @@ export class Store {
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
         if (!seen.has(number) && !kept.has(number) && at < readAt) {
-          this.commsStore.settleAsksOfClosedPrs(repoId, readAt, number);
+          this.commsStore.settleAsksOfClosedWork(readAt);
           del.run(repoId, number);
         }
       }
