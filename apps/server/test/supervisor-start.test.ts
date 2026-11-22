@@ -37,6 +37,7 @@ import {
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
+  DEFAULT_SEAT_COMMANDS,
   estimateTokens,
   FLIGHT_FULL_BUILTINS,
   freezeRules,
@@ -1001,7 +1002,8 @@ describe("startRun", () => {
         bodyLength: TICKET.body.length,
         branch: BRANCH,
         area: ["apps/**"],
-        commands: [],
+        // the harness repo sets no commands and is the hub's own, so it gets the pnpm defaults
+        commands: DEFAULT_SEAT_COMMANDS.writer,
         fullSuite: [],
         ...(startedProfile ? { profile: startedProfile } : {}),
         profileNames: DEFAULT_PROFILES.map((p) => p.name),
