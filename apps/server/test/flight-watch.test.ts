@@ -79,6 +79,7 @@ import {
   flightSeat,
   flightSeatView,
   flightState,
+  flightWake,
   flightView,
   flightWakeHistory,
   markItemsShown,
@@ -5301,6 +5302,19 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(wakeSummary(read(T0 + GAP))).toContain("40 open tickets (9 with no board status");
   });
 
+  it("puts every open idle ticket in the wake beyond the normal digest cap", () => {
+    store.replaceBoard("mc", Array.from({ length: 40 }, (_, n) => card(n + 1, "Backlog")));
+    tick(T0);
+    const digest = flightWake(read(T0 + FLIGHT_IDLE_SEAT_WAKE_MS)).digest;
+    expect(digest.idleTickets).toEqual(
+      expect.arrayContaining([
+        { ref: "mc#1", title: "Ticket 1" },
+        { ref: "mc#40", title: "Ticket 40" },
+      ]),
+    );
+    expect(digest.idleTickets).toHaveLength(40);
+  });
+
   it("names a web seat whose only ticket is past the digest's 30", () => {
     const server = Array.from({ length: 31 }, (_, n) => card(n + 1, "Backlog"));
     const web = { ...card(90, "Backlog", ["area:web"]), createdAt: T0 + 1000 };
@@ -5376,6 +5390,44 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       );
 
       nowMs += FLIGHT_BATCH_MS - MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+    });
+
+    it("does not re-wake a delivered idle spell after a hub restart", async () => {
+      await watch.check();
+      nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      watch.stop();
+      makeWatch({ log: (line: string) => void logged.push(line) });
+      await watch.check();
+      nowMs += FLIGHT_BATCH_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      live("guido-1", "r-guido");
+      await watch.check();
+      nowMs += MIN;
+      store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
+      store.setSeatSession(row("guido-1", null));
+      await watch.check();
+      nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+    });
+
+    it("retries an undelivered idle spell after a hub restart", async () => {
+      await watch.check();
+      sendFails = true;
+      nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      watch.stop();
+      makeWatch({ log: (line: string) => void logged.push(line) });
+      sendFails = false;
       await watch.check();
       expect(sendCalls).toHaveLength(2);
     });

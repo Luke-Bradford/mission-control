@@ -798,18 +798,28 @@ function wakeInputs(i: {
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
 export const FLIGHT_IDLE_SEAT_SETTING = "flight.idle-seat";
 
-const readIdleSince = (store: Store): Record<string, number> => {
+const readIdleState = (store: Store): { seats: Record<string, number>; delivered: string[] } => {
   try {
     const v = JSON.parse(store.getSetting(FLIGHT_IDLE_SEAT_SETTING) || "null") as {
       seats?: Record<string, unknown>;
+      delivered?: unknown;
     } | null;
-    return Object.fromEntries(
-      Object.entries(v?.seats ?? {}).filter((e): e is [string, number] => typeof e[1] === "number"),
-    );
+    return {
+      seats: Object.fromEntries(
+        Object.entries(v?.seats ?? {}).filter(
+          (e): e is [string, number] => typeof e[1] === "number",
+        ),
+      ),
+      delivered: Array.isArray(v?.delivered)
+        ? v.delivered.filter((key): key is string => typeof key === "string")
+        : [],
+    };
   } catch {
-    return {};
+    return { seats: {}, delivered: [] };
   }
 };
+
+const idleKey = (seat: { id: string; since: number }): string => `${seat.id}:${seat.since}`;
 
 /**
  * The free build seats that have open tickets near their area (Backlog, Refinement or Ready), read from the board with no FLIGHT tokens. A ticket is near a
@@ -834,11 +844,11 @@ function idleSeats(
     .filter((x) => x.near.length > 0);
   if (seats.length === 0) return undefined;
   const tickets = [...new Map(seats.flatMap((x) => x.near).map((t) => [t.ref, t])).values()];
-  const stored = readIdleSince(i.store);
+  const stored = readIdleState(i.store);
   return {
     seats: seats
       .map((x) => {
-        const since = stored[x.id] ?? i.now;
+        const since = stored.seats[x.id] ?? i.now;
         return { id: x.id, since, ms: Math.max(0, i.now - since) };
       })
       .sort((a, b) => a.id.localeCompare(b.id)),
@@ -848,6 +858,8 @@ function idleSeats(
       .map((t) => t.ref)
       .sort(),
     ready: [...new Set(seats.flatMap((x) => fit[x.id] ?? []))].sort(),
+    delivered: stored.delivered,
+    tickets: tickets.map((t) => ({ ref: t.ref, title: t.title })).sort((a, b) => a.ref.localeCompare(b.ref)),
   };
 }
 
@@ -856,14 +868,32 @@ function idleSeats(
  * and dropped when it stops. The watcher calls it on each look; reads of the state never write.
  */
 export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: number): void {
-  const before = readIdleSince(store);
+  const before = readIdleState(store);
   const after = Object.fromEntries(
-    (s.wake?.idle?.seats ?? []).map((x) => [x.id, before[x.id] ?? now]),
+    (s.wake?.idle?.seats ?? []).map((x) => [x.id, before.seats[x.id] ?? now]),
   );
-  if (JSON.stringify(before) === JSON.stringify(after)) return;
+  const delivered = before.delivered.filter((key) =>
+    Object.entries(after).some(([id, since]) => key === `${id}:${since}`),
+  );
+  if (JSON.stringify(before.seats) === JSON.stringify(after) && before.delivered.length === delivered.length)
+    return;
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
-    Object.keys(after).length === 0 ? "" : JSON.stringify({ seats: after }),
+    Object.keys(after).length === 0 ? "" : JSON.stringify({ seats: after, delivered }),
+  );
+}
+
+/** Marks successful idle-seat delivery durably, so a hub restart does not re-wake the same spell. */
+export function markIdleSeatsShown(store: Store, s: Pick<FlightState, "wake">): void {
+  const state = readIdleState(store);
+  const delivered = new Set(state.delivered);
+  for (const seat of s.wake?.idle?.seats ?? []) {
+    if (seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS) delivered.add(idleKey(seat));
+  }
+  if (delivered.size === state.delivered.length) return;
+  store.setSetting(
+    FLIGHT_IDLE_SEAT_SETTING,
+    JSON.stringify({ seats: state.seats, delivered: [...delivered].sort() }),
   );
 }
 
@@ -1506,7 +1536,7 @@ export function flightWake(
     memory = [],
     prFlow: flow,
     mergeQueue,
-    wake: _wake,
+    wake,
     ...rest
   } = state;
   const briefHashes = new Map(
@@ -1619,6 +1649,9 @@ export function flightWake(
             : t,
         ),
       },
+      ...(wake?.idle?.seats.some((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
+        ? { idleTickets: wake.idle.tickets }
+        : {}),
       facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
     },
   };
@@ -1644,9 +1677,11 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
   // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
   // tickets; keeping this to the seat and spell start avoids re-waking as the board changes.
+  const delivered = new Set(s.wake?.idle?.delivered ?? []);
   const idle = (s.wake?.idle?.seats ?? [])
     .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
-    .map((seat) => `${seat.id}:${seat.since}`);
+    .filter((seat) => !delivered.has(idleKey(seat)))
+    .map(idleKey);
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
