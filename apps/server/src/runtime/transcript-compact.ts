@@ -1,3 +1,4 @@
+import { parseJson, rethrowJson } from "../json.ts";
 /**
  * What a run's transcript keeps of each CLI stdout line (#934). The keeper persists
  * `compactTranscriptLine(line)` instead of the line, so a run holds kilobytes per message:
@@ -203,7 +204,7 @@ export function compactTranscriptLine(line: string, heartbeats?: DeltaHeartbeats
   if (!dropsDelta && !dropsTurnDiff && !mayBeUsage && !mayBeBig && !completes) return line;
   let m: unknown;
   try {
-    m = JSON.parse(line);
+    m = parseJson<unknown>(line, undefined, rethrowJson);
   } catch {
     return line;
   }

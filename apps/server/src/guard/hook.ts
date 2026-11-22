@@ -30,7 +30,7 @@ import {
   HOOK_RETRY_MS,
   LOOPBACK_HOST,
 } from "@mc/core";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 
 export interface HookResult {
   out: string;
@@ -151,7 +151,7 @@ function verdict(status: number, text: string): string | null {
   if (status !== 200) return null;
   let v: unknown;
   try {
-    v = JSON.parse(text);
+    v = parseJson<unknown>(text, undefined, rethrowJson);
   } catch {
     return null;
   }

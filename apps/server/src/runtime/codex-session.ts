@@ -12,7 +12,7 @@ import {
   type SessionEvent,
 } from "@mc/core";
 import { plainCall } from "../guard/plain-call.ts";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { str } from "../util.ts";
 import { CODEX_MCP_ELICITATION } from "./codex-wire.ts";
 import { CODEX_DELIVERY } from "./keeper.ts";
@@ -96,7 +96,7 @@ function readOutbox(path: string, transcriptPath?: string): Map<string, string> 
     for (const line of readFileSync(transcriptPath, "utf8").split("\n")) {
       let message: unknown;
       try {
-        message = JSON.parse(line);
+        message = parseJson<unknown>(line, undefined, rethrowJson);
       } catch {
         continue;
       }
@@ -433,7 +433,7 @@ function codexSession(
   transport.onLine((line) => {
     let m: unknown;
     try {
-      m = JSON.parse(line);
+      m = parseJson<unknown>(line, undefined, rethrowJson);
     } catch {
       return;
     }

@@ -1,3 +1,4 @@
+import { parseJson, rethrowJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { Store } from "../store.ts";
 
@@ -16,7 +17,12 @@ export function trustedAuthor(
   const value = store.getSetting(key(repo, login));
   if (!value) return false;
   try {
-    const entry = JSON.parse(value);
+    const entry = parseJson<{ trusted?: unknown; at?: unknown } | undefined>(
+      value,
+      undefined,
+      rethrowJson,
+    );
+    if (entry === undefined) return false;
     return entry.trusted === true && typeof entry.at === "number" && now - entry.at < TTL;
   } catch {
     return false;
@@ -38,7 +44,11 @@ async function readCollaborator(
   const saved = fresh ? null : store.getSetting(key(repo, login));
   if (saved) {
     try {
-      if (now - JSON.parse(saved).at < TTL) return trustedAuthor(store, repo, login, now);
+      if (
+        now - (parseJson<{ at?: number } | undefined>(saved, undefined, rethrowJson)?.at ?? 0) <
+        TTL
+      )
+        return trustedAuthor(store, repo, login, now);
     } catch {
       /* read again */
     }
@@ -50,7 +60,12 @@ async function readCollaborator(
   let trusted = false;
   if (result.code === 0) {
     try {
-      trusted = ["write", "maintain", "admin"].includes(JSON.parse(result.stdout).permission);
+      trusted = ["write", "maintain", "admin"].includes(
+        String(
+          parseJson<{ permission?: unknown } | undefined>(result.stdout, undefined, rethrowJson)
+            ?.permission,
+        ),
+      );
     } catch {
       /* fail closed */
     }

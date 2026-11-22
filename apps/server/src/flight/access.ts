@@ -15,6 +15,7 @@ import {
   MC_TOOL_NAMES,
 } from "@mc/core";
 import { z } from "zod";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
 import { isKept, SAFE_BRANCH } from "../repo/branch-tidy.ts";
@@ -153,7 +154,7 @@ export function createAccessTools(h: PowerHelpers) {
         ]);
         let openPrs: unknown;
         try {
-          openPrs = JSON.parse(open.stdout);
+          openPrs = parseJson<unknown>(open.stdout, undefined, rethrowJson);
         } catch {
           openPrs = null;
         }

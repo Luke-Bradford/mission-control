@@ -17,7 +17,7 @@ import {
   type TokenUsage,
   workSummary,
 } from "@mc/core";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { cleanText } from "../repo/clean.ts";
 import { codexPlan, codexTool, transcriptVendor } from "../transcript/codex-transcript.ts";
 import { str } from "../util.ts";
@@ -829,7 +829,7 @@ export function foldTranscript(
     if (!line.startsWith("{") || line.startsWith(STREAM_EVENT_PREFIX)) continue;
     let ev: unknown;
     try {
-      ev = JSON.parse(line);
+      ev = parseJson<unknown>(line, undefined, rethrowJson);
     } catch {
       continue;
     }

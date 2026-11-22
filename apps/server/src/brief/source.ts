@@ -13,7 +13,7 @@ import { pendingRunApproval } from "../attention/subjects.ts";
 import { flightQuestionMessageId } from "../comms/question.ts";
 import type { CcConfig } from "../config.ts";
 import { externalMergeHold, externalPrControl } from "../external-pr-control.ts";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 // FLIGHT's brief keeps its `parked` and `aside` keys: they are its tool contract.
@@ -46,7 +46,7 @@ export const briefHash = (value: unknown): string =>
 const settingFact = (store: Store, key: string): unknown => {
   const raw = store.getSetting(key);
   try {
-    return JSON.parse(raw ?? "null");
+    return parseJson<unknown>(raw ?? "null", undefined, rethrowJson);
   } catch {
     return { unreadable: raw };
   }
@@ -297,7 +297,7 @@ export function briefSourceRevision(
     queueProposals: [...queueKeys].sort().map((key) => {
       const raw = store.getSetting(key);
       try {
-        const { state: _dispatchState, ...facts } = JSON.parse(raw ?? "{}");
+        const { state: _dispatchState, ...facts } = parseJson<Record<string, unknown>>(raw, {});
         return [key, facts];
       } catch {
         return [key, raw];

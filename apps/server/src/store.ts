@@ -126,7 +126,7 @@ import {
 } from "@mc/core";
 import { BoundedMap } from "./bounded.ts";
 import { StandingInstructions } from "./instructions/standing.ts";
-import { parseJson } from "./json.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
@@ -399,7 +399,10 @@ export class Store {
       );
       for (const row of saved) {
         try {
-          const value = JSON.parse(row.value) as { day?: unknown; report?: { at?: unknown } };
+          const value = parseJson<unknown>(row.value, undefined, rethrowJson) as {
+            day?: unknown;
+            report?: { at?: unknown };
+          };
           const repoId = row.key.slice(`${FLIGHT_RETROSPECTIVE_SETTING}:`.length);
           if (typeof value.day === "string" && typeof value.report?.at === "number")
             addReport.run(repoId, value.day, value.report.at, JSON.stringify(value.report));
@@ -2280,7 +2283,7 @@ export class Store {
   ): number {
     const key = `silence-quiet-at-seen:${kind}`;
     try {
-      const seen = JSON.parse(this.getSetting(key) ?? "null") as {
+      const seen = parseJson<unknown>(this.getSetting(key) ?? "null", undefined, rethrowJson) as {
         lastSeenAt?: unknown;
         quietTotal?: unknown;
       } | null;
@@ -3685,7 +3688,7 @@ export class Store {
       .all(repoId, pr, ...(headSha === undefined ? [] : [headSha])) as Row[];
     return rows.flatMap((row) => {
       try {
-        return [JSON.parse(row.report as string) as QaReport];
+        return [parseJson<unknown>(row.report as string, undefined, rethrowJson) as QaReport];
       } catch {
         return [];
       }

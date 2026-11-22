@@ -169,7 +169,7 @@ export async function collectTeams(
         );
       }
       const saved = store.getSetting(cursorKey);
-      const pending: string[] = saved ? JSON.parse(saved) : [first.href];
+      const pending: string[] = saved ? parseJson<string[]>(saved, [first.href]) : [first.href];
       const messages: unknown[] = [];
       for (let page = 0; pending.length > 0 && page < MAX_PAGES; page++) {
         const url = pending.shift() as string;

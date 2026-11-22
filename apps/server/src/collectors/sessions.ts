@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { AdoptedLoop } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 
 /** A running Claude Code CLI process, read from `~/.claude/sessions/<pid>.json`. */
 export interface LiveSession {
@@ -127,7 +128,7 @@ export function readSessions(dir: string, isAlive: (pid: number) => boolean): Li
     if (!name.endsWith(".json")) continue;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(join(dir, name), "utf8"));
+      parsed = parseJson<unknown>(readFileSync(join(dir, name), "utf8"), undefined, rethrowJson);
     } catch {
       continue;
     }

@@ -127,7 +127,7 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
-import { parseJson } from "./json.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { loopPause } from "./loop/pause.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
@@ -1737,7 +1737,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       const saved = store.getSetting(USAGE_BACKOFF_SETTING);
       if (saved !== null) {
         try {
-          const parsed = JSON.parse(saved);
+          const parsed = parseJson<{ waitMs: number; notBefore: number } | undefined>(
+            saved,
+            undefined,
+            rethrowJson,
+          );
           if (
             parsed &&
             Number.isFinite(parsed.waitMs) &&

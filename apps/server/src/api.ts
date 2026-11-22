@@ -354,7 +354,7 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { parseJson } from "./json.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { loopTries } from "./loop/history.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -1141,7 +1141,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const raw = req.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
     if (typeof raw !== "string") return null;
     try {
-      const value = JSON.parse(raw);
+      const value = parseJson<{ seatId?: unknown; runId?: unknown } | undefined>(
+        raw,
+        undefined,
+        rethrowJson,
+      );
       if (typeof value?.seatId !== "string" || typeof value.runId !== "string") return null;
       const seat = configuredAgents(config).find(
         (agent) => agent.kind === "crew" && agent.id === value.seatId,
@@ -4995,7 +4999,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             try {
               comments = z
                 .object({ comments: z.array(z.object({ body: z.string() })) })
-                .parse(JSON.parse(latest.stdout)).comments;
+                .parse(parseJson<unknown>(latest.stdout, undefined, rethrowJson)).comments;
             } catch {
               /* A failed read must not turn into a second post. */
             }
@@ -6591,7 +6595,7 @@ export function githubRate(store: Store): GithubRateState {
   const raw = store.getSetting(GITHUB_RATE_SETTING);
   if (raw === null) return { queries: {}, pollCost: null };
   try {
-    return JSON.parse(raw) as GithubRateState;
+    return parseJson<unknown>(raw, undefined, rethrowJson) as GithubRateState;
   } catch {
     return { queries: {}, pollCost: null };
   }

@@ -8,6 +8,7 @@
 import { closeSync, constants, lstatSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { trimToolResponse } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 
 /** The trim hook's entry file, from the hub root. */
 export const TRIM_ENTRY = "apps/server/src/guard/trim-cli.ts";
@@ -41,7 +42,7 @@ function keepFull(dir: string, file: string, text: string): void {
 export function trimMain(stdin: string, dir: string): string {
   if (!dir.startsWith("/")) return "";
   try {
-    const e: unknown = JSON.parse(stdin);
+    const e: unknown = parseJson<unknown>(stdin, undefined, rethrowJson);
     if (typeof e !== "object" || e === null) return "";
     const {
       hook_event_name: event,

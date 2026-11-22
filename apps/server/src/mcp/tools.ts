@@ -222,6 +222,7 @@ import { RepoRulesError } from "../engine/rules.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { keepMockups } from "../plans/assets.ts";
 import {
   PREVIEW_READY_WAIT_MS,
@@ -921,7 +922,11 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       );
       let state: unknown;
       try {
-        state = viewed.code === 0 ? (JSON.parse(viewed.stdout) as { state?: unknown }).state : null;
+        state =
+          viewed.code === 0
+            ? (parseJson<unknown>(viewed.stdout, undefined, rethrowJson) as { state?: unknown })
+                .state
+            : null;
       } catch {
         state = null;
       }
@@ -1349,7 +1354,7 @@ async function draftPr(
   if (listed.code !== 0) return failed("pr list", listed);
   let open: unknown;
   try {
-    open = JSON.parse(listed.stdout);
+    open = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
   } catch {
     return failed("pr list", { code: listed.code, stderr: "not JSON" });
   }
@@ -1439,7 +1444,7 @@ export async function editRunPrBody(
   if (viewed.code !== 0) return failed("pr view", viewed);
   let info: { headRefName?: unknown; state?: unknown; body?: unknown } | null;
   try {
-    info = JSON.parse(viewed.stdout) as typeof info;
+    info = parseJson<unknown>(viewed.stdout, undefined, rethrowJson) as typeof info;
   } catch {
     return failed("pr view", { code: viewed.code, stderr: "not JSON" });
   }
@@ -3040,7 +3045,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       if (viewed.code !== 0) return failed("issue view", viewed);
       let issueJson: { body?: unknown; state?: unknown };
       try {
-        issueJson = JSON.parse(viewed.stdout) as { body?: unknown; state?: unknown };
+        issueJson = parseJson<unknown>(viewed.stdout, undefined, rethrowJson) as {
+          body?: unknown;
+          state?: unknown;
+        };
       } catch {
         return failed("issue view", { code: viewed.code, stderr: "not JSON" });
       }

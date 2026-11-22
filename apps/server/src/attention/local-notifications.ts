@@ -10,7 +10,7 @@ import { z } from "zod";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -198,7 +198,7 @@ export class LocalNotifications {
     if (raw === null) return defaults;
     let json: unknown;
     try {
-      json = JSON.parse(raw);
+      json = parseJson<unknown>(raw, undefined, rethrowJson);
     } catch {
       // emit runs from a timer: a bad setting must not throw there
       return defaults;

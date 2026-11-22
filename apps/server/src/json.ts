@@ -11,3 +11,11 @@ export function parseJson<T>(raw: unknown, fallback: T, onError?: (message: stri
     return fallback;
   }
 }
+
+/**
+ * An `onError` for a caller whose surrounding `try` already says what a malformed value means
+ * (a refusal, a fixed message, a skipped line): the failure is thrown there as it was before.
+ */
+export const rethrowJson = (message: string): never => {
+  throw new SyntaxError(message);
+};

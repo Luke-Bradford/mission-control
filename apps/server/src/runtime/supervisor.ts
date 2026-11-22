@@ -164,7 +164,7 @@ import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -1892,7 +1892,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!init && !line.includes('"total_cost_usd"')) continue;
         let ev: unknown;
         try {
-          ev = JSON.parse(line);
+          ev = parseJson<unknown>(line, undefined, rethrowJson);
         } catch {
           continue;
         }
@@ -2397,7 +2397,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function removeCodexTmp(runId: string, value: string): boolean {
     let saved: { worktree: string; tmp: string };
     try {
-      saved = JSON.parse(value) as { worktree: string; tmp: string };
+      saved = parseJson<unknown>(value, undefined, rethrowJson) as {
+        worktree: string;
+        tmp: string;
+      };
       if (typeof saved.worktree !== "string" || typeof saved.tmp !== "string") return false;
       const parent = dirname(saved.tmp);
       const key = basename(saved.tmp);
@@ -3418,8 +3421,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (existsSync(run.transcriptPath)) {
         for (const line of readFileSync(run.transcriptPath, "utf8").split("\n")) {
           try {
-            const receipt = JSON.parse(line);
-            if (receipt.type === CODEX_DELIVERY) entries.delete(receipt.id);
+            const receipt = parseJson<{ type?: unknown; id?: unknown } | undefined>(
+              line,
+              undefined,
+              rethrowJson,
+            );
+            if (receipt === undefined) continue;
+            if (receipt.type === CODEX_DELIVERY && typeof receipt.id === "string")
+              entries.delete(receipt.id);
           } catch {
             // A partial final transcript line has no receipt yet.
           }

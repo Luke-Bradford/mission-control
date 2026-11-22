@@ -52,7 +52,7 @@ import { BoundedMap, BoundedSet } from "../bounded.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { wakePieces } from "../telemetry/prompt-cost.ts";
@@ -372,6 +372,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
     let added = false;
+    const missedNow = new Set<string>();
     let nextDue = Infinity;
     for (const item of operatorItems(
       config,
@@ -384,11 +385,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (item.flightTriage === "waiting" && item.triageDueAt !== undefined)
         nextDue = Math.min(nextDue, item.triageDueAt);
       const identity = `${item.key}:${item.at}`;
+      if (item.flightTriage === "missed") missedNow.add(identity);
       if (item.flightTriage === "missed" && !announced.has(identity)) {
         announced.add(identity);
         added = true;
       }
     }
+    // an item that is no longer missed leaves the set, so it holds only what is missed now
+    for (const identity of announced) if (!missedNow.has(identity)) announced.delete(identity);
     if (triageTimer !== null) clearTimeout(triageTimer);
     triageTimer = null;
     if (Number.isFinite(nextDue)) {
@@ -691,7 +695,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const raw = store.getSetting(FLIGHT_RUN_TOOLS_SETTING);
     if (raw === null) return false;
     try {
-      const kept = JSON.parse(raw) as { runId?: unknown; tools?: unknown };
+      const kept = parseJson<unknown>(raw, undefined, rethrowJson) as {
+        runId?: unknown;
+        tools?: unknown;
+      };
       return kept.runId === runId && kept.tools !== flightToolsDigest();
     } catch {
       return false;

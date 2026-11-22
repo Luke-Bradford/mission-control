@@ -6,7 +6,7 @@ import {
   seatIsPaused,
 } from "@mc/core";
 import { z } from "zod";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 
@@ -42,7 +42,7 @@ export function readCrewPause(store: Store): CrewPause | null {
   const raw = store.getSetting(CREW_PAUSE_SETTING);
   if (raw === null || raw === "null") return null;
   try {
-    const parsed = record.safeParse(JSON.parse(raw));
+    const parsed = record.safeParse(parseJson<unknown>(raw, undefined, rethrowJson));
     if (parsed.success) {
       const { except, legacyExcept, ...base } = parsed.data;
       const oldSeats = [

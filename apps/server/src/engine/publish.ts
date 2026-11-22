@@ -44,7 +44,7 @@ import {
   withSection,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import {
   COMMIT_ADD_PATHSPEC,
   editRunPrBody,
@@ -700,7 +700,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     const r = await deps.gh(args, { cwd: cwd() });
     if (r.code !== 0) return ghFailed(what, r.stderr);
     try {
-      const parsed: unknown = JSON.parse(r.stdout);
+      const parsed: unknown = parseJson<unknown>(r.stdout, undefined, rethrowJson);
       if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown>;
     } catch {
       // falls through
@@ -728,7 +728,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     if (listed.code !== 0) return ghFailed("run list", listed.stderr);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(listed.stdout);
+      parsed = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
     } catch {
       return transient("gh run list gave no JSON");
     }
@@ -807,7 +807,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     if (listed.code !== 0) return null;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(listed.stdout);
+      parsed = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
     } catch {
       return null;
     }
@@ -1110,7 +1110,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           { cwd: cwd() },
         );
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
-        const runs: unknown = JSON.parse(listed.stdout);
+        const runs: unknown = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
         const failed: {
           id: number;
@@ -1166,7 +1166,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               { cwd: cwd() },
             );
             if (before.code !== 0) return CI_LOG_UNREADABLE;
-            const state: unknown = JSON.parse(before.stdout);
+            const state: unknown = parseJson<unknown>(before.stdout, undefined, rethrowJson);
             if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
               failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
             }
@@ -1216,7 +1216,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           { cwd: cwd() },
         );
         if (listed.code !== 0) return null;
-        const runs: unknown = JSON.parse(listed.stdout);
+        const runs: unknown = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
         if (!Array.isArray(runs)) return null;
         if (runs.some((r: unknown) => (r as { status?: unknown } | null)?.status !== "completed")) {
           return "running";
@@ -1977,7 +1977,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               : ghFailed("rolling tech-debt issue view", viewed.stderr);
           let issue: Record<string, unknown>;
           try {
-            const parsed: unknown = JSON.parse(viewed.stdout);
+            const parsed: unknown = parseJson<unknown>(viewed.stdout, undefined, rethrowJson);
             if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
               return transient("gh rolling tech-debt issue view gave no JSON");
             issue = parsed as Record<string, unknown>;
@@ -2027,7 +2027,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           );
           if (listed.code !== 0) return ghFailed("rolling tech-debt issue list", listed.stderr);
           try {
-            const issues: unknown = JSON.parse(listed.stdout);
+            const issues: unknown = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
             if (Array.isArray(issues)) {
               const matches = issues.filter(
                 (issue): issue is { number: number } =>

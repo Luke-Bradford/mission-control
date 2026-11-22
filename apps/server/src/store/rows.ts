@@ -25,7 +25,7 @@ import type {
   TokenUsage,
 } from "@mc/core";
 import { FLIGHT_WAKE_STORED_BYTES } from "@mc/core";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Evidence, QueueRow, SeatQuestion } from "../store.ts";
 
 type Row = Record<string, SQLInputValue>;
@@ -43,7 +43,7 @@ export const evidenceOf = (r: Row): Evidence => ({
 /** A run's stored plan fact; a value that won't parse is dropped rather than failing every run read. */
 export function parsePlan(raw: string): { plan?: Run["plan"] } {
   try {
-    const plan = JSON.parse(raw) as Run["plan"];
+    const plan = parseJson<unknown>(raw, undefined, rethrowJson) as Run["plan"];
     return plan !== null && typeof plan === "object" ? { plan } : {};
   } catch {
     return {};
@@ -53,7 +53,7 @@ export function parsePlan(raw: string): { plan?: Run["plan"] } {
 /** A run's stored advice; a value that won't parse is dropped rather than failing every run read. */
 function parseAdvice(raw: string): { advice?: ModelAdvice } {
   try {
-    const advice = JSON.parse(raw) as ModelAdvice;
+    const advice = parseJson<unknown>(raw, undefined, rethrowJson) as ModelAdvice;
     return advice !== null && typeof advice === "object" ? { advice } : {};
   } catch {
     return {};

@@ -5844,6 +5844,46 @@ describe("report_plan", () => {
     expect(told).toHaveLength(2);
   });
 
+  it("keeps at most 50 planner runs waiting for an end retry, dropping the oldest", async () => {
+    endFails = true;
+    const asRun = (i: number) => `${FAO_RUN}:${i}`;
+    for (let i = 0; i < 55; i++) {
+      store.upsertRun(
+        run({ id: asRun(i), agentId: "fao-1", branch: null, ticket: "mc#7", seq: 100 + i }),
+      );
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: asRun(i),
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      ghState(view("Do X."));
+      await plan(PLAN, { seatId: "fao-1", runId: asRun(i) });
+    }
+    endFails = false;
+    const writes = () => ghCalls().filter((c) => c.body !== undefined).length;
+    const retry = async (i: number) => {
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: asRun(i),
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      ghState(view("Do X."));
+      const before = writes();
+      await plan(PLAN, { seatId: "fao-1", runId: asRun(i) });
+      return writes() - before;
+    };
+    expect(await retry(54)).toBe(0); // still remembered: the retry only ends the run
+    expect(await retry(0)).toBe(1); // dropped: the retry writes the plan again
+  });
+
   it("rechecks away after reading the issue and before editing it", async () => {
     const calls: string[][] = [];
     const cfg = config();

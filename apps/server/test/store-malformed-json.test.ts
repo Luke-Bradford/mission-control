@@ -2,8 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { trustedAuthor } from "../src/flight/collaborators.ts";
 import { urgentChange } from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
+import { readWaitRecord, WAIT_RECORD_SETTING } from "../src/queue/dependencies.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;
@@ -53,5 +55,12 @@ describe("stored JSON that will not parse", () => {
   it("compares FLIGHT wake facts without throwing when either side will not parse", () => {
     expect(urgentChange("{oops", "{}")).toBe(false);
     expect(changedWakeFacts("{oops", JSON.stringify({ prs: [1] }))).toEqual(["prs (1)"]);
+  });
+
+  it("reads a malformed collaborator cache as untrusted and a malformed wait record as empty", () => {
+    store.setSetting("collaborator:o/mc:someone", "{oops");
+    expect(trustedAuthor(store, "o/mc", "someone", 1)).toBe(false);
+    store.setSetting(`${WAIT_RECORD_SETTING}:mc`, "[unclosed");
+    expect(readWaitRecord(store, "mc")).toEqual({ waiting: {} });
   });
 });

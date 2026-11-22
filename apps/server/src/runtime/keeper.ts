@@ -44,7 +44,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { uptime } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { CODEX_APPROVAL_DECISION } from "./codex-wire.ts";
 import { compactTranscriptLine, deltaHeartbeats } from "./transcript-compact.ts";
 
@@ -148,7 +148,7 @@ export interface KeeperHello {
 export function isResultLine(line: string): boolean {
   if (!line.includes(RESULT_TYPE)) return false;
   try {
-    const m: unknown = JSON.parse(line);
+    const m: unknown = parseJson<unknown>(line, undefined, rethrowJson);
     return typeof m === "object" && m !== null && (m as { type?: unknown }).type === "result";
   } catch {
     return false;
@@ -188,7 +188,11 @@ export function readPidFile(dir: string, name: string): number | null {
 /** The hub secret in the run folder's spec; null when the spec is unreadable or its secret is not 64 hex characters. */
 export function readKeeperSecret(dir: string): string | null {
   try {
-    const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"));
+    const v: unknown = parseJson<unknown>(
+      readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"),
+      undefined,
+      rethrowJson,
+    );
     const secret = (v as { secret?: unknown } | null)?.secret;
     return typeof secret === "string" && SECRET_FORMAT.test(secret) ? secret : null;
   } catch {
@@ -245,7 +249,11 @@ export function processInfo(pid: number): { startedAt: number; command: string }
 /** `exit.json` of the run folder, or null when it is not there or not an exit. */
 export function readKeeperExit(dir: string): KeeperExit | null {
   try {
-    const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_EXIT_FILE), "utf8"));
+    const v: unknown = parseJson<unknown>(
+      readFileSync(join(dir, KEEPER_EXIT_FILE), "utf8"),
+      undefined,
+      rethrowJson,
+    );
     if (typeof v !== "object" || v === null) return null;
     const r = v as Record<string, unknown>;
     const code = typeof r.code === "number" ? r.code : null;
@@ -288,7 +296,11 @@ export async function endKeeper(
   type Target = { pid: number; role: Role };
   const marker = (): string | null => {
     try {
-      const v: unknown = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"));
+      const v: unknown = parseJson<unknown>(
+        readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"),
+        undefined,
+        rethrowJson,
+      );
       const spec = v as { marker?: unknown; cliSessionId?: unknown } | null;
       const id = spec?.marker ?? spec?.cliSessionId;
       return typeof id === "string" && id !== "" ? id : null;
@@ -620,7 +632,7 @@ export function runKeeper(
     line = redact(line);
     if (spec.turnEnd === "codex") {
       try {
-        const m = JSON.parse(line) as Json | null;
+        const m = parseJson<unknown>(line, undefined, rethrowJson) as Json | null;
         // Persist arrival time so replay keeps activity and usage in their original buckets.
         if (typeof m?.method === "string" && m.timestamp === undefined) {
           line = JSON.stringify({ ...m, timestamp: new Date().toISOString() });
@@ -643,7 +655,7 @@ export function runKeeper(
     lineCount = n + 1;
     if (spec.turnEnd === "codex") {
       try {
-        const m = JSON.parse(line) as Json | null;
+        const m = parseJson<unknown>(line, undefined, rethrowJson) as Json | null;
         if (
           m?.method === "turn/completed" ||
           (awaitingId !== null && m?.id === awaitingId && m.error != null)
@@ -746,7 +758,7 @@ export function runKeeper(
   const onClientLine = (c: Client, text: string) => {
     let m: unknown;
     try {
-      m = JSON.parse(text);
+      m = parseJson<unknown>(text, undefined, rethrowJson);
     } catch {
       return;
     }
@@ -771,7 +783,7 @@ export function runKeeper(
       if (msg.user === true) {
         if (spec.turnEnd === "codex") {
           try {
-            const request = JSON.parse(msg.line) as Json | null;
+            const request = parseJson<unknown>(msg.line, undefined, rethrowJson) as Json | null;
             if (
               request?.method === "turn/start" &&
               (typeof request.id === "string" || typeof request.id === "number")
@@ -787,7 +799,7 @@ export function runKeeper(
       stdin.write(`${msg.line}\n`);
       if (spec.turnEnd === "codex") {
         try {
-          const reply = JSON.parse(msg.line) as Json | null;
+          const reply = parseJson<unknown>(msg.line, undefined, rethrowJson) as Json | null;
           const result = reply?.result as Json | null;
           if (
             result &&
@@ -822,7 +834,7 @@ export function runKeeper(
   const authenticate = (c: Client, text: string): boolean => {
     let ok = false;
     try {
-      const m: unknown = JSON.parse(text);
+      const m: unknown = parseJson<unknown>(text, undefined, rethrowJson);
       const given = (m as { t?: unknown; secret?: unknown } | null)?.secret;
       if ((m as { t?: unknown } | null)?.t === "hello" && typeof given === "string") {
         const got = Buffer.from(given);

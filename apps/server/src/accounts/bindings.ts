@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { parseJson } from "../json.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 export interface CliBinding {
@@ -39,7 +39,11 @@ export function accountBindingProblem(accounts: readonly CliBinding[]): string |
       continue;
     let login: unknown;
     try {
-      login = JSON.parse(readFileSync(join(path, "auth.json"), "utf8"))?.tokens?.account_id;
+      login = parseJson<{ tokens?: { account_id?: string } } | undefined>(
+        readFileSync(join(path, "auth.json"), "utf8"),
+        undefined,
+        rethrowJson,
+      )?.tokens?.account_id;
     } catch {
       // Fixed error text: JSON errors may contain credential bytes.
     }
