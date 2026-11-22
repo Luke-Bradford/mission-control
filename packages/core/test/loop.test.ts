@@ -108,6 +108,7 @@ describe("pendingSeatWork", () => {
           { key: "other", from: "other", at: 106 },
         ],
         woken: ["ci:ci"],
+        flightSeatId: "flight-1",
       }),
     ).toEqual([
       { key: "ci:ci-at-start", kind: "ci", at: 100, text: "a CI failure on c13fd87" },
@@ -121,6 +122,23 @@ describe("pendingSeatWork", () => {
       { key: "message:cap", kind: "message", at: 105, text: "a message from CAPCOM" },
       { key: "review:1", kind: "findings", at: 109, text: "RETRO round 2 findings" },
     ]);
+  });
+
+  it("wakes on a message from FLIGHT's seat whatever its id is, and on none when there is no such seat", () => {
+    const input = {
+      lastTurnStartedAt: 100,
+      reviews: [],
+      events: [],
+      messages: [
+        { key: "a", from: "flight-1", at: 110 },
+        { key: "b", from: "fl-main", at: 120 },
+      ],
+      woken: [],
+    };
+    expect(pendingSeatWork({ ...input, flightSeatId: "fl-main" }).map((x) => x.key)).toEqual([
+      "message:b",
+    ]);
+    expect(pendingSeatWork({ ...input, flightSeatId: null })).toEqual([]);
   });
 });
 

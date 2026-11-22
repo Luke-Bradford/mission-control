@@ -1042,12 +1042,36 @@ export function qaReportMarkdown(report: QaReport): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** Whether GitHub readers can open `baseUrl`: not empty and not a loopback or `.local` address. */
+function hubReachable(baseUrl: string): boolean {
+  if (baseUrl === "") return false;
+  try {
+    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, "");
+    return !(
+      host === "localhost" ||
+      host === "::1" ||
+      host === "::" ||
+      host === "0.0.0.0" ||
+      host.endsWith(".local") ||
+      /^127\./.test(host) ||
+      /^(?:10|192\.168)\./.test(host) ||
+      /^172\.(?:1[6-9]|2\d|3[01])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** A compact index for GitHub comments; detailed notes stay in the retained report. */
 export function qaReportGitIndex(report: QaReport, baseUrl = ""): string {
+  const route = `/api/qa-reports/${report.id}`;
   return [
     "## Saved QA report",
     "",
-    `[Immutable QA report](${baseUrl}/api/qa-reports/${report.id}) · [Markdown export](${baseUrl}/api/qa-reports/${report.id}/markdown)`,
+    // A hub address that only the operator's machine can open is no link for a GitHub reader: name the route instead.
+    hubReachable(baseUrl)
+      ? `[Immutable QA report](${baseUrl}${route}) · [Markdown export](${baseUrl}${route}/markdown)`
+      : `Immutable QA report in the hub: \`${route}\` · Markdown export: \`${route}/markdown\``,
     `Head ${report.headSha}; reviewer ${report.reviewer.label}; source ${report.source}; registered ${new Date(report.registeredAt).toISOString()}; evidence ${report.completeness.state}.`,
     "This snapshot is not current merge approval.",
   ].join("\n");

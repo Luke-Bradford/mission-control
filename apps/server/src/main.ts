@@ -7,7 +7,8 @@ import {
  * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).
  *   MC_CONFIG  config path (default ~/.config/mission-control/config.yaml)
  *   MC_DB      sqlite path (default ~/.local/share/mission-control/mc.sqlite; its dir is created 0700)
- *   MC_PORT    port (default 7420; 1024–65535), e.g. for a preview server beside the live hub
+ *   MC_PORT    port (default: the live port; 1024–65535), e.g. for a preview server beside the live hub
+ *   MC_LIVE_PORT  the live hub's port (default 7420); a server on any other port is a preview
  *   MC_NO_LOOP_WRITES  `1`: Pause/Resume answer 409 and never write into a loop (preview servers);
  *               this, or any port but 7420, also makes the server a preview that Update refuses
  *               and that runs no crew
@@ -162,7 +163,7 @@ export async function main(): Promise<void> {
   let config: ReturnType<typeof loadConfig>;
   let port: number;
   try {
-    port = portFromEnv(process.env.MC_PORT);
+    port = portFromEnv(process.env.MC_PORT, process.env);
     config = loadConfig(configPath);
   } catch (e) {
     if (e instanceof ConfigError) {
@@ -407,6 +408,7 @@ export async function main(): Promise<void> {
     config.repos,
     config.crew?.sessions ?? [],
   );
+  config.hubRepo = previewRepoId;
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;

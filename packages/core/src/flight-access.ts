@@ -4,7 +4,7 @@
  * floor; none of these lists is a cap on how often FLIGHT acts.
  */
 import { API_PREFIX } from "./mcp.ts";
-import { FLIGHT_FLOOR_ENFORCING_PATHS } from "./rule-paths.ts";
+import { FLIGHT_FLOOR_ENFORCING_PATHS, FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
 
 /** The paths that confine seats and FLIGHT: they classify a PR's touches and set the second-review floor.
  * On a superuser repo FLIGHT's own logged clearance covers them; a standard repo needs independent
@@ -19,6 +19,13 @@ export const FLIGHT_CONTROLLER_CHECK_PATHS: readonly string[] = Object.freeze([
   "apps/server/src/external-pr-control.ts",
   "packages/core/src/flight-access.ts",
 ]);
+
+/**
+ * The controller-check paths of a repo: this repo's runtime files only where the hub's own code
+ * lives (`ownsHubFiles`); any other repo has just the repo's own rules (CLAUDE.md, `.github/**`).
+ */
+export const controllerCheckPathsOf = (ownsHubFiles: boolean): readonly string[] =>
+  ownsHubFiles ? FLIGHT_CONTROLLER_CHECK_PATHS : FLIGHT_FLOOR_PATHS;
 
 /** The operator routes `mc operator` may POST to; `:id` and `:key` match one path segment. */
 export const FLIGHT_OPERATOR_ROUTES: readonly string[] = [

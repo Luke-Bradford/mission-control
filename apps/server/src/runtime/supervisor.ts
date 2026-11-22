@@ -281,7 +281,12 @@ import {
   type SessionEvent,
   startSession,
 } from "./session.ts";
-import { copySkillsToCodexHome, readRepoDocsAndSkills, writeSkillPlugin } from "./skills.ts";
+import {
+  copySkillsToCodexHome,
+  readHubSkills,
+  readRepoDocsAndSkills,
+  writeSkillPlugin,
+} from "./skills.ts";
 import { seatToolchainDirs } from "./toolchain.ts";
 
 /** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
@@ -1607,6 +1612,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /** A start's docs and skills; a seat on a repo other than the hub's own also gets the hub's skills. */
+  const readDocs = async (checkout: string, baseSha: string, repoId: RepoId): Promise<RepoDocs> =>
+    readRepoDocsAndSkills(
+      checkout,
+      baseSha,
+      deps.config.hubRepo === undefined || deps.config.hubRepo === repoId || deps.hubRoot === ""
+        ? undefined
+        : await readHubSkills(deps.hubRoot),
+    );
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
   const pendingPromptVersions = new Map<
@@ -3714,7 +3728,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         return {
           checkout: c,
-          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
+          repoDocs: await readDocs(info.session.checkout, c.baseSha, info.repo.id),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -4145,7 +4159,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
         return {
           checkout: c,
-          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
+          repoDocs: await readDocs(info.session.checkout, c.baseSha, info.repo.id),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -4604,7 +4618,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               screenshots,
               signedPlan,
               planMockupFiles,
-              repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
+              repoDocs: await readDocs(checkout, s.baseSha, info.repo.id),
               references: await repoReferenceIndex(checkout, s.baseSha),
             };
           } catch (e) {

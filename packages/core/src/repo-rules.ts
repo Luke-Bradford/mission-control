@@ -74,14 +74,22 @@ export const hardRulesUnsetText = (repo: string): string =>
 
 /**
  * The hard-rule globs the engine flags PRs by. On a `superuser` repo a repo's own list can only add
- * to `DEFAULT_HARD_RULES`, so a repo cannot narrow the floor away.
+ * to `DEFAULT_HARD_RULES` (this repo's own files: only where `ownsHubFiles`, the repo the hub's code
+ * lives in) and the repo's rules files, so a repo cannot narrow the floor away.
  */
 export function effectiveHardRules(
   rules: Pick<RepoRules, "hardRules">,
   powers: FlightPowers,
+  ownsHubFiles = true,
 ): string[] {
   return powers === "superuser"
-    ? [...new Set([...rules.hardRules, ...DEFAULT_HARD_RULES, ...FLIGHT_FLOOR_PATHS])]
+    ? [
+        ...new Set([
+          ...rules.hardRules,
+          ...(ownsHubFiles ? DEFAULT_HARD_RULES : []),
+          ...FLIGHT_FLOOR_PATHS,
+        ]),
+      ]
     : rules.hardRules;
 }
 

@@ -240,6 +240,8 @@ export interface CcConfig {
     thresholds?: Partial<AuditThresholds>;
   };
   operator: { id: string; timezone: string; githubLogins?: string[] };
+  /** The configured repo the hub's own code lives in, set at startup; unset: unknown, so every repo is treated as it. */
+  hubRepo?: RepoId;
   accounts: {
     id: AccountId;
     vendor: "claude" | "codex";
@@ -327,6 +329,11 @@ function auditThresholdsOf(a: {
   return Object.keys(t).length === 0 ? {} : { thresholds: t };
 }
 
+/** Whether the hub's own files (its floor and controller-check paths) are in this repo. */
+export function ownsHubFiles(config: Pick<CcConfig, "hubRepo">, repoId: RepoId): boolean {
+  return config.hubRepo === undefined || config.hubRepo === repoId;
+}
+
 export function flightPowersOf(config: CcConfig, repoId: RepoId): FlightPowers {
   return config.repos.find((r) => r.id === repoId)?.flightPowers ?? "standard";
 }
@@ -382,9 +389,16 @@ export const DEFAULT_OPERATOR_ID = "operator";
 /** The hub's port; `MC_PORT` overrides it (e.g. a second, preview server beside the live one). */
 export const DEFAULT_PORT = 7420;
 
-/** A preview server beside the live hub: any port but DEFAULT_PORT, or `MC_NO_LOOP_WRITES=1`. */
+/** The live hub's port: `MC_LIVE_PORT` when set (1024–65535), else DEFAULT_PORT. */
+export function livePortFromEnv(env: NodeJS.ProcessEnv): number {
+  return env.MC_LIVE_PORT === undefined || env.MC_LIVE_PORT === ""
+    ? DEFAULT_PORT
+    : parsePort("MC_LIVE_PORT", env.MC_LIVE_PORT);
+}
+
+/** A preview server beside the live hub: any port but the live one, or `MC_NO_LOOP_WRITES=1`. */
 export function isPreview(port: number, env: NodeJS.ProcessEnv): boolean {
-  return port !== DEFAULT_PORT || env.MC_NO_LOOP_WRITES === "1";
+  return port !== livePortFromEnv(env) || env.MC_NO_LOOP_WRITES === "1";
 }
 
 /**
@@ -424,17 +438,24 @@ export function crewSeatGrants(config: CcConfig, seatId: string): McToolName[] {
   return [...crewSeatDef(config, seatId).mcTools];
 }
 
-/** `MC_PORT` as a port: unset or empty → DEFAULT_PORT; else a plain integer 1024–65535. */
-export function portFromEnv(raw: string | undefined): number {
-  if (raw === undefined || raw === "") return DEFAULT_PORT;
+function parsePort(name: string, raw: string): number {
   const n = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!(n >= 1024 && n <= 65535)) {
     throw new ConfigError(
-      "MC_PORT",
+      name,
       `must be an integer from 1024 to 65535, got ${JSON.stringify(raw)}`,
     );
   }
   return n;
+}
+
+/**
+ * `MC_PORT` as a port: unset or empty → the live port (`MC_LIVE_PORT`, default DEFAULT_PORT);
+ * else a plain integer 1024–65535.
+ */
+export function portFromEnv(raw: string | undefined, env: NodeJS.ProcessEnv = {}): number {
+  if (raw === undefined || raw === "") return livePortFromEnv(env);
+  return parsePort("MC_PORT", raw);
 }
 
 /** A board column; also validates `POST /api/repos` status maps. */

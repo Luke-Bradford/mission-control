@@ -54,6 +54,7 @@ import {
   capAudit,
   compactAttentionItem,
   compareDependencyChains,
+  controllerCheckPathsOf,
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
@@ -61,7 +62,6 @@ import {
   ENGINE_TICK_MS,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   flightShellBreakerWrite,
@@ -290,6 +290,7 @@ import {
   crewSeatMode,
   DEFAULT_MAX_SEATS,
   flightPowersOf,
+  ownsHubFiles,
   TeamsSelection,
 } from "./config.ts";
 import type { CrewReloader } from "./crew-apply.ts";
@@ -5161,7 +5162,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             flightActor(req) &&
             flightPowersOf(config, run.repoId) !== "superuser" &&
             run.loop.touches?.paths.some((path) =>
-              FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
+              controllerCheckPathsOf(ownsHubFiles(config, run.repoId)).some((pattern) =>
+                globMatches(pattern, path, true),
+              ),
             )
           )
             return reply.code(403).send({

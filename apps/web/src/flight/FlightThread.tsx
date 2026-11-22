@@ -7,6 +7,7 @@ import {
 } from "@mc/core";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
+import { useTz } from "../clock.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import { useNoticeResource } from "../comms/model.ts";
 import type { OlderMessages } from "../comms/older.ts";
@@ -29,7 +30,6 @@ type Page = {
 export const FLIGHT_THREAD_INPUT = "flightThreadInput";
 /** Within this many pixels of the bottom the log follows new messages; further up it stays put. */
 const STICK_PX = 40;
-const LONDON = "Europe/London";
 
 /** Who a line is from: the operator, the hub's own notices, or FLIGHT. */
 const senderWord = (m: FlightConversationMessage): string =>
@@ -78,6 +78,7 @@ export function FlightThread({
   const res = useNoticeResource<Page>(RESOURCES.commsFlight, hideNotices);
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   const config = useResource<ConfigView>(RESOURCES.config).data;
+  const tz = useTz();
   const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
   // Only a pull request in a configured repo shows as its text alone; any other link keeps its host.
   const isRepoPullUrl = (url: string): boolean => {
@@ -224,7 +225,7 @@ export function FlightThread({
               {senderWord(message)}
               <span className="at">
                 {" "}
-                · <time>{message.at === null ? "—" : hhmm(message.at, LONDON)}</time>
+                · <time>{message.at === null || !tz ? "—" : hhmm(message.at, tz)}</time>
               </span>
             </b>
             <div>
@@ -240,7 +241,7 @@ export function FlightThread({
         ))}
         {run?.live && (
           <p role="status">
-            FLIGHT is working… since {run.since === null ? "—" : hhmm(run.since, LONDON)}
+            FLIGHT is working… since {run.since === null || !tz ? "—" : hhmm(run.since, tz)}
           </p>
         )}
       </div>

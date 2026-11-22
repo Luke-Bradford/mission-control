@@ -1490,6 +1490,13 @@ describe("preview servers and crew", () => {
     expect(isPreview(DEFAULT_PORT, { MC_NO_LOOP_WRITES: "0" })).toBe(false);
   });
 
+  it("the live port is MC_LIVE_PORT when set, and MC_PORT defaults to it", () => {
+    expect(isPreview(7500, { MC_LIVE_PORT: "7500" })).toBe(false);
+    expect(isPreview(DEFAULT_PORT, { MC_LIVE_PORT: "7500" })).toBe(true);
+    expect(portFromEnv(undefined, { MC_LIVE_PORT: "7500" })).toBe(7500);
+    expect(errorOf(() => isPreview(7500, { MC_LIVE_PORT: "80" })).path).toBe("MC_LIVE_PORT");
+  });
+
   it("the live hub runs crew unless MC_NO_CREW=1; a preview only with MC_CREW=1", () => {
     expect(crewAllowed(false, {})).toBe(true);
     expect(crewAllowed(false, { MC_NO_CREW: "1" })).toBe(false);

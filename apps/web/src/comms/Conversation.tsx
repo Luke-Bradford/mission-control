@@ -431,7 +431,7 @@ function MessagePane({
                     : message.state === "stored"
                       ? "Stored"
                       : message.state === "delivered"
-                        ? `Delivered ${message.deliveredAt == null ? "—" : hhmm(message.deliveredAt, "Europe/London")}`
+                        ? `Delivered ${message.deliveredAt == null ? "—" : hhmm(message.deliveredAt, tz)}`
                         : messageStateLine(message, [...lookupMessages, ...messages], tz)}
                 </div>
               )}

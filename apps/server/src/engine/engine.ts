@@ -51,6 +51,7 @@ import {
   conflictText,
   controllerCheckFailText,
   controllerCheckParkText,
+  controllerCheckPathsOf,
   controllerCheckUnreadableText,
   crewProfileOf,
   deletedLocalText,
@@ -63,7 +64,6 @@ import {
   evidenceNoteKey,
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   fillLoopText,
   fixCommsText,
@@ -162,7 +162,13 @@ import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
-import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
+import {
+  type CcConfig,
+  type CrewSeatConfig,
+  flightPowersOf,
+  ownsHubFiles,
+  seatUnavailable,
+} from "../config.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -821,6 +827,9 @@ export function createEngine(deps: EngineDeps): Engine {
         .filter((m) => m.to === run.agentId)
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,
+      flightSeatId:
+        config.crew?.sessions.flatMap((s) => s.seats).find((x) => seatDef(x).loop === "watch")
+          ?.id ?? null,
       // the fix line carries the findings' text and wakes the seat itself, so a findings item
       // whose fix line is still unsent is left to it
     }).filter(
@@ -2347,8 +2356,8 @@ export function createEngine(deps: EngineDeps): Engine {
         ? null
         : [
             ...new Set([
-              ...effectiveHardRules(rules, flightPowers),
-              ...(fullFlight ? FLIGHT_CONTROLLER_CHECK_PATHS : []),
+              ...effectiveHardRules(rules, flightPowers, ownsHubFiles(config, run.repoId)),
+              ...(fullFlight ? controllerCheckPathsOf(ownsHubFiles(config, run.repoId)) : []),
             ]),
           ];
     const hardRulesHash =
@@ -3095,7 +3104,7 @@ export function createEngine(deps: EngineDeps): Engine {
             // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
             if (!first || first.blocking === 0) return refuse("wrong-action");
             const paths = await publisher.hardRuleTouches(run, pushed.sha, [
-              ...FLIGHT_CONTROLLER_CHECK_PATHS,
+              ...controllerCheckPathsOf(ownsHubFiles(config, run.repoId)),
               ...FLIGHT_FLOOR_PATHS,
             ]);
             if (paths.length === 0) return refuse("wrong-action");
@@ -3117,7 +3126,7 @@ export function createEngine(deps: EngineDeps): Engine {
               .at(-1);
             if (!review || review.blocking > 0) {
               const paths = await publisher.hardRuleTouches(run, pushed.sha, [
-                ...FLIGHT_CONTROLLER_CHECK_PATHS,
+                ...controllerCheckPathsOf(ownsHubFiles(config, run.repoId)),
                 ...FLIGHT_FLOOR_PATHS,
               ]);
               if (paths.length > 0) return refuse("floor-enforced");
