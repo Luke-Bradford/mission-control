@@ -56,6 +56,7 @@ import {
   PR_SWEEP_MS,
   refreshOnSeatFree,
   type SchedulerDeps,
+  STAGGERED_FIRST_DELAY_MS,
   waitedPrNumbers,
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
@@ -720,9 +721,12 @@ describe("scheduler", () => {
     prune.mockClear();
     const t = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
     t.start();
-    await vi.advanceTimersByTimeAsync(0);
+    const first = STAGGERED_FIRST_DELAY_MS.maintenance as number;
+    await vi.advanceTimersByTimeAsync(first - 1);
+    expect(prune).toHaveBeenCalledTimes(0);
+    await vi.advanceTimersByTimeAsync(1);
     expect(prune).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(MAINTENANCE_INTERVAL_MS - 1);
+    await vi.advanceTimersByTimeAsync(MAINTENANCE_INTERVAL_MS - first - 1);
     expect(prune).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(prune).toHaveBeenCalledTimes(2);
@@ -2486,9 +2490,12 @@ describe("scheduler", () => {
         autoUpdate,
       });
       s.start();
-      await vi.advanceTimersByTimeAsync(0);
+      const first = STAGGERED_FIRST_DELAY_MS.update as number;
+      await vi.advanceTimersByTimeAsync(first - 1);
+      expect(autoUpdate).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(1);
       expect(autoUpdate).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
+      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS - first);
       expect(autoUpdate).toHaveBeenCalledTimes(2);
       await s.stop();
     });

@@ -576,7 +576,7 @@ export async function main(): Promise<void> {
         review.sha,
       );
       if (!subject) return null;
-      const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
+      const pr = store.pullRequest(repo.id, review.prNumber);
       if (
         pr?.headSha !== review.sha ||
         branchOwned(config, store, repo.id, subject.branch, pr?.ticket)

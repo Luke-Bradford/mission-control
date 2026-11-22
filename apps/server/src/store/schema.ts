@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS guard_hits (
   text TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
+CREATE INDEX IF NOT EXISTS guard_hits_run ON guard_hits(run_id);
 -- Commits the mc commit tool made (phase 2b): the only commits a push may send.
 CREATE TABLE IF NOT EXISTS run_commits (
   id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,

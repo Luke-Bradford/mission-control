@@ -505,7 +505,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   if (taken === null) return;
   const { repoId, issue } = taken;
   const ref = refOf(repoId, issue);
-  const card = store.board(repoId).find((c) => c.issueNumber === issue);
+  const card = store.boardItem(repoId, issue) ?? undefined;
   // The card may have moved since the poll, and another seat may have been started on it by hand.
   if (
     card === undefined ||

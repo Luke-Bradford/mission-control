@@ -257,7 +257,7 @@ export async function closeSettledQuestions(d: {
     const ticket = store.run(q.runId)?.ticket ?? null;
     const ref = ticket === null ? null : /^(.+)#(\d+)$/.exec(ticket);
     if (ticket === null || ref === null) continue;
-    const card = store.board(ref[1] as string).find((b) => b.issueNumber === Number(ref[2]));
+    const card = store.boardItem(ref[1] as string, Number(ref[2]));
     if (card?.closed !== true) continue;
     const stored = store.closeQuestion({
       key: `ask:${q.id}`,

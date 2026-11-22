@@ -195,6 +195,16 @@ export const JOBS: readonly Job[] = [
   "cli",
   "cliAuto",
 ];
+/**
+ * Jobs nobody waits on start later, a few seconds apart, so a restart does not run every job at
+ * once: the sessions, GitHub and loop ticks stay first.
+ */
+export const STAGGERED_FIRST_DELAY_MS: Partial<Record<Job, number>> = {
+  maintenance: 12_000,
+  update: 16_000,
+  cli: 20_000,
+  cliAuto: 24_000,
+};
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
 export const LOOP_INTERVAL_MS = 15_000;
@@ -849,9 +859,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           }),
         (pr) => {
           const [repoId, number] = pr.split("#");
-          return (
-            store.pullRequests(repoId ?? "").find((p) => p.number === Number(number))?.ci ?? null
-          );
+          return store.pullRequest(repoId ?? "", Number(number))?.ci ?? null;
         },
         (key) => {
           waiting ??= new Set(
@@ -1624,6 +1632,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_FIRST_DELAY_MS,
     backfill: BACKFILL_FIRST_DELAY_MS,
     transcripts: TRANSCRIPT_PASS_FIRST_DELAY_MS,
+    ...STAGGERED_FIRST_DELAY_MS,
   };
 
   const refreshBoards = () => {

@@ -492,11 +492,17 @@ export function makeGql(
     );
 }
 
-/**
- * `gh auth token`, run once and kept in memory by the caller. Never logged. `timeoutMs`: kill gh
- * after this long (default: no limit).
- */
-export async function githubToken(timeoutMs?: number): Promise<string> {
+/** How long a token read from `gh auth token` is reused; the token lives in memory only. */
+export const GITHUB_TOKEN_TTL_MS = 5 * 60_000;
+let tokenKept: { token: string; at: number } | null = null;
+let tokenReading: Promise<string> | null = null;
+
+/** Forgets the kept token (tests, and a caller that saw GitHub refuse it). */
+export function forgetGithubToken(): void {
+  tokenKept = null;
+}
+
+async function readGithubToken(timeoutMs?: number): Promise<string> {
   try {
     const token = (
       await execFileAsync(
@@ -510,6 +516,24 @@ export async function githubToken(timeoutMs?: number): Promise<string> {
     // fall through to the fixed message
   }
   throw new Error("gh: could not read a GitHub token (run `gh auth login`)");
+}
+
+/**
+ * The GitHub token from `gh auth token`, kept in memory for GITHUB_TOKEN_TTL_MS so a request does
+ * not spawn gh each time (never logged, never written to disk). A failed read is not kept.
+ * `timeoutMs`: kill gh after this long (default: no limit).
+ */
+export async function githubToken(timeoutMs?: number): Promise<string> {
+  if (tokenKept !== null && Date.now() - tokenKept.at < GITHUB_TOKEN_TTL_MS) return tokenKept.token;
+  tokenReading ??= readGithubToken(timeoutMs)
+    .then((token) => {
+      tokenKept = { token, at: Date.now() };
+      return token;
+    })
+    .finally(() => {
+      tokenReading = null;
+    });
+  return tokenReading;
 }
 
 export const path = (v: unknown, ...keys: string[]): unknown =>

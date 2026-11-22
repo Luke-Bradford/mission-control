@@ -2584,10 +2584,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const keepsWorktree = (run: Run): boolean => {
     if (run.reviewId != null || !run.ticket || !run.branch || run.loop?.phase === "done")
       return false;
-    const card = store
-      .board(run.repoId)
-      .find((candidate) => `${run.repoId}#${candidate.issueNumber}` === run.ticket);
-    if (card?.closed) return false;
+    const card = store.boardCardOf(run.ticket);
+    if (card?.repoId === run.repoId && card.closed) return false;
     return !store
       .pullRequestsOnTicket(run.repoId, run.ticket)
       .some((pr) => pr.branch === run.branch && pr.state === "merged");
@@ -4519,7 +4517,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
-      const card = store.board(info.repo.id).find((i) => i.issueNumber === issue);
+      const card = store.boardItem(info.repo.id, issue);
       // FLIGHT's second review of a blocking floor review: the most capable model, and it reads
       // the first review's findings and FLIGHT's reason
       const secondOf = author?.loop?.flightSecondReview?.[review.sha];
