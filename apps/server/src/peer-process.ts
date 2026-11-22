@@ -21,9 +21,13 @@ function clientPid(clientPort: number, run: RunTool): number | null {
 }
 
 /**
- * Whether the local process on the other end of a loopback connection is a seat or was started by one
+ * Whether the local process on the other end of a loopback connection is a seat or descends from one
  * (a seat's processes carry the sandbox marker in their environment). A caller that cannot be
- * identified counts as a seat's: the operator token is for the HUD page only, so doubt refuses.
+ * identified, or whose parent chain cannot be followed to launchd, counts as a seat's: doubt refuses.
+ *
+ * This is a second layer. The seat sandbox (Claude: loopback denied; Codex: network off) is the
+ * barrier. A process that clears its environment and detaches, so that launchd becomes its parent,
+ * looks the same as the operator's browser and is not caught here.
  */
 export function peerIsSeat(clientPort: number | undefined, run: RunTool = defaultRun): boolean {
   if (clientPort === undefined) return true;
@@ -36,7 +40,8 @@ export function peerIsSeat(clientPort: number | undefined, run: RunTool = defaul
       const parent = Number.parseInt(run("ps", ["-o", "ppid=", "-p", String(pid)]).trim(), 10);
       pid = Number.isFinite(parent) ? parent : null;
     }
-    return false;
+    // only a walk that really ended at launchd (or the kernel) clears the caller
+    return pid !== 1 && pid !== 0;
   } catch {
     return true;
   }
