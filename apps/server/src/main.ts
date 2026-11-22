@@ -1194,6 +1194,7 @@ export async function main(): Promise<void> {
       void (async () => {
         // a merged PR's pictures stay until the hub runs code that holds its merge commit
         const notLive = await notLivePrKeys(
+          previewRepoId,
           store.mergedPrs(),
           (await updater?.version().catch(() => null))?.sha || null,
           (mergeSha, running) =>
