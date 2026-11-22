@@ -333,12 +333,14 @@ function wasteCauseGroups(
   return [...groups.values()];
 }
 
-/** The change each message problem asks for; kinds not listed are not rows. */
+/**
+ * The change each message problem asks for; kinds not listed are not rows. `chatter` is not listed:
+ * the improvement of that kind is built from `audit.chatter`, which already has the `messages:chatter` row.
+ */
 const IMPROVEMENT_TITLES: Partial<Record<AuditImprovementKind, string>> = {
   "question-asked-back": "Answer a seat's question without asking it back",
   "question-waited": "Answer seats' questions before they wait for hours",
   "delivered-after-run-ended": "Stop sending messages to runs that have ended",
-  chatter: "Stop seats sending the same message twice",
   "repeat-notice": "Stop the hub repeating one notice on a PR",
   "controller-request-waited": "Answer the controller's requests sooner",
   "ticket-message-volume": "Trim the tickets that carry far more message text than usual",

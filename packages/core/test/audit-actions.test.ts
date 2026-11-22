@@ -299,4 +299,23 @@ describe("auditActions", () => {
     );
     expect(rows[0]?.measure.atLeast).toBe(true);
   });
+  it("gives one chatter cause one row, not one from the chatter list and one from its improvement", () => {
+    const audit: AuditView = {
+      ...base,
+      chatter: [{ from: "guido-1", to: "flight-1", ticket: "mc#9", rounds: 12 }],
+      improvements: [
+        {
+          kind: "chatter",
+          subject: "mc#9",
+          ticket: "mc#9",
+          pr: null,
+          detail: "guido-1 and flight-1 went 12 rounds on mc#9",
+          at: 1,
+        },
+      ],
+    };
+    const rows = auditActions(audit, [], new Set());
+    expect(rows.filter((r) => /chatter/.test(r.id))).toHaveLength(1);
+    expect(rows).toHaveLength(1);
+  });
 });
