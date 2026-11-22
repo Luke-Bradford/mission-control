@@ -239,17 +239,23 @@ describeRendered("Audit first screen in a browser", () => {
         });
         await page.click(".audit-verdict .audit-retry");
         for (let i = 0; i < 50; i++) {
-          if ((await page.boxes(".audit-models h2")).length > 0) break;
+          const ready = await page.evaluate(
+            () => document.querySelectorAll(".audit-models h2").length,
+            null,
+          );
+          if (ready > 0) break;
           await new Promise((r) => setTimeout(r, 100));
         }
         const models = await page.box(".audit-models");
         expect(models.y + models.height).toBeLessThanOrEqual(940);
         // No column panel is left to draw over the model panels.
-        expect(await page.boxes(".audit-col > .panel")).toHaveLength(0);
-        expect(await page.boxes(".audit-models h2")).not.toHaveLength(0);
+        const count = (selector: string) =>
+          page.evaluate((q) => document.querySelectorAll(q).length, selector);
+        expect(await count(".audit-col > .panel")).toBe(0);
+        expect(await count(".audit-models h2")).toBeGreaterThan(0);
         await page.click(".audit-verdict .audit-retry");
         expect((await page.box(".audit-next")).height).toBeGreaterThanOrEqual(200);
-        expect(await page.boxes(".audit-models")).toHaveLength(0);
+        expect(await count(".audit-models")).toBe(0);
         await page.close();
       },
       BROWSER_TEST_TIMEOUT_MS,
