@@ -1795,6 +1795,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["PUT", "/api/accounts/claude-main", { provider: "claude", alertAt: 85, stopAt: 95 }],
   ["DELETE", "/api/accounts/claude-main"],
   ["POST", "/api/config/reload"],
+  ["GET", "/api/config/settings"],
+  ["POST", "/api/config/settings", {}],
+  ["DELETE", "/api/repos/shop-app", {}],
+  ["POST", "/api/hub/restart", {}],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
   ["POST", "/api/crew/sessions"],
@@ -1972,14 +1976,18 @@ describe("repo profiles and the add-repo preview", () => {
 });
 
 describe("account model catalogs", () => {
-  it("does not fabricate Claude choices from configured roles", async () => {
+  it("lists the opus, sonnet and haiku aliases for a Claude account", async () => {
     const r = await get("/api/accounts/models");
     expect(r.statusCode).toBe(200);
+    const efforts = ["low", "medium", "high"];
     expect(
       r
         .json<{ accountId: string; models: unknown[] }[]>()
         .find((x) => x.accountId === "claude-main"),
-    ).toEqual({ accountId: "claude-main", models: [] });
+    ).toEqual({
+      accountId: "claude-main",
+      models: ["opus", "sonnet", "haiku"].map((model) => ({ model, efforts })),
+    });
   });
 
   it("returns the catalog discovered for each Codex binding only", async () => {
@@ -2003,7 +2011,13 @@ describe("account model catalogs", () => {
     await models.ready();
     try {
       expect((await models.inject({ method: "GET", url: "/api/accounts/models" })).json()).toEqual([
-        { accountId: "claude-main", models: [] },
+        {
+          accountId: "claude-main",
+          models: ["opus", "sonnet", "haiku"].map((model) => ({
+            model,
+            efforts: ["low", "medium", "high"],
+          })),
+        },
         { accountId: "codex-main", models: [{ model: "machine-only", efforts: ["low"] }] },
         { accountId: "codex-profile", models: [{ model: "profile-only", efforts: ["high"] }] },
         { accountId: "codex-unavailable", models: [] },
@@ -2999,6 +3013,15 @@ describe("local access", () => {
       }
       if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/config/settings" && method === "POST") {
+        expect(r.statusCode, `${method} ${url}`).toBe(400); // no version or key in the table body
+        continue;
+      }
+      if (url === "/api/hub/restart" || (method === "DELETE" && url === "/api/repos/shop-app")) {
+        // a test server cannot restart itself, and shop-app is in use
+        expect(r.statusCode, `${method} ${url}`).toBe(409);
         continue;
       }
       if (url === "/api/repos/shop-app/rules") {
@@ -9098,7 +9121,9 @@ describe("QA board data", () => {
 });
 
 // Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
-vi.mock("../src/accounts/accounts.ts", () => ({
+vi.mock("../src/accounts/accounts.ts", async (importOriginal) => ({
+  CLAUDE_MODELS: (await importOriginal<typeof import("../src/accounts/accounts.ts")>())
+    .CLAUDE_MODELS,
   readAccountStatus: async (account: { id: string; vendor: string }, now: number) => ({
     accountId: account.id,
     provider: account.vendor,

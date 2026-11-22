@@ -30,6 +30,7 @@ import {
   setAccount,
   setSessionSeats,
 } from "../src/config/config-write.ts";
+import { ensureConfigFile } from "../src/config/hub-settings.ts";
 import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import { codexModels } from "../src/runtime/codex-models.ts";
 import { Store } from "../src/store.ts";
@@ -102,6 +103,22 @@ beforeEach(() => {
 afterEach(() => {
   chmodSync(dir, 0o700);
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("ensureConfigFile", () => {
+  it("ensureConfigFile writes a starter that loads", () => {
+    const fresh = join(dir, "new", "config.yaml");
+    expect(ensureConfigFile(fresh, "Europe/Paris")).toBe(true);
+    expect(statSync(fresh).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, "new")).mode & 0o777).toBe(0o700);
+    const loaded = loadConfig(fresh);
+    expect(loaded.accounts).toEqual([]);
+    expect(loaded.repos).toEqual([]);
+    expect(loaded.operator.timezone).toBe("Europe/Paris");
+    const bytes = readFileSync(fresh);
+    expect(ensureConfigFile(fresh, "UTC")).toBe(false);
+    expect(readFileSync(fresh)).toEqual(bytes);
+  });
 });
 
 describe("addRepo", () => {
