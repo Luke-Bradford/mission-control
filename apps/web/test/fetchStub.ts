@@ -21,7 +21,7 @@ export function stubFetch(routes: Record<string, Handler | unknown>) {
   vi.stubGlobal("fetch", fn);
   // A new route table represents a new mocked server state. The real server announces this on
   // the stream; discard a previous fixture response so a remounted component asks this table.
-  hub.clear();
+  hub.clearInactive();
   return fn;
 }
 

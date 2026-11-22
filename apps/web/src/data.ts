@@ -490,6 +490,8 @@ interface Entry {
   completedAt?: number;
   /** The start sequence of the newest answer kept: an older request must not replace it. */
   appliedSeq: number;
+  /** Bumped when this entry alone is discarded, so its outstanding answer cannot land. */
+  generation: number;
   settled: number;
   settledListeners: Set<() => void>;
 }
@@ -527,6 +529,7 @@ class Hub {
         inflight: false,
         again: false,
         appliedSeq: 0,
+        generation: 0,
         settled: 0,
         settledListeners: new Set(),
       };
@@ -604,6 +607,7 @@ class Hub {
       return;
     }
     const gen = this.generation;
+    const entryGen = e.generation;
     const seq = ++this.seq;
     e.inflight = true;
     e.fetchedAt = Date.now();
@@ -669,7 +673,7 @@ class Hub {
           (e.snap.data as ActivityRow[] | undefined) ?? [],
         );
       }
-      if (gen !== this.generation) return;
+      if (gen !== this.generation || entryGen !== e.generation) return;
       if (activity) {
         if (!delta) e.activityFullAt = startedAt;
         else if (e.listeners.size > 0 && e.activityTimer === undefined) {
@@ -691,7 +695,7 @@ class Hub {
       const error = err instanceof Error ? err : new Error(String(err));
       next = { ...e.snap, error, loading: false };
     }
-    if (gen !== this.generation) return; // cleared meanwhile: this answer belongs to the old session
+    if (gen !== this.generation || entryGen !== e.generation) return; // cleared meanwhile: this answer belongs to the old session
     // A read that started later may already have stored a newer answer: keep that one.
     if (seq < e.appliedSeq) next = e.snap;
     else {
@@ -812,11 +816,28 @@ class Hub {
       e.fullAgain = false;
       e.activityFullAt = undefined;
       e.completedAt = undefined;
+      e.generation++;
       clearTimeout(e.activityTimer);
       e.activityTimer = undefined;
       this.set(e, IDLE);
     }
     if (refetch) this.refetchAll();
+  }
+
+  /** Forget fixture data that no rendered page can still read. */
+  clearInactive(): void {
+    for (const e of this.entries.values()) {
+      if (e.listeners.size > 0) continue;
+      e.generation++;
+      e.inflight = false;
+      e.again = false;
+      e.fullAgain = false;
+      e.activityFullAt = undefined;
+      e.completedAt = undefined;
+      clearTimeout(e.activityTimer);
+      e.activityTimer = undefined;
+      this.set(e, IDLE);
+    }
   }
 }
 
