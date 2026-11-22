@@ -67,6 +67,7 @@ import {
   flightWakes,
   idleSeatLine,
   lastRecordedWake,
+  markIdleSeatsShown,
   markItemsShown,
   markPointersShown,
   markPrsShown,
@@ -520,6 +521,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
+        markIdleSeatsShown(store, state);
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);
@@ -661,6 +663,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
+        markIdleSeatsShown(store, state);
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);

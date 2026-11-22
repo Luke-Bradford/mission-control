@@ -556,6 +556,140 @@ describe("why the recorder dropped a check call", () => {
     expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
   });
 
+  it("reserves the checkout for one check or test at a time, vitest and pnpm test included", async () => {
+    let t = 1_000;
+    const r = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      now: () => t,
+    });
+    const key = (id: string) => ({ runId: "r1", toolUseId: id });
+    expect(await r.admit?.(key("t0"), "ls")).toBeNull();
+    // two parallel requests: exactly one gets the checkout
+    const both = await Promise.all([r.admit?.(key("t1"), LINT), r.admit?.(key("t2"), TYPES)]);
+    expect(both).toEqual([null, LINT]);
+    expect(await r.admit?.(key("t3"), "pnpm -s vitest run a.test.ts")).toBe(LINT);
+    expect(await r.admit?.({ runId: "r2", toolUseId: "o" }, TYPES)).toBeNull(); // another run's checkout is free
+    r.release?.(key("t1"));
+    // a vitest run, not a receipt check, holds the checkout as well
+    expect(await r.admit?.(key("t4"), "pnpm -s vitest run a.test.ts")).toBeNull();
+    expect(await r.admit?.(key("t5"), TYPES)).toBe("pnpm -s vitest run a.test.ts");
+    await r.end(key("t4"), true, 0);
+    expect(await r.admit?.(key("t6"), "pnpm -s test")).toBeNull();
+    expect(await r.admit?.(key("t7"), LINT)).toBe("pnpm -s test");
+    r.dropRun("r1");
+    expect(await r.admit?.(key("t8"), LINT)).toBeNull();
+    t += CHECK_BASH_TIMEOUT_MS + 1_000; // past its own timeout, a call is gone
+    expect(await r.admit?.(key("t9"), TYPES)).toBeNull();
+  });
+
+  describe("a check whose tool handed back before its process ended", () => {
+    const WORKTREE = "/work/trees/guido-1-9";
+    const watching = (alive: { now: boolean }) =>
+      createCheckRecorder({
+        store: { addCheckRun: (row) => void rows.push(row) },
+        checks: async () => CHECKS,
+        state: async () => state,
+        worktree: async () => WORKTREE,
+        processAlive: async () => alive.now,
+        pollMs: 5,
+      });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    it("keeps the checkout reserved and records the late exit against the start commit", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      r.dropRun("r1"); // the turn ended; the process still runs
+      await wait(20);
+      expect(r.pending("r1")).toEqual([LINT]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      await r.end(KEY, true, 0);
+      expect(rows).toMatchObject([{ command: LINT, headSha: HEAD, ok: true, exitCode: 0 }]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
+    it("keeps a vitest or pnpm test hold while its process runs, and frees it when it is gone", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      const test = "pnpm -s test";
+      await r.admit?.(KEY, test);
+      r.dropRun("r1"); // not a receipt check: no started call, only the reservation
+      await wait(20);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, test)).toBe(test);
+      alive.now = false;
+      await wait(40);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, test)).toBeNull();
+    });
+
+    it("keeps the checkout when a completion has no exit code while the process runs", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      await r.end(KEY, false);
+      expect(rows).toEqual([]);
+      expect(r.pending("r1")).toEqual([LINT]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      await wait(20);
+      alive.now = false;
+      await wait(40);
+      expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
+    it("notes a timeout at once for a call past its Bash timeout, and keeps the checkout while it runs", async () => {
+      let t = 1_000;
+      const alive = { now: true };
+      const r = createCheckRecorder({
+        store: { addCheckRun: (row) => void rows.push(row) },
+        checks: async () => CHECKS,
+        state: async () => state,
+        worktree: async () => "/work/trees/guido-1-9",
+        processAlive: async () => alive.now,
+        pollMs: 5,
+        now: () => t,
+      });
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      t += 120_000;
+      await r.end(KEY, false);
+      expect(rows).toEqual([]);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      alive.now = false;
+      await wait(40);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
+    it("records no receipt when the head moved before the late exit", async () => {
+      const r = watching({ now: true });
+      await r.begin(KEY, LINT);
+      r.dropRun("r1");
+      state = { head: "b".repeat(40), clean: true };
+      await r.end(KEY, true, 0);
+      expect(rows).toEqual([]);
+      expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
+    });
+
+    it("frees the checkout and says so when the process ends with no completion", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      r.dropRun("r1");
+      await wait(20);
+      alive.now = false;
+      await wait(40);
+      expect(r.pending("r1")).toEqual([]);
+      expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+  });
+
   it("says the turn ended before a check reported its end", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);

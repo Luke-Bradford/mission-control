@@ -1261,7 +1261,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     if (t === null) return fail(READ_NO_ISSUE);
     const number = t.number;
-    const card = store.board(repo.id).find((i) => i.issueNumber === number);
+    const card = store.boardItem(repo.id, number) ?? undefined;
     const column = card === undefined ? NOT_ON_BOARD : hudColumnOf(card);
     const note = cutNoteText(t.body, t.bodyTruncated, t.bodyLength ?? Array.from(t.body).length);
     const trusted = await collaborator(
@@ -1599,7 +1599,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         return fail(START_NO_GITHUB);
       }
     } else {
-      card = store.board(repo.id).find((i) => i.issueNumber === issue);
+      card = store.boardItem(repo.id, issue) ?? undefined;
     }
     if (card === undefined) return fail(notOnBoardText(ref));
     const column = hudColumnOf(card);
@@ -1649,7 +1649,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       override ?? store.profileOverride(repo.id, issue),
     );
     if ("refusal" in chosen) return fail(chosen.refusal);
-    const board = store.board(repo.id);
     const away = activeAway(store, now(), config.operator.timezone);
     const pace = paceStartCheck(store, config, now());
     const refusal = eligibleToStart({
@@ -1670,7 +1669,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       lane: config.crew?.lane,
       laneDefault: config.crew?.laneDefault ?? false,
       body,
-      closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+      closed: (n) => store.boardItem(repo.id, n)?.closed,
       waits: waitReader(store, repo.id)(card),
     });
     if (refusal !== null) return fail(refusal);
@@ -2102,14 +2101,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // The card as it is now: an edit_card or a poll may have changed it since the cache was filled.
     const fresh = await deps.board.read?.(repo.id, issue).catch(() => null);
     // the board is read after that await: a poll may have replaced it while the project was read
-    const board = store.board(repo.id);
-    const cached = board.find((i) => i.issueNumber === issue);
+    const cached = store.boardItem(repo.id, issue) ?? undefined;
     // a card that cannot be read live is not moved on the cache's word
     if (deps.board.read !== undefined && !fresh) return fail(moveNotOnBoardText(ref));
     const card = fresh ?? cached;
     if (card === undefined) return fail(moveNotOnBoardText(ref));
     if (fresh && JSON.stringify(fresh) !== JSON.stringify(cached)) {
-      store.replaceBoard(repo.id, [...board.filter((i) => i.issueNumber !== issue), fresh]);
+      store.replaceBoard(repo.id, [
+        ...store.board(repo.id).filter((i) => i.issueNumber !== issue),
+        fresh,
+      ]);
     }
     const column = hudColumnOf(card);
     const allowed =
@@ -2221,7 +2222,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (repo === undefined) return fail(PROMOTE_NO_RULES);
     const { issue, basis } = c.args;
     const ref = `${repo.id}#${issue}`;
-    const card = store.board(repo.id).find((i) => i.issueNumber === issue);
+    const card = store.boardItem(repo.id, issue) ?? undefined;
     if (card === undefined) return fail(moveNotOnBoardText(ref));
     if (store.plans.get(repo.id, issue)?.state === "signed-off") return fail(PLAN_SEND_REFUSED);
     // a card in Ready is already pickable: it must leave Ready before it can be held for a plan
@@ -2441,7 +2442,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const refuse = (why: string) => fail(`Cannot add the controller check: ${why}.`);
     const ref = `${repo.id}#${a.issue}`;
     const card =
-      store.board(repo.id).find((c) => c.issueNumber === a.issue) ??
+      store.boardItem(repo.id, a.issue) ??
       (await deps.board.read?.(repo.id, a.issue).catch(() => null));
     if (!card) return refuse("the issue is not on this repo's board");
     if (card.closed) return refuse("the ticket is closed");
@@ -2512,9 +2513,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const ref = `${repo.id}#${a.issue}`;
     const rules = await deps.rules(repo.id);
     if (rules instanceof RepoRulesError) return refuse("cannot read repo rules");
-    const cards = store.board(repo.id);
     const unfit = (card: BoardItem): string | null => cardProblem(card, rules);
-    const card = cards.find((c) => c.issueNumber === a.issue);
+    const card = store.boardItem(repo.id, a.issue);
     if (!card) return refuse("the issue is not on this repo's board");
     const problem = unfit(card);
     if (problem !== null) return refuse(problem);
@@ -2541,7 +2541,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { replacement, reason } = a;
     const replacementRef = `${repo.id}#${replacement}`;
     if (replacement === a.issue) return refuse("the replacement must be a different ticket");
-    const next = cards.find((c) => c.issueNumber === replacement);
+    const next = store.boardItem(repo.id, replacement);
     if (!next || next.closed)
       return refuse("the replacement must be an open ticket on this repo's board");
     const nextProblem = unfit(next);
@@ -2674,9 +2674,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       );
     }
     if (item.kind === "pr" && item.repoId !== null) {
-      const pr = store
-        .pullRequests(item.repoId)
-        .find((p) => `pr:${p.repoId}#${p.number}:${p.updatedAt}` === item.key);
+      const number = /^pr:.*#(\d+):\d+$/.exec(item.key)?.[1];
+      const found = number === undefined ? null : store.pullRequest(item.repoId, Number(number));
+      const pr =
+        found !== null && `pr:${found.repoId}#${found.number}:${found.updatedAt}` === item.key
+          ? found
+          : null;
       if (pr) return `${pr.title}\n\n${item.text}`;
     }
     const person = parsePersonKey(item.key);
@@ -2743,7 +2746,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const main = parseTicket(
       structured.ticket ?? (structured.noTicket === undefined ? (item.ticket ?? "") : ""),
     );
-    const card = main ? store.board(main.repoId).find((b) => b.issueNumber === main.number) : null;
+    const card = main ? store.boardItem(main.repoId, main.number) : null;
     // an old card's label that is not P0 to P2 gives way to the priority FLIGHT states (#1869)
     const cardPriority =
       card?.priority && (PRIORITIES as readonly string[]).includes(card.priority)
@@ -2853,9 +2856,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           : withTicketTitles(t, (n, kind) =>
               kind === "pr"
                 ? (store.pullRequest(home, n)?.title ?? null)
-                : (store.board(home).find((b) => b.issueNumber === n)?.title ??
-                  store.pullRequest(home, n)?.title ??
-                  null),
+                : (store.boardItem(home, n)?.title ?? store.pullRequest(home, n)?.title ?? null),
             );
       const priority = cardPriority ?? structured.priority;
       const content = {
@@ -3586,9 +3587,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
   function prRun(pr: number): Run | null {
     const repo = repoOf();
-    const row = store
-      .pullRequests(repo?.id ?? "")
-      .find((p) => p.number === pr && p.state === "open");
+    const found = store.pullRequest(repo?.id ?? "", pr);
+    const row = found?.state === "open" ? found : undefined;
     const run = store
       .loopRuns(now())
       .find(
@@ -3602,9 +3602,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return inRunLane(run) ? run : null;
   }
   function inRunLane(run: Run): boolean {
-    const card = store
-      .board(run.repoId)
-      .find((b) => `${run.repoId}#${b.issueNumber}` === run.ticket);
+    const found = run.ticket === null ? null : store.boardCardOf(run.ticket);
+    const card = found?.repoId === run.repoId ? found : null;
     const lanes = card?.labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX)) ?? [];
     return (
       lanes.length <= 1 &&
@@ -4143,7 +4142,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return fail("Assignees must be configured GitHub logins.");
         // a card filed since the last board poll: read that one item instead of refusing
         const card =
-          store.board(repo.id).find((c) => c.issueNumber === a.issue) ??
+          store.boardItem(repo.id, a.issue) ??
           (await deps.board.read?.(repo.id, a.issue).catch(() => null));
         if (!card) return fail("Card is not on this repo's board.");
         const rules = await deps.rules(repo.id);
@@ -4258,7 +4257,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           if (asked !== undefined && ticketRepoId === repo.id) {
             const rules = await deps.rules(repo.id);
             if (rules instanceof Error) return fail("Cannot read repo rules.");
-            const card = store.board(repo.id).find((c) => c.issueNumber === Number(asked));
+            const card = store.boardItem(repo.id, Number(asked));
             if (
               card &&
               rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true)))
@@ -4841,9 +4840,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           ...(where === undefined ? {} : { where }),
           ...(context === undefined ? {} : { context }),
         });
-        const card = store
-          .board(match[1] as string)
-          .find((c) => c.issueNumber === Number(match[2]));
+        const card = store.boardItem(match[1] as string, Number(match[2]));
         if (card)
           store.recordFlightArrival({
             source: "Board",

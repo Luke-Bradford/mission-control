@@ -40,6 +40,7 @@ import {
   CI_TRIES,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  CONTROLLER_HEADER,
   type ConfigView,
   type Crew,
   type CrewChanges,
@@ -9827,6 +9828,37 @@ describe("operator token", () => {
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
   });
 
+  it("refuses the token to a caller that is a seat or started by one", async () => {
+    const ports: Array<number | undefined> = [];
+    let seat = true;
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      operatorToken: "tok-1",
+      seatPeer: (port) => {
+        ports.push(port);
+        return seat;
+      },
+    });
+    await app.ready();
+    const ask = () =>
+      app.inject({
+        method: "GET",
+        url: OPERATOR_BOOTSTRAP_PATH,
+        headers: { "sec-fetch-site": "same-origin" },
+        remoteAddress: "127.0.0.1",
+      });
+    const refused = await ask();
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect(refused.body).not.toContain("tok-1");
+    expect(ports).toHaveLength(1);
+    seat = false;
+    expect((await ask()).json()).toEqual({ token: "tok-1" });
+    await app.close();
+  });
+
   it("refuses the token to the HUD screenshot browser, whatever spelling of the path it uses", async () => {
     for (const url of [OPERATOR_BOOTSTRAP_PATH, "/api/operator/%62ootstrap"]) {
       const shot = await guarded.inject({
@@ -10562,5 +10594,33 @@ describe("lighter reads and compressed responses", () => {
       });
       expect(health.headers["content-encoding"]).toBeUndefined();
     });
+  });
+});
+
+describe("request log redaction", () => {
+  it("hides every request header that carries a credential or an actor identity", async () => {
+    const out: string[] = [];
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      logger: { stream: { write: (s: string) => void out.push(s) } },
+    });
+    await a.ready();
+    const names = [
+      "authorization",
+      "proxy-authorization",
+      "cookie",
+      OPERATOR_HEADER,
+      CONTROLLER_HEADER,
+      FLIGHT_OPERATOR_ACTOR_HEADER,
+      PREVIEW_ACTIVITY_HEADER,
+      "x-api-key",
+    ];
+    const headers = Object.fromEntries(names.map((n) => [n, `secret-${n}`]));
+    a.log.info({ req: { headers }, headers }, "request");
+    await a.close();
+    const line = out.join("");
+    for (const n of names) expect(line).not.toContain(`secret-${n}`);
   });
 });

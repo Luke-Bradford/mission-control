@@ -38,7 +38,8 @@ function fixDueReason(store: Store, run: Run): "ci" | "review" | null {
   if (pushed === null || run.loop === null || run.loop === undefined) return null;
   if (run.loop.phase === "ci") {
     const prNumber = run.loop.prNumber;
-    const pr = store.pullRequests(run.repoId).find((p) => p.number === prNumber);
+    const pr =
+      prNumber === null ? undefined : (store.pullRequest(run.repoId, prNumber) ?? undefined);
     // the loop's rule: the first failure on a sha is re-run, not sent; it is due after that re-run
     const rerun = run.loop.rerun;
     return pr !== undefined &&
