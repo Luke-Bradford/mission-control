@@ -76,7 +76,9 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
   // a waiting ticket holds no seat: no agent, queue slot or reviewer on its card
   const waits = col === WAITING_COLUMN;
   const agent = waits ? null : cardAgent(item, ctx.crew);
-  const pr = cardPr(item, prs);
+  const picked = cardPr(item, prs);
+  // a closed, unmerged PR is past work, not the card's current PR; only the idle line mentions it
+  const pr = picked?.state === "closed" ? null : picked;
   const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
   const reviewer = col === "Done" || waits ? null : cardReviewer(item, pr, ctx.crew);
   const check = pr?.check ? flowChip(pr.check, ctx.flow.get(flowKey(pr.repoId, pr.number))) : null;
@@ -92,7 +94,7 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
     idle: cardIdle(
       item,
       col,
-      pr,
+      picked,
       agent !== null,
       reviewer !== null,
       prs.some((p) => p.state === "open"),
@@ -107,7 +109,7 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
     unacked: needs.some((a) => !a.acked),
     outcome: doneOutcome(item, prs),
     when,
-    statusOutOfDate: statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
+    statusOutOfDate: col !== "Done" && statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
     you: cardYou(needs, ctx.now),
     rework:
       facts && col !== "Done"
