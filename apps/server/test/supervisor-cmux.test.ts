@@ -28,9 +28,7 @@ it("starts a Claude run in a cmux workspace", async () => {
   expect(launcher).not.toContain(" -p ");
   await until(() =>
     expect(
-      JSON.parse(readFileSync(state, "utf8")).calls.some(
-        (call: string[]) => call[0] === "send",
-      ),
+      JSON.parse(readFileSync(state, "utf8")).calls.some((call: string[]) => call[0] === "send"),
     ).toBe(true),
   );
   const sent = JSON.parse(readFileSync(state, "utf8")).calls.find(
