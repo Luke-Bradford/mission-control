@@ -2522,10 +2522,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * finds it. True when the keeper is gone. Never throws.
    */
   async function endAndRemoveKeeper(seatId: string, runId: string): Promise<boolean> {
-    if (store.run(runId)?.vendor !== "codex") {
-      const saved = store.getSetting(cmuxWorkspaceKey(runId));
+    const saved = store.getSetting(cmuxWorkspaceKey(runId));
+    if (store.run(runId)?.vendor !== "codex" && saved !== null) {
       try {
-        const value: unknown = saved === null ? null : JSON.parse(saved);
+        const value: unknown = JSON.parse(saved);
         if (isObj(value) && typeof value.workspace === "string")
           await createCmux(deps.cmuxCommand, log).close(value.workspace);
       } catch (e) {
