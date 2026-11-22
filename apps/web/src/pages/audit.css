@@ -482,7 +482,30 @@
 }
 
 .audit-files .audit-path {
+  all: unset;
+  box-sizing: border-box;
   display: block;
+  min-height: var(--sp-5);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.audit-files .audit-path:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--r-s);
+}
+
+.audit-file-detail td {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--surface-2);
+  white-space: normal;
+}
+
+.audit-file-fullpath {
+  overflow-wrap: anywhere;
+  font: 400 var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
 }

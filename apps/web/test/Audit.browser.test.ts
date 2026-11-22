@@ -161,6 +161,19 @@ describeRendered("Audit first screen in a browser", () => {
         expect(path?.whiteSpace).toBe("nowrap");
         // The regular 40 px table row remains compact even when the path is much longer.
         expect(path?.rowHeight).toBeLessThanOrEqual(40);
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>(".audit-files .audit-path")?.focus();
+        }, null);
+        await page.press("Enter");
+        const fullPath = await page.evaluate(
+          () => document.querySelector(".audit-file-fullpath")?.textContent ?? "",
+          null,
+        );
+        expect(fullPath).toContain("another-long-directory/Audit.tsx");
+        const pathDetail = await page.box(".audit-file-fullpath");
+        const filesPanel = await page.box(".audit-files");
+        expect(pathDetail.x).toBeGreaterThanOrEqual(filesPanel.x);
+        expect(pathDetail.x + pathDetail.width).toBeLessThanOrEqual(filesPanel.x + filesPanel.width);
         for (const toggle of await page.boxes(".audit-rt")) {
           expect(toggle.height).toBeGreaterThanOrEqual(24);
         }

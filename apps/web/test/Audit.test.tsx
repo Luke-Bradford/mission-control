@@ -285,8 +285,13 @@ it("ranks Where findings land by findings per touch, with a dash where no touch 
     "Touches",
     "Per touch",
   ]);
-  const longPath = panel.querySelector(".audit-path") as HTMLElement;
-  expect(longPath.title).toBe(
+  const path = within(panel).getByRole("button", {
+    name: "apps/web/src/pages/a-very-long-directory-name/another-long-directory/File.tsx",
+  });
+  expect(path.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(path);
+  expect(path.getAttribute("aria-expanded")).toBe("true");
+  expect(panel.querySelector(".audit-file-fullpath")?.textContent).toBe(
     "apps/web/src/pages/a-very-long-directory-name/another-long-directory/File.tsx",
   );
 });

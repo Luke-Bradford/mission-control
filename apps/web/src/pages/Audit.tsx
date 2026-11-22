@@ -567,6 +567,7 @@ function HowWeBuild({
 }
 
 function WhereFindingsLand({ audit }: { audit: AuditData }) {
+  const [openFile, setOpenFile] = useState<string | null>(null);
   const files = audit.findingFiles ?? [];
   // Most findings per touch first; a file with no recorded touch has no ratio and sorts after.
   const ranked = [...files].sort((a, b) => {
@@ -594,20 +595,38 @@ function WhereFindingsLand({ audit }: { audit: AuditData }) {
               </tr>
             </thead>
             <tbody>
-              {ranked.map((r) => (
-                <tr key={r.file} className="hrow">
-                  <td className="lab">
-                    <span className="audit-path" title={r.file}>
-                      {r.file}
-                    </span>
-                  </td>
-                  <td className="num">{r.findings}</td>
-                  <td className="num">{r.touches === 0 ? "–" : r.touches}</td>
-                  <td className="num">
-                    {r.touches === 0 ? "–" : (r.findings / r.touches).toFixed(2)}
-                  </td>
-                </tr>
-              ))}
+              {ranked.map((r) => {
+                const isOpen = openFile === r.file;
+                return (
+                  <Fragment key={r.file}>
+                    <tr className="hrow">
+                      <td className="lab">
+                        <button
+                          type="button"
+                          className="audit-path"
+                          title={r.file}
+                          aria-expanded={isOpen}
+                          onClick={() => setOpenFile(isOpen ? null : r.file)}
+                        >
+                          {r.file}
+                        </button>
+                      </td>
+                      <td className="num">{r.findings}</td>
+                      <td className="num">{r.touches === 0 ? "–" : r.touches}</td>
+                      <td className="num">
+                        {r.touches === 0 ? "–" : (r.findings / r.touches).toFixed(2)}
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="audit-file-detail">
+                        <td colSpan={4}>
+                          <code className="audit-file-fullpath">{r.file}</code>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}
