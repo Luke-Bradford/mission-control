@@ -584,6 +584,57 @@ describe("why the recorder dropped a check call", () => {
     expect(await r.admit?.(key("t9"), TYPES)).toBeNull();
   });
 
+  describe("a check whose tool handed back before its process ended", () => {
+    const WORKTREE = "/work/trees/guido-1-9";
+    const watching = (alive: { now: boolean }) =>
+      createCheckRecorder({
+        store: { addCheckRun: (row) => void rows.push(row) },
+        checks: async () => CHECKS,
+        state: async () => state,
+        worktree: async () => WORKTREE,
+        processAlive: async () => alive.now,
+        pollMs: 5,
+      });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    it("keeps the checkout reserved and records the late exit against the start commit", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      r.dropRun("r1"); // the turn ended; the process still runs
+      await wait(20);
+      expect(r.pending("r1")).toEqual([LINT]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBe(LINT);
+      await r.end(KEY, true, 0);
+      expect(rows).toMatchObject([{ command: LINT, headSha: HEAD, ok: true, exitCode: 0 }]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+
+    it("records no receipt when the head moved before the late exit", async () => {
+      const r = watching({ now: true });
+      await r.begin(KEY, LINT);
+      r.dropRun("r1");
+      state = { head: "b".repeat(40), clean: true };
+      await r.end(KEY, true, 0);
+      expect(rows).toEqual([]);
+      expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
+    });
+
+    it("frees the checkout and says so when the process ends with no completion", async () => {
+      const alive = { now: true };
+      const r = watching(alive);
+      await r.admit?.(KEY, LINT);
+      await r.begin(KEY, LINT);
+      r.dropRun("r1");
+      alive.now = false;
+      await wait(40);
+      expect(r.pending("r1")).toEqual([]);
+      expect(reasons(r)).toEqual([["session-lost", LINT, HEAD]]);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "retry" }, LINT)).toBeNull();
+    });
+  });
+
   it("says the turn ended before a check reported its end", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);

@@ -175,6 +175,13 @@ export interface CheckRecorderDeps {
   state: (runId: string) => Promise<CloneState | null>;
   /** The run's seat worktree, or null when unknown (a leading `cd` then counts for nothing). */
   worktree?: (runId: string) => Promise<string | null>;
+  /**
+   * Whether a process in this worktree is still running this exact command: for a call whose tool
+   * handed back before it ended. Without it, a hand-back drops the call.
+   */
+  processAlive?: (worktree: string, command: string) => Promise<boolean>;
+  /** How often a kept call's process is looked at (ms). */
+  pollMs?: number;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -224,6 +231,43 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     const rest = list.filter((x) => x.command !== command);
     if (rest.length === 0) dropped.delete(runId);
     else dropped.set(runId, rest);
+  };
+  /** Calls whose tool handed back while their process still ran: a watcher holds each. */
+  const lingering = new Set<StartedCall>();
+  /** The call is over without a receipt: forget it, say why, and free the checkout it held. */
+  const forget = (call: StartedCall, reason: CheckDropReason): void => {
+    lingering.delete(call);
+    let was = false;
+    for (const [id, c] of started)
+      if (c === call) {
+        started.delete(id);
+        was = true;
+      }
+    if (!was) return;
+    noteDrop(call.runId, reason, call.matched, call.head, call.command);
+    if (reservations.get(call.runId)?.command === call.command) reservations.delete(call.runId);
+  };
+  /** Polls the process of a call kept past its tool's hand-back until it ends or its timeout passes. */
+  const watch = async (call: StartedCall): Promise<void> => {
+    const pollMs = d.pollMs ?? 2_000;
+    const alive = async (): Promise<boolean> => {
+      const wt = d.worktree === undefined ? null : await d.worktree(call.runId).catch(() => null);
+      return wt !== null && (await d.processAlive?.(wt, call.command).catch(() => false)) === true;
+    };
+    let gone = 0;
+    try {
+      while (true) {
+        // its completion came (or the call was lost): `end` recorded it, or `lost` noted it
+        if (![...started.values()].includes(call)) return;
+        if (now() - call.startedAt >= call.timeoutMs) return forget(call, "session-lost");
+        if (await alive()) gone = 0;
+        // one more look after the process is gone, for a completion that is on its way
+        else if (++gone > 1) return forget(call, "session-lost");
+        await new Promise((r) => setTimeout(r, pollMs).unref());
+      }
+    } finally {
+      lingering.delete(call);
+    }
   };
   return {
     lockedBy: (command) => lockedCheck(command, [RELATED_CHECK]),
@@ -358,16 +402,26 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     dropRun(runId) {
-      reservations.delete(runId);
       // a call can sit under two ids (Codex): it is one call
       const calls = new Set<StartedCall>();
-      for (const [id, call] of started) {
-        if (call.runId !== runId) continue;
-        started.delete(id);
-        calls.add(call);
+      for (const call of started.values()) if (call.runId === runId) calls.add(call);
+      if (d.processAlive === undefined) {
+        for (const call of calls) forget(call, "turn-ended");
+        reservations.delete(runId);
+        return;
       }
-      for (const call of calls)
-        noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+      // the tool may have handed back while the process still runs: watch it, keep the checkout
+      // reserved, and let its late completion record the exit code against the start commit
+      let watching = false;
+      for (const call of calls) {
+        if (lingering.has(call)) watching = true;
+        else {
+          lingering.add(call);
+          watching = true;
+          void watch(call);
+        }
+      }
+      if (!watching) reservations.delete(runId);
     },
     lost(runId, command) {
       if (reservations.get(runId)?.command === command) reservations.delete(runId);

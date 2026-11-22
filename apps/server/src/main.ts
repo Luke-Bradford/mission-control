@@ -90,6 +90,7 @@ import {
   seatWorktree,
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
+import { processAlive } from "./guard/process-alive.ts";
 import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -516,6 +517,7 @@ export async function main(): Promise<void> {
     checks: runChecks,
     state: cloneState(config, store),
     worktree: seatWorktree(store),
+    processAlive,
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
