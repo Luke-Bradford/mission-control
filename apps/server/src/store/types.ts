@@ -308,3 +308,12 @@ export interface AgentEvent {
 
 /** A run still open (no end) this long before a query's end is an abandoned row, not live work. */
 export const MAX_OPEN_RUN_AGE_MS = 30 * 24 * 60 * 60_000;
+
+/** A `run` snapshot in run_attempts that a later snapshot of its run supersedes is kept this long. */
+export const RUN_SNAPSHOT_KEEP_MS = 24 * 60 * 60_000;
+/** Attempts other than `loop` (which the Audit death-loop list reads for a year) are kept this long. */
+export const RUN_ATTEMPTS_KEEP_MS = 90 * 24 * 60 * 60_000;
+/** The store compacts its file at open when at least this much of it is free pages. */
+export const VACUUM_MIN_FREE_BYTES = 8 * 1024 * 1024;
+/** ...and free pages are at least this share of the file. */
+export const VACUUM_MIN_FREE_SHARE = 0.25;

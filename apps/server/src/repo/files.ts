@@ -293,6 +293,68 @@ export async function committedLines(
   }
 }
 
+/** Counts several immutable commit trees in one read-only Git invocation. */
+export async function committedLinesBatch(
+  worktree: string,
+  shas: readonly string[],
+  exec: GitExec = realGitExec,
+): Promise<Map<string, { additions: number | null; deletions: number | null }>> {
+  const unknown = { additions: null, deletions: null };
+  const valid = [...new Set(shas.filter((sha) => /^[a-f0-9]{40,64}$/.test(sha)))];
+  const lines = new Map<string, { additions: number | null; deletions: number | null }>(
+    valid.map((sha) => [sha, unknown]),
+  );
+  if (valid.length === 0) return lines;
+  try {
+    const base = await readOnlyBase(worktree, exec);
+    const out = await exec([
+      ...base,
+      "show",
+      "--format=%H%x00",
+      "--diff-merges=first-parent",
+      "--root",
+      "-r",
+      "--numstat",
+      "-z",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--ignore-submodules=all",
+      "--no-renames",
+      ...valid,
+      "--",
+    ]);
+    let current: string | null = null;
+    const rows = new Map<string, FileRow[]>();
+    for (const record of out.split("\0")) {
+      const value = record.trimStart();
+      if (/^[a-f0-9]{40,64}$/.test(value)) {
+        current = value;
+        rows.set(value, []);
+      } else if (current !== null) {
+        const row = parseNumstat(value, "committed")[0];
+        if (row) rows.get(current)?.push(row);
+      }
+    }
+    for (const [sha, changes] of rows) {
+      lines.set(sha, {
+        additions: changes.some((row) => row.add === null)
+          ? null
+          : changes.reduce((sum, row) => sum + (row.add ?? 0), 0),
+        deletions: changes.some((row) => row.del === null)
+          ? null
+          : changes.reduce((sum, row) => sum + (row.del ?? 0), 0),
+      });
+    }
+  } catch {
+    return new Map(
+      await Promise.all(
+        valid.map(async (sha) => [sha, await committedLines(worktree, sha, exec)] as const),
+      ),
+    );
+  }
+  return lines;
+}
+
 /** HEAD's sha, or null when git cannot name it. */
 const headSha = (base: string[], exec: GitExec): Promise<string | null> =>
   exec([...base, "rev-parse", "--verify", "HEAD"]).then(

@@ -112,6 +112,7 @@ describe("createReviewPreviews", () => {
   it("immediate review cancellation does not close an operator-owned preview", async () => {
     const stop = vi.fn();
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async () => ({ stop }),
@@ -134,6 +135,7 @@ describe("createReviewPreviews", () => {
   it("cancels only its own pending build", async () => {
     let signal: AbortSignal | undefined;
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async (input) =>
@@ -221,6 +223,7 @@ describe("createReviewPreviews", () => {
   it("keeps the preview alive past the manager's idle expiry while the run is open", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async () => ({ stop: () => {} }),
