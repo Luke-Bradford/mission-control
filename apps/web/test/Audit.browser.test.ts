@@ -147,19 +147,16 @@ describeRendered("Audit first screen in a browser", () => {
           const box = await page.box(panel);
           expect(box.y + box.height).toBeLessThanOrEqual(height);
         }
-        const path = await page.evaluate(
-          () => {
-            const el = document.querySelector<HTMLElement>(".audit-files .audit-path");
-            return el
-              ? {
-                  title: el.title,
-                  whiteSpace: getComputedStyle(el.closest("td") ?? el).whiteSpace,
-                  rowHeight: el.closest("tr")?.getBoundingClientRect().height ?? 0,
-                }
-              : null;
-          },
-          null,
-        );
+        const path = await page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>(".audit-files .audit-path");
+          return el
+            ? {
+                title: el.title,
+                whiteSpace: getComputedStyle(el.closest("td") ?? el).whiteSpace,
+                rowHeight: el.closest("tr")?.getBoundingClientRect().height ?? 0,
+              }
+            : null;
+        }, null);
         expect(path?.title).toContain("another-long-directory/Audit.tsx");
         expect(path?.whiteSpace).toBe("nowrap");
         // The regular 40 px table row remains compact even when the path is much longer.
