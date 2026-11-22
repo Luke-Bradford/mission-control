@@ -1,8 +1,13 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { dir, make, seatState, store, until } from "./supervisor-harness.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { crewKeeperDir } from "../src/store/crew-paths.ts";
+import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+import { dbPath, dir, make, seatState, store, until } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 const fake = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
 const files: string[] = [];
@@ -79,4 +84,150 @@ it("seat state follows cmux and /clear keeps the run", async () => {
   await until(() => expect(store.seatSession("guido-1")?.cliSessionId).toBe(cleared));
   expect(store.run(run.runId)?.sessionId).toBe(cleared);
   expect(store.run(run.runId)?.endedAt).toBeNull();
+});
+
+const calls = (state: string): string[][] => JSON.parse(readFileSync(state, "utf8")).calls;
+const sessions = (state: string): Record<string, string>[] =>
+  JSON.parse(readFileSync(state, "utf8")).sessions;
+const setLifecycle = (state: string, lifecycle: string) =>
+  edit(state, (session) => {
+    session.agent_lifecycle = lifecycle;
+  });
+
+/** A run with its cmux agent registered and a first turn driven through, so the row is idle. */
+async function idleRun() {
+  const state = join(dir, "fake-cmux.json");
+  const first = make({ cmuxCommand: [process.execPath, fake, state] });
+  first.sup.start();
+  const run = await first.sup.startRun("guido-1", 42);
+  await until(() => expect(readFileSync(state, "utf8")).toContain("workspace_id"));
+  setLifecycle(state, "running");
+  await until(() => expect(seatState("guido-1")).toBe("running"));
+  setLifecycle(state, "idle");
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  return { state, first, run };
+}
+
+const restart = async (state: string, first: { sup: { stopAll(): Promise<void> } }) => {
+  await first.sup.stopAll();
+  const next = make({ cmuxCommand: [process.execPath, fake, state] });
+  next.sup.start();
+  return next;
+};
+
+it("an operator's own prompt is a turn", async () => {
+  const { state, run } = await idleRun();
+  const started = store.seatSession("guido-1")?.lastTurnStartedAt ?? 0;
+  await new Promise((r) => setTimeout(r, 5));
+  setLifecycle(state, "running");
+  await until(() => expect(seatState("guido-1")).toBe("running"));
+  expect(store.seatSession("guido-1")?.lastTurnStartedAt).toBeGreaterThan(started);
+  setLifecycle(state, "idle");
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  expect(store.run(run.runId)?.endedAt).toBeNull();
+});
+
+it("a restored agent with a new pid is closed and resumed with the hub's command", async () => {
+  const { state, run } = await idleRun();
+  const launcher = sessions(state)[0]?.command as string;
+  edit(state, (session) => {
+    session.pid = 2;
+  });
+  await until(() =>
+    expect(calls(state).some((c) => c[0] === "close-workspace" && c.includes("--force"))).toBe(
+      true,
+    ),
+  );
+  await until(() => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(2));
+  const text = readFileSync(launcher, "utf8");
+  expect(text).toContain("'--resume'");
+  expect(text).toContain("'--settings'");
+  expect(store.run(run.runId)?.endedAt).toBeNull();
+});
+
+it("no keeper for any Claude seat", async () => {
+  const state = join(dir, "fake-cmux.json");
+  const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
+  sup.start();
+  const runs = [
+    (await sup.startRun("guido-1", 42)).runId,
+    (await sup.startRun("fao-1", 43)).runId,
+    (await sup.startWatch("flight-1")).runId,
+  ];
+  await until(() => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(3));
+  for (const runId of runs)
+    for (const f of ["keeper.pid", "spec.json", "s"])
+      expect(existsSync(join(crewKeeperDir(dbPath, runId), f))).toBe(false);
+});
+
+it("a Codex seat still has a keeper", async () => {
+  const { sup } = codexSupervisor();
+  sup.start();
+  const { runId } = await sup.startRun("guido-1", 42);
+  await until(() =>
+    expect(existsSync(join(crewKeeperDir(dbPath, runId), "keeper.pid"))).toBe(true),
+  );
+  await sup.endRunByEngine(runId);
+});
+
+describe("a restart attaches to the workspace", () => {
+  it("keeps an idle row idle", async () => {
+    const { state, first } = await idleRun();
+    await restart(state, first);
+    await until(() =>
+      expect(calls(state).filter((c) => c[0] === "sessions").length).toBeGreaterThan(3),
+    );
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(seatState("guido-1")).toBe("idle");
+    expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
+  });
+
+  it("keeps a needs-input row waiting, then runs when cmux runs", async () => {
+    const { state, first } = await idleRun();
+    setLifecycle(state, "needsInput");
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    await restart(state, first);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(seatState("guido-1")).toBe("needs-input");
+    setLifecycle(state, "running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+  });
+
+  it("a saved needs-input row becomes running when cmux is already running", async () => {
+    const { state, first } = await idleRun();
+    setLifecycle(state, "needsInput");
+    await until(() => expect(seatState("guido-1")).toBe("needs-input"));
+    await first.sup.stopAll();
+    setLifecycle(state, "running");
+    const next = make({ cmuxCommand: [process.execPath, fake, state] });
+    next.sup.start();
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+  });
+
+  it("a saved running row does not start a second turn", async () => {
+    const { state, first } = await idleRun();
+    setLifecycle(state, "running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const started = store.seatSession("guido-1")?.lastTurnStartedAt;
+    await restart(state, first);
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(seatState("guido-1")).toBe("running");
+    expect(store.seatSession("guido-1")?.lastTurnStartedAt).toBe(started);
+  });
+
+  it("does not replay transcript lines it already copied", async () => {
+    const { state, first, run } = await idleRun();
+    const source = join(dir, "claude-source.jsonl");
+    writeFileSync(source, '{"type":"assistant","n":"one"}\n');
+    edit(state, (session) => {
+      session.transcript_path = source;
+    });
+    const copied = (marker: string) =>
+      readFileSync(store.run(run.runId)?.transcriptPath ?? "", "utf8").split(marker).length - 1;
+    await until(() => expect(copied('"n":"one"')).toBe(1));
+    await restart(state, first);
+    appendFileSync(source, '{"type":"assistant","n":"two"}\n');
+    await until(() => expect(copied('"n":"two"')).toBe(1));
+    expect(copied('"n":"one"')).toBe(1);
+  });
 });

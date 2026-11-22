@@ -3070,6 +3070,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               workspace: saved.workspace,
               pid: saved.pid,
               awaiting: row.state !== "idle",
+              savedState: row.state,
               from: cursor?.spawn === `cmux:${saved.workspace}` ? cursor.line : 0,
               name: row.seatId,
               cwd: row.worktree,

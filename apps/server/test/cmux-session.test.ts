@@ -339,6 +339,7 @@ it("attaches an idle workspace as idle without a synthetic result", async () => 
     workspace: "workspace-1",
     pid: 42,
     awaiting: false,
+    savedState: "idle",
     from: 0,
     name: "GUIDO · mc#2194",
     cwd: dir,
@@ -357,4 +358,63 @@ it("attaches an idle workspace as idle without a synthetic result", async () => 
   expect(events).toContain("attached");
   expect(events).not.toContain("result");
   await session.close();
+});
+
+describe("reconciling a saved seat state at attach", () => {
+  const attachWith = async (saved: string, lifecycle: "idle" | "running" | "needsInput") => {
+    const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+    dirs.push(dir);
+    const cmux: Cmux = {
+      ensure: async () => {},
+      newWorkspace: async () => "workspace-1",
+      agents: async () => [
+        {
+          workspaceId: "workspace-1",
+          sessionId: "session-1",
+          pid: 42,
+          lifecycle,
+          transcriptPath: null,
+        },
+      ],
+      send: async () => "sent",
+      sendKey: async () => {},
+      readScreen: async () => "",
+      close: async () => {},
+    };
+    const session = attachCmuxSession({
+      cmux,
+      workspace: "workspace-1",
+      pid: 42,
+      awaiting: saved !== "idle",
+      savedState: saved,
+      from: 0,
+      name: "GUIDO · mc#2194",
+      cwd: dir,
+      command: "claude",
+      args: [],
+      env: {},
+      dir: join(dir, "run"),
+      transcriptPath: join(dir, "run.jsonl"),
+      cliSessionId: "session-1",
+      messageDir: join(dir, "messages"),
+      pollMs: 5,
+    });
+    const events: string[] = [];
+    session.on((event) => events.push(event.kind));
+    await session.ready;
+    await session.close();
+    return events;
+  };
+
+  it("starts a turn when a saved waiting seat is already running", async () => {
+    expect(await attachWith("needs-input", "running")).toContain("turn-start");
+  });
+
+  it("starts a turn when a saved idle seat is already running", async () => {
+    expect(await attachWith("idle", "running")).toContain("turn-start");
+  });
+
+  it("does not repeat the turn of a saved running seat", async () => {
+    expect(await attachWith("running", "running")).not.toContain("turn-start");
+  });
 });

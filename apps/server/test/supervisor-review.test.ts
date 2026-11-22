@@ -21,6 +21,7 @@ import "./supervisor-harness.ts";
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DEFAULT_PROFILES,
   type EvidencePage,
@@ -51,7 +52,7 @@ import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { crewTokenPath } from "../src/store/crew-paths.ts";
+import { crewKeeperDir, crewTokenPath } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -808,6 +809,20 @@ describe("startReview", () => {
     });
     const { runId } = await started();
     expect(store.run(runId)?.advice).toMatchObject({ step: "review", by: "planner" });
+  });
+
+  it("a review run is a cmux workspace with no keeper", async () => {
+    const r = reviewOfPush();
+    const state = join(dir, "fake-cmux-review.json");
+    const fake = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
+    const m = make({ scratchRetro: true, cmuxCommand: [process.execPath, fake, state] });
+    m.sup.start();
+    const { runId } = await m.sup.startReview("retro", r.reviewId);
+    await until(() => expect(readFileSync(state, "utf8")).toContain("workspace_id"));
+    const created = JSON.parse(readFileSync(state, "utf8")).sessions[0];
+    expect(created.name).toBe(`retro · PR ${9}`);
+    for (const f of ["keeper.pid", "spec.json", "s"])
+      expect(existsSync(join(crewKeeperDir(dbPath, runId), f))).toBe(false);
   });
 
   it("a review run snapshots the hub default when nothing is stored", async () => {

@@ -35,6 +35,8 @@ export interface CmuxSessionInput {
   startWaitMs?: number;
   /** The hub had a turn open when it detached and needs the first cmux state reconciled. */
   awaiting?: boolean;
+  /** The seat's saved state at restart, so the first cmux state is reconciled against it. */
+  savedState?: string;
   onWorkspace?: (workspace: string, pid: number | null) => void;
 }
 
@@ -64,7 +66,13 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
 }
 
 export function attachCmuxSession(
-  i: CmuxSessionInput & { workspace: string; pid: number; from: number; awaiting: boolean },
+  i: CmuxSessionInput & {
+    workspace: string;
+    pid: number;
+    from: number;
+    awaiting: boolean;
+    savedState: string;
+  },
 ): CrewSession {
   return cmuxSession(i, i.workspace, i.pid, i.from);
 }
@@ -203,7 +211,7 @@ function cmuxSession(
             emit({ kind: "result", isError: false, stopReason: "end_turn" });
           }
           if (lifecycle === "needsInput") emit({ kind: "needs-input" });
-          if (lifecycle === "running" && !i.awaiting) emit({ kind: "turn-start" });
+          if (lifecycle === "running" && i.savedState !== "running") emit({ kind: "turn-start" });
           attached = false;
           emit({ kind: "attached", awaiting: lifecycle !== "idle" });
         }
