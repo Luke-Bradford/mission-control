@@ -69,6 +69,7 @@ import {
   collectGithub,
   collectWaitedPrs,
   fetchTicket,
+  forgetGithubToken,
   githubToken,
   MISSING_SCOPE_PREFIX,
   makeGql,
@@ -196,6 +197,24 @@ export const JOBS: readonly Job[] = [
   "cli",
   "cliAuto",
 ];
+/**
+ * start() runs the sessions read at once (the studio's first tick reuses it) and starts every
+ * other independent job a second or more after the one before, so a restart does not run them
+ * all together. The engine, PR sweep, flow, backfill and transcript jobs have their own, later
+ * delays below.
+ */
+export const STAGGERED_FIRST_DELAY_MS: Partial<Record<Job, number>> = {
+  ta: 1_000,
+  studio: 2_000,
+  github: 3_000,
+  teams: 4_000,
+  usage: 6_000,
+  machine: 8_000,
+  maintenance: 10_000,
+  update: 12_000,
+  cli: 14_000,
+  cliAuto: 16_000,
+};
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
 export const LOOP_INTERVAL_MS = 15_000;
@@ -280,6 +299,8 @@ export interface Collectors {
   launchctl: LaunchctlRunner;
   sessions: () => LiveSession[];
   githubToken: () => Promise<string>;
+  /** Drops a kept token, so the next `githubToken()` reads gh again (after a scope refusal). */
+  forgetGithubToken?: () => void;
   /** `rates` is where every answer's `rateLimit` is recorded. */
   makeGql: (token: string, rates: RateLimits) => Gql;
   github: typeof collectGithub;
@@ -396,6 +417,7 @@ export function realCollectors(config: CcConfig): Collectors {
     launchctl,
     sessions: () => readSessions(SESSIONS_DIR, defaultIsAlive),
     githubToken,
+    forgetGithubToken,
     makeGql: (token, rates) => makeGql(token, fetch, rates),
     github: collectGithub,
     githubPrs: collectWaitedPrs,
@@ -850,9 +872,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           }),
         (pr) => {
           const [repoId, number] = pr.split("#");
-          return (
-            store.pullRequests(repoId ?? "").find((p) => p.number === Number(number))?.ci ?? null
-          );
+          return store.pullRequest(repoId ?? "", Number(number))?.ci ?? null;
         },
         (key) => {
           waiting ??= new Set(
@@ -1263,7 +1283,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
           if (error?.includes(MISSING_SCOPE_PREFIX)) {
-            // `gh auth refresh` issues a new token: read it again on the next tick.
+            // `gh auth refresh` issues a new token: read it again on the next tick (the kept
+            // token is dropped too, or the new client would carry the old scopes).
+            c.forgetGithubToken?.();
             gql = null;
             // Once per repo, after its first poll: the health row has it, the server log should too.
             if (!scopeLogged.has(repo.id)) {
@@ -1677,6 +1699,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_FIRST_DELAY_MS,
     backfill: BACKFILL_FIRST_DELAY_MS,
     transcripts: TRANSCRIPT_PASS_FIRST_DELAY_MS,
+    ...STAGGERED_FIRST_DELAY_MS,
   };
 
   const refreshBoards = () => {
@@ -1770,7 +1793,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         }
         // An interval shorter than the delay starts with the first run (else it would run the job
         // early); a longer one keeps its phase from start().
-        const late = intervals[job] < delay;
+        // A staggered job keeps the stagger: its interval counts from its first tick.
+        const late = intervals[job] < delay || job in STAGGERED_FIRST_DELAY_MS;
         const first = setTimeout(() => {
           void tick(job);
           if (late) every();

@@ -91,6 +91,7 @@ import {
   seatWorktree,
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
+import { processAlive } from "./guard/process-alive.ts";
 import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -103,6 +104,7 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
+import { peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
 import {
   evidenceSideStarter,
@@ -533,6 +535,7 @@ export async function main(): Promise<void> {
     checks: runChecks,
     state: cloneState(config, store),
     worktree: seatWorktree(store),
+    processAlive,
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
@@ -593,7 +596,7 @@ export async function main(): Promise<void> {
         review.sha,
       );
       if (!subject) return null;
-      const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
+      const pr = store.pullRequest(repo.id, review.prNumber);
       if (
         pr?.headSha !== review.sha ||
         branchOwned(config, store, repo.id, subject.branch, pr?.ticket)
@@ -1041,6 +1044,7 @@ export async function main(): Promise<void> {
     ticketRead: engineBoard.read,
     operatorToken,
     controllerToken,
+    seatPeer: peerIsSeat,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,

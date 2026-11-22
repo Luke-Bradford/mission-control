@@ -26,11 +26,11 @@ export function loopPause(
   if (by === undefined) return { paused: file, by: null, url: null };
   if ("stopFile" in by) return { paused: file || existsNoted(by.stopFile), by: null, url: null };
   const { repoId, number } = by.issue;
-  const board = store.board(repoId);
+  const card = store.boardItem(repoId, number);
   const open =
-    !board.some((b) => b.issueNumber === number && b.closed) &&
+    card?.closed !== true &&
     (store.escalations().some((e) => e.repoId === repoId && e.issueNumber === number) ||
-      board.some((b) => b.issueNumber === number));
+      card !== null);
   const slug = github?.(repoId);
   return {
     paused: file || open,

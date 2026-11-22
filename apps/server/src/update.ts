@@ -390,6 +390,9 @@ export interface UpdaterDeps {
   now?: () => number;
 }
 
+/** `version()` reuses its last answer this long: the page polls it, and each answer spawns git. */
+export const VERSION_INFO_TTL_MS = 5000;
+
 export interface Updater {
   version(): Promise<VersionInfo>;
   /** `version()` after a fetch now (shared with one in flight; none inside the floor). */
@@ -892,6 +895,19 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     );
   }
 
+  /** The last answer `version()` gave and when; `check()` and `update()` drop it. */
+  let shown: { at: number; checkedAt: number | null; value: Promise<VersionInfo> } | null = null;
+
+  /** `info()`, remembered for `version()`. */
+  function read(): Promise<VersionInfo> {
+    const value = info();
+    shown = { at: now(), checkedAt, value };
+    value.catch(() => {
+      if (shown?.value === value) shown = null;
+    });
+    return value;
+  }
+
   /**
    * What `version()` and `check()` answer, without fetching. Refusals come first (preview,
    * running, branch, dirty, crew); only a hub free to update reads as up to date: nothing behind
@@ -914,22 +930,27 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   return {
     async version() {
       if (!deps.preview) await cachedFetch();
-      return info();
+      // the page polls this: answer from the last read inside the window, so it spawns no git
+      if (shown !== null && now() - shown.at < VERSION_INFO_TTL_MS && shown.checkedAt === checkedAt)
+        return shown.value;
+      return read();
     },
 
     async check() {
+      shown = null;
       if (!deps.preview) {
         await floorFetch();
         // while an update runs nothing was fetched, and the answer is UPDATE_RUNNING anyway
         if (fetchOk === false && !updating)
           throw new UpdateError(502, originUnreachable(checkedAt), { checkedAt });
       }
-      return info();
+      return read();
     },
 
     changes: () => changes(),
 
     async update(opts) {
+      shown = null;
       if (updating) throw new UpdateError(409, UPDATE_RUNNING);
       updating = true;
       let logStarted = false;

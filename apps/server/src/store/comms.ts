@@ -45,6 +45,29 @@ type Row = Record<string, SQLInputValue>;
 /** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
 const COMMS_LINK_PREVIEW = 200;
 
+// The ask's repo and PR or issue number, read out of its `ticket` ("repo#n") and `ref` ("PR n") so
+// each closure table is reached by its primary key (repo_id, number) and not scanned.
+const ASK_REPO_SQL = "substr(c.ticket, 1, instr(c.ticket, '#') - 1)";
+const ASK_ISSUE_SQL = "CAST(substr(c.ticket, instr(c.ticket, '#') + 1) AS INTEGER)";
+const ASK_PR_SQL = "CAST(substr(c.ref, 4) AS INTEGER)";
+/** True for an ask whose ticket is closed, or whose PR is merged or closed. `c` is the ask. */
+export const CLOSED_WORK_SQL = `(
+  EXISTS (
+    SELECT 1 FROM board_items b
+    WHERE b.repo_id = ${ASK_REPO_SQL} AND b.issue_number = ${ASK_ISSUE_SQL} AND b.closed = 1
+  )
+  OR (c.ref GLOB 'PR [0-9]*' AND c.ticket GLOB '*#*' AND (
+    EXISTS (
+      SELECT 1 FROM pull_requests p
+      WHERE p.repo_id = ${ASK_REPO_SQL} AND p.number = ${ASK_PR_SQL}
+        AND p.state IN ('merged', 'closed')
+    )
+    OR EXISTS (
+      SELECT 1 FROM pr_history h WHERE h.repo_id = ${ASK_REPO_SQL} AND h.number = ${ASK_PR_SQL}
+    )
+  ))
+)`;
+
 export function cutCommsText(text: string): string {
   const chars = Array.from(text);
   return chars.length > COMMS_TEXT_MAX
@@ -81,7 +104,7 @@ export class CommsQueries {
          ORDER BY at DESC, id DESC LIMIT ?3`,
       )
       .all(ticket, shortRef, limit, ...prRefs) as Row[];
-    return rows.map((r) => this.commsRow(r));
+    return this.commsRows(rows);
   }
 
   /** Counts retained and retired reference metadata; never reads text or limits by time. */
@@ -405,30 +428,54 @@ export class CommsQueries {
   }
 
   commsPins(): CommsRow[] {
-    return (
+    return this.commsRows(
       this.db
         .prepare(
           "SELECT c.* FROM comms c JOIN comms_pins p ON p.message_id=c.id ORDER BY p.pinned_at DESC",
         )
-        .all() as Row[]
-    ).map((r) => this.commsRow(r));
+        .all() as Row[],
+    );
   }
 
   commsReactions(messageId: string): CommsReaction[] {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return [];
-    return this.db
-      .prepare(
-        "SELECT actor_id, reaction, reason, at FROM comms_reactions WHERE message_id=? ORDER BY at,actor_id",
-      )
-      .all(id)
-      .map((r) => ({
-        messageId: `comms:${id}`,
-        actor: r.actor_id as string,
-        reaction: r.reaction as CommsReactionKind,
-        reason: r.reason as string | null,
-        at: r.at as number,
-      }));
+    return this.commsReactionsFor([messageId]).get(messageId) ?? [];
+  }
+
+  /** The reactions on each message, read in batches of one query; a message with none is absent. */
+  commsReactionsFor(messageIds: readonly string[]): Map<string, CommsReaction[]> {
+    const found = new Map<string, CommsReaction[]>();
+    const ids = [
+      ...new Set(
+        messageIds.flatMap((messageId) => {
+          const id = commsMessageNumber(messageId);
+          return id === null ? [] : [id];
+        }),
+      ),
+    ];
+    // Stay below even SQLite's older 999-variable limit.
+    const batchSize = 400;
+    for (let start = 0; start < ids.length; start += batchSize) {
+      const batch = ids.slice(start, start + batchSize);
+      const rows = this.db
+        .prepare(
+          `SELECT message_id, actor_id, reaction, reason, at FROM comms_reactions
+           WHERE message_id IN (${batch.map(() => "?").join(",")}) ORDER BY message_id, at, actor_id`,
+        )
+        .all(...batch);
+      for (const r of rows) {
+        const key = `comms:${r.message_id}`;
+        const list = found.get(key) ?? [];
+        list.push({
+          messageId: key,
+          actor: r.actor_id as string,
+          reaction: r.reaction as CommsReactionKind,
+          reason: r.reason as string | null,
+          at: r.at as number,
+        });
+        found.set(key, list);
+      }
+    }
+    return found;
   }
 
   commsSettlement(messageId: string): CommsSettlement | null {
@@ -459,13 +506,13 @@ export class CommsQueries {
   }
 
   commsMentions(target: string): CommsRow[] {
-    return (
+    return this.commsRows(
       this.db
         .prepare(
           "SELECT c.* FROM comms c JOIN comms_mentions m ON m.message_id=c.id WHERE m.mentioned_id=? ORDER BY c.at DESC,c.id DESC",
         )
-        .all(target) as Row[]
-    ).map((r) => this.commsRow(r));
+        .all(target) as Row[],
+    );
   }
 
   markCommsMentionsSeen(target: string, ids: string[], at: number): void {
@@ -603,8 +650,10 @@ export class CommsQueries {
         ...(before ? [before.at, before.id] : []),
         limit,
       ) as Row[];
-    return rows.reverse().map((r) => ({
-      ...this.commsRow(r),
+    const ordered = rows.reverse();
+    const base = this.commsRows(ordered);
+    return ordered.map((r, i) => ({
+      ...(base[i] as CommsRow),
       ...(typeof r.choice_label === "string"
         ? { choice: { label: r.choice_label }, itemKey: (r.item_key ?? r.choice_key) as string }
         : {}),
@@ -708,15 +757,15 @@ export class CommsQueries {
   ): { rows: CommsRow[]; hasMore: boolean } {
     const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const beforeId = before === undefined ? null : commsMessageNumber(before);
-    const rows = (
+    const rows = this.commsRows(
       this.db
         .prepare(
           `SELECT * FROM comms WHERE ${where}${
             beforeId === null ? "" : " AND (at, id) < (SELECT at, id FROM comms WHERE id = ?)"
           } ORDER BY at DESC, id DESC LIMIT ?`,
         )
-        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[]
-    ).map((r) => this.commsRow(r));
+        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[],
+    );
     const hasMore = rows.length > limit;
     return { rows: rows.slice(0, limit).reverse(), hasMore };
   }
@@ -889,9 +938,9 @@ export class CommsQueries {
   }
 
   private commsForWhere(where: string, ...args: SQLInputValue[]): CommsRow[] {
-    return (
-      this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
-    ).map((r) => this.commsRow(r));
+    return this.commsRows(
+      this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[],
+    );
   }
 
   private commsForRunWhere(runId: string, where: string, ...args: SQLInputValue[]): CommsRow[] {
@@ -1076,13 +1125,73 @@ export class CommsQueries {
          ) ORDER BY at ASC, id ASC`,
       )
       .all(itemKey, since, COMMS_MC, limit) as Row[];
-    return rows.map((r) => ({
-      ...this.commsRow(r),
+    const base = this.commsRows(rows);
+    return rows.map((r, i) => ({
+      ...(base[i] as CommsRow),
       ...(typeof r.choice_label === "string" ? { choice: r.choice_label } : {}),
     }));
   }
 
-  /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
+  /**
+   * Settles the open asks whose ticket is closed or whose PR is merged or closed, as the stored
+   * boards and PRs show now. The caches drop those rows later (a board refresh, a PR sweep), and
+   * the ask must not reopen when they do; merged PRs also stay in `pr_history`. Safe to repeat.
+   */
+  settleAsksOfClosedWork(at: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO comms_settlements (message_id, settled_by, reason, at)
+         SELECT c.id, ?, 'Its ticket or PR was closed', ? FROM comms c
+         WHERE c.label IN ('question', 'blocker') AND ${CLOSED_WORK_SQL}
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
+         ON CONFLICT(message_id) DO NOTHING`,
+      )
+      .run(COMMS_MC, at);
+  }
+
+  /**
+   * Settles the open asks about a ticket the hub's own records show closed or merged, even when
+   * the board and PR caches no longer hold its row: a card moved into Done by a run, a merged PR kept
+   * in `pr_history`, or a question closed because its ticket closed or its PR merged or closed.
+   * Reads first and writes only when it settles something. Returns how many it settled.
+   */
+  reconcileAsksOfClosedTickets(at: number): number {
+    const asks = this.db
+      .prepare(
+        `SELECT c.id, c.ticket FROM comms c
+         WHERE c.label IN ('question', 'blocker') AND c.ticket GLOB '*#*'
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)`,
+      )
+      .all() as { id: number; ticket: string }[];
+    if (asks.length === 0) return 0;
+    const closed = new Set<string>();
+    const collect = (sql: string) => {
+      for (const r of this.db.prepare(sql).all() as { ticket: string | null }[])
+        if (r.ticket) closed.add(r.ticket);
+    };
+    collect(
+      "SELECT DISTINCT repo_id || '#' || issue AS ticket FROM board_moves WHERE state = 'done' AND board_column = 'Done'",
+    );
+    collect("SELECT DISTINCT json_extract(record, '$.ticket') AS ticket FROM pr_history");
+    collect(
+      "SELECT DISTINCT ticket FROM question_closures WHERE kind IN ('ticket-closed', 'pr-merged', 'pr-closed')",
+    );
+    const stale = asks.filter((a) => closed.has(a.ticket));
+    if (stale.length === 0) return 0;
+    const settle = this.db.prepare(
+      `INSERT INTO comms_settlements (message_id, settled_by, reason, at) VALUES (?, ?, ?, ?)
+       ON CONFLICT(message_id) DO NOTHING`,
+    );
+    this.host.transaction(() => {
+      for (const a of stale) settle.run(a.id, COMMS_MC, "Its ticket or PR was closed", at);
+    }, true);
+    return stale.length;
+  }
+
+  /**
+   * Labelled direct questions and blockers still awaiting a reply or the addressee's reaction. A
+   * reply from anyone but the asker answers it; so does its ticket or PR being closed or merged.
+   */
   openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
     const rows = this.db
       .prepare(
@@ -1093,13 +1202,14 @@ export class CommsQueries {
            )
            AND NOT EXISTS (
              SELECT 1 FROM comms reply
-             WHERE reply.reply_to = c.id AND reply.from_id = c.to_id
+             WHERE reply.reply_to = c.id AND reply.from_id != c.from_id
            )
+           AND NOT (${CLOSED_WORK_SQL})
            AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
          ORDER BY c.at ASC, c.id ASC`,
       )
       .all(COMMS_CREW) as Row[];
-    return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
+    return this.commsRows(rows) as (CommsRow & { label: "question" | "blocker" })[];
   }
 
   /** The newest `limit` messages with an id above `sinceId`, newest first; text cut to `textMax`. */
@@ -1332,12 +1442,12 @@ export class CommsQueries {
 
   /** The newest `limit` messages `from` sent about one run, newest first. */
   commsFromToRun(from: string, runId: string, limit: number): CommsRow[] {
-    return (
+    return this.commsRows(
       this.db
         .prepare(
           "SELECT * FROM comms WHERE from_id = ? AND target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
         )
-        .all(from, runId, limit) as Row[]
-    ).map((r) => this.commsRow(r));
+        .all(from, runId, limit) as Row[],
+    );
   }
 }

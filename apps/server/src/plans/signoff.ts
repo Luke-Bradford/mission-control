@@ -40,7 +40,7 @@ export type SignoffResult =
 
 /** The plan with its title from the board copy, when the ticket is still on the board. */
 export function withTitle(store: Store, plan: TicketPlan): TicketPlan {
-  const card = store.board(plan.repoId).find((i) => i.issueNumber === plan.issue);
+  const card = store.boardItem(plan.repoId, plan.issue);
   return { ...plan, title: card?.title ?? null };
 }
 
@@ -58,7 +58,7 @@ export function ticketPlan(
 
 /** Whether the ticket's card is closed in the board copy: a closed ticket has no plan left to decide. */
 const closedTicket = (store: Store, plan: TicketPlan): boolean =>
-  store.board(plan.repoId).find((i) => i.issueNumber === plan.issue)?.closed === true;
+  store.boardItem(plan.repoId, plan.issue)?.closed === true;
 
 /** The Planner tab: what waits for a plan or sign-off, and what was signed off. */
 export function plansView(store: Store, config: CcConfig): PlansView {
@@ -176,7 +176,7 @@ async function approveOne(
   if (held) {
     // the card as it is now, not as the last poll saw it: a card that cannot be read live is not
     // moved on the cache's word
-    const cached = deps.store.board(repoId).find((i) => i.issueNumber === issue);
+    const cached = deps.store.boardItem(repoId, issue) ?? undefined;
     let card: BoardItem | undefined = cached;
     if (deps.readCard !== undefined) {
       const fresh = await deps.readCard(repoId, issue).catch(() => null);
