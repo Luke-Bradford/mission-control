@@ -60,6 +60,15 @@ export interface EvidenceDemo {
   height: number;
 }
 
+/** A committed picture FLIGHT supplied for a review the hub cannot render itself. */
+export interface EvidenceSubmission {
+  name: string;
+  caption: string;
+  viewport: { width: number; height: number };
+  side: "head" | "base" | "reference";
+  path: string;
+}
+
 /** What a capture stored for one head sha (`manifest.json`, and `GET /api/prs/:n/evidence`). */
 export interface EvidenceManifest {
   repoId: string;
@@ -71,6 +80,8 @@ export interface EvidenceManifest {
   pairs: EvidencePair[];
   /** The head's Demo renders; absent on a capture made before they existed. */
   demos?: EvidenceDemo[];
+  /** Extra committed pictures, retained only for this exact review head. */
+  submitted?: EvidenceSubmission[];
 }
 
 const WEB_PREFIX = "apps/web/";
@@ -250,7 +261,8 @@ export const evidenceImageName = (
   kind: EvidenceKind,
 ): string => `${page}-${scheme}-${kind}.png`;
 /** Whether `name` is one a capture can have stored; anything else is never turned into a path. */
-export const isEvidenceImageName = (name: string): boolean => IMAGE_NAME.test(name);
+export const isEvidenceImageName = (name: string): boolean =>
+  IMAGE_NAME.test(name) || /^submitted-[a-f0-9]{64}\.png$/.test(name);
 
 const CLOSES = /^(?:Closes|Part of) #\d+\.$/;
 const isHeading = (line: string): boolean => /^## /.test(line);

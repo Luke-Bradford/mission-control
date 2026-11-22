@@ -1352,6 +1352,7 @@ describe("tool list", () => {
       "comms_pin",
       "flight_state",
       "screenshot_hud",
+      "add_review_evidence",
       "promote",
       "send_to_planner",
       "end_run",

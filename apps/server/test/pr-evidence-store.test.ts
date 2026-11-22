@@ -109,6 +109,39 @@ describe("stageReviewEvidence", () => {
     );
   });
 
+  it("stages committed submitted pictures only for their recorded head", async () => {
+    const root = tmp();
+    const store = prEvidenceStore(join(root, "evidence"));
+    const old = sha("a"),
+      current = sha("b");
+    const name = `submitted-${"c".repeat(64)}.png`;
+    store.save(
+      {
+        ...manifest(old, 1),
+        pairs: [],
+        submitted: [
+          {
+            name,
+            caption: "Audit state",
+            viewport: { width: 1280, height: 900 },
+            side: "head",
+            path: "docs/audit.png",
+          },
+        ],
+      },
+      [{ name, png }],
+    );
+    store.save({ ...manifest(current, 2), pairs: [] }, []);
+    const scratch = join(root, "scratch");
+    mkdirSync(scratch);
+    const staged = await stageReviewEvidence(store, "mc", 5, old, scratch);
+    expect(staged?.submitted).toMatchObject([
+      { caption: "Audit state", viewport: { width: 1280, height: 900 }, side: "head" },
+    ]);
+    expect(readFileSync(join(scratch, ".mc-review/evidence", name))).toEqual(png);
+    expect(await stageReviewEvidence(store, "mc", 5, current, root)).toBeUndefined();
+  });
+
   it("gives nothing for a head without pairs, or a hub without a store", async () => {
     const root = tmp();
     const store = prEvidenceStore(join(root, "evidence"));

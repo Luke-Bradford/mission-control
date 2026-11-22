@@ -316,8 +316,24 @@ export function createQaReports(i: {
           });
       }
     }
-    result.screenshots = (review.id === undefined ? [] : i.store.reviewShots(review.id)).flatMap(
-      (shot) => {
+    for (const submitted of manifest?.submitted ?? []) {
+      const png = i.evidence?.image(review.repoId, review.prNumber, review.sha, submitted.name);
+      if (!png) continue;
+      const hash = retain(png, known);
+      result.screenshots ??= [];
+      result.screenshots.push({
+        label: `${submitted.caption} (${submitted.viewport.width}×${submitted.viewport.height}, ${submitted.side})`,
+        url: `/api/qa-report-assets/${hash}`,
+        sha256: hash,
+        source: "controlled-fixture",
+        capturedAt: manifest?.capturedAt,
+        commitSha: review.sha,
+        provenance: `Committed review evidence: ${submitted.path}`,
+      });
+    }
+    result.screenshots = [
+      ...(result.screenshots ?? []),
+      ...(review.id === undefined ? [] : i.store.reviewShots(review.id)).flatMap((shot) => {
         const png = i.reviewShots?.read(shot.id);
         if (!png) return [];
         const hash = retain(png, known);
@@ -332,8 +348,8 @@ export function createQaReports(i: {
             provenance: "Review preview browser capture; not a before/after pair.",
           },
         ];
-      },
-    );
+      }),
+    ];
     return result;
   }
   function finish(
