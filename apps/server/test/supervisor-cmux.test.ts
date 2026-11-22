@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -147,7 +147,21 @@ it("a restored agent with a new pid is closed and resumed with the hub's command
 
 it("no keeper for any Claude seat", async () => {
   const state = join(dir, "fake-cmux.json");
-  const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
+  const rolesDir = join(dir, "roles");
+  mkdirSync(rolesDir, { recursive: true });
+  writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
+  writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
+  const { sup } = make({
+    cmuxCommand: [process.execPath, fake, state],
+    rolesDir,
+    extraSeat: {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    },
+  });
   sup.start();
   const runs = [
     (await sup.startRun("guido-1", 42)).runId,
