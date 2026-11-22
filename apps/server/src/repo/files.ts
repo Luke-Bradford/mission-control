@@ -336,7 +336,6 @@ export async function committedLinesBatch(
       }
     }
     for (const [sha, changes] of rows) {
-      if (changes.length === 0) continue;
       lines.set(sha, {
         additions: changes.some((row) => row.add === null)
           ? null
@@ -347,7 +346,11 @@ export async function committedLinesBatch(
       });
     }
   } catch {
-    // Unavailable objects remain unknown, as the single-commit reader does.
+    return new Map(
+      await Promise.all(
+        valid.map(async (sha) => [sha, await committedLines(worktree, sha, exec)] as const),
+      ),
+    );
   }
   return lines;
 }

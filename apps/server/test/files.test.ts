@@ -599,6 +599,30 @@ describe("realGitExec on a scratch repo", () => {
     );
   });
 
+  it("keeps readable commits when a batch includes a missing object", async () => {
+    const root = git("rev-parse", "HEAD").trim();
+    writeFileSync(join(dir, "a.txt"), "two\n");
+    git("add", "a.txt");
+    git("commit", "-q", "-m", "change");
+    const change = git("rev-parse", "HEAD").trim();
+    const missing = "d".repeat(40);
+    expect(await committedLinesBatch(dir, [root, change, missing])).toEqual(
+      new Map([
+        [root, { additions: 2, deletions: 0 }],
+        [change, { additions: 1, deletions: 1 }],
+        [missing, { additions: null, deletions: null }],
+      ]),
+    );
+  });
+
+  it("counts an empty commit as zero lines in a batch", async () => {
+    git("commit", "--allow-empty", "-q", "-m", "empty");
+    const empty = git("rev-parse", "HEAD").trim();
+    expect(await committedLinesBatch(dir, [empty])).toEqual(
+      new Map([[empty, { additions: 0, deletions: 0 }]]),
+    );
+  });
+
   it("reads uncommitted and untracked files with the note when there is no origin/HEAD", async () => {
     writeFileSync(join(dir, "a.txt"), "one\ntwo\n");
     writeFileSync(join(dir, "new file.txt"), "x\n");
