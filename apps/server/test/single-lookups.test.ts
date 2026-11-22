@@ -12,7 +12,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { BoardItem, PullRequestView } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { questionFacts } from "../src/attention/question-watch.ts";
 import { forgetGithubToken, GITHUB_TOKEN_TTL_MS, githubToken } from "../src/collectors/github.ts";
+import type { AdoptedLoop } from "../src/config.ts";
+import { loopPause } from "../src/loop/pause.ts";
 import { STAGGERED_FIRST_DELAY_MS } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";
 
@@ -95,6 +98,39 @@ describe("single lookups", () => {
       listThenFind.test(readFileSync(file, "utf8")),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it("no server code lists the board or PRs into a variable, within a few lines of finding one by number", () => {
+    const viaVariable =
+      /const (\w+) = (?:[\w.]+\.)?store\.(?:board|pullRequests)\([^;]*\);(?:[^;]*\n){0,6}?[^;]*?\b\1\.(?:find|some)\(\s*\(?\w+\)?\s*=>[^)]*\b(?:issueNumber|number)\b/;
+    const offenders = sourceFiles(join(import.meta.dirname, "..", "src")).filter((file) =>
+      viaVariable.test(readFileSync(file, "utf8")),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("a loop's pause issue and a question's PR are read by key, not by listing", () => {
+    store.replaceBoard("r", [card(1), card(2, { closed: true })]);
+    store.upsertPullRequests("r", [pr(7)], 1);
+    const board = vi.spyOn(store, "board");
+    const prs = vi.spyOn(store, "pullRequests");
+    const loop = (number: number) =>
+      ({ pausedBy: { issue: { repoId: "r", number } } }) as unknown as AdoptedLoop;
+    expect(loopPause(loop(1), store, () => "o/r")).toMatchObject({ paused: true, by: "r#1" });
+    expect(loopPause(loop(2), store).paused).toBe(false);
+    const facts = questionFacts(store, {
+      key: "ask:1",
+      askAt: 1,
+      question: "q",
+      ticket: "r#1",
+      runId: null,
+      seatId: null,
+      prNumber: 7,
+      operator: false,
+    });
+    expect(facts.ticket).toBe("open");
+    expect(board).not.toHaveBeenCalled();
+    expect(prs).not.toHaveBeenCalled();
   });
 
   it("reads one card and one PR by key", () => {

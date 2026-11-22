@@ -1646,7 +1646,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       override ?? store.profileOverride(repo.id, issue),
     );
     if ("refusal" in chosen) return fail(chosen.refusal);
-    const board = store.board(repo.id);
     const away = activeAway(store, now(), config.operator.timezone);
     const pace = paceStartCheck(store, config, now());
     const refusal = eligibleToStart({
@@ -1667,7 +1666,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       lane: config.crew?.lane,
       laneDefault: config.crew?.laneDefault ?? false,
       body,
-      closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+      closed: (n) => store.boardItem(repo.id, n)?.closed,
       waits: waitReader(store, repo.id)(card),
     });
     if (refusal !== null) return fail(refusal);

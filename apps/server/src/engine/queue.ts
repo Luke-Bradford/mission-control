@@ -268,7 +268,6 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       ...group.filter((s) => seatMayTake(store, s.seat.id, maxOpen)),
       ...group.filter((s) => !seatMayTake(store, s.seat.id, maxOpen)),
     ];
-    const board = store.board(repoId);
     const waitsOf = waitReader(store, repoId);
     const repo = config.repos.find((r) => r.id === repoId);
     const cards: { issue: number; label: string; seats: string[] }[] = [];
@@ -306,7 +305,7 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
               lane: config.crew?.lane,
               laneDefault: config.crew?.laneDefault ?? false,
               body,
-              closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+              closed: (n) => store.boardItem(repoId, n)?.closed,
               waits: waitsOf(card),
             }) === null,
         );

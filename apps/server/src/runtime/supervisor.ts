@@ -3591,8 +3591,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
       // Every way a run starts ends here: the one eligibility check, before a worktree or a claim.
-      const board = store.board(info.repo.id);
-      const card = board.find((i) => i.issueNumber === issue);
+      const card = store.boardItem(info.repo.id, issue) ?? undefined;
       if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
       const rules = await deps.rules(info.repo.id);
       if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
@@ -3646,7 +3645,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         lane: config.crew?.lane,
         laneDefault: config.crew?.laneDefault ?? false,
         body: ticket.body,
-        closed: (n) => board.find((i) => i.issueNumber === n)?.closed,
+        closed: (n) => store.boardItem(info.repo.id, n)?.closed,
         waits: waitReader(store, info.repo.id)(card),
       });
       if (refusal !== null) throw new SupervisorError(422, refusal);

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,7 +21,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { holdItem, holds } from "../src/attention/holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
-import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
+import {
+  forgetGithubToken,
+  MISSING_SCOPE_PREFIX,
+  githubToken as readGithubToken,
+} from "../src/collectors/github.ts";
 import type { RateLimits } from "../src/collectors/rate-limit.ts";
 import {
   OAUTH_USAGE_SOURCE,
@@ -49,6 +53,7 @@ import {
   FLOW_FIRST_DELAY_MS,
   FLOW_INTERVAL_MS,
   JOBS,
+  type Job,
   MACHINE_INTERVAL_MS,
   MACHINE_STATUS_MS,
   MAINTENANCE_INTERVAL_MS,
@@ -143,6 +148,11 @@ const machineSample = (over: Partial<MachineSample> = {}): MachineSample => ({
   ...over,
 });
 
+/** Past the staggered first ticks of the jobs the tests watch (sessions, ta, studio, github, usage, machine, maintenance), before the 15 s loop tick. */
+const START_UP_MS = 10_000;
+/** When start() first ticks `job`. */
+const firstTick = (job: Job): number => STAGGERED_FIRST_DELAY_MS[job] ?? 0;
+
 function stubs(over: Partial<Collectors> = {}): Collectors {
   return {
     ta: vi.fn(async () => undefined),
@@ -234,7 +244,7 @@ describe("scheduler", () => {
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
 
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("ta"));
     expect(store.questionClosure(first, NOW - 60_000)).toMatchObject({
       kind: "repo-unwatched",
       reason: REPO_UNWATCHED_REASON,
@@ -468,7 +478,8 @@ describe("scheduler", () => {
     const c = stubs();
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
     s.start();
-    await s.stop(); // waits for the immediate start-up ticks
+    await vi.advanceTimersByTimeAsync(firstTick("github"));
+    await s.stop(); // waits for the start-up ticks
     expect(await s.tick("github")).toBe("ran");
     expect(c.githubToken).toHaveBeenCalledTimes(1);
     expect(c.makeGql).toHaveBeenCalledTimes(1);
@@ -590,7 +601,42 @@ describe("scheduler", () => {
     expect(row("github:shop-app")).toMatchObject({ ok: true });
   });
 
+  it("a missing-scope poll reads gh again on the next tick, through the real token cache", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "mc-gh-"));
+    const tokenFile = join(bin, "token");
+    writeFileSync(tokenFile, "old");
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat "${tokenFile}"\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    forgetGithubToken();
+    try {
+      const github = vi
+        .fn<Collectors["github"]>()
+        .mockRejectedValueOnce(
+          new Error(`${MISSING_SCOPE_PREFIX}read:project scope: run gh auth refresh -s project`),
+        )
+        .mockImplementation(async (repo) => {
+          store.setStatus(`github:${repo.id}`, true, null);
+          return { boards: false, escalations: false };
+        });
+      const c = stubs({ githubToken: readGithubToken, forgetGithubToken, github });
+      const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+      await s.tick("github");
+      expect(c.makeGql).toHaveBeenLastCalledWith("old", expect.any(Object));
+      writeFileSync(tokenFile, "new"); // the operator ran `gh auth refresh -s project`
+      await s.tick("github");
+      expect(c.makeGql).toHaveBeenLastCalledWith("new", expect.any(Object));
+      expect(c.makeRest).toHaveBeenLastCalledWith("new");
+    } finally {
+      process.env.PATH = path;
+      forgetGithubToken();
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
   it("a failing githubToken is a GitHub collector error; the other jobs keep running", async () => {
+    vi.useFakeTimers();
     const c = stubs({
       githubToken: vi.fn(async () => {
         throw new Error("gh: could not read a GitHub token (run `gh auth login`)");
@@ -598,6 +644,7 @@ describe("scheduler", () => {
     });
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
     s.start();
+    await vi.advanceTimersByTimeAsync(START_UP_MS);
     await s.stop();
     await s.tick("github");
     await s.tick("ta");
@@ -679,22 +726,34 @@ describe("scheduler", () => {
     expect(row("usage:claude-main")).toMatchObject({ ok: true, error: "no usable 7d reading" });
   });
 
-  it("runs every job at start, then on its own interval, until stop()", async () => {
+  it("starts the sessions read at once and each other job a little later, in turn, then on its own interval, until stop()", async () => {
     vi.useFakeTimers();
     const c = stubs();
     const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
     s.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(c.ta).toHaveBeenCalledTimes(1);
     expect(c.sessions).toHaveBeenCalledTimes(1);
+    // nothing expensive shares time zero with the sessions read
+    for (const job of [c.ta, c.studio, c.github, c.claude, c.machine])
+      expect(job).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(firstTick("ta"));
+    expect(c.ta).toHaveBeenCalledTimes(1);
+    expect(c.github).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(firstTick("github") - firstTick("ta"));
     expect(c.github).toHaveBeenCalledTimes(1);
+    expect(c.claude).not.toHaveBeenCalled();
+    expect(c.machine).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(firstTick("usage") - firstTick("github"));
     expect(c.claude).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(15_000);
+    expect(c.machine).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(firstTick("machine") - firstTick("usage"));
+    expect(c.machine).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(firstTick("studio") + 15_000 - firstTick("machine"));
     expect(c.ta).toHaveBeenCalledTimes(2);
     expect(c.studio).toHaveBeenCalledTimes(2);
     expect(c.sessions).toHaveBeenCalledTimes(2);
     expect(c.github).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(45_000);
+    await vi.advanceTimersByTimeAsync(46_000);
     expect(c.github).toHaveBeenCalledTimes(2);
     expect(c.claude).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(30 * 60_000);
@@ -726,7 +785,7 @@ describe("scheduler", () => {
     expect(prune).toHaveBeenCalledTimes(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(prune).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(MAINTENANCE_INTERVAL_MS - first - 1);
+    await vi.advanceTimersByTimeAsync(MAINTENANCE_INTERVAL_MS - 1);
     expect(prune).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(prune).toHaveBeenCalledTimes(2);
@@ -837,7 +896,7 @@ describe("scheduler", () => {
           vi.useFakeTimers();
           const s = sched();
           s.start();
-          await vi.advanceTimersByTimeAsync(3000);
+          await vi.advanceTimersByTimeAsync(START_UP_MS);
           topics.length = 0;
           return s;
         };
@@ -872,7 +931,7 @@ describe("scheduler", () => {
           await vi.advanceTimersByTimeAsync(1000);
           expect(crewCalls()).toBe(settled + 1);
           topics.length = 0;
-          await vi.advanceTimersByTimeAsync(5000);
+          await vi.advanceTimersByTimeAsync(400);
           expect(crewCalls()).toBe(settled + 1);
           expect(topics).not.toContain("agents");
           expect(store.agentEvents(0)).toHaveLength(1);
@@ -1159,7 +1218,7 @@ describe("scheduler", () => {
           at = NOW + 1;
           bus.emit("health");
           bus.emit("attention");
-          await vi.advanceTimersByTimeAsync(3000);
+          await vi.advanceTimersByTimeAsync(1000);
           expect(crewCalls()).toBe(before);
           expect(store.agentEvents(0)).toEqual([]);
           await s.stop();
@@ -1480,7 +1539,9 @@ describe("scheduler", () => {
       const calls = vi.mocked(c.machine).mock.calls.length;
       const u = createScheduler({ config, store, bus, now: () => t, collectors: c });
       u.start();
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(firstTick("machine") - 1);
+      expect(c.machine).toHaveBeenCalledTimes(calls);
+      await vi.advanceTimersByTimeAsync(1);
       expect(c.machine).toHaveBeenCalledTimes(calls + 1);
       await vi.advanceTimersByTimeAsync(MACHINE_INTERVAL_MS - 1);
       expect(c.machine).toHaveBeenCalledTimes(calls + 1);
@@ -2382,15 +2443,15 @@ describe("scheduler", () => {
       expect(row("github:shop-app:prs")).toMatchObject({ ok: false, error: "gh: no token" });
     });
 
-    it("first runs 5 minutes after start(), then hourly; the other jobs run at once", async () => {
+    it("first runs 5 minutes after start(), then hourly; the other jobs start in turn", async () => {
       vi.useFakeTimers();
       const c = stubs();
       const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
       s.start();
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(firstTick("github"));
       expect(c.github).toHaveBeenCalledTimes(1);
       expect(c.prSweep).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(PR_SWEEP_FIRST_DELAY_MS - 1);
+      await vi.advanceTimersByTimeAsync(PR_SWEEP_FIRST_DELAY_MS - firstTick("github") - 1);
       expect(c.prSweep).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
       expect(c.prSweep).toHaveBeenCalledTimes(1);
@@ -2495,7 +2556,7 @@ describe("scheduler", () => {
       expect(autoUpdate).toHaveBeenCalledTimes(0);
       await vi.advanceTimersByTimeAsync(1);
       expect(autoUpdate).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS - first);
+      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
       expect(autoUpdate).toHaveBeenCalledTimes(2);
       await s.stop();
     });
@@ -2792,7 +2853,7 @@ describe("scheduler", () => {
         return github.mock.calls.length;
       };
       s.start();
-      expect(await runs(0)).toBe(1); // first run at start(); the reading is low -> next in 2x
+      expect(await runs(firstTick("github"))).toBe(1); // first run at start(); the reading is low -> next in 2x
       expect(await runs(60 * SECOND)).toBe(1);
       expect(await runs(60 * SECOND)).toBe(2); // 120 s; still low -> next in 4x
       expect(await runs(239 * SECOND)).toBe(2);
@@ -2834,7 +2895,7 @@ describe("scheduler", () => {
         return github.mock.calls.length;
       };
       s.start();
-      expect(await runs(0)).toBe(1);
+      expect(await runs(firstTick("github"))).toBe(1);
       expect(await runs(120 * SECOND)).toBe(2);
       expect(await runs(240 * SECOND)).toBe(3); // 360 s: next in 8x, at 840 s
       expect(await runs(239 * SECOND)).toBe(3); // 599 s
@@ -2887,7 +2948,7 @@ describe("scheduler", () => {
           resetAt: RESET + 3_600_000,
         });
         s.start();
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(firstTick("github"));
         await vi.advanceTimersByTimeAsync(120 * SECOND); // run 2 (2x); then 4x until 360 s
         await vi.advanceTimersByTimeAsync(240 * SECOND); // run 3; then 8x until 840 s
         expect(github).toHaveBeenCalledTimes(3);
@@ -2906,7 +2967,7 @@ describe("scheduler", () => {
           resetAt: RESET + 3_600_000,
         });
         s.start();
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(firstTick("github"));
         expect(github).toHaveBeenCalledTimes(1);
         await vi.advanceTimersByTimeAsync(60 * SECOND);
         expect(github).toHaveBeenCalledTimes(1); // still backed off: next run at 120 s
@@ -2942,7 +3003,7 @@ describe("scheduler", () => {
         collectors: stubs({ makeGql, github }),
       });
       s.start();
-      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(firstTick("github"));
       expect(github).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(479 * SECOND);
       expect(github).toHaveBeenCalledTimes(1); // 8x of 60 s is 480 s: the ticks before it skip
@@ -3014,8 +3075,8 @@ describe("scheduler", () => {
         collectors: stubs({ makeGql, github }),
       });
       s.start();
-      // runs at 0, 2, 6, 14 min (gaps 2x, 4x, 8x), then every 8 min
-      await vi.advanceTimersByTimeAsync(14 * 60 * SECOND);
+      // runs at 0, 2, 6, 14 min (gaps 2x, 4x, 8x), then every 8 min, counted from its first tick
+      await vi.advanceTimersByTimeAsync(firstTick("github") + 14 * 60 * SECOND);
       expect(github).toHaveBeenCalledTimes(4);
       await vi.advanceTimersByTimeAsync(7 * 60 * SECOND);
       expect(github).toHaveBeenCalledTimes(4);
@@ -3185,7 +3246,7 @@ describe("board and PR cadence", () => {
   it("with board_minutes 15 reads the boards once at start, then not for 15 min", async () => {
     const { s, prs, github } = cadence();
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("github"));
     expect(github).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(15 * MIN - 1000);
     expect(github).toHaveBeenCalledTimes(1);
@@ -3241,7 +3302,7 @@ describe("board and PR cadence", () => {
       waitedPrs: () => [],
     });
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("github"));
     expect(github).toHaveBeenCalledTimes(1); // low reading: backed off
     await vi.advanceTimersByTimeAsync(10_000);
     s.refreshBoards(); // its timer waits out the 30 s debounce, so run past it
@@ -3253,7 +3314,7 @@ describe("board and PR cadence", () => {
   it("waited PRs are read every github_seconds, others only with the board", async () => {
     const { s, prs, github } = cadence({ waited: (r) => (r === "shop-app" ? [7] : []) });
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("github"));
     expect(github).toHaveBeenCalledTimes(1);
     expect(prs).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(60_000);
@@ -3449,7 +3510,7 @@ describe("Claude usage back-off", () => {
     config.poll.usageMinutes = 240;
     const { s, fetch } = setup(String(USAGE_BACKOFF_CAP_MS / 1000));
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("usage"));
     expect(fetch).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(USAGE_BACKOFF_CAP_MS - 1);
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -3528,7 +3589,7 @@ describe("Claude usage back-off", () => {
     await s.stop();
     const second = createScheduler({ config, store, bus, now: Date.now, collectors: c });
     second.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("usage"));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(savedBackoff()?.notBefore).toBe(NOW + USAGE_BACKOFF_CAP_MS);
     vi.setSystemTime(NOW + USAGE_BACKOFF_CAP_MS - 1);
@@ -3550,7 +3611,7 @@ describe("Claude usage back-off", () => {
     store.addUsage(sample({ at: NOW - minutes * MINUTE_MS, source }));
     const { s, fetch, c } = setup();
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("usage"));
     expect(fetch).toHaveBeenCalledTimes(calls);
     expect(c.codex).toHaveBeenCalledTimes(1);
     if (calls === 0) {
@@ -3573,7 +3634,7 @@ describe("Claude usage back-off", () => {
     store.addUsage(sample({ at: NOW - 5 * MINUTE_MS, source: "transcript" }));
     const { s, fetch } = setup();
     s.start();
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(firstTick("usage"));
     expect(fetch).not.toHaveBeenCalled();
     await s.stop();
   });
