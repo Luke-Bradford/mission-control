@@ -104,7 +104,7 @@ export class CommsQueries {
          ORDER BY at DESC, id DESC LIMIT ?3`,
       )
       .all(ticket, shortRef, limit, ...prRefs) as Row[];
-    return rows.map((r) => this.commsRow(r));
+    return this.commsRows(rows);
   }
 
   /** Counts retained and retired reference metadata; never reads text or limits by time. */
@@ -428,30 +428,54 @@ export class CommsQueries {
   }
 
   commsPins(): CommsRow[] {
-    return (
+    return this.commsRows(
       this.db
         .prepare(
           "SELECT c.* FROM comms c JOIN comms_pins p ON p.message_id=c.id ORDER BY p.pinned_at DESC",
         )
-        .all() as Row[]
-    ).map((r) => this.commsRow(r));
+        .all() as Row[],
+    );
   }
 
   commsReactions(messageId: string): CommsReaction[] {
-    const id = commsMessageNumber(messageId);
-    if (id === null) return [];
-    return this.db
-      .prepare(
-        "SELECT actor_id, reaction, reason, at FROM comms_reactions WHERE message_id=? ORDER BY at,actor_id",
-      )
-      .all(id)
-      .map((r) => ({
-        messageId: `comms:${id}`,
-        actor: r.actor_id as string,
-        reaction: r.reaction as CommsReactionKind,
-        reason: r.reason as string | null,
-        at: r.at as number,
-      }));
+    return this.commsReactionsFor([messageId]).get(messageId) ?? [];
+  }
+
+  /** The reactions on each message, read in batches of one query; a message with none is absent. */
+  commsReactionsFor(messageIds: readonly string[]): Map<string, CommsReaction[]> {
+    const found = new Map<string, CommsReaction[]>();
+    const ids = [
+      ...new Set(
+        messageIds.flatMap((messageId) => {
+          const id = commsMessageNumber(messageId);
+          return id === null ? [] : [id];
+        }),
+      ),
+    ];
+    // Stay below even SQLite's older 999-variable limit.
+    const batchSize = 400;
+    for (let start = 0; start < ids.length; start += batchSize) {
+      const batch = ids.slice(start, start + batchSize);
+      const rows = this.db
+        .prepare(
+          `SELECT message_id, actor_id, reaction, reason, at FROM comms_reactions
+           WHERE message_id IN (${batch.map(() => "?").join(",")}) ORDER BY message_id, at, actor_id`,
+        )
+        .all(...batch);
+      for (const r of rows) {
+        const key = `comms:${r.message_id}`;
+        const list = found.get(key) ?? [];
+        list.push({
+          messageId: key,
+          actor: r.actor_id as string,
+          reaction: r.reaction as CommsReactionKind,
+          reason: r.reason as string | null,
+          at: r.at as number,
+        });
+        found.set(key, list);
+      }
+    }
+    return found;
   }
 
   commsSettlement(messageId: string): CommsSettlement | null {
@@ -482,13 +506,13 @@ export class CommsQueries {
   }
 
   commsMentions(target: string): CommsRow[] {
-    return (
+    return this.commsRows(
       this.db
         .prepare(
           "SELECT c.* FROM comms c JOIN comms_mentions m ON m.message_id=c.id WHERE m.mentioned_id=? ORDER BY c.at DESC,c.id DESC",
         )
-        .all(target) as Row[]
-    ).map((r) => this.commsRow(r));
+        .all(target) as Row[],
+    );
   }
 
   markCommsMentionsSeen(target: string, ids: string[], at: number): void {
@@ -626,8 +650,10 @@ export class CommsQueries {
         ...(before ? [before.at, before.id] : []),
         limit,
       ) as Row[];
-    return rows.reverse().map((r) => ({
-      ...this.commsRow(r),
+    const ordered = rows.reverse();
+    const base = this.commsRows(ordered);
+    return ordered.map((r, i) => ({
+      ...(base[i] as CommsRow),
       ...(typeof r.choice_label === "string"
         ? { choice: { label: r.choice_label }, itemKey: (r.item_key ?? r.choice_key) as string }
         : {}),
@@ -731,15 +757,15 @@ export class CommsQueries {
   ): { rows: CommsRow[]; hasMore: boolean } {
     const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const beforeId = before === undefined ? null : commsMessageNumber(before);
-    const rows = (
+    const rows = this.commsRows(
       this.db
         .prepare(
           `SELECT * FROM comms WHERE ${where}${
             beforeId === null ? "" : " AND (at, id) < (SELECT at, id FROM comms WHERE id = ?)"
           } ORDER BY at DESC, id DESC LIMIT ?`,
         )
-        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[]
-    ).map((r) => this.commsRow(r));
+        .all(...args, ...(beforeId === null ? [] : [beforeId]), limit + 1) as Row[],
+    );
     const hasMore = rows.length > limit;
     return { rows: rows.slice(0, limit).reverse(), hasMore };
   }
@@ -912,9 +938,9 @@ export class CommsQueries {
   }
 
   private commsForWhere(where: string, ...args: SQLInputValue[]): CommsRow[] {
-    return (
-      this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[]
-    ).map((r) => this.commsRow(r));
+    return this.commsRows(
+      this.db.prepare(`SELECT * FROM comms WHERE ${where} ORDER BY at,id`).all(...args) as Row[],
+    );
   }
 
   private commsForRunWhere(runId: string, where: string, ...args: SQLInputValue[]): CommsRow[] {
@@ -1099,8 +1125,9 @@ export class CommsQueries {
          ) ORDER BY at ASC, id ASC`,
       )
       .all(itemKey, since, COMMS_MC, limit) as Row[];
-    return rows.map((r) => ({
-      ...this.commsRow(r),
+    const base = this.commsRows(rows);
+    return rows.map((r, i) => ({
+      ...(base[i] as CommsRow),
       ...(typeof r.choice_label === "string" ? { choice: r.choice_label } : {}),
     }));
   }
@@ -1182,7 +1209,7 @@ export class CommsQueries {
          ORDER BY c.at ASC, c.id ASC`,
       )
       .all(COMMS_CREW) as Row[];
-    return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
+    return this.commsRows(rows) as (CommsRow & { label: "question" | "blocker" })[];
   }
 
   /** The newest `limit` messages with an id above `sinceId`, newest first; text cut to `textMax`. */
@@ -1415,12 +1442,12 @@ export class CommsQueries {
 
   /** The newest `limit` messages `from` sent about one run, newest first. */
   commsFromToRun(from: string, runId: string, limit: number): CommsRow[] {
-    return (
+    return this.commsRows(
       this.db
         .prepare(
           "SELECT * FROM comms WHERE from_id = ? AND target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
         )
-        .all(from, runId, limit) as Row[]
-    ).map((r) => this.commsRow(r));
+        .all(from, runId, limit) as Row[],
+    );
   }
 }

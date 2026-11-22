@@ -992,6 +992,19 @@ describe("POST /api/guard/check", () => {
       expect(lock.state().holder).toBeNull();
     });
 
+    it("refuses a second check or test while one runs in the checkout, naming the running one", async () => {
+      const { checks } = spy();
+      let running: string | null = null;
+      checks.admit = async () => running;
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s lint"))).body).toBe("{}");
+      running = "pnpm -s lint";
+      const refused = await check(tokA, bash("a2", "pnpm -s typecheck"));
+      expect(refused.body).toContain("pnpm -s lint");
+      expect(refused.body).toContain("Wait for it");
+    });
+
     it("allows a configured check to run again unchanged: the hook does not refuse", async () => {
       const { checks } = spy();
       await app.close();

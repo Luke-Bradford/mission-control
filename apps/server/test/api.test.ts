@@ -40,6 +40,7 @@ import {
   CI_TRIES,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  CONTROLLER_HEADER,
   type ConfigView,
   type Crew,
   type CrewChanges,
@@ -9334,7 +9335,7 @@ vi.mock("../src/accounts/accounts.ts", () => ({
   }),
 }));
 
-it("bounds uncached telemetry reads, filters first and persists immutable counts", async () => {
+it("batches uncached telemetry reads, filters first and persists immutable counts", async () => {
   store.upsertRun(
     run({
       id: "many",
@@ -9352,26 +9353,27 @@ it("bounds uncached telemetry reads, filters first and persists immutable counts
     });
   let active = 0;
   let peak = 0;
-  const read = vi.spyOn(files, "committedLines").mockImplementation(async () => {
-    peak = Math.max(peak, ++active);
-    await new Promise((resolve) => setTimeout(resolve, 1));
-    active--;
-    return { additions: 2, deletions: 1 };
-  });
+  const read = vi
+    .spyOn(files, "committedLinesBatch")
+    .mockImplementation(async (_worktree, shas) => {
+      peak = Math.max(peak, ++active);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      active--;
+      return new Map(shas.map((sha) => [sha, { additions: 2, deletions: 1 }]));
+    });
   try {
     await get("/api/telemetry?ticket=shop-app%238");
     expect(read).toHaveBeenCalledTimes(0);
     const first = (await get("/api/telemetry")).json<Telemetry>();
-    expect(read).toHaveBeenCalledTimes(32);
-    expect(peak).toBeLessThanOrEqual(4);
-    expect(peak).toBeGreaterThan(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(peak).toBe(1);
     expect(first.totals[0]?.additions).toBeNull();
     const second = (await get("/api/telemetry")).json<Telemetry>();
-    expect(read).toHaveBeenCalledTimes(50);
-    expect(new Set(read.mock.calls.map((c) => c[1])).size).toBe(50);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(new Set(read.mock.calls.flatMap(([, shas]) => shas)).size).toBe(50);
     expect(second.totals[0]?.additions).toBe(100);
     await get("/api/telemetry");
-    expect(read).toHaveBeenCalledTimes(50);
+    expect(read).toHaveBeenCalledTimes(2);
   } finally {
     read.mockRestore();
   }
@@ -10042,6 +10044,37 @@ describe("operator token", () => {
     expect((await get(OPERATOR_BOOTSTRAP_PATH)).statusCode).toBe(404);
   });
 
+  it("refuses the token to a caller that is a seat or started by one", async () => {
+    const ports: Array<number | undefined> = [];
+    let seat = true;
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      operatorToken: "tok-1",
+      seatPeer: (port) => {
+        ports.push(port);
+        return seat;
+      },
+    });
+    await app.ready();
+    const ask = () =>
+      app.inject({
+        method: "GET",
+        url: OPERATOR_BOOTSTRAP_PATH,
+        headers: { "sec-fetch-site": "same-origin" },
+        remoteAddress: "127.0.0.1",
+      });
+    const refused = await ask();
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json()).toEqual({ error: BOOTSTRAP_REFUSED });
+    expect(refused.body).not.toContain("tok-1");
+    expect(ports).toHaveLength(1);
+    seat = false;
+    expect((await ask()).json()).toEqual({ token: "tok-1" });
+    await app.close();
+  });
+
   it("refuses the token to the HUD screenshot browser, whatever spelling of the path it uses", async () => {
     for (const url of [OPERATOR_BOOTSTRAP_PATH, "/api/operator/%62ootstrap"]) {
       const shot = await guarded.inject({
@@ -10473,6 +10506,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     NOW,
   );
   const heldPreviews = new PreviewManager({
+    trusted: async () => true,
     exists: () => false,
     capacity: () => ({ blocked: true, reason: "memory free is 8.0%" }),
     start: async () => ({ stop: () => {} }),
@@ -10501,6 +10535,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
   const stop = vi.fn();
   let activityToken = "";
   const previews = new PreviewManager({
+    trusted: async () => true,
     exists: () => false,
     capacity: () => ({ blocked: false, reason: null }),
     start: async ({ token }) => {
@@ -10775,5 +10810,33 @@ describe("lighter reads and compressed responses", () => {
       });
       expect(health.headers["content-encoding"]).toBeUndefined();
     });
+  });
+});
+
+describe("request log redaction", () => {
+  it("hides every request header that carries a credential or an actor identity", async () => {
+    const out: string[] = [];
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      logger: { stream: { write: (s: string) => void out.push(s) } },
+    });
+    await a.ready();
+    const names = [
+      "authorization",
+      "proxy-authorization",
+      "cookie",
+      OPERATOR_HEADER,
+      CONTROLLER_HEADER,
+      FLIGHT_OPERATOR_ACTOR_HEADER,
+      PREVIEW_ACTIVITY_HEADER,
+      "x-api-key",
+    ];
+    const headers = Object.fromEntries(names.map((n) => [n, `secret-${n}`]));
+    a.log.info({ req: { headers }, headers }, "request");
+    await a.close();
+    const line = out.join("");
+    for (const n of names) expect(line).not.toContain(`secret-${n}`);
   });
 });
