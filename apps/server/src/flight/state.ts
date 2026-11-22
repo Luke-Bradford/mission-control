@@ -614,10 +614,8 @@ export function flightArrivalSource(
 ): Pick<FlightArrivalDisposition, "text" | "arrivedAt"> | null {
   if (operation.source === "Board") {
     const repo = flightSeat(config)?.session.repoId;
-    const card =
-      repo === undefined
-        ? undefined
-        : store.board(repo).find((c) => `${repo}#${c.issueNumber}` === operation.arrivalId);
+    const found = repo === undefined ? null : store.boardCardOf(operation.arrivalId);
+    const card = found?.repoId === repo ? found : null;
     return card && String(card.createdAt) === operation.version
       ? { text: card.title, arrivedAt: card.createdAt }
       : null;

@@ -1926,18 +1926,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const storedCommsMessage = (
         row: ReturnType<Store["commsMessage"]>,
         pins: ReadonlySet<string> = new Set(store.commsPins().map((pin) => pin.id)),
+        reactions: ReadonlyMap<
+          string,
+          ReturnType<Store["commsReactions"]>
+        > = store.commsReactionsFor(row === null ? [] : [row.id]),
       ) => {
         if (row === null) throw new Error("Unknown Comms message.");
         return {
           ...row,
-          reactions: store.commsReactions(row.id),
+          reactions: reactions.get(row.id) ?? [],
           pinned: pins.has(row.id),
           operator: row.from === COMMS_CAPCOM,
         };
       };
       const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) => {
         const pins = new Set(store.commsPins().map((pin) => pin.id));
-        return rows.map((row) => storedCommsMessage(row, pins));
+        const reactions = store.commsReactionsFor(rows.map((row) => row.id));
+        return rows.map((row) => storedCommsMessage(row, pins, reactions));
       };
       const knownCommsAgent = (id: string) =>
         commsCrew().includes(id) ||
@@ -2211,7 +2216,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             context.repoId === null ||
             !config.repos.some((repo) => repo.id === context.repoId)
               ? undefined
-              : store.board(context.repoId).find((item) => item.issueNumber === issueNumber);
+              : store.boardItem(context.repoId, issueNumber);
           return {
             messages: storedCommsMessages(context.rows),
             ticket: {
@@ -3603,9 +3608,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const repo = config.repos.find((candidate) => candidate.id === deps.previewRepoId);
         if (!repo)
           return reply.code(409).send({ error: "previews run Mission Control branches only" });
-        const pr = store
-          .pullRequests(repo.id)
-          .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
+        const found = store.pullRequest(repo.id, parsed.data.pr);
+        const pr = found?.state === "open" ? found : undefined;
         if (!pr) return reply.code(404).send({ error: "open PR not found" });
         const match = { repo, pr, checkout: previewCheckout(repo) };
         if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
@@ -5237,7 +5241,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (run === null) return reply.code(404).send({ error: "unknown run" });
         const repo = config.repos.find((value) => value.id === run?.repoId);
         const pr =
-          repo && store.pullRequests(repo.id).find((value) => value.number === run?.loop?.prNumber);
+          repo && run?.loop?.prNumber != null
+            ? (store.pullRequest(repo.id, run.loop.prNumber) ?? undefined)
+            : undefined;
         if (
           !run?.loop ||
           run.endedAt !== null ||
@@ -5303,7 +5309,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         reply: FastifyReply,
       ) => {
         const repo = config.repos.find((value) => value.id === repoId);
-        const pr = store.pullRequests(repoId).find((value) => value.number === number);
+        const pr = store.pullRequest(repoId, number);
         const sha = pr?.headSha;
         if (
           !repo ||
@@ -5335,7 +5341,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               number,
               sha,
             )) ||
-            store.pullRequests(repoId).find((value) => value.number === number)?.headSha !== sha
+            store.pullRequest(repoId, number)?.headSha !== sha
           ) {
             reply
               .code(409)
