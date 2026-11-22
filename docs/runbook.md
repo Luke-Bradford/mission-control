@@ -310,6 +310,8 @@ forwards `/api` to `http://127.0.0.1:$MC_PORT` (default 7431, the preview port) 
 start with `MC_PORT=7420`, so the dev server can never post acks, away settings or a PAUSE into
 the live hub's data.
 
+The hub builds and runs a pull request's code (a branch preview or a screenshot capture) only when the PR is on the repo's own branch and its author is the crew or a collaborator with write access. A fork or a stranger's PR is refused for a click and for every automatic start, read fresh from GitHub each time.
+
 The API is under `/api/*`. A POST must be `application/json` (415 otherwise) and, if it carries an
 `Origin`, one on `localhost` or `127.0.0.1` (403 otherwise).
 

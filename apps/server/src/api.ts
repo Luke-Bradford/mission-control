@@ -502,6 +502,14 @@ const HOUR_MS = 3600e3;
 const DAY_MS = 24 * HOUR_MS;
 const FIVE_HOURS_MS = 5 * HOUR_MS;
 
+/** Headers that carry a crew credential: the operator and controller tokens, a preview's own token. */
+const CREDENTIAL_HEADERS = [
+  OPERATOR_HEADER,
+  CONTROLLER_HEADER,
+  PREVIEW_ACTIVITY_HEADER,
+  HUD_RENDERER_HEADER,
+] as const;
+
 /** Never log credentials: request/response headers that can carry them are censored. */
 export const LOG_REDACT = {
   paths: [
@@ -510,9 +518,8 @@ export const LOG_REDACT = {
     'res.headers["set-cookie"]',
     "headers.cookie",
     "headers.authorization",
-    'req.headers["x-mc-operator"]',
-    'headers["x-mc-operator"]',
     'headers["set-cookie"]',
+    ...CREDENTIAL_HEADERS.flatMap((h) => [`req.headers["${h}"]`, `headers["${h}"]`]),
   ],
   censor: "[redacted]",
 };
