@@ -11,6 +11,7 @@ import {
   OWNERS,
   PR_KEEP_DAYS,
   PR_MAX_PAGES,
+  PR_PAGE_SIZE,
   priorityRank,
   SIZE_FIELD,
   STAGE_FIELD,
@@ -26,7 +27,8 @@ describe("board retention constants", () => {
     expect(BOARD_DONE_DAYS).toBe(7);
     expect(DONE_RANGES).toEqual([7, 14, 30]);
     expect(PR_KEEP_DAYS).toBe(30);
-    expect(PR_MAX_PAGES).toBe(10);
+    expect(PR_PAGE_SIZE).toBe(50); // 100 timed out (HTTP 502) on a large repo
+    expect(PR_MAX_PAGES * PR_PAGE_SIZE).toBe(1000);
     expect(SIZE_FIELD).toBe("Size");
   });
 });
