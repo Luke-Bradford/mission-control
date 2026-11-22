@@ -121,7 +121,7 @@ export function offerProblem(
   if (repo === undefined || ref.repoId !== flightSeat(c.config)?.session.repoId)
     return "its ticket is not on this hub's repo";
   if (repo.autonomy !== "merge") return "this repo's board is not written by the hub";
-  if (!c.store.board(repo.id).some((b) => b.issueNumber === ref.number && !b.closed))
+  if (c.store.boardItem(repo.id, ref.number)?.closed !== false)
     return "its ticket is not on this repo's board";
   // a card parked under another run's feet would leave that run working it
   if (otherLiveRun(c.store, repo.id, `${repo.id}#${ref.number}`, asked.runId))
@@ -162,7 +162,7 @@ async function targetOf(c: NeedsYouContext, key: string, prefix: string): Promis
   const question = questionOf(c.store, c.config, item);
   if (ref === null || repo === undefined || question === null)
     return stop(409, "the question is no longer waiting");
-  const card = c.store.board(repo.id).find((b) => b.issueNumber === ref.number);
+  const card = c.store.boardItem(repo.id, ref.number) ?? undefined;
   if (card === undefined || card.closed) return stop(409, "its ticket is not on this repo's board");
   const rules = await c.rules(repo.id);
   if (rules instanceof Error) return stop(409, "the repo's rules cannot be read");
@@ -320,7 +320,7 @@ async function dropOnce(c: NeedsYouContext, key: string): Promise<ActionResult> 
   const t = await targetOf(c, key, DROP_REFUSED);
   if (!t.ok) return t.result;
   const { repo, issue, ref } = t;
-  const card = c.store.board(repo.id).find((b) => b.issueNumber === issue);
+  const card = c.store.boardItem(repo.id, issue) ?? undefined;
   if (card === undefined)
     return refuse(409, DROP_REFUSED, "its ticket is not on this repo's board");
   const closable = await closeBlocker(
@@ -492,7 +492,7 @@ export const answerSetAside = (
       );
     }
     const fail = (why: string) => refuse(502, ANSWER_REFUSED, why);
-    const card = c.store.board(repoId).find((b) => b.issueNumber === issue);
+    const card = c.store.boardItem(repoId, issue) ?? undefined;
     // the answer is stored first, where the ticket's next run reads it, so a failure below never
     // leaves the card in Ready with no answer; a retry replaces it
     c.store.recordSetAsideAnswer({

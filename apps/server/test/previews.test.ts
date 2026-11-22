@@ -40,6 +40,7 @@ describe("PreviewManager", () => {
   it("rejects a head that is not an immutable commit before starting a process", async () => {
     const start = vi.fn(async () => ({ stop: () => {} }));
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start,
@@ -55,6 +56,7 @@ describe("PreviewManager", () => {
     let release: (() => void) | undefined;
     const preparing = new Promise<void>((resolve) => (release = resolve));
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async () => {
@@ -80,6 +82,7 @@ describe("PreviewManager", () => {
   it("cancels and waits for a preview still preparing during shutdown", async () => {
     let cleaned = false;
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async ({ signal }) =>
@@ -101,6 +104,7 @@ describe("PreviewManager", () => {
   it("cancels a pending preview when the operator closes it and releases its slot", async () => {
     let cancelled = false;
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async ({ signal, pr }) => {
@@ -131,6 +135,7 @@ describe("PreviewManager", () => {
     const stop = vi.fn();
     const remove = vi.fn(async () => {});
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async () => {
@@ -155,6 +160,7 @@ describe("PreviewManager", () => {
     vi.useFakeTimers();
     try {
       const manager = new PreviewManager({
+        trusted: async () => true,
         exists: () => false,
         capacity: () => ({ blocked: false, reason: null }),
         start: async ({ signal }) =>
@@ -180,6 +186,7 @@ describe("PreviewManager", () => {
     let clock = NOW;
     const starts: { port: number; dbPath: string; token: string }[] = [];
     const manager = new PreviewManager({
+      trusted: async () => true,
       now: () => clock,
       capacity: () => ({ blocked: false, reason: null }),
       exists: (port) => port === 7431,
@@ -212,6 +219,7 @@ describe("PreviewManager", () => {
     const second = { stop: vi.fn(), dbPath: "/tmp/second.sqlite" };
     const remove = vi.fn(async () => {});
     const manager = new PreviewManager({
+      trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
       start: async ({ pr }) => (pr === 41 ? first : second),
@@ -237,6 +245,7 @@ describe("PreviewManager", () => {
     };
     const remove = vi.fn(async () => {});
     const manager = new PreviewManager({
+      trusted: async () => true,
       now: () => clock,
       capacity: () => ({ blocked: held, reason: "memory free is 8.0%" }),
       exists: () => false,
@@ -270,6 +279,7 @@ describe("PreviewManager", () => {
     let clock = NOW;
     const stop = vi.fn();
     const manager = new PreviewManager({
+      trusted: async () => true,
       now: () => clock,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),

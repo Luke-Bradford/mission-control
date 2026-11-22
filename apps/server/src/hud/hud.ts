@@ -622,6 +622,7 @@ function buildCrew(
     const latest = held?.endedAt === null ? held : runs[0];
     return latest ? [latest.id] : [];
   });
+  const denialsByRun = store.guardHitCountsByRun(latestRunIds);
   const digestByRun = store.digests(latestRunIds);
   const contextWindows = store.digestContextWindows(allRuns.map((run) => run.id));
   const offSeatAll = store.offSeatRuns();
@@ -842,7 +843,7 @@ function buildCrew(
           agent.kind === "crew" && latest
             ? {
                 commits: store.authoredCommitCount(latest.id),
-                denials: store.guardHitCount(latest.id),
+                denials: denialsByRun.get(latest.id) ?? 0,
               }
             : null,
         prs,
@@ -937,8 +938,7 @@ export function pinned(item: AttentionItem, store: Store, config: CcConfig): Att
   // the item's own ticket, else the one FLIGHT named in its brief
   const ticket = item.ticket ?? item.brief?.ticket ?? null;
   const ref = ticket === null ? null : parseTicket(ticket);
-  const card =
-    ref === null ? undefined : store.board(ref.repoId).find((b) => b.issueNumber === ref.number);
+  const card = ref === null ? undefined : store.boardItem(ref.repoId, ref.number);
   const key = /^pr:([^#]+)#(\d+):/.exec(item.key);
   const address = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(item.url ?? "");
   // a PR address names the GitHub repo, which maps to a configured repo id
@@ -1354,7 +1354,7 @@ function buildAttentionItems(
 
   for (const e of store.escalations()) {
     // an escalation whose issue the board has since seen closed no longer holds
-    if (store.board(e.repoId).some((b) => b.issueNumber === e.issueNumber && b.closed)) continue;
+    if (store.boardItem(e.repoId, e.issueNumber)?.closed === true) continue;
     // A paused, parked or stopped loop asks nobody: its open escalations stay on its card until
     // it runs again.
     const loopRow = rows.find((r) => r.kind === "loop" && r.repoId === e.repoId);

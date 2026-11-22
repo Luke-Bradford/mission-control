@@ -4345,6 +4345,21 @@ it("deduplicates a large history with an indexed first-commit lookup", () => {
   }
 });
 
+it("looks up a ticket's first run with the telemetry index", () => {
+  store.upsertRun(run({ id: "first", ticket: "repo#1", startedAt: 10 }));
+  store.upsertRun(run({ id: "later", ticket: "repo#1", startedAt: 20 }));
+  expect(store.ticketStartedAt("repo#1")).toBe(10);
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    const plan = db
+      .prepare("EXPLAIN QUERY PLAN SELECT MIN(started_at) FROM runs WHERE ticket = ?")
+      .all("repo#1");
+    expect(plan.map((r) => r.detail).join(" ")).toContain("runs_ticket_started");
+  } finally {
+    db.close();
+  }
+});
+
 it("refreshes note details without losing an episode's age or dismissal", () => {
   const note = {
     key: "capacity-episode",

@@ -84,6 +84,18 @@ export function lockedCheck(command: string, checks: readonly string[]): string 
   return null;
 }
 
+/** A vitest or `pnpm test` command: it loads the Mac like a check, so it waits for one too. */
+export function testCommand(command: string): boolean {
+  return splitCommands(command).some((argv) => {
+    const form = lockForm(argv);
+    return (
+      form[0] === "vitest" ||
+      (form[0] === "pnpm" &&
+        (form[1] === "vitest" || form[1] === "test" || form[1] === "test:related"))
+    );
+  });
+}
+
 /** The script the related-tests check runs: `pnpm test:related` is this node call. */
 const RELATED_SCRIPT = ["node", "--experimental-strip-types", "scripts/check-related.ts"];
 
@@ -132,6 +144,15 @@ export interface CheckRecorder {
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
   /** RELATED_CHECK when this shell command runs it, which takes the test lock (it can run the whole suite); else null. */
   lockedBy(command: string): string | null;
+  /**
+   * Reserves this run's checkout for a check, vitest or pnpm test command, or names the one that
+   * holds it (one at a time per checkout). Null when this command is none of those, or the
+   * reservation is made. The reservation ends with the call's end, its refusal (`release`), the turn
+   * ending, or its own Bash timeout.
+   */
+  admit?(key: CallKey, command: string): Promise<string | null>;
+  /** The reserved call will not run (refused, or its lock wait failed): free the checkout. */
+  release?(key: CallKey): void;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
   /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
@@ -154,6 +175,13 @@ export interface CheckRecorderDeps {
   state: (runId: string) => Promise<CloneState | null>;
   /** The run's seat worktree, or null when unknown (a leading `cd` then counts for nothing). */
   worktree?: (runId: string) => Promise<string | null>;
+  /**
+   * Whether a check or test process (node, pnpm, vitest, tsc, eslint) still runs in this worktree:
+   * for a call whose tool handed back before it ended. Without it, a hand-back drops the call.
+   */
+  processAlive?: (worktree: string) => Promise<boolean>;
+  /** How often a kept call's process is looked at (ms). */
+  pollMs?: number;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -167,6 +195,8 @@ interface StartedCall {
   timeoutMs: number;
   /** The related-tests companion is last, so its failure must not exhaust a check retry. */
   relatedTests: boolean;
+  /** Its end came after its Bash timeout: that is already noted, so a later forget says no more. */
+  timedOut?: true;
 }
 
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
@@ -176,6 +206,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
   const finishing = new Set<StartedCall>();
+  /** The one check or test call each run may have in flight, whether or not it is a receipt check. */
+  const reservations = new Map<string, { key: CallKey; command: string; at: number }>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
   const noteDrop = (
@@ -202,8 +234,81 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     if (rest.length === 0) dropped.delete(runId);
     else dropped.set(runId, rest);
   };
+  /** The call is over without a receipt: forget it, say why. */
+  const forget = (call: StartedCall, reason: CheckDropReason): void => {
+    let was = false;
+    for (const [id, c] of started)
+      if (c === call) {
+        started.delete(id);
+        was = true;
+      }
+    if (was && !call.timedOut) noteDrop(call.runId, reason, call.matched, call.head, call.command);
+  };
+  const reading = async (runId: string): Promise<boolean> => {
+    const wt = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
+    return wt !== null && (await d.processAlive?.(wt).catch(() => false)) === true;
+  };
+  /** Runs whose reservation or calls a watcher holds. */
+  const watched = new Set<string>();
+  /**
+   * The tool handed back (or its completion came with no exit code) while a check or test process
+   * may still run in the checkout: keep the reservation and the calls until no such process is left,
+   * or the Bash timeout has passed. A completion with an exit code ends them sooner (`end`).
+   */
+  const watch = async (runId: string): Promise<void> => {
+    if (watched.has(runId)) return;
+    watched.add(runId);
+    const pollMs = d.pollMs ?? 2_000;
+    const since = now();
+    let sawAlive = false;
+    let gone = 0;
+    try {
+      while (true) {
+        const calls = new Set([...started.values()].filter((c) => c.runId === runId));
+        // its completion came (or the call was lost): nothing is held any more
+        if (calls.size === 0 && !reservations.has(runId)) return;
+        const expired = now() - since >= CHECK_BASH_TIMEOUT_MS;
+        if (!expired && (await reading(runId))) {
+          sawAlive = true;
+          gone = 0;
+        } else if (expired || !sawAlive || ++gone > 1) {
+          // a process never seen is a plain turn end; one that went with no completion is lost
+          const reason = sawAlive || expired ? "session-lost" : "turn-ended";
+          for (const call of calls) forget(call, reason);
+          reservations.delete(runId);
+          return;
+        }
+        // else one more look after the process is gone, for a completion on its way
+        await new Promise((r) => setTimeout(r, pollMs).unref());
+      }
+    } finally {
+      watched.delete(runId);
+    }
+  };
   return {
     lockedBy: (command) => lockedCheck(command, [RELATED_CHECK]),
+    async admit(key, command) {
+      try {
+        const checks = await d.checks(key.runId);
+        if (lockedCheck(command, [...checks, RELATED_CHECK]) === null && !testCommand(command))
+          return null;
+        // no await from here: the check and the reservation are one step
+        const at = now();
+        const held = reservations.get(key.runId);
+        if (held !== undefined && at - held.at < CHECK_BASH_TIMEOUT_MS) {
+          return callId(held.key) === callId(key) ? null : held.command;
+        }
+        reservations.set(key.runId, { key, command, at });
+        return null;
+      } catch (e) {
+        d.log?.(`checks: could not admit a check for ${key.runId}: ${(e as Error).message}`);
+        return null;
+      }
+    },
+    release(key) {
+      const held = reservations.get(key.runId);
+      if (held !== undefined && callId(held.key) === callId(key)) reservations.delete(key.runId);
+    },
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);
@@ -264,6 +369,26 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     async end(key, ok, exitCode = null) {
       const call = started.get(callId(key));
+      // a failure with no exit code while the process still runs is no result: keep watching it
+      if (!ok && exitCode === null && d.processAlive !== undefined && (await reading(key.runId))) {
+        // one the CLI moved to the background at its Bash timeout says so, not that a session was lost
+        if (
+          call !== undefined &&
+          !call.timedOut &&
+          now() - call.startedAt >= call.timeoutMs - 1_000
+        ) {
+          call.timedOut = true;
+          noteDrop(key.runId, "timeout", call.matched, call.head, call.command);
+        }
+        void watch(key.runId);
+        return;
+      }
+      const held = reservations.get(key.runId);
+      if (
+        held !== undefined &&
+        (callId(held.key) === callId(key) || held.command === call?.command)
+      )
+        reservations.delete(key.runId);
       if (call === undefined) return;
       finishing.add(call);
       for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
@@ -307,17 +432,15 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     dropRun(runId) {
-      // a call can sit under two ids (Codex): it is one call
-      const calls = new Set<StartedCall>();
-      for (const [id, call] of started) {
-        if (call.runId !== runId) continue;
-        started.delete(id);
-        calls.add(call);
+      if (d.processAlive !== undefined) {
+        void watch(runId);
+        return;
       }
-      for (const call of calls)
-        noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+      for (const call of started.values()) if (call.runId === runId) forget(call, "turn-ended");
+      reservations.delete(runId);
     },
     lost(runId, command) {
+      if (reservations.get(runId)?.command === command) reservations.delete(runId);
       const calls = new Set<StartedCall>();
       for (const [id, call] of started) {
         if (call.runId !== runId || !call.matched.includes(command)) continue;

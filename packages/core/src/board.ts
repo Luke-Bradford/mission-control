@@ -16,7 +16,9 @@ export const DONE_RANGES = [7, 14, 30] as const;
 /** Pull requests are kept this long after their last update, and a sweep reads at most this many pages. */
 export const PR_KEEP_DAYS = 30;
 export const PR_KEEP_MS = PR_KEEP_DAYS * DAY_MS;
-export const PR_MAX_PAGES = 10;
+/** A page of 100 took 10 s on a large repo and got HTTP 502; 50 took 5 s. */
+export const PR_PAGE_SIZE = 50;
+export const PR_MAX_PAGES = 20;
 
 /** The QA board's history (test-lock holds, CI runs, review findings) is kept at least this long. */
 export const QA_RETENTION_DAYS = 90;

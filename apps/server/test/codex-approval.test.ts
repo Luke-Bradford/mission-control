@@ -378,6 +378,26 @@ describe("Codex check records", () => {
     ]);
   });
 
+  it("declines a check or test while another call holds the checkout, naming it, and starts no record", async () => {
+    const { begun, checks } = recorder();
+    const held = "pnpm -s vitest run a.test.ts";
+    checks.admit = async (k) => (k.toolUseId === "item-0" ? null : held);
+    const tell = vi.fn();
+    const h = approver("writer", [], undefined, checks, new TestLock(), false, tell);
+    expect(await h.approve(request(held, { itemId: "item-0" }), undefined, signal())).toBe(
+      "accept",
+    );
+    for (const [i, command] of ["pnpm -s typecheck", "pnpm -s vitest run b.test.ts"].entries()) {
+      expect(
+        await h.approve(request(command, { itemId: `item-${i + 1}` }), undefined, signal()),
+      ).toBe("decline");
+    }
+    expect(tell).toHaveBeenCalledTimes(2);
+    expect(tell.mock.calls[0]?.[0]).toContain(held);
+    expect(tell.mock.calls[0]?.[0]).toContain("Wait for it");
+    expect(begun).toHaveLength(1);
+  });
+
   it("tells the seat the rule's text when a guard rule refuses", async () => {
     const tell = vi.fn();
     const h = approver("writer", [], undefined, undefined, new TestLock(), false, tell);

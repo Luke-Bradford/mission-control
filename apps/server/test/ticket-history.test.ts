@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -7,6 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { forgetGithubToken, githubToken } from "../src/collectors/github.ts";
 import { sendComms } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
@@ -553,4 +554,86 @@ it("both ticket readers retain secondary closingIssues links within the configur
   const history = await read("/api/tickets/shop-app/7");
   expect(board.json().pullRequests.map((p: { number: number }) => p.number)).toEqual([31]);
   expect(history.json().prs.map((p: { number: number }) => p.number)).toEqual([31]);
+});
+
+describe("a ticket view's cost", () => {
+  it("answers each view in under 300 ms and spawns neither gh nor git per view", async () => {
+    // a representative store: a full ticket, a 200-card board, and 300 messages on the ticket
+    seedFull();
+    store.replaceBoard("shop-app", [
+      card(7),
+      ...Array.from({ length: 200 }, (_, i) => card(100 + i)),
+    ]);
+    for (let i = 0; i < 300; i++)
+      store.addComms({
+        at: NOW - i * 1000,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "shop-app#7",
+        text: `message ${i}`,
+        mentions: ["CAPCOM"],
+      });
+    // gh and git on PATH count each spawn
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const spawned = join(dir, "spawned");
+    writeFileSync(spawned, "");
+    for (const tool of ["gh", "git"]) {
+      writeFileSync(join(bin, tool), `#!/bin/sh\necho ${tool} >> "${spawned}"\necho token\n`);
+      chmodSync(join(bin, tool), 0o755);
+    }
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path}`;
+    forgetGithubToken();
+    const gh = (): number =>
+      readFileSync(spawned, "utf8")
+        .split("\n")
+        .filter((l) => l === "gh").length;
+    const git = (): number =>
+      readFileSync(spawned, "utf8")
+        .split("\n")
+        .filter((l) => l === "git").length;
+    // the default client's path: read the token, then ask GitHub
+    const viaToken = buildApp({
+      config,
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      githubGql: async () => {
+        await githubToken();
+        return async () => ({
+          repository: {
+            issue: {
+              number: 7,
+              title: "One read",
+              url: "https://github.com/o/shop-app/issues/7",
+              state: "OPEN",
+              body: BODY,
+              labels: { nodes: [] },
+              milestone: null,
+              subIssues: { nodes: [] },
+              closedByPullRequestsReferences: { nodes: [] },
+            },
+          },
+        });
+      },
+    });
+    try {
+      await viaToken.ready();
+      const times: number[] = [];
+      for (let i = 0; i < 10; i++) {
+        const start = performance.now();
+        const response = await viaToken.inject({ method: "GET", url: "/api/tickets/shop-app/7" });
+        times.push(performance.now() - start);
+        expect(response.statusCode).toBe(200);
+      }
+      expect(Math.max(...times)).toBeLessThan(300);
+      expect(gh()).toBe(1);
+      expect(git()).toBe(0);
+    } finally {
+      process.env.PATH = path;
+      forgetGithubToken();
+      await viaToken.close();
+    }
+  });
 });
