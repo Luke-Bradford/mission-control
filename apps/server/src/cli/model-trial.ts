@@ -250,7 +250,7 @@ async function wakeTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]> {
     );
     if (answer) total += answer.cost;
     const action = answer ? jsonOf(answer.text)?.action : undefined;
-    if (action !== "act" && action !== "wait") {
+    if (!answer || (action !== "act" && action !== "wait")) {
       failed += 1;
       lines.push(`- ${r.wake_id}: failed, the reply was not usable; not scored.`);
       continue;
@@ -290,7 +290,7 @@ async function summaryTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]
     );
     if (answer) total += answer.cost;
     const line = answer ? jsonOf(answer.text)?.summary : undefined;
-    if (typeof line !== "string" || line.trim() === "") {
+    if (!answer || typeof line !== "string" || line.trim() === "") {
       failed += 1;
       lines.push(`- ${r.ticket ?? r.id}: failed, the reply was not usable; not shown.`);
       continue;
@@ -299,7 +299,12 @@ async function summaryTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]
       `- ${r.ticket ?? r.id}\n  - stored: ${String(r.summary)}\n  - trial: ${line.trim()}\n  - cost ${money(answer.cost)}`,
     );
   }
-  return [`${rows.length - failed} summaries, ${failed} failed (unusable reply).`, `Cost ${money(total)} in total.`, "", ...lines];
+  return [
+    `${rows.length - failed} summaries, ${failed} failed (unusable reply).`,
+    `Cost ${money(total)} in total.`,
+    "",
+    ...lines,
+  ];
 }
 
 /** Runs a trial and returns its markdown result; nothing is written. */
