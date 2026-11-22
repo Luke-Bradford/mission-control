@@ -172,9 +172,12 @@ function SideCells({ side }: { side: ModelSide }) {
       {plural(side.runs, "run")} · too few
     </td>
   ) : (
-    <td className="num" colSpan={2}>
-      {percent(side.round3.percent)} · {dash(side.tokensPerMerged, kTokens)} · n={side.runs}
-    </td>
+    <>
+      <td className="num">
+        {percent(side.round3.percent)} <span className="fg2">(n={side.runs})</span>
+      </td>
+      <td className="num">{dash(side.tokensPerMerged, kTokens)}</td>
+    </>
   );
 }
 
@@ -186,15 +189,21 @@ function ChangeTable({ rows }: { rows: ModelChangeRow[] }) {
         <table className="ta-table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Seat</th>
-              <th>Change</th>
-              <th className="num" colSpan={2}>
-                Before: round 3+ · tokens per merged ticket
+              <th rowSpan={2}>Date</th>
+              <th rowSpan={2}>Seat</th>
+              <th rowSpan={2}>Change</th>
+              <th className="group" colSpan={2}>
+                Before
               </th>
-              <th className="num" colSpan={2}>
-                After: round 3+ · tokens per merged ticket
+              <th className="group" colSpan={2}>
+                After
               </th>
+            </tr>
+            <tr>
+              <th className="num">Round 3+</th>
+              <th className="num">Tokens per merged ticket</th>
+              <th className="num">Round 3+</th>
+              <th className="num">Tokens per merged ticket</th>
             </tr>
           </thead>
           <tbody>

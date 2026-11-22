@@ -18,6 +18,16 @@ describe("stepUpAdvice", () => {
     expect(a?.reason.length).toBeLessThanOrEqual(300);
   });
 
+  it("raises high to max on the same model", () => {
+    const a = stepUpAdvice({
+      ...base,
+      effort: "high",
+      previous: [f("a.ts")],
+      current: [f("a.ts")],
+    });
+    expect(a).toMatchObject({ model: "sonnet-5.5", effort: "max" });
+  });
+
   it("asks for a stronger model at max, null or a Codex effort", () => {
     const i = { ...base, previous: [f("a.ts")], current: [f("a.ts")] };
     expect(stepUpAdvice({ ...i, effort: "max" })).toMatchObject({ model: null, effort: "max" });

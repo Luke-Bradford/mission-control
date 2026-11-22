@@ -72,6 +72,8 @@ beforeEach(() => {
       loopKind: "review",
     });
   run("retro:1", "opus-5.5");
+  run("flight:1", "opus-5.5");
+  run("flight:2", "opus-5.5");
   store.upsertRun({
     id: "guido-1:1",
     agentId: "guido-1",
@@ -128,6 +130,10 @@ beforeEach(() => {
   );
   dec.run(NOW, "answer", "w1");
   dec.run(NOW + 1, "wait", "w2");
+  // newer wakes of another repository's FLIGHT must not count
+  raw.db.prepare("UPDATE runs SET repo_id = 'other' WHERE id = 'flight:2'").run();
+  wake.run("flight:2", NOW + 9, "foreign wake", "w3");
+  dec.run(NOW + 9, "answer", "w3");
   store.close();
 });
 
@@ -200,6 +206,50 @@ describe("model trial", () => {
     expect(out).toContain("False waits: 1");
     expect(out).toContain("Agreement: 1 of 2");
     expect(out).toMatch(/^Decision:\s*$/m);
+  });
+
+  it("wake trial ignores other repositories' wakes", async () => {
+    fakeClaude({ action: "act" }, 0.001);
+    const out = await runTrial(opts("wake", { model: "haiku-5.5" }));
+    expect(out).toContain("Agreement: 1 of 2");
+    expect(out).not.toContain("w3");
+    expect(out).toContain("Cost $0.00");
+  });
+
+  it("does not score malformed replies, and reports them", async () => {
+    for (const body of [
+      "I cannot help with that.",
+      '{"findings":{}}',
+      '{"findings":[{"severity":"Huge","file":"a.ts","line":1}]}',
+      '{"findings":[',
+    ]) {
+      writeFileSync(
+        join(bin, "claude"),
+        `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${JSON.stringify({ result: body, total_cost_usd: 0.05 }).replace(/'/g, "'\\''")}'\n`,
+      );
+      chmodSync(join(bin, "claude"), 0o755);
+      const out = await runTrial(opts("review"));
+      expect(out).toContain("over 0 completed reviews");
+      expect(out).toContain("1 failed (unusable reply)");
+      expect(out).toContain("Cost $0.05");
+      const wake = await runTrial(opts("wake", { model: "haiku-5.5" }));
+      expect(wake).toContain("Agreement: 0 of 0");
+      expect(wake).toContain("0 scored, 2 failed");
+      expect(wake).toContain("False waits: 0");
+    }
+  });
+
+  it("replays a PR merged with a merge commit with its real diff", async () => {
+    git("checkout", "-q", "main");
+    git("merge", "--no-ff", "-qm", "merge pr", "feature");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    // a fake reviewer that only catches the finding when the changed line is in the prompt
+    writeFileSync(
+      join(bin, "claude"),
+      `#!/bin/sh\nif grep -q '^+two' ; then printf '%s' '${JSON.stringify({ result: JSON.stringify({ findings: [{ severity: "Critical", file: "a.ts", line: 5, summary: "x" }] }), total_cost_usd: 0.01 })}'; else printf '%s' '${JSON.stringify({ result: '{"findings":[]}', total_cost_usd: 0.01 })}'; fi\n`,
+    );
+    chmodSync(join(bin, "claude"), 0o755);
+    expect(await runTrial(opts("review"))).toContain("Caught 1 of 2 blocking findings");
   });
 
   it("summary trial shows the line beside the stored summary", async () => {

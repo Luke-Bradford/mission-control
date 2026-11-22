@@ -29,11 +29,20 @@
   overflow-y: auto;
 }
 
+.model-scroll table {
+  min-width: 56rem;
+}
+
 .model-scroll th,
 .model-scroll td {
   max-width: 28ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.model-scroll th.group {
+  text-align: center;
+  border-bottom: 1px solid var(--line);
 }
 
 .model-scroll th.num,
@@ -119,4 +128,8 @@
   .audit-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+.model-scroll thead tr:nth-child(2) th {
+  top: var(--table-row);
 }

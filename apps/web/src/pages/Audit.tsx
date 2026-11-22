@@ -79,11 +79,11 @@ function AuditDashboard() {
       )}
       {audit && (
         <div className="audit-grid">
+          <ModelPanels range={range} />
           <Improvements audit={audit} config={configRes.data} configError={configRes.error} />
           <PrSizes sizes={audit.prSizes} />
           <Changes changes={audit.changes} />
           <Checks audit={audit} />
-          <ModelPanels range={range} />
           <Proposals />
         </div>
       )}

@@ -4,7 +4,7 @@ import { BLOCKING_SEVERITIES, type ReviewFinding } from "./review.ts";
 export const stepUpReason = (classes: string[], round: number): string =>
   `Review round ${round} repeated blocking findings of the same kind as round ${round - 1} (${classes.join(", ")}). Give the next attempt more effort or a stronger model instead of a third identical round.`;
 
-const STEP_UP_EFFORTS = ["low", "medium", "high"] as const;
+const STEP_UP_EFFORTS = ["low", "medium", "high", "max"] as const;
 
 /** A blocking finding's class: its category, else the file it is on. */
 const findingClass = (f: ReviewFinding): string => f.category ?? `file ${f.file}`;

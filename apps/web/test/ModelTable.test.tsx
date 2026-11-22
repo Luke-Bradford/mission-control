@@ -97,7 +97,11 @@ it("shows before and after with sample sizes", async () => {
   render(<ModelPanels range="30d" />);
   const region = await screen.findByRole("region", { name: "Changes" });
   expect(within(region).getByText("guido-1")).toBeTruthy();
-  expect(within(region).getByText(/20% · 50\.0k · n=25/)).toBeTruthy();
+  expect(within(region).getByText("20%", { exact: false })).toBeTruthy();
+  expect(within(region).getByText("(n=25)")).toBeTruthy();
+  expect(within(region).getByText("50.0k")).toBeTruthy();
+  for (const name of ["Before", "After"]) expect(within(region).getByText(name)).toBeTruthy();
+  expect(within(region).getAllByText("Tokens per merged ticket")).toHaveLength(2);
   expect(within(region).getByText("7 runs · too few")).toBeTruthy();
   expect(
     screen.getByText("Each side up to 30 days, bounded by the seat's other changes."),

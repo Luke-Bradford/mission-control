@@ -89,6 +89,33 @@ export function jsonOf(text: string): Record<string, unknown> | null {
   }
 }
 
+/** A reply's findings when every one is well formed; null when the reply is not usable. */
+export function parseFindings(
+  text: string,
+): { severity: string; file: string; line: number }[] | null {
+  const list = jsonOf(text)?.findings;
+  if (!Array.isArray(list)) return null;
+  const out: { severity: string; file: string; line: number }[] = [];
+  for (const f of list as unknown[]) {
+    if (typeof f !== "object" || f === null) return null;
+    const { severity, file, line } = f as Record<string, unknown>;
+    if (!FINDING_SEVERITIES.some((s) => s === severity)) return null;
+    if (typeof file !== "string" || file === "") return null;
+    if (typeof line !== "number" || !Number.isFinite(line)) return null;
+    out.push({ severity: severity as string, file, line });
+  }
+  return out;
+}
+
+/** `ask`, with a failed call (exit code, unreadable output) as null so it is counted, not scored. */
+async function tryAsk(o: TrialOptions, prompt: string): Promise<Answer | null> {
+  try {
+    return await ask(o, prompt);
+  } catch {
+    return null;
+  }
+}
+
 const money = (n: number): string => `$${n.toFixed(2)}`;
 const cut = (s: string): string => (s.length > INPUT_MAX ? `${s.slice(0, INPUT_MAX)}…` : s);
 
@@ -130,6 +157,7 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
   let recordedAll = 0;
   let completed = 0;
   let skipped = 0;
+  let failed = 0;
   let next = 0;
   // Older eligible reviews stand in for one whose commit is not in the clone, until `count` complete.
   for (; next < rows.length && completed < o.count; next += 1) {
@@ -144,9 +172,23 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
     let diff: string;
     try {
       const sha = r.sha as string;
-      const base = (
+      let base = (
         await exec("git", ["merge-base", sha, "origin/main"], { cwd: o.clone })
       ).stdout.trim();
+      if (base === sha) {
+        // Merged with a merge commit: the reviewed base is the first parent of the merge that brought it in.
+        const path = (
+          await exec(
+            "git",
+            ["rev-list", "--first-parent", "--ancestry-path", "--reverse", `${sha}..origin/main`],
+            { cwd: o.clone },
+          )
+        ).stdout.trim();
+        const merge = path.split("\n")[0] ?? "";
+        if (merge === "") throw new Error("no merge");
+        await exec("git", ["rev-parse", "--verify", `${merge}^2`], { cwd: o.clone });
+        base = (await exec("git", ["rev-parse", `${merge}^1`], { cwd: o.clone })).stdout.trim();
+      }
       diff = (await exec("git", ["diff", base, sha], { cwd: o.clone, maxBuffer: 64 * 1024 * 1024 }))
         .stdout;
     } catch {
@@ -154,15 +196,14 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
       lines.push(`- PR ${r.pr_number}: skipped, its commit is not in the clone.`);
       continue;
     }
-    const answer = await ask(o, `${role}\n\n## The change\n\n${diff}\n\n${SHAPE}\n`);
-    total += answer.cost;
-    const trial = (((jsonOf(answer.text)?.findings ?? []) as Record<string, unknown>[]) || []).map(
-      (f) => ({
-        severity: String(f.severity),
-        file: String(f.file),
-        line: Number(f.line) || 0,
-      }),
-    );
+    const answer = await tryAsk(o, `${role}\n\n## The change\n\n${diff}\n\n${SHAPE}\n`);
+    if (answer) total += answer.cost;
+    const trial = answer ? parseFindings(answer.text) : null;
+    if (!answer || !trial) {
+      failed += 1;
+      lines.push(`- PR ${r.pr_number}: failed, the reply was not usable; not scored.`);
+      continue;
+    }
     const hit = recorded.filter((f) => caught(f, trial));
     completed += 1;
     found += hit.length;
@@ -173,11 +214,11 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
   }
   const shortfall =
     completed < o.count
-      ? ` Shortfall: ${completed} completed of the ${o.count} asked for, as only ${rows.length} eligible reviews exist and ${skipped} were skipped.`
+      ? ` Shortfall: ${completed} completed of the ${o.count} asked for, as only ${rows.length} eligible reviews exist, ${skipped} were skipped and ${failed} had unusable replies.`
       : "";
   return [
     `Caught ${found} of ${recordedAll} blocking findings over ${completed} completed reviews.`,
-    `Reviews: ${completed} completed, ${rows.length} eligible, ${skipped} skipped (commit not in the clone).${shortfall}`,
+    `Reviews: ${completed} completed, ${rows.length} eligible, ${skipped} skipped (commit not in the clone), ${failed} failed (unusable reply).${shortfall}`,
     `Cost ${money(total)} in total.`,
     "",
     ...lines,
@@ -190,22 +231,32 @@ async function wakeTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]> {
       `SELECT w.wake_id, w.reasons,
          (SELECT COUNT(*) FROM flight_decisions d WHERE d.wake_id = w.wake_id) AS decided,
          (SELECT COUNT(*) FROM flight_decisions d WHERE d.wake_id = w.wake_id AND d.kind != 'wait') AS acted
-       FROM flight_wakes w WHERE w.wake_id IS NOT NULL AND decided > 0
+       FROM flight_wakes w JOIN runs fr ON fr.id = w.run_id
+       WHERE w.wake_id IS NOT NULL AND fr.repo_id = ? AND decided > 0
        ORDER BY w.at DESC LIMIT ?`,
     )
-    .all(o.count) as Row[];
+    .all(o.repo, o.count) as Row[];
   let agree = 0;
   let falseWaits = 0;
+  let failed = 0;
+  let scored = 0;
   let total = 0;
   const lines: string[] = [];
   for (const r of rows) {
     const acted = (r.acted as number) > 0;
-    const answer = await ask(
+    const answer = await tryAsk(
       o,
       `FLIGHT was woken for this reason:\n\n${cut(String(r.reasons))}\n\nDoes this need action now? Reply with only JSON: {"action":"act"|"wait"}.\n`,
     );
-    total += answer.cost;
-    const said = jsonOf(answer.text)?.action === "wait" ? "wait" : "act";
+    if (answer) total += answer.cost;
+    const action = answer ? jsonOf(answer.text)?.action : undefined;
+    if (action !== "act" && action !== "wait") {
+      failed += 1;
+      lines.push(`- ${r.wake_id}: failed, the reply was not usable; not scored.`);
+      continue;
+    }
+    scored += 1;
+    const said = action;
     if (said === (acted ? "act" : "wait")) agree += 1;
     if (said === "wait" && acted) falseWaits += 1;
     lines.push(
@@ -213,8 +264,9 @@ async function wakeTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]> {
     );
   }
   return [
-    `Agreement: ${agree} of ${rows.length}`,
+    `Agreement: ${agree} of ${scored}`,
     `False waits: ${falseWaits}`,
+    `Wakes: ${scored} scored, ${failed} failed (unusable reply), ${rows.length} sampled.`,
     `Cost ${money(total)} in total.`,
     "",
     ...lines,
@@ -229,19 +281,25 @@ async function summaryTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]
     )
     .all(o.repo, o.count) as Row[];
   let total = 0;
+  let failed = 0;
   const lines: string[] = [];
   for (const r of rows) {
-    const answer = await ask(
+    const answer = await tryAsk(
       o,
       `Write one plain line saying what this run did, from its stored result text:\n\n${cut(String(r.summary))}\n\nReply with only JSON: {"summary":"..."}.\n`,
     );
-    total += answer.cost;
-    const line = String(jsonOf(answer.text)?.summary ?? answer.text).trim();
+    if (answer) total += answer.cost;
+    const line = answer ? jsonOf(answer.text)?.summary : undefined;
+    if (typeof line !== "string" || line.trim() === "") {
+      failed += 1;
+      lines.push(`- ${r.ticket ?? r.id}: failed, the reply was not usable; not shown.`);
+      continue;
+    }
     lines.push(
-      `- ${r.ticket ?? r.id}\n  - stored: ${String(r.summary)}\n  - trial: ${line}\n  - cost ${money(answer.cost)}`,
+      `- ${r.ticket ?? r.id}\n  - stored: ${String(r.summary)}\n  - trial: ${line.trim()}\n  - cost ${money(answer.cost)}`,
     );
   }
-  return [`${rows.length} summaries.`, `Cost ${money(total)} in total.`, "", ...lines];
+  return [`${rows.length - failed} summaries, ${failed} failed (unusable reply).`, `Cost ${money(total)} in total.`, "", ...lines];
 }
 
 /** Runs a trial and returns its markdown result; nothing is written. */
