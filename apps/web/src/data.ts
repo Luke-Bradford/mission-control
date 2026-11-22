@@ -484,11 +484,16 @@ interface Entry {
   fullAgain?: boolean;
   activityFullAt?: number;
   activityTimer?: ReturnType<typeof setTimeout>;
+  /** When the last fetch started: the stream's `agents` events are paced from it. */
+  fetchedAt?: number;
   /** The start sequence of the newest answer kept: an older request must not replace it. */
   appliedSeq: number;
   settled: number;
   settledListeners: Set<() => void>;
 }
+
+/** The least time between stream-driven reads of one resource on `agents` events. */
+const AGENTS_PACE_MS = 6000;
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
@@ -591,6 +596,7 @@ class Hub {
     const gen = this.generation;
     const seq = ++this.seq;
     e.inflight = true;
+    e.fetchedAt = Date.now();
     // A refresh with usable data is not a loading transition. Besides avoiding a visual flash,
     // this lets identical responses retain their complete snapshot identity.
     if (e.snap.data === undefined && !e.snap.loading) this.set(e, { ...e.snap, loading: true });
@@ -723,8 +729,14 @@ class Hub {
     if (e && e.listeners.size > 0) void this.fetch(e);
   }
 
-  /** Refetch only what is on screen and belongs to the changed topic. */
-  refetchTopic(topic: Topic): void {
+  /**
+   * Refetch only what is on screen and belongs to the changed topic. `paced` is for the stream's
+   * events: an `agents` event arrives about once a second while a seat runs, so each resource is
+   * read at most once per AGENTS_PACE_MS for them. A local call (after the operator's own send)
+   * is never paced.
+   */
+  refetchTopic(topic: Topic, { paced = false }: { paced?: boolean } = {}): void {
+    const pace = paced && topic === "agents";
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
@@ -743,28 +755,29 @@ class Hub {
           topic === "attention" ||
           topic === "guard" ||
           topic === "config");
-      if (
-        ((Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
-          activityChanged ||
-          timelineChanged ||
-          briefChanged ||
-          notificationSettingsChanged ||
-          summaryChanged) &&
-        e.listeners.size > 0
-      ) {
-        if (Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
-          if (!e.queued) {
-            e.queued = true;
-            setTimeout(
-              () => {
-                e.queued = false;
-                if (e.listeners.size) void this.fetch(e);
-              },
-              summaryChanged && topic === "agents" ? 100 : 0,
-            );
-          }
-        } else void this.fetch(e);
-      }
+      const matches =
+        (Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
+        activityChanged ||
+        timelineChanged ||
+        briefChanged ||
+        notificationSettingsChanged ||
+        summaryChanged;
+      if (!matches) continue;
+      if (e.listeners.size === 0) continue;
+      if (pace || Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
+        if (!e.queued) {
+          e.queued = true;
+          const wait = pace
+            ? Math.max(0, (e.fetchedAt ?? 0) + AGENTS_PACE_MS - Date.now())
+            : summaryChanged && topic === "agents"
+              ? 100
+              : 0;
+          setTimeout(() => {
+            e.queued = false;
+            if (e.listeners.size) void this.fetch(e);
+          }, wait);
+        }
+      } else void this.fetch(e);
     }
   }
 
@@ -934,7 +947,7 @@ export function startStream(): () => void {
     source.addEventListener("changed", (ev) => {
       received();
       const topic = parseTopic((ev as MessageEvent).data);
-      if (topic) hub.refetchTopic(topic);
+      if (topic) hub.refetchTopic(topic, { paced: true });
     });
     source.addEventListener("error", () => {
       if (stopped || source !== es || source.readyState === EventSource.OPEN) return;

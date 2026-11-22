@@ -325,6 +325,41 @@ describe("startStream", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("paces the stream's agents events: a running seat's event a second does not refetch each resource a second", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const paths = ["/api/crew?x=1", "/api/comms/crew?x=1", "/api/activity?x=1", "/api/flight?x=1"];
+    for (const path of paths) sub(path, "agents", () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    start();
+    const [es] = FakeEventSource.instances;
+    for (let second = 0; second < 10; second++) {
+      es?.emit("changed", { data: '{"topic":"agents"}' });
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    const counts = new Map<string, number>();
+    for (const url of fetched(fetchMock))
+      counts.set(String(url), (counts.get(String(url)) ?? 0) + 1);
+    for (const path of paths) expect(counts.get(path), path).toBeLessThanOrEqual(2);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(20);
+    // the change is not lost: the last event's refetch lands once the pace allows it
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(counts.size).toBe(paths.length);
+  });
+
+  it("a local refetch of agents (after a send) is not paced", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    sub("/api/comms/flight?x=2", "agents", () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fetchMock.mockClear();
+    hub.refetchTopic("agents");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("a resource whose last listener left is not refetched by its topic", async () => {
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

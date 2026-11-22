@@ -16,6 +16,7 @@ import { PrChip, type PreviewPr } from "../hud/PrChip.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { ReviewState } from "../hud/ReviewState.tsx";
 import { agentPath, followLink, navigate, needsYouPath, ticketPath, tracePath } from "../router.ts";
+import { sameValue } from "../sameValue.ts";
 import {
   type BoardColumn,
   type CardSeat,
@@ -126,9 +127,7 @@ export interface CardProps {
  * re-render the card (#26 A1). Values that are the same object skip the comparison.
  */
 function sameProps(a: CardProps, b: CardProps): boolean {
-  return (Object.keys(a) as (keyof CardProps)[]).every(
-    (k) => Object.is(a[k], b[k]) || JSON.stringify(a[k]) === JSON.stringify(b[k]),
-  );
+  return (Object.keys(a) as (keyof CardProps)[]).every((k) => sameValue(a[k], b[k]));
 }
 
 /**
