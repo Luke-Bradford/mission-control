@@ -644,6 +644,12 @@ describe("log_decision", () => {
     expect(seen).toEqual(["flight"]);
   });
 
+  it("records a successful FLIGHT tool call for the silence alarm", async () => {
+    expect(store.silenceEventLastSeen("flight-tool-succeeded")).toBeNull();
+    expect(await tool.call(ctx(), args())).toEqual({ text: FLIGHT_NOTED });
+    expect(store.silenceEventLastSeen("flight-tool-succeeded")).toBe(NOW);
+  });
+
   it("stamps a decision with the id of the wake FLIGHT is in", async () => {
     store.addFlightWake("r-flight", NOW - 5000, ["pr"], flightWakeId("r-flight", 0));
     store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));

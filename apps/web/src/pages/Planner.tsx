@@ -264,6 +264,7 @@ export function Planner() {
                 Loading the plans…
               </p>
             )}
+            {res.error && !res.data && <p className="pb">No plans to show until they load.</p>}
             {res.data && list.length === 0 && (
               <div className="pb uat-empty">
                 <h3>{history ? "No plan has been decided yet" : "No plan is waiting for you"}</h3>
