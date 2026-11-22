@@ -2658,7 +2658,7 @@ branch previews do.
 
 ## Audit API
 
-`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
+`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. The hub reads the 30d range once at start and keeps each range's view for 30 seconds; an older view is still served at once while a fresh one is built behind the reply, so repeats never wait on the store (a view can be up to one rebuild behind). Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
 
 - `prSizes`: each merged PR's additions, deletions and changed files (PRs merged before size capture are left out) and the outliers at or above `AUDIT_PR_OUTLIER_LINES`.
 - `agentId` and `runId` on long runners, death loops, rework, `refusals` and `spendOutliers` (runs costing at least twice the range's median run).

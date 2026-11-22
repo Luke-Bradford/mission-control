@@ -628,6 +628,16 @@ describe("audit", () => {
     expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
   });
 
+  it("answers repeats from a cache instead of reading the store again", async () => {
+    const read = vi.spyOn(store, "auditStepped");
+    await get("/api/audit?range=30d");
+    await get("/api/audit?range=30d");
+    await get("/api/audit?range=30d");
+    expect(read).toHaveBeenCalledTimes(1);
+    await get("/api/audit?range=7d");
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects an invalid range", async () => {
     const response = await get("/api/audit?range=14d");
     expect(response.statusCode).toBe(400);
