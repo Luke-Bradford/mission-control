@@ -12,7 +12,10 @@
   gap: var(--sp-2);
 }
 
-.audit-panel:last-child,
+.audit-panel:last-child {
+  grid-column: 1 / -1;
+}
+
 .audit-wide {
   grid-column: 1 / -1;
 }

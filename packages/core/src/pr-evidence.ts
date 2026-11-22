@@ -95,6 +95,7 @@ const PAGE_ALIASES: Record<string, EvidencePage> = {
   qahotspots: "qa",
   "qa-hotspots": "qa",
   legacyaudit: "audit",
+  modeltable: "audit",
 };
 
 /** `pages/` files with no fixed address, so no screenshot can show them. */
