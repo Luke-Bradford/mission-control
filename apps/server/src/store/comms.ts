@@ -1083,6 +1083,23 @@ export class CommsQueries {
   }
 
   /**
+   * Settles the open asks naming a merged or closed PR of `repoId` (all of them, or just `number`).
+   * The PR cache drops such a row later, and the ask must not reopen when it does.
+   */
+  settleAsksOfClosedPrs(repoId: string, at: number, number?: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO comms_settlements (message_id, settled_by, reason, at)
+         SELECT c.id, ?, 'Its PR was closed', ? FROM comms c
+         JOIN pull_requests p ON c.ref = 'PR ' || p.number AND c.ticket LIKE p.repo_id || '#%'
+         WHERE p.repo_id = ? AND p.state IN ('merged', 'closed') AND (? IS NULL OR p.number = ?)
+           AND c.label IN ('question', 'blocker')
+         ON CONFLICT(message_id) DO NOTHING`,
+      )
+      .run(COMMS_MC, at, repoId, number ?? null, number ?? null);
+  }
+
+  /**
    * Labelled direct questions and blockers still awaiting a reply or the addressee's reaction. A
    * reply from anyone but the asker answers it; so does its ticket or PR being closed or merged.
    */

@@ -1136,6 +1136,13 @@ describe("Comms API", () => {
       expect(ids).not.toContain(answeredByOther.id);
       expect(ids).not.toContain(ticketClosed.id);
       expect(ids).not.toContain(prMerged.id);
+      // the PR cache dropping the merged row does not reopen its ask
+      store.sweepPullRequests("shop-app", [], clock + 1);
+      const later = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.map((i: { id: string }) => i.id);
+      expect(later).toContain(real.id);
+      expect(later).not.toContain(prMerged.id);
     });
   });
 

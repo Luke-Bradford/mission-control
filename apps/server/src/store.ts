@@ -1608,6 +1608,7 @@ export class Store {
   /** Replaces the repo's rows with `prs`. True when any stored row changed. */
   replacePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): boolean {
     return this.changed("pull_requests", repoId, () => {
+      this.commsStore.settleAsksOfClosedPrs(repoId, readAt);
       this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ?").run(repoId);
       this.writePullRequests(repoId, prs, readAt);
     });
@@ -1633,7 +1634,10 @@ export class Store {
       const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
       for (const [number, at] of readAtOf) {
-        if (!seen.has(number) && !kept.has(number) && at < readAt) del.run(repoId, number);
+        if (!seen.has(number) && !kept.has(number) && at < readAt) {
+          this.commsStore.settleAsksOfClosedPrs(repoId, readAt, number);
+          del.run(repoId, number);
+        }
       }
       this.writePullRequests(
         repoId,
