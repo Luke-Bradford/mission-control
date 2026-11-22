@@ -949,6 +949,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const flightAudits = new Set<string>();
   const accountModels = new Map<string, AccountModels>();
   let localAccountUpdate: Promise<void> | null = null;
   const withAccountUpdate = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -2536,38 +2537,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.tool_name === "Bash" &&
               typeof command === "string" &&
               flightShellWrite(command) &&
+              !flightAudits.has(auditKey) &&
               store.getSetting(auditKey) === null
             ) {
-              let shown = command;
-              let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
-              for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
-                if (secret !== "") {
-                  shown = shown.split(secret).join("[redacted]");
-                  cwd = cwd.split(secret).join("[redacted]");
+              flightAudits.add(auditKey);
+              try {
+                let shown = command;
+                let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
+                for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
+                  if (secret !== "") {
+                    shown = shown.split(secret).join("[redacted]");
+                    cwd = cwd.split(secret).join("[redacted]");
+                  }
                 }
-              }
-              shown = cleanText(shown, 1500);
-              cwd = cleanText(cwd, 1000);
-              store.addFlightDecision({
-                at: now(),
-                kind: "shell",
-                seatId: who.seatId,
-                targetRunId: who.runId,
-                ref: null,
-                questionId: null,
-                about: shown,
-                decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
-                basis: "The CLI's post-execution hook recorded this result.",
-              });
-              store.setSetting(auditKey, "recorded");
-              if (
-                flightShellBreakerWrite(
-                  command,
-                  flightShellContext(store, who.runId, body.data.cwd),
+                shown = cleanText(shown, 1500);
+                cwd = cleanText(cwd, 1000);
+                store.addFlightDecision({
+                  at: now(),
+                  kind: "shell",
+                  seatId: who.seatId,
+                  targetRunId: who.runId,
+                  ref: null,
+                  questionId: null,
+                  about: shown,
+                  decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
+                  basis: "The CLI's post-execution hook recorded this result.",
+                });
+                store.setSetting(auditKey, "recorded");
+                if (
+                  flightShellBreakerWrite(
+                    command,
+                    flightShellContext(store, who.runId, body.data.cwd),
+                  )
                 )
-              )
-                noteFlightWrite(store, bus, now(), "shell", { command: shown });
-              bus.emit("flight");
+                  noteFlightWrite(store, bus, now(), "shell", { command: shown });
+                bus.emit("flight");
+              } finally {
+                flightAudits.delete(auditKey);
+              }
             }
             return answer();
           }
