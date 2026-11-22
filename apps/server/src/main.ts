@@ -103,6 +103,7 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
+import { peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
 import {
   evidenceSideStarter,
@@ -1035,6 +1036,7 @@ export async function main(): Promise<void> {
     ticketRead: engineBoard.read,
     operatorToken,
     controllerToken,
+    seatPeer: peerIsSeat,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,
