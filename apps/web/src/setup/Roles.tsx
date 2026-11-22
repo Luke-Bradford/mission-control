@@ -434,7 +434,7 @@ function RolesTable({ config, error }: { config: ConfigView | undefined; error: 
                   <td>{modeText(r.mode)}</td>
                   <td className="rg-mid">
                     {seats ? (
-                      <a href={setupPath("sessions")}>
+                      <a href={setupPath("repos")}>
                         {seats.length} seat{seats.length === 1 ? "" : "s"}
                       </a>
                     ) : (
@@ -464,7 +464,7 @@ function RolesTable({ config, error }: { config: ConfigView | undefined; error: 
                             </span>
                             <a
                               href={editSeatPath(s.sessionId, s.id)}
-                              aria-label={`Edit ${nameOf(s.id)} on Sessions`}
+                              aria-label={`Edit ${nameOf(s.id)} on Repos & seats`}
                             >
                               Edit
                             </a>

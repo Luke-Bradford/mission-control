@@ -293,7 +293,7 @@ describe("Agents panel", () => {
     ]);
   });
 
-  it("its header opens Setup Sessions to add an agent to the first crew session", async () => {
+  it("its header opens Repos & seats to add an agent to the first crew session", async () => {
     const crew = CREW_CONFIG.crew;
     const first = crew?.sessions[0];
     if (!crew || !first) throw new Error("no crew session");
@@ -307,7 +307,7 @@ describe("Agents panel", () => {
     await settled(f, "/api/config");
     const header = container.querySelector<HTMLElement>("#agentsP .ph") as HTMLElement;
     fireEvent.click(within(header).getByRole("button", { name: "Add agent" }));
-    expect(window.location.pathname + window.location.search).toBe("/setup/sessions?add=s1");
+    expect(window.location.pathname + window.location.search).toBe("/setup/repos?add=s1");
   });
 
   it("disables Add agent when there is no crew session", async () => {

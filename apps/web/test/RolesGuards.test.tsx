@@ -323,7 +323,7 @@ describe("Setup › Roles & guards", () => {
     await within(lock).findByText(LOCK_FREE_TEXT);
   });
 
-  it("Roles: each role lists its seats with file areas and an Edit link to its Sessions form", async () => {
+  it("Roles: each role lists its seats with file areas and an Edit link to Repos & seats", async () => {
     load();
     page();
     const roles = await screen.findByRole("region", { name: "Roles" });
@@ -336,18 +336,18 @@ describe("Setup › Roles & guards", () => {
       return r;
     });
     expect(row.textContent).toContain(seat?.area.join(", ") ?? "whole checkout");
-    const edit = within(row).getByRole("link", { name: /^Edit .* on Sessions$/ });
+    const edit = within(row).getByRole("link", { name: /^Edit .* on Repos & seats$/ });
     const href = edit.getAttribute("href") as string;
-    expect(href.startsWith("/setup/sessions?edit=")).toBe(true);
+    expect(href.startsWith("/setup/repos?edit=")).toBe(true);
     expect(editSeatParam(href.slice(href.indexOf("?")))).toEqual({
       sessionId: CFG.crew?.sessions[0]?.id,
       seatId: seat?.id,
     });
     expect(
       within(row)
-        .getByRole("link", { name: /seats?$/ })
+        .getByRole("link", { name: /^\d+ seats?$/ })
         .getAttribute("href"),
-    ).toBe("/setup/sessions");
+    ).toBe("/setup/repos");
     // a role with no seat says so
     expect(
       within(roles.querySelector("[data-role=FAO]") as HTMLElement).getByText("No seats"),
