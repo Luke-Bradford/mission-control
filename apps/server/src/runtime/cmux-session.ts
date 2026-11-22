@@ -244,7 +244,7 @@ function cmuxSession(
   void launch();
   return {
     send(text) {
-      if (!alive || workspace === null) throw new SessionControlError("ended", "session ended");
+      if (!alive) throw new SessionControlError("ended", "session ended");
       const deliver = async () => {
         let body = text;
         if (text.includes("\n")) {
@@ -254,7 +254,11 @@ function cmuxSession(
           chmodSync(file, 0o600);
           body = `Mission Control sent you a message. Read ${file} and act on it.`;
         }
-        while (alive && workspace) {
+        while (alive) {
+          if (workspace === null) {
+            await sleep(25);
+            continue;
+          }
           const sent = await i.cmux.send(workspace, body);
           if (sent === "sent") {
             await i.cmux.sendKey(workspace, "enter");

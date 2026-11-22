@@ -181,10 +181,10 @@ describe("crewCliArgs", () => {
     expect(a).not.toContain("--resume");
   });
 
-  it("uses --restricted, not --setting-sources, and names the built-in tools", () => {
+  it("uses --restricted, project and local settings, and names the built-in tools", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
-    expect(w).not.toContain("--setting-sources");
+    expect(w[w.indexOf("--setting-sources") + 1]).toBe("project,local");
     expect(w[w.indexOf("--tools") + 1]).toBe(
       "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
     );

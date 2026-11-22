@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Cmux } from "../src/runtime/cmux.ts";
 import { launcherScript, startCmuxSession } from "../src/runtime/cmux-session.ts";
 
@@ -130,9 +130,9 @@ it("keeps the workspace open across /clear and delivers multi-line messages by f
   session.on((event) => {
     if (event.kind === "init") inits.push(event.sessionId);
   });
-  await session.ready;
   session.send("first line\nsecond line");
-  await new Promise((resolve) => setTimeout(resolve, 15));
+  await session.ready;
+  await vi.waitFor(() => expect(sent).toHaveLength(1));
   expect(sent[0]).toMatch(/^Mission Control sent you a message\. Read .+ and act on it\.$/);
   const message = sent[0]?.match(/Read (.+) and act/)?.[1];
   expect(message).toBeDefined();
