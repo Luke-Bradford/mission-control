@@ -132,10 +132,18 @@ describe("FlightThread", () => {
   });
 
   it("shows times in the operator's configured zone, not London's", async () => {
-    stub([msg("comms:1", "hi")], true, undefined, { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } });
+    stub([msg("comms:1", "hi")], true, undefined, {
+      ...CONFIG,
+      operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" },
+    });
     const { container } = render(<FlightThread />);
     await screen.findByText("hi");
-    const expected = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Tokyo" }).format(NOW);
+    const expected = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "Asia/Tokyo",
+    }).format(NOW);
     await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
   });
 
