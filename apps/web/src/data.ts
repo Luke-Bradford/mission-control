@@ -49,7 +49,7 @@ const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
 const AGENT_DETAIL_TOPICS: readonly Topic[] = ["agents", "attention", "boards"];
 const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
-const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
+const METRICS_TOPICS: readonly Topic[] = ["boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
 const PLAN_TOPICS: readonly Topic[] = ["boards", "plans"];
@@ -100,7 +100,7 @@ export const RESOURCES = {
   crewSessions: { path: "/api/crew/sessions", topic: null },
   // Whether this server runs crew sessions (off on a preview, or when another server holds
   // the lock).
-  crewStatus: { path: "/api/crew/status", topic: "agents" },
+  crewStatus: { path: "/api/crew/status", topic: "config" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
   /** One item's conversation: the messages sent from it and their replies, from Comms. */
@@ -128,8 +128,7 @@ export const RESOURCES = {
   notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
   notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
-  // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
-  flight: { path: "/api/flight", topic: "agents" },
+  flight: { path: "/api/flight", topic: "flight" },
   // Active sets are always complete. The strip requests only the smallest included history page.
   flightOrders: { path: "/api/flight/orders?limit=1", topic: ORDER_TOPICS },
   instructionHistory: (seatId: string | null, before?: number): ResourceRef => ({
@@ -162,7 +161,7 @@ export const RESOURCES = {
     path: `/api/away/digest${since ? `?since=${enc(since)}` : ""}`,
     topic: "settings",
   }),
-  crewPause: { path: "/api/settings/crew-pause", topic: ["settings", "agents"] },
+  crewPause: { path: "/api/settings/crew-pause", topic: "settings" },
   away: { path: "/api/settings/away", topic: "settings" },
   /** `range` is checked against TELEMETRY_RANGES by the caller; "" for agent/account/ticket is all. */
   telemetry: (range: string, agent = "", account = "", ticket = ""): ResourceRef => ({
@@ -761,8 +760,7 @@ class Hub {
         e.path === RESOURCES.activity.path &&
         (topic === "guard" || topic === "health" || topic === "boards");
       const timelineChanged = e.path === RESOURCES.overviewTimeline.path && topic === "guard";
-      const briefChanged =
-        e.path === RESOURCES.flightBrief.path && (topic === "guard" || topic === "agents");
+      const briefChanged = e.path === RESOURCES.flightBrief.path && topic === "guard";
       const notificationSettingsChanged =
         topic === "settings" && e.path === RESOURCES.notificationEvents.path;
       const summaryChanged =
