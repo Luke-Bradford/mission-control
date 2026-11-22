@@ -314,6 +314,7 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
       CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
+      CREATE INDEX IF NOT EXISTS runs_ticket_started ON runs(ticket, started_at);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
       CREATE INDEX IF NOT EXISTS runs_loop_off_seat ON runs(ended_at, json_extract(loop, '$.hold.worktree'), started_at, seq);
