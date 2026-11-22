@@ -933,7 +933,11 @@ describe("mc tool grants", () => {
       "gh_write",
       "crew_tidy",
     ]);
-    expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", "report_audit", ...FLIGHT_TOOLS]);
+    expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual([
+      "report_plan",
+      "report_audit",
+      ...FLIGHT_TOOLS,
+    ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
     expect(MC_TOOL_GRANTS.writer.grantable).toEqual([]);
     expect(MC_TOOL_GRANTS.writer.grantable).not.toContain("log_decision");
