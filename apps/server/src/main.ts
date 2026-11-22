@@ -202,6 +202,12 @@ export async function main(): Promise<void> {
       ),
     );
   }
+  const previewRepoId = await resolvePreviewRepo(
+    hubRoot,
+    config.repos,
+    config.crew?.sessions ?? [],
+  );
+  config.hubRepo = previewRepoId;
   // Read at call time: `gh` is built below, and a build only starts once the hub is serving.
   const trustedHead = async (pr: number, sha?: string, repoId?: string): Promise<boolean> => {
     const github = config.repos.find((r) => r.id === (repoId ?? previewRepoId))?.github;
@@ -212,6 +218,7 @@ export async function main(): Promise<void> {
   const previews = isPreview(port, process.env)
     ? undefined
     : new PreviewManager({
+        ...(previewRepoId === undefined ? {} : { hubRepoId: previewRepoId }),
         trusted: ({ pr, sha, repoId }) => trustedHead(pr, sha, repoId),
         capacity: () => {
           const capacityConfig = config.crew?.machineCapacity;
@@ -234,7 +241,13 @@ export async function main(): Promise<void> {
           checkout: repoCheckout,
         }) => {
           if (hubRoot === null) throw new Error("the hub checkout is unavailable for previews");
-          const root = join(previewRoot, String(pr));
+          // one folder per repo and PR: two repos can have the same PR number
+          const root = join(
+            previewRoot,
+            repoId === undefined || repoId === previewRepoId
+              ? String(pr)
+              : `${encodeURIComponent(repoId)}-${pr}`,
+          );
           const previewDb = join(root, "mc.sqlite");
           if (repoId !== undefined && repoId !== previewRepoId) {
             // Another repo's app: its own run command in a worktree of its own clone.
@@ -471,12 +484,6 @@ export async function main(): Promise<void> {
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
-  const previewRepoId = await resolvePreviewRepo(
-    hubRoot,
-    config.repos,
-    config.crew?.sessions ?? [],
-  );
-  config.hubRepo = previewRepoId;
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;

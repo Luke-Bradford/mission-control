@@ -52,6 +52,7 @@ export function isWebPr(files: readonly string[], globs: readonly string[]): boo
 }
 
 interface Entry {
+  repoId: string;
   pr: number;
   closed: boolean;
   /** The preview this run uses, as the manager reported it. */
@@ -84,8 +85,8 @@ export function createReviewPreviews(deps: ReviewPreviewDeps): ReviewPreviews {
     if (entry.timer !== null) clearInterval(entry.timer);
     entry.timer = null;
     if (!entry.owned || entry.view === null) return;
-    if (!sameView(deps.previews.get(entry.pr), entry.view)) return;
-    await deps.previews.close(entry.pr).catch((e) => {
+    if (!sameView(deps.previews.get(entry.pr, entry.repoId), entry.view)) return;
+    await deps.previews.close(entry.pr, entry.repoId).catch((e) => {
       log(`review preview for PR ${entry.pr} did not close: ${e instanceof Error ? e.message : e}`);
     });
   }
@@ -107,7 +108,7 @@ export function createReviewPreviews(deps: ReviewPreviewDeps): ReviewPreviews {
     } catch (e) {
       if (e instanceof PreviewHubError && e.code === "already-running") {
         // A preview the operator started: use it, and leave it running afterwards.
-        const existing = deps.previews.get(input.pr);
+        const existing = deps.previews.get(input.pr, input.repoId);
         if (existing?.sha === entry.sha) entry.view = existing;
         else entry.note = "the operator's preview is for a different or unknown head";
       }
@@ -128,14 +129,17 @@ export function createReviewPreviews(deps: ReviewPreviewDeps): ReviewPreviews {
       return;
     }
     // Reading a long diff must not let the idle expiry close the preview before the browser is used.
-    entry.timer = setInterval(() => deps.previews.touch(input.pr), REVIEW_PREVIEW_TOUCH_MS);
+    entry.timer = setInterval(
+      () => deps.previews.touch(input.pr, input.repoId),
+      REVIEW_PREVIEW_TOUCH_MS,
+    );
     entry.timer.unref?.();
   }
 
   const origin = (runId: string): string | null => {
     const entry = entries.get(runId);
     if (!entry?.view || entry.closed) return null;
-    const running = deps.previews.get(entry.pr);
+    const running = deps.previews.get(entry.pr, entry.repoId);
     return entry.view.sha === entry.sha && sameView(running, entry.view) ? entry.view.url : null;
   };
 
@@ -151,6 +155,7 @@ export function createReviewPreviews(deps: ReviewPreviewDeps): ReviewPreviews {
     async open({ runId, repoId, pr, branch, sha }) {
       if (!isWebPr(deps.files(repoId, pr), await deps.webGlobs(repoId))) return false;
       const entry: Entry = {
+        repoId,
         pr,
         sha,
         controller: new AbortController(),
