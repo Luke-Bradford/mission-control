@@ -101,7 +101,7 @@ export function parseFindings(
     const { severity, file, line } = f as Record<string, unknown>;
     if (!FINDING_SEVERITIES.some((s) => s === severity)) return null;
     if (typeof file !== "string" || file === "") return null;
-    if (typeof line !== "number" || !Number.isFinite(line)) return null;
+    if (typeof line !== "number" || !Number.isInteger(line) || line < 0) return null;
     out.push({ severity: severity as string, file, line });
   }
   return out;
@@ -176,7 +176,7 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
         await exec("git", ["merge-base", sha, "origin/main"], { cwd: o.clone })
       ).stdout.trim();
       if (base === sha) {
-        // Merged with a merge commit: the reviewed base is the first parent of the merge that brought it in.
+        // Merged with a merge commit: the reviewed base is the first parent of the merge that brought it in, as it stood when the head branched.
         const path = (
           await exec(
             "git",
@@ -187,7 +187,9 @@ async function reviewTrial(o: TrialOptions, db: DatabaseSync): Promise<string[]>
         const merge = path.split("\n")[0] ?? "";
         if (merge === "") throw new Error("no merge");
         await exec("git", ["rev-parse", "--verify", `${merge}^2`], { cwd: o.clone });
-        base = (await exec("git", ["rev-parse", `${merge}^1`], { cwd: o.clone })).stdout.trim();
+        base = (
+          await exec("git", ["merge-base", sha, `${merge}^1`], { cwd: o.clone })
+        ).stdout.trim();
       }
       diff = (await exec("git", ["diff", base, sha], { cwd: o.clone, maxBuffer: 64 * 1024 * 1024 }))
         .stdout;

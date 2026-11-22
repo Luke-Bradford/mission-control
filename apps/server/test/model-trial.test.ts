@@ -222,6 +222,8 @@ describe("model trial", () => {
       '{"findings":{}}',
       '{"findings":[{"severity":"Huge","file":"a.ts","line":1}]}',
       '{"findings":[',
+      '{"findings":[{"severity":"Important","file":"a.ts","line":-1}]}',
+      '{"findings":[{"severity":"Important","file":"a.ts","line":5.5}]}',
     ]) {
       writeFileSync(
         join(bin, "claude"),
@@ -247,6 +249,22 @@ describe("model trial", () => {
     writeFileSync(
       join(bin, "claude"),
       `#!/bin/sh\nif grep -q '^+two' ; then printf '%s' '${JSON.stringify({ result: JSON.stringify({ findings: [{ severity: "Critical", file: "a.ts", line: 5, summary: "x" }] }), total_cost_usd: 0.01 })}'; else printf '%s' '${JSON.stringify({ result: '{"findings":[]}', total_cost_usd: 0.01 })}'; fi\n`,
+    );
+    chmodSync(join(bin, "claude"), 0o755);
+    expect(await runTrial(opts("review"))).toContain("Caught 1 of 2 blocking findings");
+  });
+
+  it("leaves out changes added to main before the merge", async () => {
+    git("checkout", "-q", "main");
+    writeFileSync(join(clone, "unrelated.ts"), "other\n");
+    git("add", ".");
+    git("commit", "-qm", "unrelated");
+    git("merge", "--no-ff", "-qm", "merge pr", "feature");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    // the fake reviewer finds nothing when the prompt carries the unrelated file
+    writeFileSync(
+      join(bin, "claude"),
+      `#!/bin/sh\nif grep -q 'unrelated.ts' ; then printf '%s' '${JSON.stringify({ result: '{"findings":[]}', total_cost_usd: 0.01 })}'; else printf '%s' '${JSON.stringify({ result: JSON.stringify({ findings: [{ severity: "Critical", file: "a.ts", line: 5, summary: "x" }] }), total_cost_usd: 0.01 })}'; fi\n`,
     );
     chmodSync(join(bin, "claude"), 0o755);
     expect(await runTrial(opts("review"))).toContain("Caught 1 of 2 blocking findings");
