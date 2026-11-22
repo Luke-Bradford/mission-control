@@ -387,9 +387,7 @@ describe("startStream", () => {
     for (const url of fetched(fetchMock))
       counts.set(String(url), (counts.get(String(url)) ?? 0) + 1);
     for (const [path, count] of counts) expect(count, path).toBeLessThanOrEqual(2);
-    // Metrics and FLIGHT both depend on live run facts, so their paced agents refreshes are not
-    // optional. The screen therefore holds at 22 reads while every path remains at two or fewer.
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(22);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(20);
     // the change is not lost: the last event's refetch lands once the pace allows it
     const beforeTrailing = fetchMock.mock.calls.length;
     await act(async () => {
@@ -401,7 +399,6 @@ describe("startStream", () => {
         "/api/activity?since=0",
         "/api/crew?shape=summary",
         "/api/flight",
-        "/api/flight/brief",
         "/api/metrics",
         "/api/overview",
       ].sort(),

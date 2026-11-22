@@ -729,7 +729,8 @@ it("keeps FLIGHT coverage, the latest decision and session turns on the head-age
   render(<AgentsPanel />);
   await screen.findByText("Watching");
   const link = screen.getByRole("link", { name: /^head agent/ });
-  await waitFor(() => expect(link.title).toContain("watching 1 · triaging"));
+  await waitFor(() => expect(link.title).toContain("triaging"));
+  expect(link.title).not.toContain("watching");
   expect(link.title).toContain("last action 3m ago (CI)");
   expect(link.title).toContain("next check within 5m");
   expect(link.title).toContain("Asked GUIDO to check CI");
