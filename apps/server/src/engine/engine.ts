@@ -520,14 +520,24 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
  * Whether the run's last design verdict, on this head or an earlier one, is a fail. A review with no
  * design verdict, or `n-a`, does not clear an earlier fail, on the same head or after a rework; a
  * later pass does. The carried review from before a main merge is one of the run's rows, so it counts.
+ * A fail whose blocking findings are all `evidence` (missing stored pictures) says nothing about the
+ * page, so it gives no verdict: FLIGHT can settle it, and it does not clear an earlier real fail.
  */
 export function designFailedIn(
   rows: readonly ReviewRow[],
   checks: (reviewId: number) => readonly Pick<ReviewCheck, "check" | "result">[],
+  findings: (reviewId: number) => readonly Pick<StoredFinding, "severity" | "category">[] = () => [],
 ): boolean {
+  const picturesOnly = (id: number): boolean => {
+    const blocking = findings(id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity));
+    return blocking.length > 0 && blocking.every((f) => f.category === "evidence");
+  };
   const verdicts = rows
     .filter((r) => r.state === "reported")
-    .map((r) => checks(r.id).find((c) => c.check === "design")?.result)
+    .map((r) => {
+      const result = checks(r.id).find((c) => c.check === "design")?.result;
+      return result === "fail" && picturesOnly(r.id) ? undefined : result;
+    })
     .filter((v) => v === "pass" || v === "fail");
   return verdicts.at(-1) === "fail";
 }
@@ -3114,7 +3124,11 @@ export function createEngine(deps: EngineDeps): Engine {
             // A failed design needs the operator's own accept (PR 1465, #1529).
             if (
               by === "FLIGHT" &&
-              designFailedIn(store.reviewsOfRun(run.id), (id) => store.reviewChecks(id))
+              designFailedIn(
+                store.reviewsOfRun(run.id),
+                (id) => store.reviewChecks(id),
+                (id) => store.findingsOf(id),
+              )
             )
               return refuse("design-failed");
           }
