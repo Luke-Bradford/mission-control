@@ -1642,6 +1642,11 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
  * seats are the hub's own timers and show in the digest, never here.
  */
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
+  // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
+  // tickets; keeping this to the seat and spell start avoids re-waking as the board changes.
+  const idle = (s.wake?.idle?.seats ?? [])
+    .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
+    .map((seat) => `${seat.id}:${seat.since}`);
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
@@ -1678,11 +1683,7 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     operator: s.wake?.operator ?? [],
     // read and not answered: owed until FLIGHT replies to it
     owed: s.wake?.owed ?? [],
-    // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
-    // tickets; keeping this to the seat and spell start avoids re-waking as the board changes.
-    idle: (s.wake?.idle?.seats ?? [])
-      .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
-      .map((seat) => `${seat.id}:${seat.since}`),
+    ...(idle.length === 0 ? {} : { idle }),
     // blockers and messages; a PR's own steps are the hub's
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
