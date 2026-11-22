@@ -83,8 +83,9 @@ describe("route()", () => {
     expect(route(path)).toBeNull();
   });
 
-  it("knows the seven setup tabs", () => {
+  it("knows the eight setup tabs", () => {
     expect(SETUP_TABS).toEqual([
+      "hub",
       "sessions",
       "repos",
       "loops",
@@ -270,7 +271,7 @@ describe("editSeatParam() and editSeatPath()", () => {
 
   it("round-trips through the path", () => {
     const path = editSeatPath("s1", "guido-1");
-    expect(path.startsWith("/setup/sessions?")).toBe(true);
+    expect(path.startsWith("/setup/repos?")).toBe(true);
     expect(editSeatParam(path.slice(path.indexOf("?")))).toEqual({
       sessionId: "s1",
       seatId: "guido-1",

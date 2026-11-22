@@ -152,11 +152,11 @@ beforeEach(() => vi.useFakeTimers({ toFake: ["Date"], now: NOW }));
 afterEach(() => vi.useRealTimers());
 
 describe("Setup tabs", () => {
-  it("the dependency-order sidebar routes its six sections", async () => {
+  it("the dependency-order sidebar routes its seven sections", async () => {
     load();
     render(<Setup tab="sessions" />);
     const tabs = screen.getByRole("navigation", { name: "Setup sections" });
-    expect(SETUP_TABS).toHaveLength(7);
+    expect(SETUP_TABS).toHaveLength(8);
     fireEvent.click(within(tabs).getByRole("button", { name: "Accounts" }));
     expect(window.location.pathname).toBe("/setup/accounts");
     fireEvent.click(within(tabs).getByRole("button", { name: "Roles & guards" }));
@@ -1330,30 +1330,31 @@ describe("Setup tabs", () => {
   });
 });
 
-describe("Setup is read-only (except Repos, Sessions and Accounts)", () => {
-  it.each(SETUP_TABS.filter((t) => t !== "repos" && t !== "sessions" && t !== "accounts"))(
-    "%s: no enabled field, and no button posts",
-    async (tab) => {
-      load();
-      at(tab);
-      // the config-gated tabs show a placeholder until the config answers: scan the real content
-      await waitFor(() => {
-        const grid = document.querySelector(".sgrid") as HTMLElement;
-        expect(grid.textContent).not.toBe("");
-        expect(within(grid).queryByText(/^(Loading…|Could not load)/)).toBeNull();
-      });
-      const body = document.querySelector(".sgrid") as HTMLElement;
-      for (const el of body.querySelectorAll("input, select, textarea")) {
-        if (tab === "loops" && el.id === "loop-run-picker") continue;
-        // the repo picker chooses which repo's rules to read; it changes nothing
-        if (tab === "roles" && el.closest(".rg-picker")) continue;
-        expect((el as HTMLInputElement).disabled).toBe(true);
-      }
-      for (const b of body.querySelectorAll("button")) fireEvent.click(b);
-      const posts = fetchFn.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
-      expect(posts).toEqual([]);
-    },
-  );
+describe("Setup is read-only (except Hub, Repos, Sessions, Accounts and Safety)", () => {
+  it.each(
+    SETUP_TABS.filter(
+      (t) => t !== "hub" && t !== "repos" && t !== "sessions" && t !== "accounts" && t !== "access",
+    ),
+  )("%s: no enabled field, and no button posts", async (tab) => {
+    load();
+    at(tab);
+    // the config-gated tabs show a placeholder until the config answers: scan the real content
+    await waitFor(() => {
+      const grid = document.querySelector(".sgrid") as HTMLElement;
+      expect(grid.textContent).not.toBe("");
+      expect(within(grid).queryByText(/^(Loading…|Could not load)/)).toBeNull();
+    });
+    const body = document.querySelector(".sgrid") as HTMLElement;
+    for (const el of body.querySelectorAll("input, select, textarea")) {
+      if (tab === "loops" && el.id === "loop-run-picker") continue;
+      // the repo picker chooses which repo's rules to read; it changes nothing
+      if (tab === "roles" && el.closest(".rg-picker")) continue;
+      expect((el as HTMLInputElement).disabled).toBe(true);
+    }
+    for (const b of body.querySelectorAll("button")) fireEvent.click(b);
+    const posts = fetchFn.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
+    expect(posts).toEqual([]);
+  });
 });
 
 function cleanupAndAt(tab: SetupTab) {

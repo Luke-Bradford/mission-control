@@ -19,7 +19,7 @@ export function ConfigStatus() {
     }
   };
   return (
-    <div className="setup-config-status" role={data?.error ? "alert" : "status"}>
+    <div className="setup-config-status" role={data?.error ? "alert" : undefined}>
       {data?.error && (
         <span className="crit-t">
           {data.error.startsWith("config.yaml does not load:")
