@@ -3,6 +3,7 @@ import type { Store } from "../store.ts";
 
 const TTL = 24 * 60 * 60_000;
 const key = (repo: string, login: string) => `collaborator:${repo}:${login.toLowerCase()}`;
+const reads = new WeakMap<Store, Map<string, Promise<boolean>>>();
 
 /** Missing and expired permissions are untrusted; cached results are evidence, never grants. */
 export function trustedAuthor(
@@ -22,7 +23,7 @@ export function trustedAuthor(
   }
 }
 
-export async function collaborator(
+async function readCollaborator(
   store: Store,
   gh: GhRunner,
   cwd: string,
@@ -54,6 +55,30 @@ export async function collaborator(
   }
   store.setSetting(key(repo, login), JSON.stringify({ at: now, trusted }));
   return trusted;
+}
+
+export function collaborator(
+  store: Store,
+  gh: GhRunner,
+  cwd: string,
+  repo: string,
+  login: string | null | undefined,
+  now: number,
+): Promise<boolean> {
+  if (!login || !/^[A-Za-z0-9-]{1,39}$/.test(login)) return Promise.resolve(false);
+  let inFlight = reads.get(store);
+  if (inFlight === undefined) {
+    inFlight = new Map();
+    reads.set(store, inFlight);
+  }
+  const cacheKey = key(repo, login);
+  const existing = inFlight.get(cacheKey);
+  if (existing !== undefined) return existing;
+  const read = readCollaborator(store, gh, cwd, repo, login, now).finally(() => {
+    inFlight?.delete(cacheKey);
+  });
+  inFlight.set(cacheKey, read);
+  return read;
 }
 
 /** Warm only authors already present in the digest's repo; no issue-body reads. */
