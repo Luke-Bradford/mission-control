@@ -1,8 +1,16 @@
-import type { AttentionBrief, AttentionItem, BriefOption } from "@mc/core";
+import type {
+  AttentionBrief,
+  AttentionItem,
+  BriefOperatorReason,
+  BriefOption,
+  BriefReadState,
+} from "@mc/core";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useSecond } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES } from "../data.ts";
+import { hhmm } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import {
   CATCH_UP_LABEL,
@@ -17,6 +25,127 @@ import "./ItemBrief.css";
 
 export const BRIEF_LINES = 8;
 export const BRIEF_FOLD_AFTER = 12;
+
+export const WHY_OPERATOR_LABEL: Record<BriefOperatorReason, string> = {
+  money: "Money",
+  "product-direction": "Product direction",
+  "security-exception": "Security exception",
+  irreversible: "Cannot be undone",
+  "floor-approval": "Floor approval",
+};
+
+export const REVERSIBILITY_LABEL = {
+  reversible: "Can be undone",
+  "partly-reversible": "Partly undoable",
+  irreversible: "Cannot be undone",
+} as const;
+
+/** Whether the brief is fresh, and when it is not, the server's reason in plain words. */
+export function FreshnessBadge({
+  state,
+  legacy = false,
+}: {
+  state?: BriefReadState;
+  legacy?: boolean;
+}) {
+  const stale = state?.freshness === "stale";
+  if (!legacy && (!state || state.freshness === "current")) return null;
+  return (
+    <p className="brief-fresh" role="status">
+      <Pill tone={stale ? "warn" : "plain"}>{stale ? "Stale" : "Needs a refreshed brief"}</Pill>
+      {state?.reason && <span className="s qtext"> {state.reason}</span>}
+    </p>
+  );
+}
+
+/**
+ * The facts an operator needs to decide, open on every layout: why it needs them, who FLIGHT
+ * consulted, what happens if nobody answers and what waiting costs. A brief with no decision
+ * facts (written before they existed) shows only the refresh note; nothing is made up.
+ */
+export function DecisionFacts({
+  brief,
+  defaultDueAt,
+  tz,
+}: {
+  brief: AttentionBrief;
+  defaultDueAt?: number;
+  tz: string | null;
+}) {
+  const decision = brief.decision;
+  if (!decision) return <FreshnessBadge state={brief.state} legacy />;
+  const why = decision.whyOperator;
+  const effect =
+    brief.binding?.actions.find((a) => a.optionId === brief.recommendedOptionId)?.effect ??
+    "the recommended action";
+  return (
+    <section className="decision-facts" aria-label="Decision facts">
+      <FreshnessBadge state={brief.state} />
+      <div className="fact">
+        <h3 className="bsec">Why it needs you</h3>
+        <p className="s qtext">
+          {why ? (
+            <>
+              <b>{WHY_OPERATOR_LABEL[why.kind]}.</b> {why.explanation}
+            </>
+          ) : (
+            "Within FLIGHT's standing authority"
+          )}
+        </p>
+      </div>
+      <div className="fact">
+        <h3 className="bsec">Who FLIGHT consulted</h3>
+        {decision.consulted.length === 0 ? (
+          <p className="s qtext">Nobody consulted</p>
+        ) : (
+          <ul className="checked">
+            {decision.consulted.map((c, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: consultations remain in source order
+              <li key={i}>
+                <span className="chipref">{c.who}</span> {c.finding}
+                {c.ref && <span className="chipref">{c.ref}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="fact">
+        <h3 className="bsec">If nobody answers</h3>
+        <p className="s qtext">
+          {why ? (
+            "Waits for your answer. Nothing happens automatically."
+          ) : defaultDueAt !== undefined ? (
+            <FYITiming dueAt={defaultDueAt} effect={effect} tz={tz} />
+          ) : (
+            "Nothing is scheduled to happen automatically."
+          )}
+          {decision.waiting && <> {decision.waiting}</>}
+        </p>
+      </div>
+      <div className="fact">
+        <h3 className="bsec">Cost of delay</h3>
+        <p className="s qtext">{decision.costOfDelay}</p>
+      </div>
+    </section>
+  );
+}
+
+/** The only second-by-second part of a brief, so a FYI clock cannot rerender its list or refetch it. */
+function FYITiming({ dueAt, effect, tz }: { dueAt: number; effect: string; tz: string | null }) {
+  const now = useSecond();
+  const remaining = Math.max(0, Math.ceil((dueAt - now) / 1000));
+  const minutes = Math.floor(remaining / 60);
+  const seconds = String(remaining % 60).padStart(2, "0");
+  const when = tz ? hhmm(dueAt, tz) : "soon";
+  return (
+    <>
+      FLIGHT will {effect} at {when} unless you choose.
+      <span className="fyi-countdown" aria-live="polite">
+        {remaining > 0 ? ` ${minutes}:${seconds} remaining.` : " Deadline reached."}
+      </span>
+    </>
+  );
+}
 
 function BriefSection({
   title,
@@ -193,6 +322,8 @@ export function BriefOptions(p: {
   rowLabel?: string;
   /** The pictures that show an option, rendered on it so choosing it is choosing them. */
   pictures?: (o: BriefOption) => ReactNode;
+  /** Per option: false shuts that option while the rest stay open. */
+  canPick?: (o: BriefOption) => boolean;
   onPick: (o: BriefOption) => void;
 }) {
   const labelId = useId();
@@ -217,7 +348,7 @@ export function BriefOptions(p: {
                 // biome-ignore lint/suspicious/noArrayIndexKey: position is the only id, see above
                 key={i}
                 title={p.title}
-                disabled={p.disabled || !p.live}
+                disabled={p.disabled || !p.live || p.canPick?.(o) === false}
                 onClick={() => p.onPick(o)}
               >
                 {o.label}
@@ -257,6 +388,7 @@ export function BriefOptions(p: {
           of={`${o.label}, option ${i + 1}`}
           recommended={o.id !== undefined && o.id === p.recommendedOptionId}
           {...p}
+          disabled={p.disabled || p.canPick?.(o) === false}
         />
       ))}
       {(p.disabled || !p.live) && p.title && <p className="note">{p.title}</p>}
@@ -281,33 +413,51 @@ function OptionCard(p: {
       {p.option.label}
     </b>
   );
+  const { consequence, reversibility } = p.option;
   return (
     <div className={p.recommended ? "opt rec" : "opt"}>
-      {p.live ? (
-        <button
-          type="button"
-          className="option-pick"
-          aria-label={p.option.label}
-          title={p.title}
-          disabled={p.disabled}
-          onClick={() => p.onPick(p.option)}
-        >
-          {label}
-        </button>
-      ) : (
-        label
-      )}
-      <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={p.of}>
-        <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
-      </Expandable>
-      {p.pictures?.(p.option)}
-      {p.recommended &&
-        (p.recommendation?.trim() &&
-        p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim() ? (
-          <Recommendation text={p.recommendation} of={`Recommendation, ${p.of}`} />
+      <div className="opt-head">
+        {p.live ? (
+          <button
+            type="button"
+            className="option-pick"
+            aria-label={p.option.label}
+            title={p.title}
+            disabled={p.disabled}
+            onClick={() => p.onPick(p.option)}
+          >
+            {label}
+          </button>
         ) : (
-          <Pill tone="plain">FLIGHT recommends</Pill>
-        ))}
+          label
+        )}
+        {p.recommended &&
+          !(
+            p.recommendation?.trim() &&
+            p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim()
+          ) && <Pill tone="plain">FLIGHT recommends</Pill>}
+      </div>
+      <div className="opt-body">
+        <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={p.of}>
+          <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
+        </Expandable>
+        {consequence && (
+          <p className="s qtext opt-consequence">
+            <span className="bsec">Consequence</span> {consequence}
+          </p>
+        )}
+        {p.pictures?.(p.option)}
+        {p.recommended &&
+          p.recommendation?.trim() &&
+          p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim() && (
+            <Recommendation text={p.recommendation} of={`Recommendation, ${p.of}`} />
+          )}
+      </div>
+      {reversibility && (
+        <p className="s qtext opt-rev">
+          <b>{REVERSIBILITY_LABEL[reversibility.kind]}.</b> {reversibility.detail}
+        </p>
+      )}
     </div>
   );
 }
