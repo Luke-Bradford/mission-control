@@ -1073,6 +1073,7 @@ describe("Comms API", () => {
       at: clock++,
       from: "flight",
       to: "alpha",
+      ticket: null,
       text: "Use the contract.",
       replyTo: answeredByOther.id,
     });
