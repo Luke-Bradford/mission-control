@@ -21,7 +21,7 @@ it("starts a Claude run in a cmux workspace", async () => {
   expect(created.cwd).toContain("worktrees");
   const launcher = readFileSync(created.command, "utf8");
   expect(launcher).toContain("--settings");
-  expect(launcher).toContain("--setting-sources' 'project,local");
+  expect(launcher).not.toContain("--setting-sources");
   expect(launcher).toContain("--mcp-config");
   expect(launcher).toContain("--strict-mcp-config");
   expect(launcher).toContain("--session-id");
