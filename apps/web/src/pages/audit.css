@@ -498,7 +498,7 @@
   border-radius: var(--r-s);
 }
 
-.audit-file-detail td {
+.audit-files .audit-table .audit-file-detail td {
   padding: var(--sp-2) var(--sp-4);
   background: var(--surface-2);
   white-space: normal;

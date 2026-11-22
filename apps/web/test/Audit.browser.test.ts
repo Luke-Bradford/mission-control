@@ -173,7 +173,9 @@ describeRendered("Audit first screen in a browser", () => {
         const pathDetail = await page.box(".audit-file-fullpath");
         const filesPanel = await page.box(".audit-files");
         expect(pathDetail.x).toBeGreaterThanOrEqual(filesPanel.x);
-        expect(pathDetail.x + pathDetail.width).toBeLessThanOrEqual(filesPanel.x + filesPanel.width);
+        expect(pathDetail.x + pathDetail.width).toBeLessThanOrEqual(
+          filesPanel.x + filesPanel.width,
+        );
         for (const toggle of await page.boxes(".audit-rt")) {
           expect(toggle.height).toBeGreaterThanOrEqual(24);
         }
