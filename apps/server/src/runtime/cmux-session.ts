@@ -33,6 +33,8 @@ export interface CmuxSessionInput {
   log?: (message: string) => void;
   pollMs?: number;
   startWaitMs?: number;
+  /** The hub had a turn open when it detached and needs the first cmux state reconciled. */
+  awaiting?: boolean;
   onWorkspace?: (workspace: string, pid: number | null) => void;
 }
 
@@ -62,7 +64,7 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
 }
 
 export function attachCmuxSession(
-  i: CmuxSessionInput & { workspace: string; pid: number; from: number },
+  i: CmuxSessionInput & { workspace: string; pid: number; from: number; awaiting: boolean },
 ): CrewSession {
   return cmuxSession(i, i.workspace, i.pid, i.from);
 }
@@ -192,6 +194,16 @@ function cmuxSession(
       if (lifecycle === null) {
         lifecycle = record.lifecycle;
         if (attached) {
+          if (lifecycle === "idle" && i.awaiting) {
+            appendFileSync(
+              i.transcriptPath,
+              '{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","mc_cmux":true}\n',
+              { mode: 0o600 },
+            );
+            emit({ kind: "result", isError: false, stopReason: "end_turn" });
+          }
+          if (lifecycle === "needsInput") emit({ kind: "needs-input" });
+          if (lifecycle === "running" && !i.awaiting) emit({ kind: "turn-start" });
           attached = false;
           emit({ kind: "attached", awaiting: lifecycle !== "idle" });
         }

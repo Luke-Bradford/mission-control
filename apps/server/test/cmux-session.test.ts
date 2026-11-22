@@ -338,6 +338,7 @@ it("attaches an idle workspace as idle without a synthetic result", async () => 
     cmux,
     workspace: "workspace-1",
     pid: 42,
+    awaiting: false,
     from: 0,
     name: "GUIDO · mc#2194",
     cwd: dir,
