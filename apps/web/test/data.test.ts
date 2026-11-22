@@ -329,6 +329,22 @@ describe("startStream", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("paces metrics and FLIGHT's live seat state after an agents event", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const metrics = RESOURCES.metrics();
+    sub(metrics.path, metrics.topic, () => {});
+    sub(RESOURCES.flight.path, RESOURCES.flight.topic, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    start();
+    FakeEventSource.instances[0]?.emit("changed", { data: '{"topic":"agents"}' });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(fetched(fetchMock).sort()).toEqual(
+      [metrics.path, RESOURCES.flight.path, metrics.path, RESOURCES.flight.path].sort(),
+    );
+  });
+
   it("keeps a five-seat Overview within its agents-event request budget", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const rows = Array.from({ length: 5 }, (_, index) =>
@@ -371,7 +387,9 @@ describe("startStream", () => {
     for (const url of fetched(fetchMock))
       counts.set(String(url), (counts.get(String(url)) ?? 0) + 1);
     for (const [path, count] of counts) expect(count, path).toBeLessThanOrEqual(2);
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(20);
+    // Metrics and FLIGHT both depend on live run facts, so their paced agents refreshes are not
+    // optional. The screen therefore holds at 22 reads while every path remains at two or fewer.
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(22);
     // the change is not lost: the last event's refetch lands once the pace allows it
     const beforeTrailing = fetchMock.mock.calls.length;
     await act(async () => {
@@ -382,7 +400,9 @@ describe("startStream", () => {
       [
         "/api/activity?since=0",
         "/api/crew?shape=summary",
+        "/api/flight",
         "/api/flight/brief",
+        "/api/metrics",
         "/api/overview",
       ].sort(),
     );

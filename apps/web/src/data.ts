@@ -49,7 +49,7 @@ const enc = encodeURIComponent;
 const OVERVIEW_TOPICS: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
 const AGENT_DETAIL_TOPICS: readonly Topic[] = ["agents", "attention", "boards"];
 const TICKET_TOPICS: readonly Topic[] = ["agents", "boards", "attention"];
-const METRICS_TOPICS: readonly Topic[] = ["boards"];
+const METRICS_TOPICS: readonly Topic[] = ["agents", "boards"];
 const INSTRUCTION_TOPICS: readonly Topic[] = ["flight", "config", "agents"];
 const ORDER_TOPICS: readonly Topic[] = ["flight", "config"];
 const PLAN_TOPICS: readonly Topic[] = ["boards", "plans"];
@@ -128,7 +128,7 @@ export const RESOURCES = {
   notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
   notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
-  flight: { path: "/api/flight", topic: "flight" },
+  flight: { path: "/api/flight", topic: ["agents", "flight"] },
   // Active sets are always complete. The strip requests only the smallest included history page.
   flightOrders: { path: "/api/flight/orders?limit=1", topic: ORDER_TOPICS },
   instructionHistory: (seatId: string | null, before?: number): ResourceRef => ({
