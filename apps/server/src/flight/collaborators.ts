@@ -66,6 +66,8 @@ export function collaborator(
   repo: string,
   login: string | null | undefined,
   now: number,
+  /** Read the permission from GitHub now, ignoring the cache; for decisions that run code. */
+  fresh = false,
 ): Promise<boolean> {
   if (!login || !/^[A-Za-z0-9-]{1,39}$/.test(login)) return Promise.resolve(false);
   let inFlight = reads.get(store);
@@ -73,10 +75,10 @@ export function collaborator(
     inFlight = new Map();
     reads.set(store, inFlight);
   }
-  const cacheKey = key(repo, login);
+  const cacheKey = `${fresh ? "fresh:" : ""}${key(repo, login)}`;
   const existing = inFlight.get(cacheKey);
   if (existing !== undefined) return existing;
-  const read = readCollaborator(store, gh, cwd, repo, login, now).finally(() => {
+  const read = readCollaborator(store, gh, cwd, repo, login, now, fresh).finally(() => {
     inFlight?.delete(cacheKey);
   });
   inFlight.set(cacheKey, read);
