@@ -348,7 +348,7 @@ import {
   pinned,
   seatQuestionTriage,
 } from "./hud/hud.ts";
-import { overviewSummary } from "./hud/overview.ts";
+import { overviewSummary, recordNeedsHistory } from "./hud/overview.ts";
 import {
   decodeCursor,
   TICKET_PAGE_DEFAULT,
@@ -1445,7 +1445,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       now,
     });
   const notifications = new LocalNotifications(store, config, bus, now);
-  const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
+  const reconcileNotifications = () => {
+    const items = sharedAttention(true);
+    // The overview's need history is written here, so GET /overview stays a pure read.
+    recordNeedsHistory(store, items, now());
+    notifications.reconcile(items);
+  };
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
   let reconciled: { at: number; basis: string } | undefined;
@@ -1495,9 +1500,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const unsubscribeNotifications = bus.subscribe((topic) => {
     if (topic !== "machine") {
       responseRevision++;
-      responseCache.clear();
       attentionMemo = undefined;
-      forgetViews(store);
+      // `agents` moves often; the cache and view memos are already checked against
+      // store.readVersion(), the config, lock and login, so an unchanged store keeps them.
+      if (topic !== "agents") {
+        responseCache.clear();
+        forgetViews(store);
+      }
     }
     if (crewTopics.has(topic)) {
       crewRevision++;

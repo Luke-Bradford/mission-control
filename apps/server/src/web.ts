@@ -3,6 +3,7 @@
  * path, and index.html for extension-less paths (SPA routes such as /needs-you).
  * Assets are static; all data is under /api, which only a loopback Host may reach.
  */
+import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -58,13 +59,28 @@ export function resolveWebPath(root: string, urlPath: string): Resolved {
   return { kind: "file", path: file };
 }
 
-async function readInside(root: string, file: string): Promise<Buffer | null> {
+interface Served {
+  body: Buffer;
+  etag: string;
+}
+/** Files read once and kept while their size and mtime hold, so a request stats rather than reads. */
+const served = new Map<string, Served & { mtimeMs: number; size: number }>();
+const SERVED_MAX = 256;
+
+async function readInside(root: string, file: string): Promise<Served | null> {
   try {
     const real = await realpath(file);
     // A symlink inside dist must not lead outside it either.
     if (!real.startsWith(root + sep)) return null;
-    if (!(await stat(real)).isFile()) return null;
-    return await readFile(real);
+    const info = await stat(real);
+    if (!info.isFile()) return null;
+    const hit = served.get(real);
+    if (hit && hit.mtimeMs === info.mtimeMs && hit.size === info.size) return hit;
+    const body = await readFile(real);
+    const etag = `"${createHash("sha256").update(body).digest("base64url").slice(0, 22)}"`;
+    if (served.size >= SERVED_MAX) served.clear();
+    served.set(real, { body, etag, mtimeMs: info.mtimeMs, size: info.size });
+    return { body, etag };
   } catch {
     return null;
   }
@@ -92,8 +108,8 @@ export function webHandler(webRoot: string, csp: string = WEB_CSP) {
       urlPath === HASHED_PREFIX.slice(0, -1) ||
       (topLevel && ext !== "");
     const file = isFile ? target.path : resolve(root, "index.html");
-    const body = await readInside(root, file);
-    if (!body) {
+    const found = await readInside(root, file);
+    if (!found) {
       const text = isFile ? "not found" : "web app not built: run pnpm build";
       return reply.code(404).type("text/plain; charset=utf-8").send(text);
     }
@@ -106,6 +122,11 @@ export function webHandler(webRoot: string, csp: string = WEB_CSP) {
         ? "public, max-age=31536000, immutable"
         : "no-cache",
     );
-    return reply.send(body);
+    reply.header("etag", found.etag);
+    const wanted = req.headers["if-none-match"];
+    if (wanted?.split(",").some((t) => t.trim() === found.etag)) {
+      return reply.code(304).send();
+    }
+    return reply.send(found.body);
   };
 }

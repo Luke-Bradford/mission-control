@@ -51,7 +51,10 @@ describeRendered("Board cards with nothing working on them, rendered", () => {
       });
       await page.evaluate(async () => {
         const end = performance.now() + 8000;
-        while (!document.querySelector(".kcard") && performance.now() < end)
+        while (
+          !document.querySelector('.kcard[data-card="shop-app#2"] .overlay')?.textContent &&
+          performance.now() < end
+        )
           await new Promise((r) => requestAnimationFrame(r));
         await document.fonts.ready;
       }, undefined);

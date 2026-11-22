@@ -100,7 +100,7 @@ export const RESOURCES = {
   crewSessions: { path: "/api/crew/sessions", topic: null },
   // Whether this server runs crew sessions (off on a preview, or when another server holds
   // the lock).
-  crewStatus: { path: "/api/crew/status", topic: "agents" },
+  crewStatus: { path: "/api/crew/status", topic: "config" },
   // What the last read of config.yaml says against what runs (pending seat changes, errors).
   crewChanges: { path: "/api/crew/changes", topic: "config" },
   /** One item's conversation: the messages sent from it and their replies, from Comms. */
@@ -128,8 +128,7 @@ export const RESOURCES = {
   notificationPreferences: { path: "/api/notification-preferences", topic: "settings" },
   notificationEvents: { path: "/api/notifications/events", topic: "attention" },
   notifications: { path: "/api/notifications", topic: "attention" },
-  // TODO(#232): topic becomes "flight" once core names it; "agents" meanwhile, as FLIGHT's seat is one.
-  flight: { path: "/api/flight", topic: "agents" },
+  flight: { path: "/api/flight", topic: ["agents", "flight"] },
   // Active sets are always complete. The strip requests only the smallest included history page.
   flightOrders: { path: "/api/flight/orders?limit=1", topic: ORDER_TOPICS },
   instructionHistory: (seatId: string | null, before?: number): ResourceRef => ({
@@ -498,11 +497,24 @@ interface Entry {
   fullAgain?: boolean;
   activityFullAt?: number;
   activityTimer?: ReturnType<typeof setTimeout>;
+  /** When the last fetch started: the stream's `agents` events are paced from it. */
+  fetchedAt?: number;
+  /** When the data currently in the snapshot finished loading successfully. */
+  completedAt?: number;
   /** The start sequence of the newest answer kept: an older request must not replace it. */
   appliedSeq: number;
+  /** Bumped when this entry alone is discarded, so its outstanding answer cannot land. */
+  generation: number;
   settled: number;
   settledListeners: Set<() => void>;
 }
+
+/** The least time between stream-driven reads of one resource on `agents` events. */
+const AGENTS_PACE_MS = 6000;
+/** Background history and pause audits change with seat output, but not on every running turn. */
+const BACKGROUND_AGENTS_PACE_MS = 30_000;
+/** Keep a completed response through a brief unmount/remount caused by a page layout update. */
+const VISIT_REUSE_MS = 2000;
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
@@ -532,6 +544,7 @@ class Hub {
         inflight: false,
         again: false,
         appliedSeq: 0,
+        generation: 0,
         settled: 0,
         settledListeners: new Set(),
       };
@@ -581,7 +594,13 @@ class Hub {
     e.listeners.add(fn);
     if (e.listeners.size === 1 && !e.inflight) {
       // A new visit reconciles the activity window before following deltas.
-      void this.fetch(e, path === RESOURCES.activity.path);
+      const reuseRecentVisit =
+        path !== RESOURCES.activity.path &&
+        e.snap.data !== undefined &&
+        e.snap.error === null &&
+        e.completedAt !== undefined &&
+        Date.now() - e.completedAt < VISIT_REUSE_MS;
+      if (!reuseRecentVisit) void this.fetch(e, path === RESOURCES.activity.path);
     }
     return () => {
       e.listeners.delete(fn);
@@ -603,8 +622,10 @@ class Hub {
       return;
     }
     const gen = this.generation;
+    const entryGen = e.generation;
     const seq = ++this.seq;
     e.inflight = true;
+    e.fetchedAt = Date.now();
     // A refresh with usable data is not a loading transition. Besides avoiding a visual flash,
     // this lets identical responses retain their complete snapshot identity.
     if (e.snap.data === undefined && !e.snap.loading) this.set(e, { ...e.snap, loading: true });
@@ -667,7 +688,7 @@ class Hub {
           (e.snap.data as ActivityRow[] | undefined) ?? [],
         );
       }
-      if (gen !== this.generation) return;
+      if (gen !== this.generation || entryGen !== e.generation) return;
       if (activity) {
         if (!delta) e.activityFullAt = startedAt;
         else if (e.listeners.size > 0 && e.activityTimer === undefined) {
@@ -689,10 +710,13 @@ class Hub {
       const error = err instanceof Error ? err : new Error(String(err));
       next = { ...e.snap, error, loading: false };
     }
-    if (gen !== this.generation) return; // cleared meanwhile: this answer belongs to the old session
+    if (gen !== this.generation || entryGen !== e.generation) return; // cleared meanwhile: this answer belongs to the old session
     // A read that started later may already have stored a newer answer: keep that one.
     if (seq < e.appliedSeq) next = e.snap;
-    else e.appliedSeq = seq;
+    else {
+      e.appliedSeq = seq;
+      if (next.error === null) e.completedAt = Date.now();
+    }
     e.inflight = false;
     this.set(e, next);
     this.settle(e);
@@ -737,8 +761,14 @@ class Hub {
     if (e && e.listeners.size > 0) void this.fetch(e);
   }
 
-  /** Refetch only what is on screen and belongs to the changed topic. */
-  refetchTopic(topic: Topic): void {
+  /**
+   * Refetch only what is on screen and belongs to the changed topic. `paced` is for the stream's
+   * events: an `agents` event arrives about once a second while a seat runs, so each resource is
+   * read at most once per AGENTS_PACE_MS for them. A local call (after the operator's own send)
+   * is never paced.
+   */
+  refetchTopic(topic: Topic, { paced = false }: { paced?: boolean } = {}): void {
+    const pace = paced && topic === "agents";
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
@@ -757,28 +787,33 @@ class Hub {
           topic === "attention" ||
           topic === "guard" ||
           topic === "config");
-      if (
-        ((Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
-          activityChanged ||
-          timelineChanged ||
-          briefChanged ||
-          notificationSettingsChanged ||
-          summaryChanged) &&
-        e.listeners.size > 0
-      ) {
-        if (Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
-          if (!e.queued) {
-            e.queued = true;
-            setTimeout(
-              () => {
-                e.queued = false;
-                if (e.listeners.size) void this.fetch(e);
-              },
-              summaryChanged && topic === "agents" ? 100 : 0,
-            );
-          }
-        } else void this.fetch(e);
-      }
+      const matches =
+        (Array.isArray(e.topic) ? e.topic.includes(topic) : e.topic === topic) ||
+        activityChanged ||
+        timelineChanged ||
+        briefChanged ||
+        notificationSettingsChanged ||
+        summaryChanged;
+      if (!matches) continue;
+      if (e.listeners.size === 0) continue;
+      if (pace || Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
+        if (!e.queued) {
+          e.queued = true;
+          const paceMs =
+            e.path === RESOURCES.overviewTimeline.path || e.path === RESOURCES.crewPause.path
+              ? BACKGROUND_AGENTS_PACE_MS
+              : AGENTS_PACE_MS;
+          const wait = pace
+            ? Math.max(0, (e.fetchedAt ?? 0) + paceMs - Date.now())
+            : summaryChanged && topic === "agents"
+              ? 100
+              : 0;
+          setTimeout(() => {
+            e.queued = false;
+            if (e.listeners.size) void this.fetch(e);
+          }, wait);
+        }
+      } else void this.fetch(e);
     }
   }
 
@@ -799,11 +834,29 @@ class Hub {
       e.again = false;
       e.fullAgain = false;
       e.activityFullAt = undefined;
+      e.completedAt = undefined;
+      e.generation++;
       clearTimeout(e.activityTimer);
       e.activityTimer = undefined;
       this.set(e, IDLE);
     }
     if (refetch) this.refetchAll();
+  }
+
+  /** Forget fixture data that no rendered page can still read. */
+  clearInactive(): void {
+    for (const e of this.entries.values()) {
+      if (e.listeners.size > 0) continue;
+      e.generation++;
+      e.inflight = false;
+      e.again = false;
+      e.fullAgain = false;
+      e.activityFullAt = undefined;
+      e.completedAt = undefined;
+      clearTimeout(e.activityTimer);
+      e.activityTimer = undefined;
+      this.set(e, IDLE);
+    }
   }
 }
 
@@ -948,7 +1001,7 @@ export function startStream(): () => void {
     source.addEventListener("changed", (ev) => {
       received();
       const topic = parseTopic((ev as MessageEvent).data);
-      if (topic) hub.refetchTopic(topic);
+      if (topic) hub.refetchTopic(topic, { paced: true });
     });
     source.addEventListener("error", () => {
       if (stopped || source !== es || source.readyState === EventSource.OPEN) return;

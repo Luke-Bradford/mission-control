@@ -5,7 +5,7 @@ import {
   type ConfigView,
   type FlightConversationMessage,
 } from "@mc/core";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import { useNoticeResource } from "../comms/model.ts";
@@ -44,6 +44,58 @@ const failNote = (e: unknown): string => {
   return errorNote(error) ?? error.message;
 };
 
+/** Only a pull request in a configured repo shows as its text alone; any other link keeps its host. */
+const repoPullUrl =
+  (config: ConfigView | undefined) =>
+  (url: string): boolean => {
+    const repoOf = githubRepoOfUrl(url);
+    return (
+      repoOf !== null &&
+      /\/pull\/\d+$/.test(url) &&
+      (config?.repos.some((r) => r.github.toLowerCase() === repoOf.toLowerCase()) ?? false)
+    );
+  };
+
+/**
+ * One line of the thread. Memoised: typing in the composer re-renders the thread, and every
+ * message would otherwise be parsed as Markdown again on each keystroke.
+ */
+const ThreadMessage = memo(function ThreadMessage({
+  message,
+  highlighted,
+  repo,
+  config,
+}: {
+  message: FlightConversationMessage;
+  highlighted: boolean;
+  repo: string | undefined;
+  config: ConfigView | undefined;
+}) {
+  return (
+    <article
+      className={`flight-thread-message${message.operator ? " operator" : ""}${highlighted ? " highlighted" : ""}`}
+      data-message-id={message.id}
+    >
+      <b>
+        {senderWord(message)}
+        <span className="at">
+          {" "}
+          · <time>{message.at === null ? "—" : hhmm(message.at, LONDON)}</time>
+        </span>
+      </b>
+      <div>
+        {message.choice ? (
+          `You chose: ${message.choice.label}`
+        ) : (
+          <OpenLinks hostHidden={repoPullUrl(config)}>
+            <Markdown text={linkRefs(message.text, message.ticket, repo, config)} />
+          </OpenLinks>
+        )}
+      </div>
+    </article>
+  );
+});
+
 /**
  * The one FLIGHT conversation: the fly-out and Comms both mount this. It reads the stored thread
  * (`GET /api/comms/flight`) and sends with `POST /api/comms`, so a message sent from one place is
@@ -79,15 +131,6 @@ export function FlightThread({
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
-  // Only a pull request in a configured repo shows as its text alone; any other link keeps its host.
-  const isRepoPullUrl = (url: string): boolean => {
-    const repoOf = githubRepoOfUrl(url);
-    return (
-      repoOf !== null &&
-      /\/pull\/\d+$/.test(url) &&
-      (config?.repos.some((r) => r.github.toLowerCase() === repoOf.toLowerCase()) ?? false)
-    );
-  };
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // Beside a question the unsent text is kept per item, so opening another question does not lose it.
@@ -215,28 +258,13 @@ export function FlightThread({
           <p className="note">No messages yet.</p>
         )}
         {messages.map((message) => (
-          <article
-            className={`flight-thread-message${message.operator ? " operator" : ""}${highlightId === message.id ? " highlighted" : ""}`}
-            data-message-id={message.id}
+          <ThreadMessage
             key={message.id}
-          >
-            <b>
-              {senderWord(message)}
-              <span className="at">
-                {" "}
-                · <time>{message.at === null ? "—" : hhmm(message.at, LONDON)}</time>
-              </span>
-            </b>
-            <div>
-              {message.choice ? (
-                `You chose: ${message.choice.label}`
-              ) : (
-                <OpenLinks hostHidden={isRepoPullUrl}>
-                  <Markdown text={linkRefs(message.text, message.ticket, repo, config)} />
-                </OpenLinks>
-              )}
-            </div>
-          </article>
+            message={message}
+            highlighted={highlightId === message.id}
+            repo={repo}
+            config={config}
+          />
         ))}
         {run?.live && (
           <p role="status">

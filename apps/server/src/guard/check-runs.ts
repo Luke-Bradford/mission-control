@@ -255,7 +255,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
    * may still run in the checkout: keep the reservation and the calls until no such process is left,
    * or the Bash timeout has passed. A completion with an exit code ends them sooner (`end`).
    */
-  const watch = async (runId: string): Promise<void> => {
+  const watch = async (runId: string, afterFirstPoll = false): Promise<void> => {
     if (watched.has(runId)) return;
     watched.add(runId);
     const pollMs = d.pollMs ?? 2_000;
@@ -263,6 +263,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     let sawAlive = false;
     let gone = 0;
     try {
+      // An admitted call has not reached the process yet. Give it one poll to start before
+      // treating the checkout as free.
+      if (afterFirstPoll) await new Promise((r) => setTimeout(r, pollMs).unref());
       while (true) {
         const calls = new Set([...started.values()].filter((c) => c.runId === runId));
         // its completion came (or the call was lost): nothing is held any more
@@ -271,7 +274,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         if (!expired && (await reading(runId))) {
           sawAlive = true;
           gone = 0;
-        } else if (expired || !sawAlive || ++gone > 1) {
+        } else if (expired || (!sawAlive && calls.size === 0) || ++gone > 1) {
           // a process never seen is a plain turn end; one that went with no completion is lost
           const reason = sawAlive || expired ? "session-lost" : "turn-ended";
           for (const call of calls) forget(call, reason);
@@ -299,6 +302,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           return callId(held.key) === callId(key) ? null : held.command;
         }
         reservations.set(key.runId, { key, command, at });
+        if (d.processAlive !== undefined) void watch(key.runId, true);
         return null;
       } catch (e) {
         d.log?.(`checks: could not admit a check for ${key.runId}: ${(e as Error).message}`);

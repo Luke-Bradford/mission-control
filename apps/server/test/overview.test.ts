@@ -1,7 +1,7 @@
 import type { AttentionItem, BoardItem, PullRequestView, Run, RunDigest } from "@mc/core";
 import { NEW_LOOP, OWNER_OPERATOR } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { type OverviewScope, overviewSummary } from "../src/hud/overview.ts";
+import { type OverviewScope, overviewSummary, recordNeedsHistory } from "../src/hud/overview.ts";
 import { Store } from "../src/store.ts";
 import { metricsView } from "../src/telemetry/metrics.ts";
 
@@ -580,8 +580,8 @@ it("retains resolved operator needs in the buckets when they were open", () => {
     acked: false,
     owner: OWNER_OPERATOR,
   };
-  overviewSummary(store, END - MIN, { ...scope, attention: [item] });
-  overviewSummary(store, END, scope);
+  recordNeedsHistory(store, [item], END - MIN);
+  recordNeedsHistory(store, [], END);
   expect(summary().kpis.needsYou).toEqual({
     count: 0,
     overHour: 0,
@@ -591,9 +591,9 @@ it("retains resolved operator needs in the buckets when they were open", () => {
 
 it("uses a question's recorded answer time between overview reads", () => {
   const id = store.addQuestion({ agentId: "seat", runId: "run-1", text: "?", at: END - 4 * MIN });
-  overviewSummary(store, END - 3 * MIN, {
-    ...scope,
-    attention: [
+  recordNeedsHistory(
+    store,
+    [
       {
         key: `ask:${id}`,
         kind: "question",
@@ -608,7 +608,8 @@ it("uses a question's recorded answer time between overview reads", () => {
         acked: false,
       },
     ],
-  });
+    END - 3 * MIN,
+  );
   store.answerQuestions("seat", END - 2 * MIN);
   expect(summary().kpis.needsYou.series).toEqual([...Array(26).fill(0), 1, 0, 0, 0]);
 });
@@ -669,13 +670,35 @@ it("does not rewrite the needs history when nothing in it changed", () => {
     ticket: null,
     acked: false,
   } as AttentionItem;
-  overviewSummary(store, NOW, { ...scope, attention: [item] });
+  recordNeedsHistory(store, [item], NOW);
   expect(write).toHaveBeenCalledTimes(1);
-  overviewSummary(store, NOW, { ...scope, attention: [item] });
-  overviewSummary(store, NOW + 1_000, { ...scope, attention: [item] });
+  recordNeedsHistory(store, [item], NOW);
+  recordNeedsHistory(store, [item], NOW + 1_000);
   expect(write).toHaveBeenCalledTimes(1);
-  overviewSummary(store, NOW, { ...scope, attention: [] });
+  recordNeedsHistory(store, [], NOW);
   expect(write).toHaveBeenCalledTimes(2);
+});
+
+it("writes nothing when summarising, and still shows the open needs", () => {
+  const write = vi.spyOn(store, "setSetting");
+  const before = store.readVersion();
+  const item = {
+    key: "ask:1",
+    kind: "question",
+    agentId: "seat",
+    repoId: "repo",
+    text: "?",
+    at: END - 4 * MIN,
+    tool: null,
+    url: null,
+    escalationId: null,
+    ticket: null,
+    acked: false,
+  } as AttentionItem;
+  const result = overviewSummary(store, NOW, { ...scope, attention: [item] });
+  expect(write).not.toHaveBeenCalled();
+  expect(store.readVersion()).toBe(before);
+  expect(result.kpis.needsYou.count).toBe(1);
 });
 
 /** A reported review of PR `prNumber`'s `sha`: round `round`, `blocking` blocking findings. */
