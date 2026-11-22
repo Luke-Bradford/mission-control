@@ -31,6 +31,7 @@ export const FINDING_CATEGORIES = [
   "scope",
   "style",
   "docs",
+  "evidence",
 ] as const;
 export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
 
