@@ -5334,17 +5334,50 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       flightOnly();
     });
 
-    it("never wakes FLIGHT for an idle seat: the hub logs it and takes the next ticket itself", async () => {
+    it("wakes once per idle spell with the idle seat and open tickets", async () => {
       await watch.check();
-      nowMs = T0 + GAP + MIN;
+      nowMs = T0 + FLIGHT_IDLE_SEAT_WAKE_MS;
       await watch.check();
-      for (let h = 1; h <= 5; h++) {
-        nowMs = T0 + h * HOUR;
-        await watch.check();
-      }
-      expect(sendCalls).toEqual([]);
+      expect(sendCalls).toHaveLength(1);
+      expect(sendCalls[0]?.text).toContain("guido-1");
+      expect(sendCalls[0]?.text).toContain("Ticket 1");
+      expect(sendCalls[0]?.text).toContain("Ticket 2");
+      expect(sendCalls[0]?.text).toContain("Ticket 3");
+
+      nowMs += 5 * HOUR;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
       expect(logged.some((l) => l.includes("seat idle"))).toBe(true);
       expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBeNull();
+
+      live("guido-1", "r-guido");
+      await watch.check();
+      nowMs += MIN;
+      store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
+      store.setSeatSession(row("guido-1", null));
+      await watch.check();
+      nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+    });
+
+    it("waits the normal gap before waking FLIGHT for an idle spell", async () => {
+      await watch.check();
+      nowMs = T0 + FLIGHT_IDLE_SEAT_WAKE_MS - MIN;
+      ask("guido-1", "r-guido", nowMs);
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      nowMs += MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+      expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBe(
+        T0 + 2 * FLIGHT_IDLE_SEAT_WAKE_MS - MIN,
+      );
+
+      nowMs += FLIGHT_BATCH_MS - MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
     });
 
     it("times and logs the idle hours while FLIGHT is rate limited", async () => {

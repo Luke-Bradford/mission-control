@@ -21,6 +21,7 @@ import {
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
+  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -1636,9 +1637,9 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 };
 
 /**
- * What a wake is about, as a stable string (no times): an operator message, a seat's question, or
- * a failure the hub could not settle. CI, PR flow, free and idle seats are the hub's own timers
- * and show in the digest, never here.
+ * What a wake is about, as a stable string (no times): an operator message, a seat's question, a
+ * failure the hub could not settle, or an idle build seat with open tickets. CI, PR flow and free
+ * seats are the hub's own timers and show in the digest, never here.
  */
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
   return JSON.stringify({
@@ -1677,6 +1678,11 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     operator: s.wake?.operator ?? [],
     // read and not answered: owed until FLIGHT replies to it
     owed: s.wake?.owed ?? [],
+    // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
+    // tickets; keeping this to the seat and spell start avoids re-waking as the board changes.
+    idle: (s.wake?.idle?.seats ?? [])
+      .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
+      .map((seat) => `${seat.id}:${seat.since}`),
     // blockers and messages; a PR's own steps are the hub's
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
