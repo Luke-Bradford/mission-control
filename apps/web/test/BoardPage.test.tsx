@@ -388,7 +388,7 @@ describe("cards", () => {
     );
   });
 
-  it("waits for linked PR data before mounting card content", async () => {
+  it("shows a card before its linked PR data arrives, then fills the PR in", async () => {
     const normal = stub({ shopApp: [todo(1)] });
     let resolvePr: ((response: Response) => void) | undefined;
     vi.stubGlobal(
@@ -404,13 +404,15 @@ describe("cards", () => {
 
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
     await waitFor(() => expect(resolvePr).toBeTypeOf("function"));
-    expect(container.querySelector(".kcard")).toBeNull();
-
-    act(() => resolvePr?.(Response.json([])));
     expect(await screen.findByText("Ticket 1")).toBeTruthy();
+    expect(container.querySelector(".kcard")).toBeTruthy();
+    expect(screen.queryByText("PR #41")).toBeNull();
+
+    act(() => resolvePr?.(Response.json([pr({ number: 41, ticket: "shop-app#1" })])));
+    expect(await screen.findByText("PR #41")).toBeTruthy();
   });
 
-  it("waits for timezone configuration before mounting Done card content", async () => {
+  it("shows a Done card before the timezone arrives, then its age", async () => {
     const normal = stub({
       shopApp: [todo(1, { status: "Done", state: "done", updatedAt: NOW - 3 * DAY })],
     });
@@ -428,11 +430,12 @@ describe("cards", () => {
 
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
     await waitFor(() => expect(resolveConfig).toBeTypeOf("function"));
-    expect(container.querySelector(".kcard")).toBeNull();
+    const card = (await screen.findByText("Ticket 1")).closest(".kcard") as HTMLElement;
+    expect(container.querySelector(".kcard")).toBeTruthy();
+    expect(card.textContent).not.toContain("3d ago");
 
     act(() => resolveConfig?.(Response.json(CONFIG)));
-    const card = (await screen.findByText("Ticket 1")).closest(".kcard") as HTMLElement;
-    expect(card.textContent).toContain("3d ago");
+    await waitFor(() => expect(card.textContent).toContain("3d ago"));
   });
 
   it("shows #n in a repo lane and repo#n in All repos; null size shows nothing", async () => {
@@ -1596,6 +1599,21 @@ describe("missing sources", () => {
     });
     const { container } = render(<BoardPage repoId={null} ticket={null} />);
     await waitFor(() => expect(container.querySelectorAll(".kcol.empty").length).toBe(8));
+  });
+});
+
+describe("cards as their sources arrive", () => {
+  it("shows the cards from the boards alone, while crew, PRs, attention and the rest are still loading", async () => {
+    const fetch = stub({ shopApp: [todo(1)] });
+    const real = fetch.getMockImplementation();
+    fetch.mockImplementation((input: string, init?: RequestInit) =>
+      /^\/api\/(crew|attention|prs|config|overview|repos\/[^/]+\/prs)/.test(input)
+        ? new Promise<Response>(() => {})
+        : (real as (i: string, n?: RequestInit) => Promise<Response>)(input, init),
+    );
+    const { container } = render(<BoardPage repoId={null} ticket={null} />);
+    await waitFor(() => expect(card(container, "shop-app#1")).toBeTruthy());
+    expect(container.querySelector(".board-placeholder")).toBeNull();
   });
 });
 
