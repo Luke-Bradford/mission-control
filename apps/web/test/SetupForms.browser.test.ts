@@ -91,6 +91,11 @@ async function render(
         const button = [...document.querySelectorAll("button")].find(
           (b) => b.textContent === label && !b.disabled,
         );
+        // Repo cards start collapsed: open the first one, which holds the seats.
+        const card = document.querySelector<HTMLButtonElement>(
+          '.repo-card-title[aria-expanded="false"]',
+        );
+        if (!button && card) card.click();
         if (button) {
           // A real click focuses the button; a scripted one does not, and the opener is what focus returns to.
           button.focus();
