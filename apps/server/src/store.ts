@@ -300,6 +300,8 @@ const CI_P90_PRS = 40;
 /** A job needs this many timed runs before its p90 stands in for the fixed limit. */
 const CI_P90_MIN_SAMPLES = 5;
 
+const CLOSED_ASKS_RECONCILED_SETTING = "comms.closed-asks-reconciled";
+
 export class Store {
   private readonly db: DatabaseSync;
   private readonly rawDb: DatabaseSync;
@@ -345,8 +347,16 @@ export class Store {
     migrate(this.db, (fn, writeLock) => this.transaction(fn, writeLock));
     this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
+    this.reconcileClosedAsks();
     this.pruneRunAttempts(Date.now());
     this.compact();
+  }
+
+  /** Once: settles the open asks about work the hub's records show closed (see CommsQueries). */
+  private reconcileClosedAsks(): void {
+    if (this.getSetting(CLOSED_ASKS_RECONCILED_SETTING) !== null) return;
+    this.commsStore.reconcileAsksOfClosedTickets(Date.now());
+    this.setSetting(CLOSED_ASKS_RECONCILED_SETTING, "1");
   }
 
   /**
@@ -1530,6 +1540,7 @@ export class Store {
     let changed = false;
     this.transaction(() => {
       this.boardViews.delete(repoId);
+      this.commsStore.settleAsksOfClosedWork(Date.now());
       const before = new Map(
         (
           this.db
@@ -1653,6 +1664,7 @@ export class Store {
   /** Replaces the repo's rows with `prs`. True when any stored row changed. */
   replacePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): boolean {
     return this.changed("pull_requests", repoId, () => {
+      this.commsStore.settleAsksOfClosedWork(readAt);
       this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ?").run(repoId);
       this.writePullRequests(repoId, prs, readAt);
     });
@@ -1674,6 +1686,7 @@ export class Store {
             .all(repoId) as { number: number; read_at: number }[]
         ).map((r) => [r.number, r.read_at]),
       );
+      this.commsStore.settleAsksOfClosedWork(readAt);
       const seen = new Set(prs.map((p) => p.number));
       const kept = this.namedPullRequests(repoId);
       const del = this.db.prepare("DELETE FROM pull_requests WHERE repo_id = ? AND number = ?");
