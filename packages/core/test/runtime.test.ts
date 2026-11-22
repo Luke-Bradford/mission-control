@@ -356,6 +356,7 @@ describe("the allowlist in phase 2b", () => {
       withdrawQuestion: "mcp__mc__withdraw_question",
       attachMaterials: "mcp__mc__attach_materials",
       screenshotHud: "mcp__mc__screenshot_hud",
+      addReviewEvidence: "mcp__mc__add_review_evidence",
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
       callFlight: "mcp__mc__call_flight",

@@ -899,6 +899,7 @@ export async function main(): Promise<void> {
     operator: operatorCall(() => hubApp, operatorToken),
     tidy: crewTidy,
     hudShots,
+    evidence: evidenceStore,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
