@@ -114,13 +114,13 @@ export function openQuestionSubjects(d: {
 export function questionFacts(store: Store, s: QuestionSubject): QuestionFacts {
   const ticket = /^(.+)#(\d+)$/.exec(s.ticket ?? "");
   const card = ticket === null ? null : store.boardItem(ticket[1] as string, Number(ticket[2]));
-  const prs = ticket === null ? [] : store.pullRequests(ticket[1] as string);
   const found =
     s.prNumber !== null
-      ? prs.find((p) => p.number === s.prNumber)
+      ? (store.pullRequest(ticket?.[1] ?? "", s.prNumber) ?? undefined)
       : ticket === null
         ? undefined
-        : prs
+        : store
+            .pullRequests(ticket[1] as string)
             .filter((p) => p.ticket === s.ticket || p.closingIssues?.includes(Number(ticket[2])))
             .sort((a, b) => b.number - a.number)[0];
   const run = s.runId === null ? null : store.run(s.runId);
@@ -258,7 +258,7 @@ export async function closeSettledQuestions(d: {
     const ticket = store.run(q.runId)?.ticket ?? null;
     const ref = ticket === null ? null : /^(.+)#(\d+)$/.exec(ticket);
     if (ticket === null || ref === null) continue;
-    const card = store.board(ref[1] as string).find((b) => b.issueNumber === Number(ref[2]));
+    const card = store.boardItem(ref[1] as string, Number(ref[2]));
     if (card?.closed !== true) continue;
     const stored = store.closeQuestion({
       key: `ask:${q.id}`,

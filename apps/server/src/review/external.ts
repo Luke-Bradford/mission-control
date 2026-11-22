@@ -166,7 +166,7 @@ export function createExternalReviews(deps: {
   /** Why this row is not posted now, or null when it is. */
   function notWanted(row: ReviewRow): string | null {
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
-    const pr = store.pullRequests(row.repoId).find((p) => p.number === row.prNumber);
+    const pr = store.pullRequest(row.repoId, row.prNumber);
     if (!isExternalReview(row) && !orphaned(row)) return "a crew run still owns the review";
     if (!(deps.enabled?.() ?? true)) return "the engine is off";
     if (repo?.autonomy !== "merge") return "the repo is not on merge autonomy";
@@ -461,8 +461,7 @@ export function createExternalReviews(deps: {
                 }
                 if (
                   !(deps.enabled?.() ?? true) ||
-                  store.pullRequests(repo.id).find((p) => p.number === pr.number)?.headSha !==
-                    pr.headSha
+                  store.pullRequest(repo.id, pr.number)?.headSha !== pr.headSha
                 )
                   continue;
                 const id = store.requestReview({

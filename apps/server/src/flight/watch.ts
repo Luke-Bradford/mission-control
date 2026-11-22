@@ -68,6 +68,7 @@ import {
   flightWakes,
   idleSeatLine,
   lastRecordedWake,
+  markIdleSeatsShown,
   markItemsShown,
   markPointersShown,
   markPrsShown,
@@ -525,6 +526,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
+        markIdleSeatsShown(store, state);
         markRetrospectiveShown(store, state);
         markPointersShown(store, config, state, t);
         lastFacts = deliveredFacts(state);
@@ -665,6 +667,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
+        markIdleSeatsShown(store, state);
         markRetrospectiveShown(store, state);
         markPointersShown(store, config, state, t);
         const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];

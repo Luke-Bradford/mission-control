@@ -52,6 +52,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  checkRunningText,
   compactAttentionItem,
   compareDependencyChains,
   crewProfileOf,
@@ -503,24 +504,25 @@ const HOUR_MS = 3600e3;
 const DAY_MS = 24 * HOUR_MS;
 const FIVE_HOURS_MS = 5 * HOUR_MS;
 
-/** Headers that carry a crew credential: the operator and controller tokens, a preview's own token. */
-const CREDENTIAL_HEADERS = [
+/** Request headers that carry a credential or name the acting seat: never logged. */
+const SECRET_REQUEST_HEADERS = [
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "x-api-key",
   OPERATOR_HEADER,
   CONTROLLER_HEADER,
+  FLIGHT_OPERATOR_ACTOR_HEADER,
   PREVIEW_ACTIVITY_HEADER,
   HUD_RENDERER_HEADER,
-] as const;
+];
 
 /** Never log credentials: request/response headers that can carry them are censored. */
 export const LOG_REDACT = {
   paths: [
-    "req.headers.cookie",
-    "req.headers.authorization",
+    ...SECRET_REQUEST_HEADERS.flatMap((h) => [`req.headers["${h}"]`, `headers["${h}"]`]),
     'res.headers["set-cookie"]',
-    "headers.cookie",
-    "headers.authorization",
     'headers["set-cookie"]',
-    ...CREDENTIAL_HEADERS.flatMap((h) => [`req.headers["${h}"]`, `headers["${h}"]`]),
   ],
   censor: "[redacted]",
 };
@@ -557,6 +559,8 @@ export interface AppDeps {
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
+  /** Whether the local process behind a loopback connection (by its client port) is a seat or started by one. */
+  seatPeer?: (clientPort: number | undefined) => boolean;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
   /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
@@ -1927,18 +1931,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const storedCommsMessage = (
         row: ReturnType<Store["commsMessage"]>,
         pins: ReadonlySet<string> = new Set(store.commsPins().map((pin) => pin.id)),
+        reactions: ReadonlyMap<
+          string,
+          ReturnType<Store["commsReactions"]>
+        > = store.commsReactionsFor(row === null ? [] : [row.id]),
       ) => {
         if (row === null) throw new Error("Unknown Comms message.");
         return {
           ...row,
-          reactions: store.commsReactions(row.id),
+          reactions: reactions.get(row.id) ?? [],
           pinned: pins.has(row.id),
           operator: row.from === COMMS_CAPCOM,
         };
       };
       const storedCommsMessages = (rows: ReturnType<Store["commsForCrew"]>) => {
         const pins = new Set(store.commsPins().map((pin) => pin.id));
-        return rows.map((row) => storedCommsMessage(row, pins));
+        const reactions = store.commsReactionsFor(rows.map((row) => row.id));
+        return rows.map((row) => storedCommsMessage(row, pins, reactions));
       };
       const knownCommsAgent = (id: string) =>
         commsCrew().includes(id) ||
@@ -2212,7 +2221,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             context.repoId === null ||
             !config.repos.some((repo) => repo.id === context.repoId)
               ? undefined
-              : store.board(context.repoId).find((item) => item.issueNumber === issueNumber);
+              : store.boardItem(context.repoId, issueNumber);
           return {
             messages: storedCommsMessages(context.rows),
             ticket: {
@@ -2624,6 +2633,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ? { kind: "lock", command: related, background: true }
                 : { kind: "lock", command: related };
           }
+          // one check or test at a time per checkout: a second one waits for the first
+          if (
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const busy = await checks?.admit?.(key, command);
+            if (busy) return answer(checkRunningText(busy));
+          }
           // the check's record starts when the call does: after any wait for the test lock
           const startCheck = async () => {
             if (body.data.tool_name !== "Bash" || typeof command !== "string") return;
@@ -2647,7 +2665,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             bus.emit("guard");
             return answer(verdict.text);
           }
-          if (lock === undefined) return answer(TEST_LOCK_UNAVAILABLE_TEXT);
+          if (lock === undefined) {
+            checks?.release?.(key);
+            return answer(TEST_LOCK_UNAVAILABLE_TEXT);
+          }
           // The hook hung up (killed, or its CLI interrupted) when the reply closes unanswered. The
           // request's own close is not it: that fires once the body has been read.
           const res = reply.raw;
@@ -2689,6 +2710,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
             // a grant that landed after the hang-up: nobody will run that call
             if (granted) lock.release(key);
+            checks?.release?.(key);
             const h = lock.state().holder;
             return answer(
               lockBusyText(
@@ -3603,9 +3625,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const repo = config.repos.find((candidate) => candidate.id === deps.previewRepoId);
         if (!repo)
           return reply.code(409).send({ error: "previews run Mission Control branches only" });
-        const pr = store
-          .pullRequests(repo.id)
-          .find((candidate) => candidate.number === parsed.data.pr && candidate.state === "open");
+        const found = store.pullRequest(repo.id, parsed.data.pr);
+        const pr = found?.state === "open" ? found : undefined;
         if (!pr) return reply.code(404).send({ error: "open PR not found" });
         const match = { repo, pr, checkout: previewCheckout(repo) };
         if (!match.checkout) return reply.code(409).send({ error: "PR checkout is unavailable" });
@@ -3932,7 +3953,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (
             !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "") ||
             req.headers["sec-fetch-site"] !== "same-origin" ||
-            req.headers[HUD_RENDERER_HEADER] !== undefined
+            req.headers[HUD_RENDERER_HEADER] !== undefined ||
+            deps.seatPeer?.(req.socket.remotePort) === true
           ) {
             return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
           }
@@ -5237,7 +5259,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (run === null) return reply.code(404).send({ error: "unknown run" });
         const repo = config.repos.find((value) => value.id === run?.repoId);
         const pr =
-          repo && store.pullRequests(repo.id).find((value) => value.number === run?.loop?.prNumber);
+          repo && run?.loop?.prNumber != null
+            ? (store.pullRequest(repo.id, run.loop.prNumber) ?? undefined)
+            : undefined;
         if (
           !run?.loop ||
           run.endedAt !== null ||
@@ -5303,7 +5327,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         reply: FastifyReply,
       ) => {
         const repo = config.repos.find((value) => value.id === repoId);
-        const pr = store.pullRequests(repoId).find((value) => value.number === number);
+        const pr = store.pullRequest(repoId, number);
         const sha = pr?.headSha;
         if (
           !repo ||
@@ -5335,7 +5359,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               number,
               sha,
             )) ||
-            store.pullRequests(repoId).find((value) => value.number === number)?.headSha !== sha
+            store.pullRequest(repoId, number)?.headSha !== sha
           ) {
             reply
               .code(409)

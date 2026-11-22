@@ -48,6 +48,9 @@ const RETIRED_TABLES = [
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
 
+/** The highest `runs` rowid whose branch has been read for a ticket (see `migrate`). */
+const RUN_TICKET_INFER_KEY = "run-ticket-infer-rowid-v1";
+
 /** Upgrades a database made by an older release to the current shape; run once after SCHEMA. */
 export function migrate(db: DatabaseSync, transaction: Transaction): void {
   new Migrations(db, transaction).migrate();
@@ -402,18 +405,30 @@ class Migrations {
     this.addColumn("pull_requests", "changed_files", "INTEGER");
     // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
     this.addColumn("pull_requests", "base", "TEXT");
-    // On every start: a row whose branch names a ticket the pattern did not know when the row was
-    // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
-    this.transaction(() => {
-      const rows = this.db
-        .prepare("SELECT id, repo_id, branch FROM runs WHERE branch IS NOT NULL AND ticket IS NULL")
-        .all() as { id: string; repo_id: string; branch: string }[];
-      const set = this.db.prepare("UPDATE runs SET ticket = ? WHERE id = ?");
-      for (const r of rows) {
-        const ticket = inferTicket(r.branch, r.repo_id);
-        if (ticket !== null) set.run(ticket, r.id);
-      }
-    });
+    // A row whose branch names a ticket the pattern did not know when the row was stored (`docs/`
+    // branches) gets it now. A row's ticket is never replaced. Only rows added since the last
+    // start are read (`RUN_TICKET_INFER_KEY` holds the highest rowid read); change the branch
+    // pattern and bump the key's name so the older rows are read again.
+    const inferredTo = Number(this.getSetting(RUN_TICKET_INFER_KEY) ?? 0);
+    const newest = this.db.prepare("SELECT MAX(rowid) AS n FROM runs").get() as {
+      n: number | null;
+    };
+    if ((newest.n ?? 0) > inferredTo) {
+      this.transaction(() => {
+        const rows = this.db
+          .prepare(
+            `SELECT id, repo_id, branch FROM runs
+             WHERE rowid > ? AND branch IS NOT NULL AND ticket IS NULL`,
+          )
+          .all(inferredTo) as { id: string; repo_id: string; branch: string }[];
+        const set = this.db.prepare("UPDATE runs SET ticket = ? WHERE id = ?");
+        for (const r of rows) {
+          const ticket = inferTicket(r.branch, r.repo_id);
+          if (ticket !== null) set.run(ticket, r.id);
+        }
+        this.setSetting(RUN_TICKET_INFER_KEY, String(newest.n));
+      }, true);
+    }
     // When we read the row from GitHub, by our own clock (GitHub's updatedAt does not move when a
     // PR's CI finishes). 0: stored before it existed, older than any read.
     this.addColumn("pull_requests", "read_at", "INTEGER NOT NULL DEFAULT 0");
