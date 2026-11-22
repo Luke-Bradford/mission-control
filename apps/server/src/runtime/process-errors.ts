@@ -5,7 +5,7 @@
  */
 export function installHubErrorHandlers(log: (line: string) => void): () => void {
   const write = (kind: string, error: unknown) => {
-    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
     try {
       log(`hub ${kind}: ${message}`);
     } catch {
