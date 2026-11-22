@@ -83,8 +83,8 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
       ),
       rule(
         /^Add agent$/,
-        /^\/setup\/sessions\?add=[\w-]+$/,
-        "Setup sessions, with the add-agent form open.",
+        /^\/setup\/repos\?add=[\w-]+$/,
+        "Setup Repos & seats, with the add-seat form open.",
       ),
       rule(/^head agent/, /^\/flight$/, "FLIGHT's seat opens the FLIGHT page, its own view."),
       rule(/^(dev|[a-z]+)-\d+$/i, /^\/agent\/[\w-]+$/, "A seat's name opens its Agent page."),
@@ -280,15 +280,25 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
     ),
     rules: [
       rule(
-        /^(Accounts|Repos & seats|Loops|Roles & guards|Sources|Safety|Sessions)$/,
+        /^(Hub|Accounts|Repos & seats|Loops|Roles & guards|Sources|Safety|Sessions)$/,
         /^\/setup\/\w+$/,
         "A Setup tab.",
       ),
-      rule(/^\d+ seats?$/, /^\/setup\/sessions$/, "A role's seats open Setup sessions."),
       rule(
-        /^Edit [\w-]+ on Sessions$/,
-        /^\/setup\/sessions\?edit=[\w%-]+$/,
-        "A seat's Edit link opens its form on Setup sessions.",
+        /^Add agent$/,
+        /^\/setup\/repos\?add=[\w-]+$/,
+        "Sessions' Add agent opens the add-seat form on Repos & seats.",
+      ),
+      rule(
+        /^Edit$/,
+        /^\/setup\/repos\?edit=[\w%-]+$/,
+        "Sessions' Edit opens that seat's form on Repos & seats.",
+      ),
+      rule(/^\d+ seats?$/, /^\/setup\/repos$/, "A role's seats open Setup Repos & seats."),
+      rule(
+        /^Edit [\w-]+ on Repos & seats$/,
+        /^\/setup\/repos\?edit=[\w%-]+$/,
+        "A seat's Edit link opens its form on Setup Repos & seats.",
       ),
       rule(
         /^[a-z]+-\d+.*(whole checkout|read-only)/,
@@ -370,6 +380,8 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/qa/TicketQaReports.tsx": "page: permanent report",
   "src/qa/frees.tsx": "page: ticket, FLIGHT chains",
   "src/router.ts": "the router itself",
+  "src/setup/FirstRun.tsx": "page: Setup accounts, Setup repos with Add repo open",
+  "src/setup/Repos.tsx": "page: the same page, without its ?add or ?edit parameter",
   "src/setup/Roles.tsx": "page: Setup sessions (a role's seats, a seat's form)",
   "src/setup/Sessions.tsx": "page: seat",
   "src/shell/AwayDigest.tsx": "page: its item; pane",

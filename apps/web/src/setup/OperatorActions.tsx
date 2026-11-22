@@ -135,12 +135,14 @@ export function OperatorActions() {
         </label>
         <button
           type="button"
-          onClick={() =>
-            void post(ACTIONS.flightApprovals, {
-              ...approval,
-              until: new Date(approval.until).toISOString(),
-            })
-          }
+          onClick={() => {
+            const until = new Date(approval.until);
+            if (Number.isNaN(until.getTime())) {
+              setMessage("Choose when the approval ends.");
+              return;
+            }
+            void post(ACTIONS.flightApprovals, { ...approval, until: until.toISOString() });
+          }}
         >
           Grant approval
         </button>

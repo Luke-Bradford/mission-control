@@ -112,3 +112,11 @@ describe("RunPrActions", () => {
     ]);
   });
 });
+
+it("grant approval with no end time says so and posts nothing", async () => {
+  const fetch = stubFetch({ "/api/config": { repos: [] } });
+  render(<OperatorActions />);
+  fireEvent.click(screen.getByRole("button", { name: "Grant approval" }));
+  expect((await screen.findByRole("status")).textContent).toBe("Choose when the approval ends.");
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+});
