@@ -486,6 +486,8 @@ interface Entry {
   activityTimer?: ReturnType<typeof setTimeout>;
   /** When the last fetch started: the stream's `agents` events are paced from it. */
   fetchedAt?: number;
+  /** When the data currently in the snapshot finished loading successfully. */
+  completedAt?: number;
   /** The start sequence of the newest answer kept: an older request must not replace it. */
   appliedSeq: number;
   settled: number;
@@ -494,6 +496,8 @@ interface Entry {
 
 /** The least time between stream-driven reads of one resource on `agents` events. */
 const AGENTS_PACE_MS = 6000;
+/** Keep a completed response through a brief unmount/remount caused by a page layout update. */
+const VISIT_REUSE_MS = 2000;
 
 const IDLE: Resource<never> = { data: undefined, error: null, loading: false };
 
@@ -572,7 +576,13 @@ class Hub {
     e.listeners.add(fn);
     if (e.listeners.size === 1 && !e.inflight) {
       // A new visit reconciles the activity window before following deltas.
-      void this.fetch(e, path === RESOURCES.activity.path);
+      const reuseRecentVisit =
+        path !== RESOURCES.activity.path &&
+        e.snap.data !== undefined &&
+        e.snap.error === null &&
+        e.completedAt !== undefined &&
+        Date.now() - e.completedAt < VISIT_REUSE_MS;
+      if (!reuseRecentVisit) void this.fetch(e, path === RESOURCES.activity.path);
     }
     return () => {
       e.listeners.delete(fn);
@@ -684,7 +694,10 @@ class Hub {
     if (gen !== this.generation) return; // cleared meanwhile: this answer belongs to the old session
     // A read that started later may already have stored a newer answer: keep that one.
     if (seq < e.appliedSeq) next = e.snap;
-    else e.appliedSeq = seq;
+    else {
+      e.appliedSeq = seq;
+      if (next.error === null) e.completedAt = Date.now();
+    }
     e.inflight = false;
     this.set(e, next);
     this.settle(e);
@@ -798,6 +811,7 @@ class Hub {
       e.again = false;
       e.fullAgain = false;
       e.activityFullAt = undefined;
+      e.completedAt = undefined;
       clearTimeout(e.activityTimer);
       e.activityTimer = undefined;
       this.set(e, IDLE);

@@ -325,13 +325,23 @@ describe("startStream", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("paces the stream's agents events: a running seat's event a second does not refetch each resource a second", async () => {
+  it("reuses an Overview visit through remount churn while pacing a running seat's agents events", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    const paths = ["/api/crew?x=1", "/api/comms/crew?x=1", "/api/activity?x=1", "/api/flight?x=1"];
-    for (const path of paths) sub(path, "agents", () => {});
+    const refs = [
+      RESOURCES.overview(),
+      RESOURCES.crew,
+      RESOURCES.crewStatus,
+      RESOURCES.overviewTimeline,
+      RESOURCES.flight,
+    ];
+    let visits = refs.map((ref) => sub(ref.path, ref.topic, () => {}));
     await vi.advanceTimersByTimeAsync(10);
+    // Nested Overview panels can briefly unmount and immediately mount again on layout changes.
+    for (const off of visits) off();
+    await vi.advanceTimersByTimeAsync(1000);
+    visits = refs.map((ref) => sub(ref.path, ref.topic, () => {}));
     start();
     const [es] = FakeEventSource.instances;
     for (let second = 0; second < 10; second++) {
@@ -341,11 +351,12 @@ describe("startStream", () => {
     const counts = new Map<string, number>();
     for (const url of fetched(fetchMock))
       counts.set(String(url), (counts.get(String(url)) ?? 0) + 1);
-    for (const path of paths) expect(counts.get(path), path).toBeLessThanOrEqual(2);
+    for (const { path } of refs) expect(counts.get(path), path).toBeLessThanOrEqual(2);
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(20);
     // the change is not lost: the last event's refetch lands once the pace allows it
     await vi.advanceTimersByTimeAsync(6000);
-    expect(counts.size).toBe(paths.length);
+    expect(counts.size).toBe(refs.length);
+    for (const off of visits) off();
   });
 
   it("a local refetch of agents (after a send) is not paced", async () => {
