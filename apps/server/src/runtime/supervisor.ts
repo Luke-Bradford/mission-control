@@ -37,12 +37,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   adviceStepOf,
   BLOCKING_SEVERITIES,
   CANNOT_START,
+  CMUX_NEEDS_INPUT_TEXT,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -140,7 +141,7 @@ import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CliHold } from "../cli/update.ts";
-import { probeClaudeVersion } from "../cli/version.ts";
+import { CLAUDE_COMMAND, probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import { pausedSeat } from "../config/crew-pause.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../config/profiles.ts";
@@ -244,6 +245,8 @@ import {
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
+import { createCmux } from "./cmux.ts";
+import { attachCmuxSession, cmuxWorkspaceKey, startCmuxSession } from "./cmux-session.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
@@ -472,6 +475,8 @@ export interface SupervisorDeps {
   command?: string;
   /** Put before the CLI's own arguments. */
   commandArgs?: string[];
+  /** Local cmux command; tests pass a fake executable and its prefix arguments. */
+  cmuxCommand?: string[];
   /** Default "codex"; its version and app-server are run through the same binary. */
   codexCommand?: string;
   /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
@@ -1321,11 +1326,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function onEvent(l: Live, e: SessionEvent): void {
     switch (e.kind) {
       case "init":
-        if (l.run.vendor === "codex") {
-          l.run = { ...l.run, sessionId: e.sessionId };
-          store.upsertRun(l.run);
-          setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
-        }
+        l.run = { ...l.run, sessionId: e.sessionId };
+        store.upsertRun(l.run);
+        setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
         break;
       case "turn-refused":
         if (!e.active) {
@@ -1344,6 +1347,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l.inTurn = true;
         store.setSeatTurnStarted(l.info.seat.id, now());
         if (!l.parkedTurn) setState(l, "running", null);
+        break;
+      case "needs-input":
+        l.inTurn = true;
+        setState(l, "needs-input", CMUX_NEEDS_INPUT_TEXT);
         break;
       case "tool-result":
         if (
@@ -2261,27 +2268,57 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             },
           },
         });
-        session = startSession({
-          command: deps.command,
-          args: [...(deps.commandArgs ?? []), ...args],
-          cwd,
-          transcriptPath: run.transcriptPath,
-          privateEnv,
-          env: crewEnv(
-            info.seat.id,
-            tmpPath,
-            crewProfileOf(info.seat.role, def.loop) === "flight-full",
-            readOnlyReview,
-          ),
-          node: crew?.node ?? DEFAULT_CREW_NODE,
-          entry: join(deps.hubRoot, KEEPER_ENTRY),
-          dir: crewKeeperDir(deps.dbPath, run.id),
-          spawn: keeperSpawn,
-          cliSessionId,
-          log,
-          controlTimeoutMs: deps.controlTimeoutMs,
-          stopGraceMs: deps.stopGraceMs,
-        });
+        const env = crewEnv(
+          info.seat.id,
+          tmpPath,
+          crewProfileOf(info.seat.role, def.loop) === "flight-full",
+          readOnlyReview,
+        );
+        // An injected Claude binary is the legacy deterministic test seam. Production Claude
+        // seats always use cmux; Codex already took its branch above.
+        if (deps.command !== undefined && deps.cmuxCommand === undefined) {
+          session = startSession({
+            command: deps.command,
+            args: [...(deps.commandArgs ?? []), ...args],
+            cwd,
+            transcriptPath: run.transcriptPath,
+            privateEnv,
+            env,
+            node: crew?.node ?? DEFAULT_CREW_NODE,
+            entry: join(deps.hubRoot, KEEPER_ENTRY),
+            dir: crewKeeperDir(deps.dbPath, run.id),
+            spawn: keeperSpawn,
+            cliSessionId,
+            log,
+            controlTimeoutMs: deps.controlTimeoutMs,
+            stopGraceMs: deps.stopGraceMs,
+          });
+        } else {
+          const ref = run.reviewId != null ? `PR ${run.reviewId}` : (run.ticket ?? def.loop);
+          session = startCmuxSession({
+            cmux: createCmux(deps.cmuxCommand, log),
+            name: `${info.seat.id} · ${ref}`,
+            cwd,
+            // cmux must invoke Claude by its command name so its shim remains in control. A
+            // relative command is useful for a local installation; test binaries are absolute.
+            command:
+              deps.command !== undefined && !isAbsolute(deps.command)
+                ? deps.command
+                : CLAUDE_COMMAND,
+            args,
+            transcriptPath: run.transcriptPath,
+            privateEnv,
+            env: Object.fromEntries(
+              Object.entries(env).filter((e): e is [string, string] => typeof e[1] === "string"),
+            ),
+            dir: crewKeeperDir(deps.dbPath, run.id),
+            cliSessionId,
+            messageDir: join(tmp, "mc-messages"),
+            log,
+            onWorkspace: (workspace, pid) =>
+              store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify({ workspace, pid })),
+          });
+        }
       }
     } catch (e) {
       release();
@@ -2467,6 +2504,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Removes a run's keeper folder and its cursor. Never throws. */
   function removeKeeper(seatId: string, runId: string): void {
     try {
+      store.deleteSetting(cmuxWorkspaceKey(runId));
       rmSync(crewKeeperDir(deps.dbPath, runId), { recursive: true, force: true });
       store.deleteKeeperCursor(runId);
       if (store.run(runId)?.endedAt != null) removeRunFiles(runId);
@@ -2484,6 +2522,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * finds it. True when the keeper is gone. Never throws.
    */
   async function endAndRemoveKeeper(seatId: string, runId: string): Promise<boolean> {
+    if (store.run(runId)?.vendor !== "codex") {
+      const saved = store.getSetting(cmuxWorkspaceKey(runId));
+      try {
+        const value: unknown = saved === null ? null : JSON.parse(saved);
+        if (isObj(value) && typeof value.workspace === "string")
+          await createCmux(deps.cmuxCommand, log).close(value.workspace);
+      } catch (e) {
+        log(`${seatId}: could not close cmux workspace of ${runId}: ${errText(e)}`);
+        return false;
+      }
+      removeKeeper(seatId, runId);
+      return true;
+    }
     const dir = crewKeeperDir(deps.dbPath, runId);
     try {
       if (keeperAlive(dir) && !(await endKeeper(dir, keeperEndWait(), log))) {
@@ -2992,6 +3043,56 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
     }
     if (runGone(runId, row.seatId) || stopping) return;
+    // Claude has no keeper. Its workspace is durable across a hub restart, so attach directly to
+    // the saved workspace when cmux still reports the same process. A missing workspace takes the
+    // normal resume path below, which starts a fresh workspace with the hub's settings.
+    if (row.vendor !== "codex" && info && run?.endedAt === null && row.worktree !== null) {
+      try {
+        const saved: unknown = JSON.parse(store.getSetting(cmuxWorkspaceKey(runId)) ?? "null");
+        if (isObj(saved) && typeof saved.workspace === "string" && typeof saved.pid === "number") {
+          const cmux = createCmux(deps.cmuxCommand, log);
+          const record = (await cmux.agents()).find(
+            (agent) => agent.workspaceId === saved.workspace && agent.pid === saved.pid,
+          );
+          if (record) {
+            try {
+              deps.tokens.adopt(
+                row.seatId,
+                runId,
+                readFileSync(crewTokenPath(deps.dbPath, runId), "utf8"),
+              );
+            } catch (error) {
+              log(`${row.seatId}: could not restore the cmux token: ${errText(error)}`);
+            }
+            const session = attachCmuxSession({
+              cmux,
+              workspace: saved.workspace,
+              pid: saved.pid,
+              from: 0,
+              name: row.seatId,
+              cwd: row.worktree,
+              command: CLAUDE_COMMAND,
+              args: [],
+              env: {},
+              dir,
+              transcriptPath: run.transcriptPath,
+              cliSessionId: row.cliSessionId ?? record.sessionId,
+              messageDir: join(seatTmp(runId), "mc-messages"),
+              log,
+              onWorkspace: (workspace, pid) =>
+                store.setSetting(cmuxWorkspaceKey(runId), JSON.stringify({ workspace, pid })),
+            });
+            track(info, run, session, grant(info, run), {
+              spawn: `cmux:${saved.workspace}`,
+              inTurn: row.state !== "idle",
+            });
+            return;
+          }
+        }
+      } catch (error) {
+        log(`${row.seatId}: could not attach cmux workspace: ${errText(error)}`);
+      }
+    }
     const found = await attachSession({
       dir,
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0

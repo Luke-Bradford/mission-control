@@ -338,6 +338,7 @@ function make(
     fake?: string;
     cliCheckTimeoutMs?: number;
     codexCommand?: string;
+    cmuxCommand?: string[];
     codexAuthPath?: string;
     worktrees?: string;
     extraArgs?: string[];
@@ -413,6 +414,7 @@ function make(
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
     codexCommand: over.codexCommand,
+    cmuxCommand: over.cmuxCommand,
     codexAuthPath,
     commandArgs:
       over.command === undefined

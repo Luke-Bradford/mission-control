@@ -573,6 +573,7 @@ describe("crewHudState", () => {
   });
   it("maps idle, parked, stopped and error", () => {
     expect(crewHudState(seat("idle"), null, now)).toBe("idle");
+    expect(crewHudState(seat("needs-input"), now - STALL_MS, now)).toBe("blocked");
     expect(crewHudState(seat("parked"), null, now)).toBe("parked");
     expect(crewHudState(seat("stopped", null), null, now)).toBe("stopped");
     expect(crewHudState(seat("error"), null, now)).toBe("error");

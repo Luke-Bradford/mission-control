@@ -1,0 +1,148 @@
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import type { Cmux } from "../src/runtime/cmux.ts";
+import { launcherScript, startCmuxSession } from "../src/runtime/cmux-session.ts";
+
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("cmux launcher", () => {
+  it("runs claude by name and sources then removes private environment", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+    dirs.push(dir);
+    const envFile = join(dir, "env");
+    const script = launcherScript({
+      command: "claude",
+      args: ["--settings", "/private/settings.json"],
+      env: { PATH: "/operator/path", LANG: "en_GB.UTF-8" },
+      nodeDir: "/node/bin",
+      envFile,
+    });
+    expect(script).toContain("exec 'claude' '--settings' '/private/settings.json'");
+    expect(script).toContain("$PATH");
+    expect(script).toContain(`source '${envFile}'`);
+    expect(script).toContain(`rm -f '${envFile}'`);
+  });
+
+  it("copies the cmux transcript and follows a running, waiting and idle seat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+    dirs.push(dir);
+    const source = join(dir, "claude.jsonl");
+    const target = join(dir, "run.jsonl");
+    let lifecycle: "idle" | "running" | "needsInput" = "running";
+    const cmux: Cmux = {
+      ensure: async () => {},
+      newWorkspace: async () => "workspace-1",
+      agents: async () => [
+        {
+          workspaceId: "workspace-1",
+          sessionId: "session-1",
+          pid: 42,
+          lifecycle,
+          transcriptPath: source,
+        },
+      ],
+      send: async () => "sent",
+      sendKey: async () => {},
+      readScreen: async () => "",
+      close: async () => {},
+    };
+    appendFileSync(
+      source,
+      '{"type":"system","subtype":"init","session_id":"session-1","model":"sonnet"}\n',
+    );
+    const session = startCmuxSession({
+      cmux,
+      name: "GUIDO · mc#2194",
+      cwd: dir,
+      command: "claude",
+      args: [],
+      env: {},
+      dir: join(dir, "run"),
+      transcriptPath: target,
+      cliSessionId: "session-1",
+      messageDir: join(dir, "messages"),
+      pollMs: 5,
+    });
+    const seen: string[] = [];
+    session.on((event) => seen.push(event.kind));
+    await session.ready;
+    lifecycle = "needsInput";
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    lifecycle = "idle";
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(seen).toContain("needs-input");
+    expect(seen).toContain("result");
+    expect(readFileSync(target, "utf8")).toContain('"mc_cmux":true');
+    await session.close();
+  });
+});
+
+it("keeps the workspace open across /clear and delivers multi-line messages by file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const first = join(dir, "first.jsonl");
+  const second = join(dir, "second.jsonl");
+  const target = join(dir, "run.jsonl");
+  appendFileSync(first, '{"type":"system","subtype":"init","session_id":"one"}\n');
+  appendFileSync(second, '{"type":"system","subtype":"init","session_id":"two"}\n');
+  let record = {
+    workspaceId: "workspace-1",
+    sessionId: "one",
+    pid: 42,
+    lifecycle: "running" as const,
+    transcriptPath: first,
+  };
+  const sent: string[] = [];
+  const keys: string[] = [];
+  const cmux: Cmux = {
+    ensure: async () => {},
+    newWorkspace: async () => "workspace-1",
+    agents: async () => [record],
+    send: async (_workspace, text) => {
+      sent.push(text);
+      return "sent";
+    },
+    sendKey: async (_workspace, key) => {
+      keys.push(key);
+    },
+    readScreen: async () => "",
+    close: async () => {},
+  };
+  const session = startCmuxSession({
+    cmux,
+    name: "GUIDO · mc#2194",
+    cwd: dir,
+    command: "claude",
+    args: [],
+    env: {},
+    dir: join(dir, "run"),
+    transcriptPath: target,
+    cliSessionId: "one",
+    messageDir: join(dir, "messages"),
+    pollMs: 5,
+  });
+  const inits: string[] = [];
+  session.on((event) => {
+    if (event.kind === "init") inits.push(event.sessionId);
+  });
+  await session.ready;
+  session.send("first line\nsecond line");
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  expect(sent[0]).toMatch(/^Mission Control sent you a message\. Read .+ and act on it\.$/);
+  const message = sent[0]?.match(/Read (.+) and act/)?.[1];
+  expect(message).toBeDefined();
+  expect(readFileSync(message as string, "utf8")).toBe("first line\nsecond line");
+  expect(keys).toContain("enter");
+
+  record = { ...record, sessionId: "two", transcriptPath: second };
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  expect(inits).toContain("two");
+  expect(readFileSync(target, "utf8")).toContain('"session_id":"two"');
+  expect(existsSync(message as string)).toBe(true);
+  await session.close();
+});

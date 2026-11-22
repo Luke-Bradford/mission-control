@@ -1,6 +1,7 @@
 import type { CrewMode, LoopKind } from "./runtime-model.ts";
 
 export {
+  CMUX_NEEDS_INPUT_TEXT,
   CODEX_SHELL,
   CREW_MODES,
   type CrewMode,
@@ -1318,7 +1319,7 @@ export function trimHookCommand(i: TrimHookInput): string {
   return `${q(i.node)} --experimental-strip-types ${q(i.entry)} ${q(i.dir)}`;
 }
 
-/** The argv (after `claude`) for one seat's long-lived stream-json process. */
+/** The argv (after `claude`) for one interactive crew process. */
 export function crewCliArgs(i: CrewCliInput): string[] {
   const base: readonly string[] =
     i.mode === "writer" ? WRITER_TOOLS : i.mode === "scratch" ? SCRATCH_TOOLS : READONLY_TOOLS;
@@ -1344,16 +1345,9 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   const profile = i.profile ?? "standard";
   const args = [
-    "-p",
-    "--input-format",
-    "stream-json",
-    "--output-format",
-    "stream-json",
-    "--verbose",
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
-    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--settings",
@@ -1428,6 +1422,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
 export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
+  | { kind: "needs-input" }
   /** A rejected request is not evidence that any executing turn has ended. */
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
