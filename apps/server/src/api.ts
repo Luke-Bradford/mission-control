@@ -504,15 +504,23 @@ const DAY_MS = 24 * HOUR_MS;
 const FIVE_HOURS_MS = 5 * HOUR_MS;
 
 /** Never log credentials: request/response headers that can carry them are censored. */
+/** Request headers that carry a credential or name the acting seat: never logged. */
+const SECRET_REQUEST_HEADERS = [
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "x-api-key",
+  OPERATOR_HEADER,
+  CONTROLLER_HEADER,
+  FLIGHT_OPERATOR_ACTOR_HEADER,
+  PREVIEW_ACTIVITY_HEADER,
+];
+
+/** Never log credentials: request/response headers that can carry them are censored. */
 export const LOG_REDACT = {
   paths: [
-    "req.headers.cookie",
-    "req.headers.authorization",
+    ...SECRET_REQUEST_HEADERS.flatMap((h) => [`req.headers["${h}"]`, `headers["${h}"]`]),
     'res.headers["set-cookie"]',
-    "headers.cookie",
-    "headers.authorization",
-    'req.headers["x-mc-operator"]',
-    'headers["x-mc-operator"]',
     'headers["set-cookie"]',
   ],
   censor: "[redacted]",
@@ -550,6 +558,8 @@ export interface AppDeps {
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
+  /** Whether the local process behind a loopback connection (by its client port) is a seat or started by one. */
+  seatPeer?: (clientPort: number | undefined) => boolean;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
   /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
@@ -3912,7 +3922,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (
             !LOOPBACK_ADDRESSES.has(req.socket.remoteAddress ?? "") ||
             req.headers["sec-fetch-site"] !== "same-origin" ||
-            req.headers[HUD_RENDERER_HEADER] !== undefined
+            req.headers[HUD_RENDERER_HEADER] !== undefined ||
+            deps.seatPeer?.(req.socket.remotePort) === true
           ) {
             return reply.code(403).send({ error: BOOTSTRAP_REFUSED });
           }
