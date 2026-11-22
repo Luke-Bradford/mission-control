@@ -186,6 +186,8 @@ import {
   type QueueRow,
   type SeatLine,
   type SeatQuestion,
+  VACUUM_MIN_FREE_BYTES,
+  VACUUM_MIN_FREE_SHARE,
 } from "./store/types.ts";
 import { usageQueries } from "./store/usage.ts";
 import { wasteQueries } from "./store/waste.ts";
@@ -205,6 +207,8 @@ const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 
 type Row = Record<string, SQLInputValue>;
 
+/** Set once the audit-history backfill has run: merges are recorded as they happen, so it never repeats. */
+const AUDIT_BACKFILL_SETTING = "audit_history_backfilled";
 const DAY_MS = 86_400_000;
 const SILENCE_CLOCK = "silence";
 const SILENCE_SEAT_START_CLOCK = "silence-seat-start";
@@ -341,10 +345,34 @@ export class Store {
     migrate(this.db, (fn, writeLock) => this.transaction(fn, writeLock));
     this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
+    this.pruneRunAttempts(Date.now());
+    this.compact();
+  }
+
+  /**
+   * Compacts the file once when a large share of it is free pages (a first retention pass frees
+   * many). Runs at open, before the hub listens, so nothing waits on it.
+   */
+  private compact(): void {
+    if (this.path === ":memory:") return;
+    const n = (pragma: string) =>
+      Number((this.db.prepare(`PRAGMA ${pragma}`).get() as Row)[pragma]);
+    const free = n("freelist_count") * n("page_size");
+    if (
+      free >= VACUUM_MIN_FREE_BYTES &&
+      free >= n("page_count") * n("page_size") * VACUUM_MIN_FREE_SHARE
+    )
+      this.db.exec("VACUUM");
+  }
+
+  /** Deletes run_attempts past retention (store/runs.ts); returns the rows deleted. */
+  pruneRunAttempts(now: number): number {
+    return this.runQ.pruneAttempts(now);
   }
 
   /** One-time-safe reconstruction from sources that already survived retention. */
   private backfillAuditHistory(): void {
+    if (this.getSetting(AUDIT_BACKFILL_SETTING) !== null) return;
     this.transaction(() => {
       const merged = this.pullRequestRows(
         this.db.prepare("SELECT * FROM pull_requests WHERE merged_at IS NOT NULL").all() as Row[],
@@ -369,6 +397,7 @@ export class Store {
           // A malformed settings value must not prevent the hub from opening.
         }
       }
+      this.setSetting(AUDIT_BACKFILL_SETTING, "1");
     });
   }
 
@@ -1223,6 +1252,9 @@ export class Store {
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
     const day = 24 * 60 * 60_000;
+    this.pruneRunAttempts(now);
+    // refreshes the planner's statistics for the tables whose size changed; cheap when none did
+    this.db.exec("PRAGMA optimize");
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
     this.db
       .prepare(
@@ -1490,9 +1522,13 @@ export class Store {
     return row ? toEscalation(row) : null;
   }
 
-  /** True when any stored row changed. */
+  /**
+   * Makes the repo's cards match `items`, writing only the cards that changed and deleting only
+   * those that left the board. True when any stored row changed.
+   */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
-    return this.changed("board_items", repoId, () => {
+    let changed = false;
+    this.transaction(() => {
       this.boardViews.delete(repoId);
       const before = new Map(
         (
@@ -1501,35 +1537,22 @@ export class Store {
             .all(repoId) as Row[]
         ).map((r) => [r.issue_number as number, r]),
       );
-      this.db.prepare("DELETE FROM board_items WHERE repo_id = ?").run(repoId);
-      const ins = this.db.prepare(
-        `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
-           updated_at, url, stage, owner, parent, sub_done, sub_total, blocked_by, milestone, size,
-           closed, priority_source, created_at, item_id, project_id, assignees, author, after_deps,
-           defect_refs)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(repo_id, issue_number) DO UPDATE SET title = excluded.title,
-           status = excluded.status, state = excluded.state, labels = excluded.labels,
-           priority = excluded.priority, updated_at = excluded.updated_at, url = excluded.url,
-           stage = excluded.stage, owner = excluded.owner, parent = excluded.parent,
-           sub_done = excluded.sub_done, sub_total = excluded.sub_total,
-           blocked_by = excluded.blocked_by, milestone = excluded.milestone,
-           size = excluded.size, closed = excluded.closed,
-           priority_source = excluded.priority_source, created_at = excluded.created_at,
-           item_id = excluded.item_id, project_id = excluded.project_id,
-           assignees = excluded.assignees, author = excluded.author,
-           after_deps = excluded.after_deps, defect_refs = excluded.defect_refs`,
+      const columns = `title, status, state, labels, priority, updated_at, url, stage, owner, parent,
+           sub_done, sub_total, blocked_by, milestone, size, closed, priority_source, created_at,
+           item_id, project_id, assignees, author, after_deps, defect_refs`;
+      const names = columns.split(",").map((c) => c.trim());
+      const ins = this.statement(
+        `INSERT INTO board_items (repo_id, issue_number, ${columns})
+         VALUES (?, ?, ${names.map(() => "?").join(", ")})
+         ON CONFLICT(repo_id, issue_number) DO UPDATE SET
+           ${names.map((c) => `${c} = excluded.${c}`).join(", ")}
+         WHERE (${names.map((c) => `${c} IS NOT excluded.${c}`).join(" OR ")})`,
       );
+      const seen = new Set<number>();
       for (const i of items) {
+        seen.add(i.issueNumber);
         const old = before.get(i.issueNumber);
-        if (old !== undefined && (old.status !== i.status || Boolean(old.closed) !== i.closed))
-          this.markFlightPointers(
-            "ticket",
-            `${repoId}#${i.issueNumber}`,
-            i.closed ? "closed" : `moved to ${i.status}`,
-            Date.now(),
-          );
-        ins.run(
+        const written = ins.run(
           repoId,
           i.issueNumber,
           i.title,
@@ -1559,8 +1582,23 @@ export class Store {
             : null,
           i.defectRefs ? JSON.stringify(i.defectRefs) : null,
         );
+        if (Number(written.changes) > 0) changed = true;
+        if (old !== undefined && (old.status !== i.status || Boolean(old.closed) !== i.closed))
+          this.markFlightPointers(
+            "ticket",
+            `${repoId}#${i.issueNumber}`,
+            i.closed ? "closed" : `moved to ${i.status}`,
+            Date.now(),
+          );
+      }
+      const del = this.statement("DELETE FROM board_items WHERE repo_id = ? AND issue_number = ?");
+      for (const n of before.keys()) {
+        if (seen.has(n)) continue;
+        del.run(repoId, n);
+        changed = true;
       }
     });
+    return changed;
   }
 
   board(repoId: RepoId): BoardItem[] {
@@ -1588,6 +1626,13 @@ export class Store {
     RepoId,
     { version: string; cards: readonly Readonly<BoardItem>[] }
   >();
+
+  /** The card a `<repo>#<number>` reference names, else null. */
+  boardCardOf(ref: string): BoardItem | null {
+    const at = ref.lastIndexOf("#");
+    const number = /^[1-9]\d*$/.test(ref.slice(at + 1)) ? Number(ref.slice(at + 1)) : 0;
+    return at < 0 || number === 0 ? null : this.boardItem(ref.slice(0, at), number);
+  }
 
   /** One board card from the last read, else null. */
   boardItem(repoId: RepoId, issueNumber: number): BoardItem | null {
@@ -1933,13 +1978,17 @@ export class Store {
     ).map((r) => JSON.parse(r.report));
   }
 
-  /** Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP. */
-  audit(
+  /**
+   * Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP.
+   * One section is built per step, and a step is a pause point, so a caller can let the event loop
+   * run between sections (`auditStepped`); `audit` runs them all at once.
+   */
+  *auditSteps(
     since: number,
     until: number,
     kinds: ReadonlyMap<string, AuditRunKind> = new Map(),
     thresholds?: Partial<AuditThresholds>,
-  ): AuditView {
+  ): Generator<void, AuditView> {
     const rows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
     const prs = this.auditPrSizes(since, until);
@@ -1951,45 +2000,50 @@ export class Store {
       until,
     ) as unknown as AuditView["spendOutliers"];
     const medianSpend = median(spend.map((r) => r.costUsd));
-    return {
-      range: { since, until },
-      longRunners: (
-        rows(
-          `SELECT id AS runId, agent_id AS agentId, ticket, started_at AS startedAt, ended_at AS endedAt,
+    let chatterRows: ReturnType<Store["commsChatter"]> | undefined;
+    const chatter = () => (chatterRows ??= this.commsChatter(since, until));
+    const parts: { [K in keyof AuditView]: () => AuditView[K] } = {
+      range: () => ({ since, until }),
+      longRunners: () =>
+        (
+          rows(
+            `SELECT id AS runId, agent_id AS agentId, ticket, started_at AS startedAt, ended_at AS endedAt,
             EXISTS (SELECT 1 FROM seat_sessions s WHERE s.run_id = runs.id) AS held,
             COALESCE(ended_at, ?) - started_at AS durationMs FROM runs
            WHERE started_at <= ? AND COALESCE(ended_at, ?) >= ? ORDER BY durationMs DESC LIMIT 100`,
-          until,
-          until,
-          until,
-          since,
-        ) as unknown as (Omit<AuditView["longRunners"][number], "kind" | "actionable"> & {
-          agentId: string;
-          held: number;
-        })[]
-      ).map(({ held, ...r }) => {
-        const kind = kinds.get(r.agentId) ?? null;
-        const actionable =
-          kind !== "observed" && kind !== "watch" && (r.endedAt !== null || held === 1);
-        return { ...r, kind, actionable };
-      }),
-      deathLoops: rows(
-        `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
+            until,
+            until,
+            until,
+            since,
+          ) as unknown as (Omit<AuditView["longRunners"][number], "kind" | "actionable"> & {
+            agentId: string;
+            held: number;
+          })[]
+        ).map(({ held, ...r }) => {
+          const kind = kinds.get(r.agentId) ?? null;
+          const actionable =
+            kind !== "observed" && kind !== "watch" && (r.endedAt !== null || held === 1);
+          return { ...r, kind, actionable };
+        }),
+      deathLoops: () =>
+        rows(
+          `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
           COUNT(*) AS parks FROM run_attempts a
          WHERE a.kind = 'loop' AND a.at >= ? AND a.at <= ?
            AND json_extract(a.data, '$.hold.kind') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
-        since,
-        until,
-      ) as unknown as AuditView["deathLoops"],
-      reworkRounds: rows(
-        `SELECT author_run_id AS runId, (SELECT agent_id FROM runs WHERE id = author_run_id) AS agentId,
+          since,
+          until,
+        ) as unknown as AuditView["deathLoops"],
+      reworkRounds: () =>
+        rows(
+          `SELECT author_run_id AS runId, (SELECT agent_id FROM runs WHERE id = author_run_id) AS agentId,
           MAX(0, MAX(round) - 1) AS rounds, MAX(round) AS maxRound FROM reviews
          WHERE state = 'reported' AND ended_at >= ? AND ended_at <= ?
          GROUP BY author_run_id ORDER BY rounds DESC, runId`,
-        since,
-        until,
-      ) as unknown as AuditView["reworkRounds"],
-      reviewRounds: {
+          since,
+          until,
+        ) as unknown as AuditView["reworkRounds"],
+      reviewRounds: () => ({
         prs: rows(
           `SELECT rounds, COUNT(*) AS count FROM (
              SELECT MAX(round) AS rounds FROM reviews
@@ -2010,81 +2064,105 @@ export class Store {
           until,
           ...BLOCKING_SEVERITIES,
         ) as unknown as { seatId: string; model: string | null; findings: number; late: number }[],
-      },
-      refusalsByRule: rows(
-        `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
-        since,
-        until,
-      ) as unknown as AuditView["refusalsByRule"],
-      refusals: rows(
-        `SELECT agent_id AS agentId, run_id AS runId, rule, COUNT(*) AS count FROM guard_hits
+      }),
+      refusalsByRule: () =>
+        rows(
+          `SELECT rule, COUNT(*) AS count FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY rule ORDER BY count DESC, rule`,
+          since,
+          until,
+        ) as unknown as AuditView["refusalsByRule"],
+      refusals: () =>
+        rows(
+          `SELECT agent_id AS agentId, run_id AS runId, rule, COUNT(*) AS count FROM guard_hits
          WHERE at >= ? AND at <= ? GROUP BY agent_id, run_id, rule
          ORDER BY count DESC, agent_id, run_id, rule`,
-        since,
-        until,
-      ) as unknown as AuditView["refusals"],
-      refusalSpikes: rows(
-        `SELECT agent_id AS agentId, (at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS count
+          since,
+          until,
+        ) as unknown as AuditView["refusals"],
+      refusalSpikes: () =>
+        rows(
+          `SELECT agent_id AS agentId, (at / ${DAY_MS}) * ${DAY_MS} AS day, COUNT(*) AS count
          FROM guard_hits WHERE at >= ? AND at <= ? GROUP BY agent_id, day HAVING count >= ?
          ORDER BY count DESC, day, agent_id`,
-        since,
-        until,
-        AUDIT_REFUSAL_SPIKE,
-      ) as unknown as AuditView["refusalSpikes"],
-      spendOutliers:
+          since,
+          until,
+          AUDIT_REFUSAL_SPIKE,
+        ) as unknown as AuditView["refusalSpikes"],
+      spendOutliers: () =>
         medianSpend === null
           ? []
           : spend.filter(
               (r) => r.costUsd > 0 && r.costUsd >= medianSpend * AUDIT_SPEND_OUTLIER_FACTOR,
             ),
-      questions: (rows(
-        `SELECT COUNT(*) AS asked, COALESCE(SUM(answered_at IS NOT NULL), 0) AS answered,
+      questions: () =>
+        (rows(
+          `SELECT COUNT(*) AS asked, COALESCE(SUM(answered_at IS NOT NULL), 0) AS answered,
           AVG(CASE WHEN answered_at IS NULL THEN NULL ELSE answered_at - at END) AS answerMs
          FROM seat_questions WHERE at >= ? AND at <= ?`,
-        since,
-        until,
-      )[0] ?? { asked: 0, answered: 0, answerMs: null }) as unknown as AuditView["questions"],
-      costPerMergedTicket: rows(
-        `WITH merged_tickets AS (
+          since,
+          until,
+        )[0] ?? { asked: 0, answered: 0, answerMs: null }) as unknown as AuditView["questions"],
+      costPerMergedTicket: () =>
+        rows(
+          `WITH merged_tickets AS (
            SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
            WHERE merged_at >= ? AND merged_at <= ?
          ) SELECT t.ticket, SUM(r.cost_usd) AS costUsd FROM merged_tickets t
          LEFT JOIN runs r ON r.repo_id = t.repo_id AND r.ticket = t.ticket
          GROUP BY t.repo_id, t.ticket ORDER BY t.ticket`,
-        since,
-        until,
-      ) as unknown as AuditView["costPerMergedTicket"],
-      modelPromptTimeline: rows(
-        `SELECT started_at AS at, model, account_id AS accountId, effort, prompt_hash AS promptHash
-         FROM runs WHERE started_at >= ? AND started_at <= ? ORDER BY started_at`,
-        since,
-        until,
-      ) as unknown as AuditView["modelPromptTimeline"],
-      prSizes: {
-        prs,
-        outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
-      },
-      chatter: this.commsChatter(since, until),
-      flakes: this.auditFlakes(since, until),
-      changes: this.auditChanges(since, until),
-      tokenOveruse: this.auditTokenOveruse(since, until, kinds),
-      items: this.auditItems(since, until),
-      bugEscapes: [],
-      improvements: [
-        ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
-        ...messageImprovements(
-          this.db,
           since,
           until,
-          auditThresholds(thresholds),
-          this.commsChatter(since, until),
-        ),
+        ) as unknown as AuditView["costPerMergedTicket"],
+      modelPromptTimeline: () =>
+        rows(
+          `SELECT started_at AS at, model, account_id AS accountId, effort, prompt_hash AS promptHash
+         FROM runs WHERE started_at >= ? AND started_at <= ? ORDER BY started_at`,
+          since,
+          until,
+        ) as unknown as AuditView["modelPromptTimeline"],
+      prSizes: () => ({
+        prs,
+        outliers: prs.filter((p) => p.additions + p.deletions >= AUDIT_PR_OUTLIER_LINES),
+      }),
+      chatter: () => chatter(),
+      flakes: () => this.auditFlakes(since, until),
+      changes: () => this.auditChanges(since, until),
+      tokenOveruse: () => this.auditTokenOveruse(since, until, kinds),
+      items: () => this.auditItems(since, until),
+      bugEscapes: () => [],
+      improvements: () => [
+        ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
+        ...messageImprovements(this.db, since, until, auditThresholds(thresholds), chatter()),
       ],
-      specBounces: specBounces(this.db, since, until),
-      surgeonProposals: [],
+      specBounces: () => specBounces(this.db, since, until),
+      surgeonProposals: () => [],
     };
+    const out: Partial<AuditView> = {};
+    for (const key of Object.keys(parts) as (keyof AuditView)[]) {
+      (out as Record<string, unknown>)[key] = (parts[key] as () => unknown)();
+      yield;
+    }
+    return out as AuditView;
   }
 
+  /** `auditSteps` run to the end in one go. */
+  audit(...args: Parameters<Store["auditSteps"]>): AuditView {
+    const steps = this.auditSteps(...args);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+
+  /** `auditSteps` with the event loop let run between sections, so a long read never freezes the hub. */
+  async auditStepped(...args: Parameters<Store["auditSteps"]>): Promise<AuditView> {
+    const steps = this.auditSteps(...args);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
   /**
    * Records an Audit item once per kind and subject; its tier comes from the kind (unknown kinds
    * are Go-ahead). A repeat leaves the item as it was, except that an open item may become done.
@@ -2259,20 +2337,33 @@ export class Store {
 
   /** Each seat's first run on a new prompt or model in range, with metrics either side of it. */
   private auditChanges(since: number, until: number): AuditChange[] {
-    const runs = this.db
-      .prepare(
-        `SELECT agent_id, started_at, model, prompt_hash FROM runs
-         WHERE started_at <= ? ORDER BY agent_id, started_at, id`,
-      )
-      .all(until) as {
+    type ChangeRun = {
       agent_id: string;
       started_at: number;
       model: string | null;
       prompt_hash: string | null;
-    }[];
+    };
+    const runs = this.db
+      .prepare(
+        `SELECT agent_id, started_at, model, prompt_hash FROM runs
+         WHERE started_at >= ? AND started_at <= ? ORDER BY agent_id, started_at, id`,
+      )
+      .all(since, until) as ChangeRun[];
+    // each seat's last run before the range is what its first run in range changed from
+    const lastBefore = this.db.prepare(
+      `SELECT agent_id, started_at, model, prompt_hash FROM runs
+       WHERE agent_id = ? AND started_at < ? ORDER BY started_at DESC, id DESC LIMIT 1`,
+    );
+    const seats = [...new Set(runs.map((r) => r.agent_id))];
+    const history = runs.slice();
+    for (const agent of seats) {
+      const before = lastBefore.get(agent, since) as ChangeRun | undefined;
+      if (before) history.push(before);
+    }
+    history.sort((a, b) => a.agent_id.localeCompare(b.agent_id) || a.started_at - b.started_at);
     const changes: AuditChange[] = [];
-    const previous = new Map<string, (typeof runs)[number]>();
-    for (const run of runs) {
+    const previous = new Map<string, ChangeRun>();
+    for (const run of history) {
       const last = previous.get(run.agent_id);
       previous.set(run.agent_id, run);
       if (!last || run.started_at < since) continue;
@@ -2317,7 +2408,9 @@ export class Store {
       this.db.prepare(sql).all(...args) as Row[];
     // the board's Size of the run's ticket ("repo#12" is repo, issue 12)
     const from = `FROM runs r LEFT JOIN board_items b
-         ON b.repo_id = r.repo_id AND r.ticket = b.repo_id || '#' || b.issue_number
+         ON b.repo_id = r.repo_id
+           AND b.issue_number = CAST(substr(r.ticket, length(r.repo_id) + 2) AS INTEGER)
+           AND r.ticket = b.repo_id || '#' || b.issue_number
        WHERE r.review_id IS NULL AND r.tokens IS NOT NULL`;
     // the loop kind stored at the run's start; a seat since removed still counts, and a row from
     // before it was stored falls back to the seat's kind now
@@ -4288,6 +4381,10 @@ export class Store {
   commsPins(): CommsRow[] {
     return this.commsStore.commsPins();
   }
+  commsReactionsFor(messageIds: readonly string[]): Map<string, CommsReaction[]> {
+    return this.commsStore.commsReactionsFor(messageIds);
+  }
+
   commsReactions(messageId: string): CommsReaction[] {
     return this.commsStore.commsReactions(messageId);
   }
@@ -5096,6 +5193,23 @@ export class Store {
     return r.n;
   }
 
+  /** How many refusals each of `runIds` has had, in one query; a run with none is absent. */
+  guardHitCountsByRun(runIds: readonly string[]): Map<string, number> {
+    const counts = new Map<string, number>();
+    const batchSize = 400;
+    for (let start = 0; start < runIds.length; start += batchSize) {
+      const batch = runIds.slice(start, start + batchSize);
+      const rows = this.db
+        .prepare(
+          `SELECT run_id, COUNT(*) AS n FROM guard_hits
+           WHERE run_id IN (${batch.map(() => "?").join(",")}) GROUP BY run_id`,
+        )
+        .all(...batch) as { run_id: string; n: number }[];
+      for (const r of rows) counts.set(r.run_id, r.n);
+    }
+    return counts;
+  }
+
   /** Hits at or after `sinceMs` per rule; every rule is present, 0 when it has none. */
   guardHitCounts(sinceMs: number): Record<GuardRule, number> {
     const counts = Object.fromEntries(Object.keys(GUARD_RULES).map((k) => [k, 0])) as Record<
@@ -5132,6 +5246,21 @@ export class Store {
       (this.db.prepare("SELECT additions, deletions FROM commit_lines WHERE sha = ?").get(sha) as
         | { additions: number | null; deletions: number | null }
         | undefined) ?? null
+    );
+  }
+
+  /** Cached line counts for several commit hashes, read in one query. */
+  commitLinesFor(
+    shas: readonly string[],
+  ): Map<string, { additions: number | null; deletions: number | null }> {
+    const unique = [...new Set(shas)];
+    if (unique.length === 0) return new Map();
+    const marks = unique.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`SELECT sha, additions, deletions FROM commit_lines WHERE sha IN (${marks})`)
+      .all(...unique) as { sha: string; additions: number | null; deletions: number | null }[];
+    return new Map(
+      rows.map((row) => [row.sha, { additions: row.additions, deletions: row.deletions }]),
     );
   }
 
@@ -5708,11 +5837,7 @@ export class Store {
     const id = JSON.stringify([entry.source, entry.arrivalId, entry.version]);
     const notification = entry.source === "Board" ? null : this.notification(entry.arrivalId);
     const board =
-      entry.source === "Board"
-        ? this.board(entry.arrivalId.split("#")[0] ?? "").find(
-            (c) => `${c.repoId}#${c.issueNumber}` === entry.arrivalId,
-          )
-        : undefined;
+      entry.source === "Board" ? (this.boardCardOf(entry.arrivalId) ?? undefined) : undefined;
     const repoId = notification?.repoId || board?.repoId || null;
     const kind =
       entry.source === "Teams"

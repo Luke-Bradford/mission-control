@@ -169,8 +169,9 @@ file. The live config needs `paused_by: { issue: autonomy-engine#1818 }` on the 
 studio loop's own setting, if it has one); without it the hub cannot tell the loop is paused.
 
 The config is rejected at start-up if an id repeats within `accounts`, `repos` or `loops`, or if
-two accounts share a vendor: the usage readers use this Mac's single Claude login (Keychain
-OAuth) and single Codex login, so a second account would report the first one's usage.
+two account labels use the same CLI profile. Claude accounts use this Mac's machine login and
+cannot use separate profiles. Codex accounts can share a vendor when each uses a separate profile
+directory and Codex login.
 
 ## Template profiles
 
@@ -268,8 +269,8 @@ variables are now `MC_CONFIG`, `MC_DB` and `MC_PORT` (plus `MC_NO_LOOP_WRITES` f
 | What | Path |
 |---|---|
 | Config | `~/.config/mission-control/config.yaml` (override with `MC_CONFIG`) |
-| Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every write the server makes to `config.yaml` (a repo added from Setup › Repos, or a session's seats replaced), the newest 10 kept, mode 0600 |
-| Template profiles | `profiles.yaml` beside `config.yaml` (optional; you create it, the hub never writes it); see [Template profiles](#template-profiles) |
+| Config backups | `config.yaml.bak-<UTC time>` beside `config.yaml`: one written on every server write to `config.yaml`, including account, repository-rule, setup, session and Teams-source changes; the newest 10 kept, mode 0600 |
+| Template profiles | `profiles.yaml` beside `config.yaml` (optional; you can create it, and Setup can add a validated profile); see [Template profiles](#template-profiles) |
 | Database (SQLite, WAL) | `~/.local/share/mission-control/mc.sqlite` (override with `MC_DB`; its directory is created 0700) |
 | Web build | `apps/web/dist` (run `pnpm install` then `pnpm build` again after web changes, then restart the server); Update builds into `apps/web/dist-next` and swaps it in |
 | Update log | `update.log` beside the database: the last update's commands and output, mode 0600; Setup → **Update log** shows its end |
@@ -308,6 +309,8 @@ web development, start a preview server as above, then run `pnpm --filter @mc/we
 forwards `/api` to `http://127.0.0.1:$MC_PORT` (default 7431, the preview port) and refuses to
 start with `MC_PORT=7420`, so the dev server can never post acks, away settings or a PAUSE into
 the live hub's data.
+
+The hub builds and runs a pull request's code (a branch preview or a screenshot capture) only when the PR is on the repo's own branch and its author is the crew or a collaborator with write access. A fork or a stranger's PR is refused for a click and for every automatic start, read fresh from GitHub each time.
 
 The API is under `/api/*`. A POST must be `application/json` (415 otherwise) and, if it carries an
 `Origin`, one on `localhost` or `127.0.0.1` (403 otherwise).
@@ -1706,7 +1709,7 @@ needs no Mission Control file, heading or block. `config.example.yaml` shows the
 
 Commands and protected files already live alongside `rules`, at `repos[].commands` (`writer` and
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
-from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
+from a repo block. Changes to these repo settings, including `rules`, apply live when saved.
 
 **Roles & guards API.** `GET /api/repos/:repoId/rules` reads config.yaml fresh and returns 18 keys,
 each as `{ value, source }`: `pick_from`, `needs`, `areas`, `promote_backlog`, `plan_signoff`, `protected`,
@@ -2695,6 +2698,8 @@ A pass keeps the version, clears the pending record and records a `cli-update` i
 **Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list.
 
 **What FLIGHT costs.** `GET /api/flight` `wakeCost` has the last 14 days: `totalUsd` (FLIGHT), `crewUsd`, `share` (0..1, the whole 14 days) and `weekShare` (the last 7 days only; read this one against the 0.2 target after a week of live work), `byDay`, and `byReason` (a run's cost spread over its messages by tokens, each message given to the latest wake before it, a wake's cost split over its reasons; `start` is the turn before a run's first wake). `wakeWaits` has the median milliseconds an operator message, a blocker to FLIGHT and a seat's `call_flight` waited, per day and overall. A wait ends at the first recorded wake after it or the first message FLIGHT's run produced after it, whichever is earlier; seat calls come from the signal record, which keeps them for the 14 days the figures cover. Compare the days before and after a change to see that decisions did not slow down.
+
+**Speed and retention.** The route builds the view one section at a time and lets the event loop run between sections (`store.auditStepped`), so a health request waits for one section at most. The slow readers have indexes: `run_attempts(kind, at)` for death loops, `run_attempts(run_id, kind, id)` for the latest-attempt lookups, and `review_findings(author_run_id, severity)` for token overuse; `changes` reads only the runs in range plus each seat's last run before it. `run_attempts` retention (`store.pruneRunAttempts`, at open and in the history sweep): a `run` snapshot that a later one of its run supersedes goes after a day (each run keeps its final snapshot), and any attempt other than `loop` goes after 90 days; `loop` rows stay, as death loops read them for a year. When the prune leaves at least 8 MB and a quarter of the file as free pages, the store runs `VACUUM` once at open, before the hub listens; the sweep runs `PRAGMA optimize`.
 
 ## FLIGHT's operator messages at an account stop
 

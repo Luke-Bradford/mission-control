@@ -49,8 +49,7 @@ export async function flightFloor(i: {
           ? "the repo's rules could not be read"
           : writes.issues.some((number) =>
                 i.store
-                  .board(i.repoId)
-                  .find((card) => card.issueNumber === number)
+                  .boardItem(i.repoId, number)
                   ?.labels.some((label) =>
                     rules.alwaysAsk.some((pattern) => globMatches(pattern, label, true)),
                   ),

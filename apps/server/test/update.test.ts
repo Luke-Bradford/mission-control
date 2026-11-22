@@ -64,6 +64,7 @@ import {
   type UpdaterDeps,
   VERSION_CHECK_FLOOR_MS,
   VERSION_CHECK_MS,
+  VERSION_INFO_TTL_MS,
 } from "../src/update.ts";
 import { blockedHere } from "./sandbox-gaps.ts";
 
@@ -219,6 +220,25 @@ describe("version", () => {
     upstreamCommit("b.txt");
     const fresh = updater({ startSha: head() });
     expect(await fresh.u.version()).toMatchObject({ behind: 1, canUpdate: true, reason: null });
+  });
+
+  it("answers a repeated version from its last read, spawning no git, until check() or the window ends", async () => {
+    let t = 1000;
+    const { u, calls } = updater({ now: () => t });
+    const first = await u.version();
+    const spawned = calls.length;
+    expect(spawned).toBeGreaterThan(0);
+    expect(await u.version()).toBe(first);
+    expect(await u.version()).toBe(first);
+    expect(calls).toHaveLength(spawned);
+    await u.check();
+    expect(calls.length).toBeGreaterThan(spawned);
+    const afterCheck = calls.length;
+    await u.version();
+    expect(calls).toHaveLength(afterCheck);
+    t += VERSION_INFO_TTL_MS + 1;
+    await u.version();
+    expect(calls.length).toBeGreaterThan(afterCheck);
   });
 
   it("keeps every refusal ahead of up to date", async () => {

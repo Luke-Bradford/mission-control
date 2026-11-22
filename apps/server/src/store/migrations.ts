@@ -47,6 +47,9 @@ const RETIRED_TABLES = [
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
 
+/** The highest `runs` rowid whose branch has been read for a ticket (see `migrate`). */
+const RUN_TICKET_INFER_KEY = "run-ticket-infer-rowid-v1";
+
 /** Upgrades a database made by an older release to the current shape; run once after SCHEMA. */
 export function migrate(db: DatabaseSync, transaction: Transaction): void {
   new Migrations(db, transaction).migrate();
@@ -314,6 +317,7 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
       CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
+      CREATE INDEX IF NOT EXISTS runs_ticket_started ON runs(ticket, started_at);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
       CREATE INDEX IF NOT EXISTS runs_loop_off_seat ON runs(ended_at, json_extract(loop, '$.hold.worktree'), started_at, seq);
@@ -337,6 +341,9 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
       CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS run_attempts_kind_at ON run_attempts(kind, at);
+      CREATE INDEX IF NOT EXISTS run_attempts_run_kind ON run_attempts(run_id, kind, id);
+      CREATE INDEX IF NOT EXISTS review_findings_author ON review_findings(author_run_id, severity);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
@@ -396,18 +403,30 @@ class Migrations {
     this.addColumn("pull_requests", "changed_files", "INTEGER");
     // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
     this.addColumn("pull_requests", "base", "TEXT");
-    // On every start: a row whose branch names a ticket the pattern did not know when the row was
-    // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
-    this.transaction(() => {
-      const rows = this.db
-        .prepare("SELECT id, repo_id, branch FROM runs WHERE branch IS NOT NULL AND ticket IS NULL")
-        .all() as { id: string; repo_id: string; branch: string }[];
-      const set = this.db.prepare("UPDATE runs SET ticket = ? WHERE id = ?");
-      for (const r of rows) {
-        const ticket = inferTicket(r.branch, r.repo_id);
-        if (ticket !== null) set.run(ticket, r.id);
-      }
-    });
+    // A row whose branch names a ticket the pattern did not know when the row was stored (`docs/`
+    // branches) gets it now. A row's ticket is never replaced. Only rows added since the last
+    // start are read (`RUN_TICKET_INFER_KEY` holds the highest rowid read); change the branch
+    // pattern and bump the key's name so the older rows are read again.
+    const inferredTo = Number(this.getSetting(RUN_TICKET_INFER_KEY) ?? 0);
+    const newest = this.db.prepare("SELECT MAX(rowid) AS n FROM runs").get() as {
+      n: number | null;
+    };
+    if ((newest.n ?? 0) > inferredTo) {
+      this.transaction(() => {
+        const rows = this.db
+          .prepare(
+            `SELECT id, repo_id, branch FROM runs
+             WHERE rowid > ? AND branch IS NOT NULL AND ticket IS NULL`,
+          )
+          .all(inferredTo) as { id: string; repo_id: string; branch: string }[];
+        const set = this.db.prepare("UPDATE runs SET ticket = ? WHERE id = ?");
+        for (const r of rows) {
+          const ticket = inferTicket(r.branch, r.repo_id);
+          if (ticket !== null) set.run(ticket, r.id);
+        }
+        this.setSetting(RUN_TICKET_INFER_KEY, String(newest.n));
+      }, true);
+    }
     // When we read the row from GitHub, by our own clock (GitHub's updatedAt does not move when a
     // PR's CI finishes). 0: stored before it existed, older than any read.
     this.addColumn("pull_requests", "read_at", "INTEGER NOT NULL DEFAULT 0");
