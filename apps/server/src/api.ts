@@ -1417,9 +1417,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     });
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => {
-    notifications.reconcile(sharedAttention(true));
+    const items = sharedAttention(true);
     // The overview's need history is written here, so GET /overview stays a pure read.
-    recordNeedsHistory(store, sharedAttention(), now());
+    recordNeedsHistory(store, items, now());
+    notifications.reconcile(items);
   };
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
