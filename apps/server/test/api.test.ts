@@ -5578,7 +5578,7 @@ describe("config", () => {
     const r = await get("/api/config");
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({
-      operator: { id: "operator", timezone: "Europe/London" },
+      operator: { id: "operator", timezone: "Europe/London", locale: "en-GB" },
       githubLogin: "octo-op",
       accounts: [
         {
