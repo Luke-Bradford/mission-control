@@ -989,7 +989,7 @@ describe("cards", () => {
     expect(document.querySelectorAll(".kcol .kcard")).toHaveLength(362);
   });
 
-  it("a closed issue whose Status says In progress sits in Done with the Status out of date flag", async () => {
+  it("a closed issue whose Status says In progress sits in Done without the Status out of date flag", async () => {
     stub({
       shopApp: [
         todo(7, {
@@ -1006,12 +1006,8 @@ describe("cards", () => {
     await screen.findByText("Ticket 7");
     const c = card(container, "shop-app#7") as HTMLElement;
     expect((c.closest(".kcol") as HTMLElement).querySelector(".kh")?.textContent).toMatch(/^Done/);
-    const flag = within(c).getByText("Status out of date");
-    expect(flag.title).toBe("GitHub says Closed; the board's Status says In progress");
-    // the reason is on the card itself, not only in the tooltip
-    expect(
-      within(c).getAllByText("GitHub says Closed; the board's Status says In progress"),
-    ).toHaveLength(1);
+    // already in Done: the note tells the operator nothing to act on
+    expect(within(c).queryByText("Status out of date")).toBeNull();
     expect(within(c).queryByText(/^Blocked:/)).toBeNull();
     // the open one agrees with its Status: no flag
     expect(
@@ -1019,14 +1015,12 @@ describe("cards", () => {
     ).toBeNull();
   });
 
-  it("an open issue whose Status is Done stays in Done with the flag", async () => {
+  it("an open issue whose Status is Done stays in Done without the flag", async () => {
     stub({ shopApp: [todo(9, { status: "Done", state: "done", closed: false })] });
     const { container } = await open();
     await screen.findByText("Ticket 9");
     const c = card(container, "shop-app#9") as HTMLElement;
-    expect(within(c).getByText("Status out of date").title).toBe(
-      "GitHub says Open; the board's Status says Done",
-    );
+    expect(within(c).queryByText("Status out of date")).toBeNull();
   });
 
   it("an issue with no Status lands in Backlog", async () => {

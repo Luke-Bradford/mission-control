@@ -7031,6 +7031,29 @@ describe("the engine runs reviews", () => {
         expect(await operate(RUN, "CAPCOM", { action: "accept" })).toBe(true);
       });
 
+      it.each([
+        ["only missing pictures", "evidence", true],
+        ["a page that looks wrong", "correctness", false],
+      ] as const)("a failed design with blocking findings of %s", async (_n, category, ok) => {
+        await parkedReview();
+        reported(
+          first().id,
+          [{ ...finding("Important"), category }],
+          [{ check: "design", result: "fail" }],
+        );
+        await h.engine.reconcileRun(RUN);
+        setLoop({
+          phase: "parked",
+          hold: { kind: "review", reason: "Blocked", ended: false, worktree: null, wake: false },
+        });
+        if (ok)
+          expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
+        else
+          expect(await refusal("FLIGHT", { kinds: ["review"], action: "accept" })).toBe(
+            "design-failed",
+          );
+      });
+
       it("a passed design does not refuse FLIGHT's accept", async () => {
         await parkedReview();
         reported(first().id, [finding("Important")], [{ check: "design", result: "pass" }]);
@@ -8905,5 +8928,61 @@ describe("designFailedIn: the head's last design verdict", () => {
     expect(
       designFailedIn([row(1, "a"), row(2, "b", "failed")], checks({ 1: "pass", 2: "fail" })),
     ).toBe(false);
+  });
+
+  const finding = (
+    severity: "Critical" | "Important" | "Minor",
+    category?: "evidence" | "correctness",
+  ) => ({
+    pos: 1,
+    severity,
+    file: "a.ts",
+    line: 1,
+    summary: "s",
+    scenario: "s",
+    fix: "f",
+    ...(category === undefined ? {} : { category }),
+  });
+  const withFindings =
+    (byReview: Record<number, ReturnType<typeof finding>[]>) =>
+    (id: number): ReturnType<typeof finding>[] =>
+      byReview[id] ?? [];
+
+  it("does not count a fail whose blocking findings only ask for stored pictures", () => {
+    expect(
+      designFailedIn(
+        [row(1, "a")],
+        checks({ 1: "fail" }),
+        withFindings({ 1: [finding("Important", "evidence"), finding("Minor", "correctness")] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("still counts a fail when a blocking finding says the page looks wrong", () => {
+    expect(
+      designFailedIn(
+        [row(1, "a")],
+        checks({ 1: "fail" }),
+        withFindings({
+          1: [finding("Important", "evidence"), finding("Important", "correctness")],
+        }),
+      ),
+    ).toBe(true);
+    expect(designFailedIn([row(1, "a")], checks({ 1: "fail" }), withFindings({ 1: [] }))).toBe(
+      true,
+    );
+  });
+
+  it("keeps an earlier real fail when a later picture-only fail follows", () => {
+    expect(
+      designFailedIn(
+        [row(1, "a"), row(2, "b")],
+        checks({ 1: "fail", 2: "fail" }),
+        withFindings({
+          1: [finding("Important", "correctness")],
+          2: [finding("Important", "evidence")],
+        }),
+      ),
+    ).toBe(true);
   });
 });
