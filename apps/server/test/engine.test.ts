@@ -1020,40 +1020,43 @@ describe("idle-seat wakes", () => {
   });
 
   it.each([
-    ["the unrelated FLIGHT first", true],
-    ["the run's own FLIGHT first", false],
-  ])("wakes only from the run's own session's FLIGHT, with %s", async (_name, otherFirst) => {
-    const flight = (id: string) => ({
-      id,
-      role: "FLIGHT" as const,
-      accountId: "claude-main",
-      model: "opus",
-      area: [],
-    });
-    const own = config.crew?.sessions[0];
-    if (!own || !config.crew) throw new Error("no crew");
-    own.seats.push(flight("flight-mc"));
-    const other = {
-      id: "other-crew",
-      repoId: REPO,
-      checkout: own.checkout,
-      seats: [flight("flight-other")],
-    };
-    config.crew.sessions = otherFirst ? [other, own] : [own, other];
-    setLoop({ phase: "working", hold: null, prNumber: 12 });
-    store.setSeatTurnStarted(SEAT, clock);
-    clock += MIN;
-    store.addComms({ at: clock, from: "flight-other", to: SEAT, ticket: null, text: "not yours" });
-    await h.engine.tick();
-    expect(sentKeys().some((key) => key.startsWith(`wake:${RUN}:`))).toBe(false);
-    const at = clock + 1;
-    store.addComms({ at, from: "flight-mc", to: SEAT, ticket: null, text: "yours" });
-    clock += 2;
-    await h.engine.tick();
-    expect(sentKeys().filter((key) => key.startsWith(`wake:${RUN}:`))).toEqual([
-      `wake:${RUN}:message:${at}:flight-mc`,
-    ]);
-  });
+    ["the FLIGHT session first", true],
+    ["the run's session first", false],
+  ])(
+    "wakes from the one configured FLIGHT in another session, with %s",
+    async (_name, flightFirst) => {
+      const own = config.crew?.sessions[0];
+      if (!own || !config.crew) throw new Error("no crew");
+      const flightSession = {
+        id: "flight-crew",
+        repoId: REPO,
+        checkout: own.checkout,
+        seats: [
+          {
+            id: "flight-mc",
+            role: "FLIGHT" as const,
+            accountId: "claude-main",
+            model: "opus",
+            area: [],
+          },
+        ],
+      };
+      config.crew.sessions = flightFirst ? [flightSession, own] : [own, flightSession];
+      setLoop({ phase: "working", hold: null, prNumber: 12 });
+      store.setSeatTurnStarted(SEAT, clock);
+      clock += MIN;
+      store.addComms({ at: clock, from: "stranger-1", to: SEAT, ticket: null, text: "not FLIGHT" });
+      await h.engine.tick();
+      expect(sentKeys().some((key) => key.startsWith(`wake:${RUN}:`))).toBe(false);
+      const at = clock + 1;
+      store.addComms({ at, from: "flight-mc", to: SEAT, ticket: null, text: "yours" });
+      clock += 2;
+      await h.engine.tick();
+      expect(sentKeys().filter((key) => key.startsWith(`wake:${RUN}:`))).toEqual([
+        `wake:${RUN}:message:${at}:flight-mc`,
+      ]);
+    },
+  );
 
   it("does not wake or remind a rate-limited, account-stopped, or parked seat", async () => {
     const setup = () => {

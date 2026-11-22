@@ -828,9 +828,9 @@ export function createEngine(deps: EngineDeps): Engine {
         .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
       woken,
       flightSeatId:
-        config.crew?.sessions
-          .find((s) => s.seats.some((x) => x.id === run.agentId))
-          ?.seats.find((x) => seatDef(x).loop === "watch")?.id ?? null,
+        // config allows one watcher across every session, so it need not share the run's session
+        config.crew?.sessions.flatMap((s) => s.seats).find((x) => seatDef(x).loop === "watch")
+          ?.id ?? null,
       // the fix line carries the findings' text and wakes the seat itself, so a findings item
       // whose fix line is still unsent is left to it
     }).filter(
