@@ -5753,6 +5753,7 @@ describe("report_plan", () => {
   const PLAN = "### Outcome\n\nDo X, then Y.\n\n### Tests\n\n- First, in `a.test.ts`.";
   let ghDir: string;
   let told: [string, string][];
+  let endFails = false;
   let pt: McTool[];
 
   const ghState = (state: Record<string, { code?: number; stdout?: string; stderr?: string }>) =>
@@ -5781,6 +5782,7 @@ describe("report_plan", () => {
     writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
     ghState(view("Do X."));
+    endFails = false;
     const cfg = config();
     cfg.crew?.sessions[0]?.seats.push({
       id: "fao-1",
@@ -5794,7 +5796,10 @@ describe("report_plan", () => {
       deps({
         config: cfg,
         gh: createGh(join(ghDir, "gh")),
-        onPlanned: (s, r) => told.push([s, r]),
+        onPlanned: (s, r) => {
+          told.push([s, r]);
+          if (endFails) throw new Error("could not end");
+        },
       }),
     );
     store.upsertRun(run({ id: FAO_RUN, agentId: "fao-1", branch: null, ticket: "mc#7" }));
@@ -5819,6 +5824,14 @@ describe("report_plan", () => {
     expect(await plan()).toEqual(refused(AWAY_PLAN_REFUSED));
     expect(ghCalls()).toEqual([]);
     expect(told).toEqual([]);
+  });
+
+  it("tells the seat when the run could not be ended after the plan was saved", async () => {
+    endFails = true;
+    const result = await plan();
+    expect(result).toMatchObject({ isError: true });
+    expect(result.text).toContain("could not be ended");
+    expect(told).toEqual([["fao-1", FAO_RUN]]);
   });
 
   it("rechecks away after reading the issue and before editing it", async () => {

@@ -697,13 +697,7 @@ export async function main(): Promise<void> {
     log: (line) => log(line),
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),
-    onPlanned: (_s, runId) => {
-      supervisor.endRunByEngine(runId).catch((e: unknown) => {
-        log(
-          `mc report_plan: could not end ${runId}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      });
-    },
+    onPlanned: (_s, runId) => supervisor.endRunByEngine(runId),
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined

@@ -228,7 +228,10 @@ export class TestLock {
     );
   }
 
-  /** Runs a store call; the lock never depends on it succeeding. */
+  /**
+   * Runs a store call. A failed write is logged and the lock carries on: a hold lost this way is
+   * not restored after a restart.
+   */
   private store(f: (s: LockHolds) => void): void {
     if (this.holds === undefined) return;
     try {

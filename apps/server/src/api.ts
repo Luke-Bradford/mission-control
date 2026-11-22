@@ -6588,11 +6588,13 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
         );
         if (
           backoff &&
+          typeof backoff.waitMs === "number" &&
           Number.isFinite(backoff.waitMs) &&
-          backoff.waitMs! > 0 &&
+          backoff.waitMs > 0 &&
+          typeof backoff.notBefore === "number" &&
           Number.isFinite(backoff.notBefore)
         ) {
-          const capped = Math.min(backoff.notBefore!, now + USAGE_BACKOFF_CAP_MS);
+          const capped = Math.min(backoff.notBefore, now + USAGE_BACKOFF_CAP_MS);
           if (capped > now) nextTryAt = capped;
         }
       } catch {

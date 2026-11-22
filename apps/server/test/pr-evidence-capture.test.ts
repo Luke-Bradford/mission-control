@@ -395,6 +395,7 @@ describe("PrEvidence capture", () => {
     await t.evidence.ensure(target);
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
     expect(t.evidence.gate(target)).toContain("links are posted");
+    expect(t.evidence.gate(target)).toContain("gh down");
     fail = false;
     await t.evidence.ensure(target);
     expect(t.evidence.gate(target)).toBeNull();

@@ -293,7 +293,7 @@ export interface McToolsDeps {
   /** The repo's rules as the engine reads them; `report_plan` reads `plan_signoff` from them. Absent: the config's. */
   rules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
-  onPlanned?: (seatId: string, runId: string) => void;
+  onPlanned?: (seatId: string, runId: string) => void | Promise<void>;
   /**
    * The run's repo's configured checks (`mc.checks`), read for each push; empty: the push is not
    * gated on them. Throws when the rules cannot be read (the push then fails and is retried).
@@ -611,6 +611,9 @@ const FindingResolutionSchema = {
   required: ["findingRef", "outcome"],
   additionalProperties: false,
 };
+
+const MC_PLAN_NOT_ENDED =
+  "The plan was saved, but the run could not be ended. Call report_plan again.";
 
 export function badArgs(e: z.ZodError): Result {
   const issue = e.issues[0];
@@ -3145,7 +3148,16 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       text: planned,
     });
     bus.emit("agents");
-    if (loop === "plan") deps.onPlanned?.(ctx.seatId, ctx.runId);
+    if (loop === "plan") {
+      try {
+        await deps.onPlanned?.(ctx.seatId, ctx.runId);
+      } catch (e) {
+        deps.log?.(
+          `mc report_plan: could not end ${ctx.runId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return { text: MC_PLAN_NOT_ENDED, isError: true };
+      }
+    }
     return loop === "plan" ? written : { text: MC_PLAN_WRITTEN_CONTINUE };
   }
 
