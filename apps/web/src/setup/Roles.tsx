@@ -200,7 +200,10 @@ function RuleRow({
   );
 }
 
-/** One rule as a form: lists one per line, a checkbox, a select, or `label: glob, glob` lines. */
+/**
+ * One rule as a form: lists one per line, a checkbox, a select, or `label: glob, glob` lines.
+ * Save posts the file digest the rules were read with, so a changed file is refused, not overwritten.
+ */
 function RuleEditor({
   rule,
   view,
