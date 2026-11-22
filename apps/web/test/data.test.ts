@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render } from "@testing-library/react";
 import { createElement } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
 import { ACTIONS, hub, parseTopic, RESOURCES, startStream } from "../src/data.ts";
 import { Overview } from "../src/pages/Overview.tsx";
