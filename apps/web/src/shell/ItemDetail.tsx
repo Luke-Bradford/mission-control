@@ -15,18 +15,20 @@ import {
   answerTarget,
   boundChoice,
   boundChoiceStands,
+  choiceBlocker,
   choiceLine,
-  choosable,
   dismissItem,
+  newRequestId,
+  receiptLine,
   sendAnswer,
   sendBoundChoice,
-  sendChoice,
 } from "../comms/answer.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import {
   BRIEF_FOLD_AFTER,
   BRIEF_LINES,
   BriefOptions,
+  DecisionFacts,
   ItemBrief,
   PersonChoices,
   Recommendation,
@@ -35,7 +37,7 @@ import { MentionText } from "../comms/messages.tsx";
 import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
-import { hub, RESOURCES, useResource } from "../data.ts";
+import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import { FlightThread } from "../flight/FlightThread.tsx";
 import { dayMonth, rel } from "../fmt.ts";
@@ -60,7 +62,7 @@ import {
 } from "../notifications.ts";
 import { agentPath, followLink } from "../router.ts";
 import { openItem, useOpenedItem } from "./overlays.ts";
-import { toast } from "./Toast.tsx";
+import { useStore } from "./store.ts";
 import "./ItemPanel.css";
 
 /**
@@ -112,9 +114,15 @@ export function useItemDetail(key: string | null) {
     Record<string, { id: string; text: string; note?: string }>
   >({});
   const [chosenLocal, setChosen] = useState<Record<string, string>>({});
-  const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
   const [boundReceipts, setBoundReceipts] = useState<Record<string, BriefChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
+  // What the operator picked on each item and under which request id: a retry of the same
+  // option on the same brief reuses the id, so the server never applies it twice.
+  const intents = useRef<Record<string, { optionId: string; briefId: number; requestId: string }>>(
+    {},
+  );
+  // Bumped by Discuss: the conversation opens and takes focus.
+  const [discussOpen, setDiscussOpen] = useState<Record<string, number>>({});
   const tz = useTz();
   const now = useNow();
   const activeKey = useRef(key);
@@ -135,7 +143,7 @@ export function useItemDetail(key: string | null) {
     choiceRes.data?.key === k && item?.brief && choiceRes.data.chosenAt >= item.brief.at
       ? choiceRes.data
       : undefined;
-  const recorded = choices[k] ?? serverChoice;
+  const recorded = serverChoice;
   // The bound choice made on this item: this page's receipt, else the one the hub stored.
   const boundReceipt = boundReceipts[k] ?? item?.brief?.choice;
   const boundLabel =
@@ -181,7 +189,7 @@ export function useItemDetail(key: string | null) {
     });
   };
   const pick = (o: BriefOption) => {
-    if (item && queueApproval) {
+    if (item && queueApproval && !boundChoice(item, o)) {
       if (busy || chosen[item.key] || (o.id !== "approve" && o.id !== "deny")) return;
       void act(async () => {
         try {
@@ -211,48 +219,28 @@ export function useItemDetail(key: string | null) {
       });
       return;
     }
-    if (item && boundChoice(item, o)) {
+    const bound = item ? boundChoice(item, o) : null;
+    if (item && bound && o.id !== undefined) {
       if (busy || chosen[item.key]) return;
+      const prior = intents.current[item.key];
+      const intent =
+        prior?.optionId === o.id && prior.briefId === bound.briefId
+          ? prior
+          : { optionId: o.id, briefId: bound.briefId, requestId: newRequestId() };
+      intents.current[item.key] = intent;
       void act(async () => {
-        const result = await sendBoundChoice(item, o);
+        const result = await sendBoundChoice(item, o, intent.requestId);
+        // No answer: the outcome is unknown, so the intent stays for a retry.
         if ("error" in result) return result.error;
+        if (!boundChoiceStands(result.receipt)) {
+          delete intents.current[item.key];
+          return result.receipt.text;
+        }
         setChosen((prev) => ({ ...prev, [item.key]: o.label }));
         setBoundReceipts((prev) => ({ ...prev, [item.key]: result.receipt }));
         return null;
       });
-      return;
     }
-    if (!item || !target || !replyOk || busy || chosen[item.key]) return;
-    // An option the choose routes do not take: its answer goes as a message that carries the pick.
-    const answerWith = () =>
-      void act(async () => {
-        const failed = await sendAnswer(target, seat, item, o.answer, o);
-        if (failed !== null) return failed;
-        // The thread beside the question shows the pick: it is the one message sent.
-        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-        hub.refetch(RESOURCES.choice(item.key).path);
-        return null;
-      });
-    if (item.kind === "person") {
-      answerWith();
-      return;
-    }
-    if (item.kind === "approval" && o.label === "Edit") {
-      toast("Opens the draft so you can change it before approving.");
-      return;
-    }
-    if (choosable(item, o)) {
-      void act(async () => {
-        const result = await sendChoice(item, o);
-        if ("error" in result) return result.error;
-        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-        setChoices((prev) => ({ ...prev, [item.key]: result.receipt }));
-        hub.refetch(RESOURCES.choice(item.key).path);
-        return null;
-      });
-      return;
-    }
-    answerWith();
   };
   const dismiss = (after?: () => void) => {
     if (!item) return;
@@ -265,7 +253,15 @@ export function useItemDetail(key: string | null) {
   const thread = currentThread ?? savedPerson?.thread;
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
   const handledHow = handled?.how ?? justHandled[k];
-  const options = item?.brief?.person ? [] : (item?.brief?.options ?? []);
+  // A person-source brief may carry a complete decision even when the server cannot prepare an
+  // action for it. Keep that contract readable and let its missing binding disable choices.
+  // Only older records with no decision context use the legacy reply controls.
+  const completePersonBrief = Boolean(item?.brief?.person && item.brief.decision);
+  const options = completePersonBrief
+    ? (item?.brief?.options ?? [])
+    : item?.brief?.person
+      ? []
+      : (item?.brief?.options ?? []);
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
   return {
@@ -299,9 +295,12 @@ export function useItemDetail(key: string | null) {
     receipts,
     handledHow,
     options,
+    completePersonBrief,
     currentItem,
     submit,
     pick,
+    discussOpen,
+    discuss: () => setDiscussOpen((prev) => ({ ...prev, [k]: (prev[k] ?? 0) + 1 })),
     dismiss,
     act,
     setJustHandled,
@@ -346,15 +345,20 @@ export function ItemDetail({
     receipts,
     handledHow,
     options,
+    completePersonBrief,
     currentItem,
     submit,
     pick,
+    discussOpen,
+    discuss,
     act,
     setJustHandled,
   } = detail;
   const page = layout === "page";
   const materials = useAttentionMaterials(page && item && !holding ? item : null);
   const viewer = useImageViewer();
+  const connection = useStore(streamStatus);
+  const disconnected = !connection.connected && connection.reconnecting;
   if (key === null) return null;
   const p = page ? "needs" : "ds";
   const flightSeat = flight === undefined ? undefined : flight.seat;
@@ -427,61 +431,130 @@ export function ItemDetail({
       )}
     </div>
   );
-  // Every option has an action the server prepared: they go through the bound choice route.
-  const bound =
-    item !== undefined && options.length > 0 && options.every((o) => boundChoice(item, o));
+  const brief = item?.brief;
+  const recommended = brief?.options.find(
+    (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
+  );
+  // An unbound queue proposal still goes through its own route; every other option needs the
+  // server's binding on a current brief.
+  const blockerOf = (o: BriefOption): string | null =>
+    !item
+      ? "Loading…"
+      : disconnected
+        ? "Disconnected. Reconnect to choose."
+        : queueApproval && !boundChoice(item, o) && (o.id === "approve" || o.id === "deny")
+          ? null
+          : choiceBlocker(item, o);
+  const sendable = options.some((o) => blockerOf(o) === null);
+  const githubOnly = target?.to === "github" && !sendable;
+  const acceptBlock = recommended
+    ? githubOnly
+      ? null
+      : blockerOf(recommended)
+    : "FLIGHT named no recommended option.";
+  const showFacts =
+    brief !== undefined &&
+    (!brief.person || completePersonBrief) &&
+    !holding &&
+    (brief.for === "operator" || options.length > 0);
   const answerBlock = (
     <>
+      {item && brief && showFacts && (
+        <DecisionFacts brief={brief} defaultDueAt={item.defaultDueAt} tz={tz} />
+      )}
       {item?.brief && !holding && <h3 className="bsec answer-heading">Your answer</h3>}
       {item?.brief && options.length === 0 && !holding && (
         <div className="composer">
           <Recommendation text={item.brief.recommendation} />
         </div>
       )}
-      {item && !item.brief?.person && !holding && (esc || options.length > 0) && (
-        <div className="composer" id={`${p}Opts`}>
-          {options.length > 0 && (
-            <>
-              {/* The pick itself shows once, in the FLIGHT thread; here only where it went. */}
-              {chosen[k] && (recorded || boundReceipt) && (
-                <p className="note" data-testid="choice-line">
-                  {recorded ? choiceLine(recorded, tz ?? "UTC") : boundReceipt?.text}
-                </p>
-              )}
-              <BriefOptions
-                options={options}
-                recommendedOptionId={item.brief?.recommendedOptionId}
-                recommendation={item.brief?.recommendation}
-                live={queueApproval || bound || target?.to !== "github"}
-                disabled={busy || (!queueApproval && !bound && !replyOk) || Boolean(chosen[k])}
-                title={
-                  !queueApproval && !bound && target?.to === "github"
-                    ? "Reply on GitHub to answer this item."
-                    : undefined
-                }
-                variant={item.kind === "approval" ? "row" : "panel"}
-                rowLabel={item.kind === "approval" ? "Your call:" : undefined}
-                primaryFirst={item.kind === "approval"}
-                pictures={
-                  materials.packets.length > 0
-                    ? (o) => (
-                        <OptionPictures option={o} packets={materials.packets} open={viewer.open} />
-                      )
-                    : undefined
-                }
-                onPick={pick}
-              />
-              {!queueApproval && target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
-            </>
-          )}
-          {esc && (
-            <div className="row">
-              <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
-            </div>
-          )}
-        </div>
+      {item &&
+        (!item.brief?.person || completePersonBrief) &&
+        !holding &&
+        (esc || options.length > 0) && (
+          <div className="composer" id={`${p}Opts`}>
+            {options.length > 0 && (
+              <>
+                {chosen[k] && (
+                  <p>
+                    You chose: <b>{chosen[k]}</b>
+                    {recorded && (
+                      <span className="note" data-testid="choice-line">
+                        {" "}
+                        · {choiceLine(recorded, tz ?? "UTC")}
+                      </span>
+                    )}
+                    {!recorded && boundReceipt && (
+                      <span className="note" data-testid="choice-line">
+                        {" "}
+                        · {receiptLine(boundReceipt)}
+                      </span>
+                    )}
+                  </p>
+                )}
+                <BriefOptions
+                  options={options}
+                  recommendedOptionId={item.brief?.recommendedOptionId}
+                  recommendation={item.brief?.recommendation}
+                  live={sendable || target?.to !== "github"}
+                  disabled={busy || Boolean(chosen[k])}
+                  canPick={(o) => blockerOf(o) === null}
+                  title={githubOnly ? "Reply on GitHub to answer this item." : undefined}
+                  variant={item.kind === "approval" ? "row" : "panel"}
+                  rowLabel={item.kind === "approval" ? "Your call:" : undefined}
+                  primaryFirst={item.kind === "approval"}
+                  pictures={
+                    materials.packets.length > 0
+                      ? (o) => (
+                          <OptionPictures
+                            option={o}
+                            packets={materials.packets}
+                            open={viewer.open}
+                          />
+                        )
+                      : undefined
+                  }
+                  onPick={pick}
+                />
+                {recommended && !(githubOnly && acceptBlock === null) && (
+                  <div className="answer-actions">
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={busy || Boolean(chosen[k]) || acceptBlock !== null}
+                      onClick={() => pick(recommended)}
+                    >
+                      Accept recommendation: {recommended.label}
+                    </button>
+                    <button type="button" onClick={discuss}>
+                      Discuss
+                    </button>
+                    {acceptBlock !== null && !chosen[k] && <p className="note">{acceptBlock}</p>}
+                  </div>
+                )}
+                {!recommended && (
+                  <div className="answer-actions">
+                    <button type="button" onClick={discuss}>
+                      Discuss
+                    </button>
+                    {acceptBlock !== null && !githubOnly && <p className="note">{acceptBlock}</p>}
+                  </div>
+                )}
+                {!queueApproval && target?.to === "flight" && (
+                  <FlightStoppedNote seat={flightSeat} />
+                )}
+              </>
+            )}
+            {esc && (
+              <div className="row">
+                <ExternalLink url={esc.url}>Reply on GitHub ↗</ExternalLink>
+              </div>
+            )}
+          </div>
+        )}
+      {item?.brief?.person && !completePersonBrief && (
+        <PersonChoices key={item.key} item={item} thread={thread} />
       )}
-      {item?.brief?.person && <PersonChoices key={item.key} item={item} thread={thread} />}
       {item?.kind === "person" && !item.brief?.person && !holding && (
         <div className="composer" id={`${p}Person`}>
           {handledHow ? (
@@ -513,44 +586,53 @@ export function ItemDetail({
   );
   const replyBlock = (
     <>
-      {item && !holding && (target?.to === "seat" || target?.to === "flight") && (
-        <form className="composer" id={`${p}Form`} onSubmit={submit}>
-          {page ? (
-            <textarea
-              id={`${p}Input`}
-              aria-label="Your answer"
-              placeholder="Type your answer… (Ctrl or ⌘ + Enter sends)"
-              rows={3}
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit(e);
-              }}
-              disabled={!replyOk}
-            />
-          ) : (
-            <input
-              id={`${p}Input`}
-              autoComplete="off"
-              aria-label="Your answer"
-              placeholder="Type your answer…"
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              disabled={!replyOk}
-            />
-          )}
-          <button type="submit" className="primary" disabled={!replyOk || busy}>
-            Reply
-          </button>
-          {target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
-        </form>
-      )}
+      {item &&
+        !completePersonBrief &&
+        !holding &&
+        (target?.to === "seat" || target?.to === "flight") && (
+          <form className="composer" id={`${p}Form`} onSubmit={submit}>
+            {page ? (
+              <textarea
+                id={`${p}Input`}
+                aria-label="Your answer"
+                placeholder="Type your answer… (Ctrl or ⌘ + Enter sends)"
+                rows={3}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit(e);
+                }}
+                disabled={!replyOk}
+              />
+            ) : (
+              <input
+                id={`${p}Input`}
+                autoComplete="off"
+                aria-label="Your answer"
+                placeholder="Type your answer…"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                disabled={!replyOk}
+              />
+            )}
+            <button type="submit" className="primary" disabled={!replyOk || busy}>
+              Reply
+            </button>
+            {target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
+          </form>
+        )}
     </>
   );
   const discussionBlock = (
     <>
       {item && !holding && (
-        <FlightThread key={item.key} id={`${p}Thread`} itemKey={item.key} about={about} />
+        <FlightThread
+          key={item.key}
+          id={`${p}Thread`}
+          itemKey={item.key}
+          about={about}
+          openRequest={discussOpen[item.key] ?? 0}
+        />
       )}
     </>
   );
@@ -585,7 +667,7 @@ export function ItemDetail({
           {viewer.element}
           <Pictures item={item} />
           {item.brief ? (
-            <details className="needs-more">
+            <details className="needs-more" open={Boolean(item.brief.person) || undefined}>
               <summary>Details</summary>
               {briefBlock}
             </details>
