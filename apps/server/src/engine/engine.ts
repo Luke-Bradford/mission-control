@@ -526,7 +526,9 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
 export function designFailedIn(
   rows: readonly ReviewRow[],
   checks: (reviewId: number) => readonly Pick<ReviewCheck, "check" | "result">[],
-  findings: (reviewId: number) => readonly Pick<StoredFinding, "severity" | "category">[] = () => [],
+  findings: (
+    reviewId: number,
+  ) => readonly Pick<StoredFinding, "severity" | "category">[] = () => [],
 ): boolean {
   const picturesOnly = (id: number): boolean => {
     const blocking = findings(id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity));

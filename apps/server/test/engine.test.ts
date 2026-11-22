@@ -7046,7 +7046,8 @@ describe("the engine runs reviews", () => {
           phase: "parked",
           hold: { kind: "review", reason: "Blocked", ended: false, worktree: null, wake: false },
         });
-        if (ok) expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
+        if (ok)
+          expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
         else
           expect(await refusal("FLIGHT", { kinds: ["review"], action: "accept" })).toBe(
             "design-failed",
@@ -8962,7 +8963,9 @@ describe("designFailedIn: the head's last design verdict", () => {
       designFailedIn(
         [row(1, "a")],
         checks({ 1: "fail" }),
-        withFindings({ 1: [finding("Important", "evidence"), finding("Important", "correctness")] }),
+        withFindings({
+          1: [finding("Important", "evidence"), finding("Important", "correctness")],
+        }),
       ),
     ).toBe(true);
     expect(designFailedIn([row(1, "a")], checks({ 1: "fail" }), withFindings({ 1: [] }))).toBe(
@@ -8975,7 +8978,10 @@ describe("designFailedIn: the head's last design verdict", () => {
       designFailedIn(
         [row(1, "a"), row(2, "b")],
         checks({ 1: "fail", 2: "fail" }),
-        withFindings({ 1: [finding("Important", "correctness")], 2: [finding("Important", "evidence")] }),
+        withFindings({
+          1: [finding("Important", "correctness")],
+          2: [finding("Important", "evidence")],
+        }),
       ),
     ).toBe(true);
   });
