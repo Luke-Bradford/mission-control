@@ -990,11 +990,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   };
 
   /** Runs `fn`; anything it throws is recorded as `collector`'s status instead. Never throws. */
-  const guarded = async (collector: string, fn: () => Promise<void>) => {
+  const guarded = async (collector: string, fn: () => Promise<void>, paused = false) => {
     try {
       await fn();
     } catch (e) {
-      recordStatus(collector, false, msg(e));
+      if (paused) recordStatus(collector, true, pausedNote(msg(e)));
+      else recordStatus(collector, false, msg(e));
     }
   };
 
@@ -1136,22 +1137,48 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /**
    * A paused loop's driver is stopped on purpose, so a read that fails because of it is not a
    * failure: it shows as paused (ok, with the cause as the note), and a retry clears it on resume.
+   * The failure is written once, as paused, so a steady failure does not flip the row each tick.
    */
-  const notePaused = (loop: AdoptedLoop) => {
-    const collector = collectorName(loop.kind, loop.id);
-    const row = store.status().find((s) => s.collector === collector);
-    if (!row || row.ok) return;
-    if (!loopPause(loop, store).paused) return;
-    recordStatus(collector, true, `paused (read failed: ${row.error ?? "collector failed"})`);
+  const pausedNote = (error: string | null) =>
+    `paused (read failed: ${error ?? "collector failed"})`;
+  const loopIsPaused = (loop: AdoptedLoop) => loopPause(loop, store).paused;
+  /** True when the repo has loops and every one is paused. */
+  const repoPaused = (repoId: string) => {
+    const loops = config.loops.filter((l) => l.repoId === repoId);
+    return loops.length > 0 && loops.every(loopIsPaused);
   };
+  /** The store a collector writes through: while `paused`, its failure on `collector` is the paused note. */
+  const whilePaused = (collector: string, paused: boolean): Store =>
+    paused
+      ? new Proxy(store, {
+          get: (target, prop) => {
+            if (prop === "setStatus")
+              return (name: string, ok: boolean, error: string | null) =>
+                name === collector && !ok
+                  ? target.setStatus(name, true, pausedNote(error))
+                  : target.setStatus(name, ok, error);
+            const value = Reflect.get(target, prop, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        })
+      : store;
 
   const jobs: Record<Job, () => Promise<void>> = {
     ta: async () => {
       for (const loop of config.loops.filter((l) => l.kind === "ta-loop")) {
-        await guarded(collectorName(loop.kind, loop.id), () =>
-          c.ta(loop, store, now(), taState, undefined, c.launchctl),
+        await guarded(
+          collectorName(loop.kind, loop.id),
+          () =>
+            c.ta(
+              loop,
+              whilePaused(collectorName(loop.kind, loop.id), loopIsPaused(loop)),
+              now(),
+              taState,
+              undefined,
+              c.launchctl,
+            ),
+          loopIsPaused(loop),
         );
-        notePaused(loop);
       }
       emitIfChanged("agents", "health", "attention");
       afterLoopTick();
@@ -1161,18 +1188,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       // (start() runs every job at once) may need to read the registry itself.
       if (!sessionsRead) await readLiveSessions();
       for (const loop of config.loops.filter((l) => l.kind === "studio-loop")) {
-        await guarded(collectorName(loop.kind, loop.id), () =>
-          c.studio(
-            loop,
-            store,
-            config.operator.timezone,
-            now(),
-            studioState,
-            liveSessions,
-            c.launchctl,
-          ),
+        await guarded(
+          collectorName(loop.kind, loop.id),
+          () =>
+            c.studio(
+              loop,
+              whilePaused(collectorName(loop.kind, loop.id), loopIsPaused(loop)),
+              config.operator.timezone,
+              now(),
+              studioState,
+              liveSessions,
+              c.launchctl,
+            ),
+          loopIsPaused(loop),
         );
-        notePaused(loop);
       }
       emitIfChanged("agents", "health", "attention");
       afterLoopTick();
@@ -1409,27 +1438,36 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       let boards = false;
       for (const repo of config.repos) {
         const collector = prSweepCollector(repo.id);
-        if (client instanceof Error) recordStatus(collector, false, client.message);
+        const paused = repoPaused(repo.id);
+        const sweepStore = whilePaused(collector, paused);
+        if (client instanceof Error)
+          paused
+            ? recordStatus(collector, true, pausedNote(client.message))
+            : recordStatus(collector, false, client.message);
         else {
-          await guarded(collector, async () => {
-            if (
-              (
-                await c.prSweep(
-                  repo,
-                  store,
-                  client,
-                  now(),
-                  flightSeat(config)?.session.repoId === repo.id,
-                )
-              ).boards
-            )
-              boards = true;
-            if (
-              deps.boardWrites !== false &&
-              (await c.followPrs({ gql: client, store, config, now }, repo.id))
-            )
-              boards = true;
-          });
+          await guarded(
+            collector,
+            async () => {
+              if (
+                (
+                  await c.prSweep(
+                    repo,
+                    sweepStore,
+                    client,
+                    now(),
+                    flightSeat(config)?.session.repoId === repo.id,
+                  )
+                ).boards
+              )
+                boards = true;
+              if (
+                deps.boardWrites !== false &&
+                (await c.followPrs({ gql: client, store: sweepStore, config, now }, repo.id))
+              )
+                boards = true;
+            },
+            paused,
+          );
         }
       }
       if (boards) emit("boards");
