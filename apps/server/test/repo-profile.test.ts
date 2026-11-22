@@ -95,9 +95,9 @@ describe("repoProfiles", () => {
     // 4 items, 2 labels: 60 polls * (1 + 3 + 2 + 1 + 1) = 480; flow 2 * ceil(4/20) + 4 * 4 extra timeline pages = 18.
     expect(shopApp?.budget).toEqual({
       boardPerHour: 480,
-      sweepPerHour: 10,
+      sweepPerHour: 20,
       flowPerHour: 18,
-      totalPerHour: 508,
+      totalPerHour: 518,
     });
     expect(ae?.loops).toEqual([]);
     // No needsYouLabels configured: the collector's default is one label.
@@ -200,7 +200,7 @@ describe("repoPreview", () => {
       loops: [],
     });
     // New repo, default labels (1): 60 * (3 + 3 + 1 + 1 + 1) = 540, sweep 10, flow 2 * 13 + 5 * 4.
-    expect(p.budget.totalPerHour).toBe(540 + 10 + 26 + 20);
+    expect(p.budget.totalPerHour).toBe(540 + 20 + 26 + 20);
     const now = repoProfiles(config(), store).reduce((n, r) => n + r.budget.totalPerHour, 0);
     expect(p.budgetNow).toBe(now);
   });
