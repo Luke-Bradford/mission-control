@@ -1616,7 +1616,7 @@ export function flightWake(
             : t,
         ),
       },
-      facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
+      facts: parseJson<FlightWake["facts"]>(wakeFacts(state), {} as FlightWake["facts"]),
     },
   };
 }
@@ -1739,8 +1739,8 @@ const URGENT_CATEGORIES: readonly string[] = [
 
 /** Whether a changed fact set adds an urgent fact: one of the categories above, or a seat's call. */
 export function urgentChange(previous: string, current: string): boolean {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
+  const before = parseJson<Facts>(previous, {});
+  const after = parseJson<Facts>(current, {});
   const added = (category: string): unknown[] => {
     const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
     return (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
@@ -1757,8 +1757,8 @@ export function urgentChange(previous: string, current: string): boolean {
  * lifting is not settled: either one frees work FLIGHT can act on, so it wakes FLIGHT at once.
  */
 export function onlySettled(previous: string, current: string): boolean {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
+  const before = parseJson<Facts>(previous, {});
+  const after = parseJson<Facts>(current, {});
   let removed = false;
   for (const category of new Set([...Object.keys(before), ...Object.keys(after)])) {
     const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));

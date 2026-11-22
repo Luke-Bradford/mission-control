@@ -11,7 +11,7 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_REPO_RULES, type RepoRules } from "@mc/core";
 import { parse as parseYaml } from "yaml";
-import { setBounded } from "../bounded.ts";
+import { BoundedMap } from "../bounded.ts";
 import { readRepoClaudeMd } from "../runtime/brief.ts";
 import { crewGit } from "../runtime/git.ts";
 import { overlayRepoBlock, type RepoBlock, repoRulesSchema } from "./rule-config.ts";
@@ -191,10 +191,10 @@ export async function readRepoBlock(
 }
 
 /** The latest `origin/HEAD` sha read per checkout, and what it came to. */
-const cache = new Map<
+const cache = new BoundedMap<
   string,
   { sha: string; base: RepoRules; outcome: RepoRules | RepoRulesError }
->();
+>(200);
 
 /**
  * The repo's rules at `origin/HEAD` of the crew clone at `checkout`. Returns the error rather than
@@ -224,7 +224,7 @@ export async function readRepoRules(
       if (!(e instanceof RepoRulesError)) throw e;
       outcome = new RepoRulesError(`${repo}: ${e.message}`);
     }
-    setBounded(cache, checkout, { sha, base, outcome }, 200);
+    cache.set(checkout, { sha, base, outcome });
     return outcome;
   } catch (e) {
     return new RepoRulesError(

@@ -211,6 +211,7 @@ import {
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
+import { BoundedMap } from "../bounded.ts";
 import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
@@ -2885,7 +2886,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
   }
 
   /** Planner runs whose plan is saved but whose end failed, with the answer their retry gets. */
-  const planEndPending = new Map<string, Result>();
+  const planEndPending = new BoundedMap<string, Result>(50);
 
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = PlanArgs.safeParse(args);
@@ -2894,7 +2895,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: AWAY_PLAN_REFUSED, isError: true };
     const plan = parsed.data.plan;
     const live = liveRun(ctx);
-    if (live === null) return ENDED;
+    if (live === null) {
+      planEndPending.delete(ctx.runId);
+      return ENDED;
+    }
     const { run } = live;
     const place = seatPlace(config, ctx.seatId);
     if (place === null) return ENDED;

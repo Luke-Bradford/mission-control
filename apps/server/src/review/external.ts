@@ -14,6 +14,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { externalReviewAsked } from "../external-pr-control.ts";
+import { parseJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { postPrEvidence } from "../pr-evidence/sweep.ts";
@@ -71,7 +72,7 @@ export async function readExternalSubject(
   const result = await gh(["api", `repos/${repo.github}/pulls/${number}`], { cwd });
   if (result.code !== 0)
     throw new ExternalReviewPublicationError("external review PR could not be read");
-  const value: unknown = JSON.parse(result.stdout);
+  const value: unknown = parseJson<unknown>(result.stdout, null);
   if (value === null || typeof value !== "object") return null;
   const pr = value as {
     number?: unknown;
@@ -273,7 +274,7 @@ export function createExternalReviews(deps: {
       });
       if (existing.code !== 0)
         throw new ExternalReviewPublicationError("external review comments could not be checked");
-      const pages: unknown = JSON.parse(existing.stdout);
+      const pages: unknown = parseJson<unknown>(existing.stdout, null);
       if (!Array.isArray(pages) || !pages.every(Array.isArray))
         throw new ExternalReviewPublicationError("external review comments were unreadable");
       const comments: unknown[] = pages.flat();

@@ -124,7 +124,7 @@ import {
   tokenBaselines,
   type UsageSample,
 } from "@mc/core";
-import { setBounded } from "./bounded.ts";
+import { BoundedMap } from "./bounded.ts";
 import { StandingInstructions } from "./instructions/standing.ts";
 import { parseJson } from "./json.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
@@ -312,13 +312,13 @@ export class Store {
   private readonly db: DatabaseSync;
   private readonly rawDb: DatabaseSync;
   /** Statements used by read-heavy views stay prepared for this Store's lifetime. */
-  private readonly statements = new Map<string, StatementSync>();
+  private readonly statements = new BoundedMap<string, StatementSync>(STATEMENTS_MAX);
 
   private statement(sql: string): StatementSync {
     let statement = this.statements.get(sql);
     if (!statement) {
       statement = this.rawDb.prepare(sql);
-      setBounded(this.statements, sql, statement, STATEMENTS_MAX);
+      this.statements.set(sql, statement);
     }
     return statement;
   }

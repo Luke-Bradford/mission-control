@@ -165,6 +165,19 @@ describe("TestLock", () => {
       expect(lock.state().holder).toBeNull();
     });
 
+    it("does not grant a lock whose hold cannot be stored, and stays free", async () => {
+      vi.spyOn(store, "addLockHold").mockImplementation(() => {
+        throw new Error("disk full");
+      });
+      const key = { runId: "A", toolUseId: "a1" };
+      await expect(lock.acquire(key, "s-A", "pnpm -s test", 1000, live())).rejects.toThrow(
+        "could not record your hold",
+      );
+      expect(lock.state().holder).toBeNull();
+      vi.restoreAllMocks();
+      expect(await lock.acquire(key, "s-A", "pnpm -s test", 1000, live())).toBe(true);
+    });
+
     it("restores a pinned hold as pinned: only releaseRun frees it", async () => {
       const key = { runId: "A", toolUseId: "a1" };
       await lock.acquire(key, "s-A", "pnpm -s test", 1000, live());

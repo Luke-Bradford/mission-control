@@ -44,7 +44,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { uptime } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-
+import { parseJson } from "../json.ts";
 import { CODEX_APPROVAL_DECISION } from "./codex-wire.ts";
 import { compactTranscriptLine, deltaHeartbeats } from "./transcript-compact.ts";
 
@@ -393,7 +393,11 @@ export function runKeeper(
   dir: string,
   opts: { write?: (fd: number, data: Uint8Array) => number } = {},
 ): { done: Promise<void>; terminate: () => void } {
-  const spec = JSON.parse(readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8")) as KeeperSpec;
+  const spec = parseJson<KeeperSpec | null>(
+    readFileSync(join(dir, KEEPER_SPEC_FILE), "utf8"),
+    null,
+  );
+  if (spec === null) throw new Error("the keeper spec is unreadable");
   const privateEnv = Object.fromEntries(
     (spec.privateEnvKeys ?? []).flatMap((key) => {
       const value = process.env[key];

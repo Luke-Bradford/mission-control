@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { urgentChange } from "../src/flight/state.ts";
+import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;
@@ -46,5 +48,10 @@ describe("stored JSON that will not parse", () => {
       )
       .run();
     expect(store.plans.get("mc", 5)?.mockups).toEqual([]);
+  });
+
+  it("compares FLIGHT wake facts without throwing when either side will not parse", () => {
+    expect(urgentChange("{oops", "{}")).toBe(false);
+    expect(changedWakeFacts("{oops", JSON.stringify({ prs: [1] }))).toEqual(["prs (1)"]);
   });
 });

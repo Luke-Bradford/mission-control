@@ -44,6 +44,7 @@ import {
   withSection,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
+import { parseJson } from "../json.ts";
 import {
   COMMIT_ADD_PATHSPEC,
   editRunPrBody,
@@ -849,7 +850,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       cwd: cwd(),
     });
     if (viewed.code !== 0) return [];
-    const parsed = JSON.parse(viewed.stdout) as { jobs?: unknown } | null;
+    const parsed = parseJson<{ jobs?: unknown } | null>(viewed.stdout, null);
     if (!Array.isArray(parsed?.jobs)) return [];
     return parsed.jobs.flatMap((j: unknown) => {
       const x = j as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;

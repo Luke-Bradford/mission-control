@@ -330,7 +330,7 @@ import {
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
-import type { TestLock } from "./guard/lock.ts";
+import { LockStoreError, type TestLock } from "./guard/lock.ts";
 import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
@@ -2657,13 +2657,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
           res.on("close", onClose);
           try {
-            const granted = await lock.acquire(
-              key,
-              who.seatId,
-              verdict.command,
-              LOCK_WAIT_MS,
-              hungUp.signal,
-            );
+            let granted: boolean;
+            try {
+              granted = await lock.acquire(
+                key,
+                who.seatId,
+                verdict.command,
+                LOCK_WAIT_MS,
+                hungUp.signal,
+              );
+            } catch (e) {
+              if (e instanceof LockStoreError) return answer(e.message);
+              throw e;
+            }
             if (granted && !hungUp.signal.aborted) {
               // `finish` means the answer was handed to the kernel, not that the hook received it.
               // On a real socket this release only catches an async gap between the send and the

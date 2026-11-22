@@ -48,7 +48,7 @@ import {
   wakeLine,
 } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
-import { addBounded, setBounded } from "../bounded.ts";
+import { BoundedMap, BoundedSet } from "../bounded.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -131,12 +131,12 @@ export interface FlightWatch {
 
 /** Whether any list of a `wakeFacts` string has an entry. */
 const hasFacts = (facts: string): boolean =>
-  Object.values(JSON.parse(facts) as Record<string, unknown[]>).some((l) => l.length > 0);
+  Object.values(parseJson<Record<string, unknown[]>>(facts, {})).some((l) => l.length > 0);
 
 /** Describe changes against the same baseline used to decide whether a wake is due. */
 export const changedWakeFacts = (previous: string, current: string): string[] => {
-  const before = JSON.parse(previous || "{}") as Record<string, unknown[]>;
-  const after = JSON.parse(current) as Record<string, unknown[]>;
+  const before = parseJson<Record<string, unknown[]>>(previous, {});
+  const after = parseJson<Record<string, unknown[]>>(current, {});
   return Object.keys(after)
     .filter((key) => JSON.stringify(before[key] ?? []) !== JSON.stringify(after[key]))
     .map((key) => {
@@ -181,7 +181,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** When FLIGHT was handed a fresh session this hour: rotations count against their own cap. */
   let rotations: number[] = [];
   /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
-  const firstContext = new Map<string, number>();
+  const firstContext = new BoundedMap<string, number>(FIRST_CONTEXT_MAX);
   let rotationRequested = false;
   /** The failure in plain words for the operator's alert; the raw error stays in the hub log. */
   let lastReason: string | null = null;
@@ -209,7 +209,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
   /** Missed-triage identities already announced; the oldest go once the cap is passed. */
-  const announced = new Set<string>();
+  const announced = new BoundedSet<string>(ANNOUNCED_MAX);
   let preparingDay: string | null = null;
   let attemptedDay: string | null = null;
   let retryAt = 0;
@@ -384,7 +384,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         nextDue = Math.min(nextDue, item.triageDueAt);
       const identity = `${item.key}:${item.at}`;
       if (item.flightTriage === "missed" && !announced.has(identity)) {
-        addBounded(announced, identity, ANNOUNCED_MAX);
+        announced.add(identity);
         added = true;
       }
     }
@@ -585,8 +585,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     // past the context limit: one handover wake, then the fresh session once that turn has ended
     const context = store.digest(runId)?.contextTokens ?? null;
-    if (context !== null && !firstContext.has(runId))
-      setBounded(firstContext, runId, context, FIRST_CONTEXT_MAX);
+    if (context !== null && !firstContext.has(runId)) firstContext.set(runId, context);
     const grown = context === null ? 0 : context - (firstContext.get(runId) ?? context);
     if (
       context !== null &&

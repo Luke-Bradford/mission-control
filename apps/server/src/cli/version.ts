@@ -7,7 +7,7 @@
 import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import { setBounded } from "../bounded.ts";
+import { BoundedMap } from "../bounded.ts";
 
 const MAX_KEYS = 200;
 
@@ -20,10 +20,10 @@ const NOT_FOUND_TTL_MS = 30_000;
 /** How long a failed run stands before the binary is probed again (one slow start must not stick). */
 const FAILURE_TTL_MS = 60_000;
 /** Versions read, per path and mtime. */
-const cache = new Map<string, string>();
-const failedUntil = new Map<string, number>();
+const cache = new BoundedMap<string, string>(MAX_KEYS);
+const failedUntil = new BoundedMap<string, number>(MAX_KEYS);
 const inFlight = new Map<string, Promise<string | null>>();
-const notFoundUntil = new Map<string, number>();
+const notFoundUntil = new BoundedMap<string, number>(MAX_KEYS);
 
 interface Located {
   path: string;
@@ -59,7 +59,7 @@ function locate(binary: string): Located | null {
   } catch {
     // vanished between the walk and the stat: treated as not found
   }
-  setBounded(notFoundUntil, missKey, Date.now() + NOT_FOUND_TTL_MS, MAX_KEYS);
+  notFoundUntil.set(missKey, Date.now() + NOT_FOUND_TTL_MS);
   return null;
 }
 
@@ -82,8 +82,8 @@ function probe({ path, key }: Located, timeoutMs: number): Promise<string | null
       (err, stdout) => {
         const version = err ? null : parseCliVersion(stdout);
         // a failed run is remembered too: a broken binary must not be probed again on every poll
-        if (version === null) setBounded(failedUntil, key, Date.now() + FAILURE_TTL_MS, MAX_KEYS);
-        else setBounded(cache, key, version, MAX_KEYS);
+        if (version === null) failedUntil.set(key, Date.now() + FAILURE_TTL_MS);
+        else cache.set(key, version);
         inFlight.delete(key);
         resolve(version);
       },

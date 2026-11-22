@@ -1,23 +1,40 @@
 /**
- * Long-lived hub maps and sets that gain keys over time keep at most `max`, oldest first out
- * (a Map or Set iterates in insertion order), so a hub left running for weeks does not grow.
+ * Long-lived hub maps and sets that gain keys over time hold at most `max`: the oldest key goes
+ * first (a Map or Set iterates in insertion order), and setting a key again makes it the newest.
+ * The cap is part of the collection's type, so a call site cannot drop it by accident.
  */
-export function setBounded<K, V>(map: Map<K, V>, key: K, value: V, max: number): void {
-  map.delete(key);
-  map.set(key, value);
-  while (map.size > max) {
-    const oldest = map.keys().next();
-    if (oldest.done) break;
-    map.delete(oldest.value);
+export class BoundedMap<K, V> extends Map<K, V> {
+  readonly max: number;
+  constructor(max: number) {
+    super();
+    this.max = max;
+  }
+  override set(key: K, value: V): this {
+    this.delete(key);
+    super.set(key, value);
+    while (this.size > this.max) {
+      const oldest = this.keys().next();
+      if (oldest.done) break;
+      this.delete(oldest.value);
+    }
+    return this;
   }
 }
 
-export function addBounded<T>(set: Set<T>, value: T, max: number): void {
-  set.delete(value);
-  set.add(value);
-  while (set.size > max) {
-    const oldest = set.values().next();
-    if (oldest.done) break;
-    set.delete(oldest.value);
+export class BoundedSet<T> extends Set<T> {
+  readonly max: number;
+  constructor(max: number) {
+    super();
+    this.max = max;
+  }
+  override add(value: T): this {
+    this.delete(value);
+    super.add(value);
+    while (this.size > this.max) {
+      const oldest = this.values().next();
+      if (oldest.done) break;
+      this.delete(oldest.value);
+    }
+    return this;
   }
 }

@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { COMMS_NOTICE, FLIGHT_WAKE_STORED_BYTES, inferTicket, TITLE_MARKERS } from "@mc/core";
+import { parseJson } from "../json.ts";
 import { compactFlightWake } from "./rows.ts";
 
 type Row = Record<string, SQLInputValue>;
@@ -274,7 +275,8 @@ class Migrations {
         const rows = this.db.prepare(unfolded).all() as { id: string; loop: string }[];
         const set = this.db.prepare("UPDATE runs SET loop = ? WHERE id = ?");
         for (const r of rows) {
-          const loop = JSON.parse(r.loop) as Record<string, unknown>;
+          const loop = parseJson<Record<string, unknown> | null>(r.loop, null);
+          if (loop === null) continue;
           const parked = loop.parked as
             | { kind?: string; reason?: string; ended?: boolean }
             | null

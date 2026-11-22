@@ -10,6 +10,7 @@ import { z } from "zod";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -162,15 +163,17 @@ function quietAt(p: NotificationPreferences, at: number): boolean {
   return start < end ? time >= start && time < end : start > end && (time >= start || time < end);
 }
 
+interface NotificationState {
+  seen: Record<string, string>;
+  events: NotificationEvent[];
+  away: boolean;
+  /** versionOf's format the seen versions were written in; absent before VERSION_FORMAT 2. */
+  format?: number;
+}
+
 /** Local events only: delivery to devices is a separate transport. */
 export class LocalNotifications {
-  private readonly state: {
-    seen: Record<string, string>;
-    events: NotificationEvent[];
-    away: boolean;
-    /** versionOf's format the seen versions were written in; absent before VERSION_FORMAT 2. */
-    format?: number;
-  };
+  private readonly state: NotificationState;
   private publishing = false;
   private readonly store: Store;
   private readonly config: CcConfig;
@@ -182,9 +185,11 @@ export class LocalNotifications {
     this.config = config;
     this.bus = bus;
     this.now = now;
-    this.state = JSON.parse(
-      store.getSetting("notification-events") ?? '{"seen":{},"events":[],"away":false}',
-    );
+    this.state = parseJson<NotificationState>(store.getSetting("notification-events"), {
+      seen: {},
+      events: [],
+      away: false,
+    });
   }
 
   preferences(): NotificationPreferences {

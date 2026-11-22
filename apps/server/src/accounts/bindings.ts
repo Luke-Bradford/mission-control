@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 export interface CliBinding {
@@ -55,6 +56,10 @@ export function runAccountId(store: Store, runId: string | null, configured: str
   if (runId === null) return configured;
   const text = store.getSetting(`account-transfer:${runId}`);
   if (text === null) return configured;
-  const binding = JSON.parse(text) as { source: string; target: string; pending: boolean };
+  const binding = parseJson<{ source: string; target: string; pending: boolean } | null>(
+    text,
+    null,
+  );
+  if (binding === null) return configured;
   return binding.pending ? binding.source : binding.target;
 }

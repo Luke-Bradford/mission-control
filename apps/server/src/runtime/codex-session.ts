@@ -12,6 +12,7 @@ import {
   type SessionEvent,
 } from "@mc/core";
 import { plainCall } from "../guard/plain-call.ts";
+import { parseJson } from "../json.ts";
 import { str } from "../util.ts";
 import { CODEX_MCP_ELICITATION } from "./codex-wire.ts";
 import { CODEX_DELIVERY } from "./keeper.ts";
@@ -77,7 +78,7 @@ function readOutbox(path: string, transcriptPath?: string): Map<string, string> 
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return new Map();
     throw e;
   }
-  const entries: unknown = JSON.parse(text);
+  const entries: unknown = parseJson<unknown>(text, null);
   if (
     !Array.isArray(entries) ||
     !entries.every(

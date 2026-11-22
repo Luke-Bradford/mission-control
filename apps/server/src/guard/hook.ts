@@ -30,6 +30,7 @@ import {
   HOOK_RETRY_MS,
   LOOPBACK_HOST,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 
 export interface HookResult {
   out: string;
@@ -63,7 +64,7 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 /** The check body: only what the guard reads, never the raw stdin (a Write's content, a Post's output). */
 function checkBody(stdin: string): { event: GuardHookEvent; body: string } {
-  const e: unknown = JSON.parse(stdin);
+  const e: unknown = parseJson<unknown>(stdin, null);
   if (!isObject(e)) throw new Unusable();
   const event = e.hook_event_name;
   const tool = e.tool_name;

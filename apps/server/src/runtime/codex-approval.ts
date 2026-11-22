@@ -21,7 +21,7 @@ import {
 import { type CcConfig, crewSeatGrants } from "../config.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
-import type { TestLock } from "../guard/lock.ts";
+import { LockStoreError, type TestLock } from "../guard/lock.ts";
 import { codexApproval, codexEditAllowed } from "./codex-floor.ts";
 import { CODEX_MCP_ELICITATION, type CodexSessionInput } from "./codex-session.ts";
 
@@ -210,13 +210,19 @@ export function createCodexApprover(i: {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
         const key = { runId: i.runId, toolUseId: String(id) };
-        const granted = await i.lock.acquire(
-          key,
-          i.seatId,
-          verdict.command,
-          CODEX_LOCK_WAIT_MS,
-          signal,
-        );
+        let granted: boolean;
+        try {
+          granted = await i.lock.acquire(
+            key,
+            i.seatId,
+            verdict.command,
+            CODEX_LOCK_WAIT_MS,
+            signal,
+          );
+        } catch (e) {
+          if (e instanceof LockStoreError) return refuse("full-suite", e.message);
+          throw e;
+        }
         if (!granted || signal.aborted) {
           if (granted) i.lock.release(key);
           const h = i.lock.state().holder;
