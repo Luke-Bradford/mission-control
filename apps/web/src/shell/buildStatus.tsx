@@ -308,6 +308,12 @@ export const BUILD_NOTES: BuildNote[] = [
   { panel: "tStepBars", cls: "later", label: "P2", note: "Usage keyed by loop step." },
   { panel: "tTotals", cls: "proven", label: "Proven", note: "Usage totals per agent." },
   {
+    panel: "setup-hub",
+    cls: "build",
+    label: "Buildable",
+    note: "Hub settings write config.yaml with a backup. Restart-only settings wait for the operator to restart the hub.",
+  },
+  {
     panel: "setup-sessions",
     cls: "proven",
     label: "Proven",
