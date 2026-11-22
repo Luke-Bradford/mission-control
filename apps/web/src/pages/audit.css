@@ -142,7 +142,11 @@
 }
 
 .audit-table th.dec {
-  width: 150px;
+  width: 180px;
+}
+
+.audit-table th.n3 {
+  width: 88px;
 }
 
 .audit-table .rec > td {
@@ -240,11 +244,13 @@
 }
 
 .rec .dec span {
-  display: block;
+  display: -webkit-box;
   color: var(--muted);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
 }
 
 .audit-table .more > td {

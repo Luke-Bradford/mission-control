@@ -219,6 +219,24 @@ it("opens the first row, toggles rows, and filters by decider", async () => {
   for (const r of flight) expect(r.querySelector(".dec b")?.textContent).toBe("FLIGHT");
 });
 
+it("opens the model panels from a button, and shows who decides in the open row", async () => {
+  stubFetch({
+    "/api/audit?range=30d": AUDIT,
+    "/api/config": CONFIG,
+    "/api/waste": WASTE,
+    "/api/audit/models?range=30d": {
+      groups: { none: [], type: [], size: [], plan: [] },
+      changes: [],
+    },
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Do next" });
+  expect(screen.queryByRole("region", { name: "Rework and cost by model" })).toBeNull();
+  expect(document.querySelector(".more")?.textContent).toMatch(/Decides: (FLIGHT|You), /);
+  fireEvent.click(screen.getByRole("button", { name: "Rework and cost by model" }));
+  expect(await screen.findByRole("heading", { name: "Rework and cost by model" })).toBeTruthy();
+});
+
 it("links each row's detail to the seat and run, in words rather than raw ids", async () => {
   render(<Audit />);
   await screen.findByRole("heading", { level: 2, name: "Do next" });

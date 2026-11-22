@@ -13,6 +13,7 @@ import { cost, elapsed, percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
+import { ModelPanels } from "./ModelTable.tsx";
 import "./audit.css";
 
 const RANGES = ["7d", "30d", "90d", "365d"] as const;
@@ -47,6 +48,7 @@ export function Audit() {
 
 function AuditDashboard() {
   const [range, setRange] = useState<AuditRange>("30d");
+  const [models, setModels] = useState(false);
   const res = useResource<AuditData>(RESOURCES.audit(range));
   const configRes = useResource<ConfigView>(RESOURCES.config);
   const wasteRes = useResource<WasteReport>(RESOURCES.waste);
@@ -95,6 +97,14 @@ function AuditDashboard() {
           range={range}
           waste={waste}
         />
+        <button
+          type="button"
+          className="audit-retry"
+          aria-expanded={models}
+          onClick={() => setModels(!models)}
+        >
+          Rework and cost by model
+        </button>
         <Seg label="Range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>
       {audit && (
@@ -115,6 +125,7 @@ function AuditDashboard() {
           </div>
         </div>
       )}
+      {models && <ModelPanels range={range} />}
     </div>
   );
 }
@@ -295,7 +306,7 @@ function DoNext({
                       </td>
                       <td className="dec">
                         <b className={a.decider === "You" ? "you" : undefined}>{a.decider}</b>
-                        <span>{a.deciderNote}</span>
+                        <span title={a.deciderNote}>{a.deciderNote}</span>
                       </td>
                     </tr>
                     {isOpen && (
@@ -314,6 +325,9 @@ function DoNext({
                               <h3>Target</h3>
                               <p>
                                 {a.measure.target} {a.measure.unit}: {a.measure.targetSource}.
+                              </p>
+                              <p>
+                                Decides: {a.decider}, {a.deciderNote}.
                               </p>
                               <p>
                                 State: proposed. Nothing is stored for it, so it has no review date.
@@ -589,9 +603,9 @@ function WhereFindingsLand({ audit }: { audit: AuditData }) {
             <thead>
               <tr>
                 <th>File</th>
-                <th className="num">Findings</th>
-                <th className="num">Touches</th>
-                <th className="num">Per touch</th>
+                <th className="num n3">Findings</th>
+                <th className="num n3">Touches</th>
+                <th className="num n3">Per touch</th>
               </tr>
             </thead>
             <tbody>

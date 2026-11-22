@@ -176,6 +176,24 @@ describeRendered("Audit first screen in a browser", () => {
         expect(pathDetail.x + pathDetail.width).toBeLessThanOrEqual(
           filesPanel.x + filesPanel.width,
         );
+        // The File column takes most of the files table; the three number columns are narrow.
+        const share = await page.evaluate(() => {
+          const th = document.querySelector<HTMLElement>(".audit-files th");
+          const table = document.querySelector<HTMLElement>(".audit-files table");
+          return th && table
+            ? th.getBoundingClientRect().width / table.getBoundingClientRect().width
+            : 0;
+        }, null);
+        expect(share).toBeGreaterThanOrEqual(0.55);
+        // A Decides note wraps; none is cut off.
+        const cutNotes = await page.evaluate(
+          () =>
+            [...document.querySelectorAll<HTMLElement>(".rec .dec span")].filter(
+              (el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight + 1,
+            ).length,
+          null,
+        );
+        expect(cutNotes).toBe(0);
         for (const toggle of await page.boxes(".audit-rt")) {
           expect(toggle.height).toBeGreaterThanOrEqual(24);
         }
