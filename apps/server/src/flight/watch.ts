@@ -84,10 +84,12 @@ import {
   wakeFacts,
 } from "./state.ts";
 
-const ANNOUNCED_MAX = 1000;
+export const ANNOUNCED_MAX = 1000;
 const FIRST_CONTEXT_MAX = 200;
 
 export interface FlightWatchDeps {
+  /** How many announced missed items are remembered; tests lower it. */
+  announcedMax?: number;
   config: CcConfig;
   refreshAuthors?: (repoId: string) => Promise<void>;
   store: Store;
@@ -210,7 +212,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
   /** Missed-triage identities already announced; the oldest go once the cap is passed. */
-  const announced = new BoundedSet<string>(ANNOUNCED_MAX);
+  const announced = new BoundedSet<string>(deps.announcedMax ?? ANNOUNCED_MAX);
   let preparingDay: string | null = null;
   let attemptedDay: string | null = null;
   let retryAt = 0;

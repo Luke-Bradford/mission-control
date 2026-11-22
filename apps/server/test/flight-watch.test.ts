@@ -90,6 +90,7 @@ import {
   wakeFacts,
 } from "../src/flight/state.ts";
 import {
+  ANNOUNCED_MAX,
   createFlightWatch,
   type FlightWatch,
   type FlightWatchDeps,
@@ -228,7 +229,9 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked"> = {}) => {
+const makeWatch = (
+  over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked" | "announcedMax"> = {},
+) => {
   watch = createFlightWatch({
     ...over,
     config,
@@ -1451,16 +1454,22 @@ describe("FLIGHT's brief in the digest", () => {
       expect(emitted).toContain("attention"); // the set let go of it, so it is announced again
     });
 
-    it("keeps at most 1000 announced items: the oldest is announced again", async () => {
+    it("remembers at most the announced cap: the oldest is announced again", async () => {
+      watch.stop();
+      makeWatch({ announcedMax: 5 });
       liveCrew();
       nowMs = T0 + MIN;
-      raiseAll(1005);
+      raiseAll(8);
       nowMs = T0 + 40 * MIN;
       await watch.check();
       expect(emitted).toContain("attention");
       emitted.length = 0;
       await watch.check();
-      expect(emitted).toContain("attention"); // the 5 dropped identities are announced again
+      expect(emitted).toContain("attention"); // the 3 dropped identities are announced again
+    });
+
+    it("has a real cap of 1000", () => {
+      expect(ANNOUNCED_MAX).toBe(1000);
     });
   });
 
