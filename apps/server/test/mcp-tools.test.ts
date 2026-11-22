@@ -5830,8 +5830,18 @@ describe("report_plan", () => {
     endFails = true;
     const result = await plan();
     expect(result).toMatchObject({ isError: true });
-    expect(result.text).toContain("could not be ended");
+    expect(result.text).toContain("could not end the run");
     expect(told).toEqual([["fao-1", FAO_RUN]]);
+  });
+
+  it("ends the run on the retry after the plan was saved, without writing it again", async () => {
+    endFails = true;
+    await plan();
+    ghState(view(ghCalls().at(-1)?.body ?? ""));
+    endFails = false;
+    const second = await plan();
+    expect(second).not.toMatchObject({ isError: true });
+    expect(told).toHaveLength(2);
   });
 
   it("rechecks away after reading the issue and before editing it", async () => {

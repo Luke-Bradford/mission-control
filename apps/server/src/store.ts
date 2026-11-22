@@ -124,6 +124,7 @@ import {
   tokenBaselines,
   type UsageSample,
 } from "@mc/core";
+import { setBounded } from "./bounded.ts";
 import { StandingInstructions } from "./instructions/standing.ts";
 import { parseJson } from "./json.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
@@ -198,6 +199,9 @@ import {
   toolImprovements,
 } from "./telemetry/audit-improvements.ts";
 import { specBounces } from "./telemetry/spec-bounces.ts";
+
+/** Prepared statements kept per Store: the views use a fixed set of texts, so this is a ceiling only. */
+const STATEMENTS_MAX = 256;
 
 export * from "./store/types.ts";
 
@@ -314,7 +318,7 @@ export class Store {
     let statement = this.statements.get(sql);
     if (!statement) {
       statement = this.rawDb.prepare(sql);
-      this.statements.set(sql, statement);
+      setBounded(this.statements, sql, statement, STATEMENTS_MAX);
     }
     return statement;
   }

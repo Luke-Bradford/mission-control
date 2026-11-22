@@ -29,4 +29,22 @@ describe("stored JSON that will not parse", () => {
     expect(prs).toHaveLength(1);
     expect(prs[0]?.number).toBe(2);
   });
+
+  it("drops an unreadable FLIGHT ledger entry and keeps the good ones", () => {
+    const insert = raw.db.prepare(
+      "INSERT INTO flight_ledger (session_id, key, kind, status, updated_at, entry) VALUES ('s', ?, 'k', 'open', 1, ?)",
+    );
+    insert.run("a", "{broken");
+    insert.run("b", JSON.stringify({ key: "b" }));
+    expect(store.flightLedger("s").map((e) => e.key)).toEqual(["b"]);
+  });
+
+  it("reads a ticket plan whose mockups will not parse as having none", () => {
+    raw.db
+      .prepare(
+        "INSERT INTO ticket_plans (repo_id, issue, state, required, mockups, requested_at) VALUES ('mc', 5, 'awaiting-plan', 0, '[oops', 1)",
+      )
+      .run();
+    expect(store.plans.get("mc", 5)?.mockups).toEqual([]);
+  });
 });

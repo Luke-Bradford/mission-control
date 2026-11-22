@@ -48,6 +48,7 @@ import {
   wakeLine,
 } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
+import { addBounded, setBounded } from "../bounded.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
@@ -81,6 +82,9 @@ import {
   urgentChange,
   wakeFacts,
 } from "./state.ts";
+
+const ANNOUNCED_MAX = 1000;
+const FIRST_CONTEXT_MAX = 200;
 
 export interface FlightWatchDeps {
   config: CcConfig;
@@ -204,6 +208,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
+  /** Missed-triage identities already announced; the oldest go once the cap is passed. */
   const announced = new Set<string>();
   let preparingDay: string | null = null;
   let attemptedDay: string | null = null;
@@ -379,7 +384,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         nextDue = Math.min(nextDue, item.triageDueAt);
       const identity = `${item.key}:${item.at}`;
       if (item.flightTriage === "missed" && !announced.has(identity)) {
-        announced.add(identity);
+        addBounded(announced, identity, ANNOUNCED_MAX);
         added = true;
       }
     }
@@ -580,7 +585,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     // past the context limit: one handover wake, then the fresh session once that turn has ended
     const context = store.digest(runId)?.contextTokens ?? null;
-    if (context !== null && !firstContext.has(runId)) firstContext.set(runId, context);
+    if (context !== null && !firstContext.has(runId))
+      setBounded(firstContext, runId, context, FIRST_CONTEXT_MAX);
     const grown = context === null ? 0 : context - (firstContext.get(runId) ?? context);
     if (
       context !== null &&

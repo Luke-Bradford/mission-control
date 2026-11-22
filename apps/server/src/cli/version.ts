@@ -7,6 +7,9 @@
 import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { setBounded } from "../bounded.ts";
+
+const MAX_KEYS = 200;
 
 /** The command that runs the Claude CLI: the version probe and the crew spawn both use it. */
 export const CLAUDE_COMMAND = "claude";
@@ -56,7 +59,7 @@ function locate(binary: string): Located | null {
   } catch {
     // vanished between the walk and the stat: treated as not found
   }
-  notFoundUntil.set(missKey, Date.now() + NOT_FOUND_TTL_MS);
+  setBounded(notFoundUntil, missKey, Date.now() + NOT_FOUND_TTL_MS, MAX_KEYS);
   return null;
 }
 
@@ -79,8 +82,8 @@ function probe({ path, key }: Located, timeoutMs: number): Promise<string | null
       (err, stdout) => {
         const version = err ? null : parseCliVersion(stdout);
         // a failed run is remembered too: a broken binary must not be probed again on every poll
-        if (version === null) failedUntil.set(key, Date.now() + FAILURE_TTL_MS);
-        else cache.set(key, version);
+        if (version === null) setBounded(failedUntil, key, Date.now() + FAILURE_TTL_MS, MAX_KEYS);
+        else setBounded(cache, key, version, MAX_KEYS);
         inFlight.delete(key);
         resolve(version);
       },

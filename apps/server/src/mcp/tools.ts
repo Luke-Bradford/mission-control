@@ -613,7 +613,7 @@ const FindingResolutionSchema = {
 };
 
 const MC_PLAN_NOT_ENDED =
-  "The plan was saved, but the run could not be ended. Call report_plan again.";
+  "The plan was saved, but the hub could not end the run. Call report_plan again with the same plan to end it; nothing is rewritten.";
 
 export function badArgs(e: z.ZodError): Result {
   const issue = e.issues[0];
@@ -2884,6 +2884,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return config.repos.find((r) => r.id === repoId)?.rules?.planSignoff ?? "never";
   }
 
+  /** Planner runs whose plan is saved but whose end failed, with the answer their retry gets. */
+  const planEndPending = new Map<string, Result>();
+
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = PlanArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -2898,6 +2901,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const loop = seatDef(place.seat).loop;
     const planlessBuild = loop === "build" && run.plan === undefined && !store.planLanded(run);
     if (loop !== "plan" && !planlessBuild) return { text: MC_PLAN_NOT_FAO, isError: true };
+    // The plan is already saved and only ending the run failed: the retry ends it, nothing is rewritten.
+    const savedPlan = planEndPending.get(run.id);
+    if (savedPlan !== undefined) return endPlannerRun(ctx, savedPlan);
     const issue = issueOf(run);
     const repo = repoOf(deps, run);
     if (issue === null || repo === "") return ENDED;
@@ -3148,17 +3154,23 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       text: planned,
     });
     bus.emit("agents");
-    if (loop === "plan") {
-      try {
-        await deps.onPlanned?.(ctx.seatId, ctx.runId);
-      } catch (e) {
-        deps.log?.(
-          `mc report_plan: could not end ${ctx.runId}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        return { text: MC_PLAN_NOT_ENDED, isError: true };
-      }
+    if (loop === "plan") return endPlannerRun(ctx, written);
+    return { text: MC_PLAN_WRITTEN_CONTINUE };
+  }
+
+  /** Ends a planner's run after its plan is saved; a failure is kept so the seat's retry only ends it. */
+  async function endPlannerRun(ctx: McToolContext, written: Result): Promise<Result> {
+    try {
+      await deps.onPlanned?.(ctx.seatId, ctx.runId);
+    } catch (e) {
+      deps.log?.(
+        `mc report_plan: could not end ${ctx.runId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      planEndPending.set(ctx.runId, written);
+      return { text: MC_PLAN_NOT_ENDED, isError: true };
     }
-    return loop === "plan" ? written : { text: MC_PLAN_WRITTEN_CONTINUE };
+    planEndPending.delete(ctx.runId);
+    return written;
   }
 
   return [

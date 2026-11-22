@@ -567,6 +567,46 @@ describe("POST /api/guard/check", () => {
       ]);
     });
 
+    it("records one shell decision when the same post-tool hook arrives twice at once", async () => {
+      let release: (secrets: string[]) => void = () => {};
+      const gate = new Promise<string[]>((resolve) => {
+        release = resolve;
+      });
+      const cfg = config();
+      cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "a",
+        model: "haiku",
+        area: [],
+      });
+      let secretReads = 0;
+      const held = await build({
+        config: cfg,
+        knownSecrets: () => {
+          secretReads += 1;
+          return gate;
+        },
+      });
+      try {
+        const body = {
+          ...post("twice"),
+          tool_input: { command: "gh pr close 12" },
+          cwd: "/repo",
+          exit_code: 0,
+        };
+        const both = Promise.all([check(tokF, body, held), check(tokF, body, held)]);
+        await vi.waitFor(() => expect(secretReads).toBeGreaterThan(0));
+        release([]);
+        await both;
+        expect(secretReads).toBe(1);
+        expect(shell()).toHaveLength(1);
+        expect(store.getSetting("flight-shell-audit:run-f:twice")).toBe("recorded");
+      } finally {
+        await held.close();
+      }
+    });
+
     it("counts shell writes toward the runaway breaker, and holds them once it trips", async () => {
       for (let i = 0; i < FLIGHT_RUNAWAY.sameActionLimit; i++)
         expect((await complete(`r${i}`, "gh pr close 12")).body).toBe("{}");

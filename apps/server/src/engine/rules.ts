@@ -11,6 +11,7 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_REPO_RULES, type RepoRules } from "@mc/core";
 import { parse as parseYaml } from "yaml";
+import { setBounded } from "../bounded.ts";
 import { readRepoClaudeMd } from "../runtime/brief.ts";
 import { crewGit } from "../runtime/git.ts";
 import { overlayRepoBlock, type RepoBlock, repoRulesSchema } from "./rule-config.ts";
@@ -223,7 +224,7 @@ export async function readRepoRules(
       if (!(e instanceof RepoRulesError)) throw e;
       outcome = new RepoRulesError(`${repo}: ${e.message}`);
     }
-    cache.set(checkout, { sha, base, outcome });
+    setBounded(cache, checkout, { sha, base, outcome }, 200);
     return outcome;
   } catch (e) {
     return new RepoRulesError(
