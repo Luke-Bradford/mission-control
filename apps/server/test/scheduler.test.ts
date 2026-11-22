@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -397,6 +397,70 @@ describe("scheduler", () => {
       "Europe/London",
       NOW,
     ]);
+  });
+
+  it("shows a paused loop's failing read as paused, not as a failure from days ago", async () => {
+    mkdirSync(join(dir, "ta"), { recursive: true });
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    const c = stubs({
+      ta: vi.fn(async (loop: { id: string }, st: Store) => {
+        st.setStatus(`ta-loop:${loop.id}`, false, "launchd job not running");
+      }),
+      studio: vi.fn(async (loop: { id: string }, st: Store) => {
+        st.setStatus(`studio-loop:${loop.id}`, false, "launchd job not running");
+      }),
+    });
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+    await s.tick("ta");
+    await s.tick("studio");
+    const row = (name: string) => store.status().find((r) => r.collector === name);
+    expect(row("ta-loop:shop-app-ta")).toMatchObject({
+      ok: true,
+      error: "paused (read failed: launchd job not running)",
+    });
+    // the studio loop is not paused: its failure stays
+    expect(row("studio-loop:studio-builder")).toMatchObject({ ok: false });
+  });
+
+  it("writes a paused loop's failure once: a steady failure does not move readVersion", async () => {
+    mkdirSync(join(dir, "ta"), { recursive: true });
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    const c = stubs({
+      ta: vi.fn(async (loop: { id: string }, st: Store) => {
+        st.setStatus(`ta-loop:${loop.id}`, false, "launchd job not running");
+      }),
+    });
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: c });
+    await s.tick("ta");
+    const v = store.readVersion();
+    await s.tick("ta");
+    expect(store.readVersion()).toBe(v);
+  });
+
+  it("shows a paused repo's failing PR read as paused; an unpaused repo's stays failing", async () => {
+    const failing = vi.fn(async () => {
+      throw new Error("HTTP 502");
+    });
+    const run = async () => {
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: stubs({ prSweep: failing }),
+      });
+      await s.tick("prs");
+    };
+    await run();
+    expect(row("github:shop-app:prs")).toMatchObject({ ok: false, error: "HTTP 502" });
+    mkdirSync(join(dir, "ta"), { recursive: true });
+    writeFileSync(join(dir, "ta", "PAUSE"), "");
+    config.loops = config.loops.filter((l) => l.kind === "ta-loop");
+    await run();
+    expect(row("github:shop-app:prs")).toMatchObject({
+      ok: true,
+      error: "paused (read failed: HTTP 502)",
+    });
   });
 
   it("hands both loop collectors the launchctl runner", async () => {
