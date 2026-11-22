@@ -65,8 +65,8 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
              model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
              ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-             account_id, effort, prompt_hash, loop_kind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             account_id, effort, prompt_hash, loop_kind, advice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
              started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -80,7 +80,8 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
              account_id = COALESCE(account_id, excluded.account_id),
              effort = COALESCE(effort, excluded.effort),
              prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
-             loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
+             loop_kind = COALESCE(loop_kind, excluded.loop_kind),
+             advice = COALESCE(advice, excluded.advice)`,
       ).run(
         r.id,
         r.agentId,
@@ -112,6 +113,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         r.effort ?? null,
         r.promptHash ?? null,
         r.loopKind ?? null,
+        r.advice === undefined ? null : JSON.stringify(r.advice),
       );
     },
 

@@ -95,6 +95,7 @@ import {
   type McToolName,
   METER_FULL_PCT,
   type MilestonesView,
+  modelsView,
   NEW_LOOP,
   needsYouAlert,
   OPERATOR_BOOTSTRAP_PATH,
@@ -3958,6 +3959,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             config.audit?.thresholds,
           ),
         );
+      });
+      // Reader: docs/runbook.md#audit-api (rework and cost by model, and before and after each change)
+      api.get<{ Querystring: { range?: string } }>("/audit/models", async (req, reply) => {
+        const match = /^(7|30|90|365)d$/.exec(req.query.range ?? "30d");
+        if (!match) return reply.code(400).send({ error: "range must be 7d, 30d, 90d, or 365d" });
+        const until = now();
+        const from = until - Number(match[1]) * 86_400_000;
+        return modelsView(store.modelTableData(from, until), from, until);
       });
       // Reader: docs/runbook.md#spend-report (spend per merged change and the building share; the Audit page reads it)
       api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));

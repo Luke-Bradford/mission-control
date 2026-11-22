@@ -140,19 +140,21 @@ it("fails closed while crew classification is loading or unavailable", async () 
         ? new Promise<Response>((done) => {
             resolveConfig = done;
           })
-        : Promise.resolve(
-            new Response(
-              JSON.stringify({
-                ...AUDIT,
-                longRunners: [
-                  ...AUDIT.longRunners,
-                  { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
-                  { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
-                ],
-              }),
-              { status: 200 },
+        : input.startsWith("/api/audit/models")
+          ? Promise.resolve(new Response(JSON.stringify({ error: "n/a" }), { status: 404 }))
+          : Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  ...AUDIT,
+                  longRunners: [
+                    ...AUDIT.longRunners,
+                    { ...AUDIT.longRunners[0], runId: "run/observed", agentId: "studio-builder" },
+                    { ...AUDIT.longRunners[0], runId: "run/watch", agentId: "flight-1" },
+                  ],
+                }),
+                { status: 200 },
+              ),
             ),
-          ),
     ),
   );
   render(<Audit />);

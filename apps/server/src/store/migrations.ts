@@ -258,6 +258,8 @@ class Migrations {
       ["prompt_hash", "TEXT"],
       // The seat's loop kind at the start; `upsertRun` keeps the first value.
       ["loop_kind", "TEXT"],
+      // The model advice for the run's step at creation; kept when a later write has none.
+      ["advice", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
     // Migration only: a run's old park and set-aside records fold into one `hold` (#2071), so a

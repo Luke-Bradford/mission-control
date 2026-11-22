@@ -334,6 +334,15 @@ CREATE TABLE IF NOT EXISTS profile_overrides (
   repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
   by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
 );
+-- The model and effort recommended for a ticket's step, with the reason; the latest write wins.
+CREATE TABLE IF NOT EXISTS model_advice (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, step TEXT NOT NULL, model TEXT, effort TEXT,
+  reason TEXT NOT NULL, by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue, step)
+);
+-- Every step-up recommendation ever recorded, append-only: model_advice keeps only the latest per step.
+CREATE TABLE IF NOT EXISTS model_step_ups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, issue INTEGER NOT NULL, at INTEGER NOT NULL
+);
 -- FLIGHT's living brief: one row per crew session and section.
 CREATE TABLE IF NOT EXISTS flight_brief (
   session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
