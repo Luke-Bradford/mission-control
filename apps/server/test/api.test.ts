@@ -10256,6 +10256,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
     NOW,
   );
   const heldPreviews = new PreviewManager({
+    trusted: async () => true,
     exists: () => false,
     capacity: () => ({ blocked: true, reason: "memory free is 8.0%" }),
     start: async () => ({ stop: () => {} }),
@@ -10284,6 +10285,7 @@ it("starts, lists and closes an operator-only PR preview", async () => {
   const stop = vi.fn();
   let activityToken = "";
   const previews = new PreviewManager({
+    trusted: async () => true,
     exists: () => false,
     capacity: () => ({ blocked: false, reason: null }),
     start: async ({ token }) => {
