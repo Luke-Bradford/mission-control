@@ -369,8 +369,8 @@ describe("session actions", () => {
       await expect(save()).rejects.toThrow("Stop or remove the 1 agent(s)");
       store.setSeatSession({ ...row, state: "stopped" });
       const aside = vi
-        .spyOn(store, "asideRuns")
-        .mockReturnValue([{ agentId: "pilot" } as ReturnType<Store["asideRuns"]>[number]]);
+        .spyOn(store, "offSeatRuns")
+        .mockReturnValue([{ agentId: "pilot" } as ReturnType<Store["offSeatRuns"]>[number]]);
       await expect(save()).rejects.toThrow("Stop or remove the 1 agent(s)");
       aside.mockRestore();
       const activeRun = vi
@@ -465,9 +465,11 @@ describe("session actions", () => {
           kind === "run" ? ({ endedAt: null } as ReturnType<Store["seatRun"]>) : undefined,
         );
       const aside = vi
-        .spyOn(store, "asideRuns")
+        .spyOn(store, "offSeatRuns")
         .mockReturnValue(
-          kind === "aside" ? [{ agentId: "pilot" } as ReturnType<Store["asideRuns"]>[number]] : [],
+          kind === "aside"
+            ? [{ agentId: "pilot" } as ReturnType<Store["offSeatRuns"]>[number]]
+            : [],
         );
       try {
         await createSession(path, input("harbor-two"), now, config);

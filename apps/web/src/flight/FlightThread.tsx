@@ -58,12 +58,15 @@ export function FlightThread({
   onJumped,
   itemKey,
   about,
+  openRequest = 0,
 }: {
   id?: string;
   /** The Needs-you question this thread sits beside: sends carry it, so FLIGHT knows what they are about. */
   itemKey?: string;
   /** That question's title, shown as the `About:` heading. */
   about?: string;
+  /** Bumped by an item's Discuss control: moves focus to this conversation's composer. */
+  openRequest?: number;
   /** Comms' "Hide hub notices" switch: the page is read without them and they are filtered out. */
   hideNotices?: boolean;
   /** Older pages the route has not sent: Comms passes them in, with a "Load older" control. */
@@ -97,6 +100,10 @@ export function FlightThread({
   };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (openRequest > 0) input.current?.focus();
+  }, [openRequest]);
   const all = older?.messages ?? res.data?.messages ?? [];
   const messages = hideNotices ? all.filter((m) => m.kind !== COMMS_NOTICE) : all;
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow new messages while the reader is at the bottom
@@ -245,6 +252,7 @@ export function FlightThread({
         }}
       >
         <textarea
+          ref={input}
           id={id}
           className="flight-thread-input"
           aria-label="Message FLIGHT"

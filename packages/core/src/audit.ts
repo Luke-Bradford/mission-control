@@ -93,13 +93,26 @@ export const AUDIT_MEASURED_TOOLS = [
   MC_TOOL_NAMES.previewBrowser,
 ] as const;
 
+/** Routine hub events Audit watches for an unexpected silence. */
+export const SILENCE_WATCHED_EVENTS = [
+  {
+    kind: "merged-pr-review-recorded",
+    label: "Merged PR review recording",
+    gapMs: 24 * 60 * 60_000,
+  },
+  { kind: "screenshot-captured", label: "Screenshot capture", gapMs: 24 * 60 * 60_000 },
+  { kind: "flight-tool-succeeded", label: "FLIGHT tool success", gapMs: 6 * 60 * 60_000 },
+  { kind: "ci-result-observed", label: "CI result observation", gapMs: 6 * 60 * 60_000 },
+  { kind: "seat-run-started", label: "Seat run start", gapMs: 6 * 60 * 60_000 },
+] as const;
+export type SilenceWatchedEventKind = (typeof SILENCE_WATCHED_EVENTS)[number]["kind"];
+
 /** What a row in Audit's list of things to improve is about. */
 export const AUDIT_IMPROVEMENT_KINDS = [
   "question-asked-back",
   "question-waited",
   "delivered-after-run-ended",
   "chatter",
-  "repeat-message",
   "repeat-notice",
   "controller-request-waited",
   "ticket-message-volume",

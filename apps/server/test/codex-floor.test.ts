@@ -169,6 +169,7 @@ describe("codexSeatConfig", () => {
     expect(config).toContain(
       '[permissions.mc_seat.filesystem.":workspace_roots"]\n"."="write"\n".git"="read"\n".codex"="read"',
     );
+    // Codex's network stays off: its domain rules cannot keep the hub's loopback closed
     expect(config).toContain("[permissions.mc_seat.network]\nenabled = false");
     expect(config).not.toMatch(/notify|network_proxy|sandbox_mode|dangerously/);
   });
@@ -505,6 +506,13 @@ describe("Codex seat floor", () => {
     "pwd |& head",
   ])("refuses unfinished commands and every redirection: %j", (script) => {
     expect(codexLineCommands(script)).toBeNull();
+  });
+
+  it("accepts a command line that starts a background task", () => {
+    expect(codexLineCommands("sleep 30 &")).toEqual([
+      expect.objectContaining({ argv: ["sleep", "30"] }),
+    ]);
+    expect(codexLineCommands("node server.js & curl -sI https://example.com")).not.toBeNull();
   });
 
   it("passes the whole script on when the CLI's amendment names one segment", () => {

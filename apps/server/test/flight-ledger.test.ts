@@ -209,7 +209,13 @@ describe("flightMetrics", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "ci", reason: "CI failed 3 times", ended: false },
+          hold: {
+            kind: "ci",
+            reason: "CI failed 3 times",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
         },
       }),
     );
@@ -311,7 +317,11 @@ describe("flightMetrics", () => {
     ).entries())
       store.upsertRun(
         run(`park-${n}`, "guido-1", {
-          loop: { ...NEW_LOOP, phase: "parked", parked: { kind, reason: kind, ended: false } },
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            hold: { kind, reason: kind, ended: false, worktree: null, wake: false },
+          },
         }),
       );
     store.upsertRun(
@@ -320,7 +330,7 @@ describe("flightMetrics", () => {
         loop: {
           ...NEW_LOOP,
           phase: "parked",
-          parked: { kind: "review", reason: "ended", ended: true },
+          hold: { kind: "review", reason: "ended", ended: true, worktree: null, wake: false },
         },
       }),
     );
@@ -662,12 +672,12 @@ describe("retrospective measures", () => {
           "/telemetry",
           "/audit",
           "/setup",
+          "/planner",
           "/agent/flight-1",
           "/agent/guido-1",
         ],
         instruction: expect.stringContaining("log pages checked and tickets filed or folded"),
       },
-      wakeActions: { wakes: 2, noAction: 1, share: 0.5 },
     });
     await prepareRetrospective(config, store, NOW + MIN);
     expect(pendingRetrospective(store, "mc")).toEqual(report);

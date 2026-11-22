@@ -7,7 +7,6 @@ import {
   blockedItemPrefix,
   blockedNoteKey,
   CI_FAILED_TEXT,
-  CI_PENDING_MAX_MS,
   CI_TRIES,
   CONTROLLER_CHECK_PARK,
   ciVerdict,
@@ -25,6 +24,8 @@ import {
   LOOP_TEXT_REVIEW,
   LOOP_TEXT_REVIEW_PR,
   LOOP_TEXT_WORKING,
+  leaveSeat,
+  liftPark,
   loopText,
   MERGE_MAIN_TEXT,
   MERGE_STEP_WORDS,
@@ -36,10 +37,12 @@ import {
   NOTE_ITEM_PREFIX,
   NUDGE_TEXT,
   noShaDeleteText,
+  parkHold,
   pendingSeatWork,
   REFUSAL_TRIES,
   RESUME_TEXT,
   reconcile,
+  rejoinSeat,
   ticketControllerCheck,
   withControllerCheckItem,
   wokenEventText,
@@ -203,13 +206,8 @@ const again = (s: LoopSnapshot, loop: RunLoop): ReturnType<typeof reconcile> =>
 
 describe("constants and texts", () => {
   it("exports the tuning constants and fills templates", () => {
-    expect([CI_TRIES, REFUSAL_TRIES, CI_PENDING_MAX_MS, NO_CI_AFTER_MS]).toEqual([
-      3,
-      3,
-      30 * 60_000,
-      10 * 60_000,
-    ]);
-    expect(NEW_LOOP).toMatchObject({ phase: "working", epoch: 0, parked: null, cardFor: null });
+    expect([CI_TRIES, REFUSAL_TRIES, NO_CI_AFTER_MS]).toEqual([3, 3, 10 * 60_000]);
+    expect(NEW_LOOP).toMatchObject({ phase: "working", epoch: 0, hold: null, cardFor: null });
     expect(fillLoopText(NO_NEW_COMMIT_TEXT, { sha7: "abc1234" })).toContain("CI failed on abc1234");
     expect(CI_FAILED_TEXT.endsWith("The failing output:\n")).toBe(true);
     expect(RESUME_TEXT).toContain("{ref}");
@@ -272,7 +270,11 @@ describe("state step", () => {
     const s = snap({ ended: { reason: "stopped" } });
     const r = reconcile(s);
     expect(r.loop.phase).toBe("parked");
-    expect(r.loop.parked).toEqual({ kind: "ended", reason: "run ended (stopped)", ended: true });
+    expect(r.loop.hold).toMatchObject({
+      kind: "ended",
+      reason: "run ended (stopped)",
+      ended: true,
+    });
     expect(events(r.actions)).toEqual([]);
     const r2 = again(s, r.loop);
     expect(r2.loop).toEqual(r.loop);
@@ -282,25 +284,38 @@ describe("state step", () => {
     const r = reconcile(
       snap(
         { ended: { reason: "x" } },
-        { phase: "parked", parked: { kind: "ci", reason: "r", ended: false } },
+        {
+          phase: "parked",
+          hold: { kind: "ci", reason: "r", ended: false, worktree: null, wake: false },
+        },
       ),
     );
-    expect(r.loop.parked?.ended).toBe(true);
+    expect(r.loop.hold?.ended).toBe(true);
   });
 
-  it("3: parked stays parked", () => {
-    const l = { phase: "parked" as const, parked: { kind: "ci", reason: "r", ended: false } };
+  it("3: an old non-live park stops on upgrade, while live parks wait", () => {
+    const l = {
+      phase: "parked" as const,
+      hold: { kind: "gate", reason: "r", ended: false, worktree: null, wake: false },
+    };
     const r = reconcile(snap({ evidence: { id: 9, at: 1, ruling: false }, headCommit: SHA }, l));
-    expect(r.loop).toEqual({ ...NEW_LOOP, ...l });
-    expect(events(r.actions)).toEqual([]);
+    expect(r.loop.hold?.ended).toBe(true);
+    expect(r.actions.map((action) => action.kind)).toEqual(
+      expect.arrayContaining(["end-run", "take-next"]),
+    );
+    const review = {
+      phase: "parked" as const,
+      hold: { kind: "review", reason: "r", ended: false, worktree: null, wake: false },
+    };
+    expect(reconcile(snap({}, review)).loop).toEqual({ ...NEW_LOOP, ...review });
   });
 
   it("4: a closed PR parks", () => {
     const r = reconcile(snap({ pr: pr({ state: "closed" }) }, { phase: "ci" }));
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "pr-closed",
       reason: "PR #12 was closed without merging",
-      ended: false,
+      ended: true,
     });
     expect(events(r.actions)).toEqual(["parked: PR #12 was closed without merging"]);
   });
@@ -340,7 +355,7 @@ describe("state step", () => {
     );
     expect(r.loop.phase).toBe("parked");
     expect(r.loop.reportedEvidenceId).toBe(3);
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "ruling",
       reason: "SULU ruled on the CI failure on aaaaaaa instead of fixing it; see its last report",
       ended: false,
@@ -351,7 +366,7 @@ describe("state step", () => {
     for (const kind of ["ruling", "review-ruling"]) {
       const parked = {
         phase: "parked" as const,
-        parked: { kind, reason: "ruled", ended: false },
+        hold: { kind, reason: "ruled", ended: false, worktree: null, wake: false },
         ciFailedSha: SHA,
         reportedEvidenceId: 1,
       };
@@ -362,7 +377,7 @@ describe("state step", () => {
         evidenceCount: 1,
       };
       const r = reconcile(snap({ ...newer, pr: pr({ headSha: SHA2, ci: "passing" }) }, parked));
-      expect(r.loop).toMatchObject({ phase: "review", parked: null, ciFails: 0 });
+      expect(r.loop).toMatchObject({ phase: "review", hold: null, ciFails: 0 });
       expect(events(r.actions)).toEqual([`CI green on bbbbbbb; ruling on aaaaaaa void`]);
       // red, pending or unchanged heads, and a closed PR, stay parked
       for (const over of [
@@ -402,10 +417,10 @@ describe("state step", () => {
     for (const ruling of [false, true]) {
       const r = reconcile(snap({ evidence: { id: 1, at: 1, ruling } }));
       expect(r.loop.phase).toBe("parked");
-      expect(r.loop.parked).toEqual({
+      expect(r.loop.hold).toMatchObject({
         kind: "nothing",
         reason: "SULU reported, but nothing was committed, so there is nothing to push",
-        ended: false,
+        ended: true,
       });
       expect(r.loop.reportedEvidenceId).toBe(1);
       expect(r.actions.some((a) => a.kind === "push")).toBe(false);
@@ -426,57 +441,128 @@ describe("state step", () => {
 
   it("7: too many refusals park with the last refusal", () => {
     const r = reconcile(inCi({}, { transient: REFUSAL_TRIES, lastRefusal: "push refused" }));
-    expect(r.loop.parked).toEqual({ kind: "refused", reason: "push refused", ended: false });
+    expect(r.loop.hold).toMatchObject({ kind: "refused", reason: "push refused", ended: true });
     const r2 = reconcile(inCi({}, { transient: REFUSAL_TRIES - 1, lastRefusal: "x" }));
     expect(r2.loop.phase).toBe("ci");
   });
 
-  it("8: a push or PR that never shows up parks after ten minutes", () => {
+  it("8: a push or PR that never shows up stays in CI", () => {
     const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
-    const msg = "the push or PR for aaaaaaa has not shown up on GitHub after 10 minutes";
-    const cases: [Partial<LoopSnapshot>, string][] = [
-      [{ pushed: null }, "no push is recorded for the run"],
-      [{ pr: null }, "no PR of the run has been read from GitHub"],
-      [{ pr: pr({ headSha: SHA2 }) }, `PR #${pr().number} has head bbbbbbb, not aaaaaaa`],
-      [{ pushed: { sha: SHA2, at: NOW } }, "the push is bbbbbbb, not the newest commit aaaaaaa"],
-      [{ headCommit: null }, "no commit is recorded for the run, but aaaaaaa is pushed"],
-      [{ pr: pr({ headSha: null }) }, `PR #${pr().number} has no head, not aaaaaaa`],
+    const cases: Partial<LoopSnapshot>[] = [
+      { pushed: null },
+      { pr: null },
+      { pr: pr({ headSha: SHA2 }) },
+      { pushed: { sha: SHA2, at: NOW } },
+      { headCommit: null },
+      { pr: pr({ headSha: null }) },
     ];
-    for (const [over, why] of cases) {
+    for (const over of cases) {
       const r = reconcile(inCi(over, late));
-      expect(r.loop.parked).toEqual({ kind: "stuck", reason: `${msg}: ${why}`, ended: false });
+      expect(r.loop).toMatchObject({ phase: "ci", hold: null });
+      expect(r.actions.map((action) => action.kind)).not.toContain("end-run");
+    }
+    expect(reconcile(inCi({ pr: pr({ headSha: SHA, ci: "passing" }) }, late)).loop.phase).toBe(
+      "review",
+    );
+  });
+
+  it("8: a PR head that descends from the push is adopted as the push, not parked as stuck", () => {
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true }, late));
+    expect(r.loop.phase).toBe("ci");
+    expect(r.loop.hold?.kind ?? null).toBeNull();
+    expect(r.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
+  });
+
+  it("8: a descending head is adopted while the seat is busy, including after the window", () => {
+    const busy = { seat: { ...snap().seat, inTurn: true } };
+    const inside = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...busy }, { pushStartedAt: NOW - 1000 }),
+    );
+    expect(inside.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    const spent = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...busy }, late));
+    expect(spent.loop).toMatchObject({ phase: "ci", hold: null });
+    // an idle seat is adopted for however long it has waited
+    const idle = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true }, late));
+    expect(idle.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
+  });
+
+  it("8: a worktree move the hub could not make parks once the window is spent, and names the reason", () => {
+    const held = { sha: SHA2, epoch: 0, since: NOW - NO_CI_AFTER_MS - 1, why: "diverged" };
+    const r = reconcile(
+      inCi({ pr: pr({ headSha: SHA2 }), pushed: { sha: SHA2, at: NOW } }, { branchMoved: held }),
+    );
+    expect(r.loop.hold?.kind).toBe("stuck");
+    expect(r.loop.hold?.reason).toContain("could not move");
+    expect(r.loop.hold?.reason).toContain("diverged");
+    expect(r.loop.branchMoved).toBeUndefined();
+    const fresh = reconcile(
+      inCi(
+        { pr: pr({ headSha: SHA2 }), pushed: { sha: SHA2, at: NOW } },
+        { branchMoved: { ...held, since: NOW - 1000 } },
+      ),
+    );
+    expect(fresh.loop.hold?.kind ?? null).toBeNull();
+  });
+
+  it("8: a descending head is adopted past the window when the busy seat does not hold the run", () => {
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    const away = { seat: { ...snap().seat, inTurn: true, holdsRun: false } };
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends: true, ...away }, late));
+    expect(r.actions).toEqual([{ kind: "adopt-head", sha: SHA2, from: SHA }]);
+  });
+
+  it("8: a PR merged while a worktree move is held reaches done, not a park or CI", () => {
+    const held = { sha: SHA2, epoch: 0, since: NOW - NO_CI_AFTER_MS - 1, why: "diverged" };
+    const r = reconcile(
+      inCi(
+        { pr: pr({ headSha: SHA2, state: "merged" }), pushed: { sha: SHA2, at: NOW } },
+        { branchMoved: held },
+      ),
+    );
+    expect(r.loop.phase).toBe("done");
+  });
+
+  it("8: a head first seen long after the push has its own window and does not park at once", () => {
+    const old = {
+      pushStartedAt: NOW - NO_CI_AFTER_MS - 1,
+      headSeenSha: SHA,
+      headSeenAt: NOW - 1000,
+    };
+    const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }) }, old));
+    expect(r.loop.hold?.kind ?? null).toBeNull();
+    expect(r.loop).toMatchObject({ headSeenSha: SHA2, headSeenAt: NOW });
+    // seen for a whole window, still not adoptable: it remains in CI
+    const spent = reconcile(
+      inCi(
+        { pr: pr({ headSha: SHA2 }) },
+        { ...old, headSeenSha: SHA2, headSeenAt: NOW - NO_CI_AFTER_MS - 1 },
+      ),
+    );
+    expect(spent.loop).toMatchObject({ phase: "ci", hold: null });
+  });
+
+  it("8: a PR head that does not descend from the push remains in CI", () => {
+    const late = { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 };
+    for (const prDescends of [false, undefined]) {
+      const r = reconcile(inCi({ pr: pr({ headSha: SHA2 }), prDescends }, late));
+      expect(r.loop).toMatchObject({ phase: "ci", hold: null });
+      expect(r.actions.some((a) => a.kind === "adopt-head")).toBe(false);
     }
   });
 
-  it("8: a run stopped on push-not-shown is in CI again once the PR head is the pushed sha", () => {
-    const stopped = reconcile(
-      inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
-    ).loop;
-    expect(stopped.parked?.kind).toBe("stuck");
-    // the stored PR row later carries the pushed head
-    const r = reconcile(inCi({ pr: pr({ headSha: SHA }) }, stopped));
-    expect(r.loop).toMatchObject({
-      phase: "ci",
-      parked: null,
-      pushStartedAt: NOW,
-      pushFor: SHA,
-      unparkedAt: NOW,
-    });
-    expect(events(r.actions)).toEqual([`PR #12 shows ${SHA.slice(0, 7)}; back to CI`]);
-  });
-
-  it("8: a stuck run stays stopped while the PR head is not the pushed sha, or the PR is closed", () => {
-    const stopped = reconcile(
+  it("8: a late pushed head remains in CI until GitHub catches up", () => {
+    const waiting = reconcile(
       inCi({ pr: pr({ headSha: SHA2 }) }, { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 }),
     ).loop;
     for (const over of [
       { pr: pr({ headSha: SHA2 }) },
       { pr: pr({ headSha: null }) },
       { pr: null },
-      { pr: pr({ state: "closed" as const }) },
       { headCommit: SHA2 },
     ] as Partial<LoopSnapshot>[]) {
-      expect(reconcile(inCi(over, stopped)).loop.phase).toBe("parked");
+      expect(reconcile(inCi(over, waiting)).loop.phase).toBe("ci");
     }
   });
 
@@ -500,12 +586,14 @@ describe("state step", () => {
     const s = inCi({ pr: pr({ mergeable: "CONFLICTING", ci: "passing" }) });
     const r = reconcile(s);
     expect(r.loop.phase).toBe("working");
-    expect(r.loop.parked).toBeNull();
+    expect(r.loop.hold?.kind ?? null).toBeNull();
     expect(r.loop.pendingLine).toEqual({ key: mergeMainKey("r1", SHA), text: MERGE_MAIN_TEXT });
-    expect(reconcile({ ...s, claimed: { [mergeMainKey("r1", SHA)]: NOW } }).loop.parked).toEqual({
+    expect(
+      reconcile({ ...s, claimed: { [mergeMainKey("r1", SHA)]: NOW } }).loop.hold,
+    ).toMatchObject({
       kind: "conflict",
       reason: "PR #12 conflicts with main",
-      ended: false,
+      ended: true,
     });
   });
 
@@ -535,10 +623,10 @@ describe("state step", () => {
       { ciFails: CI_TRIES - 1, ciFailedSha: SHA2, rerun },
     );
     const r = reconcile(s);
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "ci",
       reason: "CI failed 3 times; last on aaaaaaa",
-      ended: false,
+      ended: true,
     });
     s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 2, ciFailedSha: SHA2, rerun });
     expect(reconcile(s).loop.phase).toBe("working");
@@ -549,7 +637,7 @@ describe("state step", () => {
       ...inCi({ pr: pr({ ci: "failing" }) }, { rerun: reran() }),
       limits: { tries: 1, rounds: 3 },
     });
-    expect(r.loop.parked).toMatchObject({
+    expect(r.loop.hold).toMatchObject({
       kind: "ci",
       reason: "CI failed 1 times; last on aaaaaaa",
     });
@@ -660,15 +748,15 @@ describe("state step", () => {
     });
 
     it("the CI-pending clock runs from the re-run, not the push", () => {
-      const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
+      const old = { pushed: { sha: SHA, at: NOW - 30 * 60_000 - 1 } };
       const pending = pr({ ci: "pending" });
       const r = reconcile(
         inCi({ ...old, pr: pending }, { rerun: { sha: SHA, at: NOW - 60_000, runs: [] } }),
       );
       expect(r.loop.phase).toBe("ci");
-      expect(r.loop.parked).toBeNull();
+      expect(r.loop.hold?.kind ?? null).toBeNull();
       const other = reconcile(inCi({ ...old, pr: pending }, { rerun: reran(SHA2) }));
-      expect(other.loop.parked?.kind).toBe("ci-pending");
+      expect(other.loop).toMatchObject({ phase: "ci", hold: null });
     });
 
     it("a pass with no failure before is no flake", () => {
@@ -688,7 +776,7 @@ describe("state step", () => {
         { ciFails: CI_TRIES - 1, ciFailedSha: SHA2, rerun: reran() },
       ),
     );
-    expect(parked.loop.parked?.reason).toBe("CI failed 3 times; last on aaaaaaa (failing: check)");
+    expect(parked.loop.hold?.reason).toBe("CI failed 3 times; last on aaaaaaa (failing: check)");
   });
 
   it("12: no checks keeps today's CI texts", () => {
@@ -697,132 +785,21 @@ describe("state step", () => {
     expect(events(r.actions)).toEqual(["CI failed on aaaaaaa"]);
   });
 
-  it("13: the pending park names pending and missing checks", () => {
-    const checks = { failing: [], pending: ["check"], missing: ["e2e"] };
-    const r = reconcile(
-      inCi({ pr: pr({ checks }), pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } }),
+  it("13: slow or missing CI remains in CI until the later result", () => {
+    const slow = reconcile(
+      inCi({ pr: pr({ ci: "pending", checks: { failing: [], pending: ["web"], missing: [] } }) }),
     );
-    expect(r.loop.parked?.reason).toBe(
-      "CI pending for 30 minutes on aaaaaaa (pending: check; missing: e2e)",
-    );
-  });
-
-  it("13: CI pending for thirty minutes parks", () => {
-    const old = { pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS - 1 } };
-    const r = reconcile(inCi(old));
-    expect(r.loop.parked).toEqual({
-      kind: "ci-pending",
-      reason: "CI pending for 30 minutes on aaaaaaa",
-      ended: false,
-    });
-    const r2 = reconcile(inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS } }));
-    expect(r2.loop.phase).toBe("ci");
-  });
-
-  describe("13: the pending limit follows each job's normal time", () => {
-    const min = 60_000;
-    const runningFor = (m: number, startedMin: number) => ({
-      pushed: { sha: SHA, at: NOW - m * min },
-      ciP90Ms: { web: 30 * min },
-      pr: pr({
-        checks: {
-          failing: [],
-          pending: ["web"],
-          missing: [],
-          startedAt: { web: NOW - startedMin * min },
-        },
-      }),
-    });
-
-    it("a job within twice its p90 does not park", () => {
-      const r = reconcile(inCi(runningFor(45, 40)));
-      expect(r.loop.phase).toBe("ci");
-      expect(r.loop.parked).toBeNull();
-    });
-
-    it("a job past twice its p90 parks, naming the job", () => {
-      const r = reconcile(inCi(runningFor(75, 62)));
-      expect(r.loop.parked).toEqual({
-        kind: "ci-pending",
-        reason: "CI pending for 60 minutes on aaaaaaa (pending: web)",
-        ended: false,
-      });
-    });
-
-    it("a queued job with no start is judged from the push", () => {
-      const queued = runningFor(75, 0);
-      const r = reconcile(
-        inCi({
-          ...queued,
-          pr: pr({ checks: { failing: [], pending: ["web"], missing: [] } }),
-        }),
-      );
-      expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
-    });
-
-    describe("a short gate job waiting on a slow one", () => {
-      const gate = (m: number, checks: { pending: string[]; missing: string[] }) =>
-        inCi({
-          pushed: { sha: SHA, at: NOW - m * min },
-          ciP90Ms: { "web-core": 30 * min, check: 10_000 },
-          pr: pr({ checks: { failing: [], ...checks } }),
-        });
-
-      it("a missing check is not parked while the slowest job may still run", () => {
-        const r = reconcile(gate(12, { pending: [], missing: ["check"] }));
-        expect(r.loop.parked).toBeNull();
-        const late = reconcile(gate(61, { pending: [], missing: ["check"] }));
-        expect(late.loop.parked?.reason).toBe(
-          "CI pending for 60 minutes on aaaaaaa (missing: check)",
-        );
-      });
-
-      it("a queued check with no start is judged the same way", () => {
-        const r = reconcile(gate(26, { pending: ["check"], missing: [] }));
-        expect(r.loop.parked).toBeNull();
-      });
-    });
-
-    it("a job with no history keeps the fixed limit", () => {
-      const r = reconcile(inCi({ ...runningFor(31, 31), ciP90Ms: {} }));
-      expect(r.loop.parked?.kind).toBe("ci-pending");
-    });
-
-    it("a ci-pending park lifts itself when every check is green", () => {
-      const parked = reconcile(inCi(runningFor(75, 62))).loop;
-      const r = reconcile(
-        inCi({ pr: pr({ ci: "passing" }) }, { phase: "parked", parked: parked.parked }),
-      );
-      expect(r.loop.phase).toBe("review");
-      expect(r.loop.parked).toBeNull();
-      expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
-      const still = reconcile(
-        inCi({ pr: pr({ ci: "pending" }) }, { phase: "parked", parked: parked.parked }),
-      );
-      expect(still.loop.phase).toBe("parked");
-    });
-  });
-
-  it("14: no CI reported within ten minutes of the push parks", () => {
-    const at = NOW - NO_CI_AFTER_MS - 1;
-    const r = reconcile(inCi({ pushed: { sha: SHA, at }, pr: pr({ ci: null, polledAt: NOW }) }));
-    expect(r.loop.parked).toEqual({
-      kind: "no-ci",
-      reason: "no CI reported for aaaaaaa",
-      ended: false,
-    });
-    const r2 = reconcile(
-      inCi({ pushed: { sha: SHA, at: NOW - NO_CI_AFTER_MS }, pr: pr({ ci: null }) }),
-    );
-    expect(r2.loop.phase).toBe("ci");
+    expect(slow.loop).toMatchObject({ phase: "ci", hold: null });
+    const passing = reconcile(inCi({ pr: pr({ ci: "passing" }) }, slow.loop));
+    expect(passing.loop.phase).toBe("review");
   });
 
   it("15: working over budget parks; budgetExtra raises the ceiling", () => {
     const r = reconcile(snap({ tokens: 1001 }));
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "budget",
       reason: "used 1001 input + output tokens of a 1000-token budget",
-      ended: false,
+      ended: true,
     });
     expect(reconcile(snap({ tokens: 1001 }, { budgetExtra: 1 })).loop.phase).toBe("working");
     expect(reconcile(snap({ tokens: 1000 })).loop.phase).toBe("working");
@@ -831,7 +808,7 @@ describe("state step", () => {
 
   it("parks an ended run when Claude reaches its dollar cap", () => {
     const r = reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } }));
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "budget",
       reason: "used $12.50 of a $12.50 budget",
       ended: true,
@@ -841,8 +818,12 @@ describe("state step", () => {
   it("a parked loop keeps its own park past the dollar cap", () => {
     const review = { kind: "review", reason: "r", ended: false };
     expect(
-      reconcile(snap({ costUsd: 13, budgetUsd: 12.5 }, { phase: "parked", parked: review })).loop
-        .parked?.kind,
+      reconcile(
+        snap(
+          { costUsd: 13, budgetUsd: 12.5 },
+          { phase: "parked", hold: { ...review, worktree: null, wake: false } },
+        ),
+      ).loop.hold?.kind,
     ).toBe("review");
   });
 
@@ -867,10 +848,10 @@ describe("state step", () => {
       reconcile(
         snap(
           { costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } },
-          { phase: "parked", parked },
+          { phase: "parked", hold: { ...parked, worktree: null, wake: false } },
         ),
-      ).loop.parked,
-    ).toEqual({ ...parked, ended: true });
+      ).loop.hold,
+    ).toMatchObject({ ...parked, ended: true });
   });
 
   it("the dollar cap leaves a pushed PR in ci or review moving", () => {
@@ -878,7 +859,7 @@ describe("state step", () => {
     const review = reconcile(
       snap({ costUsd: 12.6, budgetUsd: 12.5, headCommit: SHA }, { phase: "review" }),
     );
-    expect(review.loop.parked?.kind).not.toBe("budget");
+    expect(review.loop.hold?.kind).not.toBe("budget");
   });
 
   describe("16: silent after three carry-on resumes", () => {
@@ -895,10 +876,10 @@ describe("state step", () => {
 
     it("parks when the seat stops after three carry-on resumes", () => {
       const r = reconcile(base());
-      expect(r.loop.parked).toEqual({
+      expect(r.loop.hold).toMatchObject({
         kind: "silent",
         reason: "stopped after 3 carry-on resumes without reporting",
-        ended: false,
+        ended: true,
       });
     });
 
@@ -940,7 +921,13 @@ describe("desired-state step", () => {
     const cases: [Partial<RunLoop>, string][] = [
       [{ phase: "working" }, "In progress"],
       [{ phase: "review" }, "In review"],
-      [{ phase: "parked", parked: { kind: "x", reason: "r", ended: false } }, "Blocked"],
+      [
+        {
+          phase: "parked",
+          hold: { kind: "x", reason: "r", ended: false, worktree: null, wake: false },
+        },
+        "Blocked",
+      ],
     ];
     for (const [loop, column] of cases) {
       const r = reconcile(snap({}, loop));
@@ -975,7 +962,7 @@ describe("desired-state step", () => {
   it("emits a note for each missing desired key and clears those no longer wanted", () => {
     const parked = {
       phase: "parked" as const,
-      parked: { kind: "ci", reason: "boom", ended: false },
+      hold: { kind: "review", reason: "boom", ended: false, worktree: null, wake: false },
       cardFor: "parked:0",
     };
     const r = reconcile(snap({ openNotes: ["old"] }, parked));
@@ -989,7 +976,7 @@ describe("desired-state step", () => {
   it("a park's note key changes with the epoch", () => {
     const parked = {
       phase: "parked" as const,
-      parked: { kind: "ci", reason: "boom", ended: false },
+      hold: { kind: "review", reason: "boom", ended: false, worktree: null, wake: false },
       cardFor: "parked:1",
       epoch: 1,
     };
@@ -1333,7 +1320,12 @@ describe("sequences", () => {
     expect(r.loop.phase).toBe("parked");
     const next = again(s, r.loop);
     expect(outstanding(next.actions)).toEqual(outstanding(r.actions));
-    expect(outstanding(r.actions).map((a) => a.kind)).toEqual(["move-card", "note"]);
+    expect(outstanding(r.actions).map((a) => a.kind)).toEqual([
+      "end-run",
+      "take-next",
+      "move-card",
+      "note",
+    ]);
     expect(events(next.actions)).toEqual([]);
   });
 
@@ -1381,7 +1373,7 @@ describe("sequences", () => {
     }
     expect(last.loop.phase).toBe("parked");
     expect(last.loop.ciFails).toBe(3);
-    expect(last.loop.parked?.reason).toBe("CI failed 3 times; last on 3333333");
+    expect(last.loop.hold?.reason).toBe("CI failed 3 times; last on 3333333");
   });
 
   it("a review-round report pushes only", () => {
@@ -1431,8 +1423,8 @@ describe("sequences", () => {
     const s7 = { ...s6, claimed: { ...s5.claimed, "nudge:r1:0:0:3": 9100 } };
     const s8 = { ...s7, seat: seat(s7, { lastTurnEndedAt: 10_000 }) };
     const r8 = reconcile(s8);
-    expect(r8.loop.parked?.kind).toBe("silent");
-    expect(r8.loop.parked?.reason).toBe("stopped after 3 carry-on resumes without reporting");
+    expect(r8.loop.hold?.kind).toBe("silent");
+    expect(r8.loop.hold?.reason).toBe("stopped after 3 carry-on resumes without reporting");
     expect(sends(r8.actions)).toEqual([]);
     // with an open question it neither nudges nor parks
     const q = { ...s8, seat: seat(s8, { openQuestion: true }) };
@@ -1442,15 +1434,20 @@ describe("sequences", () => {
 });
 
 describe("review round", () => {
-  const PARKED = { kind: "ci", reason: "r", ended: false };
+  const PARKED = { kind: "review", reason: "r", ended: false };
   const ENDED = { kind: "ended", reason: "run ended (stopped)", ended: true };
   const touches = { sha: SHA, paths: ["a.yml"] };
   const limited = (s: LoopSnapshot): LoopSnapshot["seat"] =>
     seat(s, { state: "parked", rateLimitedUntil: null });
 
   it("an ended run desires only its blocked note and clears the others", () => {
-    const loop = { phase: "parked" as const, parked: ENDED, cardFor: "parked:0", touches };
-    const base = snap({}, loop);
+    const loop = {
+      phase: "parked" as const,
+      hold: { ...ENDED, worktree: null, wake: false },
+      cardFor: "parked:0",
+      touches,
+    };
+    const base = snap({ ended: { reason: "stopped" } }, loop);
     const s = { ...base, seat: limited(base) };
     const r = reconcile(s);
     expect(r.actions).toEqual([
@@ -1469,7 +1466,15 @@ describe("review round", () => {
   });
 
   it("a parked run that has not ended keeps its flag and rate-limit notes", () => {
-    const base = snap({}, { phase: "parked", parked: PARKED, cardFor: "parked:0", touches });
+    const base = snap(
+      {},
+      {
+        phase: "parked",
+        hold: { ...PARKED, worktree: null, wake: false },
+        cardFor: "parked:0",
+        touches,
+      },
+    );
     const keys = reconcile({ ...base, seat: limited(base) }).actions.flatMap((a) =>
       a.kind === "note" ? [a.key] : [],
     );
@@ -1496,9 +1501,9 @@ describe("review round", () => {
   });
 
   it("3: a parked run with a closed PR stays parked", () => {
-    const l = { phase: "parked" as const, parked: PARKED };
+    const l = { phase: "parked" as const, hold: { ...PARKED, worktree: null, wake: false } };
     const r = reconcile(snap({ pr: pr({ state: "closed" }) }, l));
-    expect(r.loop.parked).toEqual(PARKED);
+    expect(r.loop.hold).toMatchObject(PARKED);
     expect(events(r.actions)).toEqual([]);
   });
 
@@ -1526,16 +1531,16 @@ describe("review round", () => {
   });
 
   it("13: pending is measured from now, not from the poll", () => {
-    const at = NOW - CI_PENDING_MAX_MS - 1;
+    const at = NOW - 30 * 60_000 - 1;
     const stale = reconcile(inCi({ pushed: { sha: SHA, at }, pr: pr({ polledAt: at }) }));
-    expect(stale.loop.parked?.kind).toBe("ci-pending");
+    expect(stale.loop).toMatchObject({ phase: "ci", hold: null });
     const ahead = reconcile(
-      inCi({ pushed: { sha: SHA, at: NOW - CI_PENDING_MAX_MS }, pr: pr({ polledAt: NOW + 5 }) }),
+      inCi({ pushed: { sha: SHA, at: NOW - 30 * 60_000 }, pr: pr({ polledAt: NOW + 5 }) }),
     );
     expect(ahead.loop.phase).toBe("ci");
   });
 
-  it("14: no CI is measured from the poll, not from now", () => {
+  it("14: missing CI remains in CI regardless of the poll time", () => {
     const at = NOW - 1000;
     const polled = reconcile(
       inCi({
@@ -1543,7 +1548,7 @@ describe("review round", () => {
         pr: pr({ ci: null, polledAt: at + NO_CI_AFTER_MS + 1 }),
       }),
     );
-    expect(polled.loop.parked?.kind).toBe("no-ci");
+    expect(polled.loop).toMatchObject({ phase: "ci", hold: null });
     const old = NOW - NO_CI_AFTER_MS - 100;
     const fresh = reconcile(
       inCi({ pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: old + 1 }) }),
@@ -1556,7 +1561,7 @@ describe("review round", () => {
     const past = AUDIT_EXPECTED_TOKENS_DEFAULT + 1;
     expect(reconcile({ ...snap({ tokens: past }), budget: 1_500_000 }).loop.phase).toBe("working");
     const over = reconcile({ ...snap({ tokens: 1_500_001 }), budget: 1_500_000 });
-    expect(over.loop.parked?.kind).toBe("budget");
+    expect(over.loop.hold?.kind).toBe("budget");
   });
 
   it("15: only a working run parks over budget", () => {
@@ -1651,21 +1656,19 @@ describe("review round", () => {
     expect(text({ prNumber: 9 })).toBe(`${REF}: PR #9 is ready for review (CI passed on aaaaaaa)`);
   });
 
-  it("8: a report with no commit that never pushes parks with a readable text", () => {
+  it("8: a report with no commit that never pushes stays in CI", () => {
     const r = reconcile(
       inCi(
         { headCommit: null, pushed: null, pr: null },
         { pushStartedAt: NOW - NO_CI_AFTER_MS - 1 },
       ),
     );
-    expect(r.loop.parked?.reason).toBe(
-      "the push or PR has not shown up on GitHub after 10 minutes: no push is recorded for the run",
-    );
+    expect(r.loop).toMatchObject({ phase: "ci", hold: null });
   });
 
   it("15: the budget text names the ceiling", () => {
     const r = reconcile(snap({ tokens: 1500 }, { budgetExtra: 400 }));
-    expect(r.loop.parked?.reason).toBe("used 1500 input + output tokens of a 1400-token budget");
+    expect(r.loop.hold?.reason).toBe("used 1500 input + output tokens of a 1400-token budget");
   });
 
   describe("lines", () => {
@@ -1754,11 +1757,23 @@ describe("review round", () => {
           pr: pr(),
         }),
       ).toEqual([]);
-      expect(at({ phase: "parked", parked: PARKED, cardFor: "parked:0" }, 6000)).toEqual([]);
+      expect(
+        at(
+          {
+            phase: "parked",
+            hold: { ...PARKED, worktree: null, wake: false },
+            cardFor: "parked:0",
+          },
+          6000,
+        ),
+      ).toEqual([]);
     });
 
     it("no rate-limit line while the loop is parked", () => {
-      const s = snap({}, { phase: "parked", parked: PARKED, cardFor: "parked:0" });
+      const s = snap(
+        {},
+        { phase: "parked", hold: { ...PARKED, worktree: null, wake: false }, cardFor: "parked:0" },
+      );
       const r = reconcile({ ...s, seat: limited(s) });
       expect(sends(r.actions)).toEqual([]);
     });
@@ -1801,17 +1816,17 @@ describe("amendments from the reviews of Task 5", () => {
     const r = reconcile(s);
     expect(r.loop).toMatchObject({ phase: "ci", pushFor: SHA2, pushStartedAt: NOW });
     expect(r.actions).toEqual([{ kind: "push" }]);
-    // the clock now runs from the new commit: ten minutes on, with the push still missing, it parks
+    // the clock now runs from the new commit: it keeps waiting if the push is still missing
     const later = reconcile({ ...s, now: NOW + 10 * MIN + 1, loop: r.loop });
-    expect(later.loop.parked?.kind).toBe("stuck");
+    expect(later.loop).toMatchObject({ phase: "ci", hold: null });
     // and a commit resets the refusals counted against the old one
     const refused = reconcile({ ...s, loop: { ...s.loop, transient: 2, lastRefusal: "old" } });
     expect(refused.loop).toMatchObject({ transient: 0, lastRefusal: null });
   });
 
-  it("E3: without a new commit the old clock still parks", () => {
+  it("E3: without a new commit the old clock keeps waiting", () => {
     const s = inCi({ pushed: null, pr: null }, { pushFor: SHA, pushStartedAt: NOW - 11 * MIN });
-    expect(reconcile(s).loop.parked?.kind).toBe("stuck");
+    expect(reconcile(s).loop).toMatchObject({ phase: "ci", hold: null });
   });
 
   it("E4: the review note after a ruling says it was ruled, not that CI passed", () => {
@@ -1917,7 +1932,7 @@ describe("amendments from the reviews of Task 5", () => {
     );
     expect(reconcile(pending).loop.phase).toBe("ci");
     const never = { ...pending, loop: { ...pending.loop, unparkedAt: null } };
-    expect(reconcile(never).loop.parked?.kind).toBe("ci-pending");
+    expect(reconcile(never).loop).toMatchObject({ phase: "ci", hold: null });
     const none = inCi(
       { pushed: { sha: SHA, at: old }, pr: pr({ ci: null, polledAt: NOW }) },
       { unparkedAt: NOW - 1000 },
@@ -1926,31 +1941,55 @@ describe("amendments from the reviews of Task 5", () => {
     // once the un-park is itself old enough, the limits apply again
     const stale = {
       ...pending,
-      loop: { ...pending.loop, unparkedAt: NOW - CI_PENDING_MAX_MS - 1 },
+      loop: { ...pending.loop, unparkedAt: NOW - 30 * 60_000 - 1 },
     };
-    expect(reconcile(stale).loop.parked?.kind).toBe("ci-pending");
+    expect(reconcile(stale).loop).toMatchObject({ phase: "ci", hold: null });
   });
 
   it("the returned loop shares no parked or touches object with the input", () => {
     const touches = { sha: SHA, paths: ["a.yml"], flightPowers: "superuser" as const };
-    const parked = { kind: "ci", reason: "r", ended: false };
-    const s = snap({}, { phase: "parked", parked, touches, cardFor: "parked:0" });
+    const parked = { kind: "review", reason: "r", ended: false };
+    const s = snap(
+      {},
+      {
+        phase: "parked",
+        hold: { ...parked, worktree: null, wake: false },
+        touches,
+        cardFor: "parked:0",
+      },
+    );
     const r = reconcile(s);
-    expect(r.loop.parked).toEqual(parked);
-    expect(r.loop.parked).not.toBe(s.loop.parked);
+    expect(r.loop.hold).toMatchObject(parked);
+    expect(r.loop.hold).not.toBe(s.loop.hold);
     expect(r.loop.touches).toEqual(touches);
     expect(r.loop.touches).not.toBe(s.loop.touches);
     expect(r.loop.touches?.paths).not.toBe(s.loop.touches?.paths);
     const gate = { sha: SHA, mainSha: SHA2, containsMain: true, hubOnly: true, strays: ["a"] };
     const merging = { sha: SHA, done: ["ready" as const] };
-    const m = reconcile(snap({}, { phase: "parked", parked, gate, merging, cardFor: "parked:0" }));
+    const m = reconcile(
+      snap(
+        {},
+        {
+          phase: "parked",
+          hold: { ...parked, worktree: null, wake: false },
+          gate,
+          merging,
+          cardFor: "parked:0",
+        },
+      ),
+    );
     expect(m.loop.gate).toEqual(gate);
     expect(m.loop.gate).not.toBe(gate);
     expect(m.loop.gate?.strays).not.toBe(gate.strays);
     expect(m.loop.merging).toEqual(merging);
     expect(m.loop.merging).not.toBe(merging);
     expect(m.loop.merging?.done).not.toBe(merging.done);
-    const bare = reconcile(snap({}, { phase: "parked", parked, cardFor: "parked:0" }));
+    const bare = reconcile(
+      snap(
+        {},
+        { phase: "parked", hold: { ...parked, worktree: null, wake: false }, cardFor: "parked:0" },
+      ),
+    );
     expect("gate" in bare.loop).toBe(false);
     expect("merging" in bare.loop).toBe(false);
   });
@@ -1999,7 +2038,9 @@ describe("loopText", () => {
   });
   it("parked gives the reason", () => {
     const parked = { kind: "ci", reason: "CI failed 3 times", ended: false };
-    expect(loopText(REF, loop({ phase: "parked", parked }))).toBe("Blocked: CI failed 3 times");
+    expect(
+      loopText(REF, loop({ phase: "parked", hold: { ...parked, worktree: null, wake: false } })),
+    ).toBe("Blocked: CI failed 3 times");
     expect(LOOP_TEXT_PARKED).toBe("Blocked: {reason}");
   });
   it("done names the PR when there is one", () => {
@@ -2090,7 +2131,7 @@ describe("review decisions", () => {
       ),
     );
     expect(two.loop.phase).toBe("parked");
-    expect(two.loop.parked).toEqual({
+    expect(two.loop.hold).toMatchObject({
       kind: "review-failed",
       reason: reviewFailedParkText(RETRO, SHA, 2, "boom"),
       ended: false,
@@ -2170,13 +2211,28 @@ describe("review decisions", () => {
     ]);
   });
 
+  it("a loop-chosen CI stop during rework stays Blocked, not Ready", () => {
+    const stopped = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" } },
+      {
+        phase: "parked",
+        hold: { kind: "ci", reason: "CI failed 3 times", ended: true, worktree: null, wake: false },
+        cardFor: null,
+      },
+    );
+    expect(kinds(reconcile(stopped).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Blocked" },
+    ]);
+  });
+
   it("an ended run whose PR was closed keeps its card Blocked", () => {
     const closed = inReview(
       withReview([fact({ id: 5, blocking: 1 })], [finding]),
       { ended: { reason: "stopped" }, pr: pr({ ci: "passing", state: "closed" }) },
       {
         phase: "parked",
-        parked: { kind: "pr-closed", reason: "closed", ended: false },
+        hold: { kind: "pr-closed", reason: "closed", ended: false, worktree: null, wake: false },
         cardFor: "parked:0",
       },
     );
@@ -2189,12 +2245,12 @@ describe("review decisions", () => {
       { ended: { reason: "stopped" } },
       {
         phase: "parked",
-        parked: { kind: "review", reason: "rounds", ended: false },
+        hold: { kind: "review", reason: "rounds", ended: false, worktree: null, wake: false },
         cardFor: "parked:0",
       },
     );
     const r = reconcile(parked);
-    expect(r.loop.parked?.ended).toBe(true);
+    expect(r.loop.hold?.ended).toBe(true);
     expect(kinds(r.actions, "move-card")).toEqual([{ kind: "move-card", column: "Ready" }]);
     // the stale Blocked mark is cleared so the move is planned; the engine sets the new mark
     expect(r.loop.cardFor).toBeNull();
@@ -2264,7 +2320,7 @@ describe("review decisions", () => {
       { reportedEvidenceId: 3 },
     );
     const r = reconcile(s);
-    expect(r.loop.parked).toMatchObject({
+    expect(r.loop.hold).toMatchObject({
       kind: "review",
       reason: reviewParkText(RETRO, SHA, 3, {
         developer: "Fixed the first two findings.",
@@ -2277,7 +2333,7 @@ describe("review decisions", () => {
   it("a profile's round limit parks review after one blocking review at rounds 1", () => {
     const s = inReview(withReview([fact({ id: 1, blocking: 1 })], [finding]));
     const r = reconcile({ ...s, limits: { tries: 3, rounds: 1 } });
-    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
+    expect(r.loop.hold).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
     expect(sends(r.actions)).toEqual([]);
   });
 
@@ -2288,8 +2344,46 @@ describe("review decisions", () => {
       { epoch: 1, flightReworks: { [SHA]: 1 } },
     );
     const r = reconcile(s);
-    expect(r.loop.parked).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
+    expect(r.loop.hold).toMatchObject({ kind: "review", reason: reviewParkText(RETRO, SHA, 1) });
     expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("a rework granted at the cap limits the review from its epoch on, even after a new epoch starts", () => {
+    const granted = inReview(
+      withReview([fact({ id: 4, epoch: 3, blocking: 1 })], [finding]),
+      {},
+      { epoch: 3, flightReworkGrantEpoch: 3 },
+    );
+    const parked = reconcile(granted);
+    expect(parked.loop.hold).toMatchObject({ kind: "review" });
+    expect(sends(parked.actions)).toEqual([]);
+    // a sync or CI ruling started epoch 4 before the review: the grant still holds
+    const later = inReview(
+      withReview([fact({ id: 4, epoch: 4, blocking: 1 })], [finding]),
+      {},
+      { epoch: 4, flightReworkGrantEpoch: 3 },
+    );
+    const r = reconcile(later);
+    expect(r.loop.hold).toMatchObject({ kind: "review" });
+    expect(sends(r.actions)).toEqual([]);
+    // no grant: the full limit
+    const none = inReview(
+      withReview([fact({ id: 4, epoch: 4, blocking: 1 })], [finding]),
+      {},
+      { epoch: 4 },
+    );
+    expect(reconcile(none).loop.hold?.kind ?? null).toBeNull();
+  });
+
+  it("a rework granted on one head does not limit the review of another head in a later epoch", () => {
+    const s = inReview(
+      withReview([fact({ id: 4, epoch: 2, blocking: 1 })], [finding]),
+      {},
+      { epoch: 2, flightReworks: { ["f".repeat(40)]: 1 } },
+    );
+    const r = reconcile(s);
+    expect(r.loop.hold?.kind ?? null).toBeNull();
+    expect(sends(r.actions)).toEqual(["fix:r1:2:4"]);
   });
 
   it("a profile's round limit above 3 sends the third fix line instead of parking", () => {
@@ -2302,7 +2396,7 @@ describe("review decisions", () => {
       claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 },
     });
     const r = reconcile({ ...s, limits: { tries: 3, rounds: 4 } });
-    expect(r.loop.parked ?? null).toBeNull();
+    expect(r.loop.hold?.kind ?? null).toBeNull();
     expect(sends(r.actions)).toEqual(["fix:r1:0:3"]);
   });
 
@@ -2397,7 +2491,10 @@ describe("review decisions", () => {
     const parked = inReview(
       rows,
       {},
-      { phase: "parked", parked: { kind: "x", reason: "y", ended: false } },
+      {
+        phase: "parked",
+        hold: { kind: "x", reason: "y", ended: false, worktree: null, wake: false },
+      },
     );
     expect(kinds(reconcile(parked).actions, "supersede-review")).toEqual(sup);
     const ci = inReview(rows, {}, { phase: "ci", cardFor: "ci:0" });
@@ -2473,7 +2570,16 @@ describe("set aside", () => {
     );
     return { ...s, seat: { ...s.seat, state: "idle", lastTurnEndedAt: NOW - 1000, ...over.seat } };
   };
-  const asideOf = (wake = false): Partial<RunLoop> => ({ aside: { worktree: "/w/r1", wake } });
+  const asideOf = (wake = false, on: Partial<RunLoop> = {}): Partial<RunLoop> => ({
+    ...on,
+    hold: {
+      kind: on.hold?.kind ?? null,
+      reason: on.hold?.reason ?? null,
+      ended: on.hold?.ended ?? false,
+      worktree: "/w/r1",
+      wake,
+    },
+  });
   /** The run off its seat: the seat is another run's, so the snapshot is not current. */
   const off = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = asideOf()) => {
     const s = base(over, loop);
@@ -2486,7 +2592,7 @@ describe("set aside", () => {
     expect(asideEventText("SULU")).toBe("in review; SULU is free for its next ticket");
     expect(asideInCiEventText("SULU")).toBe("in CI; SULU is free for its next ticket");
     expect(wokenEventText("SULU")).toBe("back to SULU for rework");
-    expect(NEW_LOOP.aside).toBeNull();
+    expect(NEW_LOOP.hold?.worktree ?? null).toBeNull();
   });
 
   it("sets aside at review", () => {
@@ -2518,132 +2624,6 @@ describe("set aside", () => {
 
   it("no review seat: held", () => {
     expect(kindsOf(reconcile(base({ asideOk: false })).actions)).not.toContain("set-aside");
-  });
-
-  describe("rework due on the seat", () => {
-    /** A new ticket being built, its seat between turns, another run of the seat due back. */
-    const building = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
-      const s = base(
-        { headCommit: null, pushed: null, pr: null, review: null, reworkDue: true, ...over },
-        { phase: "working", cardFor: "working:0", ...loop },
-      );
-      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
-    };
-
-    it("sets the working run aside at its turn end, with no review seat needed", () => {
-      for (const s of [building(), building({ asideOk: false })]) {
-        const r = reconcile(s);
-        expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
-        expect(r.loop.phase).toBe("working");
-      }
-    });
-
-    it("waits for the turn to end, and for the seat to be free of questions", () => {
-      const b = building();
-      const cases: [string, LoopSnapshot][] = [
-        ["in turn", building({ seat: { ...b.seat, inTurn: true } })],
-        ["open question", building({ seat: { ...b.seat, openQuestion: true } })],
-        ["not idle", building({ seat: { ...b.seat, state: "running" } })],
-        ["seat does not hold the run", building({ seat: { ...b.seat, holdsRun: false } })],
-        ["no rework due", building({ reworkDue: false })],
-        ["already pushed", building({ pushed: { sha: SHA, at: NOW - 60_000 } })],
-        ["ended", building({ ended: { reason: "done" } })],
-      ];
-      for (const [name, s] of cases) {
-        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
-      }
-    });
-
-    /** A run that pushed once, then made a commit the push gate refused: the commit stays unpushed. */
-    const refused = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
-      const s = base(
-        { headCommit: SHA2, pr: pr({ ci: "passing" }), reworkDue: true, ...over },
-        {
-          phase: "ci",
-          pushFor: SHA2,
-          pushStartedAt: NOW - 60_000,
-          transient: 1,
-          lastRefusal: "the push gate refused the commit",
-          cardFor: "ci:0",
-          ...loop,
-        },
-      );
-      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
-    };
-
-    it("sets aside a pushed run whose newer commit was refused, when rework is due on the seat", () => {
-      const cases: [string, LoopSnapshot][] = [
-        ["in ci", refused()],
-        [
-          "stuck",
-          refused(
-            {},
-            { phase: "parked", parked: { kind: "stuck", reason: "not on GitHub", ended: false } },
-          ),
-        ],
-        [
-          "refused park",
-          refused(
-            {},
-            { phase: "parked", parked: { kind: "refused", reason: "refused", ended: false } },
-          ),
-        ],
-      ];
-      for (const [name, s] of cases) {
-        const r = reconcile(s);
-        expect(
-          kindsOf(r.actions).filter((k) => k === "set-aside"),
-          name,
-        ).toHaveLength(1);
-        expect(
-          r.actions.find((a) => a.kind === "set-aside"),
-          name,
-        ).toEqual({
-          kind: "set-aside",
-          displaced: true,
-        });
-      }
-    });
-
-    it("keeps a refused run on its seat while no rework is due", () => {
-      const cases: [string, LoopSnapshot][] = [
-        ["no rework due", refused({ reworkDue: false })],
-        ["no commit read", refused({ headCommit: null })],
-        ["in turn", refused({ seat: { ...refused().seat, inTurn: true } })],
-        ["review phase", refused({}, { phase: "review" })],
-        // in ci with nothing refused: the push has not been tried yet
-        ["not refused yet", refused({}, { lastRefusal: null, transient: 0 })],
-      ];
-      for (const [name, s] of cases) {
-        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
-      }
-    });
-
-    it("does not displace a rework run that has just reported its fix, before its push is tried", () => {
-      const s = base(
-        {
-          headCommit: SHA2,
-          reworkDue: true,
-          evidence: { id: 2, at: 3000, ruling: false },
-          evidenceCount: 2,
-        },
-        { phase: "working", reportedEvidenceId: 1 },
-      );
-      const idle = { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false } };
-      expect(reconcile(idle).actions).not.toContainEqual({ kind: "set-aside", displaced: true });
-    });
-
-    it("a run off its seat with a refused commit is due back, behind the rework", () => {
-      const r = reconcile(
-        off({ headCommit: SHA2, reworkDue: true }, { phase: "ci", ...asideOf(true) }),
-      );
-      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
-    });
-
-    it("the displaced run is flagged to come back, behind the rework", () => {
-      const r = reconcile(off({ reworkDue: true }, { phase: "working", ...asideOf() }));
-      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
-    });
   });
 
   describe("a question the operator must answer", () => {
@@ -2708,12 +2688,22 @@ describe("set aside", () => {
           };
           return reconcile({
             ...x,
-            loop: { ...x.loop, aside: { worktree: "/w/r1", wake: false, ask: 3 } },
+            loop: {
+              ...x.loop,
+              hold: {
+                kind: null,
+                reason: null,
+                ended: false,
+                worktree: "/w/r1",
+                wake: false,
+                ask: 3,
+              },
+            },
           });
         };
-        expect(off(true).loop.aside?.wake, name).toBe(false);
+        expect(off(true).loop.hold?.wake, name).toBe(false);
         expect(kindsOf(off(true).actions), name).not.toContain("wake");
-        expect(off(false).loop.aside?.wake, name).toBe(true);
+        expect(off(false).loop.hold?.wake, name).toBe(true);
         expect(kindsOf(off(false).actions), name).toContain("wake");
       }
     });
@@ -2753,10 +2743,10 @@ describe("set aside", () => {
         return { ...s, seat: { ...s.seat, openQuestion: operatorAsk } };
       };
       const held = reconcile(parked(true));
-      expect(held.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+      expect(held.loop.hold).toMatchObject({ worktree: "/w/r1", wake: false });
       expect(kindsOf(held.actions)).not.toContain("wake");
       const answered = reconcile(parked(false));
-      expect(answered.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+      expect(answered.loop.hold).toMatchObject({ worktree: "/w/r1", wake: true });
       expect(kindsOf(answered.actions)).toContain("wake");
     });
   });
@@ -2781,7 +2771,7 @@ describe("set aside", () => {
 
   it("findings wake it", () => {
     const r = reconcile(off({ review: blocking }));
-    expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    expect(r.loop.hold).toMatchObject({ worktree: "/w/r1", wake: true });
     expect(kindsOf(r.actions).filter((k) => k === "wake")).toHaveLength(1);
     expect(sends(r.actions)).toEqual([]);
   });
@@ -2791,13 +2781,14 @@ describe("set aside", () => {
       off(
         {},
         {
-          ...asideOf(),
           phase: "parked",
-          parked: { kind: "ci", reason: "x", ended: false },
+          ...asideOf(false, {
+            hold: { kind: "ci", reason: "x", ended: false, worktree: null, wake: false },
+          }),
         },
       ),
     );
-    expect(r.loop.aside?.wake).toBe(true);
+    expect(r.loop.hold?.wake).toBe(true);
     expect(kindsOf(r.actions)).toContain("wake");
   });
 
@@ -2808,8 +2799,13 @@ describe("set aside", () => {
     );
     const r = reconcile(off({ review: rows, claimed: { "fix:r1:0:1": 1, "fix:r1:0:2": 2 } }));
     expect(r.loop.phase).toBe("parked");
-    expect(r.loop.parked?.kind).toBe("review");
-    expect(r.loop.aside?.wake).toBe(false);
+    expect(r.loop.hold).toEqual({
+      kind: "review",
+      reason: expect.any(String),
+      ended: false,
+      worktree: "/w/r1",
+      wake: false,
+    });
     expect(kindsOf(r.actions)).not.toContain("wake");
   });
 
@@ -2818,11 +2814,11 @@ describe("set aside", () => {
     (kind) => {
       const parked: Partial<RunLoop> = {
         phase: "parked",
-        parked: { kind, reason: "x", ended: false },
+        hold: { kind, reason: "x", ended: false, worktree: null, wake: false },
       };
       expect(kindsOf(reconcile(base({}, parked)).actions)).toContain("set-aside");
-      const r = reconcile(off({}, { ...parked, ...asideOf(false) }));
-      expect(r.loop.aside?.wake).toBe(false);
+      const r = reconcile(off({}, asideOf(false, parked)));
+      expect(r.loop.hold?.wake).toBe(false);
       expect(kindsOf(r.actions)).not.toContain("wake");
     },
   );
@@ -2837,21 +2833,21 @@ describe("set aside", () => {
     const ruled = reconcile(
       base(failing, { phase: "working", ciFailedSha: SHA, reportedEvidenceId: 1 }),
     );
-    expect(ruled.loop.parked?.kind).toBe("ruling");
+    expect(ruled.loop.hold?.kind).toBe("ruling");
     const next = reconcile(base(failing, ruled.loop));
     expect(kindsOf(next.actions)).toContain("set-aside");
   });
 
   it("settling the wait brings the run back", () => {
     // the park lifted: the run is working again, and an aside one is woken
-    const r = reconcile(off({}, { phase: "working", parked: null, ...asideOf(false) }));
-    expect(r.loop.aside?.wake).toBe(true);
+    const r = reconcile(off({}, { phase: "working", hold: null, ...asideOf(false) }));
+    expect(r.loop.hold?.wake).toBe(true);
     expect(kindsOf(r.actions)).toContain("wake");
   });
 
   it("clean review stays aside", () => {
     const r = reconcile(off({ review: facts([fact({ minor: 1 })]) }));
-    expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+    expect(r.loop.hold).toMatchObject({ worktree: "/w/r1", wake: false });
     expect(kindsOf(r.actions)).not.toContain("wake");
     expect(kindsOf(r.actions)).not.toContain("set-aside");
     expect(sends(r.actions)).toEqual([]);
@@ -2860,23 +2856,37 @@ describe("set aside", () => {
   it("a run parked on a controller check is set aside, and an aside one is not woken", () => {
     const parked: Partial<RunLoop> = {
       phase: "parked",
-      parked: { kind: CONTROLLER_CHECK_PARK, reason: "check", ended: false },
+      hold: {
+        kind: CONTROLLER_CHECK_PARK,
+        reason: "check",
+        ended: false,
+        worktree: null,
+        wake: false,
+      },
     };
     const a = reconcile(base({}, parked)).actions;
     expect(a.filter((x) => x.kind === "set-aside")).toHaveLength(1);
-    const r = reconcile(off({}, { ...parked, ...asideOf(false) }));
-    expect(r.loop.aside?.wake).toBe(false);
+    const r = reconcile(off({}, asideOf(false, parked)));
+    expect(r.loop.hold?.wake).toBe(false);
     expect(kindsOf(r.actions)).not.toContain("wake");
     // any other park brings an aside run back
     const other = reconcile(
-      off({}, { phase: "parked", parked: { kind: "ci", reason: "x", ended: false }, ...asideOf() }),
+      off(
+        {},
+        {
+          phase: "parked",
+          ...asideOf(false, {
+            hold: { kind: "ci", reason: "x", ended: false, worktree: null, wake: false },
+          }),
+        },
+      ),
     );
-    expect(other.loop.aside?.wake).toBe(true);
+    expect(other.loop.hold?.wake).toBe(true);
   });
 
   it("back on its seat clears aside", () => {
     const r = reconcile(base({}, asideOf(true)));
-    expect(r.loop.aside).toBeNull();
+    expect(r.loop.hold?.worktree ?? null).toBeNull();
     expect(kindsOf(r.actions)).not.toContain("wake");
   });
 
@@ -3044,7 +3054,7 @@ describe("merge workspace", () => {
       expect(reconcile(base).loop.awaitingFlight).toBe(SHA);
       expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
       const standard = reconcile({ ...base, flightPowers: "standard" });
-      expect(standard.loop.parked?.kind).toBe("gate");
+      expect(standard.loop.hold?.kind).toBe("gate");
     },
   );
 
@@ -3054,7 +3064,7 @@ describe("merge workspace", () => {
       { touches: { sha: SHA, paths: [] }, gate: gateOf({ hubOnly: false, strays: ["x/a.ts"] }) },
     );
     const held = reconcile(base);
-    expect(held.loop.parked).toBeNull();
+    expect(held.loop.hold?.kind ?? null).toBeNull();
     expect(held.loop.awaitingFlight).toBe(SHA);
     expect(kindsOf(held.actions)).not.toContain("merge");
     const cleared = { ...base.loop, flightClearedSha: SHA };
@@ -3209,19 +3219,19 @@ describe("merge workspace", () => {
     const touches = { sha: SHA, paths: ["CLAUDE.md"] };
     const foreign = reconcile(merge({}, { touches, gate: gateOf({ hubOnly: false }) }));
     noMerge(foreign);
-    expect(foreign.loop.parked).toEqual({
+    expect(foreign.loop.hold).toMatchObject({
       kind: "gate",
       reason: "commits on the branch that Mission Control did not make",
-      ended: false,
+      ended: true,
     });
     const stray = reconcile(
       merge({}, { touches, gate: gateOf({ strays: ["CLAUDE.md", "x/a.ts"] }) }),
     );
     noMerge(stray);
-    expect(stray.loop.parked).toEqual({
+    expect(stray.loop.hold).toMatchObject({
       kind: "gate",
       reason: "changes outside SULU's area: x/a.ts",
-      ended: false,
+      ended: true,
     });
   });
 
@@ -3232,7 +3242,13 @@ describe("merge workspace", () => {
         {
           phase: "parked",
           cardFor: "parked:0",
-          parked: { kind: "merge-step", reason: "close the issue failed: x", ended: false },
+          hold: {
+            kind: "merge-step",
+            reason: "close the issue failed: x",
+            ended: false,
+            worktree: null,
+            wake: false,
+          },
           merging: { sha: SHA, done: ["ready", "merge"] },
         },
       );
@@ -3241,7 +3257,7 @@ describe("merge workspace", () => {
         const s = parkedAfter(st);
         const r = reconcile(s);
         expect(r.loop.phase, st).toBe("parked");
-        expect(r.loop.parked?.kind, st).toBe("merge-step");
+        expect(r.loop.hold?.kind, st).toBe("merge-step");
         expect(r.actions, st).toEqual([]);
       }
     });
@@ -3381,20 +3397,20 @@ describe("merge workspace", () => {
   it("strays park the run with kind gate", () => {
     const r = reconcile(merge({}, { gate: gateOf({ strays: ["x/a.ts", "y.ts"] }) }));
     noMerge(r);
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "gate",
       reason: "changes outside SULU's area: x/a.ts, y.ts",
-      ended: false,
+      ended: true,
     });
   });
 
   it("commits Mission Control did not make park the run with kind gate", () => {
     const r = reconcile(merge({}, { gate: gateOf({ hubOnly: false }) }));
     noMerge(r);
-    expect(r.loop.parked).toEqual({
+    expect(r.loop.hold).toMatchObject({
       kind: "gate",
       reason: "commits on the branch that Mission Control did not make",
-      ended: false,
+      ended: true,
     });
   });
 
@@ -3837,5 +3853,41 @@ describe("park note keys", () => {
     expect(
       `${NOTE_ITEM_PREFIX}${blockedNoteKey("r-10", 0)}`.startsWith(blockedItemPrefix("r-1")),
     ).toBe(false);
+  });
+});
+
+describe("one hold state", () => {
+  it("a new loop has a hold of null and no park or set-aside key", () => {
+    expect(NEW_LOOP.hold).toBeNull();
+    expect("parked" in NEW_LOOP).toBe(false);
+    expect("aside" in NEW_LOOP).toBe(false);
+  });
+
+  it("a run leaves its seat, parks there, is lifted and rejoins, keeping what it should", () => {
+    const off = leaveSeat(null, "/w", false);
+    expect(off).toEqual({ kind: null, reason: null, ended: false, worktree: "/w", wake: false });
+    const parked = parkHold(off, "review", "findings", false);
+    expect(parked).toEqual({
+      kind: "review",
+      reason: "findings",
+      ended: false,
+      worktree: "/w",
+      wake: false,
+    });
+    expect(liftPark(parked)).toEqual(off);
+    expect(rejoinSeat(off)).toBeNull();
+    const asked = leaveSeat(parked, "/w", true, 3);
+    expect(rejoinSeat(asked)).toEqual({
+      kind: "review",
+      reason: "findings",
+      ended: false,
+      worktree: null,
+      wake: false,
+    });
+  });
+
+  it("lifting a park on the seat leaves no hold", () => {
+    expect(liftPark(parkHold(null, "review", "x", false))).toBeNull();
+    expect(liftPark(null)).toBeNull();
   });
 });

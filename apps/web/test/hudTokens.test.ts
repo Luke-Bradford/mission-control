@@ -183,8 +183,6 @@ describe("readable content is at least 12px", () => {
     ["agent/agent.css", ".ev details pre"],
     ["flight/flight.css", ".wif-branch"],
     ["flight/flight.css", ".wif-checkpoint"],
-    ["lenses/lenses.css", ".map-lens"],
-    ["lenses/lenses.css", ".map-conflict-detail"],
     ["components/config/Glossary.css", ".gloss code"],
   ] as const;
 

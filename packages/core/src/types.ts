@@ -1,5 +1,6 @@
 import type { AttentionHold } from "./attention-model.ts";
 import type { Owner, Stage } from "./board-model.ts";
+import type { ModelAdvice } from "./model-advice.ts";
 
 export type {
   AttentionHold,
@@ -131,6 +132,8 @@ export interface Run {
   accountId?: AccountId | null;
   /** Immutable launch effort, absent when the CLI used its default. */
   effort?: string | null;
+  /** The model and effort recommended for the run's step when it started; absent on a run with none. */
+  advice?: ModelAdvice;
   /** The loop kind of the seat that started the run, kept so Audit still knows it after the seat is gone; absent on older runs. */
   loopKind?: LoopKind | null;
   /** SHA-256 of the role brief, generated preamble, and first step prompt. */
@@ -162,6 +165,28 @@ export interface CiRerun {
   outcome: "pending" | "passed" | "failed";
 }
 
+/** The run's one wait state, in place of the park and set-aside records. Null: on its seat, nothing holds it. */
+export interface RunHold {
+  /** The park's kind while `phase` is "parked"; null while the run only waits off its seat. */
+  kind: string | null;
+  reason: string | null;
+  /** A stop: the run ended on this park. Only true with `kind`. */
+  ended: boolean;
+  /** The worktree the run kept when its seat moved on; null while its seat holds it. */
+  worktree: string | null;
+  /** Off its seat and due back first. */
+  wake: boolean;
+  /** The operator question it waits on, off its seat. */
+  ask?: number;
+}
+
+/** A run's hold as the HUD shows it. */
+export interface CrewHold {
+  kind: string | null;
+  reason: string | null;
+  offSeat: boolean;
+}
+
 /** What the first loop's reconciler keeps per run, as JSON on the run's row. */
 export interface RunLoop {
   /** Computed from the checked diff; FLIGHT copies this exact key and evidence path. */
@@ -180,10 +205,23 @@ export interface RunLoop {
   >;
   /** One extra author rework round FLIGHT may grant after the review-round cap, per head. */
   flightReworks?: Record<string, number>;
+  /**
+   * The epoch a FLIGHT rework at the review-round cap granted a review in: the seat's fix is a new
+   * head, so the grant is by epoch. It holds from that epoch on, whatever starts a new epoch, until
+   * FLIGHT settles with rereview, accept or second_review; its review is limited to one blocking outcome.
+   */
+  flightReworkGrantEpoch?: number;
   phase: LoopPhase;
   reportedEvidenceId: number;
   prNumber: number | null;
   pushStartedAt: number | null;
+  /**
+   * The PR head the loop last saw in `ci`, and when it first saw it (a run with no record: from the
+   * push). A head that changes starts the window for it afresh, so a commit added on top long
+   * after the push gets its own grace.
+   */
+  headSeenSha?: string;
+  headSeenAt?: number;
   /** The commit `pushStartedAt` was started for: a new commit in `ci` starts the clock again. */
   pushFor: string | null;
   /** When the operator last un-parked the run; the CI clocks run from the later of this and the push. */
@@ -192,11 +230,22 @@ export interface RunLoop {
   ciFailedSha: string | null;
   /** The failed sha whose excerpt was claimed. */
   relayedSha: string | null;
+  /**
+   * A commit on top of the seat's push was adopted as the run's push (`sha`), and the hub has not yet
+   * moved the seat's worktree onto it. It is tried on each pass where the seat is idle, and dropped
+   * once it works, or when the epoch or the push changes. `why` is the last refusal.
+   */
+  branchMoved?: { sha: string; epoch: number; since: number; why?: string };
   transient: number;
   lastRefusal: string | null;
   epoch: number;
   budgetExtra: number;
-  parked: { kind: string; reason: string; ended: boolean } | null;
+  /**
+   * The run's one wait state: why a park holds it (`kind`, `reason`, `ended`) and whether it has
+   * left its seat (`worktree`, `wake`, `ask`). Null: on its seat, nothing holds it. Optional only
+   * while the web app's fixtures predate it (the web ticket makes it required again).
+   */
+  hold?: RunHold | null;
   /** Hard-rule files in the pushed sha's diff. */
   touches: {
     sha: string;
@@ -213,13 +262,6 @@ export interface RunLoop {
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
   /**
-   * Off its seat while in review; `wake`: rework or a park is due, so it goes back first.
-   * `displaced`: it left to make way for rework on the seat (a pushed run holds a refused newer
-   * commit), so that rework comes back before it.
-   * `ask`: the operator question this run waits on; the run wakes once it is answered.
-   */
-  aside?: { worktree: string; wake: boolean; displaced?: true; ask?: number } | null;
-  /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed
    * paths outside the seat's area or protected.
@@ -235,6 +277,8 @@ export interface RunLoop {
     /** The PR changes the HUD, so a passing RETRO design check is required before readiness. */
     webChanged?: boolean;
   } | null;
+  /** The merged PR was only part of the ticket: the ticket was left open and its card is not Done's. */
+  leftOpen?: boolean;
   /** The tech-debt issue filed from this run's merged PR. */
   minorIssueNumber?: number;
   /** Saved before issue creation; an interrupted write must be reconciled before retrying. */
@@ -281,7 +325,14 @@ export interface RunLoop {
    * A hold on the run's merge by FLIGHT or the controller (CAPCOM): the engine does not merge
    * while it stands. `from` is the phase the run left when it parked on the hold.
    */
-  mergeHold?: { by: "FLIGHT" | "CAPCOM"; reason: string; at: number; from?: LoopPhase } | null;
+  mergeHold?: {
+    by: "FLIGHT" | "CAPCOM";
+    reason: string;
+    at: number;
+    /** The PR head FLIGHT or CAPCOM held; an author must move beyond it before reporting again. */
+    sha?: string;
+    from?: LoopPhase;
+  } | null;
   /** The fresh CLI sessions the run started for a fix (a retired trial), oldest first; the token audit reads old ones. */
   fixSessions?: { sessionId: string; at: number; reason: "ci" | "review" }[];
 }
@@ -477,25 +528,6 @@ export interface PrCheck {
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
 export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt" | "skipped">;
 
-/**
- * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
- * `previewable` is true only where `POST /api/previews` could start one now: the hub supports
- * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
- * null; the web offers "Start preview" when `previewable && preview === null`.
- */
-/** A branch's built web app, kept to show as the real app in Demo (the operator opens it from Needs you). */
-export interface DesignPreviewView {
-  /** The repo the preview was published for; ticket numbers are only unique within one repo. */
-  repoId: RepoId;
-  ticket: number;
-  branch: string;
-  sha: string;
-  publishedAt: number;
-  pr: number | null;
-  running: boolean;
-  url: string;
-}
-
 export interface PullRequestPreviewFacts {
   previewable: boolean;
   preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
@@ -561,6 +593,8 @@ export interface PullRequestView {
   headSha: string | null;
   /** UNKNOWN: GitHub has not computed it yet, so poll again. When it was read is the row's `read_at`. */
   mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
+  /** The PR's head branch is in a fork; null when GitHub gave none or the row was stored before it. */
+  isCrossRepository?: boolean | null;
   /** The PR author's login; absent or null when GitHub gave none or the row was stored before it. */
   author?: string | null;
   /** Logins assigned to the PR; absent means none. */
@@ -907,7 +941,8 @@ export type Topic =
   | "settings"
   | "config"
   | "guard"
-  | "flight";
+  | "flight"
+  | "plans";
 
 /**
  * One machine reading. null = not measured yet (the first sample has no CPU delta) or failed with
@@ -1007,8 +1042,8 @@ export interface CrewLoop {
   phase: LoopPhase;
   text: string;
   prNumber: number | null;
-  /** The park reason while `phase` is `parked`, else null. */
-  parked: string | null;
+  /** The run's hold, else null. */
+  hold?: CrewHold | null;
   /** The name of the run's template profile; absent on a run without one. */
   profile?: string;
   /** The profile's step for the phase; null when parked, done or no step has the phase. */
@@ -1037,8 +1072,8 @@ export interface CrewQueueItem {
   pos: number;
 }
 
-/** A run its seat has set aside (in review, off the seat). */
-export interface CrewAsideRun {
+/** A run its seat has moved on from (in review, off the seat). */
+export interface CrewOffSeatRun {
   runId: string;
   /** Resolved as the row's `ticket` is (`repo#n`), else null. */
   ticket: string | null;
@@ -1116,8 +1151,8 @@ export interface CrewRow {
   ticketTitle: string | null;
   /** The latest run's loop; null when no loop drives it (always null until the engine lands). */
   loop: CrewLoop | null;
-  /** Crew: the seat's set-aside runs other than `run`, oldest first; [] for a loop row. */
-  asideRuns?: CrewAsideRun[];
+  /** Crew: the seat's off-seat runs other than `run`, oldest first; [] for a loop row. */
+  offSeatRuns?: CrewOffSeatRun[];
   /** A writer seat's queued tickets, without the one it holds; [] for other rows. */
   queue?: CrewQueueItem[];
   /**
@@ -1176,9 +1211,9 @@ export type CrewSummaryDigest = Pick<
 >;
 
 /** A crew row as the Overview reads it: state, ticket, loop step, tokens and cost, without the event timelines or the whole digest. */
-export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "asideRuns"> & {
+export type CrewSummaryRow = Omit<CrewRow, "events" | "digest" | "offSeatRuns"> & {
   digest: CrewSummaryDigest | null;
-  asideRuns?: Omit<CrewAsideRun, "events">[];
+  offSeatRuns?: Omit<CrewOffSeatRun, "events">[];
 };
 
 /** `GET /api/crew?shape=summary`. */
@@ -1247,24 +1282,6 @@ export interface PersonBrief {
   related?: BriefReference[];
   decisionKey?: string;
   replies?: SuggestedReply[];
-}
-
-/** Correlates item chat without changing how messages are delivered or executed. */
-export interface ItemDiscussion {
-  id: string;
-  itemKey: string;
-  version: string;
-  messages: ItemChatMessage[];
-}
-
-export interface ItemChatMessage {
-  id: string;
-  itemKey: string;
-  correlationId: string;
-  replyTo?: string;
-  role: "operator" | "flight";
-  text: string;
-  at: number;
 }
 
 /** One answer FLIGHT suggests for an item that is a choice. */

@@ -31,7 +31,7 @@ import {
 import { FLIGHT_FLOOR_ENFORCING_PATHS, FLIGHT_FLOOR_PATHS } from "./rule-paths.ts";
 import { globMatches } from "./runtime.ts";
 import type { SeatState } from "./runtime-model.ts";
-import type { MergeStep, PrCheck, PullRequestView, RunLoop } from "./types.ts";
+import type { MergeStep, PrCheck, PullRequestView, RunHold, RunLoop } from "./types.ts";
 import type { TicketView } from "./views.ts";
 
 /** What a PR head's checks say about CI, with the names behind it. */
@@ -85,17 +85,74 @@ export const EVIDENCE_NO_LOOP =
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
 /** Parks a new committed report can clear without weakening an operator or budget hold. */
-export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict", "stuck"] as const;
+export const EVIDENCE_UNPARK_KINDS = ["review"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
-export function evidenceCanUnpark(
-  parked: RunLoop["parked"],
-): parked is NonNullable<RunLoop["parked"]> {
+export function evidenceCanUnpark(hold: RunLoop["hold"]): hold is RunHold & { kind: string } {
   return (
-    parked !== null &&
-    !parked.ended &&
-    (EVIDENCE_UNPARK_KINDS as readonly string[]).includes(parked.kind)
+    hold != null &&
+    hold.kind !== null &&
+    !hold.ended &&
+    (EVIDENCE_UNPARK_KINDS as readonly string[]).includes(hold.kind)
   );
+}
+
+/** A hold with no park: only the worktree the run kept; null when nothing is left to hold. */
+const keptOnly = (hold: RunHold | null | undefined): RunHold | null =>
+  hold?.worktree
+    ? {
+        kind: null,
+        reason: null,
+        ended: false,
+        worktree: hold.worktree,
+        wake: hold.wake,
+        ...(hold.ask !== undefined ? { ask: hold.ask } : {}),
+      }
+    : null;
+
+/** Park the run, keeping any worktree it has left on. */
+export function parkHold(
+  hold: RunHold | null | undefined,
+  kind: string,
+  reason: string,
+  ended: boolean,
+): RunHold {
+  return {
+    kind,
+    reason,
+    ended,
+    worktree: hold?.worktree ?? null,
+    wake: hold?.wake ?? false,
+    ...(hold?.ask !== undefined ? { ask: hold.ask } : {}),
+  };
+}
+
+/** Lift the park; a run off its seat stays off it. */
+export function liftPark(hold: RunHold | null | undefined): RunHold | null {
+  return keptOnly(hold);
+}
+
+/** The run leaves its seat, keeping `worktree`; any park it is under stays. */
+export function leaveSeat(
+  hold: RunHold | null | undefined,
+  worktree: string,
+  wake: boolean,
+  ask?: number,
+): RunHold {
+  return {
+    kind: hold?.kind ?? null,
+    reason: hold?.reason ?? null,
+    ended: hold?.ended ?? false,
+    worktree,
+    wake,
+    ...(ask !== undefined ? { ask } : {}),
+  };
+}
+
+/** The run is back on its seat; any park it is under stays. */
+export function rejoinSeat(hold: RunHold | null | undefined): RunHold | null {
+  if (!hold || hold.kind === null) return null;
+  return { kind: hold.kind, reason: hold.reason, ended: hold.ended, worktree: null, wake: false };
 }
 /** The last push is in CI. */
 export const EVIDENCE_IN_CI =
@@ -113,6 +170,9 @@ export const pathsText = (paths: readonly string[]): string => {
 /** No commit since the last report, or the newest commit is the one CI failed on. */
 export const EVIDENCE_NO_COMMIT =
   "Not recorded: there is no new commit since your last report (or CI already failed on your newest one). Commit your change with mc commit, then report again. A note that starts with Ruling: needs no commit.";
+/** A held head cannot return to review until its author makes the requested change. */
+export const evidenceFlightHoldText = (reason: string): string =>
+  `Not recorded: FLIGHT holds this PR: ${reason}. Make a new commit that addresses this, then report evidence again.`;
 /** The note would notify or reference something on GitHub, or holds a secret (`what` says which). */
 export const evidenceTextText = (what: string): string =>
   `Not recorded: the note is posted to GitHub and must not notify anyone, reference another item or hold a secret (${what}); reword it, then report again. ${REFERENCE_ADVICE}`;
@@ -126,19 +186,6 @@ export const EVIDENCE_RULING_PREFIX = "Ruling:";
 export const CI_TRIES = 3;
 /** The push or PR is refused this many times before the run parks. */
 export const REFUSAL_TRIES = 3;
-/** A CI job with no recorded history may stay pending this long on a pushed sha. */
-export const CI_PENDING_MAX_MS = 30 * 60_000;
-/** A job with history parks once it is pending this many times its recent p90... */
-export const CI_PENDING_P90_FACTOR = 2;
-/** ...but never sooner than this. */
-export const CI_PENDING_MIN_MS = 10 * 60_000;
-
-/** How long a running job may stay pending: twice its recent p90, else the fixed default. */
-export function ciPendingLimitMs(p90Ms: number | undefined): number {
-  return p90Ms === undefined || !(p90Ms > 0)
-    ? CI_PENDING_MAX_MS
-    : Math.max(CI_PENDING_MIN_MS, Math.round(p90Ms * CI_PENDING_P90_FACTOR));
-}
 /** The push, the PR or the first CI report is waited for this long. */
 export const NO_CI_AFTER_MS = 10 * 60_000;
 /** The park kind of a push or PR that has not shown up on GitHub; the engine lifts it once it does. */
@@ -416,6 +463,24 @@ const prRef = (pr: number | null): string => (pr === null ? "the PR" : `PR #${pr
 export const readyMarkedText = (pr: number | null): string => `marked ${prRef(pr)} ready`;
 export const mergedText = (pr: number | null): string => `merged ${prRef(pr)} (merge commit)`;
 export const closedIssueText = (issue: number): string => `closed #${issue}`;
+export const leftOpenText = (issue: number): string =>
+  `left #${issue} open: the PR is part of the ticket`;
+
+/**
+ * Whether a merged PR's body names ticket `issue` of `repo` (`owner/name`) only as a part of it
+ * ("Part of #N", "Refs #N", any case) and never with a closing keyword (Closes, Fixes, Resolves).
+ * A bare `#N` is this repo's; `owner/name#N` counts only when it is this repo. A body that names
+ * the ticket not at all is not part-only: the engine closes the ticket as before.
+ */
+export function prIsPartOf(body: string, repo: string, issue: number): boolean {
+  const mine = (words: string): boolean =>
+    [
+      ...body.matchAll(
+        new RegExp(`\\b(?:${words})\\b:?\\s+(?:([\\w.-]+/[\\w.-]+))?#${issue}(?!\\d)`, "gi"),
+      ),
+    ].some((m) => m[1] === undefined || m[1].toLowerCase() === repo.toLowerCase());
+  return mine("part\\s+of|refs?|references?") && !mine("close[sd]?|fix(?:e[sd])?|resolve[sd]?");
+}
 export const deletedRemoteText = (branch: string): string => `deleted origin's ${branch}`;
 export const deletedLocalText = (branch: string): string => `deleted the local branch ${branch}`;
 export const localNotDeletedText = (branch: string, why: string): string =>
@@ -442,6 +507,9 @@ export const mergedMainText = (mainSha: string): string =>
   `merged main ${mainSha.slice(0, 7)} into the branch`;
 export const reviewCarriedText = (from: string, to: string): string =>
   `review of ${from.slice(0, 7)} carried to ${to.slice(0, 7)} (main merged, PR diff unchanged)`;
+/** The line a seat gets once the hub has moved its worktree onto a head someone pushed on top. */
+export const branchMovedText = (sha: string, n: number): string =>
+  `Your branch moved to ${sha.slice(0, 7)} (${n} ${n === 1 ? "commit" : "commits"} pushed on top); files may have changed, re-read before editing.`;
 export const mainConflictText = (mainSha: string, n: number): string =>
   `merging main ${mainSha.slice(0, 7)} conflicted in ${n} ${n === 1 ? "file" : "files"}`;
 /** The Activity row for a park. */
@@ -491,7 +559,7 @@ export const loopText = (ref: string | null, loop: RunLoop): string => {
         ? LOOP_TEXT_REVIEW
         : fillLoopText(LOOP_TEXT_REVIEW_PR, { n: String(loop.prNumber) });
     case "parked":
-      return fillLoopText(LOOP_TEXT_PARKED, { reason: loop.parked?.reason ?? "" });
+      return fillLoopText(LOOP_TEXT_PARKED, { reason: loop.hold?.reason ?? "" });
     case "done":
       return loop.prNumber === null
         ? LOOP_TEXT_DONE
@@ -515,12 +583,11 @@ export const NEW_LOOP: RunLoop = {
   lastRefusal: null,
   epoch: 0,
   budgetExtra: 0,
-  parked: null,
+  hold: null,
   touches: null,
   cardFor: null,
   reviewWaivedSha: null,
   prBody: null,
-  aside: null,
 };
 
 /** A run in review leaves its seat when the session has a review seat. */
@@ -537,8 +604,6 @@ export const answeredLineText =
   "The operator answered your question. The answer is in your Comms inbox: read it and carry on with the ticket.";
 export const answerLineKey = (runId: string, questionId: number): string =>
   `answer:${runId}:${questionId}`;
-export const asideForReworkEventText = (call: string): string =>
-  `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
 export const wakeFailedText = (reason: string): string =>
   `could not go back to its seat: ${reason}`;
@@ -666,8 +731,6 @@ export interface LoopSnapshot {
    * the run is parked off the seat, which takes the next ticket, and the run comes back once answered.
    */
   operatorAsk?: boolean;
-  /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
-  reworkDue?: boolean;
   /** The latest evidence. */
   evidence: { id: number; at: number; ruling: boolean; note?: string } | null;
   evidenceCount: number;
@@ -694,6 +757,11 @@ export interface LoopSnapshot {
     /** The state of `mc/review` on GitHub; null when not reported. Absent: not reported. */
     reviewStatus?: PrCheck["state"] | null;
   } | null;
+  /**
+   * In ci, the PR's head is a descendant of the pushed sha: someone else pushed on top of the seat's
+   * push. Read by the caller only when the two differ. Absent: false.
+   */
+  prDescends?: boolean;
   /** The recent p90 run time (ms) of each CI job in the repo, by check name; absent: no history. */
   ciP90Ms?: Record<string, number>;
   /** The repo is a `merge` workspace: the engine merges a PR that passes the gate. Absent: false. */
@@ -738,6 +806,12 @@ export type LoopAction =
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
+  /**
+   * Records the PR's head, a descendant of the push, as the run's push; the hub moves the seat's
+   * worktree and the seat's next line says its branch moved. `from` is the push the head sits on:
+   * the engine adopts only while that is still the run's push.
+   */
+  | { kind: "adopt-head"; sha: string; from: string }
   /** `mark`: the `cardFor` the move sets when it is not the phase's (rework is a state of review). */
   | { kind: "move-card"; column: MoveColumn; mark?: string }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
@@ -748,7 +822,7 @@ export type LoopAction =
   | { kind: "request-review"; sha: string; attempt: number }
   | { kind: "supersede-review"; reviewId: number }
   | { kind: "pr-body"; reviewId: number }
-  | { kind: "set-aside"; displaced?: true }
+  | { kind: "set-aside" }
   | { kind: "wake" }
   | { kind: "update-branch"; mainSha: string }
   | { kind: "mark-ready" }
@@ -765,10 +839,6 @@ interface Step {
 
 const sha7 = (sha: string): string => sha.slice(0, 7);
 
-/** ` for <sha7>` for a text about a sha, or nothing when there is none. */
-const forSha = (sha: string | null | undefined): string =>
-  sha === null || sha === undefined ? "" : ` for ${sha7(sha)}`;
-
 const minutes = (ms: number): number => Math.round(ms / 60_000);
 
 /**
@@ -776,51 +846,6 @@ const minutes = (ms: number): number => Math.round(ms / 60_000);
  * p90, else the fixed default), with the limit of the first; null when none has. A pending CI
  * that names no check is judged by the fixed default from `since`.
  */
-function ciOverdue(
-  s: LoopSnapshot,
-  checks: NonNullable<LoopSnapshot["pr"]>["checks"],
-  since: number,
-  now: number,
-): { pending: string[]; missing: string[]; limitMs: number } | null {
-  if (!checks || checks.pending.length + checks.missing.length === 0) {
-    return now - since > CI_PENDING_MAX_MS
-      ? { pending: [], missing: [], limitMs: CI_PENDING_MAX_MS }
-      : null;
-  }
-  // a running job is judged from its start, but never from before the push or un-park
-  // a check that has not started (missing or queued) may be waiting on a slow job, so it gets the
-  // longest limit among the repo's jobs, never below the fixed default
-  const unstarted = Math.max(
-    CI_PENDING_MAX_MS,
-    ...Object.values(s.ciP90Ms ?? {}).map((p90) => ciPendingLimitMs(p90)),
-  );
-  const over = (name: string) => {
-    const startedAt = checks.startedAt?.[name];
-    const limit = startedAt === undefined ? unstarted : ciPendingLimitMs(s.ciP90Ms?.[name]);
-    return now - Math.max(since, startedAt ?? 0) > limit ? limit : null;
-  };
-  const pending = checks.pending.filter((n) => over(n) !== null);
-  const missing = checks.missing.filter((n) => over(n) !== null);
-  const first = [...pending, ...missing][0];
-  return first === undefined ? null : { pending, missing, limitMs: over(first) as number };
-}
-
-/** Which fact kept a pushed run from reaching CI: the first of push, newest commit, PR, PR head. */
-function missingWhy(
-  headCommit: string | null,
-  pushed: LoopSnapshot["pushed"],
-  pr: LoopSnapshot["pr"],
-): string {
-  if (pushed === null) return "no push is recorded for the run";
-  if (headCommit === null)
-    return `no commit is recorded for the run, but ${sha7(pushed.sha)} is pushed`;
-  if (pushed.sha !== headCommit) {
-    return `the push is ${sha7(pushed.sha)}, not the newest commit ${sha7(headCommit)}`;
-  }
-  if (pr === null) return "no PR of the run has been read from GitHub";
-  return `PR #${pr.number} has ${pr.headSha === null ? "no head" : `head ${sha7(pr.headSha)}`}, not ${sha7(pushed.sha)}`;
-}
-
 const READY = "Ready" satisfies MoveColumn;
 const IN_PROGRESS = "In progress" satisfies MoveColumn;
 const IN_REVIEW = "In review" satisfies MoveColumn;
@@ -837,10 +862,37 @@ function untilText(at: number | null, tz: string | null): string {
   }
 }
 
-const park = (loop: RunLoop, kind: string, reason: string): Step => ({
-  loop: { ...loop, phase: "parked", parked: { kind, reason, ended: false } },
-  actions: [{ kind: "event", text: parkedEventText(reason) }],
-});
+/**
+ * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
+ * free while it stands. The run rejoins its seat's queue when the park is lifted.
+ */
+const isDecisionPark = (kind: string | null | undefined): boolean =>
+  kind === CONTROLLER_CHECK_PARK ||
+  kind === UAT_PARK ||
+  kind === MERGE_HOLD_PARK ||
+  kind === RULING_PARK ||
+  kind === "review" ||
+  kind === "review-ruling" ||
+  kind === "review-failed";
+
+/**
+ * A run that cannot go on stops: it ends with the reason on its card and timeline, and its seat
+ * takes the next ticket. A live park waits for later GitHub state or a decision.
+ */
+const park = (loop: RunLoop, kind: string, reason: string): Step =>
+  isDecisionPark(kind)
+    ? {
+        loop: { ...loop, phase: "parked", hold: parkHold(loop.hold, kind, reason, false) },
+        actions: [{ kind: "event", text: parkedEventText(reason) }],
+      }
+    : {
+        loop: { ...loop, phase: "parked", hold: parkHold(loop.hold, kind, reason, true) },
+        actions: [
+          { kind: "event", text: parkedEventText(reason) },
+          { kind: "end-run" },
+          { kind: "take-next" },
+        ],
+      };
 
 const unchanged = (loop: RunLoop): Step => ({ loop, actions: [] });
 
@@ -956,7 +1008,7 @@ export function gateView(s: LoopSnapshot, loop: RunLoop) {
     s.hardRulesSet === true &&
     gate !== null &&
     (elevated || (gate.hubOnly && gate.strays.length === 0)) &&
-    (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || loop.aside != null)));
+    (!elevated || (!s.flightHeld && (s.seat.state !== "stopped" || !!loop.hold?.worktree)));
   const awaiting = elevated && otherGates && flightCall && !cleared;
   const passes = otherGates && clear;
   return { on, P, touches, gate, clear, passes, awaiting };
@@ -1034,7 +1086,7 @@ function stateStep(s: LoopSnapshot): Step {
   const merged = pr?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
 
   // the server parked this run after the merge: its step failed, and the operator decides
-  if (loop.phase === "parked" && loop.parked?.kind === "merge-step") return unchanged(loop);
+  if (loop.phase === "parked" && loop.hold?.kind === "merge-step") return unchanged(loop);
   if (merged && loop.phase !== "done") {
     const mergedSha = pr?.headSha ?? pushed?.sha ?? null;
     const merging =
@@ -1063,60 +1115,34 @@ function stateStep(s: LoopSnapshot): Step {
           : [...doneMove(loop), { kind: "end-run" }, { kind: "take-next" }],
     };
   }
-  if (s.ended !== null && !loop.parked?.ended) {
+  if (s.ended !== null && !loop.hold?.ended) {
     // the CLI stops itself at its cap: the end keeps the dollar figure the cap hit parked with
     const capReason = dollarCapReason(s);
-    const parked =
-      loop.parked?.kind === "budget"
-        ? { ...loop.parked, ended: true }
+    const stop =
+      loop.hold?.kind === "budget"
+        ? parkHold(loop.hold, "budget", loop.hold.reason ?? "", true)
         : capReason !== null
-          ? { kind: "budget", reason: capReason, ended: true }
-          : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
+          ? parkHold(loop.hold, "budget", capReason, true)
+          : parkHold(loop.hold, "ended", `run ended (${s.ended.reason})`, true);
     // A park that ended with blocking findings owes its card the Ready move even if the park
     // already moved it to Blocked: clear the mark so desiredStep plans it. A budget stop stays, and so
     // does a closed PR (nobody wants that work restarted).
     const reviewed = reviewView(s, loop);
     const owesReady =
-      parked.kind !== "budget" && s.pr?.state === "open" && reviewed.blocked && !reviewed.waived;
+      stop.kind !== "budget" && s.pr?.state === "open" && reviewed.blocked && !reviewed.waived;
     return {
-      loop: { ...loop, phase: "parked", parked, ...(owesReady ? { cardFor: null } : {}) },
+      loop: { ...loop, phase: "parked", hold: stop, ...(owesReady ? { cardFor: null } : {}) },
       actions:
-        capReason !== null && loop.parked?.kind !== "budget"
+        capReason !== null && loop.hold?.kind !== "budget"
           ? [{ kind: "event", text: parkedEventText(capReason) }]
           : [],
-    };
-  }
-  // a push the stored PR row now shows needs no one to lift the stop: it goes to CI as a push does;
-  // a conflict stop lifts the same way once the PR no longer conflicts
-  if (
-    loop.phase === "parked" &&
-    (loop.parked?.kind === STUCK_PARK ||
-      (loop.parked?.kind === "conflict" && pr?.mergeable === "MERGEABLE")) &&
-    !loop.parked.ended &&
-    pr?.state === "open" &&
-    headCommit !== null &&
-    pushed?.sha === headCommit &&
-    pr.headSha === headCommit
-  ) {
-    return {
-      loop: {
-        ...loop,
-        phase: "ci",
-        parked: null,
-        pushStartedAt: now,
-        pushFor: headCommit,
-        unparkedAt: now,
-        transient: 0,
-        lastRefusal: null,
-      },
-      actions: [{ kind: "event", text: `PR #${pr.number} shows ${sha7(headCommit)}; back to CI` }],
     };
   }
   // a ruling on a red head is void once the seat's newer push shows green checks: back to review
   if (
     loop.phase === "parked" &&
-    (loop.parked?.kind === RULING_PARK || loop.parked?.kind === "review-ruling") &&
-    !loop.parked.ended &&
+    (loop.hold?.kind === RULING_PARK || loop.hold?.kind === "review-ruling") &&
+    !loop.hold.ended &&
     loop.ciFailedSha !== null &&
     pr?.state === "open" &&
     pr.ci === "passing" &&
@@ -1129,7 +1155,7 @@ function stateStep(s: LoopSnapshot): Step {
       loop: {
         ...loop,
         phase: "review",
-        parked: null,
+        hold: liftPark(loop.hold),
         ciFails: 0,
         transient: 0,
         lastRefusal: null,
@@ -1143,32 +1169,26 @@ function stateStep(s: LoopSnapshot): Step {
       ],
     };
   }
-  // a pending-CI stop lifts itself once every check is green on the pushed head
-  if (
-    loop.phase === "parked" &&
-    loop.parked?.kind === "ci-pending" &&
-    !loop.parked.ended &&
-    pr?.state === "open" &&
-    pr.ci === "passing" &&
-    headCommit !== null &&
-    pushed?.sha === headCommit &&
-    pr.headSha === headCommit
-  ) {
-    const passed = ciPassed(loop, headCommit);
-    return {
-      loop: {
-        ...loop,
-        phase: "review",
-        parked: null,
-        ciFails: 0,
-        ciFailedSha: null,
-        rerun: passed.rerun,
-        unparkedAt: now,
-      },
-      actions: passed.actions,
-    };
+  if (loop.phase === "parked") {
+    // Old databases can still hold parks from before non-decision parks became stops. End those
+    // runs here so an upgrade cannot leave a seat held by a park nothing can lift.
+    if (
+      loop.hold?.kind != null &&
+      !loop.hold.ended &&
+      !isDecisionPark(loop.hold.kind) &&
+      loop.hold.kind !== "ci"
+    ) {
+      return {
+        loop: { ...loop, hold: { ...loop.hold, ended: true } },
+        actions: [{ kind: "end-run" }, { kind: "take-next" }],
+      };
+    }
+    // a stop whose run is still live (the hub went down between saving the stop and ending the run)
+    // ends it now
+    return loop.hold?.ended && s.ended === null
+      ? { loop, actions: [{ kind: "end-run" }, { kind: "take-next" }] }
+      : unchanged(loop);
   }
-  if (loop.phase === "parked") return unchanged(loop);
   // A sha that failed CI and now shows green on GitHub is no longer the failed sha. A run can be
   // in review or working with it still recorded: a ruling park resumes straight into review, and
   // the merge step and the ruling park both read ciFailedSha, so a stale one wedged the run.
@@ -1280,6 +1300,17 @@ function stateStep(s: LoopSnapshot): Step {
     if (!gv.gate.hubOnly) return park(loop, "gate", GATE_FOREIGN_COMMITS_PARK);
   }
 
+  // The hub keeps trying to move the seat's worktree onto an adopted head; a seat that cannot take
+  // it in the window is the operator's to look at, not left to commit onto the old head.
+  const held = loop.branchMoved;
+  if (held !== undefined && now - held.since > NO_CI_AFTER_MS) {
+    return park(
+      { ...loop, branchMoved: undefined },
+      STUCK_PARK,
+      `the hub could not move ${s.seat.call}'s worktree onto ${sha7(held.sha)}, the commit added on top of its push, after ${minutes(NO_CI_AFTER_MS)} minutes${held.why === undefined ? "" : ` (${held.why})`}; bring the worktree up to it before the seat commits again`,
+    );
+  }
+
   if (loop.phase === "ci") {
     // A commit made while in ci is a new push: its clock and its refusals start over.
     if (typeof loop.pushFor === "string" && loop.pushFor !== headCommit) {
@@ -1295,12 +1326,23 @@ function stateStep(s: LoopSnapshot): Step {
       return park(loop, "refused", loop.lastRefusal ?? "the push or PR was refused");
     }
     if (pushed === null || pr === null || pushed.sha !== headCommit || pr.headSha !== pushed.sha) {
-      if (loop.pushStartedAt !== null && now - loop.pushStartedAt > NO_CI_AFTER_MS) {
-        return park(
-          loop,
-          STUCK_PARK,
-          `the push or PR${forSha(headCommit ?? pushed?.sha)} has not shown up on GitHub after ${minutes(NO_CI_AFTER_MS)} minutes${loop.lastRefusal === null ? "" : ` (${loop.lastRefusal})`}: ${missingWhy(headCommit, pushed, pr)}`,
-        );
+      // someone else's commit on top of the seat's push (a main merge, a doc edit): the PR head is
+      // the run's push now, and the hub moves the seat's worktree onto it. The engine adopts it only
+      // while the seat is idle, so a seat that stays busy past the window is parked as stuck below.
+      if (
+        pushed !== null &&
+        pr !== null &&
+        pr.state === "open" &&
+        pushed.sha === headCommit &&
+        pr.headSha !== null &&
+        pr.headSha !== pushed.sha &&
+        s.prDescends === true &&
+        (!s.seat.inTurn ||
+          !s.seat.holdsRun ||
+          loop.pushStartedAt === null ||
+          now - loop.pushStartedAt <= NO_CI_AFTER_MS)
+      ) {
+        return { loop, actions: [{ kind: "adopt-head", sha: pr.headSha, from: pushed.sha }] };
       }
       return unchanged(loop);
     }
@@ -1309,7 +1351,7 @@ function stateStep(s: LoopSnapshot): Step {
       // a merge workspace merges main into the branch instead (see branchUpdateDue), for as long
       // as CI may stay pending
       const waitedFrom = Math.max(pushed.at, loop.unparkedAt ?? 0);
-      if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= CI_PENDING_MAX_MS) {
+      if (s.autoMerge === true && !loop.mainMerge && now - waitedFrom <= NO_CI_AFTER_MS) {
         return unchanged(loop);
       }
       // the seat merges main itself, once per pushed sha; a seat already told, or a merge of main
@@ -1364,30 +1406,6 @@ function stateStep(s: LoopSnapshot): Step {
         actions: [{ kind: "event", text: `${CI_FAILED_EVENT_PREFIX}${short}${named}` }],
       };
     }
-    // a run the operator un-parked is judged from the un-park, not from a push made before it;
-    // a re-run is also judged from when it was asked for
-    const since = Math.max(
-      pushed.at,
-      loop.unparkedAt ?? 0,
-      loop.rerun?.sha === pushed.sha ? loop.rerun.at : 0,
-    );
-    const overdue = pr.ci === "pending" ? ciOverdue(s, pr.checks, since, now) : null;
-    if (overdue !== null) {
-      const parts = [
-        overdue.pending.length ? `pending: ${overdue.pending.join(", ")}` : "",
-        overdue.missing.length ? `missing: ${overdue.missing.join(", ")}` : "",
-      ].filter((p) => p !== "");
-      return park(
-        loop,
-        "ci-pending",
-        `CI pending for ${minutes(overdue.limitMs)} minutes on ${short}${
-          parts.length > 0 ? ` (${parts.join("; ")})` : ""
-        }`,
-      );
-    }
-    if (pr.ci === null && pr.polledAt - since > NO_CI_AFTER_MS) {
-      return park(loop, "no-ci", `no CI reported for ${short}`);
-    }
     return unchanged(loop);
   }
 
@@ -1439,11 +1457,11 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
   if (loop.phase === "parked") {
     notes.set(blockedNoteKey(runId, loop.epoch), {
       noteKind: "blocked",
-      text: `${ticket.ref} parked: ${loop.parked?.reason ?? "parked"}`,
+      text: `${ticket.ref} parked: ${loop.hold?.reason ?? "parked"}`,
     });
   }
   // an ended run keeps only its blocked note: the seat's rate limit belongs to its next run
-  if (loop.parked?.ended) return notes;
+  if (loop.hold?.ended) return notes;
   const rv = reviewView(s, loop);
   if (rv.R !== null) {
     if (loop.phase === "review" && s.ended === null && rv.P !== null) {
@@ -1550,38 +1568,33 @@ export function fixDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
-/** A FLIGHT rework grant permits exactly one more blocking RETRO outcome on that head. */
+/**
+ * A FLIGHT rework grant permits exactly one more blocking RETRO outcome: on the head it was granted
+ * for (`flightReworks`), or, at the review-round cap, in the epoch the grant started
+ * (`flightReworkGrantEpoch`) and after it, until FLIGHT decides again, since the seat's fix is a new
+ * head and a sync or CI ruling may start another epoch before it is reviewed.
+ */
 function reviewRoundLimit(s: LoopSnapshot, loop: RunLoop, sha: string): number {
   // FLIGHT's second review of this head always gets a fix round, whatever rework was granted before
   if (loop.flightSecondReview?.[sha]?.epoch === loop.epoch)
     return Math.max(2, s.limits?.rounds ?? REVIEW_ROUNDS);
-  return (loop.flightReworks?.[sha] ?? 0) > 0 ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
+  const granted =
+    (loop.flightReworks?.[sha] ?? 0) > 0 ||
+    (loop.flightReworkGrantEpoch !== undefined && loop.epoch >= loop.flightReworkGrantEpoch);
+  return granted ? 1 : (s.limits?.rounds ?? REVIEW_ROUNDS);
 }
-
-/**
- * A park that waits on FLIGHT, the controller or the operator, not on the seat: the seat may be
- * free while it stands. The run rejoins its seat's queue when the park is lifted.
- */
-const isDecisionPark = (kind: string | undefined): boolean =>
-  kind === CONTROLLER_CHECK_PARK ||
-  kind === UAT_PARK ||
-  kind === MERGE_HOLD_PARK ||
-  kind === RULING_PARK ||
-  kind === "review" ||
-  kind === "review-ruling" ||
-  kind === "review-failed";
 
 /** Whether the run in CI (its PR open on the pushed sha) or in review may leave its seat now. */
 function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat, pushed, pr } = s;
   return (
     s.asideOk &&
-    !loop.aside &&
+    !loop.hold?.worktree &&
     s.ended === null &&
     (loop.phase === "review" ||
       loop.phase === "ci" ||
       // the seat is free while the operator decides
-      (loop.phase === "parked" && isDecisionPark(loop.parked?.kind))) &&
+      (loop.phase === "parked" && isDecisionPark(loop.hold?.kind))) &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn &&
@@ -1589,7 +1602,7 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
     pushed !== null &&
     s.headCommit === pushed.sha &&
     // a ruling on the failure waits on FLIGHT or the operator, not on a fix
-    (loop.ciFailedSha !== pushed.sha || loop.parked?.kind === RULING_PARK) &&
+    (loop.ciFailedSha !== pushed.sha || loop.hold?.kind === RULING_PARK) &&
     pr?.state === "open" &&
     pr.headSha === pushed.sha &&
     !fixDue(s, loop) &&
@@ -1599,7 +1612,7 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
 
 /** A line the engine owes the run (the answer to its parked question) goes before it leaves its seat again. */
 function pendingLineDue(s: LoopSnapshot, loop: RunLoop): boolean {
-  return !loop.aside && !!loop.pendingLine && !(loop.pendingLine.key in s.claimed);
+  return !loop.hold?.worktree && !!loop.pendingLine && !(loop.pendingLine.key in s.claimed);
 }
 
 /** Whether the run being built leaves its seat to wait for the operator's answer, not hold the seat idle. */
@@ -1609,48 +1622,11 @@ function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
     s.operatorAsk === true &&
     seat.openQuestion &&
     (loop.phase === "working" || loop.phase === "ci" || loop.phase === "review") &&
-    !loop.aside &&
+    !loop.hold?.worktree &&
     s.ended === null &&
     seat.holdsRun &&
     seat.state === "idle" &&
     !seat.inTurn
-  );
-}
-
-/**
- * Whether a run that has pushed holds a newer commit the push gate refused (in ci with a refusal
- * recorded, or parked as refused or stuck). A fresh commit in ci whose push is not yet tried is not. The commit stays in its worktree, unpushed; the seat's other run may hold
- * the rework that fixes the refusal.
- */
-function refusedPush(s: LoopSnapshot, loop: RunLoop): boolean {
-  return (
-    s.pushed !== null &&
-    s.headCommit !== null &&
-    s.headCommit !== s.pushed.sha &&
-    ((loop.phase === "ci" && loop.lastRefusal !== null) ||
-      (loop.phase === "parked" &&
-        (loop.parked?.kind === "refused" || loop.parked?.kind === STUCK_PARK)))
-  );
-}
-
-/**
- * Whether the run leaves its seat at this turn end because rework is due on another of the seat's
- * runs: one being built, or one that pushed and holds a refused newer commit. Its worktree is kept
- * as it is; it comes back once the rework is out of the way.
- */
-function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
-  const { seat } = s;
-  return (
-    s.reworkDue === true &&
-    // a run in review or working on a pushed sha is rework itself (or in flight); two reworks must
-    // not displace each other
-    ((s.pushed === null && loop.phase === "working") || refusedPush(s, loop)) &&
-    !loop.aside &&
-    s.ended === null &&
-    seat.holdsRun &&
-    seat.state === "idle" &&
-    !seat.inTurn &&
-    !seat.openQuestion
   );
 }
 
@@ -1679,7 +1655,8 @@ function branchUpdateDue(s: LoopSnapshot, loop: RunLoop): string | null {
   ) {
     return null;
   }
-  if (!loop.aside && !(seat.holdsRun && !seat.inTurn && seat.state === "idle")) return null;
+  if (!loop.hold?.worktree && !(seat.holdsRun && !seat.inTurn && seat.state === "idle"))
+    return null;
   return pr.mergeable === "CONFLICTING" ? gate.mainSha : null;
 }
 
@@ -1694,7 +1671,7 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   // (in ci or review only the line that carries an answer to a parked question is ever pending)
   if (
     (working || loop.phase === "ci" || loop.phase === "review") &&
-    !loop.aside &&
+    !loop.hold?.worktree &&
     loop.pendingLine &&
     free(loop.pendingLine.key)
   ) {
@@ -1838,7 +1815,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
 
   // A PR closed by someone else is no signal to write: the card stays where it is, and the agent
   // or FLIGHT decides what the closed PR means.
-  const closedPark = loop.phase === "parked" && loop.parked?.kind === "pr-closed";
+  const closedPark = loop.phase === "parked" && loop.hold?.kind === "pr-closed";
   if (loop.phase !== "done" && !closedPark) {
     // A review with blocking findings is rework: the card goes back In progress with its seat (In
     // review means a review is queued or running). An ended run's reviewed card goes to Ready.
@@ -1850,10 +1827,7 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
           ? IN_PROGRESS
           : IN_REVIEW
         : loop.phase === "parked"
-          ? loop.parked?.ended &&
-            loop.parked.kind !== "budget" &&
-            s.pr?.state === "open" &&
-            reviewed
+          ? loop.hold?.ended && loop.hold.kind === "ended" && s.pr?.state === "open" && reviewed
             ? READY
             : BLOCKED
           : IN_PROGRESS;
@@ -1912,15 +1886,13 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
     // an aside run is off its seat: it comes back, or leaves it, instead of any line
     const updateSha = branchUpdateDue(s, loop);
     const line: LoopAction | null =
-      loop.aside?.wake && s.ended === null
+      loop.hold?.wake && s.ended === null
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : !pendingLineDue(s, loop) && displaceDue(s, loop)
-            ? { kind: "set-aside", displaced: true }
-            : !pendingLineDue(s, loop) && (asideDue(s, loop) || parkOnPersonDue(s, loop))
-              ? { kind: "set-aside" }
-              : dueLine(s, loop);
+          : !pendingLineDue(s, loop) && (asideDue(s, loop) || parkOnPersonDue(s, loop))
+            ? { kind: "set-aside" }
+            : dueLine(s, loop);
     if (line !== null) actions.push(line);
   }
   return actions;
@@ -1930,15 +1902,23 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
  * One pass of the first loop: the run's next loop state and the actions that make the world
  * match it. Anything a crashed or dropped pass left undone comes out again on the next pass.
  */
-export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
+/** In ci, notes the PR head the loop sees and when it first saw it; a changed head restarts that. */
+function watchHead(s: LoopSnapshot): LoopSnapshot {
+  const sha = s.pr?.headSha ?? null;
+  if (s.loop.phase !== "ci" || sha === null || s.loop.headSeenSha === sha) return s;
+  const at = s.loop.headSeenSha === undefined ? (s.loop.pushStartedAt ?? s.now) : s.now;
+  return { ...s, loop: { ...s.loop, headSeenSha: sha, headSeenAt: at } };
+}
+
+export function reconcile(input: LoopSnapshot): { loop: RunLoop; actions: LoopAction[] } {
+  const s = watchHead(input);
   const step = stateStep(s);
   // a fresh loop sharing nothing with the input: the engine changes it after running the actions
-  const { parked, touches, aside, gate, merging, mainMerge, carry, rerun, rulingRerun } = step.loop;
+  const { hold, touches, gate, merging, mainMerge, carry, rerun, rulingRerun } = step.loop;
   const loop: RunLoop = {
     ...step.loop,
-    parked: parked === null ? null : { ...parked },
+    hold: hold ? { ...hold } : null,
     touches: touches === null ? null : { ...touches, paths: [...touches.paths] },
-    ...(aside ? { aside: { ...aside } } : {}),
     ...(gate ? { gate: { ...gate, strays: [...gate.strays] } } : {}),
     ...(merging ? { merging: { ...merging, done: [...merging.done] } } : {}),
     ...(mainMerge ? { mainMerge: { ...mainMerge, files: [...mainMerge.files] } } : {}),
@@ -1950,21 +1930,21 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
   };
   // the line went (its key is claimed): it is no longer pending
   if (loop.pendingLine && loop.pendingLine.key in s.claimed) loop.pendingLine = null;
-  if (loop.aside) {
+  if (loop.hold?.worktree) {
     if (s.seat.holdsRun) {
       // a restart mid set-aside or mid wake left the run on its seat
-      loop.aside = null;
+      loop.hold = rejoinSeat(loop.hold);
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
       // (a run parked on the operator's question waits for the answer, whatever else holds; once
       // it is answered the run comes back in any phase)
-      const asked = loop.aside.ask !== undefined;
+      const asked = loop.hold.ask !== undefined;
       const held = s.operatorAsk === true && (asked || loop.phase === "working");
       if (!held) {
-        loop.aside.wake ||=
+        loop.hold.wake ||=
           asked ||
-          (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
+          (loop.phase === "parked" && !isDecisionPark(loop.hold?.kind)) ||
           loop.phase === "working" ||
           !s.asideOk ||
           fixDue(s, loop);

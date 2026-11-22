@@ -3,8 +3,6 @@
  * ticket, run or seat, never the whole crew. Every threshold lives here, once.
  */
 
-import { STUCK_PARK } from "./loop.ts";
-
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -21,20 +19,6 @@ export const WASTE_CHECKS = [
   "clearance-waiting",
 ] as const;
 export type WasteCheck = (typeof WASTE_CHECKS)[number];
-
-/** What each check looks at, for the Audit panel's rows. */
-export const WASTE_CHECK_TITLES: Record<WasteCheck, string> = {
-  "unchanged-rerun": "Unchanged rerun",
-  "retry-loop": "Retry loop",
-  "review-rounds": "Review rounds",
-  "restart-storm": "Restart storm",
-  "cost-without-output": "Cost without output",
-  "coordination-overhead": "Coordination overhead",
-  "ticket-churn": "Ticket churn",
-  "runs-per-ticket": "Runs per ticket",
-  "failed-review-rounds": "Failed review rounds",
-  "clearance-waiting": "Clearance waiting",
-};
 
 export const WASTE_THRESHOLDS = Object.freeze({
   /** An agent that starts more than this many times in `restartStormWindowMs` is in a storm. */
@@ -63,59 +47,17 @@ export const WASTE_THRESHOLDS = Object.freeze({
   /** Tickets opened in the window reach tickets closed (with at least this many opened). */
   churnWindowMs: DAY_MS,
   churnMinOpened: 5,
-  /** An event alarm (a rerun refused) stays open this long, then closes. */
+  /** An event alarm (a rerun) stays open this long, then closes. */
   eventOpenMs: DAY_MS,
 });
-
-/**
- * Park kinds that count as a failed attempt for the retry loop: the run stopped because it could not
- * get through. Operator holds (controller check, UAT, merge hold, away) and budget are not failures.
- */
-export const WASTE_FAILED_PARK_KINDS: readonly string[] = [
-  STUCK_PARK,
-  "refused",
-  "conflict",
-  "no-ci",
-  "gate",
-];
 
 /** The two windows the Audit panel shows. */
 export const WASTE_WINDOWS = ["day", "week"] as const;
 export type WasteWindow = (typeof WASTE_WINDOWS)[number];
 export const WASTE_WINDOW_MS: Record<WasteWindow, number> = { day: DAY_MS, week: 7 * DAY_MS };
 
-/** A title that says a ticket is a piece of another ticket's work. */
-export const WASTE_SPLIT_TITLE = /\b(?:half|halves|slice|slices|follow-?\s?ups?|part\s+\d+)\b/i;
-
 /** What a check does when it fires. */
-export type WasteAction = "refuse" | "park" | "stop-reviews" | "stop-restarts" | "alarm";
-
-export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
-  "unchanged-rerun": "refuse",
-  "retry-loop": "park",
-  "review-rounds": "stop-reviews",
-  "restart-storm": "stop-restarts",
-  "cost-without-output": "alarm",
-  "coordination-overhead": "alarm",
-  "ticket-churn": "alarm",
-  "runs-per-ticket": "alarm",
-  "failed-review-rounds": "alarm",
-  "clearance-waiting": "alarm",
-};
-
-/**
- * The alarms that wake FLIGHT, once each: work on one ticket that is going round, which a person
- * would otherwise find only by reading the log. The rest are stored and served by GET /api/waste.
- * Not here, and why: a review-rounds hold parks the run, and the park wakes FLIGHT; an unchanged
- * rerun and a restart storm are refused or held by the hub itself; clearance waiting counts hours,
- * so a resolved one would wake FLIGHT again every hour; cost, coordination and churn are left out
- * by choice, as measures of spend for the Audit page.
- */
-export const WASTE_WAKES_FLIGHT: readonly WasteCheck[] = [
-  "retry-loop",
-  "failed-review-rounds",
-  "runs-per-ticket",
-];
+export type WasteAction = "park" | "stop-reviews" | "stop-restarts" | "alarm";
 
 /** One waste alarm as the hub keeps it. */
 export interface WasteAlarm {
@@ -139,51 +81,6 @@ export interface WasteAlarm {
   resolvedAt: number | null;
   basis: string | null;
 }
-
-/** What a scan finds, before it is stored. */
-export interface WasteFinding {
-  check: WasteCheck;
-  subject: string;
-  repoId: string | null;
-  ticket: string | null;
-  seatId: string | null;
-  runId: string | null;
-  level: number;
-  evidence: string;
-}
-
-/**
- * How long a resolve silences a finding of the same or lower level. A check whose subject repeats
- * over time (one seat, one repo) is silenced only for its own window; a ticket's or a run's subject
- * is one episode, so its resolve holds until the cause grows (null).
- */
-export const wasteResolveHoldMs = (check: WasteCheck): number | null =>
-  check === "restart-storm"
-    ? WASTE_THRESHOLDS.restartStormWindowMs
-    : check === "coordination-overhead"
-      ? WASTE_THRESHOLDS.coordinationWindowMs
-      : check === "ticket-churn"
-        ? WASTE_THRESHOLDS.churnWindowMs
-        : null;
-
-/** The refusal a rerun gets. */
-export const unchangedRerunText = (command: string, sha: string): string =>
-  `Not run: ${command} already ran on commit ${sha.slice(0, 7)} and nothing has changed since (no commit, no edited file). It passed, or it has failed twice on this commit; the result is recorded. Change something first, or read that result.`;
-
-/** Every start refusal a waste alarm gives begins with this; the engine reads it as a hold, not a fault. */
-export const WASTE_HELD_PREFIX = "Not started: waste alarm.";
-
-/** The refusal a start of a parked ticket gets. */
-export const wasteParkText = (ref: string, evidence: string): string =>
-  `${WASTE_HELD_PREFIX} ${ref} is parked. ${evidence} FLIGHT or the operator decides what happens next.`;
-
-/** The refusal a start of an agent in a restart storm gets. */
-export const wasteStormText = (call: string, evidence: string): string =>
-  `${WASTE_HELD_PREFIX} ${call} is in a restart storm. ${evidence} Its restarts stop until the hour's count falls back, or the operator starts it.`;
-
-/** The line a held review shows. */
-export const wasteReviewText = (evidence: string): string =>
-  `Reviews of this change are stopped by a waste alarm. ${evidence} FLIGHT decides: fix or park.`;
 
 /** One check's row: its limit, how often it fired and whether a merge followed. */
 export interface WasteCheckRow {
@@ -270,30 +167,3 @@ export interface WasteCounts {
 
 /** How many 24-hour buckets of FLIGHT's activity the report keeps. */
 export const FLIGHT_ACTIVITY_DAYS = 14;
-
-/** The threshold of each check in words. */
-export const wasteThresholdText = (check: WasteCheck): string => {
-  const t = WASTE_THRESHOLDS;
-  switch (check) {
-    case "unchanged-rerun":
-      return "the same check again on the same commit, nothing changed";
-    case "retry-loop":
-      return `${t.retryFailedAttempts} failed attempts, or ${t.retryResumes} carry-on resumes without a report`;
-    case "review-rounds":
-      return `more than ${t.reviewRounds} review rounds`;
-    case "restart-storm":
-      return `more than ${t.restartStormStarts} starts in an hour`;
-    case "cost-without-output":
-      return `${t.costFactor}x the median cost of its size, no merge`;
-    case "coordination-overhead":
-      return "FLIGHT spend passing the developers' for a day";
-    case "ticket-churn":
-      return "tickets opened reach tickets closed in a day, a split ticket, or a parked ticket starting";
-    case "runs-per-ticket":
-      return `more than ${t.runsPerTicket} runs without a merge`;
-    case "failed-review-rounds":
-      return `${t.failedReviewRounds} failed review rounds on an open PR`;
-    case "clearance-waiting":
-      return `a hard-rule PR waiting ${t.clearanceAlarmMs / HOUR_MS} hours on FLIGHT's clearance`;
-  }
-};

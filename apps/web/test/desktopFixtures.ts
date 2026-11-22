@@ -120,6 +120,7 @@ export function desktopFixture(scenario: DesktopScenario = "default") {
     "/api/repos/shop-app/prs?linked=1&shape=summary": n ? [prView()] : [],
     "/api/repos/site-builder/prs?linked=1&shape=summary": [],
     "/api/qa/queue": { prs: [], flightId: "flight-1" },
+    "/api/plans": { waiting: [], history: [] },
     "/api/notifications": { open: [], handledToday: [] },
     "/api/settings/notifications": {},
     "/api/crew/changes": { pending: [], error: null, restartNeeded: [] },

@@ -168,6 +168,8 @@ function codexSession(
   outbox = readOutbox(i.outboxPath),
 ): CrewSession {
   let replaying = "threadId" in i;
+  /** The reattach was not confirmed in time: the exit asks the supervisor to take the run back. */
+  let retake = false;
   const replayRequests = new Map<RpcId, ReplayApproval>();
   let checked = false;
   const report = () => !replaying || ("from" in i && transport.lines > i.from);
@@ -404,7 +406,9 @@ function codexSession(
     if (e.kind === "exit") {
       if (!closing && !checked) failed = true;
       finish();
-      emit(failed ? { ...e, reason: CANNOT_START } : e);
+      emit(
+        failed ? { ...e, reason: CANNOT_START, ...(retake ? { retake: true as const } : {}) } : e,
+      );
     } else if (e.kind === "attached") {
       if (closing) return;
       replaying = false;
@@ -514,8 +518,7 @@ function codexSession(
       cancelApprovals();
       paths.clear();
       mcpCalls.clear();
-      // a command still running keeps its approval keys: its later completion must free them
-      if (params.turn.status === "interrupted") itemKeys.clear();
+      itemKeys.clear();
       const completedId = str(params.turn.id);
       turnId = null;
       if (completedId !== null) {
@@ -583,12 +586,7 @@ function codexSession(
             emit({
               kind: "tool-result",
               toolUseId: key,
-              // no exit code and not failed: the hand-back came before the command's end, so no verdict
-              ...(typeof item.exitCode !== "number" &&
-              item.status !== "failed" &&
-              item.status !== "declined"
-                ? {}
-                : { ok: item.status === "completed" && item.exitCode === 0 }),
+              ok: item.status === "completed" && item.exitCode === 0,
               ...(typeof item.exitCode === "number" ? { exitCode: item.exitCode } : {}),
               // a call that pipes or chains past the check ends with the last step's status (#1411)
               ...(typeof item.command === "string" ? { wrapped: !plainCall(item.command) } : {}),
@@ -632,6 +630,10 @@ function codexSession(
   const cannotStart = (e: unknown) => {
     if (closing) return;
     failed = true;
+    // An attach whose thread/resume got no answer in time did not fail: the app-server may be busy
+    // with the turn. The CLI is still closed (an unconfirmed floor is never driven), and the run is
+    // resumed on a fresh one instead of ended.
+    if ("threadId" in i && e instanceof SessionControlError && e.kind === "timeout") retake = true;
     const why = `${CANNOT_START}: ${e instanceof Error ? e.message : "Codex handshake failed"}`;
     i.log?.(why);
     emit({ kind: "stderr", text: why });

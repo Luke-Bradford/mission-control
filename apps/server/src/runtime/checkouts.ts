@@ -315,8 +315,6 @@ export interface PendingCheckouts {
 }
 
 export interface CheckoutInput {
-  /** An ended author's branch; an existing managed worktree can be adopted in place. */
-  handoff?: { branch: string; worktree: string | null };
   /** Branches whose cached PR has merged; these start a new stage unless they also have an open PR. */
   mergedPullRequestBranches?: readonly string[];
   /** Branches whose cached PR is still open and can therefore be resumed. */
@@ -960,7 +958,7 @@ export type InstallRunner = (
   },
 ) => Promise<unknown>;
 
-/** The sandbox has no network, so dependencies are installed here, without running package code. */
+/** Dependencies are installed here by the hub, without running package code, so a seat never runs an install script. */
 async function install(
   tool: InstallTool,
   path: string,
@@ -1265,6 +1263,7 @@ async function ticketBranch(
   issue: number,
   mergedPullRequestBranches: readonly string[] = [],
   openPullRequestBranches: readonly string[] = [],
+  baseSha?: string,
 ): Promise<{ branch: string | null; branches: ReadonlySet<string> }> {
   let refs: string;
   try {
@@ -1291,6 +1290,40 @@ async function ticketBranch(
   );
   const merged = new Set(mergedPullRequestBranches);
   const open = new Set(openPullRequestBranches);
+  // The merged-PR history lags: a branch whose tip is already in origin's default branch is merged.
+  if (baseSha !== undefined) {
+    let line: Promise<Set<string>> | undefined;
+    const firstParentLine = () =>
+      (line ??= inClone(["rev-list", "--first-parent", "-n", "5000", baseSha]).then(
+        (out) => new Set(out.split("\n")),
+      ));
+    for (const branch of branches) {
+      if (merged.has(branch) || open.has(branch)) continue;
+      const tip = await inClone([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        `refs/heads/${branch}^{commit}`,
+      ]).catch(() =>
+        inClone([
+          "rev-parse",
+          "--verify",
+          "--quiet",
+          "--end-of-options",
+          `refs/remotes/origin/${branch}^{commit}`,
+        ]).catch(() => null),
+      );
+      if (tip === null) continue;
+      const inBase = await inClone(["merge-base", "--is-ancestor", tip.trim(), baseSha]).then(
+        () => true,
+        () => false,
+      );
+      // A tip on the default branch's own first-parent line is a branch cut there and not yet
+      // used (or fast-forwarded in), not one merged in: only history can tell the second apart.
+      if (inBase && !(await firstParentLine()).has(tip.trim())) merged.add(branch);
+    }
+  }
   const openBranches = [...branches].filter((branch) => open.has(branch));
   // An open PR is the ticket's active work. Local branches from ended runs must not compete with
   // it: an earlier stage's branch can remain until the tidy removes it.
@@ -1586,79 +1619,63 @@ export async function installAfterSync(
   }
 }
 
-/** Moves a clean worktree whose commits origin has onto the handed-over branch; else refuses. */
-async function switchToHandoff(
-  w: (args: string[]) => Promise<string>,
+/** Managed worktrees under the crew root for the supplied ticket branches. */
+async function managedWorktreesOf(
+  inClone: (args: string[], timeoutMs?: number) => Promise<string>,
+  branches: ReadonlySet<string>,
+  worktreesRoot: string,
+): Promise<{ path: string; branch: string }[]> {
+  const root = await realpath(worktreesRoot).catch(() => null);
+  if (root === null) return [];
+  const listed = await inClone(["worktree", "list", "--porcelain"]).catch(() => "");
+  const worktrees: { path: string; branch: string }[] = [];
+  for (const block of listed.split("\n\n")) {
+    const lines = block.split("\n");
+    const ref = lines.find((line) => line.startsWith("branch refs/heads/"))?.slice(18);
+    if (ref === undefined || !branches.has(ref)) continue;
+    const worktreePath = lines.find((l) => l.startsWith("worktree "))?.slice(9);
+    if (worktreePath === undefined) continue;
+    const actual = await realpath(worktreePath).catch(() => null);
+    if (actual !== null && actual !== root && isInside(actual, root)) {
+      worktrees.push({ path: worktreePath, branch: ref });
+    }
+  }
+  return worktrees;
+}
+
+/** A stopped ticket branch must not be discarded when an open PR selects another branch. */
+async function stoppedTicketWorktreeBlock(
+  path: string,
   branch: string,
-  current: string,
-): Promise<void> {
-  const on = current.replace(/^refs\/heads\//, "") || "a detached head";
-  const unpushed = new CheckoutError(
-    "path",
-    `the worktree has unpushed work on ${on}; it was not changed`,
-  );
-  const dirty = await w([
+  targetBranch: string,
+  common: string,
+  baseSha: string,
+): Promise<string | null> {
+  const gitDir = await adminDirOf(common, path);
+  if (gitDir === null) return `the stopped ticket worktree for ${branch} is no longer a worktree`;
+  const git = (args: string[]) =>
+    crewGit(path, args, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+  const status = await git([
     "--no-optional-locks",
+    "-c",
+    "core.quotePath=true",
     "status",
     "--porcelain=v1",
     "--untracked-files=all",
   ]);
-  if (dirty.trim() !== "") throw unpushed;
-  const remote = `refs/remotes/origin/${branch}`;
-  if (
-    !(await succeeds(
-      w(["rev-parse", "--verify", "--quiet", "--end-of-options", `${remote}^{commit}`]),
-    ))
-  )
-    throw unpushed;
-  if (!(await succeeds(w(["merge-base", "--is-ancestor", "HEAD", remote])))) throw unpushed;
-  const local = await succeeds(
-    w(["rev-parse", "--verify", "--quiet", "--end-of-options", `refs/heads/${branch}^{commit}`]),
+  if (status.trim() !== "")
+    return `the stopped ticket worktree for ${branch} has uncommitted changes; continue it or clean it before starting ${targetBranch}`;
+  const head = (await git(["rev-parse", "--verify", "HEAD"])).trim();
+  const reachesBase = await git(["merge-base", "--is-ancestor", head, baseSha]).then(
+    () => true,
+    (e: unknown) => {
+      if ((e as { code?: unknown } | null)?.code === 1) return false;
+      throw e;
+    },
   );
-  try {
-    await w(
-      local
-        ? ["switch", "--quiet", branch]
-        : ["switch", "--quiet", "--track", "-c", branch, `origin/${branch}`],
-    );
-  } catch (e) {
-    throw new CheckoutError("path", `the worktree could not be moved to ${branch}`, {
-      cause: e,
-      detail: gitReason(e),
-    });
-  }
-}
-
-/**
- * A handed-over branch is taken at origin's tip. The PR's head can be ahead of the local branch
- * (the controller pushes to it), and a seat started on the old tip could not push. Local work that
- * origin lacks stays; a branch that has diverged is refused, since neither side may be dropped.
- */
-async function followOrigin(w: (args: string[]) => Promise<string>, branch: string): Promise<void> {
-  const remote = await w([
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    "--end-of-options",
-    `refs/remotes/origin/${branch}^{commit}`,
-  ]).then(
-    (s) => s.trim(),
-    () => null,
-  );
-  if (!remote) return;
-  const head = (await w(["rev-parse", "--verify", "HEAD"])).trim();
-  if (head === remote || (await succeeds(w(["merge-base", "--is-ancestor", remote, head])))) return;
-  if (!(await succeeds(w(["merge-base", "--is-ancestor", head, remote])))) {
-    throw new CheckoutError("path", `${branch} has diverged from origin's; it was not changed`);
-  }
-  try {
-    await w(["merge", "--ff-only", "--quiet", remote]);
-  } catch (e) {
-    throw new CheckoutError("path", `${branch} could not be moved to origin's tip`, {
-      cause: e,
-      detail: gitReason(e),
-    });
-  }
+  return reachesBase
+    ? null
+    : `the stopped ticket worktree for ${branch} has commits not in the default branch; continue it before starting ${targetBranch}`;
 }
 
 /**
@@ -1671,23 +1688,43 @@ export async function prepareCheckout(
   runInstall: InstallRunner = execFileP,
 ): Promise<Checkout> {
   const { name, path: inSession, flat, common, inClone, baseSha } = await fetchBase(i);
-  const ticket =
-    i.handoff === undefined
-      ? await ticketBranch(inClone, i.issue, i.mergedPullRequestBranches, i.openPullRequestBranches)
-      : null;
+  const ticket = await ticketBranch(
+    inClone,
+    i.issue,
+    i.mergedPullRequestBranches,
+    i.openPullRequestBranches,
+    baseSha,
+  );
+  const merged = i.mergedPullRequestBranches ?? [];
+  const plain = branchFor(i.issue, i.title);
+  // a new run never lands on a branch name a merged PR already used
   const branch =
-    i.handoff?.branch ??
     ticket?.branch ??
-    (ticket === null || ticket.branches.size === 0
-      ? branchFor(i.issue, i.title)
-      : freshTicketBranch(i.issue, i.title, ticket.branches));
+    ((ticket === null || ticket.branches.size === 0) && !merged.includes(plain)
+      ? plain
+      : freshTicketBranch(i.issue, i.title, new Set([...(ticket?.branches ?? []), ...merged])));
   // a worktree made before sessions had folders is reused where it is
-  let path =
+  const own =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
-  if (i.handoff?.worktree && (await succeeds(lstat(i.handoff.worktree)))) {
-    path = (await checkedHandoffCheckout(i.checkout, i.handoff.worktree, branch, i.worktreesRoot))
-      .path;
+  // the ticket's branch may sit in a managed worktree another seat left behind when its run
+  // stopped: this run carries on there, with its uncommitted files
+  const ticketWorktrees = await managedWorktreesOf(
+    inClone,
+    ticket?.branches ?? new Set(),
+    i.worktreesRoot,
+  );
+  for (const worktree of ticketWorktrees) {
+    if (worktree.branch === branch) continue;
+    const blocked = await stoppedTicketWorktreeBlock(
+      worktree.path,
+      worktree.branch,
+      branch,
+      common,
+      baseSha,
+    );
+    if (blocked !== null) throw new CheckoutError("worktree", blocked);
   }
+  const path = ticketWorktrees.find((worktree) => worktree.branch === branch)?.path ?? own;
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 
@@ -1697,11 +1734,6 @@ export async function prepareCheckout(
       detail: gitReason(e),
     });
   if (i.pending?.isPending(path)) {
-    if (i.handoff)
-      throw new CheckoutError(
-        "path",
-        "handoff worktree has pending cleanup; its files were preserved",
-      );
     await removePending(common, path, i.worktreesRoot, inClone).catch((e) => {
       if (e instanceof CheckoutError) throw e;
       throw cannotAdd(e);
@@ -1709,15 +1741,9 @@ export async function prepareCheckout(
   }
   if (await succeeds(lstat(path))) {
     const gitDir = await adminDirOf(common, path);
-    let head = gitDir
+    const head = gitDir
       ? await crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }).catch(() => "")
       : "";
-    if (gitDir !== null && i.handoff && head.trim() !== `refs/heads/${branch}`) {
-      // The seat that wrote the PR gets it back: its worktree sits on the local branch, the PR's
-      // head is another ref. Taken over only when nothing in it is unpushed.
-      await switchToHandoff((args) => crewGit(path, args, common, { gitDir }), branch, head.trim());
-      head = `refs/heads/${branch}`;
-    }
     if (gitDir === null || head.trim() !== `refs/heads/${branch}`) {
       throw new CheckoutError(
         "path",
@@ -1726,9 +1752,6 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
-    if (i.handoff) {
-      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
-    }
     const status = await crewGit(
       path,
       [
@@ -1742,7 +1765,37 @@ export async function prepareCheckout(
       common,
       { gitDir },
     );
-    const leftoverChanges = status.split("\n").filter((line) => line !== "");
+    let leftoverChanges = status.split("\n").filter((line) => line !== "");
+    const worktreeGit = (args: string[]) =>
+      crewGit(path, args, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+    const origin = await worktreeGit(["rev-parse", "--verify", "--quiet", `origin/${branch}`]).then(
+      (sha) => sha.trim(),
+      () => null,
+    );
+    if (origin !== null) {
+      const head = (await worktreeGit(["rev-parse", "--verify", "HEAD"])).trim();
+      const isAncestor = async (older: string, newer: string) =>
+        worktreeGit(["merge-base", "--is-ancestor", older, newer]).then(
+          () => true,
+          (e: unknown) => {
+            if ((e as { code?: unknown } | null)?.code === 1) return false;
+            throw e;
+          },
+        );
+      if (!(await isAncestor(origin, head))) {
+        if (await isAncestor(head, origin)) {
+          if (leftoverChanges.length > 0)
+            throw new CheckoutError(
+              "worktree",
+              "the reused worktree is behind origin and has uncommitted changes",
+            );
+          await worktreeGit(["reset", "--hard", origin]);
+          leftoverChanges = [];
+        } else {
+          throw new CheckoutError("worktree", "the reused worktree diverges from origin");
+        }
+      }
+    }
     await installReusedPnpm(
       {
         checkout: i.checkout,
@@ -1772,8 +1825,6 @@ export async function prepareCheckout(
     );
   const local = await refSha(`refs/heads/${branch}`);
   const remote = local === null ? await refSha(`refs/remotes/origin/${branch}`) : null;
-  if (i.handoff && local === null && remote === null)
-    throw new CheckoutError("path", "the handoff branch is missing; it was not recreated");
   const add =
     local !== null
       ? ["worktree", "add", "--quiet", "--", path, branch]
@@ -1808,9 +1859,6 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
-    if (i.handoff && local !== null) {
-      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
-    }
     await installAll(
       {
         checkout: i.checkout,
@@ -1902,82 +1950,6 @@ export async function reinstallTrimmed(
     runInstall,
   );
   return true;
-}
-
-/** Handoffs cannot grant a seat an operator checkout, sibling repo, symlink escape or another clone. */
-export async function checkedHandoffCheckout(
-  checkout: string,
-  path: string,
-  branch: string,
-  worktreesRoot: string,
-) {
-  const root = await realpath(worktreesRoot);
-  const actual = await realpath(path);
-  if (actual === root || !isInside(actual, root))
-    throw new CheckoutError("path", "handoff worktree is outside the managed crew root");
-  const c = await existingCheckout(checkout, actual, branch);
-  await checkSeatGitConfig(actual);
-  return c;
-}
-
-/** A bounded status read after validating the original clone, branch and managed path. */
-export async function handoffCheckoutStatus(
-  checkout: string,
-  path: string,
-  branch: string,
-  worktreesRoot: string,
-): Promise<string[]> {
-  const c = await checkedHandoffCheckout(checkout, path, branch, worktreesRoot);
-  const common = await realpath(join(checkout, ".git"));
-  return (
-    await crewGit(
-      c.path,
-      ["--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all"],
-      common,
-      { gitDir: c.gitDir, maxBuffer: 256 * 1024 },
-    )
-  )
-    .split("\n")
-    .filter(Boolean);
-}
-
-/** Reconstruct the location of an older ended run without moving or deleting any worktree. */
-export async function findHandoffCheckout(
-  checkout: string,
-  branch: string,
-  worktreesRoot: string,
-): Promise<string | null> {
-  const common = await realpath(join(checkout, ".git"));
-  const text = await crewGit(checkout, ["worktree", "list", "--porcelain"], common, {
-    gitDir: common,
-  });
-  for (const block of text.split("\n\n")) {
-    const lines = block.split("\n");
-    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
-    const path = lines.find((s) => s.startsWith("worktree "))?.slice(9);
-    if (path) return (await checkedHandoffCheckout(checkout, path, branch, worktreesRoot)).path;
-  }
-  return null;
-}
-
-/** Only the source run's registered commits that are actually on the adopted branch transfer. */
-export async function inheritedHandoffCommits(
-  checkout: string,
-  c: Checkout,
-  shas: readonly string[],
-): Promise<string[]> {
-  const common = await realpath(join(checkout, ".git"));
-  const inherited: string[] = [];
-  for (const sha of shas) {
-    if (!/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(sha)) continue;
-    if (
-      await succeeds(
-        crewGit(c.path, ["merge-base", "--is-ancestor", sha, "HEAD"], common, { gitDir: c.gitDir }),
-      )
-    )
-      inherited.push(sha);
-  }
-  return inherited;
 }
 
 /**

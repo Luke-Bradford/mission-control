@@ -104,6 +104,8 @@ export interface CardProps {
   checkingSeat?: string;
   checkingSince?: number;
   checkReason?: string | null;
+  /** Why nothing is working on it (`cardIdle`); null while something is. */
+  idle?: string | null;
   /** Something on this card waits on you. */
   mine: boolean;
   unacked: boolean;
@@ -140,6 +142,7 @@ export const Card = memo(function Card({
   queued,
   reviewer,
   pr,
+  idle = null,
   checkLabel,
   checkTone,
   checkingSeat,
@@ -222,30 +225,38 @@ export const Card = memo(function Card({
       ) : (
         // the review-state pill says who is checking or what the PR waits on; without one, the line does
         col === "In review" &&
-        !checkLabel && (
+        !checkLabel &&
+        !idle && (
           <span key="rev" className="xs muted">
             {NO_REVIEWER}
           </span>
         )
       )),
+    col !== "Done" && idle && (
+      <span key="idle" className="xs muted">
+        {idle}
+      </span>
+    ),
+    // a closed PR is the idle line itself; a merged one still shows beside it
     col !== "Done" &&
-      (pr ? (
-        <PrLine
-          key="pr"
-          pr={pr}
-          checkLabel={checkLabel}
-          checkTone={checkTone}
-          checkingSeat={checkingSeat}
-          checkingSince={checkingSince}
-          checkReason={checkReason}
-        />
-      ) : (
-        PR_EXPECTED.includes(col) && (
-          <span key="nopr" className="xs muted">
-            {NO_PR_YET}
-          </span>
-        )
-      )),
+      (pr
+        ? !(idle && pr.state === "closed") && (
+            <PrLine
+              key="pr"
+              pr={pr}
+              checkLabel={checkLabel}
+              checkTone={checkTone}
+              checkingSeat={checkingSeat}
+              checkingSince={checkingSince}
+              checkReason={checkReason}
+            />
+          )
+        : !idle &&
+          PR_EXPECTED.includes(col) && (
+            <span key="nopr" className="xs muted">
+              {NO_PR_YET}
+            </span>
+          )),
     col === "Done" && (
       <span key="done" className="row">
         <Pill tone={outcome === "Merged" ? "ok" : "plain"}>{outcome}</Pill>
@@ -278,8 +289,11 @@ export const Card = memo(function Card({
       </PillButton>
     ),
     statusOutOfDate && (
-      <span key="stale" className="xs warn-t" title={statusOutOfDate}>
-        {STATUS_OUT_OF_DATE}
+      <span key="stale" className="kwait">
+        <span className="xs warn-t" title={statusOutOfDate}>
+          {STATUS_OUT_OF_DATE}
+        </span>
+        <span className="xs muted">{statusOutOfDate}</span>
       </span>
     ),
     blocker && (

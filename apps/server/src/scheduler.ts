@@ -76,7 +76,12 @@ import {
   sweepPullRequests,
 } from "./collectors/github.ts";
 import { type LaunchctlRunner, launchctl } from "./collectors/launchd.ts";
-import { type MachineResult, realMachineDeps, sampleMachine } from "./collectors/machine.ts";
+import {
+  FILE_SERVICE,
+  type MachineResult,
+  realMachineDeps,
+  sampleMachine,
+} from "./collectors/machine.ts";
 import {
   collectNotifications,
   makeRest,
@@ -123,20 +128,28 @@ import {
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
-import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
+import type { FileServiceRestart } from "./telemetry/file-service-restart.ts";
 import {
+  FILE_SERVICE_CAPTURE_GAP_MS,
+  FILE_SERVICE_CAPTURE_SETTING,
+  FILE_SERVICE_RECURRING_RESTARTS,
+  FILE_SERVICE_RECURRING_WINDOW_MS,
   FILE_SERVICE_RESTART_ADVICE,
+  FILE_SERVICE_RESTART_SETTING,
+  FILE_SERVICE_RESTARTS_SETTING,
+  FILE_SERVICE_RUNAWAY_KEY,
+  FILE_SERVICE_SUDOERS_ADVICE,
+  type FileServiceReading,
+  FSEVENTSD_HEALTHY_BYTES,
+  FSEVENTSD_RUNAWAY_BYTES,
+  FSEVENTSD_RUNAWAY_WINDOW_MS,
   fileServiceFault,
+  fileServiceRunaway,
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
 } from "./telemetry/machine-capacity.ts";
-import {
-  auditEndedRuns,
-  TOKEN_AUDIT_FIRST_DELAY_MS,
-  TOKEN_AUDIT_INTERVAL_MS,
-} from "./token-audit/audit.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
@@ -153,7 +166,6 @@ export type Job =
   | "usage"
   | "maintenance"
   | "transcripts"
-  | "tokenAudit"
   | "machine"
   | "prs"
   | "flow"
@@ -174,7 +186,6 @@ export const JOBS: readonly Job[] = [
   "usage",
   "maintenance",
   "transcripts",
-  "tokenAudit",
   "machine",
   "prs",
   "flow",
@@ -300,8 +311,6 @@ export interface Collectors {
     spawn: boolean,
   ) => Promise<MachineResult>;
   transcripts?: typeof maintainTranscripts;
-  /** Reads ended runs' transcripts for the token audit; runs before the transcripts are gzipped or deleted. */
-  tokenAudit?: typeof auditEndedRuns;
 }
 
 export interface SchedulerDeps {
@@ -319,6 +328,11 @@ export interface SchedulerDeps {
   log?: (line: string) => void;
   /** What the hub holds on disk, as last measured; the disk flag names it. Null: not measured yet. */
   hubDiskUse?: () => DiskUse | null;
+  /**
+   * Restarts a runaway `fseventsd` after saving what was running. Absent on previews and in unit
+   * callers, which never touch a system service.
+   */
+  restartFileService?: (at: number, opts: { diagnose: boolean }) => Promise<FileServiceRestart>;
   /** The test lock's state: a seat in line for it is waiting, not stalled. Default: no lock. */
   lockState?: () => TestLockState;
   /** Active browser streams; absent in unit callers, which keep the historical eager behaviour. */
@@ -424,7 +438,6 @@ export function realCollectors(config: CcConfig): Collectors {
     machine: (prevCpus, prev, now, testCommand, spawn) =>
       sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand, spawn }),
     transcripts: maintainTranscripts,
-    tokenAudit: auditEndedRuns,
   };
 }
 
@@ -470,6 +483,116 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let machineMinute = -1;
   /** The capacity guard held new starts at the last stored sample. */
   let machineBlocked = false;
+  /**
+   * A runaway `fseventsd` is restarted at most once an hour, across hub restarts, through the
+   * operator's sudoers rule. Diagnostics are saved at most once in `FILE_SERVICE_CAPTURE_GAP_MS`,
+   * so the capture of the onset is kept. One operator alert is raised when a restart fails, or when
+   * restarts keep recurring (restarting is not fixing the cause); its text is not rewritten by
+   * later attempts, so FLIGHT is not woken again for it. A restart that works clears it unless it
+   * is the third in six hours; otherwise it stays until the service is back under the runaway size
+   * with no recent run of restarts. Growth merely pausing does not clear it. Only readings actually
+   * taken are judged, kept in memory, so after a hub restart growth needs fresh readings again (the
+   * stuck size acts on the first one). `fileServiceReadings` holds the last hour of them, so an open
+   * alert on an idle hub waits for a fresh reading to clear rather than trusting a carried one.
+   */
+  const fileServiceReadings: FileServiceReading[] = [];
+  const restartRunawayFileService = (at: number, fresh: number | null): void => {
+    const restart = deps.restartFileService;
+    if (restart === undefined) return;
+    // a 0 is no reading (the collector found no number), never a size
+    const taken = fresh !== null && fresh > 0 ? fresh : null;
+    if (taken !== null) fileServiceReadings.push({ at, bytes: taken });
+    while ((fileServiceReadings[0]?.at ?? at) < at - FSEVENTSD_RUNAWAY_WINDOW_MS)
+      fileServiceReadings.shift();
+    const open = (): boolean => store.notes().some((n) => n.key === FILE_SERVICE_RUNAWAY_KEY);
+    // judged on the latest reading taken, never a carried figure
+    const small = (): boolean => {
+      const size = fileServiceReadings.at(-1)?.bytes;
+      return size !== undefined && size < FSEVENTSD_HEALTHY_BYTES;
+    };
+    const restarts = (until: number): number[] => {
+      let list: unknown;
+      try {
+        list = JSON.parse(store.getSetting(FILE_SERVICE_RESTARTS_SETTING) ?? "[]");
+      } catch {
+        list = [];
+      }
+      return Array.isArray(list)
+        ? list.filter(
+            (v): v is number =>
+              typeof v === "number" && v <= until && until - v < FILE_SERVICE_RECURRING_WINDOW_MS,
+          )
+        : [];
+    };
+    const recurring = (until: number): boolean =>
+      restarts(until).length >= FILE_SERVICE_RECURRING_RESTARTS;
+    // judged only when this minute's figure was read, on the readings actually taken
+    const runaway = taken === null ? null : fileServiceRunaway(fileServiceReadings, at);
+    if (runaway === null) {
+      if (open() && small() && !recurring(at)) store.clearNote(FILE_SERVICE_RUNAWAY_KEY, at);
+      return;
+    }
+    // a stored time ahead of now (the clock moved back) does not count
+    const since = (key: string): number => {
+      const v = Number(store.getSetting(key) ?? "0");
+      return Number.isFinite(v) && v <= at ? at - v : Number.POSITIVE_INFINITY;
+    };
+    if (since(FILE_SERVICE_RESTART_SETTING) < FSEVENTSD_RUNAWAY_WINDOW_MS) return;
+    store.setSetting(FILE_SERVICE_RESTART_SETTING, String(at));
+    const diagnose = since(FILE_SERVICE_CAPTURE_SETTING) >= FILE_SERVICE_CAPTURE_GAP_MS;
+    const mb = (bytes: number): string => `${Math.round(bytes / 1024 ** 2)} MB`;
+    const grew =
+      runaway.toBytes - runaway.fromBytes >= FSEVENTSD_RUNAWAY_BYTES
+        ? `The file-change service (fseventsd) grew from ${mb(runaway.fromBytes)} to ${mb(runaway.toBytes)} within an hour; healthy, it holds a few MB and stays flat.`
+        : `The file-change service (fseventsd) holds ${mb(runaway.toBytes)}; healthy, it holds a few MB.`;
+    const wasOpen = open();
+    void restart(at, { diagnose })
+      .then((r) => {
+        // a failed save does not use up the gap
+        if (typeof r.diagnostics === "string")
+          store.setSetting(FILE_SERVICE_CAPTURE_SETTING, String(at));
+        const saved =
+          r.diagnostics === undefined
+            ? ""
+            : r.diagnostics === null
+              ? " Saving what was running failed."
+              : ` What was running is saved in ${r.diagnostics}.`;
+        const raise = (text: string): void => {
+          if (wasOpen || open()) return;
+          store.raiseNote({
+            key: FILE_SERVICE_RUNAWAY_KEY,
+            kind: "flag",
+            runId: null,
+            seatId: null,
+            repoId: null,
+            text,
+            at: now(),
+          });
+        };
+        if (r.restarted) {
+          const recent = [...restarts(at), at];
+          store.setSetting(FILE_SERVICE_RESTARTS_SETTING, JSON.stringify(recent));
+          if (recent.length < FILE_SERVICE_RECURRING_RESTARTS)
+            store.clearNote(FILE_SERVICE_RUNAWAY_KEY, now());
+          else
+            raise(
+              `${grew} The hub has restarted it ${recent.length} times in ${FILE_SERVICE_RECURRING_WINDOW_MS / 3_600_000} hours and it keeps getting stuck again, so restarting is not fixing the cause. The captures of what was running are in the diagnostics folder beside the hub's database.`,
+            );
+        } else if (!small()) {
+          raise(
+            `${grew} The hub could not restart it (${r.error ?? "no reason given"}).${saved} ${FILE_SERVICE_RESTART_ADVICE} ${FILE_SERVICE_SUDOERS_ADVICE}`,
+          );
+        }
+        const done = r.restarted
+          ? " The hub restarted it."
+          : ` It was not restarted: ${r.error ?? "no reason given"}.`;
+        store.addHubEvent(`${grew}${done}${saved}`, now());
+        emit("agents", "attention");
+      })
+      .catch((e: unknown) =>
+        deps.log?.(`fseventsd restart: ${e instanceof Error ? e.message : String(e)}`),
+      );
+  };
   /**
    * Whether this machine reading may spawn commands. The swap and memory-pressure thresholds (the
    * swap hard limit always applies) need `sysctl` and `memory_pressure`, so a browser, a start
@@ -1009,16 +1132,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       recordStatus("sessions", true, null);
     });
 
-  /** Reads ended runs' transcripts for the token audit; a failure is logged, never thrown. */
-  const runTokenAudit = async () => {
-    try {
-      const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
-      if (a.audited || a.controllerSessions)
-        deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
-    } catch (e) {
-      deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  };
   const jobs: Record<Job, () => Promise<void>> = {
     ta: async () => {
       for (const loop of config.loops.filter((l) => l.kind === "ta-loop")) {
@@ -1364,9 +1477,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           `backfill: ${r.folded} runs in ${Math.round(performance.now() - t0)} ms, ${r.left} left`,
         );
       }),
-    tokenAudit: runTokenAudit,
     transcripts: async () => {
-      await runTokenAudit();
       const r = await (c.transcripts ?? maintainTranscripts)({
         store,
         now: now(),
@@ -1408,6 +1519,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         const capacityConfig = deps.config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
         const capacity = storedMachineCapacity(store, at, capacityConfig);
         machineBlocked = capacity.blocked;
+        // only a reading taken now counts: an idle hub carries the last figure forward
+        restartRunawayFileService(
+          at,
+          spawn && !r.errors.some((e) => e.startsWith(`${FILE_SERVICE}:`))
+            ? (r.sample.fileServiceBytes ?? null)
+            : null,
+        );
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
             bytes === null || bytes === undefined ? "—" : `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -1440,13 +1558,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           });
         } else {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
-        }
-        // Waste alarms are read once a minute: a restart storm shows within minutes. They never
-        // raise a Needs-you item; one about a ticket going round wakes FLIGHT once.
-        try {
-          syncWasteAlarms(deps.config, store, at);
-        } catch (e) {
-          deps.log?.(`waste alarms: ${e instanceof Error ? e.message : String(e)}`);
         }
         emit("attention");
       }
@@ -1497,7 +1608,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     usage: config.poll.usageMinutes * 60_000,
     maintenance: MAINTENANCE_INTERVAL_MS,
     transcripts: TRANSCRIPT_PASS_INTERVAL_MS,
-    tokenAudit: TOKEN_AUDIT_INTERVAL_MS,
     machine: MACHINE_INTERVAL_MS,
     prs: PR_SWEEP_MS,
     flow: FLOW_INTERVAL_MS,
@@ -1514,7 +1624,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_FIRST_DELAY_MS,
     backfill: BACKFILL_FIRST_DELAY_MS,
     transcripts: TRANSCRIPT_PASS_FIRST_DELAY_MS,
-    tokenAudit: TOKEN_AUDIT_FIRST_DELAY_MS,
   };
 
   const refreshBoards = () => {

@@ -1,5 +1,5 @@
 import type { AuditImprovementKind, Run } from "@mc/core";
-import { COMMS_CAPCOM, COMMS_CONTROLLER, COMMS_MC } from "@mc/core";
+import { COMMS_CAPCOM, COMMS_CONTROLLER, COMMS_MC, SILENCE_WATCHED_EVENTS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../src/store.ts";
 
@@ -7,6 +7,17 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const NOW = Date.UTC(2026, 10, 8, 12);
 const SINCE = NOW - 7 * 24 * HOUR;
+const QUIET_NONE = { crewPaused: false, budgetStopped: false, noSeatRan: false };
+const screenshotEvent = () => {
+  const event = SILENCE_WATCHED_EVENTS.find((item) => item.kind === "screenshot-captured");
+  if (event === undefined) throw new Error("Screenshot capture must be watched");
+  return event;
+};
+const ciEvent = () => {
+  const event = SILENCE_WATCHED_EVENTS.find((item) => item.kind === "ci-result-observed");
+  if (event === undefined) throw new Error("CI result observation must be watched");
+  return event;
+};
 
 let store: Store;
 beforeEach(() => {
@@ -84,6 +95,173 @@ describe("question-asked-back", () => {
     discussion("needs:2", "Go with the first option.", NOW - HOUR);
     expect(rows("question-asked-back")).toEqual([]);
   });
+  it("reads the first operator message in the shared thread", () => {
+    choice("needs:3");
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:3",
+      text: "What does this mean?",
+      at: NOW - HOUR,
+    });
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:3",
+      text: "Thanks?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toMatchObject([
+      { subject: "needs:3", ticket: "repo#7", pr: null, at: NOW - HOUR },
+    ]);
+  });
+  it("gives no row when the first shared-thread message is a statement", () => {
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:4",
+      text: "Go ahead.",
+      at: NOW - HOUR,
+    });
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:4",
+      text: "Why?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toEqual([]);
+  });
+  it("gives one row when an item has both a legacy discussion and a thread", () => {
+    choice("needs:5");
+    discussion("needs:5", "Why?", NOW - HOUR);
+    msg({
+      from: COMMS_CAPCOM,
+      senderKind: "operator",
+      itemKey: "needs:5",
+      text: "Why again?",
+      at: NOW - HOUR + MIN,
+    });
+    expect(rows("question-asked-back")).toHaveLength(1);
+  });
+});
+
+describe("silence alarms", () => {
+  it("raises one alarm after an expected event gap and clears it when the event resumes", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
+    store.checkSilenceAlarms(NOW - watched.gapMs - 1, QUIET_NONE);
+    store.checkSilenceAlarms(NOW, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW).items).toMatchObject([
+      {
+        kind: "silence-alarm",
+        subject: "screenshot-captured",
+        state: "open",
+        detail: expect.stringContaining("Screenshot capture"),
+      },
+    ]);
+
+    store.recordSilenceEvent(watched.kind, NOW + 1);
+    store.checkSilenceAlarms(NOW + 1, QUIET_NONE);
+    expect(store.audit(SINCE, NOW + 1).items).toMatchObject([
+      { kind: "silence-alarm", subject: "screenshot-captured", state: "done" },
+    ]);
+  });
+
+  it.each([
+    { crewPaused: true, budgetStopped: false, noSeatRan: false },
+    { crewPaused: false, budgetStopped: true, noSeatRan: false },
+    { crewPaused: false, budgetStopped: false, noSeatRan: true },
+  ])("does not raise an alarm in quiet periods: %o", (quiet) => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
+    store.checkSilenceAlarms(NOW, quiet);
+    expect(store.audit(SINCE, NOW).items?.filter((item) => item.kind === "silence-alarm")).toEqual(
+      [],
+    );
+  });
+
+  it("starts measuring a gap again when a quiet period ends", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - 50 * HOUR);
+    store.checkSilenceAlarms(NOW - 49 * HOUR, QUIET_NONE);
+    store.checkSilenceAlarms(NOW - 48 * HOUR, { ...QUIET_NONE, crewPaused: true });
+    store.checkSilenceAlarms(NOW, { ...QUIET_NONE, crewPaused: true });
+    store.checkSilenceAlarms(NOW + MIN, QUIET_NONE);
+    expect(store.audit(SINCE, NOW + MIN).items).toEqual([]);
+
+    store.checkSilenceAlarms(NOW + MIN + watched.gapMs + 1, QUIET_NONE);
+    expect(store.audit(SINCE, NOW + MIN + watched.gapMs + 1).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
+  it("keeps an open alarm open across a quiet tick", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
+    store.checkSilenceAlarms(NOW, QUIET_NONE);
+    store.checkSilenceAlarms(NOW + MIN, { ...QUIET_NONE, noSeatRan: true });
+    store.checkSilenceAlarms(NOW + 2 * MIN, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW + 2 * MIN).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
+  it("counts active time on both sides of a short quiet spell", () => {
+    const watched = screenshotEvent();
+    store.recordSilenceEvent(watched.kind, NOW - 23 * HOUR);
+    store.checkSilenceAlarms(NOW - 23 * HOUR, QUIET_NONE);
+    store.checkSilenceAlarms(NOW, { ...QUIET_NONE, noSeatRan: true });
+    store.checkSilenceAlarms(NOW + MIN, QUIET_NONE);
+    store.checkSilenceAlarms(NOW + 2 * HOUR, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW + 2 * HOUR).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+  });
+
+  it("clears an open CI alarm after the result returns through a quiet night", () => {
+    const watched = ciEvent();
+    store.recordSilenceEvent(watched.kind, NOW - 7 * HOUR);
+    for (let at = NOW - 7 * HOUR; at <= NOW; at += MIN) store.checkSilenceAlarms(at, QUIET_NONE);
+    expect(store.audit(SINCE, NOW).items).toMatchObject([
+      { kind: "silence-alarm", subject: watched.kind, state: "open" },
+    ]);
+
+    const resumedAt = NOW + 30_000;
+    store.recordSilenceEvent(watched.kind, resumedAt);
+    for (let at = NOW + MIN; at <= NOW + 10 * HOUR; at += MIN)
+      store.checkSilenceAlarms(at, { ...QUIET_NONE, noSeatRan: true });
+    store.checkSilenceAlarms(NOW + 10 * HOUR + MIN, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW + 10 * HOUR + MIN).items).toMatchObject([
+      {
+        kind: "silence-alarm",
+        subject: watched.kind,
+        state: "done",
+        detail: expect.stringContaining(new Date(resumedAt).toISOString()),
+      },
+    ]);
+  });
+
+  it("includes the event, last seen time, and expected gap in Audit's Do next data", () => {
+    const watched = screenshotEvent();
+    const lastSeenAt = NOW - watched.gapMs - 1;
+    store.recordSilenceEvent(watched.kind, lastSeenAt);
+    store.checkSilenceAlarms(lastSeenAt, QUIET_NONE);
+    store.checkSilenceAlarms(NOW, QUIET_NONE);
+
+    expect(store.audit(SINCE, NOW).items).toMatchObject([
+      {
+        kind: "silence-alarm",
+        subject: "screenshot-captured",
+        detail: expect.stringContaining(new Date(lastSeenAt).toISOString()),
+      },
+    ]);
+    expect(store.audit(SINCE, NOW).items?.[0]?.detail).toContain(`${watched.gapMs / HOUR} hours`);
+  });
 });
 
 describe("question-waited", () => {
@@ -154,30 +332,6 @@ describe("chatter", () => {
   it("gives no row at six rounds", () => {
     rounds(6);
     expect(rows("chatter")).toEqual([]);
-  });
-});
-
-describe("repeat-message", () => {
-  it("gives one row for a message sent twice", () => {
-    msg({ pr: 3 });
-    store.addComms(
-      {
-        at: NOW - HOUR + 2000,
-        from: "guido-1",
-        to: "flight-1",
-        ticket: "repo#7",
-        text: "hello",
-        pr: 3,
-        senderKind: "seat",
-      },
-      undefined,
-      NOW - HOUR,
-    );
-    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7", pr: 3 }]);
-  });
-  it("gives no row for a message sent once", () => {
-    msg();
-    expect(rows("repeat-message")).toEqual([]);
   });
 });
 
@@ -291,26 +445,5 @@ describe("range boundaries and links", () => {
       ["comms:1", "repo#7"],
       ["comms:3", "repo#8"],
     ]);
-  });
-  it("links an exact repeat through its run's ticket, and leaves out one with no link", () => {
-    store.upsertRun(run({ id: "r1" }));
-    const repeat = (over: object) => {
-      const row = {
-        at: NOW - HOUR,
-        from: "guido-1",
-        to: "flight-1",
-        ticket: null,
-        text: "hello",
-        senderKind: "seat" as const,
-        ...over,
-      };
-      store.addComms(row, undefined, NOW - 2 * HOUR);
-      store.addComms({ ...row, at: NOW - HOUR + 1 }, undefined, NOW - 2 * HOUR);
-    };
-    repeat({ fromRunId: "r1", text: "linked" });
-    repeat({ text: "unlinked" });
-    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7" }]);
-    for (const r of store.audit(SINCE, NOW).improvements ?? [])
-      if (r.kind !== "tool-usage") expect(r.ticket !== null || r.pr !== null).toBe(true);
   });
 });

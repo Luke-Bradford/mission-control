@@ -1,8 +1,10 @@
 import type { CommsSenderKind } from "./comms.ts";
+import type { ModelAdvice } from "./model-advice.ts";
 import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
 import type { CrewMode, CrewRole, LoopKind } from "./runtime-model.ts";
+import type { TicketPlan } from "./ticket-plan.ts";
 import type {
   AccountId,
   AgentId,
@@ -698,7 +700,18 @@ export interface TicketPrView {
 
 /** One entry of the ticket's timeline; `key` is stable and orders entries that share a time. */
 export type TicketEvent = { key: string; at: number } & (
-  | { kind: "run"; runId: string; seat: AgentId; status: RunStatus; phase: string | null }
+  | {
+      kind: "run";
+      runId: string;
+      seat: AgentId;
+      status: RunStatus;
+      phase: string | null;
+      /** What the run ran on; null when the CLI never reported a model or used its default effort. */
+      model?: string | null;
+      effort?: string | null;
+      /** The model and effort recommended for its step when it started; absent when none was recorded. */
+      advice?: ModelAdvice;
+    }
   | {
       kind: "review";
       prNumber: number;
@@ -768,6 +781,8 @@ export interface TicketHistory {
   prototypeProblem?: string | null;
   /** Why the body is missing; null when GitHub answered. */
   githubError: string | null;
+  /** The ticket's plan and where its sign-off stands; null when it has none. */
+  plan?: TicketPlan | null;
   runs: TicketRunView[];
   prs: TicketPrView[];
   /** Live closing PR references, including PRs not yet collected into local history. */

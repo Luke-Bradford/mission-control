@@ -65,6 +65,7 @@ export type Page =
   | "agent"
   | "comms"
   | "qa"
+  | "planner"
   | "telemetry"
   | "audit"
   | "setup";
@@ -87,16 +88,15 @@ export type Route =
   | { page: "ticket"; repoId: string; number: number }
   | { page: "agent"; id: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
-  /** The Comms chart on its own, filling the window (`/comms/chart`); the Comms tab stays lit. */
-  | { page: "commsChart" }
   | { page: "telemetry" }
   | { page: "qa" }
+  /** Plans to sign off (`/planner`), and past ones (`?view=history`). */
+  | { page: "planner" }
   | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
 
 /** The header tab a route belongs under: a ticket is the Board's. */
-export const tabOf = (r: Route): Page =>
-  r.page === "ticket" ? "board" : r.page === "commsChart" ? "comms" : r.page;
+export const tabOf = (r: Route): Page => (r.page === "ticket" ? "board" : r.page);
 
 /**
  * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
@@ -127,6 +127,7 @@ const { map: _removedMapPath, ...HUD_PAGE_PATHS_WITHOUT_MAP } = HUD_PAGE_PATHS;
 export const PAGE_PATHS: Record<Page, string> = {
   ...HUD_PAGE_PATHS_WITHOUT_MAP,
   needs: "/needs-you",
+  planner: "/planner",
 };
 
 /** Telemetry on `tab` (and its table view); the default tab and the charts view are the bare page. */
@@ -157,8 +158,6 @@ export const itemPath = (key: string): string => `/comms/${enc(key)}`;
 /** One item open on the Needs you page. */
 export const needsYouPath = (key: string): string => `${PAGE_PATHS.needs}/${enc(key)}`;
 export const commsFlightPath = (): string => "/comms";
-/** The Comms chart popped out to its own window; the filter rides in `?focus=`. */
-export const COMMS_CHART_PATH = "/comms/chart";
 export const commsCrewPath = (): string => "/comms/crew";
 export const commsTicketPath = (ref: string, ticket?: string | null): string =>
   `/comms/tickets/${enc(ref)}${ticket && COMMS_TICKET.test(ticket) ? `?ticket=${enc(ticket)}` : ""}`;
@@ -277,6 +276,7 @@ export function route(path: string, search = ""): Route | null {
   if (p === "/telemetry") return { page: "telemetry" };
   if (p === "/audit") return { page: "audit" };
   if (p === "/qa") return { page: "qa" };
+  if (p === PAGE_PATHS.planner) return { page: "planner" };
   const board = withId(path, "board");
   if (board) return { page: "board", repoId: board.id, ticket: null };
   const ticket = boardTicket(path);
@@ -286,7 +286,6 @@ export function route(path: string, search = ""): Route | null {
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
-  if (p === COMMS_CHART_PATH) return { page: "commsChart" };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
   const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
   if (commsTicket) {

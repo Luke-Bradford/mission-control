@@ -11,7 +11,7 @@ import {
 import { sendComms } from "../comms/index.ts";
 import type { CcConfig } from "../config.ts";
 import { flightSeat } from "../flight/seat.ts";
-import { CREW_ERROR_KEY, NOTE_KEY } from "../hud/hud.ts";
+import { NOTE_KEY } from "../hud/hud.ts";
 import { commsPosition, type QuestionChoiceRow, type Store } from "../store.ts";
 
 /** What a choice route sends back when it refuses: the status and one plain line. */
@@ -336,10 +336,7 @@ export function claimMessagePick(
 /** Takes a non-question item out of Needs you the way its own source does, then acks it. */
 function closeItem(store: Store, key: string, at: number): void {
   if (key.startsWith(NOTE_KEY)) store.dismissNote(key.slice(NOTE_KEY.length), at);
-  else if (key.startsWith(CREW_ERROR_KEY)) {
-    const id = Number(key.slice(CREW_ERROR_KEY.length));
-    if (Number.isSafeInteger(id) && id > 0) store.ackCrewError(id);
-  } else if (key.startsWith(COMMS_OPEN_PREFIX))
+  else if (key.startsWith(COMMS_OPEN_PREFIX))
     store.settleCommsItem(
       key.slice(COMMS_OPEN_PREFIX.length),
       COMMS_CAPCOM,

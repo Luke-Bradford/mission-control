@@ -55,7 +55,7 @@ From a one-off inventory of a backup copy of the hub's database (rows, span, gra
 - `machine_samples`: 10228, 28 Oct to 4 Nov, about 60 s; CPU 4.5 to 100%, memory 53 to 100%.
 - `usage_samples`: 4937, 17 Oct to 4 Nov; 5h 493, 7d 4444.
 - `prompt_sections`: 1958, from 31 Oct. `flow_prs`: 734; `flow_issues`: 731 (674 done, 4 sizes), from 21 to 22 Oct.
-- `guard_hits`: 558, 9 rules. `escaped_defects`: 54. `test_lock_runs`: 2132. Test-attempt tables: empty.
+- `guard_hits`: 558, 9 rules. `test_lock_runs`: 2132. Test-attempt tables: empty.
 
 Gaps that follow from the list: cost is on 2433 of 4456 runs and tokens on 2979, so cost and token panels state their coverage; reviews stop at 1 Nov; CI starts 29 Oct; test attempts are not collected.
 
@@ -112,7 +112,6 @@ Verdict, a proposal the operator can change: Needs attention for a quota at its 
 | Human review wait | Quality | 14d | minutes, median |
 | PRs sent back | Quality | 14d | PRs |
 | Guard blocks | Quality | 14d | blocks |
-| Escaped defects | Quality table | all | rows |
 | Test attempts | Quality | none | Not collected yet |
 | CPU | Machine | now, 24h | % |
 | Memory free | Machine | now, 24h | % |
@@ -142,7 +141,7 @@ Merged per day, Cycle time per ticket, Cycle time by size, Tickets in progress a
 
 ### Quality
 
-CI green first push, First-pass review, Rounds per PR, Guard blocks by rule and the Escaped defects table. Fixed 14-day window. Review plots stop where reviews stop; test attempts stay a stated gap until collected.
+CI green first push, First-pass review, Rounds per PR, and Guard blocks by rule. Fixed 14-day window. Review plots stop where reviews stop; test attempts stay a stated gap until collected.
 
 ### Machine
 

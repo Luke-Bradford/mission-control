@@ -17,7 +17,7 @@ import {
 } from "@mc/core";
 import { type NeedsYou, sortNeeds, youAction } from "../attention.ts";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
-import { plural } from "../fmt.ts";
+import { dayMonth, plural } from "../fmt.ts";
 
 const DAY = 86_400_000;
 
@@ -157,6 +157,30 @@ export function cardColumn(item: BoardItem): BoardColumn {
   const col = hudColumnOf(item);
   if (item.waiting && col !== "Done") return WAITING_COLUMN;
   return NOT_STARTED.includes(col) && firstBlocker(item) !== null ? "Blocked" : col;
+}
+
+/**
+ * The one line that says why a card nothing is working on is where it is: its last PR was closed
+ * with nothing open, or nobody has it in a column that expects work. Null while a run or a
+ * reviewer is on it, any linked PR is open (`hasOpenPr`, from the ticket's whole PR list, not `cardPr`'s pick), or it is not started. `pr` is `cardPr`'s
+ * pick, so a closed or merged one means no open PR (a merged PR does not keep a card carried). The PR has no close time of its own (its last
+ * update is not it), so the line gives no date.
+ */
+export function cardIdle(
+  item: Pick<BoardItem, "updatedAt">,
+  col: BoardColumn,
+  pr: PullRequestView | null,
+  hasAgent: boolean,
+  hasReviewer: boolean,
+  hasOpenPr: boolean,
+  tz: string | null,
+): string | null {
+  if (col === "Done" || col === WAITING_COLUMN || hasAgent || hasReviewer || hasOpenPr) return null;
+  const on = (ms: number) => (tz === null ? "" : ` ${dayMonth(ms, tz)}`);
+  if (pr?.state === "closed") return "PR closed, nothing open";
+  if ((pr === null || pr.state === "merged") && (col === "In progress" || col === "In review"))
+    return tz === null ? "Nobody on it" : `Nobody on it since${on(item.updatedAt)}`;
+  return null;
 }
 
 const HOUR = 3_600_000;
@@ -300,7 +324,7 @@ export function pipelineStage(
   const fallback = merged && requestedStage === undefined ? "merged" : null;
   if (item.closed) return fallback;
   const agent = cardAgent(item, crew);
-  const aside = crew.flatMap((row) => row.asideRuns ?? []).find((run) => run.ticket === ref);
+  const aside = crew.flatMap((row) => row.offSeatRuns ?? []).find((run) => run.ticket === ref);
   const loop =
     loops.find((view) => view.runId === (agent?.run?.id ?? aside?.runId))?.loop ??
     agent?.loop ??

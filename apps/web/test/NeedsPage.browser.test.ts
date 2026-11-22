@@ -9,7 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
+import { boundBrief, brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
@@ -408,13 +408,14 @@ describeRendered("Needs you page", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it(
-    "every nav tab is fully visible at 1280 with a two-digit Needs you count",
-    async () => {
+  it.each(["light", "dark"] as const)(
+    "every nav tab is fully visible and separate at 1280 with a two-digit Needs you count, %s",
+    async (colorScheme) => {
       const page = await renderAt({
         page: "test/needsBrowser.html",
         width: 1280,
         height: 900,
+        colorScheme,
         api: api(6, 2, 34),
         assets: ASSETS,
       });
@@ -434,14 +435,45 @@ describeRendered("Needs you page", () => {
             outside: [...tabs.querySelectorAll("a")]
               .filter((a) => {
                 const r = a.getBoundingClientRect();
-                return r.right > box.right + 1 || (status && r.right > status.left + 1);
+                const sharesRow =
+                  !!status && r.bottom > status.top + 1 && r.top < status.bottom - 1;
+                return r.right > box.right + 1 || (sharesRow && r.right > (status?.left ?? 0) + 1);
               })
               .map((a) => a.textContent),
+            separation: [...tabs.querySelectorAll("a")].every((a, index, all) => {
+              if (index === 0) return a.getBoundingClientRect().height >= 24;
+              const previous = all[index - 1].getBoundingClientRect();
+              const current = a.getBoundingClientRect();
+              return current.height >= 24 && current.left - previous.right >= 2;
+            }),
           };
         }, undefined);
         expect(clipped.scrolls, "the tabs need no sideways scroll").toBe(false);
         expect(clipped.outside, "no tab sits under the status readout").toEqual([]);
-        if (SHOTS) await page.screenshot(join(SHOTS, "needs-1280x900-nav.png"));
+        expect(clipped.separation, "each page tab keeps a visible gap and target size").toBe(true);
+        const session = await page.evaluate(() => {
+          const select = document.querySelector<HTMLSelectElement>("#sess");
+          return {
+            label: select?.selectedOptions[0]?.textContent,
+            fits: !!select && select.scrollWidth <= select.clientWidth + 1,
+            painted:
+              !!select &&
+              (() => {
+                const style = getComputedStyle(select);
+                const canvas = document.createElement("canvas");
+                const context = canvas.getContext("2d");
+                if (!context) return false;
+                context.font = `${style.fontSize} ${style.fontFamily}`;
+                return select.clientWidth >= context.measureText("All sessions").width + 32;
+              })(),
+            height: select?.getBoundingClientRect().height ?? 0,
+          };
+        }, undefined);
+        expect(session.label).toBe("All sessions");
+        expect(session.fits, "the session label is clipped").toBe(true);
+        expect(session.painted, "the complete session label has room to paint").toBe(true);
+        expect(session.height, "the session picker is a usable control").toBeGreaterThanOrEqual(24);
+        if (SHOTS) await page.screenshot(join(SHOTS, `needs-1280x900-nav-${colorScheme}.png`));
       } finally {
         await page.close();
       }
@@ -455,14 +487,24 @@ describeRendered("Needs you page", () => {
       const ASKED = "Why this layout?";
       const REPLY = "It keeps every ask one click away.";
       const PICKED = "List and open item";
-      const choosePath = `/api/attention/${encodeURIComponent(KEY)}/choose`;
+      const choosePath = `/api/attention/${encodeURIComponent(KEY)}/choice`;
       /** The hub for one walk: it stores what the page sends, and FLIGHT's reply is the fixture's. */
       const hub = () => {
         const base = api(2);
         const [first, ...others] = base["/api/attention"];
         if (!first?.brief) throw new Error("the fixture's first ask has a brief");
-        // FLIGHT's brief to the operator: its options go through the choose route
-        const open = { ...first, brief: { ...first.brief, for: "operator" as const } };
+        // The server-bound choice route is the only way an option can act.
+        const open = {
+          ...first,
+          brief: boundBrief({
+            ask: "Which layout should the Needs you page use: a list and the open item, or one long column?",
+            options: [
+              { id: "a", label: PICKED, answer: PICKED },
+              { id: "b", label: "One long column", answer: "One long column" },
+            ],
+            recommendedOptionId: "a",
+          }),
+        };
         const earlier = base["/api/comms/flight"].messages;
         let sent = false;
         let chosen = false;
@@ -497,14 +539,13 @@ describeRendered("Needs you page", () => {
           [choosePath]: (method: string) => {
             if (method === "POST") chosen = true;
             return {
-              key: KEY,
-              optionId: "list",
-              label: PICKED,
-              to: "flight-1",
-              target: "flight",
-              chosenAt: NOW,
-              deliveredAt: null,
-              alreadyChosen: false,
+              epoch: "e1",
+              requestId: "r",
+              optionId: "a",
+              at: NOW,
+              state: "applied",
+              text: "Answer sent.",
+              actor: { operator: true },
             };
           },
         };
@@ -584,7 +625,6 @@ describeRendered("Needs you page", () => {
             try {
               if (surface.name === "page") {
                 await ready(page);
-                await pictureLoaded(page);
               }
               await page.boxes(`${surface.scope} .flight-thread-message`);
               await page.boxes(`${surface.opts} button`);
@@ -607,11 +647,9 @@ describeRendered("Needs you page", () => {
               expect(posts(page, "/api/comms"), at).toBe(1);
               await shot("2-reply");
 
-              // pick an option: one receipt in the thread, and the question leaves the list (the
-              // page moves on to the next question, whose thread is the same stored conversation)
+              // Pick the bound option. The question leaves the list; the page moves on to the next
+              // question, whose thread is the same stored conversation.
               await page.click(`${surface.opts} button`);
-              expect(await inThread(page, surface.scope, `You chose: ${PICKED}`), at).toBe(1);
-              expect(await inThread(page, surface.scope, "You chose"), at).toBe(1);
               expect(posts(page, choosePath), at).toBe(1);
               expect(await waiting(page, "2"), at).toBe("2");
               if (surface.name === "page") {
@@ -622,9 +660,11 @@ describeRendered("Needs you page", () => {
                 expect(list, at).not.toContain("Which layout should the Needs you page use");
                 expect(list, at).toContain("Second ask");
               }
-              // the send and the reply are still there, once each, beside the receipt
+              // Discuss stays chat only: the send and reply remain once each and Accept did not
+              // manufacture a chat choice.
               expect(await inThread(page, surface.scope, ASKED), at).toBe(1);
               expect(await inThread(page, surface.scope, REPLY), at).toBe(1);
+              expect(await inThread(page, surface.scope, "You chose"), at).toBe(0);
               expect(page.errors(), at).toEqual([]);
               await shot("3-picked");
             } finally {
@@ -665,6 +705,7 @@ describeRendered("Needs you page", () => {
             ],
           }),
           id: 31,
+          state: { completeness: "complete", freshness: "current", reason: "Matches the source." },
           binding: {
             version: 2,
             sourceRevision: "c".repeat(64),
@@ -747,6 +788,8 @@ describeRendered("Needs you page", () => {
         expect(await buttons()).toEqual([
           { text: "Not now, clear it", disabled: false },
           { text: "Keep it", disabled: false },
+          { text: "Accept recommendation: Not now, clear it", disabled: false },
+          { text: "Discuss", disabled: false },
         ]);
         if (SHOTS) {
           mkdirSync(SHOTS, { recursive: true });
@@ -758,7 +801,8 @@ describeRendered("Needs you page", () => {
         expect(
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
-        // the answered question leaves "Waiting on you" (and its count); the thread shows the pick once
+        // the answered question leaves "Waiting on you" (and its count); a bound choice is not a
+        // chat message, so the POST and list transition are the evidence here.
         const listText = () =>
           page.evaluate(
             () =>
@@ -786,15 +830,6 @@ describeRendered("Needs you page", () => {
             undefined,
           ),
         ).toContain("Another ask still waiting");
-        expect(
-          await page.evaluate(
-            () =>
-              [...document.querySelectorAll("#needsSide .flight-thread-message")].filter((m) =>
-                m.textContent?.includes("You chose: Not now, clear it"),
-              ).length,
-            undefined,
-          ),
-        ).toBe(1);
         if (SHOTS) await page.screenshot(join(SHOTS, "needs-protected-after-1600x1000.png"));
       } finally {
         await page.close();
@@ -802,59 +837,315 @@ describeRendered("Needs you page", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
-
   it(
-    "the fly-out keeps a long FLIGHT thread scrollable with its composer and newest message in reach",
+    "complete brief composition: facts, options, Accept and Discuss stay whole and reachable",
     async () => {
-      const newest = "Message 60: the newest FLIGHT update stays visible.";
-      const longThread = Array.from({ length: 60 }, (_, i) => ({
-        id: `comms:long-${i + 1}`,
-        at: NOW - (60 - i) * MIN,
-        from: "flight-1",
-        to: "CAPCOM",
-        operator: false,
-        text:
-          i === 59
-            ? newest
-            : `Message ${i + 1}: ${"A detailed FLIGHT update that needs a readable scrolling log. ".repeat(4)}`,
-      }));
-      const page = await renderAt({
-        page: "test/needsBrowser.html",
-        search: `?path=${encodeURIComponent(`/?item=${KEY}`)}`,
-        width: 1280,
-        height: 800,
-        api: { ...api(), "/api/comms/flight": { messages: longThread } },
-        assets: ASSETS,
-      });
-      try {
-        await page.box("#discuss .flight-thread-log");
-        const visible = await page.evaluate((newestText) => {
-          const body = document.querySelector("#discuss .item-body") as HTMLElement;
-          const log = document.querySelector("#discuss .flight-thread-log") as HTMLElement;
-          body.scrollTop = body.scrollHeight;
-          log.scrollTop = log.scrollHeight;
-          const input = document.querySelector("#discuss .flight-thread-input") as HTMLElement;
-          const last = [...log.querySelectorAll(".flight-thread-message")].at(-1) as HTMLElement;
-          const logBox = log.getBoundingClientRect();
-          const inputBox = input.getBoundingClientRect();
-          const lastBox = last.getBoundingClientRect();
-          return {
-            logHeight: logBox.height,
-            viewportHeight: window.innerHeight,
-            inputInView: inputBox.top >= 0 && inputBox.bottom <= window.innerHeight,
-            newestInLog:
-              last.textContent?.includes(newestText) &&
-              lastBox.top >= logBox.top &&
-              lastBox.bottom <= logBox.bottom,
-          };
-        }, newest);
-        expect(visible.logHeight).toBeLessThanOrEqual(800 * 0.6);
-        expect(visible.inputInView).toBe(true);
-        expect(visible.newestInLog).toBe(true);
-      } finally {
-        await page.close();
+      const BIG = "A long sentence that must be read in full. ".repeat(190).slice(0, 8000);
+      const variants = [
+        { name: "two", options: 2, asks: 0, big: false },
+        { name: "person", options: 2, asks: 0, big: false },
+        { name: "four", options: 4, asks: 0, big: false },
+        { name: "three-asks", options: 2, asks: 2, big: false },
+        { name: "fifty-asks", options: 2, asks: 49, big: false },
+        { name: "stress", options: 4, asks: 0, big: true },
+      ] as const;
+      const sizes = [
+        [1280, 900],
+        [1600, 1000],
+        [1920, 940],
+        [1600, 700],
+      ] as const;
+      for (const variant of variants) {
+        for (const [width, height] of sizes) {
+          for (const colorScheme of ["light", "dark"] as const) {
+            for (const dock of variant.name === "two" || variant.name === "stress"
+              ? (["folded", "expanded"] as const)
+              : (["folded"] as const)) {
+              const options = Array.from({ length: variant.options }, (_, i) => ({
+                id: `o${i}`,
+                label: `Option ${i + 1}`,
+                answer: `Answer ${i + 1}`,
+                ...(variant.big ? { description: BIG } : {}),
+              }));
+              const base = api(0, 2, variant.asks);
+              const decisionBrief = boundBrief({
+                options,
+                recommendedOptionId: "o0",
+                ...(variant.big ? { context: BIG, recommendation: BIG } : {}),
+              });
+              if (variant.big && decisionBrief.decision) {
+                decisionBrief.decision.costOfDelay = BIG;
+                decisionBrief.decision.consulted = [{ who: "mc-dev-1", finding: BIG }];
+              }
+              for (const o of decisionBrief.options)
+                if (variant.big) {
+                  o.consequence = BIG;
+                  if (o.reversibility) o.reversibility.detail = BIG;
+                }
+              const asks = (base["/api/attention"] as ReturnType<typeof item>[]).map((a) =>
+                a.key === KEY
+                  ? {
+                      ...a,
+                      ...(variant.name === "person" ? { kind: "person" as const } : {}),
+                      brief:
+                        variant.name === "person"
+                          ? {
+                              ...decisionBrief,
+                              person: {
+                                source: {
+                                  kind: "github" as const,
+                                  messageId: "needs-person-brief",
+                                  revision: "source-v1",
+                                },
+                              },
+                            }
+                          : decisionBrief,
+                    }
+                  : a,
+              );
+              const page = await renderAt({
+                page: "test/needsBrowser.html",
+                width,
+                height,
+                colorScheme,
+                api: { ...base, "/api/attention": asks },
+                assets: ASSETS,
+              });
+              const label = `${variant.name} ${width}x${height} ${colorScheme} dock ${dock}`;
+              try {
+                await ready(page);
+                // Needs you has no dock column: the dock is a drawer there at any width. "Expanded"
+                // opens that drawer; it floats over the page, so the page must not shift or overflow
+                // under it, and it is closed again before the focus and hit-test checks.
+                if (dock === "expanded") {
+                  await page.click('.iconbtn[title^="Show or hide FLIGHT"]');
+                  const drawerOpen = await page.evaluate(
+                    () => document.querySelector<HTMLElement>("#dock")?.hidden === false,
+                    undefined,
+                  );
+                  expect(drawerOpen, `${label}: the dock drawer opens`).toBe(true);
+                  const underDrawer = await page.evaluate(
+                    () => document.documentElement.scrollWidth - innerWidth,
+                    undefined,
+                  );
+                  expect(
+                    underDrawer,
+                    `${label}: no horizontal overflow, drawer open`,
+                  ).toBeLessThanOrEqual(0);
+                  await page.press("Escape");
+                }
+                await page.boxes(".needs-answer .decision-facts");
+                const overflow = await page.evaluate(
+                  () => document.documentElement.scrollWidth - innerWidth,
+                  undefined,
+                );
+                expect(overflow, `${label}: no horizontal overflow`).toBeLessThanOrEqual(0);
+                const factsInFold = await page.evaluate(
+                  () =>
+                    document
+                      .querySelector(".needs-more")
+                      ?.contains(document.querySelector(".decision-facts")) ?? false,
+                  undefined,
+                );
+                expect(factsInFold, `${label}: facts are outside the Details fold`).toBe(false);
+                await page.evaluate(() => {
+                  const last = [
+                    ...document.querySelectorAll<HTMLElement>(".opt .option-pick"),
+                  ].pop();
+                  last?.focus();
+                }, undefined);
+                const focused = await page.evaluate(
+                  () => document.activeElement?.classList.contains("option-pick") ?? false,
+                  undefined,
+                );
+                expect(focused, `${label}: the last option takes focus`).toBe(true);
+                // Keyboard from the last option reaches Accept, and Accept shows a focus ring.
+                for (let i = 0; i < 5; i++) {
+                  const onAccept = await page.evaluate(
+                    () => document.activeElement?.textContent?.startsWith("Accept") ?? false,
+                    undefined,
+                  );
+                  if (onAccept) break;
+                  await page.press("Tab");
+                }
+                const ring = await page.evaluate(() => {
+                  const el = document.activeElement as HTMLElement | null;
+                  const css = el ? getComputedStyle(el) : null;
+                  return {
+                    accept: el?.textContent?.startsWith("Accept") ?? false,
+                    outline: css?.outlineStyle ?? "none",
+                    shadow: css?.boxShadow ?? "none",
+                  };
+                }, undefined);
+                expect(ring.accept, `${label}: keyboard reaches Accept`).toBe(true);
+                expect(
+                  ring.outline !== "none" || ring.shadow !== "none",
+                  `${label}: Accept shows focus`,
+                ).toBe(true);
+                const reach = await page.evaluate(() => {
+                  const hit = (el: Element | null) => {
+                    if (!el) return false;
+                    el.scrollIntoView({ block: "nearest" });
+                    const r = el.getBoundingClientRect();
+                    const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                    return top !== null && (el === top || el.contains(top));
+                  };
+                  const accept = [...document.querySelectorAll("button")].find((b) =>
+                    b.textContent?.startsWith("Accept recommendation"),
+                  );
+                  const last = [...document.querySelectorAll(".opt .option-pick")].pop() ?? null;
+                  return {
+                    accept: hit(accept ?? null),
+                    last: hit(last),
+                  };
+                }, undefined);
+                expect(reach.accept, `${label}: Accept is painted and hit-testable`).toBe(true);
+                expect(reach.last, `${label}: the last option is painted and hit-testable`).toBe(
+                  true,
+                );
+                if (SHOTS) {
+                  mkdirSync(SHOTS, { recursive: true });
+                  await page.screenshot(
+                    join(
+                      SHOTS,
+                      `needs-brief-${variant.name}-${width}x${height}-${colorScheme}-${dock}.png`,
+                    ),
+                  );
+                }
+              } finally {
+                await page.close();
+              }
+            }
+          }
+        }
       }
     },
-    BROWSER_TEST_TIMEOUT_MS,
+    BROWSER_TEST_TIMEOUT_MS * 4,
+  );
+  it(
+    "the flyout keeps Accept apart from Discuss and the facts inside the panel inset",
+    async () => {
+      for (const [width, height] of [
+        [1280, 900],
+        [1600, 1000],
+        [1600, 700],
+      ] as const) {
+        for (const colorScheme of ["light", "dark"] as const) {
+          const base = api(0, 2, 0);
+          const asks = (base["/api/attention"] as ReturnType<typeof item>[]).map((a) =>
+            a.key === KEY
+              ? {
+                  ...a,
+                  brief: boundBrief({
+                    recommendedOptionId: "list",
+                    options: [
+                      {
+                        id: "list",
+                        label: "List and open item",
+                        answer: "Use the list and open item.",
+                      },
+                      { id: "column", label: "One long column", answer: "Use one long column." },
+                    ],
+                  }),
+                }
+              : a,
+          );
+          const page = await renderAt({
+            page: "test/needsBrowser.html",
+            width,
+            height,
+            colorScheme,
+            search: `?path=${encodeURIComponent(`/comms?item=${KEY}`)}`,
+            api: { ...base, "/api/attention": asks },
+            assets: ASSETS,
+          });
+          const label = `flyout ${width}x${height} ${colorScheme}`;
+          try {
+            await page.boxes("#dsOpts .answer-actions");
+            await page.evaluate(async () => {
+              await document.fonts.ready;
+            }, undefined);
+            const m = await page.evaluate(() => {
+              const box = (el: Element | null) => {
+                const r = el?.getBoundingClientRect();
+                return r ? { x: r.x, y: r.y, w: r.width, h: r.height } : null;
+              };
+              const buttons = [
+                ...document.querySelectorAll<HTMLElement>("#dsOpts .answer-actions button"),
+              ];
+              const accept = buttons.find((b) => b.textContent?.startsWith("Accept")) ?? null;
+              const discuss = buttons.find((b) => b.textContent === "Discuss") ?? null;
+              const brief = document.querySelector("#dsBrief .brief, #dsBrief");
+              const hit = (el: Element | null) => {
+                if (!el) return false;
+                el.scrollIntoView({ block: "nearest" });
+                const r = el.getBoundingClientRect();
+                const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                return top !== null && (el === top || el.contains(top));
+              };
+              const lastOption =
+                [...document.querySelectorAll("#dsOpts .option-pick")].pop() ?? null;
+              return {
+                accept: box(accept),
+                discuss: box(discuss),
+                facts: box(document.querySelector("#discuss .decision-facts")),
+                panel: box(document.querySelector("#discuss")),
+                brief: box(brief),
+                acceptHit: hit(accept),
+                lastHit: hit(lastOption),
+                overflow: document.documentElement.scrollWidth - innerWidth,
+              };
+            }, undefined);
+            if (!m.accept || !m.discuss || !m.facts || !m.panel)
+              throw new Error(`${label}: missing`);
+            expect(m.overflow, `${label}: no horizontal overflow`).toBeLessThanOrEqual(0);
+            const sameRow = Math.abs(m.accept.y - m.discuss.y) < m.accept.h;
+            if (sameRow)
+              expect(
+                m.discuss.x - (m.accept.x + m.accept.w),
+                `${label}: Accept and Discuss are apart`,
+              ).toBeGreaterThanOrEqual(4);
+            expect(
+              m.facts.x,
+              `${label}: facts are inset from the panel edge`,
+            ).toBeGreaterThanOrEqual(m.panel.x + 4);
+            expect(m.acceptHit, `${label}: Accept is hit-testable`).toBe(true);
+            expect(m.lastHit, `${label}: the last option is hit-testable`).toBe(true);
+            await page.evaluate(() => {
+              (
+                document.querySelector("#dsOpts .option-pick:last-of-type") as HTMLElement | null
+              )?.focus();
+            }, undefined);
+            for (let i = 0; i < 6; i++) {
+              const onAccept = await page.evaluate(
+                () => document.activeElement?.textContent?.startsWith("Accept") ?? false,
+                undefined,
+              );
+              if (onAccept) break;
+              await page.press("Tab");
+            }
+            const ring = await page.evaluate(() => {
+              const el = document.activeElement as HTMLElement | null;
+              const css = el ? getComputedStyle(el) : null;
+              return {
+                accept: el?.textContent?.startsWith("Accept") ?? false,
+                visible: css ? css.outlineStyle !== "none" || css.boxShadow !== "none" : false,
+              };
+            }, undefined);
+            expect(ring.accept, `${label}: keyboard reaches Accept`).toBe(true);
+            expect(ring.visible, `${label}: Accept shows focus`).toBe(true);
+            if (SHOTS) {
+              mkdirSync(SHOTS, { recursive: true });
+              await page.screenshot(
+                join(SHOTS, `needs-flyout-${width}x${height}-${colorScheme}.png`),
+              );
+            }
+          } finally {
+            await page.close();
+          }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS * 2,
   );
 });

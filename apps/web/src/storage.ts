@@ -9,8 +9,6 @@ export const THEME_KEY = "mc-theme";
 export const DOCK_KEY = "mc-dock";
 /** FLIGHT's explicit rail choice, kept only for this browser session. */
 export const DOCK_COLLAPSED_KEY = "mc-dock-collapsed";
-/** The Crew Activity Map's last manually picked repo. */
-export const MAP_REPO_KEY = "mc-map-repo";
 
 /** The Overview live log's filter. */
 export const ACTIVITY_FILTER_KEY = "overview.live-log.filter";

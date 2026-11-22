@@ -621,7 +621,7 @@ function LockWaitTitleClock({
 function identityTitleAt(row: Crew["rows"][number], lock: TestLockState | undefined, now: number) {
   return [
     modelLine(row),
-    ...(row.asideRuns ?? []).map((aside) => {
+    ...(row.offSeatRuns ?? []).map((aside) => {
       const wait = waitText(aside.loop, callSign(row), lockSince(lock, aside.runId), now);
       return `${SET_ASIDE_LABEL}: ${aside.ticket ?? DASH} ${aside.ticketTitle ?? ""} · ${aside.loop.text}${wait ? ` · ${wait}` : ""}`;
     }),
@@ -699,7 +699,7 @@ function AgentRow({
 
   const stateWaits =
     !queued && !row.crewPause && row.loop?.wait === "lock" && lockSince(lock, row.run?.id) !== null;
-  const asideWaits = (row.asideRuns ?? []).some(
+  const asideWaits = (row.offSeatRuns ?? []).some(
     (aside) => aside.loop.wait === "lock" && lockSince(lock, aside.runId) !== null,
   );
   const identityTitle = identityTitleAt(row, lock, now);
@@ -803,7 +803,7 @@ function ReviewParkSeatActions({
   };
   const ids = [
     ...(row.loop?.phase === "parked" && row.run && operatorSettles(row.run.id) ? [row.run.id] : []),
-    ...(row.asideRuns ?? [])
+    ...(row.offSeatRuns ?? [])
       .filter((run) => run.loop.phase === "parked" && operatorSettles(run.runId))
       .map((run) => run.runId),
   ];

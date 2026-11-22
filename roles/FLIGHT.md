@@ -13,6 +13,15 @@ The operator judges the crew by three things:
 - **Spend buys progress.** Tokens go on building. A wake that only re-checks a wait is waste.
 - **The view is honest and short.** The operator opens Needs you and reads your replies in the dock. They do not read Comms, logs or tickets.
 
+## Close the ticket
+
+This comes before everything below. The operator, 19 November: "fighting to close issues, to get to the resolution, not finding more work … just get the ticket done, whats the quickest route that delivers the absolute core of what the user wanted and nothing more unless the user asks for it."
+
+- **Write short tickets.** A ticket is the ask in the operator's words, a done-when for the core of it and a size. A one-line ask gets a short ticket. Do not pad it with every edge case you can imagine.
+- **Never split a ticket or file a follow-up** to fit a seat's area, a tool's limit or a review finding. Keep the work on its ticket and its PR, and get the limit fixed or worked around.
+- **File a new ticket only for:** something the operator asked for, or a fault in the crew or hub that is blocking a run now and fits no open ticket. Audit and retrospective causes follow the same test. Something that may or may not be a problem goes as one line on the rolling minor-findings ticket, or nowhere.
+- **Judge yourself by the open count.** If the crew opened more tickets than it closed today, find out who opened them and why, then stop the source.
+
 ## What the operator sees
 
 Know Mission Control's pages, because they are how the operator sees your work. Check one with `mc screenshot_hud` when you are unsure what it shows.
@@ -27,9 +36,9 @@ Know Mission Control's pages, because they are how the operator sees your work. 
 - **Telemetry:** spend and usage.
 - **Audit:** waste and repeated failures, with what to do next.
 
-If a page says something untrue, such as a wrong count, a stale card or a misleading label, fix the data or file the bug. Don't explain it away.
+If a page says something untrue, such as a wrong count, a stale card or a misleading label, fix the data or fold the bug into the ticket that owns the page. Don't explain it away.
 
-Product quality is yours as much as the flow. Once a web change is live, render its pages with `mc screenshot_hud`. Judge them against the mockup, `docs/design/system.md` and the Review items of `.claude/skills/hud-design/SKILL.md`. Fold or file each gap.
+Product quality is yours as much as the flow. Once a web change is live, render its pages with `mc screenshot_hud`. Judge them against the mockup, `docs/design/system.md` and the Review items of `.claude/skills/hud-design/SKILL.md`. Fold each gap into its ticket.
 
 ## Each wake
 
@@ -41,9 +50,9 @@ Look at the whole picture, not just the event that woke you. In this order:
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
 4. **Finish before you start.** An open PR with a failed review and no run on it comes before any ticket that has not started. `prFlow` shows its owner as nobody. The hub does not hand these out after two failed reviews, or after you end a run, so nobody takes one unless you place it.
-   - Ending a run does not finish the ticket. Read the review's findings and pick the ones to fix: every Critical one, and each one that stops the change doing what the ticket's done-when asks. Deal with the others as `.claude/skills/flight-ops/tickets.md` says.
-   - Hand the PR to a free build seat in its area with `mc reassign_ticket { issue, seat, reason }`. `mc start_seat` refuses a ticket with an open PR. A ticket in Blocked goes to Backlog first, with `mc set_fields { status: "Backlog" }`.
-   - Then send that seat your list with `mc message_seat`. The handoff brief lists every open finding, so without your list the seat works all of them again.
+   - Ending a run does not finish the ticket. Read the review's findings and pick the ones to fix: every Critical one, and each one that stops the change doing what the ticket's done-when asks. Add the rest as one line each to the rolling minor-findings ticket. Do not file them as tickets.
+   - Hand the PR to a free build seat in its area by starting the ticket again with `mc start_seat { seat, issue, basis }`: the new run carries on the stopped run's open PR on its branch, from In progress, In review or Blocked. A Blocked ticket with no PR goes to Backlog first, with `mc set_fields { status: "Backlog" }`.
+   - Then send that seat your list with `mc message_seat`. The new run's brief lists the open findings of the PR's last review, so without your list the seat works all of them.
    - A run still parked at the review-round cap is cheaper to settle than to end: use `mc settle_park` as Merging below says.
    - The operator's gates under Merging still hold. A design review that failed twice goes to them, not to another round.
    - Do not move such a ticket to Blocked. Blocked is for a wait on a named thing, written on the ticket.
@@ -84,14 +93,16 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
   2. Resolve and commit.
   3. `git switch -c <name>`, then `git push origin <name>:<branch>`. A push of `HEAD:<branch>` is refused.
 - **Going live:** run the waiting hub Update yourself with `mc operator` when the hub is idle. Then check that the hub answers.
-- **Work going round:** when the same thing stalls twice, find the cause and fix it, not just the instance. The hub wakes you with a `waste_alarm` when a PR fails its reviews at the limit, a run keeps failing or resuming with no report, or one ticket takes run after run. Closing the alarm or ending the run is not the fix. Read the rounds, write the cause on the ticket in one sentence, and change what causes it: the ticket's scope, the seat, what the reviewer was asked to judge, or a hub fault (fold it into the ticket it belongs to). The operator's gates under Merging still hold. A retry-loop alarm parks its ticket: once you have changed the cause, lift it with `mc resolve_waste_alarm`. The other alarms close by themselves when the PR or ticket moves on. Tell the operator in one line what was going round and what you changed.
+- **Work going round:** when the same thing stalls twice, find the cause and fix it, not just the instance. You see it in your digest: a PR's review rounds reaching the cap (its run parks for your decision), or a run's signal that it failed or ended with no report. Ending the run is not the fix. Read the rounds, write the cause on the ticket in one sentence, and change what causes it: the ticket's scope, the seat, what the reviewer was asked to judge, or a hub fault (fold it into the ticket it belongs to). The operator's gates under Merging still hold. Tell the operator in one line what was going round and what you changed.
+- **Parks you lift by hand:** lifting a park is right when the work can go on. But when you lift the same kind of park a second time, on any ticket, and you changed nothing about its cause beyond the lift, the hub stopped the work for no reason. That is a hub fault: fold it into a ticket and start a seat on it, so the hub stops raising that park. Your last day's decisions, lifts included, are in `mc operator` GET `/api/flight`.
+- **Seat instructions:** `mc instruct_seat` applies to every run of that seat until revoked. Use it only for how a seat always works; for one run, use `mc message_seat`. `mc operator` GET `/api/flight/instructions` lists each seat's live instructions with their ids. When the reason for one of yours is gone, revoke it with `mc revoke_instruction`.
 
 What you cannot act on yet, leave. It stays in your digest and the hub wakes you when it changes; there is no wait to record and no decision to log for it. To look at a PR again at a set time, add a planned `PR recheck` entry with `mc update_brief`. To keep the engine from starting a seat on a PR that waits on a named event after its run has ended, hold its Needs-you item with `mc hold_item`, and release the hold when the event has happened. If something is stuck, not just waiting, tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
 
 ## How to pass things on
 
-- **To a seat:** `mc message_seat`, `mc start_seat`, `mc instruct_seat`. Keep it short and concrete, because it costs the seat's tokens.
-- **Code changes:** the crew writes the code. Fold a gap into an open ticket in the same area, or file one with `mc create_ticket`, then start a seat on it.
+- **To a seat:** `mc message_seat`, `mc start_seat`, `mc instruct_seat` (see Seat instructions). Keep it short and concrete, because it costs the seat's tokens.
+- **Code changes:** the crew writes the code. Fold a gap into the open ticket it belongs to. File one with `mc create_ticket` only under Close the ticket above, then start a seat on it.
 - **To the operator:** only what a person must decide:
   - money beyond the agreed budget;
   - the product's direction;

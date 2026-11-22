@@ -190,22 +190,6 @@ describe("dependency chain stored read", () => {
     expect(chains[1]?.root.children[0]?.waitedMs).toBeNull();
     expect(chains.every((c) => c.frees.length === 0)).toBe(true);
   });
-  it("includes holds and ignores a merged hold until the engine reconciles it", () => {
-    store.replaceBoard("mc", [card(2)]);
-    store.addHold({ ref: "mc#2", waitsOn: 7, basis: "Build after this", at: T });
-    store.upsertPullRequests("mc", [pr(7, { ticket: null })], T);
-    expect(read()[0]?.root.children[0]).toMatchObject({
-      ref: "mc#2",
-      edge: "held",
-      waitedMs: 20 * M,
-    });
-    store.upsertPullRequests(
-      "mc",
-      [pr(7, { ticket: null, state: "merged", mergedAt: T + M })],
-      T + M,
-    );
-    expect(read()).toEqual([]);
-  });
   it("keeps unread PRs and untracked references unknown", () => {
     store.replaceBoard("mc", [
       card(2, {
@@ -236,7 +220,11 @@ describe("dependency chain stored read", () => {
     );
     store.setRunLoop(
       "queued",
-      { ...NEW_LOOP, prNumber: 9, aside: { worktree: "/unused", wake: false } },
+      {
+        ...NEW_LOOP,
+        prNumber: 9,
+        hold: { kind: null, reason: null, ended: false, worktree: "/unused", wake: false },
+      },
       T + 5 * M,
     );
     const chains = read();
@@ -255,7 +243,10 @@ describe("dependency chain stored read", () => {
     store.upsertRun(
       run("queued", {
         ticket: "mc#2",
-        loop: { ...NEW_LOOP, aside: { worktree: "/unused", wake: false } },
+        loop: {
+          ...NEW_LOOP,
+          hold: { kind: null, reason: null, ended: false, worktree: "/unused", wake: false },
+        },
       }),
     );
     expect(read()[0]?.root.children[0]).toMatchObject({

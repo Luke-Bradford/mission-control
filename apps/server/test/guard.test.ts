@@ -25,9 +25,6 @@ import {
   lockBusyText,
   MC_TOOLS,
   MCP_PATH,
-  NEW_LOOP,
-  REREAD_MIN_BYTES,
-  type RunDigest,
   TEST_LOCK_UNAVAILABLE_TEXT,
 } from "@mc/core";
 import type { FastifyInstance } from "fastify";
@@ -37,7 +34,7 @@ import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { runawayTrip } from "../src/flight/runaway.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import { type CheckRecorder, createCheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -113,9 +110,10 @@ describe("TestLock", () => {
       await lock.acquire({ runId: "A", toolUseId: "a2" }, "guido-1", "pnpm -s test", 1000, live());
       expect(store.lockHolds()).toEqual([
         { runId: "A", toolUseId: "a1", seatId: "guido-1", command: "pnpm -s test", since: 1000 },
+        { runId: "A", toolUseId: "a2", seatId: "guido-1", command: "pnpm -s test", since: 1000 },
       ]);
       lock.release({ runId: "A", toolUseId: "a1" });
-      expect(store.lockHolds()).toHaveLength(0);
+      expect(store.lockHolds()).toHaveLength(1);
       const b = lock.acquire(
         { runId: "B", toolUseId: "b1" },
         "guido-2",
@@ -165,6 +163,19 @@ describe("TestLock", () => {
       expect(lock.state().holder).not.toBeNull();
       lock.release({ runId: "A", toolUseId: "a2" });
       expect(lock.state().holder).toBeNull();
+    });
+
+    it("restores a pinned hold as pinned: only releaseRun frees it", async () => {
+      const key = { runId: "A", toolUseId: "a1" };
+      await lock.acquire(key, "s-A", "pnpm -s test", 1000, live());
+      lock.pin(key);
+      const next = new TestLock({ now: () => 6000, holds: store });
+      next.restore(store.lockHolds());
+      expect(next.state().holder?.runId).toBe("A");
+      next.release(key);
+      expect(next.state().holder?.runId).toBe("A");
+      next.releaseRun("A");
+      expect(next.state().holder).toBeNull();
     });
   });
 
@@ -235,16 +246,18 @@ describe("TestLock", () => {
     expect(lock.state().holder).toBeNull();
   });
 
-  it("refuses the holder's second call, so one checkout cannot run tests in parallel", async () => {
+  it("lets the holder's run re-enter, ahead of waiters; only the matching tool_use_id releases", async () => {
     await lock.acquire({ runId: "A", toolUseId: "a1" }, "s-a", "pnpm -s test", 1000, live());
     const b = lock.acquire({ runId: "B", toolUseId: "b1" }, "s-b", "pnpm -s test", 60_000, live());
     expect(
       await lock.acquire({ runId: "A", toolUseId: "a2" }, "s-a", "pnpm -s test", 1000, live()),
-    ).toBe(false);
+    ).toBe(true);
     lock.release({ runId: "A", toolUseId: "a-other" }); // a parallel Bash call that held nothing
     lock.release({ runId: "B", toolUseId: "a1" }); // the right id, another run
     expect(lock.state().holder).toMatchObject({ runId: "A" });
     lock.release({ runId: "A", toolUseId: "a1" });
+    expect(lock.state().holder).toMatchObject({ runId: "A" }); // a2 still runs
+    lock.release({ runId: "A", toolUseId: "a2" });
     expect(await b).toBe(true);
     expect(lock.state().holder).toMatchObject({ runId: "B" });
   });
@@ -738,107 +751,10 @@ describe("POST /api/guard/check", () => {
       grant("merge-push", "git push origin main");
       const r = await check(tokA, bash("w1", "git push origin main"));
       expect(reason(r.body)).toContain(GUARD_RULES["git-write"]);
-      expect(reason((await check(tokA, bash("w2", "curl http://x"))).body)).toContain(
-        GUARD_RULES.network,
+      expect(reason((await check(tokA, bash("w2", "gh pr close 1"))).body)).toContain(
+        GUARD_RULES["gh-cli"],
       );
       expect(shell()).toEqual([]);
-    });
-  });
-
-  describe("a Stop with the run's report missing", () => {
-    const stop = { hook_event_name: "Stop" };
-    const tasks = (...status: ("done" | "in_progress" | "pending")[]) =>
-      store.setDigest("run-a", {
-        toolCalls: 0,
-        turns: 0,
-        lastEventAt: null,
-        model: null,
-        contextTokens: null,
-        contextWindow: null,
-        liveTool: null,
-        tools: {},
-        subagents: [],
-        minuteTokens: [],
-        turnUsage: [],
-        background: [],
-        compactions: 0,
-        tasks: status.map((st, i) => ({ id: `t${i}`, text: `item ${i}`, status: st })),
-      });
-    beforeEach(() => {
-      store.upsertRun({
-        id: "run-a",
-        agentId: "guido-1",
-        repoId: "mc",
-        seq: 1,
-        startedAt: 1,
-        endedAt: null,
-        status: "running",
-        sessionId: null,
-        model: null,
-        branch: null,
-        ticket: "mc#42",
-        costUsd: null,
-        tokens: null,
-        transcriptPath: "",
-        prs: [],
-        summary: null,
-        loopKind: "build",
-        loop: NEW_LOOP,
-      });
-    });
-    const block = (body: string) => JSON.parse(body) as { decision?: string; reason?: string };
-
-    it("blocks with the open items, three times, then lets the stop stand", async () => {
-      tasks("done", "in_progress", "pending");
-      for (let i = 0; i < 3; i++) {
-        const b = block((await check(tokA, stop)).body);
-        expect(b.decision).toBe("block");
-        expect(b.reason).toContain("item 1");
-        expect(b.reason).toContain("item 2");
-        expect(b.reason).not.toContain("item 0");
-      }
-      expect((await check(tokA, stop)).body).toBe("{}");
-      expect((await check(tokA, stop)).body).toBe("{}");
-    });
-
-    it("lets it stand once every item is done, or when there are none", async () => {
-      expect((await check(tokA, stop)).body).toBe("{}");
-      tasks("done", "done");
-      expect((await check(tokA, stop)).body).toBe("{}");
-    });
-
-    it("lets it stand once the run has reported, and gives a later round a fresh three", async () => {
-      tasks("pending");
-      for (let i = 0; i < 4; i++) await check(tokA, stop);
-      store.addEvidence("run-a", "done", NOW);
-      expect((await check(tokA, stop)).body).toBe("{}");
-      // the loop took that report in: the next round owes a new one
-      store.setRunLoop("run-a", { ...NEW_LOOP, reportedEvidenceId: 1 });
-      for (let i = 0; i < 3; i++) {
-        expect(block((await check(tokA, stop)).body).decision).toBe("block");
-      }
-      expect((await check(tokA, stop)).body).toBe("{}");
-    });
-
-    it.each(["parked", "ci", "review", "done"] as const)(
-      "lets it stand when the run's loop is in %s, even over its budget",
-      async (phase) => {
-        tasks("pending");
-        store.setRunLoop("run-a", {
-          ...NEW_LOOP,
-          phase,
-          ...(phase === "parked"
-            ? { parked: { kind: "budget", reason: "x", ended: false } as const }
-            : {}),
-        });
-        expect((await check(tokA, stop)).body).toBe("{}");
-      },
-    );
-
-    it("lets it stand while the seat waits on an answer to its question", async () => {
-      tasks("pending");
-      store.addQuestion({ runId: "run-a", agentId: "guido-1", text: "q?", at: NOW });
-      expect((await check(tokA, stop)).body).toBe("{}");
     });
   });
 
@@ -858,125 +774,30 @@ describe("POST /api/guard/check", () => {
     expect((await check(tokA, bash("inside", "git -C . log --oneline -3"))).body).toBe("{}");
   });
 
-  describe("a second whole read of a large unchanged file", () => {
-    let big: string;
-    beforeEach(() => {
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: null,
-        cliSessionId: null,
-        state: "idle",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      big = join(dir, "big.ts");
-      writeFileSync(big, "x".repeat(REREAD_MIN_BYTES));
+  it("lets a seat read a large unchanged file again", async () => {
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: null,
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: dir,
+      updatedAt: NOW,
     });
-    const digest = (compactions: number): RunDigest => ({
-      toolCalls: 0,
-      turns: 0,
-      lastEventAt: null,
-      model: null,
-      contextTokens: null,
-      contextWindow: null,
-      liveTool: null,
-      tools: {},
-      subagents: [],
-      minuteTokens: [],
-      turnUsage: [],
-      background: [],
-      compactions,
-    });
-    const read = (id: string, input: Record<string, unknown> = { file_path: big }) =>
-      check(tokA, pre(id, "Read", input));
+    const big = join(dir, "big.ts");
+    writeFileSync(big, "x".repeat(64 * 1024));
+    const read = (id: string) => check(tokA, pre(id, "Read", { file_path: big }));
+    expect((await read("r1")).body).toBe("{}");
+    expect((await read("r2")).body).toBe("{}");
+  });
 
-    it("refuses it with the earlier read, and counts the tokens saved", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      const second = await read("r2");
-      expect(reason(second.body)).toContain("r1");
-      expect(reason((await read("r3")).body)).toContain("r1");
-      store.setDigest("run-a", digest(0));
-      const saved = { count: 2, tokensSaved: 2 * (REREAD_MIN_BYTES / 4) };
-      expect(store.digest("run-a")?.rereads).toEqual(saved);
-      expect(store.digests(["run-a"]).get("run-a")?.rereads).toEqual(saved);
-      expect(store.runRead("run-a", "", big)?.toolUseId).toBe("r1");
-      expect(store.guardHitCount("run-a")).toBe(0);
-    });
-
-    it("refuses a whole cat or sed -n p of it too", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect(reason((await check(tokA, bash("c1", `cat ${big}`))).body)).toContain("r1");
-      expect(reason((await check(tokA, bash("c2", "sed -n p big.ts"))).body)).toContain("r1");
-    });
-
-    it("passes a range", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect((await read("r2", { file_path: big, offset: 10, limit: 20 })).body).toBe("{}");
-      expect((await check(tokA, bash("c1", "sed -n '10,20p' big.ts"))).body).toBe("{}");
-    });
-
-    it("passes a changed file, and refuses its next unchanged read", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      writeFileSync(big, "y".repeat(REREAD_MIN_BYTES + 5));
-      expect((await read("r2")).body).toBe("{}");
-      expect(reason((await read("r3")).body)).toContain("r2");
-    });
-
-    it("forgets a read that failed, so its retry is not refused", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect((await check(tokA, post("r1", "PostToolUseFailure"))).body).toBe("{}");
-      expect((await read("r2")).body).toBe("{}");
-      expect(reason((await read("r3")).body)).toContain("r2");
-    });
-
-    it("keeps a read that succeeded", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      expect((await check(tokA, post("r1"))).body).toBe("{}");
-      expect(reason((await read("r2")).body)).toContain("r1");
-    });
-
-    it("passes a Read of another page range of the same file", async () => {
-      expect((await read("p1", { file_path: big, pages: "1-5" })).body).toBe("{}");
-      expect((await read("p2", { file_path: big, pages: "6-10" })).body).toBe("{}");
-    });
-
-    it("keeps a subagent's reads apart from the parent's", async () => {
-      const as = (id: string, agent?: string) =>
-        check(tokA, {
-          ...pre(id, "Read", { file_path: big }),
-          ...(agent ? { agent_id: agent } : {}),
-        });
-      expect((await as("s1", "sub-1")).body).toBe("{}");
-      expect((await as("m1")).body).toBe("{}");
-      expect((await as("s2", "sub-2")).body).toBe("{}");
-      expect(reason((await as("s3", "sub-1")).body)).toContain("s1");
-      expect(reason((await as("m2")).body)).toContain("m1");
-    });
-
-    it("passes a file under the threshold and another run's read", async () => {
-      const small = join(dir, "small.ts");
-      writeFileSync(small, "x".repeat(REREAD_MIN_BYTES - 1));
-      expect((await read("s1", { file_path: small })).body).toBe("{}");
-      expect((await read("s2", { file_path: small })).body).toBe("{}");
-      expect((await read("r1")).body).toBe("{}");
-      store.setSeatSession({
-        seatId: "guido-2",
-        runId: null,
-        cliSessionId: null,
-        state: "idle",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      expect((await check(tokB, pre("b1", "Read", { file_path: big }))).body).toBe("{}");
-    });
-
-    it("passes after a compaction dropped the earlier read from context", async () => {
-      expect((await read("r1")).body).toBe("{}");
-      store.setDigest("run-a", digest(1));
-      expect((await read("r2")).body).toBe("{}");
-    });
+  it.each([
+    "printf 'pnpm -s test\\n' | crontab -",
+    `echo 'do shell script "pnpm -s test"' | osascript`,
+  ])("takes the lock for a full suite fed to a launcher on stdin: %s", async (command) => {
+    const r = await check(tokA, bash("l1", command));
+    expect(r.body).toBe("{}");
+    expect(lock.state().holder).not.toBeNull();
   });
 
   it("serves the guard and MCP routes at the paths a seat is given", async () => {
@@ -1085,7 +906,7 @@ describe("POST /api/guard/check", () => {
     expect(r.statusCode).toBe(200);
     expect(reason(r.body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
     expect(reason(r.body)).toBe(
-      "The test lock is busy: GUIDO-1 is running pnpm -s test. Wait for it to finish. Run the same command with a test file path, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.",
+      "The test lock is busy: GUIDO-1 is running pnpm -s test. Run the same command with a test file path, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.",
     );
     expect(lock.state()).toMatchObject({ holder: { runId: "run-a" }, waiting: [] });
     expect(store.guardHits(0)).toEqual([]);
@@ -1103,12 +924,12 @@ describe("POST /api/guard/check", () => {
     expect(lock.state().holder).toMatchObject({ runId: "run-b" });
   });
 
-  it("refuses a second check in one checkout while the first is running", async () => {
+  it("parallel Bash calls in one run: each holds until its own Post", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
-    expect(lock.state().holder).toMatchObject({ runId: "run-a" });
-    const second = await check(tokA, bash("a2", "pnpm -s test"));
-    expect(reason(second.body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
+    expect((await check(tokA, bash("a2", "pnpm -s test"))).body).toBe("{}"); // re-entry
     await check(tokA, post("a1"));
+    expect(lock.state().holder).toMatchObject({ runId: "run-a" });
+    await check(tokA, post("a2", "PostToolUseFailure"));
     expect(lock.state().holder).toBeNull();
   });
 
@@ -1121,7 +942,6 @@ describe("POST /api/guard/check", () => {
   });
 
   describe("the check recorder", () => {
-    const CONFIGURED = ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test:related"];
     const spy = () => {
       const calls: unknown[][] = [];
       const options: unknown[] = [];
@@ -1131,7 +951,7 @@ describe("POST /api/guard/check", () => {
           options.push(o);
         },
         end: async (k, ok) => void calls.push(["end", k, ok]),
-        lockedBy: async (_run, c) => lockedCheck(c, CONFIGURED),
+        lockedBy: (c) => lockedCheck(c, ["pnpm -s test:related"]),
         dropRun: () => {},
         lost: () => false,
         drops: () => [],
@@ -1140,49 +960,59 @@ describe("POST /api/guard/check", () => {
       return { calls, checks, options };
     };
 
-    it("refuses a second test in the same checkout while the first runs, naming it, and allows one once it ends", async () => {
-      const checks = createCheckRecorder({
-        store: { addCheckRun: () => {} },
-        checks: async () => CONFIGURED,
-        state: async () => ({ head: "a".repeat(40), clean: true }),
-        worktree: async () => "/work/trees/guido-1-9",
-      });
-      await app.close();
-      app = await build({ checks });
-      expect((await check(tokA, bash("a1", "pnpm -s test a.test.ts"))).body).toBe("{}");
-      expect(reason((await check(tokA, bash("a2", "pnpm -s test b.test.ts"))).body)).toBe(
-        "A check is already running in this checkout: pnpm -s test a.test.ts. Wait for it to finish.",
-      );
-      await check(tokA, post("a1"));
-      expect((await check(tokA, bash("a3", "pnpm -s test b.test.ts"))).body).toBe("{}");
-    });
-
-    it("refuses a full suite while a file test runs in the same checkout, though the guard sends the suite to the lock", async () => {
-      const checks = createCheckRecorder({
-        store: { addCheckRun: () => {} },
-        checks: async () => CONFIGURED,
-        state: async () => ({ head: "a".repeat(40), clean: true }),
-        worktree: async () => "/work/trees/guido-1-9",
-      });
-      await app.close();
-      app = await build({ checks });
-      expect((await check(tokA, bash("a1", "pnpm -s test a.test.ts"))).body).toBe("{}");
-      expect(reason((await check(tokA, bash("a2", "pnpm -s test"))).body)).toBe(
-        "A check is already running in this checkout: pnpm -s test a.test.ts. Wait for it to finish.",
-      );
-    });
-
-    it("takes the test lock for a configured check: the second seat's typecheck waits for the first's", async () => {
+    it("lets two seats run a configured check at once: only a full suite takes the test lock", async () => {
       const { checks } = spy();
       await app.close();
       app = await build({ checks });
       expect((await check(tokA, bash("a1", "pnpm -s typecheck"))).body).toBe("{}");
-      expect(lock.state().holder).toMatchObject({ runId: "run-a", command: "pnpm -s typecheck" });
-      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      expect((await check(tokB, bash("b1", "pnpm -s typecheck"))).body).toBe("{}");
+      expect((await check(tokB, bash("b2", "pnpm -s lint"))).body).toBe("{}");
+      expect(lock.state().holder).toBeNull();
+      expect(lock.state().waiting).toHaveLength(0);
+      expect((await check(tokA, bash("a2", "pnpm -s test"))).body).toBe("{}");
+      expect(lock.state().holder).toMatchObject({ runId: "run-a", command: "pnpm -s test" });
+      const c = check(tokB, bash("b3", "pnpm -s test"));
       await until(() => lock.state().waiting.length === 1);
-      await check(tokA, post("a1"));
-      expect((await b).body).toBe("{}");
-      expect(lock.state().holder).toMatchObject({ runId: "run-b" });
+      await check(tokA, post("a2"));
+      expect((await c).body).toBe("{}");
+    });
+
+    it.each([
+      ["pnpm run test:related &", undefined],
+      ["pnpm run test:related", true],
+    ])("keeps the lock of a related-tests run left in the background: %s", async (command, bg) => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      await check(tokA, pre("a1", "Bash", { command, run_in_background: bg }));
+      expect(lock.state().holder?.runId).toBe("run-a");
+      await check(tokA, { ...post("a1"), tool_input: { command }, exit_code: 0 });
+      expect(lock.state().holder?.runId).toBe("run-a");
+      lock.releaseRun("run-a");
+      expect(lock.state().holder).toBeNull();
+    });
+
+    it("refuses a second check or test while one runs in the checkout, naming the running one", async () => {
+      const { checks } = spy();
+      let running: string | null = null;
+      checks.running = async () => running;
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s lint"))).body).toBe("{}");
+      running = "pnpm -s lint";
+      const refused = await check(tokA, bash("a2", "pnpm -s typecheck"));
+      expect(refused.body).toContain("pnpm -s lint");
+      expect(refused.body).toContain("Wait for it");
+    });
+
+    it("allows a configured check to run again unchanged: the hook does not refuse", async () => {
+      const { checks } = spy();
+      await app.close();
+      app = await build({ checks });
+      for (const id of ["a1", "a2", "a3"]) {
+        expect((await check(tokA, bash(id, "pnpm -s lint"))).body).toBe("{}");
+        await check(tokA, post(id));
+      }
     });
 
     it("takes the test lock for the related-tests check, however it is spelled, but not for a single test file", async () => {
@@ -1211,11 +1041,11 @@ describe("POST /api/guard/check", () => {
       const { checks } = spy();
       await app.close();
       app = await build({ checks });
-      await check(tokA, bash("a1", "pnpm -s lint"));
-      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await check(tokA, bash("a1", "pnpm -s test"));
+      const b = check(tokB, bash("b1", "pnpm -s test"));
       await until(() => lock.state().waiting.length === 1);
       vi.advanceTimersByTime(LOCK_WAIT_MS);
-      expect(reason((await b).body)).toBe(lockBusyText("GUIDO-1", "pnpm -s lint"));
+      expect(reason((await b).body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
       expect((await check(tokB, bash("b2", "ls"))).body).toBe("{}");
     });
 
@@ -1249,10 +1079,10 @@ describe("POST /api/guard/check", () => {
       const { calls, checks } = spy();
       await app.close();
       app = await build({ checks });
-      await check(tokA, bash("a1", "pnpm -s lint"));
-      const b = check(tokB, bash("b1", "pnpm -s typecheck"));
+      await check(tokA, bash("a1", "pnpm -s test"));
+      const b = check(tokB, bash("b1", "pnpm -s test"));
       await until(() => lock.state().waiting.length === 1);
-      expect(calls).toEqual([["begin", { runId: "run-a", toolUseId: "a1" }, "pnpm -s lint"]]);
+      expect(calls).toEqual([["begin", { runId: "run-a", toolUseId: "a1" }, "pnpm -s test"]]);
       vi.advanceTimersByTime(LOCK_WAIT_MS);
       await b;
       expect(calls).toHaveLength(1);
@@ -1317,10 +1147,10 @@ describe("POST /api/guard/check", () => {
     app = await build({
       checks: {
         begin: async () => {},
+        lockedBy: () => null,
         end: async (_key, ok, exitCode) => {
           ends.push([ok, exitCode]);
         },
-        lockedBy: async () => null,
         dropRun: () => {},
         lost: () => false,
         drops: () => [],
@@ -1337,6 +1167,48 @@ describe("POST /api/guard/check", () => {
     expect(ends).toEqual([[false, null]]);
   });
 
+  it("keeps the lock after a call left in the background, until the turn ends", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        lockedBy: () => null,
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        dropRun: () => {},
+        lost: () => false,
+        drops: () => [],
+        pending: () => [],
+      },
+    });
+    // a foreground call whose Bash timeout moved it to the background: the Post says so
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, {
+      ...post("a1", "PostToolUse"),
+      tool_input: { command: "pnpm -s test" },
+      exit_code: null,
+      background: true,
+    });
+    expect(ends).toEqual([[false, null]]);
+    expect(lock.state().holder?.seatId).toBe("guido-1");
+    expect(store.lockRuns(0).every((r) => r.outcome !== "pass")).toBe(true);
+    // a suite started in the background holds it from the start, whatever its call reports
+    lock.releaseRun("run-a");
+    expect(lock.state().holder).toBeNull();
+    await check(tokA, pre("a2", "Bash", { command: "pnpm -s test &" }));
+    await check(tokA, {
+      ...post("a2", "PostToolUse"),
+      tool_input: { command: "pnpm -s test &" },
+      exit_code: 0,
+    });
+    expect(lock.state().holder?.seatId).toBe("guido-1");
+    lock.releaseRun("run-a");
+    expect(lock.state().holder).toBeNull();
+  });
+
   it("hands the hook's exit code to the check recorder (#1411)", async () => {
     lock = new TestLock({ now: () => NOW, holds: store });
     await app.close();
@@ -1344,10 +1216,10 @@ describe("POST /api/guard/check", () => {
     app = await build({
       checks: {
         begin: async () => {},
+        lockedBy: () => null,
         end: async (_key, ok, exitCode) => {
           ends.push([ok, exitCode]);
         },
-        lockedBy: async () => null,
         dropRun: () => {},
         lost: () => false,
         drops: () => [],
@@ -1367,29 +1239,6 @@ describe("POST /api/guard/check", () => {
       [false, 1],
       [true, 0],
     ]);
-  });
-
-  it("refuses a check the recorder says is an unchanged rerun, takes no lock and starts no record", async () => {
-    lock = new TestLock({ now: () => NOW, holds: store });
-    await app.close();
-    const begun: string[] = [];
-    app = await build({
-      checks: {
-        begin: async (_k, c) => void begun.push(c),
-        end: async () => {},
-        lockedBy: async (_run, c) => c,
-        rerun: async () => "Not run: pnpm -s test already ran on commit abc1234.",
-        dropRun: () => {},
-        lost: () => false,
-        drops: () => [],
-        pending: () => [],
-      },
-    });
-    const res = await check(tokA, bash("a1", "pnpm -s test"));
-    expect(res.body).toContain("Not run: pnpm -s test already ran");
-    expect(res.body).not.toContain('"allow"');
-    expect(lock.state().holder).toBeNull();
-    expect(begun).toEqual([]);
   });
 
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {
@@ -1533,38 +1382,36 @@ describe("POST /api/guard/check", () => {
     store.addGuardHit({
       agentId: "guido-1",
       runId: "r",
-      rule: "network",
+      rule: "unreadable",
       text: "n: curl",
       at: NOW - 8 * DAY,
     });
     await check(tokA, bash("t1", "git push"));
     await check(tokA, bash("t2", "git commit -m x"));
-    await check(tokA, bash("t3", "curl https://x"));
+    await check(tokA, bash("t3", "gh pr close 1"));
     const r = await app.inject({ method: "GET", url: "/api/guard/hits?days=7" });
     expect(r.statusCode).toBe(200);
     const view = r.json<GuardHitsView>();
     expect(view.hits.map((h) => h.text)).toEqual([
-      `${GUARD_RULES.network}: curl`,
+      `${GUARD_RULES["gh-cli"]}: gh pr close`,
       `${GUARD_RULES["git-write"]}: git commit`,
       `${GUARD_RULES["git-write"]}: git push`,
     ]);
     expect(view.counts).toEqual({
-      background: 0,
       "git-write": 2,
       "codex-allowlist": 0,
       "git-env": 0,
-      "gh-cli": 0,
+      "gh-cli": 1,
       "merge-push": 0,
       "flight-powers": 0,
       "full-suite": 0,
       "read-only": 0,
-      network: 1,
       "repo-rules": 0,
       unreadable: 0,
       secret: 0,
     });
     const all = await app.inject({ method: "GET", url: "/api/guard/hits?days=9" });
-    expect(all.json<GuardHitsView>().counts.network).toBe(2);
+    expect(all.json<GuardHitsView>().counts.unreadable).toBe(1);
     expect((await app.inject({ method: "GET", url: "/api/guard/hits" })).json()).toEqual(view);
     // each hit says whether its guard:{id} key is acknowledged; acking one tells the HUD
     expect(view.hits.map((h) => h.acked)).toEqual([false, false, false]);
@@ -1589,7 +1436,7 @@ describe("POST /api/guard/check", () => {
       store.addGuardHit({
         agentId: "guido-1",
         runId: "r",
-        rule: "network",
+        rule: "unreadable",
         text: `n${i}`,
         at: NOW - i,
       });
@@ -1601,7 +1448,7 @@ describe("POST /api/guard/check", () => {
     expect(view.hits).toHaveLength(GUARD_HITS_LIMIT);
     expect(view.hits[0]?.text).toBe("n0");
     expect(view.hits.at(-1)?.text).toBe(`n${GUARD_HITS_LIMIT - 1}`);
-    expect(view.counts.network).toBe(GUARD_HITS_LIMIT + 1);
+    expect(view.counts.unreadable).toBe(GUARD_HITS_LIMIT + 1);
   });
 
   it.each(["0", "x", "1.5", "31", "-1"])("GET /api/guard/hits?days=%s is a 400", async (d) => {
@@ -1674,51 +1521,9 @@ describe("hookMain", () => {
     });
   });
 
-  it("posts a Stop as the event alone, and rebuilds the block answer in code", async () => {
-    const block = JSON.stringify({ decision: "block", reason: "Open items:\n- item 1" });
-    const r = await hookMain(
-      stdinFor({ hook_event_name: "Stop", tool_name: undefined, tool_use_id: undefined }),
-      [tokenFile, URL_OK],
-      answer(200, JSON.stringify(JSON.parse(block), null, 2)),
-    );
-    expect(r).toEqual({ out: block, exit: 0 });
-    expect(posts.map((p) => p.body)).toEqual([JSON.stringify({ hook_event_name: "Stop" })]);
-  });
-
-  it.each([
-    ["a 401", answer(401, '{"error":"unknown run"}')],
-    ["a 500", answer(500, "oops")],
-    [
-      "a refused connection",
-      async () => {
-        throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
-      },
-    ],
-  ])("lets a Stop stand when the hub gives %s", async (_n, post) => {
-    const stop = stdinFor({ hook_event_name: "Stop" });
-    expect(await hookMain(stop, [tokenFile, URL_OK], post, 0)).toEqual({ out: "{}", exit: 0 });
-  });
-
-  it("lets a Stop stand when the hub does not answer by the deadline, and a tool call still fails closed", async () => {
-    vi.useFakeTimers();
-    const hang = () => new Promise<{ status: number; body: string }>(() => {});
-    const stop = hookMain(stdinFor({ hook_event_name: "Stop" }), [tokenFile, URL_OK], hang);
-    const tool = hookMain(stdinFor(), [tokenFile, URL_OK], hang);
-    await vi.advanceTimersByTimeAsync(HOOK_DEADLINE_MS + 1);
-    expect(await stop).toEqual({ out: "{}", exit: 0 });
-    expect((await tool).exit).toBe(2);
-  });
-
-  it("refuses a block answer to a tool event; a Stop answer in the wrong form lets the stop stand", async () => {
+  it("refuses a block answer to a tool event", async () => {
     const block = JSON.stringify({ decision: "block", reason: "x" });
     expect((await hookMain(stdinFor(), [tokenFile, URL_OK], answer(200, block))).exit).toBe(2);
-    const stop = stdinFor({ hook_event_name: "Stop" });
-    const stands = { out: "{}", exit: 0 };
-    expect(await hookMain(stop, [tokenFile, URL_OK], answer(200, guardDenyOutput("x")))).toEqual(
-      stands,
-    );
-    const extra = JSON.stringify({ decision: "block", reason: "x", continue: false });
-    expect(await hookMain(stop, [tokenFile, URL_OK], answer(200, extra))).toEqual(stands);
   });
 
   it("sends run_in_background, timeout and file_path when the call has them, and drops other fields", async () => {
@@ -1801,6 +1606,15 @@ describe("hookMain", () => {
       exit_code: 0,
       tool_input: { command: "ls" },
     });
+  });
+
+  it("tells the hub a Bash call moved to the background on its timeout is no exit", async () => {
+    const stdin = stdinFor({
+      hook_event_name: "PostToolUse",
+      tool_response: { interrupted: false, backgroundTaskId: "b1", timedOutAfterMs: 120000 },
+    });
+    await hookMain(stdin, [tokenFile, URL_OK], answer(200, "{}"));
+    expect(JSON.parse(posts[0]?.body ?? "")).toMatchObject({ exit_code: null, background: true });
   });
 
   it("answers a Bash call over 64 KiB itself, without posting: a decision, exit 0", async () => {
@@ -2042,18 +1856,6 @@ describe("hook-cli.ts run as the CLI runs it", () => {
     expect(r.stdout).toBe(DENY_UNREACHABLE);
     expect(r.stderr.trim().split("\n")).toEqual(["mc-guard: no verdict from Mission Control"]);
     expect(r.stdout + r.stderr).not.toContain("b".repeat(64));
-  }, 30_000);
-
-  it("lets a Stop stand, printing {} and exiting 0, when the hub is not there", () => {
-    const tokenFile = join(dir, "t");
-    writeFileSync(tokenFile, "b".repeat(64), { mode: 0o600 });
-    const r = run(
-      [tokenFile, "http://127.0.0.1:1/api/guard/check"],
-      JSON.stringify({ hook_event_name: "Stop" }),
-    );
-    expect(r.status).toBe(0);
-    expect(r.stdout).toBe("{}");
-    expect(r.stderr).toBe("");
   }, 30_000);
 
   it("runs when imported as a module, not only as the main script (no main-module gate)", () => {

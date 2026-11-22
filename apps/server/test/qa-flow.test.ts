@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BoardItem, PullRequestView, Run } from "@mc/core";
+import type { PullRequestView, Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../src/store.ts";
 
@@ -38,33 +38,6 @@ const pr = (number: number, over: Partial<PullRequestView> = {}): PullRequestVie
   ...over,
 });
 
-const bug = (number: number, body: string, over: Partial<BoardItem> = {}): BoardItem => ({
-  repoId: "r1",
-  issueNumber: number,
-  title: `bug ${number}`,
-  status: "Backlog",
-  state: "planned",
-  labels: ["bug"],
-  assignees: [],
-  priority: null,
-  updatedAt: NOW - DAY,
-  url: "u",
-  stage: null,
-  owner: null,
-  parent: null,
-  subIssues: null,
-  blockedBy: [],
-  milestone: null,
-  size: null,
-  closed: false,
-  prioritySource: null,
-  createdAt: NOW - 2 * DAY,
-  itemId: null,
-  projectId: null,
-  defectRefs: { prs: [], shas: [], paths: [], ...JSON.parse(body) },
-  ...over,
-});
-
 const run = (over: Partial<Run>): Run => ({
   id: "run-a",
   agentId: "guido-1",
@@ -83,98 +56,6 @@ const run = (over: Partial<Run>): Run => ({
   prs: [],
   summary: null,
   ...over,
-});
-
-describe("escaped defects", () => {
-  it("records a bug that names a merged PR, with the originating seat and model", () => {
-    store.upsertRun(run({ branch: "feature/7-x" }));
-    store.upsertPullRequests("r1", [pr(7)], NOW);
-    store.replaceBoard("r1", [bug(50, '{"prs":[7]}')]);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toEqual([
-      {
-        repoId: "r1",
-        issueNumber: 50,
-        prNumber: 7,
-        via: "pr",
-        filedAt: NOW - 2 * DAY,
-        mergedAt: NOW - 5 * DAY,
-        seat: "guido-1",
-        model: "claude-opus",
-      },
-    ]);
-    expect(store.pullRequests("r1")[0]?.escapedDefects).toEqual([
-      { issueNumber: 50, via: "pr", filedAt: NOW - 2 * DAY },
-    ]);
-  });
-
-  it("links a bug written before its PR merged into the store", () => {
-    store.replaceBoard("r1", [bug(50, '{"prs":[7]}')]);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toEqual([]);
-    store.upsertPullRequests("r1", [pr(7)], NOW);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toMatchObject([
-      { issueNumber: 50, prNumber: 7, via: "pr" },
-    ]);
-  });
-
-  it("records a bug that names a commit the hub made for the PR's branch", () => {
-    store.addRunCommit({
-      runId: "run-a",
-      repoId: "r1",
-      branch: "feature/7-x",
-      sha: "c0ffee1234567890",
-      at: 1,
-    });
-    store.upsertPullRequests("r1", [pr(7)], NOW);
-    store.replaceBoard("r1", [bug(50, '{"shas":["c0ffee1"]}')]);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toMatchObject([
-      { prNumber: 7, via: "commit", seat: null, model: null },
-    ]);
-  });
-
-  it("records a bug naming a file one merged PR changed, not one two changed", () => {
-    store.upsertPullRequests(
-      "r1",
-      [
-        pr(7, {
-          files: [
-            { path: "src/a.ts", changeType: "MODIFIED" },
-            { path: "src/shared.ts", changeType: "MODIFIED" },
-          ],
-        }),
-        pr(8, { files: [{ path: "src/shared.ts", changeType: "MODIFIED" }] }),
-      ],
-      NOW,
-    );
-    store.replaceBoard("r1", [
-      bug(50, '{"paths":["src/a.ts"]}'),
-      bug(51, '{"paths":["src/shared.ts"]}'),
-    ]);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toMatchObject([
-      { issueNumber: 50, prNumber: 7, via: "file" },
-    ]);
-  });
-
-  it("keeps the record after the bug leaves the board, and ignores a bug filed before the merge", () => {
-    store.upsertPullRequests("r1", [pr(7)], NOW);
-    store.replaceBoard("r1", [
-      bug(50, '{"prs":[7]}'),
-      bug(51, '{"prs":[7]}', { createdAt: NOW - 6 * DAY }),
-    ]);
-    store.replaceBoard("r1", []);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects.map((d) => d.issueNumber)).toEqual([50]);
-  });
-
-  it("leaves out a card without the bug label", () => {
-    store.upsertPullRequests("r1", [pr(7)], NOW);
-    store.replaceBoard("r1", [bug(50, '{"prs":[7]}', { labels: ["feature"] })]);
-    expect(store.qaFlow(NOW - 30 * DAY).escapedDefects).toEqual([]);
-  });
-
-  it("counts only PRs merged in the window", () => {
-    store.upsertPullRequests("r1", [pr(7)], NOW);
-    store.replaceBoard("r1", [bug(50, '{"prs":[7]}')]);
-    expect(store.qaFlow(NOW - 3 * DAY).escapedDefects).toEqual([]);
-  });
 });
 
 describe("review queue age", () => {

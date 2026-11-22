@@ -54,6 +54,7 @@ import {
   READONLY_TOOLS,
   SANDBOX_DENY_READ_HOME,
   SCRATCH_TOOLS,
+  SEAT_DENIED_HOSTS,
   SEAT_STATES,
   SKILL_FILE_MAX,
   SKILLS_DIR,
@@ -128,14 +129,33 @@ describe("crewCliArgs", () => {
     expect(args).toContain("--disallowedTools");
     const seat = JSON.parse(crewSandboxSettings(base.sandbox, "writer", base.hook)).sandbox;
     expect(seat.enabled).toBe(true);
-    expect(seat.network).toEqual({ allowedDomains: [] });
+    expect(seat.network).toEqual({ allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] });
     expect(seat.filesystem.denyRead).toContain(base.sandbox.home);
   });
 
+  it("lets a seat fetch a page: curl and wget are not denied", () => {
+    expect(DENIED_TOOLS).not.toContain("Bash(curl:*)");
+    expect(DENIED_TOOLS).not.toContain("Bash(wget:*)");
+    const a = crewCliArgs(base);
+    expect(a).not.toContain("Bash(curl:*)");
+    expect(a).not.toContain("Bash(wget:*)");
+  });
+
+  it.each(["writer", "read-only", "scratch"] as const)(
+    "defines WebSearch for a %s seat and keeps WebFetch denied",
+    (mode) => {
+      const a = crewCliArgs({ ...base, mode });
+      const tools = a[a.indexOf("--tools") + 1].split(",");
+      const denied = a.slice(a.indexOf("--disallowedTools") + 1);
+      expect(tools).toContain("WebSearch");
+      expect(denied).not.toContain("WebSearch");
+      expect(tools).not.toContain("WebFetch");
+      expect(denied).toContain("WebFetch");
+    },
+  );
+
   it("allows a watch seat to prepare drafts through its CLI allowlist", () => {
     expect(FLIGHT_TOOLS).toContain("draft_reply");
-    // FLIGHT decides fix or park on a waste alarm; without this grant a review it holds never runs
-    expect(FLIGHT_TOOLS).toContain("resolve_waste_alarm");
     const argv = crewCliArgs({ ...base, mode: "read-only", mcTools: ["draft_reply"] });
     const allowed = argv.slice(
       argv.indexOf("--allowedTools") + 1,
@@ -169,9 +189,11 @@ describe("crewCliArgs", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
-    expect(w[w.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
+    expect(w[w.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
+    );
     const r = crewCliArgs({ ...base, mode: "read-only" });
-    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill");
+    expect(r[r.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,TodoWrite,Bash,Skill,WebSearch");
   });
 
   it("lets every seat invoke the repo's skills from a read-only plugin folder (#1051)", () => {
@@ -265,7 +287,6 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
-      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
@@ -321,7 +342,6 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       prBody: "mcp__mc__pr_body",
-      publishPreview: "mcp__mc__publish_preview",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",
@@ -336,6 +356,7 @@ describe("the allowlist in phase 2b", () => {
       withdrawQuestion: "mcp__mc__withdraw_question",
       attachMaterials: "mcp__mc__attach_materials",
       screenshotHud: "mcp__mc__screenshot_hud",
+      addReviewEvidence: "mcp__mc__add_review_evidence",
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
       callFlight: "mcp__mc__call_flight",
@@ -345,10 +366,8 @@ describe("the allowlist in phase 2b", () => {
       reportPlan: "mcp__mc__report_plan",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
-      codeHealth: "mcp__mc__code_health",
       answerQuestion: "mcp__mc__answer_question",
       startSeat: "mcp__mc__start_seat",
-      reassignTicket: "mcp__mc__reassign_ticket",
       messageSeat: "mcp__mc__message_seat",
       instructSeat: "mcp__mc__instruct_seat",
       revokeInstruction: "mcp__mc__revoke_instruction",
@@ -359,6 +378,7 @@ describe("the allowlist in phase 2b", () => {
       commsPin: "mcp__mc__comms_pin",
       flightState: "mcp__mc__flight_state",
       promote: "mcp__mc__promote",
+      sendToPlanner: "mcp__mc__send_to_planner",
       endRun: "mcp__mc__end_run",
       resumeSeat: "mcp__mc__resume_seat",
       acceptRuling: "mcp__mc__accept_ruling",
@@ -382,7 +402,6 @@ describe("the allowlist in phase 2b", () => {
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
       moveReview: "mcp__mc__move_review",
-      resolveWasteAlarm: "mcp__mc__resolve_waste_alarm",
       operator: "mcp__mc__operator",
       ghWrite: "mcp__mc__gh_write",
       crewTidy: "mcp__mc__crew_tidy",
@@ -398,11 +417,10 @@ describe("the allowlist in phase 2b", () => {
     );
   });
 
-  it("turns background Bash off, so a timed-out suite is killed rather than kept running", () => {
+  it("leaves background Bash on: seats may run background tasks", () => {
     expect(CREW_CLI_ENV).toEqual({
       BASH_MAX_TIMEOUT_MS: "2700000",
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
-      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
       // marks every crew seat's environment, so tests that need what a seat denies can tell (#1411)
@@ -695,7 +713,7 @@ describe("crew constants", () => {
         model: "opus",
         mode: "read-only",
         loop: "plan",
-        tools: ["report_plan", "read_ticket", "code_health"],
+        tools: ["report_plan", "read_ticket"],
         here: "planner: writes each ticket's plan for the developers",
       },
       FLIGHT: {
@@ -704,12 +722,10 @@ describe("crew constants", () => {
         mode: "read-only",
         loop: "watch",
         tools: [
-          "code_health",
           "log_decision",
           "read_ticket",
           "answer_question",
           "start_seat",
-          "reassign_ticket",
           "message_seat",
           "instruct_seat",
           "revoke_instruction",
@@ -717,6 +733,7 @@ describe("crew constants", () => {
           "flight_state",
           "screenshot_hud",
           "promote",
+          "send_to_planner",
           "end_run",
           "resume_seat",
           "accept_ruling",
@@ -726,7 +743,6 @@ describe("crew constants", () => {
           "rerun_ci",
           "edit_card",
           "dismiss_item",
-          "resolve_waste_alarm",
           "sync_main",
           "create_ticket",
           "comment_ticket",
@@ -777,7 +793,7 @@ describe("seatDef", () => {
     expect(seatDef({ role: "RETRO" })).toMatchObject({ mode: "read-only", loop: "none" });
     expect(seatDef({ role: "FAO" })).toMatchObject({
       loop: "plan",
-      mcTools: ["report_plan", "read_ticket", "code_health"],
+      mcTools: ["report_plan", "read_ticket"],
     });
   });
 
@@ -839,12 +855,10 @@ describe("mc tool grants", () => {
 
   it("a read-only seat may be granted FLIGHT's tools, and no git write", () => {
     expect(FLIGHT_TOOLS).toEqual([
-      "code_health",
       "log_decision",
       "read_ticket",
       "answer_question",
       "start_seat",
-      "reassign_ticket",
       "message_seat",
       "instruct_seat",
       "revoke_instruction",
@@ -852,6 +866,7 @@ describe("mc tool grants", () => {
       "flight_state",
       "screenshot_hud",
       "promote",
+      "send_to_planner",
       "end_run",
       "resume_seat",
       "accept_ruling",
@@ -861,7 +876,6 @@ describe("mc tool grants", () => {
       "rerun_ci",
       "edit_card",
       "dismiss_item",
-      "resolve_waste_alarm",
       "sync_main",
       "create_ticket",
       "comment_ticket",
@@ -943,7 +957,9 @@ describe("scratch mode", () => {
     ]) {
       expect(allowed).not.toContain(t);
     }
-    expect(a[a.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill");
+    expect(a[a.indexOf("--tools") + 1]).toBe(
+      "Read,Grep,Glob,Edit,Write,TodoWrite,Bash,Skill,WebSearch",
+    );
   });
 
   it("scratch allows exactly its tools, Edit and Write anchored to the worktree", () => {
@@ -957,6 +973,7 @@ describe("scratch mode", () => {
       "TodoWrite",
       "Bash",
       "Skill",
+      "WebSearch",
       "mcp__mc__call_flight",
       "mcp__mc__report_findings",
       "mcp__mc__restore_file",
@@ -1137,7 +1154,7 @@ describe("crew sandbox and scoped edits", () => {
       enabled: true,
       failIfUnavailable: true,
       allowUnsandboxedCommands: false,
-      network: { allowedDomains: [] },
+      network: { allowedDomains: ["*"], deniedDomains: [...SEAT_DENIED_HOSTS] },
     });
     // commits are the hub's (the mc commit tool): nothing in either git dir is granted (#31 R19/R24)
     expect(j.sandbox.filesystem.allowWrite).toEqual([]);
@@ -1207,14 +1224,10 @@ describe("crew sandbox and scoped edits", () => {
       const entry = (matcher: string) => [
         { matcher, hooks: [{ type: "command", command: base.hook.command, timeout: 630 }] },
       ];
-      const stopCommand = base.hook.command.replace(/ \|\| exit 2$/, " || true");
-      expect(stopCommand).not.toBe(base.hook.command);
       expect(j.hooks).toEqual({
         PreToolUse: entry("*"),
         PostToolUse: entry("Bash"),
         PostToolUseFailure: entry("Bash"),
-        // exit 2 from a Stop blocks the stop: its command ends `|| true`, not `|| exit 2`
-        Stop: [{ hooks: [{ type: "command", command: stopCommand, timeout: 630 }] }],
       });
       expect(Object.keys(j.hooks)).toEqual([...GUARD_HOOK_EVENTS]);
     }

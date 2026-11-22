@@ -66,7 +66,6 @@ export const QA_FLOW_METRICS = {
     from: "server",
   },
 } as const satisfies Readonly<Record<string, MetricDef>>;
-export type QaFlowMetricId = keyof typeof QA_FLOW_METRICS;
 
 const uniq = <T>(xs: T[]): T[] => [...new Set(xs)];
 
@@ -246,7 +245,8 @@ export interface QaFlowView {
   days: number;
   since: number;
   metrics: typeof QA_FLOW_METRICS;
-  escapedDefects: EscapedDefectView[];
+  /** Never filled now; the web page that read it goes in the web cut. */
+  escapedDefects?: EscapedDefectView[];
   reviewTimings: ReturnType<typeof reviewTimings> & {
     heads: (ReviewHeadTiming & { repoId: string; prNumber: number; sha: string })[];
   };

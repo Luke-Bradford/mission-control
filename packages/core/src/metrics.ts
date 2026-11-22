@@ -136,43 +136,6 @@ export const METRICS: Readonly<Record<MetricId, MetricDef>> = {
   },
 };
 
-/** Range-scoped chart figures. They live beside the shared KPI registry so definitions, units and
- * windows remain a single source of truth without making them header metrics. */
-export const TELEMETRY_METRICS = {
-  throughput: {
-    label: "Throughput",
-    window: "selected range",
-    unit: "tickets",
-    definition: `Tickets with a pull request merged in the selected range, grouped into timestamped buckets. Empty buckets are zero. ${CREW_REPOS}`,
-    source: "GET /api/telemetry (series.throughput)",
-    from: "server",
-  },
-  quality: {
-    label: "Quality",
-    window: "selected range, daily",
-    unit: "PRs",
-    definition: `Daily CI first-pass rate, review pass rate and review rounds for merged pull requests. A day without evidence is null, never zero. ${CREW_REPOS}`,
-    source: "GET /api/telemetry (series.quality)",
-    from: "server",
-  },
-  quotaBurn: {
-    label: "Quota burn",
-    window: "selected range",
-    unit: "quota percentage points per interval",
-    definition: `Positive changes in an account window's used percentage, grouped into the selected range's timestamped intervals. Projected exhaustion uses that range's total burn pace; no spend means no projection. ${CREW_REPOS}`,
-    source: "GET /api/telemetry (series.quota.burn, series.quota.projectedExhaustionAt)",
-    from: "server",
-  },
-  costPerMergedTicket: {
-    label: "Cost per merged ticket",
-    window: "selected range",
-    unit: "USD",
-    definition: `All observed run cost for each ticket whose pull request merged in the selected range, including work before the range. The in-range cost remains available separately. ${CREW_REPOS}`,
-    source: "GET /api/telemetry (tokensByTicket.totalCostUsd)",
-    from: "server",
-  },
-} as const satisfies Readonly<Record<string, MetricDef>>;
-
 /** Range-scoped Comms figures, shared by the Comms page and the hub route. */
 export const COMMS_METRICS = {
   messageLengthP95: {
@@ -258,7 +221,7 @@ const openLoopPark = (row: MetricRow): boolean =>
 /** Parked by a rate limit: it resumes on its own. */
 const rateLimited = (row: MetricRow): boolean =>
   (row.hudState === "parked" && RATE_LIMIT_PARK.test(row.note ?? "")) ||
-  (openLoopPark(row) && RATE_LIMIT_PARK.test(row.loop?.parked ?? ""));
+  (openLoopPark(row) && RATE_LIMIT_PARK.test(row.loop?.hold?.reason ?? ""));
 
 export const isAgentWorking = (row: MetricRow): boolean => row.hudState === "running";
 

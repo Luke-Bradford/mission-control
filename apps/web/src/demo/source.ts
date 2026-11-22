@@ -2,7 +2,14 @@
  * The Demo "server": answers a read by its path from the simulator's state. This is its own chunk,
  * loaded the first time Demo reads. Nothing here touches the network.
  */
-import { ACTIVITY_WINDOW_MS } from "@mc/core";
+import {
+  ACTIVITY_WINDOW_MS,
+  MODEL_TABLE_MIN_RUNS,
+  type ModelGroupRow,
+  type ModelRate,
+  type ModelSide,
+  type ModelsView,
+} from "@mc/core";
 import { commsMessage } from "../../test/demoSeedPages.ts";
 import { DEMO_NO_DATA } from "./mode.ts";
 import { getState } from "./simulator.ts";
@@ -180,12 +187,80 @@ function fileDiff(path: string): unknown {
   };
 }
 
+const demoGroup = (
+  model: string,
+  effort: string,
+  runs: number,
+  split: string | null,
+): ModelGroupRow => {
+  const tooFew = runs < MODEL_TABLE_MIN_RUNS;
+  const rate = (count: number): ModelRate => ({
+    count,
+    of: runs,
+    percent: tooFew ? null : Math.round((count / runs) * 100),
+  });
+  return {
+    model,
+    effort,
+    split,
+    runs,
+    tooFew,
+    pricedRuns: runs,
+    meanCost: tooFew ? null : 1.65,
+    round2: rate(Math.round(runs * 0.6)),
+    round3: rate(Math.round(runs * 0.2)),
+    meanBlocking: tooFew ? null : 2.1,
+    tokensPerMerged: tooFew ? null : 480_000,
+  };
+};
+
+/** A small model table: one group past the sample floor, one under it. */
+function modelsView(): ModelsView {
+  const none = [
+    demoGroup("sonnet-5.5", "medium", 34, null),
+    demoGroup("opus-5.5", "high", 12, null),
+  ];
+  const split = (a: string, b: string) => [
+    demoGroup("sonnet-5.5", "medium", 22, a),
+    demoGroup("sonnet-5.5", "medium", 12, b),
+    demoGroup("opus-5.5", "high", 12, a),
+  ];
+  const side = (runs: number, tokens: number): ModelSide => ({
+    runs,
+    tooFew: runs < MODEL_TABLE_MIN_RUNS,
+    round3: {
+      count: Math.round(runs * 0.2),
+      of: runs,
+      percent: runs < MODEL_TABLE_MIN_RUNS ? null : 20,
+    },
+    tokensPerMerged: runs < MODEL_TABLE_MIN_RUNS ? null : tokens,
+  });
+  return {
+    groups: {
+      none,
+      type: split("feature", "bug"),
+      size: split("S", "M"),
+      plan: split("With plan", "No plan"),
+    },
+    changes: [
+      {
+        at: Date.now() - 12 * 86_400_000,
+        seatId: "dev-1",
+        change: "sonnet-5.5 medium → sonnet-5.5 high",
+        before: side(24, 520_000),
+        after: side(14, 430_000),
+      },
+    ],
+  };
+}
+
 export function answer(path: string): Response {
   const api = getState().api;
   const key = path in ALIASES ? (ALIASES[path] as string) : path;
   if (key in api) return json(api[key]);
   const diff = fileDiff(path);
   if (diff !== undefined) return json(diff);
+  if (/^\/api\/audit\/models\?range=/.test(path)) return json(modelsView());
   if (path === "/api/comms/traffic") return json(traffic());
   if (path === "/api/comms/open") return json(openItems());
   if (path === "/api/comms/feed") return json(feed());

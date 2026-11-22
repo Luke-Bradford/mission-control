@@ -10,7 +10,6 @@ export const MC_TOOL_NAMES = {
   commit: "commit",
   syncMain: "sync_main",
   prBody: "pr_body",
-  publishPreview: "publish_preview",
   push: "push",
   draftPr: "draft_pr",
   askFlight: "ask_flight",
@@ -21,10 +20,8 @@ export const MC_TOOL_NAMES = {
   reportPlan: "report_plan",
   logDecision: "log_decision",
   readTicket: "read_ticket",
-  codeHealth: "code_health",
   answerQuestion: "answer_question",
   startSeat: "start_seat",
-  reassignTicket: "reassign_ticket",
   messageSeat: "message_seat",
   instructSeat: "instruct_seat",
   revokeInstruction: "revoke_instruction",
@@ -35,10 +32,10 @@ export const MC_TOOL_NAMES = {
   commsPin: "comms_pin",
   flightState: "flight_state",
   promote: "promote",
+  sendToPlanner: "send_to_planner",
   endRun: "end_run",
   resumeSeat: "resume_seat",
   moveReview: "move_review",
-  resolveWasteAlarm: "resolve_waste_alarm",
   acceptRuling: "accept_ruling",
   mergePr: "merge_pr",
   settlePark: "settle_park",
@@ -70,6 +67,7 @@ export const MC_TOOL_NAMES = {
   withdrawQuestion: "withdraw_question",
   attachMaterials: "attach_materials",
   screenshotHud: "screenshot_hud",
+  addReviewEvidence: "add_review_evidence",
   previewBrowser: "preview_browser",
   editIssue: "edit_issue",
   setFields: "set_fields",
@@ -88,7 +86,6 @@ export const MC_TOOLS = {
   commit: mcTool(MC_TOOL_NAMES.commit),
   syncMain: mcTool(MC_TOOL_NAMES.syncMain),
   prBody: mcTool(MC_TOOL_NAMES.prBody),
-  publishPreview: mcTool(MC_TOOL_NAMES.publishPreview),
   push: mcTool(MC_TOOL_NAMES.push),
   draftPr: mcTool(MC_TOOL_NAMES.draftPr),
   askFlight: mcTool(MC_TOOL_NAMES.askFlight),
@@ -99,10 +96,8 @@ export const MC_TOOLS = {
   reportPlan: mcTool(MC_TOOL_NAMES.reportPlan),
   logDecision: mcTool(MC_TOOL_NAMES.logDecision),
   readTicket: mcTool(MC_TOOL_NAMES.readTicket),
-  codeHealth: mcTool(MC_TOOL_NAMES.codeHealth),
   answerQuestion: mcTool(MC_TOOL_NAMES.answerQuestion),
   startSeat: mcTool(MC_TOOL_NAMES.startSeat),
-  reassignTicket: mcTool(MC_TOOL_NAMES.reassignTicket),
   messageSeat: mcTool(MC_TOOL_NAMES.messageSeat),
   instructSeat: mcTool(MC_TOOL_NAMES.instructSeat),
   revokeInstruction: mcTool(MC_TOOL_NAMES.revokeInstruction),
@@ -113,10 +108,10 @@ export const MC_TOOLS = {
   commsPin: mcTool(MC_TOOL_NAMES.commsPin),
   flightState: mcTool(MC_TOOL_NAMES.flightState),
   promote: mcTool(MC_TOOL_NAMES.promote),
+  sendToPlanner: mcTool(MC_TOOL_NAMES.sendToPlanner),
   endRun: mcTool(MC_TOOL_NAMES.endRun),
   resumeSeat: mcTool(MC_TOOL_NAMES.resumeSeat),
   moveReview: mcTool(MC_TOOL_NAMES.moveReview),
-  resolveWasteAlarm: mcTool(MC_TOOL_NAMES.resolveWasteAlarm),
   acceptRuling: mcTool(MC_TOOL_NAMES.acceptRuling),
   mergePr: mcTool(MC_TOOL_NAMES.mergePr),
   settlePark: mcTool(MC_TOOL_NAMES.settlePark),
@@ -148,6 +143,7 @@ export const MC_TOOLS = {
   withdrawQuestion: mcTool(MC_TOOL_NAMES.withdrawQuestion),
   attachMaterials: mcTool(MC_TOOL_NAMES.attachMaterials),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
+  addReviewEvidence: mcTool(MC_TOOL_NAMES.addReviewEvidence),
   previewBrowser: mcTool(MC_TOOL_NAMES.previewBrowser),
   editIssue: mcTool(MC_TOOL_NAMES.editIssue),
   setFields: mcTool(MC_TOOL_NAMES.setFields),
@@ -544,6 +540,11 @@ export const MC_PR_UNCLOSED =
 export const prAlreadyOpenText = (url: string): string => `A PR is already open: ${url}`;
 /** Added to a PR body that does not name the run's issue. */
 export const prClosesLine = (issue: number): string => `Closes #${issue}.`;
+/** Ends a PR body whose note says it is only a stage of its ticket: the merge leaves the ticket open. */
+export const prPartOfLine = (issue: number): string => `Part of #${issue}.`;
+/** Whether a report note says the PR is part of ticket `issue` ("Part of #n", any case). */
+export const noteIsPartOf = (note: string, issue: number): boolean =>
+  new RegExp(`\\bpart\\s+of\\s+#${issue}(?!\\d)`, "i").test(note);
 /** The last line of every PR body the hub opens. */
 export const prOpenedByLine = (call: string): string => `Opened by ${call} (Mission Control).`;
 /** gh failed (or timed out) listing or opening the PR. */
@@ -565,6 +566,10 @@ export const MC_PLAN_WRITTEN_CONTINUE =
 export const MC_PLAN_NOT_FAO = "Not written: report_plan is for planner or build seats.";
 export const MC_PLAN_PROFILE_ONLY =
   "Not written: profile and profile_reason are for planner seats.";
+export const MC_PLAN_STEPS_ONCE = "each step may appear once";
+export const MC_PLAN_STEPS_PLANNER_ONLY = "Only the planner records model advice; leave steps out.";
+export const MC_PLAN_STEPS_HINT =
+  "Recommend a model and effort per step with the reason only when Audit's model table or a trial result supports it.";
 export const MC_PLAN_ALREADY =
   "Not written: the ticket already has a ## Plan section. Ask FLIGHT with mc ask_flight if it needs replacing.";
 export const MC_PLAN_ISSUE_CLOSED = "Not written: the ticket is closed.";

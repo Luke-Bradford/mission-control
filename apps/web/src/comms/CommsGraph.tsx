@@ -7,7 +7,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { useMetrics } from "../metrics.ts";
 import { type CommsView, NEEDS_YOU_PATH, navigate } from "../router.ts";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "./CommsRails.tsx";
-import { chartHref, commsHrefFor, useChartFilter } from "./chartPaths.ts";
+import { commsHrefFor, useChartFilter } from "./chartPaths.ts";
 import { useReducedMotion, waitWord } from "./chartTypes.ts";
 import { type ChartFilter, pairFilter } from "./commsFilter.ts";
 import { CAPCOM, useChartData } from "./useChartData.ts";
@@ -45,25 +45,7 @@ export function CommsGraph({
         className="comms-graph-panel"
         title="Comms graph"
         sub="24h"
-        actions={
-          <>
-            <ChartModeSwitch mode={mode} onChange={setMode} openCount={chart.openCount} />
-            <a
-              className="comms-popout"
-              href={chartHref(filter)}
-              onClick={(e) => {
-                if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-                e.preventDefault();
-                navigate(chartHref(filter));
-              }}
-              aria-label="Open the chart full screen"
-              title="Open the chart full screen"
-            >
-              <span aria-hidden="true">⤢</span>
-              <span className="comms-popout-text">Full screen</span>
-            </a>
-          </>
-        }
+        actions={<ChartModeSwitch mode={mode} onChange={setMode} openCount={chart.openCount} />}
       >
         <div className="comms-graph-readout" aria-hidden="true">
           {chart.streaming && (

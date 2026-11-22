@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_SUITE_TEXT,
   closesIssue,
   codexCommand,
   DETACHED_HEAD,
@@ -22,14 +21,10 @@ import {
   inertNegatedClosingRefs,
   isFullSuite,
   MC_WRITER_TOOLS,
-  REREAD_MIN_BYTES,
-  type ReadRecord,
-  rereadVerdict,
   scanSecrets,
   scanText,
   splitCommands,
   unclosedMarkdown,
-  wholeFileRead,
 } from "../src/guard.ts";
 import { MC_TOOLS } from "../src/mcp.ts";
 import { CODEX_SHELL } from "../src/runtime.ts";
@@ -211,7 +206,6 @@ describe("FLIGHT's full profile", () => {
 
   it("keeps ordinary crew restrictions", () => {
     expect(ruleOf(bash("gh pr close 12"), writer)).not.toBe("allow");
-    expect(ruleOf(bash("curl http://x"), writer)).toBe("network");
   });
 });
 
@@ -514,7 +508,6 @@ describe("GUARD_RULES", () => {
     expect(GUARD_RULES["merge-push"]).toBe(
       "No merging, force-push or pushes to protected branches; a PR leaves draft only for a safe PR in away mode",
     );
-    expect(GUARD_RULES.network).toBe("No network from a crew's commands");
     expect(GUARD_RULES.secret).toBe("No secrets in a push");
     expect(GUARD_RULES["flight-powers"]).toBe(
       "Only repos with flight_powers: superuser may use these tools",
@@ -526,12 +519,9 @@ describe("GUARD_RULES", () => {
     expect(GUARD_RULES["gh-cli"]).toMatch(/^The GitHub CLI is not available to seats/);
     expect(GUARD_RULES["gh-cli"]).not.toMatch(/comments|labels/);
     expect(GUARD_RULES.unreadable).toBe("Commands the guard cannot read to the end are refused");
-    expect(GUARD_RULES.background).toBe(
-      "Commands must stay attached to the seat's current tool call",
-    );
     // github-write is retired: no guard path produced it once gh got its own rule
     expect(Object.keys(GUARD_RULES)).not.toContain("github-write");
-    expect(Object.keys(GUARD_RULES)).toHaveLength(13);
+    expect(Object.keys(GUARD_RULES)).toHaveLength(11);
     expect(FREE_SUITE_HINT).toBe("the same command with a test file path");
   });
 });
@@ -649,9 +639,29 @@ describe("guardDecision: gh, network", () => {
       );
     },
   );
-  it("denies curl and wget as network", () => {
-    expect(ruleOf(bash("curl https://x"))).toBe("network");
-    expect(ruleOf(bash("a && wget x"))).toBe("network");
+});
+
+describe("guardDecision: network and background work are allowed for a writer", () => {
+  it.each([
+    "curl -sI https://example.com",
+    "curl -s https://example.test",
+    "wget https://example.test/file",
+    "sleep 30 &",
+    "nohup node server.js >out.log 2>&1 &",
+    "tmux new -d 'node server.js'",
+    "screen -dm node server.js",
+    "ssh host uptime",
+  ])("allows %s", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual({ kind: "allow" });
+  });
+  it("allows a background Bash call that is not a full suite", () => {
+    expect(guardDecision(bash("node server.js", { run_in_background: true }), writer)).toEqual({
+      kind: "allow",
+    });
+  });
+  it("locks a background full suite and still refuses a git write inside a launcher", () => {
+    expect(ruleOf(bash("pnpm -s test &"))).toBe("lock");
+    expect(ruleOf(bash("tmux new -d 'git push'"))).toBe("git-write");
   });
 });
 
@@ -664,11 +674,23 @@ describe("guardDecision: the full suite", () => {
     expect(ruleOf(bash("pnpm -s vitest run apps/x.test.ts"))).toBe("allow");
     expect(ruleOf(bash("pnpm -s lint"))).toBe("allow");
   });
-  it("denies a background suite with the foreground text", () => {
+  it.each(["pnpm -s test &", "nohup pnpm -s test &", "tmux new -d 'pnpm -s test'"])(
+    "marks the locked suite %s as background, so its hold outlasts the call",
+    (c) => {
+      expect(guardDecision(bash(c), writer)).toMatchObject({ kind: "lock", background: true });
+    },
+  );
+  it("does not mark a foreground suite as background", () => {
+    expect(guardDecision(bash("pnpm -s test"), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+    });
+  });
+  it("locks a suite started with run_in_background", () => {
     expect(guardDecision(bash("pnpm -s test", { run_in_background: true }), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: "Run the full suite in the foreground: it holds the test lock.",
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
     });
   });
   it.each([
@@ -677,12 +699,8 @@ describe("guardDecision: the full suite", () => {
     "pnpm -s test & wait",
     "nohup pnpm -s vitest run >out.log &",
     `bash -c "pnpm -s test &"`,
-  ])("denies %s (a background suite returns at once) with the foreground text", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: "Run the full suite in the foreground: it holds the test lock.",
-    });
+  ])("locks %s (a suite in the background still takes the test lock)", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each([
     "pnpm -s test && echo ok",
@@ -691,10 +709,6 @@ describe("guardDecision: the full suite", () => {
     `pnpm -s test -t "a & b"`,
   ])("still locks %s (no background &)", (c) => {
     expect(ruleOf(bash(c))).toBe("lock");
-  });
-  it("denies a background command that is not a full suite", () => {
-    expect(ruleOf(bash("sleep 1 &"))).toBe("background");
-    expect(ruleOf(bash("sleep 1", { run_in_background: true }))).toBe("background");
   });
   it("locks a suite in read-only mode", () => {
     expect(guardDecision(bash("pnpm -s vitest run"), readOnly)).toEqual({
@@ -1056,12 +1070,8 @@ describe("guard fix round 5 (Task 5 review)", () => {
     "setsid -f pnpm -s vitest run",
     "coproc { pnpm -s test; }",
     "coproc SUITE { pnpm -s test; }",
-  ])("denies %s (a background run) with the foreground text", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: BACKGROUND_SUITE_TEXT,
-    });
+  ])("locks %s (a suite in the background still takes the test lock)", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each(["coproc git push", "setsid git push", "coproc NAME { git push; }"])(
     "denies %s as git-write",
@@ -1069,9 +1079,6 @@ describe("guard fix round 5 (Task 5 review)", () => {
       expect(ruleOf(bash(c))).toBe("git-write");
     },
   );
-  it("denies a background run that is not a suite", () => {
-    expect(ruleOf(bash("setsid sleep 1"))).toBe("background");
-  });
   it("names a git subcommand in the text only when it is a known one", () => {
     expect(guardDecision(bash("git SECRETX origin"), writer)).toEqual({
       kind: "deny",
@@ -1157,12 +1164,8 @@ describe("guard fix round 6 (Task 5 re-review): zsh groups, wrappers, brace expa
     "tmux new -d 'pnpm -s test'",
     "tmux new-session -d -s x pnpm -s test",
     "tmux new-window 'pnpm -s vitest run'",
-  ])("denies %s (a background run) with the foreground text", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: BACKGROUND_SUITE_TEXT,
-    });
+  ])("locks %s (a suite in the background still takes the test lock)", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
   });
   it.each(["tmux new -d 'git push'", "screen -dm git push"])("denies %s as git-write", (c) => {
     expect(ruleOf(bash(c))).toBe("git-write");
@@ -1186,8 +1189,8 @@ describe("guard fix round 6 (Task 5 re-review): zsh groups, wrappers, brace expa
   it.each([
     ["coproc NAME if git push; then :; fi", "git-write"],
     ["coproc S until git push; do :; done", "git-write"],
-    ["coproc S while pnpm -s test; do :; done", "full-suite"],
-    ["coproc S if pnpm -s test; then :; fi", "full-suite"],
+    ["coproc S while pnpm -s test; do :; done", "lock"],
+    ["coproc S if pnpm -s test; then :; fi", "lock"],
   ])("skips coproc's NAME before a compound keyword: %s", (c, rule) => {
     expect(ruleOf(bash(c))).toBe(rule);
   });
@@ -1207,11 +1210,9 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     expect(v).toEqual(tooLong);
   });
   it.each([
-    ["20 tmux words and a suite", `${"tmux ".repeat(20)}pnpm -s test`, "full-suite"],
+    ["20 tmux words and a suite", `${"tmux ".repeat(20)}pnpm -s test`, "lock"],
     ["18 `tmux a` pairs and a push", `${"tmux a ".repeat(18)}git push`, "git-write"],
     // `tmux tmux …`: an unknown tmux command may start a session
-    ["20 tmux words", "tmux ".repeat(20), "background"],
-    ["300 tmux words", "tmux ".repeat(300), "background"],
     ["2000 tmux words", "tmux ".repeat(2000), "unreadable"], // past the budget: too long
   ])("decides %s quickly, without throwing", (_n, c, rule) => {
     const { v, ms } = timed(c);
@@ -1270,15 +1271,51 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
     });
   });
   it.each(["/usr/bin/nohup pnpm -s test &", "/opt/homebrew/bin/tmux new -d 'pnpm -s test'"])(
-    "denies the background run %s with the foreground text",
+    "locks the background run %s",
     (c) => {
-      expect(guardDecision(bash(c), writer)).toEqual({
-        kind: "deny",
-        rule: "full-suite",
-        text: BACKGROUND_SUITE_TEXT,
-      });
+      expect(guardDecision(bash(c), writer).kind).toBe("lock");
     },
   );
+
+  it.each([
+    "launchctl submit -l mc.suite -- pnpm -s test",
+    "echo 'pnpm -s test' | at now",
+    "batch <<< 'pnpm -s test'",
+    "systemd-run --user pnpm -s test",
+    "ssh -f host pnpm -s test",
+    "ssh -fN host pnpm -s test",
+    "daemonize /usr/local/bin/pnpm -s test",
+    "start-stop-daemon --start --exec /usr/bin/env -- pnpm -s test",
+    `osascript -e 'do shell script "pnpm -s test"'`,
+    "printf 'pnpm -s test\\n' | crontab -",
+    `echo 'do shell script "pnpm -s test"' | osascript`,
+    "launchctl submit -l x -- pnpm -s test:related",
+    "systemd-run --user node --experimental-strip-types scripts/check-related.ts",
+  ])("locks a full suite handed to a launcher: %s", (c) => {
+    expect(guardDecision(bash(c), writer).kind).toBe("lock");
+  });
+  it.each([
+    "launchctl submit -l x -- pnpm -s test",
+    "echo 'pnpm -s test' | at now",
+    "batch <<< 'pnpm -s test'",
+    "ssh -f host pnpm -s test",
+    "printf 'pnpm -s test\\n' | crontab -",
+  ])("keeps the lock past the call for a suite a launcher runs later: %s", (c) => {
+    expect(guardDecision(bash(c), writer)).toEqual({
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
+    });
+  });
+  it.each([
+    "crontab -l",
+    "launchctl list",
+    "ssh host pnpm -s test",
+    "open https://example.com",
+    "at -l",
+  ])("leaves %s alone", (c) => {
+    expect(guardDecision(bash(c), writer).kind).not.toBe("deny");
+  });
 
   it.each([
     "find . -exec git push ;",
@@ -1311,15 +1348,15 @@ describe("guard fix round 7 (Task 5 re-review 2)", () => {
       expect(ruleOf(bash(c))).toBe("lock");
     },
   );
-  it("still denies the suite a multiplexer runs", () => {
-    expect(ruleOf(bash("tmux new -d 'pnpm -s test'"))).toBe("full-suite");
-    expect(ruleOf(bash("coproc pnpm -s test; ls"))).toBe("full-suite");
+  it("still locks the suite a multiplexer runs", () => {
+    expect(ruleOf(bash("tmux new -d 'pnpm -s test'"))).toBe("lock");
+    expect(ruleOf(bash("coproc pnpm -s test; ls"))).toBe("lock");
   });
 });
 
 describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested multiplexers", () => {
   const tooLong = { kind: "deny", rule: "unreadable", text: GUARD_TOO_LONG_TEXT };
-  const background = { kind: "deny", rule: "full-suite", text: BACKGROUND_SUITE_TEXT };
+  const background = { kind: "lock", command: "pnpm -s test", background: true };
   const timed = (c: string) => {
     const t0 = performance.now();
     const v = guardDecision(bash(c), writer);
@@ -1338,9 +1375,6 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
     "\\{git,push} origin",
   ])("allows the quoted braces in %s", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
-  });
-  it("denies a detached tmux command even when its quoted argument contains braces", () => {
-    expect(ruleOf(bash("tmux new -d 'ls {a,b}'"))).toBe("background");
   });
   it.each(["{git,'push'} origin", "tmux {git,push}", "tmux new -d '{git,push} origin'"])(
     "still denies the unquoted brace expansion in %s",
@@ -1419,7 +1453,7 @@ describe("guard fix round 8 (Task 5 re-review 3): quoting, heredocs, nested mult
   });
 
   // M3, M4, M5
-  it("denies a suite in an env -S script under coproc as background", () => {
+  it("locks a suite in an env -S script under coproc", () => {
     expect(guardDecision(bash("coproc env -S 'pnpm -s test'"), writer)).toEqual(background);
   });
   it("keeps a parameter expansion inside its word", () => {
@@ -2461,11 +2495,10 @@ describe("program names compare case-insensitively (PR #143 I1b)", () => {
     expect(ruleOf(bash("/usr/bin/Git commit -m x"))).toBe("git-write");
     expect(ruleOf(bash("SH -c 'git push'"))).toBe("git-write");
     expect(ruleOf(bash("GH pr merge 1"))).toBe("gh-cli");
-    expect(ruleOf(bash("CURL x"))).toBe("network");
     expect(splitCommands("Env GIT push")).toEqual([["git", "push"]]);
   });
   it("matches a full-suite entry whatever the case of its program", () => {
-    expect(ruleOf(bash("PNPM -s test", { run_in_background: true }))).toBe("full-suite");
+    expect(ruleOf(bash("PNPM -s test", { run_in_background: true }))).toBe("lock");
   });
 });
 
@@ -2538,9 +2571,9 @@ describe("runners, option clusters, zsh function and always, brace suites, git l
       command: "pnpm -s test",
     });
     expect(guardDecision(bash("watch tmux new -d 'pnpm -s test'"), writer)).toEqual({
-      kind: "deny",
-      rule: "full-suite",
-      text: BACKGROUND_SUITE_TEXT,
+      kind: "lock",
+      command: "pnpm -s test",
+      background: true,
     });
   });
 
@@ -2671,44 +2704,7 @@ describe("seat git environment", () => {
   });
 });
 
-describe("detached work: multiplexers fail closed, schedulers and launchers, arithmetic", () => {
-  it.each([
-    "tmux -L sock new -d sleep 1",
-    "tmux -S /tmp/s new -d",
-    "tmux -f /dev/null new -d",
-    "tmux -Lsock new -d",
-    "tmux neww",
-    "tmux new-s -d",
-    "tmux splitw",
-    "tmux split-window -d sleep 9",
-    "tmux run -b sleep 9",
-    "tmux respawnp",
-    'tmux if-shell true "run -b x"',
-    "tmux pipe-pane",
-    "tmux popup",
-    "tmux source-file x.conf",
-    "tmux ls \\; new -d sleep 9",
-    "tmux ls ';' new -d sleep 9",
-    "tmux ls\\; new -d sleep 9",
-    "tmux",
-    "tmux -u",
-    "tmux display",
-    "tmux display -p '#(sleep 9 &)'",
-    "tmux capture-pane",
-    "/opt/homebrew/bin/tmux neww",
-    "command tmux neww",
-    "screen",
-    "screen -S name",
-    "screen -S name sleep 9",
-    "screen -dmS s sleep 9",
-    "screen -d -m sleep 9",
-    "screen -DR",
-    "screen -R x",
-    "screen -S x -X screen sleep 9",
-  ])("refuses %s as background", (c) => {
-    expect(ruleOf(bash(c))).toBe("background");
-  });
-
+describe("multiplexers that start nothing, arithmetic", () => {
   it.each([
     "tmux ls",
     "tmux has -t x",
@@ -2740,31 +2736,6 @@ describe("detached work: multiplexers fail closed, schedulers and launchers, ari
   });
 
   it.each([
-    "at now",
-    "batch",
-    "crontab -l",
-    "crontab x.cron",
-    "launchctl load x.plist",
-    "launchctl submit -l x -- sleep 9",
-    "osascript -e 'do shell script \"sleep 9\"'",
-    "open -a Terminal .",
-    "command at now",
-    "env launchctl list",
-    "/usr/bin/osascript -e x",
-    "/usr/bin/open .",
-    "nice -n 5 crontab -l",
-    "ls && open .",
-    'sh -c "at now"',
-    "find . -exec open {} +",
-  ])("refuses the scheduler or launcher in %s as background", (c) => {
-    expect(guardDecision(bash(c), writer)).toEqual({
-      kind: "deny",
-      rule: "background",
-      text: expect.stringMatching(/^Commands must stay attached to the seat's current tool call: /),
-    });
-  });
-
-  it.each([
     "echo $((5 & 3))",
     'echo "$((5 & 3))"',
     "(( x = 5 & 3 ))",
@@ -2773,48 +2744,9 @@ describe("detached work: multiplexers fail closed, schedulers and launchers, ari
   ])("does not count the arithmetic & in %j as background", (c) => {
     expect(ruleOf(bash(c))).toBe("allow");
   });
-
-  it.each(["((sleep 9 &) )", 'echo "$((sleep 9 &) )"', "sleep 9 & echo $((5 & 3))"])(
-    "still counts a lone & in a subshell that only looked arithmetic: %j",
-    (c) => {
-      expect(ruleOf(bash(c))).toBe("background");
-    },
-  );
 });
 
-describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux expansions", () => {
-  it.each([
-    "corepack pnpm open .",
-    "pnpm $(echo open) .",
-    "pnpm $" + "{X:-open} .",
-    "$(echo open) .",
-    "sh -c '$(echo open) .'",
-    "ssh -fN host",
-    "ssh -Nf host",
-    "ssh -f host sleep 9",
-    "ssh -Mf host sleep 9",
-    "ssh -B en0 -f host sleep 9",
-    "ssh -P work -f host sleep 9",
-    "autossh -f host",
-    "autossh -Nf host",
-    "autossh -B en0 -f host sleep 9",
-    "start-stop-daemon --start -b",
-    "start-stop-daemon -Sb",
-    "disown",
-    "gpg-connect-agent /bye",
-    "gpg --sign x",
-    "pnpm t open .",
-    "pnpm server open .",
-  ])("refuses an unmodelled form that can launch work later: %s", (c) => {
-    expect(guardDecision(bash(c), writer).kind).toBe("deny");
-  });
-
-  it("documents program-specific argument execution as an accepted parser boundary", () => {
-    // Generic runner handling still catches npx, but bun is not a modelled runner.
-    expect(ruleOf(bash("npx cross-env A=1 open ."))).toBe("background");
-    expect(ruleOf(bash("bun x open ."))).toBe("allow");
-  });
-
+describe("zsh EQUALS and the - precommand modifier", () => {
   it("allows an ssh remote argument that only resembles a local background flag", () => {
     expect(ruleOf(bash("ssh host printf -- -foo"))).toBe("allow");
   });
@@ -2830,12 +2762,7 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
   it.each([
     ["=git push", "git-write"],
     ["=gh pr merge 1", "gh-cli"],
-    ["=curl https://x", "network"],
-    ["=setsid sleep 9", "background"],
-    ["=open .", "background"],
-    ["=tmux new -d", "background"],
     ["=pnpm -s test", "lock"],
-    ["- setsid sleep 9", "background"],
     ["- git push", "git-write"],
     ["env =git push", "git-write"],
     ["ls && =git push", "git-write"],
@@ -2865,16 +2792,6 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
       expect(ruleOf(bash(c)), c).toBe("allow");
   });
 
-  // An option known neither to take a value nor to take none may have swallowed the next word
-  // (`--store-dir add` leaves `open .` as the command pnpm runs), so the words after it are judged.
-  it.each([
-    "pnpm --store-dir add open .",
-    "pnpm --lockfile-dir add open .",
-    "pnpm --config.foo add open .",
-    "pnpm --virtual-store-dir install open .",
-  ])("refuses a launcher behind an option whose value is unknown: %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("background");
-  });
   it("still allows known options before a package command", () => {
     for (const c of [
       "pnpm -s add open",
@@ -2890,201 +2807,8 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
   it("allows a launcher word a multiplexer only types into a session", () => {
     expect(ruleOf(bash("tmux send-keys -t x open Enter"))).toBe("allow");
   });
-  // Deliberate fail-closed trade-off: a runner's options are not modelled, so every later word is
-  // judged as a command, and these ordinary lines are refused (refusal telemetry measures the cost).
-  it.each([
-    "pnpm exec vitest run -t batch apps/x.test.ts",
-    "npx vitest run -t open",
-    "npx tsx scripts/run.ts batch",
-    "npx cypress open",
-    "pnpm exec vitest run -t at",
-    "pnpm -s exec vitest run -t at",
-    "pnpm -s exec tsx x.ts open",
-  ])("refuses a launcher word among a runner's arguments: %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("background");
-  });
-  it.each([
-    "env open .",
-    "command at now",
-    'sh -c "open x"',
-    "xargs open",
-    "pnpm exec open .",
-    "npx open .",
-    "ssh-agent sh",
-    "ssh-agent -k",
-    "/usr/bin/ssh-agent -s",
-    "gpg-agent --daemon",
-    "gpgconf --launch gpg-agent",
-    "systemd-run sleep 9",
-    "daemonize /bin/sleep 9",
-    // a runner's options, `--` or another runner first: the command may be any later word
-    "npx -y open .",
-    "npx --yes open .",
-    "npx -y -- open .",
-    "npx -p foo open .",
-    "npx --package=foo open .",
-    "npx -c open",
-    "npx -y bash -c open",
-    "bunx --bun open .",
-    "pnpm dlx -y open .",
-    "npm exec -- open .",
-    "npm exec --yes -- open .",
-    "npm x -y open .",
-    "pnpm exec -- open .",
-    "pnpm exec -- launchctl load x.plist",
-    "uvx --from x open",
-    "npx -y osascript -e 'tell app \"Terminal\" to activate'",
-    "npx -y crontab f",
-    "npx -y at now",
-    "npx -y env open .",
-    "watch -n 1 open .",
-    "watch -n1 open .",
-    "watch -n 9 crontab f",
-    "caffeinate -i open .",
-    "caffeinate -t 5 open .",
-    "flock f open .",
-    "flock /tmp/l launchctl submit -l x -- /bin/sh -c x",
-    "script -q /dev/null open .",
-    "taskset 0x1 open .",
-    "ionice -c3 open .",
-    "doas -u root open .",
-    "npx npx open .",
-    "pnpm exec npx open .",
-    "npx watch open .",
-    "watch npx open .",
-    "unbuffer npx open .",
-    "timeout 5 npx -y open .",
-    "=npx -y open .",
-    "npx -y ssh-agent sh",
-    "npx -y =open .",
-    "npx -y vitest run -t open",
-    "npm exec -- vitest run -t batch",
-    // an option value that looks like a run verb only moves where the judged words start
-    "npm --prefix dlx x open .",
-    "npm --prefix x x open .",
-    "pnpm -C dlx dlx open .",
-    "pnpm --filter dlx dlx open .",
-    "pnpm --dir x x open .",
-    "yarn --cwd dlx dlx open .",
-    // an expansion, glob or EQUALS word as the runner's first word
-    "npx $X open .",
-    'npx "$X" open .',
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell syntax under test, not a template
-    "npx ${X} open .",
-    "npx $(echo -y) open .",
-    "npx `echo -y` open .",
-    "npx * open .",
-    "npx [-]y open .",
-    "npx =npx open .",
-    "npx =npx -y open .",
-    "npx =watch open .",
-    // pnpm and yarn run a binary for a word that is not their own command
-    "pnpm open .",
-    "pnpm -s open .",
-    "yarn open .",
-    "yarn run open .",
-    // a verb-looking later word is an argument, not the verb: the binary is still judged
-    "pnpm open . x",
-    "pnpm open -a Calculator --args x",
-    "pnpm open -a Calculator --args exec",
-    "pnpm osascript -e 'display dialog \"hi\"' x",
-    "pnpm crontab x",
-    "pnpm launchctl load x",
-    "pnpm at now dlx",
-    "pnpm gpgconf --launch gpg-agent x",
-    "pnpm Open . x",
-    "yarn open . x",
-    "yarn run open . exec",
-    "npm --prefix foo exec open .",
-    // yarn workspace forms run a command too
-    "yarn workspace foo open .",
-    "yarn workspaces foreach -A open",
-    "yarn workspaces foreach -A run open",
-    // more shells read -c scripts
-    "fish -c open",
-    "ksh -c open",
-    "mksh -c open",
-    "tcsh -c open",
-    "csh -c open",
-    "pwsh -c 'open .'",
-    // GnuPG takes unambiguous option prefixes
-    "gpg-agent --dae",
-    "gpg-agent --daemon=x",
-    "gpgconf --la gpg-agent",
-    "gpgconf --lau gpg-agent",
-  ])("still refuses a launcher that is the command: %s", (c) => {
-    expect(ruleOf(bash(c))).toBe("background");
-  });
 
   it("fails closed on an eval command-word expansion", () => {
     expect(ruleOf(bash('eval "$(ssh-agent -s)"'))).toBe("unreadable");
-  });
-
-  it.each(["tmux kill-$X", "tmux ls $X", "tmux -L $S ls", "tmux ls `x`"])(
-    "refuses tmux with an expansion that could become a command: %s",
-    (c) => {
-      expect(ruleOf(bash(c))).toBe("background");
-    },
-  );
-});
-
-describe("wholeFileRead", () => {
-  const read = (input: GuardEvent["input"], tool = "Read") => wholeFileRead({ tool, input });
-  it("names the file of a Read with no range", () => {
-    expect(read({ file_path: "/w/a.ts" })).toBe("/w/a.ts");
-  });
-  it("passes a Read with an offset or a limit", () => {
-    expect(read({ file_path: "/w/a.ts", offset: 100 })).toBeNull();
-    expect(read({ file_path: "/w/a.ts", limit: 50 })).toBeNull();
-  });
-  it("passes a Read of a page range", () => {
-    expect(read({ file_path: "/w/spec.pdf", pages: "1-5" })).toBeNull();
-  });
-  it.each(["cat a.ts", "cat -- a.ts", "sed -n p a.ts", "sed -n '1,$p' a.ts"])(
-    "names the file of the whole-file shell read %s",
-    (command) => expect(read({ command }, "Bash")).toBe("a.ts"),
-  );
-  it.each([
-    "sed -n '10,40p' a.ts",
-    "sed -n 10,40p a.ts",
-    "cat a.ts b.ts",
-    "cat a.ts | head",
-    "cat a.ts > b.ts",
-    "cat < a.ts",
-    "cat $F",
-    "cat -n a.ts",
-    "head -50 a.ts",
-    "cat a.ts && ls",
-  ])("passes %s", (command) => expect(read({ command }, "Bash")).toBeNull());
-  it("ignores other tools", () => {
-    expect(read({ file_path: "/w/a.ts" }, "Edit")).toBeNull();
-  });
-});
-
-describe("rereadVerdict", () => {
-  const big = REREAD_MIN_BYTES;
-  const prior: ReadRecord = { size: big, mtimeMs: 5, compactions: 0, toolUseId: "toolu_1", at: 1 };
-  const now = { size: big, mtimeMs: 5, compactions: 0 };
-  it("refuses a second whole read of an unchanged large file, naming the earlier read", () => {
-    const v = rereadVerdict("a.ts", now, prior);
-    expect(v.kind).toBe("deny");
-    if (v.kind !== "deny") return;
-    expect(v.text).toContain("toolu_1");
-    expect(v.text).toContain("offset and limit");
-    expect(v.tokensSaved).toBe(Math.ceil(big / 4));
-  });
-  it("passes a first read", () => {
-    expect(rereadVerdict("a.ts", now, undefined)).toEqual({ kind: "allow" });
-  });
-  it("passes a file under the threshold", () => {
-    const small = { ...now, size: big - 1 };
-    expect(rereadVerdict("a.ts", small, { ...prior, size: big - 1 })).toEqual({ kind: "allow" });
-  });
-  it("passes a changed file (mtime or size)", () => {
-    expect(rereadVerdict("a.ts", { ...now, mtimeMs: 6 }, prior)).toEqual({ kind: "allow" });
-    expect(rereadVerdict("a.ts", { ...now, size: big + 1 }, prior)).toEqual({ kind: "allow" });
-  });
-  it("passes after a compaction, when the earlier read is no longer in context", () => {
-    expect(rereadVerdict("a.ts", { ...now, compactions: 1 }, prior)).toEqual({ kind: "allow" });
   });
 });

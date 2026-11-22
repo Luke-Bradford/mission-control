@@ -11,7 +11,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { type CheckRecorder, createCheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, lockedCheck } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
@@ -34,7 +34,16 @@ function approver(
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
     accounts: [],
-    repos: [{ id: "repo", github: "o/r", project: 1, statusMap: {}, autonomy: "draft" }],
+    repos: [
+      {
+        id: "repo",
+        github: "o/r",
+        project: 1,
+        statusMap: {},
+        autonomy: "draft",
+        fullSuite: ["pnpm -s test"],
+      },
+    ],
     loops: [],
     poll: { usageMinutes: 30, githubSeconds: 60 },
   };
@@ -184,8 +193,6 @@ describe("Codex refusal records", () => {
   it.each([
     ["git commit -m x", "git-write"],
     ["gh pr view 1", "gh-cli"],
-    ["curl https://example.com", "network"],
-    ["sleep 1 &", "background"],
   ] as const)(
     "routes the retained hard gate for %s through the shared guard",
     async (command, rule) => {
@@ -197,7 +204,7 @@ describe("Codex refusal records", () => {
 
   it("includes the whole refused chain, even when its amendment matches an allowed segment", async () => {
     const h = approver();
-    const command = "sed -n 1p a && curl x";
+    const command = "sed -n 1p a && git commit -m x";
     expect(
       await h.approve(
         {
@@ -214,7 +221,10 @@ describe("Codex refusal records", () => {
         signal(),
       ),
     ).toBe("decline");
-    expect(h.record).toHaveBeenCalledWith("network", `${GUARD_RULES.network}: curl: ${command}`);
+    expect(h.record).toHaveBeenCalledWith(
+      "git-write",
+      `${GUARD_RULES["git-write"]}: git commit: ${command}`,
+    );
   });
 
   it.each([false, true])(
@@ -330,10 +340,9 @@ describe("Codex check records", () => {
   const recorder = () => {
     const begun: unknown[][] = [];
     const checks: CheckRecorder = {
-      begin: async (k, c, aliases, options) =>
-        void begun.push([k, c, aliases ?? [], options ?? {}]),
+      begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
       end: async () => {},
-      lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
+      lockedBy: (c) => lockedCheck(c, ["pnpm -s test:related"]),
       dropRun: () => {},
       lost: () => false,
       drops: () => [],
@@ -360,115 +369,13 @@ describe("Codex check records", () => {
       ),
     ).toBe("accept");
     expect(begun).toEqual([
-      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint", [], { receiptEligible: true }],
+      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint", []],
       [
         { runId: "run", toolUseId: "appr-2" },
         "pnpm -s typecheck",
         [{ runId: "run", toolUseId: "item-2" }],
-        { receiptEligible: true },
       ],
     ]);
-  });
-
-  it("forgets a noted check and frees its lock when the approval is cancelled after the note", async () => {
-    const abandoned: unknown[] = [];
-    const cancel = new AbortController();
-    const checks: CheckRecorder = {
-      ...recorder().checks,
-      begin: async () => cancel.abort(),
-      abandon: (k) => void abandoned.push(k),
-    };
-    const lock = new TestLock();
-    const h = approver("writer", [], undefined, checks, lock);
-    const answer = await h.approve(
-      request("pnpm -s typecheck", { itemId: "item-1", approvalId: "appr-1" }),
-      undefined,
-      cancel.signal,
-    );
-    expect(answer).not.toBe("accept");
-    expect(abandoned).toEqual([{ runId: "run", toolUseId: "appr-1" }]);
-    expect(lock.state().holder).toBeNull();
-  });
-
-  it("refuses a full suite while a file test is already running in this checkout", async () => {
-    const { checks } = recorder();
-    checks.admit = async (_k, c) => (c === "pnpm -s test" ? "pnpm -s test a.test.ts" : null);
-    const lock = new TestLock();
-    const h = approver("writer", [], undefined, checks, lock);
-    // with a configured full suite the guard sends `pnpm -s test` to the lock, not to allow
-    Object.assign(h.config.repos[0] ?? {}, { fullSuite: ["pnpm -s test"] });
-    expect(
-      await h.approve(request("pnpm -s test", { itemId: "item-4" }), undefined, signal()),
-    ).toBe("decline");
-    expect(h.record).toHaveBeenCalledWith(
-      "full-suite",
-      expect.stringContaining(
-        "A check is already running in this checkout: pnpm -s test a.test.ts.",
-      ),
-    );
-    expect(lock.state().holder).toBeNull();
-  });
-
-  it("leaves nothing behind when the approval is cancelled while the start still reads the clone, so the next check runs", async () => {
-    const cancel = new AbortController();
-    let open: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      open = resolve;
-    });
-    const checks = createCheckRecorder({
-      store: { addCheckRun: () => {} },
-      checks: async () => ["pnpm -s typecheck"],
-      state: async () => {
-        await gate;
-        return { head: "a".repeat(40), clean: true };
-      },
-      worktree: async () => cwd,
-    });
-    const lock = new TestLock();
-    const h = approver("writer", [], undefined, checks, lock);
-    const first = h.approve(
-      request("pnpm -s typecheck", { itemId: "item-1", approvalId: "appr-1" }),
-      undefined,
-      cancel.signal,
-    );
-    await new Promise((r) => setTimeout(r, 10));
-    cancel.abort();
-    checks.dropRun("run"); // the interrupted turn ends
-    open();
-    expect(await first).not.toBe("accept");
-    expect(lock.state().holder).toBeNull();
-    expect(
-      await h.approve(
-        request("pnpm -s typecheck", { itemId: "item-2", approvalId: "appr-2" }),
-        undefined,
-        signal(),
-      ),
-    ).toBe("accept");
-  });
-
-  it("declines a configured check the recorder says is an unchanged rerun, and never starts its record", async () => {
-    const { begun, checks } = recorder();
-    checks.rerun = async (_run, c) => (c === "pnpm -s typecheck" ? "Not run: unchanged." : null);
-    const h = approver("writer", [], undefined, checks, new TestLock());
-    expect(
-      await h.approve(request("pnpm -s typecheck", { itemId: "item-3" }), undefined, signal()),
-    ).toBe("decline");
-    expect(begun).toEqual([]);
-  });
-
-  it("tells the seat the rerun text when an unchanged rerun is refused", async () => {
-    const { checks } = recorder();
-    checks.rerun = async () => "Not run: unchanged.";
-    const tell = vi.fn();
-    const h = approver("writer", [], undefined, checks, new TestLock(), false, tell);
-    const out = await h.approve(
-      request("pnpm -s typecheck", { itemId: "item-30" }),
-      undefined,
-      signal(),
-    );
-    expect(out).toBe("decline");
-    expect(tell).toHaveBeenCalledTimes(1);
-    expect(tell).toHaveBeenCalledWith("Not run: unchanged.");
   });
 
   it("tells the seat the rule's text when a guard rule refuses", async () => {
@@ -495,7 +402,7 @@ describe("Codex check records", () => {
     expect(tell).not.toHaveBeenCalled();
   });
 
-  it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
+  it("takes the test lock for a full suite but not a configured check, while another seat holds the lock", async () => {
     const { checks } = recorder();
     const lock = new TestLock();
     await lock.acquire(
@@ -506,9 +413,12 @@ describe("Codex check records", () => {
       signal(),
     );
     const h = approver("writer", [], undefined, checks, lock);
+    expect(
+      await h.approve(request("pnpm -s typecheck", { itemId: "item-8" }), undefined, signal()),
+    ).toBe("accept");
     const busy = new AbortController();
     const waiting = h.approve(
-      request("pnpm -s typecheck", { itemId: "item-9" }),
+      request("pnpm -s test", { itemId: "item-9" }),
       undefined,
       busy.signal,
     );
@@ -520,11 +430,74 @@ describe("Codex check records", () => {
     );
   });
 
+  it("keeps the lock for a suite sent to the background after the item completes", async () => {
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, undefined, lock);
+    expect(
+      await h.approve(request("pnpm -s test &", { itemId: "item-bg" }), undefined, signal()),
+    ).toBe("accept");
+    lock.release({ runId: "run", toolUseId: "item-bg" });
+    expect(lock.state().holder).not.toBeNull();
+    lock.releaseRun("run");
+    expect(lock.state().holder).toBeNull();
+  });
+
+  it.each([
+    "printf 'pnpm -s test\\n' | crontab -",
+    `echo 'do shell script "pnpm -s test"' | osascript`,
+  ])(
+    "declines a full suite fed to a launcher on stdin (a Codex seat cannot pipe at all): %s",
+    async (command) => {
+      const h = approver("writer", [], undefined, undefined, new TestLock());
+      expect(await h.approve(request(command, { itemId: "item-30" }), undefined, signal())).toBe(
+        "decline",
+      );
+    },
+  );
+
+  it("keeps the lock of a related-tests run left in the background", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, checks, lock);
+    expect(
+      await h.approve(
+        request("pnpm run test:related &", { itemId: "item-rel" }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("accept");
+    lock.release({ runId: "run", toolUseId: "item-rel" });
+    expect(lock.state().holder).not.toBeNull();
+    lock.releaseRun("run");
+    expect(lock.state().holder).toBeNull();
+  });
+
+  it("takes the test lock for the related-tests check", async () => {
+    const { checks } = recorder();
+    const lock = new TestLock();
+    await lock.acquire(
+      { runId: "other", toolUseId: "x" },
+      "other-seat",
+      "pnpm -s test",
+      1000,
+      signal(),
+    );
+    const h = approver("writer", [], undefined, checks, lock);
+    const busy = new AbortController();
+    const waiting = h.approve(
+      request("pnpm -s test:related", { itemId: "item-11" }),
+      undefined,
+      busy.signal,
+    );
+    busy.abort();
+    expect(await waiting).not.toBe("accept");
+  });
+
   describe("a check queued behind a long lock hold", () => {
     const holdLock = async () => {
       const lock = new TestLock();
       const key = { runId: "other", toolUseId: "x" };
-      await lock.acquire(key, "other-seat", "pnpm -s test:related", 1000, signal());
+      await lock.acquire(key, "other-seat", "pnpm -s test", 1000, signal());
       return { lock, key };
     };
     beforeEach(() => vi.useFakeTimers());
@@ -535,7 +508,7 @@ describe("Codex check records", () => {
       const { lock, key } = await holdLock();
       const h = approver("writer", [], undefined, checks, lock);
       const waiting = h.approve(
-        request("pnpm -s typecheck", { itemId: "item-20" }),
+        request("pnpm -s test", { itemId: "item-20" }),
         undefined,
         signal(),
       );
@@ -550,7 +523,7 @@ describe("Codex check records", () => {
       const tell = vi.fn();
       const h = approver("writer", [], undefined, checks, lock, false, tell);
       const waiting = h.approve(
-        request("pnpm -s typecheck", { itemId: "item-21" }),
+        request("pnpm -s test", { itemId: "item-21" }),
         undefined,
         signal(),
       );
@@ -559,68 +532,17 @@ describe("Codex check records", () => {
       expect(tell).toHaveBeenCalledTimes(1);
       expect(tell.mock.calls[0]?.[0]).toContain("The test lock is busy");
       expect(tell.mock.calls[0]?.[0]).toContain("OTHER-SEAT");
-      expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test:related");
+      expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test");
     });
   });
 
-  it("starts an execution-only record for a command run from a subfolder of the worktree", async () => {
+  it("starts no record for a command run from a subfolder of the worktree", async () => {
     const { begun, checks } = recorder();
     const h = approver("writer", [], undefined, checks);
     mkdirSync(join(cwd, "apps"));
     const sub = request("pnpm -s lint", { itemId: "item-4", cwd: join(cwd, "apps") });
     expect(await h.approve(sub, undefined, signal())).toBe("accept");
-    expect(begun).toEqual([
-      [{ runId: "run", toolUseId: "item-4" }, "pnpm -s lint", [], { receiptEligible: false }],
-    ]);
-  });
-
-  it("excludes nested and root tests in one checkout until an alias completion releases them", async () => {
-    const rows: unknown[] = [];
-    const checks = createCheckRecorder({
-      store: { addCheckRun: (row) => void rows.push(row) },
-      checks: async () => [],
-      state: async () => ({ head: "a".repeat(40), clean: true }),
-      worktree: async () => cwd,
-    });
-    const h = approver("writer", [], undefined, checks);
-    const apps = join(cwd, "apps");
-    mkdirSync(apps);
-    const nested = request("pnpm -s test one.test.ts", {
-      itemId: "nested-item",
-      approvalId: "nested-approval",
-      cwd: apps,
-    });
-    expect(await h.approve(nested, undefined, signal())).toBe("accept");
-    expect(
-      await h.approve(
-        request("pnpm -s test two.test.ts", { itemId: "nested-second", cwd: apps }),
-        undefined,
-        signal(),
-      ),
-    ).toBe("decline");
-    expect(
-      await h.approve(
-        request("pnpm -s test root.test.ts", { itemId: "root-during-nested" }),
-        undefined,
-        signal(),
-      ),
-    ).toBe("decline");
-    await checks.end({ runId: "run", toolUseId: "nested-item" }, true, 0);
-    expect(rows).toEqual([]);
-    expect(
-      await h.approve(
-        request("pnpm -s test root.test.ts", { itemId: "root-after-nested" }),
-        undefined,
-        signal(),
-      ),
-    ).toBe("accept");
-    expect(
-      await h.approve(
-        request("pnpm -s test nested.test.ts", { itemId: "nested-during-root", cwd: apps }),
-        undefined,
-        signal(),
-      ),
-    ).toBe("decline");
+    expect(begun).toEqual([]);
   });
 
   it("starts no record for a refused command", async () => {

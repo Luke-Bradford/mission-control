@@ -316,16 +316,15 @@ describe("Not now and Drop on Needs you", () => {
     }
   });
 
-  it("Not now ends the run with a handoff, moves and labels the card, comments once, and keeps the question answerable", async () => {
+  it("Not now ends the run, moves and labels the card, comments once, and keeps the question answerable", async () => {
     const { id, key } = passedQuestion();
     const a = app();
     try {
       const res = await post(a, key, "not-now");
       expect(res.statusCode).toBe(200);
-      // the run ended and left a handoff
+      // the run ended
       expect(ended).toEqual(["r-guido"]);
       expect(store.run("r-guido")?.endedAt).not.toBeNull();
-      expect(store.handoff("r-guido")).toMatchObject({ runId: "r-guido", ticket: "mc#7" });
       // the card is in Backlog, labelled once
       expect(moves).toEqual([
         { runId: expect.any(String), repoId: "mc", issue: 7, column: "Backlog" },

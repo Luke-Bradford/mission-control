@@ -47,6 +47,7 @@ import {
   grantUngrantableText,
   guardDenyOutput,
   HOOK_RETRY_ENV,
+  HUB_DEFAULT_REASON,
   lockBusyText,
   MC_MCP_SERVER,
   MC_TMP_DIR_NAME,
@@ -83,9 +84,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
 import { loadProfiles, profileHash } from "../src/config/profiles.ts";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
+import type { Engine } from "../src/engine/engine.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
+import { createFlightTools } from "../src/flight/tools.ts";
 import { HOOK_ENTRY } from "../src/guard/hook.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
@@ -93,6 +96,7 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { runPathGrants } from "../src/repo/path-grants.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
+import * as checkouts from "../src/runtime/checkouts.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
@@ -215,66 +219,6 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
-  describe("a waste alarm holds the hub's own starts", () => {
-    const alarm = (check: "restart-storm" | "retry-loop", subject: string, ticket?: string) =>
-      store.waste.insertAlarm(
-        {
-          check,
-          subject,
-          repoId: "mc",
-          ticket: ticket ?? null,
-          seatId: check === "restart-storm" ? subject : null,
-          runId: null,
-          level: 9,
-          evidence: "evidence line.",
-        },
-        Date.now(),
-      );
-    const flightSeat = {
-      id: "flight-1",
-      role: "FLIGHT",
-      accountId: "claude-main",
-      model: "opus",
-      area: [],
-    };
-
-    it("refuses startRun and startWatch of a seat in a restart storm, and lets the operator start", async () => {
-      alarm("restart-storm", "guido-1");
-      alarm("restart-storm", "flight-1");
-      const { sup } = make({
-        rules: withRules(),
-        fetchTicket: ticketWith({}),
-        extraSeat: flightSeat,
-      });
-      sup.start();
-      const e = await refusal(sup.startRun("guido-1", 42));
-      expect(e.status).toBe(422);
-      expect(e.message).toMatch(/^Not started: waste alarm\. GUIDO-1 is in a restart storm/);
-      const w = await refusal(sup.startWatch("flight-1"));
-      expect(w.status).toBe(422);
-      expect(w.message).toMatch(/FLIGHT-1 is in a restart storm/);
-      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
-    });
-
-    it("lets the operator's dock start the watch seat during its own storm", async () => {
-      alarm("restart-storm", "flight-1");
-      const { sup } = make({ rules: withRules(), extraSeat: flightSeat });
-      sup.start();
-      expect((await sup.startWatch("flight-1", { operator: true })).runId).toBeTruthy();
-    });
-
-    it("refuses a start of a parked ticket and starts another ticket", async () => {
-      alarm("retry-loop", "mc#42", "mc#42");
-      const claim = vi.fn(async () => {});
-      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
-      sup.start();
-      const e = await refusal(sup.startRun("guido-1", 42));
-      expect(e.status).toBe(422);
-      expect(e.message).toMatch(/^Not started: waste alarm\. mc#42 is parked/);
-      expect(claim).not.toHaveBeenCalled();
-    });
-  });
-
   describe("a weekly pace past 100%", () => {
     it("never refuses a start: the account's stop_at alone limits it (32% use, 195% projection)", async () => {
       const at = Date.now();
@@ -337,7 +281,7 @@ describe("startRun eligibility", () => {
   });
 
   it("0: refuses a closed card", async () => {
-    onBoard(boardCard(42, { closed: true }));
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
     await refused(422, startClosedText("mc#42"));
   });
 
@@ -547,6 +491,63 @@ describe("startRun eligibility", () => {
     });
   });
 
+  it("a build run snapshots the planner's advice, or the hub default", async () => {
+    store.setModelAdvice("mc", 42, {
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "medium",
+      reason: "small change",
+      by: "planner",
+      at: 1,
+    });
+    const { sup } = make();
+    sup.start();
+    const planned = await sup.startRun("guido-1", 42);
+    expect(store.run(planned.runId)?.advice).toMatchObject({
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "medium",
+      reason: "small change",
+      by: "planner",
+    });
+  });
+
+  it("a hub default follows the seat: a later run on another seat gets its own model", async () => {
+    const { sup } = make({
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "opus-5.5",
+        effort: "high",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await sup.endRun("guido-1");
+    const second = await sup.startRun("guido-2", 42);
+    expect(store.run(second.runId)?.advice).toMatchObject({
+      model: "opus-5.5",
+      effort: "high",
+      by: "hub",
+    });
+  });
+
+  it("a build run snapshots the hub default when the planner recorded no advice", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    const started = store.run(runId);
+    expect(started?.advice).toMatchObject({
+      step: "build",
+      model: started?.model,
+      reason: HUB_DEFAULT_REASON,
+      by: "hub",
+    });
+    expect(store.modelAdvice("mc", 42, "build")?.by).toBe("hub");
+  });
+
   it("10: starts Size M with no plan so its seat can write it", async () => {
     onBoard(boardCard(42, { size: "M" }));
     const { sup } = make();
@@ -711,7 +712,11 @@ describe("startRun", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
-      loop: { ...NEW_LOOP, phase: "review", aside: { worktree: "/w/older", wake: true } },
+      loop: {
+        ...NEW_LOOP,
+        phase: "review",
+        hold: { kind: null, reason: null, ended: false, worktree: "/w/older", wake: true },
+      },
     });
     const pause = { seats: "all" as const, reason: "Hold other work", at: 1, by: "operator" };
     writeCrewPause(store, pause, 1);
@@ -739,7 +744,7 @@ describe("startRun", () => {
     const error = await refusal(sup.startRun("guido-1", 42));
     expect(error.status).toBe(409);
     expect(error.message).toContain("mc#41");
-    expect(store.run(older)?.loop?.aside?.wake).toBe(true);
+    expect(store.run(older)?.loop?.hold?.wake).toBe(true);
   });
 
   it("binds a run-bound pause exception at the actual pre-launch run boundary", async () => {
@@ -1121,7 +1126,6 @@ describe("startRun", () => {
       "TERM",
       "BASH_MAX_TIMEOUT_MS",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
-      "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
       SEAT_SANDBOX_ENV,
@@ -1148,8 +1152,8 @@ describe("startRun", () => {
     expect(env.GIT_COMMITTER_NAME).toBeUndefined();
     // Bash returns to the worktree after every command, so a `cd` never moves the rules (#41)
     expect(env.CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR).toBe("1");
-    // a timed-out suite is killed, not moved to the background still holding the test lock
-    expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe("1");
+    // background Bash is on: seats may run background tasks
+    expect(env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBeUndefined();
     expect(env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
@@ -1808,6 +1812,36 @@ describe("startRun", () => {
     await first;
   });
 
+  it("reserves a ticket while a competing writer starts", async () => {
+    let release = () => {};
+    const fetched = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { sup, fetchTicket } = make({
+      fetchTicket: async () => {
+        await fetched;
+        return TICKET;
+      },
+      extraSeat: {
+        id: "guido-2",
+        role: "GUIDO",
+        accountId: "claude-main",
+        model: "haiku",
+        area: ["apps/**"],
+      },
+    });
+    sup.start();
+    const first = sup.startRun("guido-1", 42);
+    await until(() => expect(fetchTicket).toHaveBeenCalledTimes(1));
+    const second = refusal(sup.startRun("guido-2", 42));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchTicket).toHaveBeenCalledTimes(1);
+    const error = await second;
+    expect(error.status).toBe(409);
+    release();
+    await first;
+  });
+
   it("busy() names a start held in its checkout, so Update refuses it", async () => {
     const { sup } = make();
     sup.start();
@@ -2108,6 +2142,172 @@ describe("reused worktrees", () => {
     expect(store.runs("guido-1", 10)).toEqual([]);
   });
 
+  it("fails a carried-on run when cloning its checkout git directory fails", async () => {
+    const { sup, cfg } = make({
+      extraSeat: {
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      },
+    });
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockRejectedValue(new Error("clone failed"));
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const failed = store.runs("guido-1", 1)[0];
+      expect(failed).toMatchObject({ status: "failed" });
+      expect(failed?.endedAt).not.toBeNull();
+      expect(store.runsOnTicket("mc", "mc#42").every((run) => run.endedAt !== null)).toBe(true);
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+      store.replaceBoard("mc", [boardCard(42, { labels: ["area:server"], status: "In progress" })]);
+      const startSeat = createFlightTools({
+        config: cfg,
+        store,
+        bus,
+        supervisor: sup,
+        login: "me",
+        // the supervisor carries an open PR on only for a start the engine drives
+        engine: { status: () => ({ on: true }) } as unknown as Engine,
+        rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [] }),
+        fetchTicket: async () => TICKET,
+        board: {
+          move: async () => ({ ok: true, changed: true }),
+          read: async () => boardCard(42, { labels: ["area:server"], status: "In progress" }),
+        },
+        gh: async () => ({ code: 0, stdout: "", stderr: "" }),
+        dbPath,
+        knownSecrets: async () => [],
+      }).find((tool) => tool.name === "start_seat");
+      if (startSeat === undefined) throw new Error("missing start_seat");
+      // FLIGHT's own live run, which every FLIGHT tool checks first
+      const seatRow = store.seatSession("guido-1");
+      if (seatRow === null || failed === undefined) throw new Error("missing fixture rows");
+      store.upsertRun({
+        ...failed,
+        id: "flight-run",
+        agentId: "flight-1",
+        endedAt: null,
+        status: "running",
+        ticket: null,
+        branch: null,
+        loop: undefined,
+      });
+      store.setSeatSession({
+        ...seatRow,
+        seatId: "flight-1",
+        runId: "flight-run",
+        state: "running",
+        reason: null,
+        worktree: null,
+      });
+      const carriedOn = await startSeat.call(
+        { seatId: "flight-1", runId: "flight-run" },
+        { seat: "guido-1", issue: 42, basis: "carry the open PR on" },
+      );
+      expect(carriedOn.isError ? carriedOn.text : undefined).toBeUndefined();
+      const carriedRunId = store.seatSession("guido-1")?.runId;
+      expect(store.run(carriedRunId ?? "")?.branch).toBe(BRANCH);
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
+  });
+
+  it("ends a start's run failed when the hub stops before any seat row holds it", async () => {
+    const { sup } = make();
+    sup.start();
+    const first = await sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } });
+    await sup.endRun("guido-1");
+    const firstRun = store.run(first.runId);
+    if (firstRun?.loop?.phase === undefined) throw new Error("missing first run loop");
+    store.setRunLoop(first.runId, { ...firstRun.loop, prNumber: 1 });
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: TICKET.title,
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: true,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    const cloneGit = vi.spyOn(checkouts, "cloneGitDir");
+    const originalUpsertRun = store.upsertRun.bind(store);
+    const upsertRun = vi.spyOn(store, "upsertRun");
+    try {
+      upsertRun.mockImplementation((run, folded) => {
+        if (run.id !== first.runId && run.status === "running")
+          cloneGit.mockImplementation(async () => {
+            void sup.stopAll();
+            throw new Error("clone failed");
+          });
+        return originalUpsertRun(run, folded);
+      });
+      await expect(sup.startRun("guido-1", 42, { loop: { ...NEW_LOOP } })).rejects.toThrow(
+        "clone failed",
+      );
+      const left = store.runs("guido-1", 1)[0];
+      expect(left?.id).not.toBe(first.runId);
+      expect(left).toMatchObject({ status: "failed", endedAt: expect.any(Number) });
+    } finally {
+      cloneGit.mockRestore();
+      upsertRun.mockRestore();
+    }
+  });
+
   it("reports an install refusal in the brief after recording the start merge", async () => {
     const first = await checkout();
     writeFileSync(join(first.path, ".npmrc"), "unsafe=true\n");
@@ -2182,6 +2382,50 @@ describe("endRun", () => {
     expect(next.runId).not.toBe(runId);
     expect(store.run(next.runId)?.seq).toBe(2);
     expect(store.run(runId)?.status).toBe("ok");
+  });
+
+  it("removes a stopped ticket worktree after its card closes", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.replaceBoard("mc", [boardCard(42, { closed: true })]);
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
+  });
+
+  it("removes a stopped ticket worktree after its branch PR merges", async () => {
+    const { sup } = make();
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const worktree = store.seatSession("guido-1")?.worktree as string;
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 1,
+          title: "Merged",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: 1,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      1,
+    );
+    await sup.endRun("guido-1");
+    await until(() => expect(existsSync(worktree)).toBe(false));
   });
 
   it("with hold, stops the seat and keeps it out of rotation", async () => {
@@ -2493,7 +2737,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token
@@ -2626,22 +2870,22 @@ describe("the mc tools and the guard (phase 2b)", () => {
   /** The next cue line: the first ends the fake's call (its tool_result), the second the turn. */
   const cue = (sup: Supervisor) => sup.message("guido-1", "cue", { interrupt: false });
 
-  it("refuses a parallel call, then frees the accepted call and later turn holds", async () => {
+  it("releases a call's hold when its tool_result comes, and the run's holds at the turn's end", async () => {
     const { sup, runId, lock } = await running();
     await toolgap(sup);
-    expect(
-      await lock.acquire({ runId, toolUseId: "toolu_g" }, "guido-1", "pnpm -s test", 1000, live()),
-    ).toBe(true);
-    expect(
-      await lock.acquire({ runId, toolUseId: "toolu_p" }, "guido-1", "pnpm -s test", 1000, live()),
-    ).toBe(false);
-    expect(lock.state().holder?.runId).toBe(runId);
+    // the fake's call, and a parallel one of the same run that is still going
+    await lock.acquire({ runId, toolUseId: "toolu_g" }, "guido-1", "pnpm -s test", 1000, live());
+    await lock.acquire({ runId, toolUseId: "toolu_p" }, "guido-1", "pnpm -s test", 1000, live());
     const transcript = () => readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8");
     await cue(sup);
     await until(() => expect(transcript()).toContain('"tool_use_id":"toolu_g"'));
-    // Only the accepted call held the lock. Its result releases it before the turn ends.
-    await until(() => expect(lock.state().holder).toBeNull());
+    // toolu_g ended, toolu_p holds on; the turn has not ended
+    expect(lock.state().holder?.runId).toBe(runId);
     expect(seatState("guido-1")).toBe("running");
+    lock.release({ runId, toolUseId: "toolu_p" });
+    // the lock is free once toolu_g's hold is gone too: the transcript line is written by the keeper
+    // before the hub has read it, so that release may be a moment behind
+    await until(() => expect(lock.state().holder).toBeNull());
     // a hold no tool_result ends (an interrupt, a refusal) is freed at the turn's end
     await lock.acquire({ runId, toolUseId: "toolu_q" }, "guido-1", "pnpm -s test", 1000, live());
     await cue(sup);
@@ -3408,18 +3652,18 @@ import(${JSON.stringify(fixture)});
     await sup.endRunByEngine(runId);
   });
 
-  it.each([
-    ["git commit -m x", "git-write"],
-    ["sleep 1 &", "background"],
-  ] as const)("sends %s to the shared %s outcome guard", async (command, rule) => {
-    const { sup } = codex({ command });
-    sup.start();
-    const { runId } = await sup.startRun("guido-1", 42);
-    await untilCodex(() => expect(decision()).toBe("decline"));
-    expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
-    await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    await sup.endRunByEngine(runId);
-  });
+  it.each([["git commit -m x", "git-write"]] as const)(
+    "sends %s to the shared %s outcome guard",
+    async (command, rule) => {
+      const { sup } = codex({ command });
+      sup.start();
+      const { runId } = await sup.startRun("guido-1", 42);
+      await untilCodex(() => expect(decision()).toBe("decline"));
+      expect(store.guardHits(0)).toContainEqual(expect.objectContaining({ runId, rule }));
+      await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.endRunByEngine(runId);
+    },
+  );
 
   it.each([
     { name: "uncorrelated mc", server: MC_MCP_SERVER, correlated: false },
@@ -3465,7 +3709,6 @@ import(${JSON.stringify(fixture)});
     const { sup, lock } = codex({
       command: "pnpm -s test",
       params: { approvalId: "test-key" },
-      exitCode: 0,
       holdItem: true,
       holdTurn: true,
     });
@@ -3501,12 +3744,7 @@ import(${JSON.stringify(fixture)});
   });
 
   it("retains an accepted test lock when a steer is rejected", async () => {
-    const { sup, lock, log } = codex({
-      command: "pnpm -s test",
-      holdItem: true,
-      exitCode: 0,
-      ackDelayMs: 100,
-    });
+    const { sup, lock, log } = codex({ command: "pnpm -s test", holdItem: true, ackDelayMs: 100 });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await untilCodex(() => expect(decision()).toBe("accept"));
@@ -3516,8 +3754,7 @@ import(${JSON.stringify(fixture)});
     );
     expect(lock.state().holder?.runId).toBe(runId);
     expect(seatState("guido-1")).toBe("running");
-    // A rejected steer cannot end the accepted command; its actual item exit does.
-    await sup.message("guido-1", JSON.stringify({ completeItem: true }), { interrupt: false });
+    await sup.message("guido-1", JSON.stringify({ completeTurn: true }), { interrupt: false });
     await untilCodex(() => expect(lock.state().holder).toBeNull());
     await sup.endRunByEngine(runId);
   });
@@ -3546,7 +3783,7 @@ import(${JSON.stringify(fixture)});
     expect(lock.state().holder).toBeNull();
   });
 
-  it("keeps an accepted lock after an early turn completion until the process exits", async () => {
+  it("releases an accepted lock on turn/completed without item/completed", async () => {
     const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -3554,9 +3791,8 @@ import(${JSON.stringify(fixture)});
     expect(lock.state().holder?.runId).toBe(runId);
     await sup.message("guido-1", JSON.stringify({ completeTurn: true }), { interrupt: false });
     await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    expect(lock.state().holder?.runId).toBe(runId);
-    await sup.endRunByEngine(runId);
     expect(lock.state().holder).toBeNull();
+    await sup.endRunByEngine(runId);
   });
 
   it.each(["close", "exit"])("cancels an actual queued test on %s", async (how) => {
@@ -3748,7 +3984,10 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   store.upsertRun({ ...run, endedAt: null, status: "running" });
   store.setRunLoop(run.id, {
     ...NEW_LOOP,
-    aside: {
+    hold: {
+      kind: null,
+      reason: null,
+      ended: false,
       worktree: join(root, "mc-crew", "guido-1-42"),
       wake: true,
     },
@@ -3756,7 +3995,7 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   const error = await refusal(sup.wakeRun(run.id));
   expect(error.status).toBe(409);
   expect(store.run(run.id)?.endedAt).toBeNull();
-  expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
+  expect(store.run(run.id)?.loop?.hold?.wake).toBe(true);
   expect(recorded()).toEqual([]);
 });
 

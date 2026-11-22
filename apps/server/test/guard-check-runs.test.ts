@@ -10,7 +10,6 @@ import {
   cloneState,
   createCheckRecorder,
   lockedCheck,
-  testCommand,
 } from "../src/guard/check-runs.ts";
 
 const LINT = "pnpm -s lint";
@@ -121,18 +120,6 @@ describe("lockedCheck", () => {
     expect(lockedCheck("pnpm -s lint --fix", CHECKS)).toBeNull();
     expect(lockedCheck("ls", CHECKS)).toBeNull();
     expect(lockedCheck(LINT, [])).toBeNull();
-  });
-});
-
-describe("testCommand", () => {
-  it.each([
-    "pnpm -s test apps/server/test/guard.test.ts",
-    "pnpm -s vitest run x.test.ts",
-    "vitest run x.test.ts",
-  ])("recognises %s", (command) => expect(testCommand(command)).toBe(true));
-
-  it("does not mistake a command that mentions tests for one that runs them", () => {
-    expect(testCommand("echo pnpm -s test")).toBe(false);
   });
 });
 
@@ -248,7 +235,7 @@ describe("the check recorder", () => {
     readingEnd = true;
     const ending = r.end(alias, true, 0);
     expect(r.pending("r1")).toEqual([LINT, TYPES]);
-    r.dropRun("r1", { keepWatching: true }); // A normal Codex hand-back keeps its receipt alive.
+    r.dropRun("r1"); // A turn ending while the completed receipt is checked must not discard it.
     expect(r.pending("r1")).toEqual([LINT, TYPES]);
     finishState?.(state);
     await ending;
@@ -451,127 +438,17 @@ describe("the check recorder", () => {
     expect(rows).toEqual([]);
   });
 
-  it("records an end once, ignores an end it never saw begin, and keeps watching after a turn ends", async () => {
+  it("records an end once, ignores an end it never saw begin, and forgets a dropped run", async () => {
     const r = recorder();
     await r.end(KEY, true);
     await r.begin(KEY, LINT);
     await r.end(KEY, true);
     await r.end(KEY, true);
     expect(rows).toHaveLength(1);
-    await r.begin(KEY, LINT);
-    r.dropRun("r1", { keepWatching: true });
-    await r.end(KEY, true);
-    expect(rows).toHaveLength(2);
-  });
-
-  it("keeps a Codex check past its turn for the hub's longest wait, not the 2-minute default", async () => {
-    const item = { runId: "r1", toolUseId: "item-1" };
-    const other = { runId: "r1", toolUseId: "t2" };
-    let t = 99;
-    const freed: unknown[] = [];
-    const r = createCheckRecorder({
-      store: { addCheckRun: (c) => void rows.push(c) },
-      checks: async () => checks,
-      state: async () => state,
-      worktree: async () => WORKTREE,
-      now: () => t,
-      release: (k) => void freed.push(k),
-    });
-    await r.begin(item, TYPES, [], { receiptEligible: true });
-    t += 60_000;
-    r.dropRun("r1", { keepWatching: true });
-    t += 120_000;
-    expect(await r.admit?.(other, TYPES)).toBe(TYPES);
-    r.cancel?.(other);
-    t += 120_000;
-    await r.end(item, true, 0);
-    expect(rows).toHaveLength(1);
-    expect(freed).toEqual([]);
-  });
-
-  it("releases an interrupted call so another check can be admitted", async () => {
-    const r = recorder();
     await r.begin(KEY, LINT);
     r.dropRun("r1");
-    expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
-    expect(r.drops("r1")).toMatchObject([{ reason: "turn-ended", command: LINT }]);
-  });
-
-  it("does not reinstall a call whose run was dropped while its start was still reading the clone", async () => {
-    let release: () => void = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const r = createCheckRecorder({
-      store: { addCheckRun: (c) => void rows.push(c) },
-      checks: async () => checks,
-      state: async () => {
-        await gate;
-        return state;
-      },
-      worktree: async () => WORKTREE,
-      now: () => 99,
-    });
-    expect(await r.admit?.(KEY, LINT)).toBeNull();
-    const starting = r.begin(KEY, LINT);
-    r.dropRun("r1"); // the turn was interrupted before the start finished
-    release();
-    await starting;
-    expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
-  });
-
-  it("stops waiting for a kept call once its deadline passes, and frees what it held", async () => {
-    let t = 99;
-    const freed: unknown[] = [];
-    const r = createCheckRecorder({
-      store: { addCheckRun: (c) => void rows.push(c) },
-      checks: async () => checks,
-      state: async () => state,
-      worktree: async () => WORKTREE,
-      now: () => t,
-      release: (k) => void freed.push(k),
-    });
-    await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "item-1" }]);
-    r.dropRun("r1", { keepWatching: true }); // no end ever comes
-    const other = { runId: "r1", toolUseId: "t2" };
-    expect(await r.admit?.(other, TYPES)).toBe(LINT);
-    r.cancel?.(other);
-    t += CHECK_BASH_TIMEOUT_MS + 1;
-    expect(await r.admit?.(other, TYPES)).toBeNull();
-    expect(freed).toEqual([KEY, { runId: "r1", toolUseId: "item-1" }]);
-    expect(r.drops("r1")).toMatchObject([{ reason: "timeout", command: LINT }]);
-    expect(rows).toEqual([]);
-  });
-
-  it("bounds a call at once when its completion came with no exit code", async () => {
-    let t = 99;
-    const freed: unknown[] = [];
-    const r = createCheckRecorder({
-      store: { addCheckRun: (c) => void rows.push(c) },
-      checks: async () => checks,
-      state: async () => state,
-      worktree: async () => WORKTREE,
-      now: () => t,
-      release: (k) => void freed.push(k),
-    });
-    const item = { runId: "r1", toolUseId: "item-1" };
-    await r.begin(KEY, LINT, [item]);
-    r.keep?.(KEY); // no turn end, no later event: the call is waited for only until its timeout
-    const other = { runId: "r1", toolUseId: "t2" };
-    expect(await r.admit?.(other, TYPES)).toBe(LINT);
-    r.cancel?.(other);
-    t += CHECK_BASH_TIMEOUT_MS + 1;
-    expect(await r.admit?.(other, TYPES)).toBeNull();
-    expect(freed).toEqual([KEY, item]);
-  });
-
-  it("forgets a call whose approval was cancelled after it was noted", async () => {
-    const r = recorder();
-    await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "item-1" }]);
-    r.abandon?.(KEY);
-    expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
-    await r.end({ runId: "r1", toolUseId: "item-1" }, true, 0);
-    expect(rows).toEqual([]);
+    await r.end(KEY, true);
+    expect(rows).toHaveLength(1);
   });
 
   it("keeps two runs' calls with the same tool id apart", async () => {
@@ -580,6 +457,16 @@ describe("the check recorder", () => {
     await r.begin({ runId: "r2", toolUseId: "t" }, LINT);
     await r.end({ runId: "r2", toolUseId: "t" }, true);
     expect(rows.map((x) => x.runId)).toEqual(["r2"]);
+  });
+
+  it("names only the related-tests check as one that takes the test lock", () => {
+    const r = recorder();
+    expect(r.lockedBy("pnpm -s test:related")).toBe("pnpm -s test:related");
+    expect(r.lockedBy("pnpm run test:related")).toBe("pnpm -s test:related");
+    expect(r.lockedBy(`${LINT} && pnpm -s test:related`)).toBe("pnpm -s test:related");
+    expect(r.lockedBy(TYPES)).toBeNull();
+    expect(r.lockedBy(LINT)).toBeNull();
+    expect(r.lockedBy("ls")).toBeNull();
   });
 
   it("never throws when the clone read does", async () => {
@@ -593,71 +480,6 @@ describe("the check recorder", () => {
       log: (l) => void lines.push(l),
     });
     await r.begin(KEY, LINT);
-    expect(lines).toHaveLength(1);
-  });
-
-  it("names the check a call must take the test lock for, and records nothing for a call that waited", async () => {
-    const r = recorder();
-    expect(await r.lockedBy("r1", TYPES)).toBe(TYPES);
-    expect(await r.lockedBy("r1", "ls")).toBeNull();
-    // the related-tests run takes the lock by name, though the repo no longer lists it as a check
-    expect(await r.lockedBy("r1", "pnpm -s test:related")).toBe("pnpm -s test:related");
-    expect(await r.lockedBy("r1", `${LINT} && ${TYPES} && pnpm -s test:related`)).toBe(LINT);
-    // refused while another seat held the lock: it began but never ended, so no failed row
-    await r.begin(KEY, TYPES);
-    expect(rows).toEqual([]);
-  });
-
-  it("names the running test before another test can start in the same checkout", async () => {
-    const r = recorder();
-    await r.begin(KEY, "pnpm -s test apps/server/test/guard.test.ts");
-    expect(await r.running?.("r1", "vitest run apps/server/test/guard.test.ts")).toBe(
-      "pnpm -s test apps/server/test/guard.test.ts",
-    );
-    await r.end(KEY, true, 0);
-  });
-
-  it("atomically refuses a second check admission in the same checkout", async () => {
-    const r = recorder();
-    const other = { runId: "r1", toolUseId: "t2" };
-    const admissions = await Promise.all([r.admit?.(KEY, LINT), r.admit?.(other, TYPES)]);
-    expect(admissions.filter((admission) => admission === null)).toHaveLength(1);
-    expect(admissions.filter((admission) => admission !== null)).toEqual([LINT]);
-    const winner = admissions[0] === null ? KEY : other;
-    await r.begin(winner, winner === KEY ? LINT : TYPES);
-    await r.end(winner, true, 0);
-  });
-
-  it.each([
-    ["dirty", { head: HEAD, clean: false } as CloneState, {}],
-    ["unreadable", null, {}],
-    ["background", { head: HEAD, clean: true } as CloneState, { background: true }],
-  ])(
-    "keeps a %s test execution exclusive although it cannot earn a receipt",
-    async (_n, start, options) => {
-      const r = recorder();
-      state = start;
-      await r.begin(KEY, "pnpm -s test apps/server/test/guard.test.ts", [], options);
-      expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, LINT)).toBe(
-        "pnpm -s test apps/server/test/guard.test.ts",
-      );
-      state = { head: HEAD, clean: true };
-      await r.end(KEY, true, 0);
-      expect(rows).toEqual([]);
-    },
-  );
-
-  it("takes no lock when the repo's rules cannot be read", async () => {
-    const lines: string[] = [];
-    const r = createCheckRecorder({
-      store: { addCheckRun: () => {} },
-      checks: async () => {
-        throw new Error("no rules");
-      },
-      state: async () => state,
-      log: (l) => void lines.push(l),
-    });
-    expect(await r.lockedBy("r1", TYPES)).toBeNull();
     expect(lines).toHaveLength(1);
   });
 });
@@ -734,26 +556,36 @@ describe("why the recorder dropped a check call", () => {
     expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
   });
 
-  it("keeps watching a check when the tool hands back early", async () => {
-    const r = recorder();
-    await r.begin(KEY, `${LINT} && ${TYPES}`);
-    r.dropRun("r1", { keepWatching: true });
-    await r.end(KEY, true, 0);
-    expect(rows).toMatchObject([
-      { command: LINT, headSha: HEAD, ok: true, exitCode: 0 },
-      { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
-    ]);
-    expect(reasons(r)).toEqual([]);
+  it("names the check still running in the same run, until it ends or outlives its timeout", async () => {
+    let t = 1_000;
+    const r = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      now: () => t,
+    });
+    expect(await r.running?.("r1", LINT)).toBeNull();
+    await r.begin(KEY, LINT);
+    expect(await r.running?.("r1", TYPES)).toBe(LINT);
+    expect(await r.running?.("r1", "pnpm -s vitest run a.test.ts")).toBe(LINT);
+    expect(await r.running?.("r1", "ls")).toBeNull();
+    expect(await r.running?.("other", TYPES)).toBeNull();
+    t += CHECK_BASH_TIMEOUT_MS + 1_000;
+    expect(await r.running?.("r1", TYPES)).toBeNull();
+    await r.begin({ runId: "r1", toolUseId: "t2" }, TYPES);
+    expect(await r.running?.("r1", LINT)).toBe(TYPES);
+    await r.end({ runId: "r1", toolUseId: "t2" }, true, 0);
+    expect(await r.running?.("r1", LINT)).toBeNull();
   });
 
-  it("marks an early-returned check stale when HEAD changes before it exits", async () => {
+  it("says the turn ended before a check reported its end", async () => {
     const r = recorder();
-    await r.begin(KEY, LINT);
-    r.dropRun("r1", { keepWatching: true });
-    state = { head: "b".repeat(40), clean: true };
-    await r.end(KEY, true, 0);
-    expect(rows).toEqual([]);
-    expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
+    await r.begin(KEY, `${LINT} && ${TYPES}`);
+    r.dropRun("r1");
+    expect(reasons(r)).toEqual([
+      ["turn-ended", LINT, HEAD],
+      ["turn-ended", TYPES, HEAD],
+    ]);
   });
 
   it("says a check moved to the background", async () => {
@@ -787,100 +619,6 @@ describe("why the recorder dropped a check call", () => {
       { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
     ]);
     expect(r.pending("r1")).toEqual([]);
-  });
-
-  describe("an unchanged rerun", () => {
-    type Row = {
-      runId: string;
-      command: string;
-      headSha: string;
-      ok: boolean;
-      exitCode?: number | null;
-      at: number;
-    };
-    const withRerun = () => {
-      const refused: string[] = [];
-      const stored = (): Row[] => rows as Row[];
-      const r = createCheckRecorder({
-        store: {
-          addCheckRun: (c) => void rows.push(c),
-          latestCheckRun: (runId, command, headSha) => {
-            const found = stored()
-              .filter((x) => x.runId === runId && x.command === command && x.headSha === headSha)
-              .at(-1);
-            return found === undefined
-              ? null
-              : {
-                  headSha,
-                  invokedCommand: command,
-                  ok: found.ok,
-                  exitCode: found.exitCode ?? null,
-                  at: found.at,
-                };
-          },
-          latestCheckResults: (runId, command, headSha, limit) =>
-            stored()
-              .filter(
-                (x) =>
-                  x.runId === runId &&
-                  x.command === command &&
-                  x.headSha === headSha &&
-                  (x.ok || (x.exitCode ?? null) !== null),
-              )
-              .slice(-limit)
-              .reverse()
-              .map((x) => ({ ok: x.ok, exitCode: x.exitCode ?? null })),
-          addRerunRefusal: (_run, command) => void refused.push(command),
-        },
-        checks: async () => CHECKS,
-        state: async () => state,
-        now: () => clock,
-      });
-      return { r, refused };
-    };
-
-    it("is refused after a pass, and the refusal is recorded", async () => {
-      const { r, refused } = withRerun();
-      await r.begin(KEY, LINT);
-      await r.end(KEY, true, 0);
-      expect(await r.rerun?.("r1", LINT)).toMatch(/already ran on commit/);
-      expect(refused).toEqual([LINT]);
-    });
-
-    it("allows one retry after a failure with an exit code, and refuses the second identical failure", async () => {
-      const { r, refused } = withRerun();
-      await r.begin(KEY, LINT);
-      await r.end(KEY, false, 1);
-      expect(await r.rerun?.("r1", LINT)).toBeNull();
-      await r.begin(KEY, LINT);
-      await r.end(KEY, false, 1);
-      expect(await r.rerun?.("r1", LINT)).toMatch(/Not run/);
-      expect(refused).toEqual([LINT]);
-    });
-
-    it("allows configured checks to run again after related tests fail twice", async () => {
-      const { r, refused } = withRerun();
-      const command = `${LINT} && ${TYPES} && pnpm -s test:related`;
-      await r.begin(KEY, command);
-      await r.end(KEY, false, 1);
-      await r.begin({ runId: "r1", toolUseId: "t2" }, command);
-      await r.end({ runId: "r1", toolUseId: "t2" }, false, 1);
-      expect(await r.rerun?.("r1", LINT)).toBeNull();
-      expect(refused).toEqual([]);
-
-      await r.begin({ runId: "r1", toolUseId: "t3" }, LINT);
-      await r.end({ runId: "r1", toolUseId: "t3" }, true, 0);
-      expect(rows.at(-1)).toMatchObject({ command: LINT, ok: true, exitCode: 0 });
-    });
-
-    it("is not refused after a call the Bash timeout killed: it may run again with a longer one", async () => {
-      const { r, refused } = withRerun();
-      await r.begin(KEY, LINT);
-      clock += 120_000;
-      await r.end(KEY, false);
-      expect(await r.rerun?.("r1", LINT)).toBeNull();
-      expect(refused).toEqual([]);
-    });
   });
 
   it("says a failed call with no exit code that ran to its Bash timeout was killed by it", async () => {
@@ -960,7 +698,7 @@ describe("why the recorder dropped a check call", () => {
       expect(rows).toEqual([]);
     });
 
-    it("does not count a background call or invent a result whose end the hub never saw", async () => {
+    it("does not count a background call or one whose end the hub never saw", async () => {
       const r = recorder();
       await r.begin(KEY, LINT, [], { ...options, background: true });
       clock += LONG;
@@ -968,8 +706,8 @@ describe("why the recorder dropped a check call", () => {
       expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
       await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
       clock += LONG;
-      r.dropRun("r1", { keepWatching: true });
-      expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
+      r.dropRun("r1");
+      expect(reasons(r)).toContainEqual(["turn-ended", LINT, HEAD]);
       expect(rows).toEqual([]);
     });
   });
@@ -981,11 +719,11 @@ describe("why the recorder dropped a check call", () => {
     expect(reasons(r)).toEqual([["unreadable", LINT, null]]);
   });
 
-  it("keeps watching after a drop and keeps runs apart", async () => {
+  it("forgets a drop once the check passes on that head, and keeps runs apart", async () => {
     const r = recorder();
     await r.begin(KEY, LINT);
-    r.dropRun("r1", { keepWatching: true });
-    expect(r.drops("r1")).toEqual([]);
+    r.dropRun("r1");
+    expect(r.drops("r1")).toHaveLength(1);
     await r.begin({ runId: "r1", toolUseId: "t2" }, LINT);
     await r.end({ runId: "r1", toolUseId: "t2" }, true);
     expect(r.drops("r1")).toEqual([]);

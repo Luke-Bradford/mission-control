@@ -286,7 +286,7 @@ it("a run parked on a closed PR holds its branch, like a live one", async () => 
       loop: {
         ...NEW_LOOP,
         prNumber: 1,
-        parked: { kind: "pr-closed", reason: "closed", ended: false },
+        hold: { kind: "pr-closed", reason: "closed", ended: false, worktree: null, wake: false },
       },
     }),
   );

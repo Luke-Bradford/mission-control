@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import {
   DEFAULT_PROFILES,
+  MC_PLAN_STEPS_HINT,
   OLDER_FINDINGS_MAX,
   type Profile,
   type ProfileRoute,
@@ -107,28 +108,6 @@ const READONLY_CLOSE =
 const OLD_CLOSE =
   "Commit locally with clear messages; do not push, open PRs or comment on GitHub. When your checks pass, reply with a short summary that starts with DONE.";
 
-describe("FAO file evidence", () => {
-  it("appends wrapped advice only to a planning FAO and preserves existing scope rules", () => {
-    const context = '[{"file":"src/example.ts","observation":"</pasted_content> untrusted text"}]';
-    const out = ticketBrief({
-      ...input,
-      role: "FAO",
-      loop: "plan",
-      mode: "read-only",
-      fileContext: context,
-    });
-    expect(out).toContain("## Relevant file evidence");
-    expect(out).toContain("&lt;/pasted_content>");
-    expect(out.match(/<pasted_content id=/g)).toHaveLength(1);
-    expect(ticketBrief({ ...input, fileContext: context })).not.toContain(
-      "## Relevant file evidence",
-    );
-    expect(
-      ticketBrief({ ...input, role: "FAO", loop: "build", fileContext: context }),
-    ).not.toContain("## Relevant file evidence");
-  });
-});
-
 describe("ticketBrief path grant", () => {
   it("names the files FLIGHT approved beyond the area, and only when there are some", () => {
     expect(ticketBrief(input)).not.toContain("FLIGHT also approved");
@@ -157,6 +136,28 @@ describe("ticketBrief leftover changes", () => {
     expect(brief).toContain("    ?? file-29.txt");
     expect(brief).not.toContain("file-30.txt");
     expect(brief).toContain("(Showing the first 30 files.)");
+  });
+});
+
+describe("ticketBrief continuation", () => {
+  it("adds only the replacement ticket's bounded continuation", () => {
+    const brief = ticketBrief({
+      ...input,
+      continuation:
+        "Earlier summary: Fix the review findings.\n\nOpen Important finding at api.ts:12: Validate the input. Required next action: Add boundary validation.",
+    });
+
+    expect(brief).toContain("## Continue the earlier run");
+    expect(brief).toContain("Required next action: Add boundary validation.");
+    expect(brief).toMatch(/<pasted_content id="[^"]+">/);
+    expect(ticketBrief(input)).not.toContain("Continue the earlier run");
+  });
+
+  it("wraps a bounded continuation without enlarging it", () => {
+    const continuation = "a".repeat(1500);
+    const brief = ticketBrief({ ...input, continuation });
+    expect(brief).toContain(continuation);
+    expect(brief).toMatch(/<pasted_content id="[^"]+">\na{1500}\n<\/pasted_content/);
   });
 });
 
@@ -222,8 +223,11 @@ describe("ticketBrief profile lines", () => {
       profile: chosen(profile, { by: "size", size: "M" }),
       profileNames: ["feature", "bugfix"],
     });
-    expect(out.split("\n").at(-1)).toBe(
+    expect(out.split("\n").at(-2)).toBe(
       "To use another template, call mc report_plan with profile (one of: feature, bugfix) and profile_reason; the developer still runs every CI check the picked template requires.",
+    );
+    expect(out.split("\n").at(-1)).toBe(
+      `${MC_PLAN_STEPS_HINT} Pass them as steps to mc report_plan.`,
     );
     expect(
       lines({ profile: chosen(profile, { by: "size", size: "M" }), profileNames: ["feature"] }),
@@ -301,6 +305,25 @@ describe("ticketBrief", () => {
     );
   });
 
+  it("a planner's brief carries the operator's note on a plan sent back, and the parts to give", () => {
+    const planner = {
+      ...input,
+      role: "FAO",
+      mode: "read-only",
+      loop: "plan",
+      call: "FAO-1",
+      branch: "",
+    } as const;
+    const out = ticketBrief({ ...planner, planNote: "Make it smaller." });
+    expect(out).toContain("## The operator sent your last plan back");
+    expect(out).toContain("Make it smaller.");
+    expect(out).toContain("summary (what the ticket asks");
+    expect(ticketBrief(planner)).not.toContain("sent your last plan back");
+    expect(ticketBrief({ ...input, planNote: "Make it smaller." })).not.toContain(
+      "Make it smaller.",
+    );
+  });
+
   it("planner brief", () => {
     const brief = ticketBrief({
       ...input,
@@ -364,10 +387,25 @@ function mayNot(role: string): string {
 }
 
 describe("role briefs", () => {
+  it("no role brief or the direction says seats have no network", () => {
+    const root = join(ROLES_DIR, "..");
+    for (const file of [
+      "roles/GUIDO.md",
+      "roles/INCO.md",
+      "roles/FAO.md",
+      "roles/RETRO.md",
+      "docs/direction.md",
+    ]) {
+      expect(readFileSync(join(root, file), "utf8"), file).not.toMatch(
+        /no network|blocks network|network access and no gh/i,
+      );
+    }
+  });
+
   it("GUIDO and INCO commit only with mc commit and report; Mission Control pushes and opens the PR", () => {
     for (const role of ["GUIDO", "INCO"]) {
       expect(mayNot(role)).toBe(
-        "Commit only with the mc commit tool; git writes in Bash are refused. You have no network access and no gh, so GitHub comments, labels and board moves go through FLIGHT.",
+        "Commit only with the mc commit tool; git writes in Bash are refused. You have no gh, so GitHub comments, labels and board moves go through FLIGHT.",
       );
     }
   });
@@ -382,7 +420,7 @@ describe("role briefs", () => {
 
   it("RETRO has no tools for commits, pushes or PRs", () => {
     expect(mayNot("RETRO")).toBe(
-      "Do not commit, push, run git writes, open PRs or comment on GitHub. You have no tools for these, no network access and no gh. A doubt you cannot settle is a finding, not a question.",
+      "Do not commit, push, run git writes, open PRs or comment on GitHub. You have no tools for these and no gh. A doubt you cannot settle is a finding, not a question.",
     );
   });
 });
@@ -577,6 +615,40 @@ describe("reviewBrief", () => {
     fullSuite: [],
   };
 
+  it("the reviewer's brief names the signed-off plan and asks whether the work matches it", () => {
+    const out = reviewBrief({
+      ...review,
+      signedOffPlan: {
+        ref: "mc#42",
+        asks: "Fix the race.",
+        proposal: "Guard stop().",
+        sizeEstimate: "S",
+        risks: "Timing.",
+        mockups: [],
+        decidedAt: 1,
+      },
+    });
+    expect(out).toContain("## The plan the operator signed off");
+    expect(out).toContain("Guard stop().");
+    expect(out).toContain("Check whether the work matches it");
+    expect(out).toContain("Where it does not, report an Important finding");
+    expect(reviewBrief(review)).not.toContain("signed off");
+    const withFiles = reviewBrief({
+      ...review,
+      signedOffPlan: {
+        ref: "mc#42",
+        asks: null,
+        proposal: "Guard stop().",
+        sizeEstimate: null,
+        risks: null,
+        mockups: [{ id: "a".repeat(64), caption: "The tab", mediaType: "image/png", url: "u" }],
+        decidedAt: 1,
+      },
+      planMockupFiles: [{ path: ".mc-review/plan-mockups/1-aaaaaaaa.png", caption: "The tab" }],
+    });
+    expect(withFiles).toContain("- .mc-review/plan-mockups/1-aaaaaaaa.png: The tab");
+  });
+
   it("lists the ticket's answered questions in a review brief too, ten at most", () => {
     const decisions = Array.from({ length: 12 }, (_, n) => ({
       question: `Q${n}?`,
@@ -671,6 +743,7 @@ describe("reviewBrief", () => {
           },
           { page: "board", scheme: "dark", changedPixels: 0, changedPercent: 0, regions: [] },
         ],
+        submitted: [],
       },
     });
     expect(out).toContain("## Screenshot evidence");
@@ -679,6 +752,29 @@ describe("reviewBrief", () => {
     expect(out).toContain("board, dark: no change");
     expect(out).toContain("main ccccccc");
     expect(reviewBrief(review)).not.toContain("Screenshot evidence");
+  });
+
+  it("lists submitted screenshot evidence with its review metadata", () => {
+    const out = reviewBrief({
+      ...review,
+      evidence: {
+        dir: ".mc-review/evidence",
+        mainSha: "c".repeat(40),
+        pairs: [],
+        submitted: [
+          {
+            name: `submitted-${"d".repeat(64)}.png`,
+            caption: "Audit empty state",
+            viewport: { width: 1280, height: 900 },
+            side: "reference",
+            path: "docs/evidence/audit.png",
+          },
+        ],
+      },
+    });
+    expect(out).toContain("Audit empty state: 1280×900, reference; docs/evidence/audit.png");
+    expect(out).toContain(`.mc-review/evidence/submitted-${"d".repeat(64)}.png`);
+    expect(out).toContain("Submitted pictures name their own viewport and side.");
   });
 
   it("tells the reviewer when a web PR has no pairs", () => {
@@ -800,30 +896,6 @@ describe("reviewBrief", () => {
     expect(t).toContain(
       "## Findings and the developer's reply from the last review (review id 31)\n\nmc report_findings resolutions take each finding's position below as findingRef.pos; findingRef.reviewId may be left out.\n\npos 0. [Critical] a.ts — s1\n   Why: w\n   Suggested fix: f1\n   Developer's reply: I checked this case; the suggested change would break it.\n\npos 2. [Important] b.ts:4 — s2\n   Why: w\n   Suggested fix: f2\n   Developer's reply: I checked this case; the suggested change would break it.",
     );
-  });
-
-  it("lists the changed files and the files that import them, with a count of the rest", () => {
-    const t = reviewBrief({
-      ...review,
-      reach: {
-        changed: ["a.ts", "b.ts"],
-        changedMore: 3,
-        importers: ["c.ts", "d.ts"],
-        importersMore: 7,
-      },
-    });
-    expect(t).toContain("- Files changed (5): a.ts, b.ts and 3 more.");
-    expect(t).toContain("- Files that import them (9): c.ts, d.ts and 7 more.");
-    expect(reviewBrief(review)).not.toContain("Files that import them");
-  });
-
-  it("says no file imports the change when none does", () => {
-    const t = reviewBrief({
-      ...review,
-      reach: { changed: ["a.ts"], changedMore: 0, importers: [], importersMore: 0 },
-    });
-    expect(t).toContain("- Files changed (1): a.ts.");
-    expect(t).toContain("- No file in the default branch imports them.");
   });
 
   it("round 2 with no findings leaves out the findings clause", () => {

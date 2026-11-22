@@ -1,11 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AWAY_SETTING, type BoardItem, NEW_LOOP, type Run } from "@mc/core";
+import { AWAY_SETTING, NEW_LOOP, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CLOSED_AWAY } from "../src/away.ts";
 import type { CcConfig } from "../src/config.ts";
-import { ACCOUNT_STOP_FREES_WHEN, releaseAtAccountStop } from "../src/engine/account-release.ts";
+import { accountStopReasonText, releaseAtAccountStop } from "../src/engine/account-release.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-09T12:00:00Z");
@@ -16,7 +16,6 @@ const REF = `${REPO}#7`;
 let dir: string;
 let store: Store;
 let ended: string[];
-let started: { seatId: string; issue: number }[];
 
 const seat = (id: string, accountId: string) => ({
   id,
@@ -80,35 +79,6 @@ const authorRun = (): Run => ({
   loop: { ...NEW_LOOP, phase: "working" },
 });
 
-const card: BoardItem = {
-  repoId: REPO,
-  issueNumber: 7,
-  title: "t",
-  status: "In progress",
-  state: "in progress",
-  labels: ["area:server"],
-  priority: null,
-  updatedAt: NOW,
-  url: "u",
-  stage: null,
-  owner: null,
-  parent: null,
-  subIssues: null,
-  blockedBy: [],
-  milestone: null,
-  size: "S",
-  closed: false,
-  prioritySource: null,
-  createdAt: NOW,
-  itemId: "I7",
-  projectId: "P1",
-};
-
-const rules = {
-  pickFrom: ["Ready"],
-  areas: { "area:server": ["apps/server/**"] },
-} as never;
-
 let facts: () => { inTurn: boolean; rateLimitedUntil: number | null } | null = () => null;
 
 const release = () =>
@@ -116,7 +86,6 @@ const release = () =>
     config,
     store,
     enabled: true,
-    rules: async () => rules,
     now: () => NOW,
     supervisor: {
       seat: (id) => store.seatSession(id),
@@ -135,11 +104,6 @@ const release = () =>
           updatedAt: NOW,
         });
       },
-      async startRun(seatId, issue) {
-        started.push({ seatId, issue });
-        store.upsertRun({ ...authorRun(), id: `${seatId}:1`, agentId: seatId });
-        return { runId: `${seatId}:1`, branch: "feature/7-x" };
-      },
     },
   });
 
@@ -147,9 +111,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-release-"));
   store = new Store(join(dir, "mc.sqlite"));
   ended = [];
-  started = [];
   facts = () => null;
-  store.replaceBoard(REPO, [card]);
   store.upsertRun(authorRun());
   store.setSeatSession({
     seatId: "guido-1",
@@ -169,38 +131,16 @@ afterEach(() => {
 });
 
 describe("releaseAtAccountStop", () => {
-  it("hands the ticket to a free seat on another account in one cycle, same ticket", async () => {
+  it("stops the run with the reason on its timeline and frees the seat", async () => {
     await release();
     expect(ended).toEqual(["guido-1:1"]);
-    expect(started).toEqual([{ seatId: "guido-2", issue: 7 }]);
-    expect(store.ticketWait(REPO, 7)).toBeNull();
+    expect(store.seatSession("guido-1")?.runId).toBeNull();
+    expect(store.loopEventsOfRun("guido-1:1").map((e) => e.text)).toContain(
+      accountStopReasonText("GUIDO-1", "acct-a"),
+    );
   });
 
-  it("with no other free seat, the ticket waits with its reason and no owner, then clears", async () => {
-    stop("acct-b");
-    await release();
-    expect(ended).toEqual(["guido-1:1"]);
-    expect(started).toEqual([]);
-    expect(store.ticketWait(REPO, 7)).toMatchObject({
-      reason: expect.stringContaining("acct-a"),
-      freesWhen: ACCOUNT_STOP_FREES_WHEN,
-    });
-    expect(store.activeTickets().has(REF)).toBe(false);
-    // acct-b resets
-    store.addUsage({
-      accountId: "acct-b",
-      window: "7d",
-      at: NOW + 1,
-      pct: 10,
-      resetAt: NOW + DAY,
-      source: "test",
-    });
-    await release();
-    expect(started).toEqual([{ seatId: "guido-2", issue: 7 }]);
-    expect(store.ticketWait(REPO, 7)).toBeNull();
-  });
-
-  it("releases a seat the CLI parked on a rate limit", async () => {
+  it("stops a run on a seat the CLI parked on a rate limit", async () => {
     store.setSeatSession({
       seatId: "guido-1",
       runId: "guido-1:1",
@@ -213,15 +153,12 @@ describe("releaseAtAccountStop", () => {
     facts = () => ({ inTurn: false, rateLimitedUntil: NOW + DAY });
     await release();
     expect(ended).toEqual(["guido-1:1"]);
-    expect(started).toEqual([{ seatId: "guido-2", issue: 7 }]);
   });
 
   it("keeps the run on its seat while away mode refuses pick-ups", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify(CLOSED_AWAY));
     await release();
     expect(ended).toEqual([]);
-    expect(started).toEqual([]);
-    expect(store.ticketWait(REPO, 7)).toBeNull();
   });
 
   it("judges a transferred run by the account it was moved to", async () => {
@@ -233,7 +170,7 @@ describe("releaseAtAccountStop", () => {
     expect(ended).toEqual([]);
   });
 
-  it("releases a run transferred onto an account at its stop", async () => {
+  it("stops a run transferred onto an account at its stop", async () => {
     store.addUsage({
       accountId: "acct-a",
       window: "7d",
@@ -249,29 +186,6 @@ describe("releaseAtAccountStop", () => {
     );
     await release();
     expect(ended).toEqual(["guido-1:1"]);
-    // acct-a can work again, so its own seat takes the ticket back
-    expect(started).toEqual([{ seatId: "guido-1", issue: 7 }]);
-  });
-
-  it("starts nothing while the machine is held, and the wait stays", async () => {
-    stop("acct-b");
-    await release();
-    store.addUsage({
-      accountId: "acct-b",
-      window: "7d",
-      at: NOW + 1,
-      pct: 10,
-      resetAt: NOW + DAY,
-      source: "test",
-    });
-    store.setSetting(
-      "machine-capacity:disk-percentage-episode",
-      JSON.stringify({ floor: 5, breachedAt: NOW - 1000 }),
-    );
-    store.addMachineSample({ at: NOW - 500, diskFreePct: 1, diskFreeGb: 2 } as never);
-    await release();
-    expect(started).toEqual([]);
-    expect(store.ticketWait(REPO, 7)).not.toBeNull();
   });
 
   it("leaves a seat's run alone while its turn is under way", async () => {
@@ -279,16 +193,13 @@ describe("releaseAtAccountStop", () => {
       config,
       store,
       enabled: true,
-      rules: async () => rules,
       now: () => NOW,
       supervisor: {
         seat: (id) => store.seatSession(id),
         seatFacts: () => ({ inTurn: true }) as never,
         endRunByEngine: async () => void ended.push("x"),
-        startRun: async () => ({ runId: "r", branch: "b" }),
       },
     });
     expect(ended).toEqual([]);
-    expect(store.ticketWait(REPO, 7)).toBeNull();
   });
 });

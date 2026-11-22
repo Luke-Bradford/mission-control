@@ -65,8 +65,8 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
              model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
              ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-             account_id, effort, prompt_hash, loop_kind)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             account_id, effort, prompt_hash, loop_kind, advice)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
              started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -80,7 +80,8 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
              account_id = COALESCE(account_id, excluded.account_id),
              effort = COALESCE(effort, excluded.effort),
              prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
-             loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
+             loop_kind = COALESCE(loop_kind, excluded.loop_kind),
+             advice = COALESCE(advice, excluded.advice)`,
       ).run(
         r.id,
         r.agentId,
@@ -112,6 +113,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         r.effort ?? null,
         r.promptHash ?? null,
         r.loopKind ?? null,
+        r.advice === undefined ? null : JSON.stringify(r.advice),
       );
     },
 
@@ -186,17 +188,6 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       return out;
     },
 
-    /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
-    mapAsideRuns(agentId: AgentId): Run[] {
-      return (
-        db
-          .prepare(
-            "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') > ''",
-          )
-          .all(agentId) as Row[]
-      ).map(toRun);
-    },
-
     /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
     runBranches(repoId: RepoId): Set<string> {
       const rows = statement(
@@ -250,7 +241,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
 
     /**
      * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
-     * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
+     * someone releases it. Only the latest run counts.
      */
     branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
       const latest = q.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);
@@ -317,7 +308,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       const rows = db
         .prepare(
           `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
-             AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
+             AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.hold.kind') IS NOT NULL)
            ORDER BY started_at, seq`,
         )
         .all() as Row[];
@@ -333,11 +324,11 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
     },
 
     /** The runs that have not ended and are off their seat in review, oldest first. */
-    asideRuns(): Run[] {
+    offSeatRuns(): Run[] {
       const rows = db
         .prepare(
           `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
-             AND json_extract(loop, '$.aside') IS NOT NULL
+             AND json_extract(loop, '$.hold.worktree') IS NOT NULL
            ORDER BY started_at, seq`,
         )
         .all() as Row[];
@@ -364,7 +355,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         db
           .prepare(
             `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
-               AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
+               AND (loop IS NULL OR json_extract(loop, '$.hold.worktree') IS NULL) LIMIT 1`,
           )
           .get(since, ...agentIds) !== undefined
       );
@@ -374,7 +365,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       return (
         db
           .prepare(
-            "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+            "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.hold.worktree') IS NULL) LIMIT 1",
           )
           .get() !== undefined
       );
@@ -408,7 +399,9 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
     /** Every run on the ticket, ended ones too; review runs do not count. */
     runsOnTicket(repoId: RepoId, ticket: string): Run[] {
       const rows = db
-        .prepare("SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL")
+        .prepare(
+          "SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL ORDER BY started_at, seq",
+        )
         .all(repoId, ticket) as Row[];
       return rows.map(toRun);
     },

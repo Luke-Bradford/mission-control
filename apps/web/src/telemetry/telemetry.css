@@ -10,7 +10,9 @@
 /* The built tab fills the work area: toolbar, band, tabs and summary keep their height and the panels take the rest. */
 #page-telemetry[data-tab="crew"],
 #page-telemetry[data-tab="cost"],
-#page-telemetry[data-tab="throughput"] {
+#page-telemetry[data-tab="throughput"],
+#page-telemetry[data-tab="quality"],
+#page-telemetry[data-tab="machine"] {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
   overflow: visible;
@@ -303,7 +305,7 @@
   }
 }
 
-/* Throughput: four charts in a 2x2, or the one table across the width. */
+/* Throughput and Quality: four charts in a 2x2, or the one table across the width. */
 .tabpanel .grid[data-view="charts"][data-n="4"] {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -320,6 +322,18 @@
 .tabpanel .grid[data-view="charts"][data-n="4"] > .panel > .pb > .chart {
   flex: 1 1 auto;
   min-height: 120px;
+}
+
+/* The ranked Guard list keeps its rows: it scrolls inside the panel and the note stays below it. */
+.tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard > .pb.qlist {
+  display: block;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#qGuard .agent-list-scroll-cue {
+  margin: 0;
+  padding: 0 var(--sp-4) var(--sp-1);
 }
 
 /* In a short desktop work area, answer the time-sensitive token and quota questions first. */
@@ -339,6 +353,25 @@
 
 .tabpanel .grid[data-view="table"][data-n="1"] {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.tabpanel .qchart > .chart {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;
+}
+
+/* At wide desktop sizes, the three compact daily charts share the first row. The ranked list takes
+   the useful residual height across the second row instead of leaving four oversized panels empty. */
+@media (min-width: 2200px) and (min-height: 1100px) {
+  .tabpanel .grid[data-view="charts"][data-n="4"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: minmax(250px, 0.72fr) minmax(360px, 1.28fr);
+  }
+
+  .tabpanel .grid[data-view="charts"][data-n="4"] > #qGuard {
+    grid-column: 1 / -1;
+  }
 }
 
 .tabpanel .grid > .panel {
@@ -508,9 +541,13 @@
   border-radius: 0;
 }
 
+/* unknown: a dashed outline over a cross-hatch, so it never reads as dotted Parked */
+.crew-sw.st.unknown,
 .share.unknown {
-  background: none;
-  border: 1px dashed var(--line-2);
+  background:
+    repeating-linear-gradient(45deg, var(--fg-2) 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(135deg, var(--fg-2) 0 1px, transparent 1px 4px);
+  border: 1px dashed var(--fg-2);
 }
 
 .readout {
@@ -605,16 +642,6 @@
 #tUtil .vl {
   text-align: right;
   white-space: nowrap;
-}
-
-.coming {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
-.coming-note .pb p {
-  margin: 0;
 }
 
 .runs-dialog .pb {
@@ -951,6 +978,68 @@
   flex: none;
 }
 
+/* Ticket identifiers and measures stay available at narrow desktop widths; the board title takes
+   the remaining space and can be expanded by keyboard for its full value. */
+.tickets-panel .tw {
+  overflow-x: clip;
+}
+
+.tickets-panel table {
+  table-layout: fixed;
+}
+
+.tickets-panel .ticket-ref-column {
+  width: 168px;
+}
+
+.tickets-panel .ticket-size-column {
+  width: 48px;
+}
+
+.tickets-panel .ticket-merged-column,
+.tickets-panel .ticket-cycle-column,
+.tickets-panel .ticket-cost-column {
+  width: 64px;
+}
+
+.tickets-panel td:first-child a {
+  display: block;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.tickets-panel .ticket-title-cell {
+  white-space: normal;
+}
+
+.ticket-title-disclosure {
+  min-width: 0;
+}
+
+.ticket-title-disclosure summary {
+  display: -webkit-box;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.ticket-title-disclosure summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ticket-title-full {
+  display: none;
+  margin-top: var(--sp-1);
+  overflow-wrap: anywhere;
+}
+
+.ticket-title-disclosure[open] .ticket-title-full {
+  display: block;
+}
+
 /* cost and tokens */
 .spend-stack {
   display: flex;
@@ -1075,4 +1164,28 @@
 .quota-row .vl {
   text-align: right;
   white-space: nowrap;
+}
+
+/* Machine: CPU over Memory used in the left column on one time axis, the other two beside them. */
+.tabpanel .grid[data-tab="machine"] {
+  grid-auto-flow: column;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+/* the plots fill their panels; the legend stays below the measured plot */
+.tabpanel .grid[data-tab="machine"] > .panel > .pb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+}
+
+.tabpanel .grid[data-tab="machine"] > .panel > .pb > .chart {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.machine-readout {
+  flex: none;
 }

@@ -25,10 +25,3 @@ export function ownsPr(
     (pr.headSha != null && externalReviewAsked(store, repoId, pr.number, pr.headSha))
   );
 }
-
-/** A build run has the ticket, or a real run in this store moved the card. */
-export function ownsCard(store: Store, repoId: RepoId, issue: number): boolean {
-  return (
-    store.runsOnTicket(repoId, `${repoId}#${issue}`).length > 0 || store.runMovedCard(repoId, issue)
-  );
-}

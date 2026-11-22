@@ -21,9 +21,6 @@ import {
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
-  FLIGHT_IDLE_MS,
-  FLIGHT_IMMEDIATE_REASONS,
-  FLIGHT_IMMEDIATE_SIGNALS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -45,7 +42,6 @@ import {
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_TICKETS_LISTED,
-  FLIGHT_UNPARK_KINDS,
   FLIGHT_VIEW_LIMIT,
   FLIGHT_VIEW_MS,
   FLIGHT_WAKE_IDLE_MS,
@@ -70,9 +66,6 @@ import {
   type FlightWakeStatus,
   flightContextText,
   hudColumnOf,
-  type ItemDiscussion,
-  idleLong,
-  idlePeriod,
   inLane,
   LANE_LABEL_PREFIX,
   OWNER_FLIGHT,
@@ -84,8 +77,6 @@ import {
   READY_LABEL,
   RULING_PARK,
   type Run,
-  reviewFaultStands,
-  STUCK_PARK,
   seatCallSign,
   seatDef,
   type TestLockState,
@@ -105,8 +96,6 @@ import { flightQuestion } from "../comms/index.ts";
 import { pausedSeat, readCrewPause } from "../config/crew-pause.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { reviewHoldOf } from "../engine/review-hold.ts";
-import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
   attentionItems,
   crew,
@@ -115,7 +104,7 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud/hud.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
+import { prFlow, prFlowFacts } from "../pr/flow.ts";
 import { blockedWork, waitReader } from "../queue/dependencies.ts";
 import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
@@ -321,6 +310,11 @@ function readWakeRecord(store: Store, repo: string): WakeRecord | null {
   }
 }
 
+/** When this repo's FLIGHT session was last woken, from the stored record; 0 when none. */
+export function lastRecordedWake(store: Store, repo: string): number {
+  return readWakeRecord(store, repo)?.at ?? 0;
+}
+
 /** Records a wake: its time, the session's repo and what woke FLIGHT. */
 export function recordFlightWake(store: Store, repo: string, at: number, wokeOn: string[]): void {
   const record: WakeRecord = { repo, at, wokeOn, next: null };
@@ -337,10 +331,8 @@ export function recordWakeReasons(
   at: number,
   causes: string[],
   wakeId?: string,
-  rode: string[] = [],
-  immediate: string[] = [],
 ): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId, rode, immediate);
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
 }
 
 /** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
@@ -404,20 +396,16 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 }
 
 /**
- * The next wake the state schedules: a deadline on one fact (a PR-flow time, a planned entry, an
- * idle seat's period), or the end of the batch window while routine facts wait in it (`batchAt`).
- * Nothing re-wakes FLIGHT on a timer for pending work: a fact that has not changed stays silent.
+ * The next wake the state schedules: a planned entry's time, or the end of the gap while a
+ * failure waits for it (`batchAt`). Nothing re-wakes FLIGHT on a timer for pending work.
  */
 export function nextWakeAt(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-  lastWakeAt: number,
+  s: FlightState & TeamsDigestState,
   now: number,
   batchAt?: number,
 ): number | null {
-  const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
+  const times: number[] = [];
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
-  const idleAt = s.wake?.idle ? idleWakeAt(s.wake.idle) : null;
-  if (idleAt !== null) times.push(idleAt);
   if (batchAt !== undefined) times.push(batchAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
@@ -682,13 +670,10 @@ const shownPrs = (store: Store): Set<string> => {
 const shownKey = (p: { repoId: string; number: number; state: string }): string =>
   `${p.repoId}#${p.number}:${p.state}`;
 
-/** FLIGHT has received `s`: each merged or closed PR in it is not listed again, nor a hold re-announced. */
+/** FLIGHT has received `s`: each merged or closed PR in it is not listed again. */
 export function markPrsShown(store: Store, s: FlightState): void {
   const shown = shownPrs(store);
   let changed = false;
-  for (const h of s.holds) {
-    if (h.prState !== "open") store.markHoldTold(h.ref, h.prState);
-  }
   for (const p of s.prs) {
     if (p.state !== "open") {
       const key = shownKey({ repoId: s.repo, number: p.pr, state: p.state });
@@ -711,7 +696,6 @@ export const deliveredFacts = (s: FlightState): string =>
     retrospective: undefined,
     triage: [],
     prs: s.prs.filter((p) => p.state === "open"),
-    holds: s.holds.map((h) => ({ ...h, told: true })),
   });
 
 /** The items FLIGHT was last shown, by key, each with a hash of its text. */
@@ -747,8 +731,6 @@ export function markItemsShown(store: Store, s: FlightState): void {
   }
 }
 
-/** The wake fact for a queued review an idle review seat has not started. */
-const REVIEW_FAULT_FACT = "idle-reviewers";
 /** What `wakeFacts` reads beyond the digest: where a Ready ticket could start, and which items are new. */
 function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): FlightWakeInputs {
   return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
@@ -838,9 +820,7 @@ function idleSeats(
   rules: { areas: Record<string, string[]> } | null,
   fit: Record<string, string[]>,
 ): FlightIdleSeats | undefined {
-  // a ticket held behind an open PR is waiting by FLIGHT's own choice, not open work for a seat
-  const held = new Set(i.store.activeHolds().map((h) => h.ref));
-  const open = i.allTickets.filter((t) => !held.has(t.ref));
+  const open = i.allTickets;
   const near = (seat: FlightSeatState, t: FlightState["tickets"][number]): boolean => {
     if (rules === null || Object.keys(rules.areas).length === 0) return true;
     if (claimedByOther(t, i.hubLogin)) return false;
@@ -896,14 +876,6 @@ export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seat
   return `flight watch: seat idle: ${named} with ${idle.open.length} open ticket${idle.open.length === 1 ? "" : "s"}${triage}; why: ${why}`;
 }
 
-/** When FLIGHT is next woken about idle seats: the moment the soonest seat's spell reaches FLIGHT_IDLE_MS; null when none is still short of it. */
-export function idleWakeAt(idle: FlightIdleSeats): number | null {
-  const coming = idle.seats
-    .filter((x) => idlePeriod(x.ms) === null)
-    .map((x) => x.since + FLIGHT_IDLE_MS);
-  return coming.length === 0 ? null : Math.min(...coming);
-}
-
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
 export function flightState(i: {
   config: CcConfig;
@@ -916,9 +888,8 @@ export function flightState(i: {
   areas?: Record<string, string[]>;
   /** Files whose merge conflicts between open PRs (see flightConflicts); absent: none known. */
   conflicts?: readonly { file: string; prs: number[] }[];
-}): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
+}): FlightState & TeamsDigestState {
   const { config, store, busy, now } = i;
-  const discussions = store.pendingDiscussions();
   const tz = config.operator.timezone;
   const found = flightSeat(config);
   const trip = runawayTrip(store);
@@ -955,7 +926,6 @@ export function flightState(i: {
     }));
   if (found === null) {
     return {
-      discussions,
       signals: [],
       triage: [],
       blocked: [],
@@ -970,7 +940,6 @@ export function flightState(i: {
       prs: [],
       prFlow: { generatedAt: now, rows: [], unowned: 0, metrics: [] },
       items: [],
-      holds: [],
       reviewQueue: { queued: 0, running: 0, seats: [] },
       mergeQueue: [],
       flowHolds: [],
@@ -1069,12 +1038,6 @@ export function flightState(i: {
     seats: reviewSeats.map((seat) => {
       const reviews = reviewRows.filter((row) => row.seatId === seat.id);
       const held = unended(seat.id);
-      const holds = reviews.flatMap((row) => {
-        const hold = row.state === "queued" ? reviewHoldOf(store, row.id) : null;
-        return hold === null
-          ? []
-          : [{ prNumber: row.prNumber, reason: hold.reason, waitsOn: hold.prNumber }];
-      });
       return {
         seat: seat.id,
         queued: reviews.filter((row) => row.state === "queued").length,
@@ -1087,7 +1050,6 @@ export function flightState(i: {
             .filter((row) => row.state === "queued")
             .map((row) => Math.floor((now - row.createdAt) / 60_000)),
         ),
-        ...(holds.length > 0 ? { holds } : {}),
         idle:
           !seatUnavailable(seat) &&
           !accountAtStop(
@@ -1241,7 +1203,7 @@ export function flightState(i: {
     .filter(
       (r) =>
         r.endedAt === null &&
-        r.loop?.aside != null &&
+        r.loop?.hold?.worktree != null &&
         r.repoId === session.repoId &&
         mine.some((s) => s.id === r.agentId),
     )
@@ -1252,38 +1214,6 @@ export function flightState(i: {
       phase: r.loop?.phase ?? "working",
       parked: parkOf(store, r),
     }));
-
-  const prStates = new Map<number, FlightState["prs"][number]["state"]>(
-    store.pullRequests(session.repoId).map((p) => [p.number, p.state]),
-  );
-  // A hold ends when the board has moved its card past Backlog (or closed or dropped it). A PR
-  // gone from the stored read is reported as unknown, for FLIGHT to check.
-  const holds = store.activeHolds().flatMap((h) => {
-    const card = board.find((b) => `${b.repoId}#${b.issueNumber}` === h.ref);
-    // The stored board lags the move to Backlog until the next poll, so a card is only past its
-    // hold once the board has shown it in Backlog.
-    // a card a run has taken is past its hold, wherever the board shows it
-    if (
-      card === undefined ||
-      card.closed ||
-      active.has(h.ref) ||
-      (h.seen && hudColumnOf(card) !== "Backlog")
-    ) {
-      store.releaseHold(h.ref, now);
-      return [];
-    }
-    if (!h.seen && hudColumnOf(card) === "Backlog") store.markHoldSeen(h.ref);
-    const prState: FlightState["holds"][number]["prState"] = prStates.get(h.waitsOn) ?? "unknown";
-    return [
-      {
-        ref: h.ref,
-        waitsOn: h.waitsOn,
-        ageMin: Math.floor((now - h.at) / 60_000),
-        prState,
-        told: h.toldState === prState,
-      },
-    ];
-  });
 
   const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
   const capacity = storedMachineCapacity(store, now, capacityConfig);
@@ -1460,8 +1390,6 @@ export function flightState(i: {
       session,
       seats,
       aside,
-      ...(i.areas === undefined ? {} : { areas: i.areas }),
-      stuckPrs: stuckPrs({ store, config, repoId: session.repoId, flow, now }),
       triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
       readyPrs: prs.flatMap((p) => {
         const at = store
@@ -1486,7 +1414,6 @@ export function flightState(i: {
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
-    discussions,
     wake: withCovered(
       wakeInputs({
         pace: paceStartCheck(store, config, now),
@@ -1521,7 +1448,6 @@ export function flightState(i: {
     blocked: blockedWork(store, session.repoId, now, inThisLane(config)),
     prs,
     items,
-    holds,
     reviewQueue,
     mergeQueue,
     conflicts,
@@ -1562,7 +1488,7 @@ const entryHash = (entry: unknown): string =>
  * `mc recall` and `mc flight_state` read them on request.
  */
 export function flightWake(
-  state: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
+  state: FlightState & TeamsDigestState,
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
@@ -1700,8 +1626,8 @@ export function flightWake(
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
 const parkOf = (store: Store, run: Run): FlightPark | null => {
   if (run.loop?.phase !== "parked") return null;
-  const kind = run.loop.parked?.kind ?? "";
-  const park: FlightPark = { kind, reason: run.loop.parked?.reason ?? "" };
+  const kind = run.loop.hold?.kind ?? "";
+  const park: FlightPark = { kind, reason: run.loop.hold?.reason ?? "" };
   if (FLIGHT_REPORT_PARKS.includes(kind)) {
     const report = store.latestEvidence(run.id)?.note;
     if (report !== undefined) park.report = cut(report, FLIGHT_REPORT_MAX);
@@ -1710,39 +1636,27 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 };
 
 /**
- * What a wake is about, as a stable string (no times): it changes only when something new needs
- * FLIGHT's judgement. Routine pipeline steps (CI, review and merge moving, a park the engine
- * clears) are in the digest but not here; a timed signal wakes FLIGHT when one stands still.
+ * What a wake is about, as a stable string (no times): an operator message, a seat's question, or
+ * a failure the hub could not settle. CI, PR flow, free and idle seats are the hub's own timers
+ * and show in the digest, never here.
  */
-export function wakeFacts(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-): string {
-  const { free, startable } = startableFor(s);
-  // a review just queued waits for its seat to start it; only one that has stood still is a fault
-  // The engine re-routes a queued review to the seat `reviewerOf` picks, so an idle seat with no queue
-  // of its own gets one without FLIGHT. The fault is an idle seat whose own queued review has stood
-  // still; a seat at its quota stop is not idle.
-  const reviewFault = reviewFaultStands(s.reviewQueue);
+export function wakeFacts(s: FlightState & TeamsDigestState): string {
   return JSON.stringify({
+    // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
     retrospective: s.retrospective ? [s.retrospective.day] : [],
+    teams: s.teamsDigest?.matches.map((m) => [m.arrival.arrivalId, m.arrival.version]) ?? [],
     signals: s.signals
       .filter((s) => !s.told)
       .map((s) => `${s.kind}:${s.key}`)
       .sort(),
     triage: s.triage.map((t) => `${t.ref}:${t.cause}`).sort(),
-    discussions: s.discussions?.map((t) => [t.id, t.messages.map((m) => m.id)]),
     planned: (s.planned ?? [])
       .filter((p) => p.minutesFromNow <= 0)
       .map((p) => [p.id, p.dueAt, p.kind, p.target, p.label]),
-    teams: s.teamsDigest?.matches.map((m) => [m.arrival.arrivalId, m.arrival.version]) ?? [],
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
-    free: free.sort(),
-    t: startable.sort(),
-    // seats idle with tickets open: one fact per idle spell, until one starts
-    idle: idleFacts(s.wake?.idle),
-    // a park the engine clears alone is digest-only; old_park says when it has stood too long
+    // a park FLIGHT rules on, and a seat left stopped, are failures the hub could not settle
     parked: [
       ...s.seats
         .filter((x) => x.parked !== null && flightParkKind(x.parked.kind))
@@ -1752,63 +1666,30 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
-    reviews: reviewFault ? [REVIEW_FAULT_FACT] : [],
-    prFlow: prFlowFacts(s.prFlow),
-    holdsInForce:
-      s.flowHolds
-        ?.filter((hold) => hold.blocking)
-        .map((hold) => hold.kind)
-        .sort() ?? [],
-    // CI, review and merge steps are digest-only; merge_stalled says when a ready PR has stood still
     prs: s.prs
-      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null || p.state === "merged")
+      .filter((p) => p.awaitingFlight != null || p.awayBugDecision != null)
       .map(
         (p) =>
           `${p.ref}:${p.pr}:${p.ready}:${p.state}:${p.awaitingFlight ?? ""}:${p.awayBugDecision?.about ?? ""}`,
       )
       .sort(),
-    // an unread plain message from the operator: never routine
+    // an unread plain message from the operator
     operator: s.wake?.operator ?? [],
     // read and not answered: owed until FLIGHT replies to it
     owed: s.wake?.owed ?? [],
+    // blockers and messages; a PR's own steps are the hub's
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
-    release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
   });
 }
-
-/** The idle-seat facts: each long-idle seat with the start of its spell, so a spell is one fact however long it lasts. */
-const idleFacts = (idle: FlightIdleSeats | undefined): string[] =>
-  idleLong(idle).map((x) => `${x.id}:${x.since}`);
 
 /** An item as a wake fact: a PR's by its text, so a new state of it is a new fact. */
 export const itemFactId = (x: { kind: string; key: string; text: string }): string =>
   x.kind === "pr" ? `${x.key.replace(/:\d+$/, "")}:${x.text}` : x.key;
 
-/**
- * The free build seats that have a Ready ticket to take, and those tickets. A seat or ticket with
- * no fit is not a reason to wake: nothing could start there.
- */
-const startableFor = (s: FlightState): { free: string[]; startable: string[] } => {
-  const fit = s.wake?.fit;
-  const ready = s.tickets.filter((t) => t.ready).map((t) => t.ref);
-  const free = s.seats
-    .filter((x) => x.loop === "build" && x.free)
-    .filter((x) => (fit === undefined ? ready.length > 0 : (fit[x.id]?.length ?? 0) > 0));
-  const startable = new Set(free.flatMap((x) => fit?.[x.id] ?? ready));
-  return { free: free.map((x) => x.id), startable: [...startable] };
-};
-
-/** The items that wake FLIGHT: a PR ready to merge is a routine step, and merge_stalled says when it stands still. */
+/** The items that wake FLIGHT: a PR's own steps (ready to merge, CI, review) are the hub's, not FLIGHT's. */
 const wakeItems = (s: Pick<FlightState, "items">): FlightState["items"] =>
-  s.items.filter((x) => x.kind !== "ready");
-
-/** The held cards whose PR has merged or closed, ready for FLIGHT to promote again. */
-const releasable = (s: FlightState): string[] =>
-  s.holds
-    .filter((h) => h.prState !== "open" && !h.told)
-    .map((h) => `${h.ref}:${h.waitsOn}:${h.prState}`)
-    .sort();
+  s.items.filter((x) => x.kind !== "ready" && x.kind !== "pr");
 
 /** The build seats left stopped, which only a start (or the operator) brings back into rotation. */
 const stoppedSeats = (s: FlightState): string[] =>
@@ -1817,31 +1698,22 @@ const stoppedSeats = (s: FlightState): string[] =>
     .map((x) => x.id)
     .sort();
 
-/** A park FLIGHT acts on: one it may lift, or a CI ruling it may settle. */
-const flightParkKind = (kind: string): boolean =>
-  kind !== STUCK_PARK && // the engine lifts it once the PR shows the push; push_unseen says when it has not
-  (kind === RULING_PARK ||
-    kind === "review-failed" ||
-    (FLIGHT_UNPARK_KINDS as readonly string[]).includes(kind));
+/** A park FLIGHT acts on: a CI ruling or a failed review it may settle. */
+const flightParkKind = (kind: string): boolean => kind === RULING_PARK || kind === "review-failed";
 
-/** Something still waits on FLIGHT: a question, an item to brief, a free or stopped build seat, or a park in FLIGHT_UNPARK_KINDS. */
-export function pending(
-  s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
-): boolean {
+/** Something still waits on FLIGHT: a question, an item to brief, a stopped build seat, or a park it may settle. */
+export function pending(s: FlightState & TeamsDigestState): boolean {
   return (
     s.retrospective !== undefined ||
+    (s.teamsDigest?.matches.length ?? 0) > 0 ||
     s.signals.some((s) => !s.told) ||
     s.triage.length > 0 ||
     (s.planned?.some((p) => p.minutesFromNow <= 0) ?? false) ||
-    (s.discussions?.length ?? 0) > 0 ||
-    (s.teamsDigest?.matches.length ?? 0) > 0 ||
     s.prs.some((p) => p.awaitingFlight != null || p.awayBugDecision != null) ||
     s.questions.length > 0 ||
     wakeItems(s).length > 0 ||
-    releasable(s).length > 0 ||
     stoppedSeats(s).length > 0 ||
-    startableFor(s).free.length > 0 ||
-    idleFacts(s.wake?.idle).length > 0 ||
+    (s.wake?.operator?.length ?? 0) > 0 ||
     (s.wake?.owed?.length ?? 0) > 0 ||
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
@@ -1850,98 +1722,35 @@ export function pending(
 
 type Facts = Record<string, unknown[]>;
 
-/** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
-const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
-
-/** Fact categories that are routine pipeline steps: they wait for the batch window. */
-const ROUTINE_CATEGORIES: ReadonlySet<string> = new Set(["t", "reviews", "prFlow"]);
-
-/** Whether one added fact must wake FLIGHT immediately even when its category was learned. */
-export function immediateFact(category: string, item: unknown): boolean {
-  if (FLIGHT_IMMEDIATE_REASONS.includes(category)) return true;
-  const fact = String(item);
-  if (category === "signals") return FLIGHT_IMMEDIATE_SIGNALS.includes(fact.split(":", 1)[0] ?? "");
-  if (category === "items") return !fact.startsWith("pr:");
-  if (category === "prs") {
-    const parts = fact.split(":");
-    return (
-      (parts[2] === "true" && parts[3] === "open") ||
-      parts[3] === "merged" ||
-      Boolean(parts.slice(5).join(":"))
-    );
-  }
-  return false;
-}
-
-/** Changed learned categories whose additions can ride with another immediate reason. */
-export function batchedCategories(
-  previous: string,
-  current: string,
-  batched: ReadonlySet<string>,
-): string[] {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
-  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
-    .filter((category) => {
-      if (!batched.has(category)) return false;
-      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
-      const added = (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
-      return added.length > 0 && added.every((v) => !immediateFact(category, v));
-    })
-    .sort();
-}
-
-/** Changed categories with an added immediate fact: a wake they cause could not have been batched. */
-export function immediateCategories(previous: string, current: string): string[] {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
-  return [...new Set([...Object.keys(before), ...Object.keys(after)])]
-    .filter((category) => {
-      const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
-      return (after[category] ?? []).some(
-        (v) => !old.has(JSON.stringify(v)) && immediateFact(category, v),
-      );
-    })
-    .sort();
-}
+/** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never settled. */
+const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker"]);
 
 /**
- * Whether everything that changed between two wake facts is routine: a free seat, a ticket, a PR
- * moving. An operator message, question, blocker, park, plan, instruction or the breaker is never
- * routine, so those wake FLIGHT at once; so does a signal, unless its kind is not immediate and
- * signals are a learned category. False when nothing changed.
+ * Fact categories a wake does not wait the gap for: an operator message, a seat's question, an
+ * instruction change, FLIGHT's own plan falling due, and the daily retrospective. Each is the
+ * operator's or FLIGHT's own doing, or at most daily.
  */
-export function routineOnly(
-  previous: string,
-  current: string,
-  batched: ReadonlySet<string> = new Set(),
-): boolean {
+const URGENT_CATEGORIES: readonly string[] = [
+  "operator",
+  "owed",
+  "q",
+  "instructions",
+  "planned",
+  "retrospective",
+];
+
+/** Whether a changed fact set adds an urgent fact: one of the categories above, or a seat's call. */
+export function urgentChange(previous: string, current: string): boolean {
   const before = JSON.parse(previous || "{}") as Facts;
   const after = JSON.parse(current) as Facts;
-  let changed = false;
-  for (const category of new Set([...Object.keys(before), ...Object.keys(after)])) {
+  const added = (category: string): unknown[] => {
     const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
-    const now = new Set((after[category] ?? []).map((v) => JSON.stringify(v)));
-    const added = [...now].filter((v) => !old.has(v));
-    const removed = [...old].filter((v) => !now.has(v));
-    if (added.length === 0 && removed.length === 0) continue;
-    // settling a question, a park or a discussion is FLIGHT's own work, not a new reason; only the
-    // breaker's lift is, as a lift alone wakes FLIGHT
-    if (
-      added.length === 0 &&
-      !LIFTS_WAKE.has(category) &&
-      !ROUTINE_CATEGORIES.has(category) &&
-      !batched.has(category)
-    )
-      continue;
-    changed = true;
-    if (category === "items") {
-      // a PR's own steps are routine; any other item (a message, a blocker) is not
-      if (!added.every((v) => !immediateFact(category, JSON.parse(v)))) return false;
-    } else if (added.some((v) => immediateFact(category, JSON.parse(v)))) return false;
-    else if (!ROUTINE_CATEGORIES.has(category) && !batched.has(category)) return false;
-  }
-  return changed;
+    return (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
+  };
+  return (
+    URGENT_CATEGORIES.some((category) => added(category).length > 0) ||
+    added("signals").some((v) => String(v).startsWith("seat_call:"))
+  );
 }
 
 /**

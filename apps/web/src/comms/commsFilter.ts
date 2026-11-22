@@ -50,9 +50,3 @@ export function filterKeeps(filter: ChartFilter | null, x: string, y: string): b
 export function filterLabel(filter: ChartFilter, name: (id: string) => string): string {
   return filter.kind === "seat" ? name(filter.id) : `${name(filter.a)} ↔ ${name(filter.b)}`;
 }
-
-export function sameFilter(x: ChartFilter | null, y: ChartFilter | null): boolean {
-  if (x === null || y === null) return x === y;
-  if (x.kind === "seat") return y.kind === "seat" && x.id === y.id;
-  return y.kind === "pair" && x.a === y.a && x.b === y.b;
-}

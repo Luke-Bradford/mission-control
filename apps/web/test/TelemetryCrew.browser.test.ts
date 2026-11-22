@@ -150,6 +150,48 @@ describeRendered("Telemetry, Crew tab, in a browser", () => {
     );
   }
 
+  for (const scheme of ["dark", "light"] as const) {
+    it(
+      `draws Unknown and Parked slices with different fills, ${scheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1600,
+          height: 1000,
+          colorScheme: scheme,
+          api: api(),
+          search: "?path=/telemetry",
+        });
+        try {
+          await ready(page);
+          const fills = await page.evaluate(() => {
+            const slice = (cls: string) => {
+              const el = document.querySelector(`#tUtil .bar .share.${cls}`) as HTMLElement | null;
+              return (
+                el && {
+                  w: el.getBoundingClientRect().width,
+                  bg: getComputedStyle(el).backgroundImage,
+                }
+              );
+            };
+            return { unknown: slice("unknown"), parked: slice("parked") };
+          }, undefined);
+          expect(fills.unknown?.w).toBeGreaterThan(0);
+          expect(fills.parked?.w).toBeGreaterThan(0);
+          expect(fills.unknown?.bg).not.toBe(fills.parked?.bg);
+          expect(fills.unknown?.bg).not.toMatch(/radial-gradient/);
+          if (evidence) {
+            mkdirSync(evidence, { recursive: true });
+            await page.screenshot(join(evidence, `telemetry-crew-unknown-parked-${scheme}.png`));
+          }
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
   it(
     "keeps lanes and agent time readable at 1600x700 and scrolls them inside their panels",
     async () => {

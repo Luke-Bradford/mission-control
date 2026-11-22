@@ -181,8 +181,6 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
     for (const run of deps.store.runsActiveSince(Number.MAX_SAFE_INTEGER)) {
       if (run.repoId === repoId && run.endedAt === null && run.branch !== null) out.add(run.branch);
     }
-    for (const h of deps.store.latestHandoffs(repoId))
-      if (h.acceptedRunId === null) out.add(h.branch);
     return out;
   }
 

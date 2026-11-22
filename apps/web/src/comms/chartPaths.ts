@@ -1,7 +1,6 @@
 import { COMMS_CREW } from "@mc/core";
 import { useCallback, useMemo } from "react";
 import {
-  COMMS_CHART_PATH,
   commsAgentPath,
   commsContactPath,
   commsCrewPath,
@@ -28,10 +27,6 @@ export function filterPath(filter: ChartFilter, flight: string): string {
 /** A link from the pop-out page to the Comms page, keeping the chart narrowed the same way. */
 export const commsHrefFor = (filter: ChartFilter, flight: string): string =>
   `${filterPath(filter, flight)}${searchWithFocus("", filter)}`;
-
-/** The pop-out's address, keeping the filter. */
-export const chartHref = (filter: ChartFilter | null): string =>
-  `${COMMS_CHART_PATH}${searchWithFocus("", filter)}`;
 
 /** The filter in the URL (`?focus=`), and a way to set or clear it that keeps the page. */
 export function useChartFilter(known: ReadonlySet<string>) {

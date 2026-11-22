@@ -1,0 +1,113 @@
+.plan-built-shots {
+  display: grid;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.plan-built-shots figure {
+  margin: 0;
+  min-width: 0;
+}
+.plan-built-shots img {
+  max-width: 100%;
+  max-height: 30vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.plan-parts {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.plan-parts h3 {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs);
+  line-height: var(--lh);
+  color: var(--fg-2);
+}
+.plan-parts p {
+  margin: 0;
+}
+.plan-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.plan-decide {
+  display: grid;
+  gap: var(--sp-2);
+  /* the decision stays in reach however long the plan is */
+  position: sticky;
+  bottom: 0;
+  padding: var(--sp-2) 0;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+/* Mockups are previews: bounded so the risks and the decision stay on the first screen. Actual size
+   (the picture's own button) shows the whole image. */
+.plan-parts .needs-pictures {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  align-items: start;
+}
+.plan-parts .needs-frame:not(.actual),
+.plan-beside .needs-frame:not(.actual) {
+  max-height: 30vh;
+}
+.plan-parts .needs-frame:not(.actual) img,
+.plan-beside .needs-frame:not(.actual) img {
+  max-height: 30vh;
+  width: auto;
+  margin: 0 auto;
+  object-fit: contain;
+}
+@media (min-width: 1000px) {
+  /* text on the left, the mockups beside it: the whole plan reads without scrolling past a picture */
+  .plan-parts {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  .plan-parts > * {
+    grid-column: 1;
+  }
+  .plan-parts > .plan-part-pictures {
+    grid-column: 2;
+    grid-row: 1 / span 4;
+  }
+}
+@media (min-width: 1000px) and (max-width: 1499px) {
+  /* At narrow desktop, decision controls follow the complete two-column review rather than
+     sticking above the mockups. The operator reads every required input before acting. */
+  .plan-decide {
+    position: static;
+  }
+}
+.plan-decide-buttons {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.plan-decide textarea {
+  width: 100%;
+  min-height: 72px;
+}
+.plan-note {
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--warn);
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+.plan-beside {
+  display: grid;
+  gap: var(--sp-3);
+}
+.plan-beside-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+.plan-beside-grid > * {
+  min-width: 0;
+}
+.plan-history-status {
+  white-space: nowrap;
+}

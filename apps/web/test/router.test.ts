@@ -18,7 +18,6 @@ import {
   route,
   SETUP_TABS,
   setupPath,
-  tabOf,
   ticketPath,
   tracePath,
   withoutAddAgentParam,
@@ -178,6 +177,7 @@ describe("path helpers", () => {
       agent: "/agent",
       comms: "/comms",
       qa: "/qa",
+      planner: "/planner",
       telemetry: "/telemetry",
       audit: "/audit",
       setup: "/setup",
@@ -254,14 +254,6 @@ describe("the ticket page route", () => {
       "/tickets/a/1/x",
     ])
       expect(route(bad), bad).toBeNull();
-  });
-
-  it("gives the Comms chart its own route, under the Comms tab", () => {
-    expect(route("/comms/chart")).toEqual({ page: "commsChart" });
-    expect(route("/comms/chart/")).toEqual({ page: "commsChart" });
-    expect(tabOf({ page: "commsChart" })).toBe("comms");
-    // The filter rides in the query and does not change the route.
-    expect(route("/comms/chart", "?focus=seat:dev-1")).toEqual({ page: "commsChart" });
   });
 });
 

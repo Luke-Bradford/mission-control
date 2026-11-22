@@ -1,7 +1,8 @@
+import type { AttentionItem, BriefBinding } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { answerTarget, askedQuestion } from "../src/comms/answer.ts";
+import { answerTarget, askedQuestion, boundChoice } from "../src/comms/answer.ts";
 import type { FlightSeat } from "../src/flight/flightTypes.ts";
-import { crewRow, item, SEAT_Q } from "./fixtures.ts";
+import { BRIEF_REVISION, boundBrief, crewRow, item, SEAT_Q } from "./fixtures.ts";
 
 const FLIGHT: FlightSeat = {
   id: "flight-1",
@@ -48,4 +49,47 @@ describe("askedQuestion", () => {
       expect(askedQuestion(key)).toBeNull();
     },
   );
+});
+
+describe("boundChoice", () => {
+  const bound = { ...SEAT_Q, brief: boundBrief() };
+  const option = (i: number) => bound.brief.options[i];
+
+  it("returns the ids for a current bound option", () => {
+    expect(boundChoice(bound, option(0))).toEqual({ briefId: 31, sourceRevision: BRIEF_REVISION });
+  });
+
+  it("refuses stale, unknown, held and unbound", () => {
+    const state = (freshness: "stale" | "unknown") => ({
+      completeness: "complete" as const,
+      freshness,
+      reason: "x",
+    });
+    const cases: AttentionItem[] = [
+      { ...bound, brief: { ...bound.brief, state: state("stale") } },
+      { ...bound, brief: { ...bound.brief, state: state("unknown") } },
+      { ...bound, brief: { ...bound.brief, state: undefined } },
+      {
+        ...bound,
+        hold: { by: "CAPCOM", reason: "wait", condition: { kind: "manual" as const }, at: 1 },
+      },
+      { ...bound, brief: { ...bound.brief, binding: undefined } },
+      { ...bound, brief: { ...bound.brief, id: undefined } },
+      {
+        ...bound,
+        brief: {
+          ...bound.brief,
+          binding: { ...(bound.brief.binding as BriefBinding), actions: [] },
+        },
+      },
+    ];
+    for (const c of cases) expect(boundChoice(c, option(0))).toBeNull();
+    expect(boundChoice(bound, { label: "x", answer: "y" })).toBeNull();
+  });
+
+  it("no longer limits bound choices to escalations or hub briefs", () => {
+    expect(bound.brief.by).toBeUndefined();
+    expect(bound.escalationId).toBeNull();
+    expect(boundChoice(bound, option(1))).not.toBeNull();
+  });
 });

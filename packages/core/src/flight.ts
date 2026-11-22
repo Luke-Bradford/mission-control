@@ -42,6 +42,7 @@ export const HUD_PAGE_PATHS = {
   telemetry: "/telemetry",
   audit: "/audit",
   setup: "/setup",
+  planner: "/planner",
 } as const;
 
 export const watchStartRefusedText = (call: string): string =>
@@ -192,27 +193,6 @@ export interface FlightWakeRecord {
   reasons: string[];
   /** `flightWakeId(runId, n)`; absent on a wake stored before ids were kept. */
   wakeId?: string;
-  /** Batched categories that rode with an immediate wake. */
-  rode?: string[];
-  /** Cause categories that carried an immediate fact, which batching could not have held back. */
-  immediate?: string[];
-}
-
-export interface FlightWakeAction {
-  runId: string;
-  at: number;
-  reasons: string[];
-  rode: string[];
-  immediate: string[];
-  acted: boolean;
-}
-
-export interface FlightWakeActions {
-  wakes: number;
-  noAction: number;
-  share: number | null;
-  byReason: { reason: string; wakes: number; noAction: number }[];
-  batched: string[];
 }
 
 /** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
@@ -267,7 +247,6 @@ export const FLIGHT_STATE_TEXT_MAX = 300;
 export const FLIGHT_STATE_DECISION_MAX = 1000;
 /** Model-supplied about text; hub-assembled descriptions can be longer. */
 export const FLIGHT_ABOUT_ARG_MAX = 300;
-export const DISCUSSION_TEXT_MAX = 4000;
 export const FLIGHT_ABOUT_MAX = 4000;
 export const FLIGHT_DECISION_MAX = 4000;
 export const FLIGHT_BASIS_MAX = 500;
@@ -545,7 +524,6 @@ export interface FlightRetrospective {
   /** Tickets opened and closed, runs per ticket, review rounds and idle seat-hours. */
   counts?: WasteCounts;
   /** How often FLIGHT woke without changing state, and which reasons are batched. */
-  wakeActions?: FlightWakeActions;
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -615,23 +593,6 @@ export const hasPlanSection = (body: string): boolean => /^## Plan[ \t]*$/m.test
 export const PLAN_SIZES: readonly string[] = ["M", "L", "XL"] satisfies readonly TicketSize[];
 /** The board columns a ticket FLIGHT starts may be in. */
 export const FLIGHT_STARTABLE: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
-/**
- * The park kinds whose lifting is FLIGHT's call: every kind but budget (a token stop), pr-closed,
- * ended, and review or CI rulings, whose lifting waives a gate. Account stops, security refusals
- * and hard-rule touches do not park as these kinds.
- */
-export const FLIGHT_UNPARK_KINDS = [
-  "silent",
-  "nothing",
-  "stuck",
-  "ci-pending",
-  "no-ci",
-  "refused",
-  "ci",
-  "gate",
-  "conflict",
-] as const;
-
 export const READ_NO_GITHUB = "Not read: GitHub could not be reached; try again in a few minutes.";
 export const READ_NO_ISSUE = "Not read: there is no such issue.";
 export const NOT_ON_BOARD = "not on the board";
@@ -704,15 +665,13 @@ export const smallNoPlanText = (ref: string, size: string): string =>
   `Not started: ${ref} is Size ${size}; small tickets need no plan, so promote it to Ready.`;
 export const plannerStartedDecision = (call: string): string => `Started ${call} to plan`;
 export const START_SEAT_DESCRIPTION =
-  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. It is not started while its PR is open. A ticket that lists files outside the seat's area in a Paths: line is started only with paths: you approve those files, a logged decision, and only this run may write them. If a crew pause holds the seat, only the actual started run gets an exception; other tickets still wait.";
+  "Start a free seat on a ticket: a developer seat on a ready ticket in its area (a ## Plan section, the ready label, or the Ready column). On a Size M, L or XL ticket with no ## Plan, the developer writes its own plan first. It is not started while its PR is open, except to continue an ended run whose recorded PR is open from In progress, In review, or Blocked. A ticket that lists files outside the seat's area in a Paths: line is started only with paths: you approve those files, a logged decision, and only this run may write them. If a crew pause holds the seat, only the actual started run gets an exception; other tickets still wait.";
 export const seatHasRunText = (call: string): string => `Not started: ${call} already has a run.`;
 export const accountStoppedText = (call: string, accountId: string): string =>
   `Not started: ${call}'s account ${accountId} is at its usage stop.`;
 export const openPrText = (ref: string, pr: number): string =>
   `Not started: ${ref} has PR #${pr} open; finish or close it first.`;
 export const notOnBoardText = (ref: string): string => `Not started: ${ref} is not on the board.`;
-export const restartDoneText = (ref: string): string =>
-  `Not restarted: ${ref} is closed; reopen_issue first.`;
 export const wrongColumnText = (ref: string, column: string): string =>
   `Not started: ${ref} is in ${column}.`;
 export const ticketHasRunText = (ref: string): string => `Not started: ${ref} already has a run.`;
@@ -771,10 +730,6 @@ export const moveWaitsOnText = (ref: string, open: readonly string[]): string =>
   `Not moved: ${ref} waits on ${open.join(", ")}.`;
 export const moveFailedText = (reason: string): string => `Not moved: ${reason}`;
 export const movedDecision = (to: string): string => `Moved to ${to}`;
-export const heldDecision = (pr: number): string => `Held in Backlog behind PR #${pr}`;
-export const holdNotOpenPrText = (repoId: string, pr: number): string =>
-  `Not moved: PR #${pr} is not an open PR in ${repoId}.`;
-export const WAITS_ON_ONLY_BACKLOG = "Not moved: waits_on is only for a move to Backlog.";
 export const movedText = (ref: string, to: string): string =>
   `Moved ${ref} to ${to}. Recorded in Decided without you.`;
 
@@ -791,6 +746,10 @@ export const rerunStartedDecision = (call: string, sha7: string): string =>
 export const rerunStartedText = (call: string, sha7: string): string =>
   rerunStartedDecision(call, sha7) + RECORDED;
 export const rerunPendingText = (sha7: string): string => `The re-run on ${sha7} is still going.`;
+export const checksPendingText = (sha7: string, names: string[]): string =>
+  names.length > 0
+    ? `CI on ${sha7} is not done: ${names.join(", ")} still pending or not reported. Nothing was re-run.`
+    : `CI on ${sha7} is not done: some checks have not reported. Nothing was re-run.`;
 export const rulingAcceptedDecision = (call: string, sha7: string): string =>
   `Re-run passed on ${sha7}: ${call}'s ruling is accepted.`;
 export const rulingAcceptedText = (call: string, sha7: string): string =>
@@ -827,18 +786,8 @@ export const endFailedText = (why: string): string => `Not ended: ${why}`;
 export const OWN_SEAT_TEXT = "Not sent: that is your own seat.";
 export const scratchSeatText = (call: string): string =>
   `Not sent: ${call} reviews what Mission Control hands it; it takes no messages from you.`;
-export const notParkedText = (call: string): string => `Not sent: ${call}'s run is not parked.`;
-export const notRunOfSeatText = (runId: string, call: string): string =>
-  `Not sent: ${runId} is not an unended run of ${call}.`;
-export const RUN_ID_NEEDS_UNPARK = "Not sent: runId goes with unpark: true.";
-export const parkNotYoursText = (kind: string): string =>
-  `Not sent: a ${kind} park is the operator's call; pass it up with mc brief_item { for: "operator" } on its Needs-you item.`;
-export const ENGINE_OFF_TEXT =
-  "Not sent: the loop engine is off on this server, so nothing can be un-parked.";
 export const messageAboutText = (call: string): string => `Message to ${call}`;
 export const sentText = (call: string): string => `Sent to ${call}.`;
-export const sentUnparkedText = (call: string): string =>
-  `Sent to ${call}, and its run is un-parked.`;
 
 export const FLIGHT_TICKET_TITLE_MAX = 200;
 export const AREA_LABEL_PREFIX = "area:";
@@ -1096,15 +1045,8 @@ export const FLIGHT_IDLE_MS = 10 * 60_000;
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
-/** A push the PR still does not show, parked this long, is a wake reason; the engine lifts it alone before. */
-export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
-/**
- * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
- * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
- */
-export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1115,8 +1057,6 @@ export const FLIGHT_CONTROLLER_WAIT_MS = 15 * 60_000;
 export const FLIGHT_ITEMS_SEEN_SETTING = "flight.items-seen";
 /** The merged and closed PRs whose one-time digest entry FLIGHT has received. */
 export const FLIGHT_PRS_SHOWN_SETTING = "flight.prs-shown";
-/** A chain of tickets waiting on one another that has stood this long wakes FLIGHT. */
-export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
@@ -1131,19 +1071,15 @@ export const FLIGHT_SIGNAL_KINDS = [
   "repeat_park",
   "main_red",
   "idle_seat",
-  "chain_stalled",
   "github_budget",
   "hub_error",
   "old_park",
-  "push_unseen",
   "merge_stalled",
   "item_stale",
   "run_no_pr",
   "controller_unanswered",
   "seat_call",
   "question_changed",
-  "waste_alarm",
-  "stuck_pr",
   "wake_stuck",
 ] as const;
 /** Kinds the hub once raised and no longer does: a stored one is dropped when the signals are read. */
@@ -1151,6 +1087,9 @@ export const FLIGHT_RETIRED_SIGNAL_KINDS: readonly string[] = [
   "idle_no_work",
   "budget_unused",
   "wait_over",
+  "stuck_pr",
+  "waste_alarm",
+  "chain_stalled",
 ];
 export interface FlightSignal {
   checks?: string[];
@@ -1265,20 +1204,6 @@ export interface FlightState {
      * reach the operator. Fix the brief with brief_item, or keep the item (brief it for FLIGHT).
      */
     returned?: string[];
-  }[];
-  /**
-   * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
-   * the PR waited on: once it is not "open", the hold is ready to release. "unknown" means the PR
-   * is not in the stored read (it may have merged or closed, or fallen past the poll's limit): check
-   * the PR yourself before you keep or release the hold. `told` is set once
-   * FLIGHT has been woken for that, so a hold it keeps does not wake it again.
-   */
-  holds: {
-    ref: string;
-    waitsOn: number;
-    ageMin: number;
-    prState: "open" | "merged" | "closed" | "unknown";
-    told: boolean;
   }[];
   /** Reviews waiting to start or already assigned, grouped by their review seat. */
   reviewQueue?: {
@@ -1441,8 +1366,6 @@ export const FLIGHT_ITEMS_LISTED = 20;
 export const FLIGHT_RECENT_LISTED = 10;
 /** How long Needs you gives FLIGHT to triage an operator-owned item. */
 export const FLIGHT_TRIAGE_WAIT_MS = 20 * 60_000;
-/** How long FLIGHT may keep an item after briefing it as handling. */
-export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 /** Compatibility for callers of the former question-only hold. */
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
@@ -1456,34 +1379,10 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 /** An unread operator request is delivered within a minute, even just after another wake. */
 export const FLIGHT_OPERATOR_WAKE_GAP_MS = 30_000;
 /**
- * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
- * together. Anything else wakes at once.
+ * A failure the hub could not settle waits this long after the last wake, so FLIGHT wakes twice
+ * an hour at most for failures. An operator message or a seat's question wakes at once.
  */
 export const FLIGHT_BATCH_MS = 30 * 60_000;
-export const FLIGHT_BATCH_LOOKBACK_MS = 7 * 24 * 60 * 60_000;
-export const FLIGHT_BATCH_NO_ACTION_SHARE = 0.8;
-export const FLIGHT_BATCH_MIN_WAKES = 10;
-export const FLIGHT_IMMEDIATE_REASONS: readonly string[] = [
-  "q",
-  "operator",
-  "owed",
-  "triage",
-  "parked",
-  "free",
-  "idle",
-  "release",
-  "breaker",
-  "holdsInForce",
-  "discussions",
-  "instructions",
-];
-export const FLIGHT_IMMEDIATE_SIGNALS: readonly string[] = [
-  "main_red",
-  "seat_call",
-  "merge_stalled",
-];
-/** @deprecated Unread operator requests no longer expire from FLIGHT's wake inputs. */
-export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** An operator message FLIGHT read and has not answered stays owed this long. */
 export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;
 /** How many days back the cost and wait telemetry looks. */
@@ -1544,7 +1443,6 @@ export const wakeKey = (runId: string, n: number): string => `${wakeKeyPrefix(ru
 /** Turn 1 is the start brief; wake k is turn k + 1, so a run's last turn is FLIGHT_MAX_WAKES + 1. */
 export const flightTurnText = (n: number, max: number): string =>
   `turn ${n} of ${max}, then a fresh session`;
-export const flightTurnShort = (n: number, max: number): string => `turn ${n} of ${max}`;
 export const FLIGHT_NOTE_KEY = "flight:start-failed";
 /**
  * The note the watch raises while FLIGHT is down without having failed to start: parked, waiting
@@ -1626,7 +1524,6 @@ export function wakeSummary(s: FlightState): string {
   const parked = s.seats.filter((x) => x.parked !== null).length;
   const stopped = s.seats.filter((x) => x.loop === "build" && x.state === "stopped").length;
   const inReview = s.prs.filter((p) => p.state === "open").length;
-  const toRelease = s.holds.filter((h) => h.prState !== "open" && !h.told).length;
   const duePlans = s.planned?.filter((p) => p.minutesFromNow <= 0).length ?? 0;
   const parts = [
     s.signals.length > 0 ? counted(s.signals.length, "signal", "signals") : "",
@@ -1641,7 +1538,6 @@ export function wakeSummary(s: FlightState): string {
     inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
     s.items.length > 0 ? `${counted(s.items.length, "item", "items")} to brief` : "",
     duePlans > 0 ? `${counted(duePlans, "planned item", "planned items")} due` : "",
-    toRelease > 0 ? `${counted(toRelease, "hold", "holds")} to release` : "",
   ].filter((p) => p !== "");
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }

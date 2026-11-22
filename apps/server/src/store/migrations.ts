@@ -9,6 +9,41 @@ const USAGE_DEDUPE_VERSION = 1;
 export const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
+/** Tables an older release made and this one does not use; an existing database drops them. */
+const RETIRED_TABLES = [
+  "run_handoffs",
+  "ticket_waits",
+  "holds",
+  "run_reads",
+  "run_rereads",
+  "strays",
+  "crew_errors",
+  "waste_alarms",
+  "comms_repeats",
+  // the code-health, Map, token-audit and bug-escape features
+  "map_cache",
+  "escaped_defects",
+  "bug_escapes",
+  "bug_escape_tries",
+  "run_token_audit",
+  "run_token_calls",
+  "controller_messages",
+  "controller_files",
+  "code_health_file_memberships",
+  "code_health_file_sizes",
+  "code_health_git_sources",
+  "code_health_merged_reviews",
+  "code_health_overview",
+  "code_health_recommendation_requests",
+  "code_health_recommendations",
+  "code_health_revisions",
+  "code_health_size_snapshots",
+  "code_health_size_sources",
+  "code_health_test_attempts",
+  "code_health_test_qa",
+  "code_health_test_reports",
+];
+
 /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
 export type Transaction = (fn: () => void, writeLock?: boolean) => void;
 
@@ -59,6 +94,11 @@ class Migrations {
   }
 
   /** Adds `column` to `table` when it is missing. */
+  private whenColumnPresent(table: string, column: string, fn: () => void): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[];
+    if (columns.some((c) => c.name === column)) fn();
+  }
+
   private addColumn(table: string, column: string, type: string): void {
     this.whenColumnMissing(table, column, () =>
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`),
@@ -73,16 +113,21 @@ class Migrations {
       undefined
     )
       this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
+    // Whether a PR comes from a fork: a run never follows a fork's head (#2099).
+    this.addColumn("pull_requests", "is_cross_repository", "INTEGER");
+    // A commit a run only follows, such as someone else's on top of its push (#2099).
+    this.addColumn("run_commits", "followed", "INTEGER NOT NULL DEFAULT 0");
+    // a hold kept past its calls (a suite left running in the background) survives a restart
+    this.addColumn("test_lock_holds", "pinned", "INTEGER NOT NULL DEFAULT 0");
     // Token audit call times (#1646): audits stored before this have none until re-read.
-    this.addColumn("run_token_calls", "at", "INTEGER");
-    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("run_token_audit", "sessions", "TEXT NOT NULL DEFAULT '[]'");
-    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
-    this.addColumn("flight_wakes", "rode", "TEXT");
-    this.addColumn("flight_wakes", "immediate", "TEXT");
+    // the wake no longer records what rode along or was handled at once
+    for (const column of ["rode", "immediate"])
+      this.whenColumnPresent("flight_wakes", column, () =>
+        this.db.exec(`ALTER TABLE flight_wakes DROP COLUMN ${column}`),
+      );
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );
@@ -213,8 +258,51 @@ class Migrations {
       ["prompt_hash", "TEXT"],
       // The seat's loop kind at the start; `upsertRun` keeps the first value.
       ["loop_kind", "TEXT"],
+      // The model advice for the run's step at creation; kept when a later write has none.
+      ["advice", "TEXT"],
     ];
     for (const [column, type] of runColumns) this.addColumn("runs", column, type);
+    // Migration only: a run's old park and set-aside records fold into one `hold` (#2071), so a
+    // database that skipped the release that folded them keeps its parks. Nothing else reads the
+    // old keys. Both go, so a second open finds nothing to change (and takes no write lock); the
+    // indexes on the old paths go with them. The rows are read again inside the write-locked
+    // transaction.
+    const unfolded = `SELECT id, loop FROM runs
+           WHERE json_type(loop, '$.parked') IS NOT NULL OR json_type(loop, '$.aside') IS NOT NULL`;
+    if (this.db.prepare(`${unfolded} LIMIT 1`).get() !== undefined) {
+      this.transaction(() => {
+        const rows = this.db.prepare(unfolded).all() as { id: string; loop: string }[];
+        const set = this.db.prepare("UPDATE runs SET loop = ? WHERE id = ?");
+        for (const r of rows) {
+          const loop = JSON.parse(r.loop) as Record<string, unknown>;
+          const parked = loop.parked as
+            | { kind?: string; reason?: string; ended?: boolean }
+            | null
+            | undefined;
+          const aside = loop.aside as
+            | { worktree?: string; wake?: boolean; ask?: number }
+            | null
+            | undefined;
+          delete loop.parked;
+          delete loop.aside;
+          loop.hold =
+            parked == null && aside == null
+              ? null
+              : {
+                  kind: parked?.kind ?? null,
+                  reason: parked?.reason ?? null,
+                  ended: parked?.ended ?? false,
+                  worktree: aside?.worktree ?? null,
+                  wake: aside?.wake ?? false,
+                  ...(aside?.ask !== undefined ? { ask: aside.ask } : {}),
+                };
+          set.run(JSON.stringify(loop), r.id);
+        }
+      }, true);
+    }
+    this.db.exec(
+      "DROP INDEX IF EXISTS runs_loop_aside; DROP INDEX IF EXISTS runs_agent_aside_worktree;",
+    );
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id);
       CREATE INDEX IF NOT EXISTS reviews_run ON reviews(run_id);
@@ -228,10 +316,10 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
       CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
       CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
-      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
+      CREATE INDEX IF NOT EXISTS runs_loop_off_seat ON runs(ended_at, json_extract(loop, '$.hold.worktree'), started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_merging_started ON runs(json_extract(loop, '$.merging'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_agent_aside_worktree ON runs(agent_id, json_extract(loop, '$.aside.worktree'));
+      CREATE INDEX IF NOT EXISTS runs_agent_off_seat_worktree ON runs(agent_id, json_extract(loop, '$.hold.worktree'));
       CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
       CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
@@ -244,7 +332,6 @@ class Migrations {
       CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
-      CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
       CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
       CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
@@ -280,7 +367,6 @@ class Migrations {
     this.addColumn("attention_notes", "dismissed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
     // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
-    this.addColumn("holds", "told_state", "TEXT");
     this.addColumn("decision_defaults", "target", "TEXT");
     this.addColumn("decision_defaults", "answer", "TEXT");
     this.addColumn("decision_defaults", "delivered_at", "INTEGER");
@@ -397,6 +483,14 @@ class Migrations {
         .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
         .run(COMMS_NOTICE, "hub");
     this.migrateCommsLabels();
+    // the old code-health triggers on kept tables write into a retired table: drop them first
+    for (const { name } of this.db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'code\\_health\\_%' ESCAPE '\\'",
+      )
+      .all() as { name: string }[])
+      this.db.exec(`DROP TRIGGER IF EXISTS "${name}"`);
+    for (const table of RETIRED_TABLES) this.db.exec(`DROP TABLE IF EXISTS ${table}`);
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);

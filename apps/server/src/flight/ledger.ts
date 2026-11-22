@@ -87,8 +87,8 @@ export function flightMetrics(config: CcConfig, store: Store, now: number): Flig
   }
   const parks = new Map<string, number>();
   for (const run of store.loopRuns(now)) {
-    if (run.repoId !== session.repoId || run.endedAt !== null || !run.loop?.parked) continue;
-    const kind = run.loop.parked.kind;
+    if (run.repoId !== session.repoId || run.endedAt !== null || !run.loop?.hold?.kind) continue;
+    const kind = run.loop.hold.kind;
     parks.set(kind, (parks.get(kind) ?? 0) + 1);
   }
   metrics.parks.live = [...parks]

@@ -234,27 +234,8 @@ export interface CommsAgentResponse extends CommsMessagesResponse {
 export interface CommsTicketResponse extends CommsMessagesResponse {
   ticket: CommsTicketContext;
 }
-export interface CommsMentionsResponse {
-  mentions: CommsMention[];
-}
 export interface CommsPinsResponse {
   messages: CommsMessage[];
-}
-export interface CommsLinksResponse {
-  links: CommsLinkCount[];
-}
-export interface CommsOpenItem {
-  id: string;
-  label: "question" | "blocker";
-  from: string;
-  to: string;
-  ticket: string | null;
-  /** The message text, cut to a few hundred characters. */
-  text?: string;
-  waitedMs: number;
-  /** "operator": no FLIGHT seat, so the question is the operator's now. */
-  nextStep: "flight" | "flight-not-triaging" | "operator";
-  nextAt: number;
 }
 
 /** One message in a Needs-you item's conversation (`GET /api/attention/:key/thread`). */

@@ -12,7 +12,6 @@ import {
   type CheckDropReason,
   type RepoRules,
   splitCommands,
-  unchangedRerunText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
@@ -67,7 +66,8 @@ export function withoutOwnCd(command: string, worktree: string | null): string {
 }
 
 /**
- * The configured check a shell command runs, for the test lock. The guard's shell parser reads the
+ * The configured check a shell command runs, even inside a chain or a pipe. It serves the test
+ * lock (the related-tests check) and the note that says why a chained check was not counted. The guard's shell parser reads the
  * call, so a chain, a pipe, a redirection or a wrapper (`command`, `env`) still counts (the check
  * still loads the Mac); a command that only mentions a check, or adds an argument to it, does not.
  */
@@ -84,13 +84,15 @@ export function lockedCheck(command: string, checks: readonly string[]): string 
   return null;
 }
 
-/** Whether a command can run tests even when it is not one of the configured push checks. */
+/** A vitest or `pnpm test` command: it loads the Mac like a check, so it waits for one too. */
 export function testCommand(command: string): boolean {
   return splitCommands(command).some((argv) => {
-    const program = argv[0]?.toLowerCase();
-    if (program === "vitest" || program?.endsWith("/vitest")) return true;
-    if (program !== "pnpm") return false;
-    return argv.slice(1).some((word) => /^test(?::|$)/.test(word) || word === "vitest");
+    const form = lockForm(argv);
+    return (
+      form[0] === "vitest" ||
+      (form[0] === "pnpm" &&
+        (form[1] === "vitest" || form[1] === "test" || form[1] === "test:related"))
+    );
   });
 }
 
@@ -126,8 +128,6 @@ export interface CallKey {
 export interface CallOptions {
   /** The call asked to run in the background. */
   background?: boolean;
-  /** The command runs within the checkout but below its root, so it cannot cover the root HEAD. */
-  receiptEligible?: boolean;
   /** The call's own Bash `timeout` (ms); Claude's default applies when it names none. */
   timeoutMs?: number;
 }
@@ -142,25 +142,16 @@ export interface CheckRecorder {
   ): Promise<void>;
   /** The call ended; `ok` is its exit success. Records one row per matched check. */
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
-  /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
-  lockedBy(runId: string, command: string): Promise<string | null>;
-  /** The active command in this checkout that prevents a check or test from starting. */
-  running?(runId: string, command: string): Promise<string | null>;
-  /** Atomically reserves this checkout for a check or test, or names the command already reserved. */
-  admit?(key: CallKey, command: string): Promise<string | null>;
-  /** Releases an admission whose command will not start. */
-  cancel?(key: CallKey): void;
-  /** Drops an approved call that will not run after all (its approval was cancelled), with its admission. */
-  abandon?(key: CallKey): void;
-  /** No further event can end this call (its completion came without an exit code): bound its wait now. */
-  keep?(key: CallKey): void;
-  /** A turn ended. Only a normal Codex hand-back can keep waiting for an item completion, until its deadline. */
-  dropRun(runId: string, options?: { keepWatching?: boolean }): void;
+  /** RELATED_CHECK when this shell command runs it, which takes the test lock (it can run the whole suite); else null. */
+  lockedBy(command: string): string | null;
   /**
-   * The text that refuses this shell call as an unchanged rerun (the same configured check already
-   * ran on this commit and no file has changed), or null. A refusal is recorded for the waste alarm.
+   * The check or test call still running in this run's checkout that stops this command from
+   * starting (one at a time per checkout); null when this command is no check or test, or none runs.
+   * A call past its own Bash timeout is gone, not running.
    */
-  rerun?(runId: string, command: string): Promise<string | null>;
+  running?(runId: string, command: string): Promise<string | null>;
+  /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
+  dropRun(runId: string): void;
   /** Codex confirmed this command's exec cell or process is gone before it reported an exit code. */
   lost(runId: string, command: string): boolean;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
@@ -174,8 +165,7 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun"> &
-    Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
+  store: Pick<Store, "addCheckRun">;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
@@ -184,39 +174,25 @@ export interface CheckRecorderDeps {
   worktree?: (runId: string) => Promise<string | null>;
   now?: () => number;
   log?: (line: string) => void;
-  /** A call kept past its turn's end ran out its time: free what it held (the test lock). */
-  release?: (key: CallKey) => void;
 }
 
 interface StartedCall {
   runId: string;
-  /** Empty when the call executed but cannot produce a receipt. */
   matched: string[];
   command: string;
-  head: string | null;
+  head: string;
   startedAt: number;
   timeoutMs: number;
-  worktree: string | null;
-  /** Set when a turn ended with the call still running: past this the hub stops waiting for its exit. */
-  keptUntil?: number;
   /** The related-tests companion is last, so its failure must not exhaust a check retry. */
   relatedTests: boolean;
 }
 
-const callKey = (id: string): CallKey => {
-  const [runId = "", toolUseId = ""] = id.split("\0");
-  return { runId, toolUseId };
-};
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
 
 export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const now = d.now ?? Date.now;
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
-  const admitted = new Map<string, { key: CallKey; command: string }>();
-  /** Bumped when a run's turn is abandoned, so a start still reading the clone cannot install afterwards. */
-  const epochs = new Map<string, number>();
-  const epochOf = (runId: string): number => epochs.get(runId) ?? 0;
   const finishing = new Set<StartedCall>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
@@ -244,55 +220,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     if (rest.length === 0) dropped.delete(runId);
     else dropped.set(runId, rest);
   };
-  /** Forgets kept calls whose deadline has passed: their command can no longer be running. */
-  const sweep = (): void => {
-    const t = now();
-    for (const call of new Set(started.values())) {
-      if (call.keptUntil === undefined || t < call.keptUntil) continue;
-      const ids = [...started].filter(([, c]) => c === call).map(([id]) => id);
-      for (const id of ids) started.delete(id);
-      noteDrop(call.runId, "timeout", call.matched, call.head, call.command);
-      for (const id of ids) d.release?.(callKey(id));
-    }
-  };
-  /** From now the call is waited for only until its own timeout, capped; the sweep frees it then. */
-  const keepCalls = (calls: Iterable<StartedCall>): void => {
-    let soonest = Number.POSITIVE_INFINITY;
-    for (const call of calls) {
-      // a Codex call has no client timeout to read (its begin names none), so it gets the hub's maximum
-      call.keptUntil ??= call.startedAt + CHECK_BASH_TIMEOUT_MS;
-      soonest = Math.min(soonest, call.keptUntil);
-    }
-    if (Number.isFinite(soonest)) setTimeout(sweep, Math.max(0, soonest - now()) + 1).unref();
-  };
-  const cancel = (key: CallKey): void => {
-    for (const [checkout, admission] of admitted) {
-      if (callId(admission.key) === callId(key)) admitted.delete(checkout);
-    }
-  };
   return {
-    async lockedBy(runId, command) {
-      try {
-        const checks = await d.checks(runId);
-        return lockedCheck(
-          command,
-          checks.includes(RELATED_CHECK) ? checks : [...checks, RELATED_CHECK],
-        );
-      } catch (e) {
-        d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
-        return null;
-      }
-    },
+    lockedBy: (command) => lockedCheck(command, [RELATED_CHECK]),
     async running(runId, command) {
-      sweep();
       try {
         const checks = await d.checks(runId);
-        if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
-        const worktree =
-          d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
+        if (lockedCheck(command, [...checks, RELATED_CHECK]) === null && !testCommand(command))
+          return null;
+        const at = now();
         return (
-          [...new Set(started.values())].find(
-            (call) => call.runId === runId || (worktree !== null && call.worktree === worktree),
+          [...started.values()].find(
+            (call) => call.runId === runId && at - call.startedAt < call.timeoutMs,
           )?.command ?? null
         );
       } catch (e) {
@@ -300,137 +238,32 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return null;
       }
     },
-    async admit(key, command) {
-      const epoch = epochOf(key.runId);
-      sweep();
-      try {
-        const checks = await d.checks(key.runId);
-        if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
-        const worktree =
-          d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
-        if (epochOf(key.runId) !== epoch) return null;
-        const checkout = worktree ?? key.runId;
-        const active = admitted.get(checkout);
-        if (active !== undefined && callId(active.key) !== callId(key)) return active.command;
-        const running = [...new Set(started.values())].find(
-          (call) => call.runId === key.runId || (worktree !== null && call.worktree === worktree),
-        );
-        if (running !== undefined) return running.command;
-        admitted.set(checkout, { key, command });
-        return null;
-      } catch (e) {
-        d.log?.(`checks: could not admit a check for ${key.runId}: ${(e as Error).message}`);
-        return null;
-      }
-    },
-    cancel(key) {
-      cancel(key);
-    },
-    keep(key) {
-      const call = started.get(callId(key));
-      if (call !== undefined) keepCalls([call]);
-    },
-    abandon(key) {
-      cancel(key);
-      const call = started.get(callId(key));
-      if (call === undefined) return;
-      for (const [id, c] of started) if (c === call) started.delete(id);
-    },
-    async rerun(runId, command) {
-      try {
-        const checks = await d.checks(runId);
-        const own = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
-        const matched = checksRun(withoutOwnCd(command, own), checks);
-        if (matched.length === 0 || d.store.latestCheckRun === undefined) return null;
-        const at = await d.state(runId);
-        // a dirty tree is a change: the check would run on something no commit holds
-        if (at === null || !at.clean) return null;
-        for (const check of matched) {
-          const last = d.store.latestCheckRun(runId, check, at.head);
-          // a run that passed, or failed with an exit code, is a result. One killed by the Bash
-          // timeout, or that failed with no exit code (a missing install), is not: it may run again.
-          if (last === null || (!last.ok && last.exitCode === null)) continue;
-          // one retry after a failure is allowed (a flaky test, a busy machine); a pass, or a
-          // second failure on the same commit, is final
-          if (!last.ok) {
-            const results = d.store.latestCheckResults?.(runId, check, at.head, 2) ?? [];
-            if (results.length < 2 || results.some((x) => x.ok)) continue;
-          }
-          d.store.addRerunRefusal?.(runId, check, at.head, now());
-          return unchangedRerunText(check, at.head);
-        }
-        return null;
-      } catch (e) {
-        d.log?.(`checks: could not test a rerun for ${runId}: ${(e as Error).message}`);
-        return null;
-      }
-    },
     async begin(key, command, aliases = [], options = {}) {
-      const epoch = epochOf(key.runId);
       try {
         const checks = await d.checks(key.runId);
         const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
         const matched = checksRun(withoutOwnCd(command, own), checks);
-        const isTest = testCommand(command);
-        const inside = lockedCheck(command, checks);
-        if (matched.length === 0 && !isTest && inside === null) {
-          cancel(key);
+        if (matched.length === 0) {
+          // a configured check inside a chain, a pipe or a list is not counted: say so
+          const inside = lockedCheck(command, checks);
+          if (inside === null) return;
+          const at = await d.state(key.runId).catch(() => null);
+          noteDrop(key.runId, "not-plain", [inside], at?.head ?? null, command);
           return;
         }
         const at = await d.state(key.runId);
-        // the turn was abandoned while the clone was read: nothing will run this call
-        if (epochOf(key.runId) !== epoch) {
-          cancel(key);
-          return;
-        }
-        // Track execution even when its receipt cannot be trusted. A dirty start must not earn a
-        // pass, but it still prevents another check or test racing in this checkout.
-        const trackOnly = (head: string | null): void => {
-          const call: StartedCall = {
-            runId: key.runId,
-            matched: [],
-            command,
-            head,
-            startedAt: now(),
-            timeoutMs: 0,
-            worktree: own,
-            relatedTests: false,
-          };
-          started.set(callId(key), call);
-          for (const alias of aliases) started.set(callId(alias), call);
-        };
-        // A command below the checkout root can still contend for the checkout's test resources,
-        // but it cannot attest to the root worktree's HEAD.
-        if (options.receiptEligible === false) {
-          trackOnly(at?.head ?? null);
-          cancel(key);
-          return;
-        }
         if (at === null) {
           noteDrop(key.runId, "unreadable", matched, null, command);
-          trackOnly(null);
-          cancel(key);
-          return;
-        }
-        // a configured check inside a chain, a pipe or a list is not counted, but is still running
-        if (matched.length === 0 && inside !== null) {
-          noteDrop(key.runId, "not-plain", [inside], at.head, command);
-          trackOnly(at.head);
-          cancel(key);
           return;
         }
         // a dirty tree: the check ran on something no commit holds
         if (!at.clean) {
           noteDrop(key.runId, "dirty-start", matched, at.head, command);
-          trackOnly(at.head);
-          cancel(key);
           return;
         }
         // a background call reports its end at once, long before the check has run
         if (options.background) {
           noteDrop(key.runId, "background", matched, at.head, command);
-          trackOnly(at.head);
-          cancel(key);
           return;
         }
         const call = {
@@ -444,7 +277,6 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
             CHECK_BASH_TIMEOUT_MS,
           ),
-          worktree: own,
           relatedTests: !matched.includes(RELATED_CHECK) && hasRelatedTestsCompanion(command),
         };
         // A new Codex call with the same command replaces an earlier one that never delivered a
@@ -459,11 +291,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         for (const prior of replaced)
           noteDrop(key.runId, "session-lost", prior.matched, prior.head, prior.command);
         started.set(callId(key), call);
-        cancel(key);
         for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
         d.log?.(`checks: could not start a record for ${key.runId}: ${(e as Error).message}`);
-        cancel(key);
       }
     },
     async end(key, ok, exitCode = null) {
@@ -472,8 +302,6 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       finishing.add(call);
       for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
       try {
-        // This call exists only to exclude an overlapping execution; it can never cover a commit.
-        if (call.matched.length === 0 || call.head === null) return;
         const at = await d.state(key.runId);
         // the head moved, or the call left the tree dirty: it did not check the commit it started on
         if (at === null) {
@@ -512,21 +340,16 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         finishing.delete(call);
       }
     },
-    dropRun(runId, options = {}) {
-      // Codex can hand a turn back while its command keeps running. Its later item completion is
-      // still the only result that can cover the commit this call started on.
-      if (options.keepWatching) {
-        // the command may outlive its turn, but not its own timeout: then nothing will report it
-        keepCalls([...new Set(started.values())].filter((call) => call.runId === runId));
-        return;
+    dropRun(runId) {
+      // a call can sit under two ids (Codex): it is one call
+      const calls = new Set<StartedCall>();
+      for (const [id, call] of started) {
+        if (call.runId !== runId) continue;
+        started.delete(id);
+        calls.add(call);
       }
-      epochs.set(runId, epochOf(runId) + 1);
-      const calls = [...new Set(started.values())].filter((call) => call.runId === runId);
-      for (const [id, call] of started) if (call.runId === runId) started.delete(id);
       for (const call of calls)
         noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
-      for (const [checkout, admission] of admitted)
-        if (admission.key.runId === runId) admitted.delete(checkout);
     },
     lost(runId, command) {
       const calls = new Set<StartedCall>();

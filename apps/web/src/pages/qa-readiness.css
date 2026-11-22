@@ -83,11 +83,6 @@
   margin: 0;
   padding: 0;
 }
-.uat-queue-group ul {
-  max-height: 288px;
-  overflow: auto;
-  scrollbar-width: thin;
-}
 .uat-queue-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

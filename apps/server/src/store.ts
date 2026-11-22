@@ -1,26 +1,20 @@
-import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
   AttentionMaterials,
   BriefChoiceReceipt,
-  ItemChatMessage,
-  ItemDiscussion,
   PersonSource,
   PromptSection,
   PromptSectionCost,
   PromptWakeCost,
   QaHistoryEntry,
   QaReport,
-  RunHandoff,
-  RunTokenAudit,
   TicketQuestion,
-  TokenAuditSession,
   TokenCall,
-  TokenCounts,
   TokenSourceAdd,
 } from "@mc/core";
 import {
   type AccountId,
+  type AdviceStep,
   type AgentId,
   ASKING_RUN_ENDED_REASON,
   type AttentionBrief,
@@ -43,18 +37,12 @@ import {
   type BoardItem,
   type BriefOption,
   type CiRunView,
-  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
-  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_CAPCOM,
-  COMMS_MC,
   COMMS_OPEN_PREFIX,
-  type CodeHealthWindow,
   type CommsReaction,
   type CommsReactionKind,
   classifyOveruse,
   DECISION_DEFAULT_WAIT_MS,
-  type DefectRefs,
-  type DefectVia,
   type DoneWhenEntry,
   type Escalation,
   estimateTokens,
@@ -72,7 +60,6 @@ import {
   type FlightPlanInput,
   type FlightPlanOperation,
   type FlightPointerKind,
-  type FlightWakeAction,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -87,12 +74,11 @@ import {
   type HealthRow,
   type HudColumn,
   type HudState,
-  isBugLabelled,
   type LoopEvent,
   type LoopKind,
-  linkEscapedDefect,
   type MachineSample,
-  type MergedPrFacts,
+  type ModelAdvice,
+  type ModelTableData,
   OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
@@ -109,7 +95,6 @@ import {
   type QaFlowView,
   type QaReviewRoundView,
   type QuestionClosure,
-  type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
   type RepoId,
@@ -128,109 +113,33 @@ import {
   reviewTimings,
   reworkRatios,
   type SeatSessionRow,
+  SILENCE_WATCHED_EVENTS,
+  type SilenceWatchedEventKind,
   type StoredFinding,
-  type StrayKind,
   type Telemetry,
   type TestLockRun,
   TICKET_SIZES,
-  type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
   type UsageSample,
 } from "@mc/core";
-import { CodeHealthReadError } from "./code-health/error.ts";
-import {
-  failGitFileSource,
-  gitFileMetrics,
-  gitFileSource,
-  installGitFileSources,
-  markGitFileChecked,
-  recordGitFileSource,
-} from "./code-health/git-store.ts";
-import {
-  installMergedReviews,
-  mergedReviewRecords,
-  recordMergedReviews,
-} from "./code-health/merged-reviews.ts";
-import {
-  costAggregate,
-  installOverview,
-  landingAggregate,
-  mergedAggregate,
-  mergedObserved,
-  readOverviewRow,
-  type StoredOverview,
-  writeOverviewRow,
-} from "./code-health/overview-store.ts";
-import {
-  decidedRecommendationRows,
-  installRecommendations,
-  linkRecommendation,
-  type Mutation,
-  mutateRecommendation,
-  openRepeatedRoundsRows,
-  RecommendationMutation,
-  recommendationFunnel,
-  recommendationProposals,
-  recommendationRow,
-  recommendationRows,
-  recommendationRowsForFiles,
-  remeasureCounts,
-  upsertRecommendation,
-} from "./code-health/recommendations.ts";
-import { remeasureDue } from "./code-health/remeasure.ts";
-import {
-  aggregateDatedRisk,
-  datedPrFiles,
-  installRiskMemberships,
-  pruneRiskMemberships,
-  recordRiskMembership,
-  reviewedFileMembership,
-} from "./code-health/risk.ts";
-import {
-  checkFileSizes,
-  failFileSizes,
-  fileSizeHistory,
-  fileSizeSource,
-  installFileSizes,
-  recordFileSizes,
-  sizedPaths,
-} from "./code-health/size-store.ts";
-import {
-  codeHealthCiSource,
-  codeHealthEvidenceSource,
-  codeHealthReviewSource,
-  codeHealthSizeSource,
-  codeHealthSourceRevision,
-  installCodeHealthRevisions,
-} from "./code-health/source.ts";
-import { installTestQa, linkTestQa, readTestQa } from "./code-health/test-qa.ts";
-import {
-  importTestReport,
-  installTestReports,
-  testAttemptSource,
-  testCollectionCoverage,
-} from "./code-health/test-reports.ts";
 import { StandingInstructions } from "./instructions/standing.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
-import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
 import {
-  type BugFixCandidate,
-  bugEscapes,
-  bugFixCandidates,
-  type IntroducingPrFacts,
-  introducingPrFacts,
-  noteBugTraceTried,
-  recordBugEscape,
-} from "./store/bug-escapes.ts";
+  auditEventLastSeen,
+  auditItems,
+  recordAuditEvent,
+  recordAuditItem,
+  recordSilenceAlarm,
+} from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
-import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
 import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
+import { modelTableData } from "./store/model-table.ts";
 import * as reviewsStore from "./store/reviews.ts";
 import {
   evidenceOf,
@@ -244,6 +153,7 @@ import {
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
 import { seatQueries } from "./store/seats.ts";
+import { ticketPlanQueries } from "./store/ticket-plans.ts";
 import {
   ACK_ABSENT_MS,
   type AgentEvent,
@@ -257,14 +167,12 @@ import {
   type CommsReadScope,
   type CommsRow,
   type CommsSettlement,
-  type CrewError,
   type Evidence,
   type FinancialRun,
   FLIGHT_DECISIONS_RETENTION_DAYS,
   type FlightBriefRow,
   HISTORY_BATCH_ROWS,
   HISTORY_SWEEP_MAX_BATCHES,
-  type Hold,
   type KeeperCursor,
   LIVE_LOOP_EVENTS_LIMIT,
   type LockHoldRow,
@@ -278,14 +186,9 @@ import {
   type QueueRow,
   type SeatLine,
   type SeatQuestion,
-  type Stray,
 } from "./store/types.ts";
-import {
-  type ControllerMessageUsage,
-  type ControllerUsageTotals,
-  usageQueries,
-} from "./store/usage.ts";
-import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
+import { usageQueries } from "./store/usage.ts";
+import { wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
   messageImprovements,
@@ -303,6 +206,8 @@ const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
 type Row = Record<string, SQLInputValue>;
 
 const DAY_MS = 86_400_000;
+const SILENCE_CLOCK = "silence";
+const SILENCE_SEAT_START_CLOCK = "silence-seat-start";
 
 /** The median of the values, or null when there are none. */
 function median(values: number[]): number | null {
@@ -376,12 +281,8 @@ type RepoTable = keyof typeof REPO_TABLES;
 const DIGEST_BATCH = 500;
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
-const sessionsOf = (raw: unknown): { sessions?: TokenAuditSession[] } => {
-  const list = JSON.parse(typeof raw === "string" ? raw : "[]") as TokenAuditSession[];
-  return list.length > 0 ? { sessions: list } : {};
-};
 
-const toTokenCall = (r: Row): TokenCall => ({
+const _toTokenCall = (r: Row): TokenCall => ({
   at: (r.at as number | null) ?? null,
   context: r.context as number,
   cacheRead: r.cache_read as number,
@@ -440,338 +341,6 @@ export class Store {
     migrate(this.db, (fn, writeLock) => this.transaction(fn, writeLock));
     this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
-    installRiskMemberships(this.db);
-    installGitFileSources(this.db);
-    installFileSizes(this.db);
-    installRecommendations(this.db);
-    installMergedReviews(this.db);
-    installTestReports(this.db);
-    installTestQa(this.db);
-    installOverview(this.db);
-    installCodeHealthRevisions(this.db);
-  }
-
-  importCodeHealthTestReport(
-    raw: unknown,
-    actor: string,
-    at: number,
-    knownSecrets: readonly string[],
-  ) {
-    let result: ReturnType<typeof importTestReport> | undefined;
-    this.transaction(() => {
-      result = importTestReport(this.db, raw, actor, at, knownSecrets);
-    }, true);
-    if (!result) throw new Error("The test report was not stored.");
-    return result;
-  }
-  linkCodeHealthTestQa(raw: unknown, actor: string, at: number, knownSecrets: readonly string[]) {
-    let result: ReturnType<typeof linkTestQa> | undefined;
-    this.transaction(() => {
-      result = linkTestQa(this.db, raw, actor, at, knownSecrets);
-    }, true);
-    if (!result) throw new Error("The test QA proposal was not stored.");
-    return result;
-  }
-  codeHealthTestQa(repoId: string, from: number, until: number) {
-    return readTestQa(this.db, repoId, from, until);
-  }
-  codeHealthTestAttempts(repoId: string, from: number, until: number) {
-    return testAttemptSource(this.db, repoId, from, until);
-  }
-  codeHealthTestCollection(repoId: string, from: number, until: number) {
-    return testCollectionCoverage(this.db, repoId, from, until);
-  }
-
-  codeHealthRecommendations(repoId: string, openAt?: number) {
-    return recommendationRows(this.db, repoId, openAt);
-  }
-  codeHealthOpenRepeatedRounds(repoId: string, at: number) {
-    return openRepeatedRoundsRows(this.db, repoId, at);
-  }
-  codeHealthRecommendationPage(repoId: string, offset: number) {
-    const rows = this.db
-      .prepare(
-        "SELECT id FROM code_health_recommendations WHERE repo_id=? ORDER BY created_at DESC,id LIMIT 51 OFFSET ?",
-      )
-      .all(repoId, offset);
-    return {
-      recommendations: rows
-        .slice(0, 50)
-        .map((row) => recommendationRow(this.db, repoId, String(row.id))),
-      nextCursor: rows.length > 50 ? String(offset + 50) : null,
-    };
-  }
-  codeHealthRecommendation(repoId: string, id: string) {
-    return recommendationRow(this.db, repoId, id);
-  }
-  refreshCodeHealthRecommendations(repoId: string, at: number, checkout?: string) {
-    this.transaction(() => {
-      const proposals = recommendationProposals(this, repoId, at, checkout);
-      const ids = proposals.map((proposal) => upsertRecommendation(this.db, proposal, at));
-      this.db
-        .prepare(
-          `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,
-        )
-        .run(at, repoId, ...ids);
-    });
-  }
-  codeHealthFileRecommendations(repoId: string, paths: readonly string[], at: number) {
-    return recommendationRowsForFiles(this.db, repoId, paths, at);
-  }
-  codeHealthDecisionRecorded(repoId: string, requestId: string): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
-        )
-        .get(repoId, requestId) !== undefined
-    );
-  }
-  decideCodeHealthRecommendation(
-    repoId: string,
-    id: string,
-    request: Mutation,
-    actor: string,
-    at: number,
-    flightId?: string,
-  ) {
-    let response: ReturnType<typeof mutateRecommendation> | undefined;
-    this.transaction(() => {
-      const previous = this.db
-        .prepare(
-          "SELECT 1 FROM code_health_recommendation_requests WHERE repo_id=? AND request_id=?",
-        )
-        .get(repoId, request.requestId);
-      response = mutateRecommendation(this.db, repoId, id, request, actor, at);
-      if (!previous) {
-        if (request.change.action === "accept" && flightId)
-          this.insertComms(
-            {
-              at,
-              from: COMMS_MC,
-              senderKind: "hub",
-              to: flightId,
-              ticket: null,
-              text: `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
-            },
-            `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
-            null,
-          );
-        this.addFlightDecision({
-          at,
-          kind: "note",
-          seatId: actor,
-          targetRunId: null,
-          ref: id,
-          questionId: null,
-          about: `Code health ${repoId}: ${id}`,
-          decision: JSON.stringify({ actor, change: request.change, response: response.state }),
-          basis: request.basis,
-        });
-      }
-    }, true);
-    if (!response) throw new Error("Recommendation transaction returned no result");
-    return response;
-  }
-  /**
-   * FLIGHT's own accept: only a FLIGHT-tier rule, with the seat as owner and the default review
-   * date. The same transition, decision record and idempotency as the operator's accept.
-   */
-  flightAcceptCodeHealth(repoId: string, id: string, seatId: string, basis: string, at: number) {
-    const row = recommendationRow(this.db, repoId, id);
-    if (!row) throw new CodeHealthReadError(404, "Unknown code-health recommendation.");
-    if (!CODE_HEALTH_FLIGHT_TIER_RULES.includes(row.rule))
-      throw new CodeHealthReadError(
-        403,
-        "FLIGHT may not accept this kind of proposal; it stays with the operator.",
-      );
-    const request = RecommendationMutation.parse({
-      requestId: randomUUID(),
-      basis,
-      expectedUpdatedAt: row.updatedAt,
-      change: {
-        action: "accept",
-        owner: `FLIGHT (${seatId})`,
-        reviewAt: at + CODE_HEALTH_FLIGHT_REVIEW_DAYS * DAY_MS,
-      },
-    });
-    return this.decideCodeHealthRecommendation(repoId, id, request, seatId, at);
-  }
-  recordCodeHealthMergedReviews(repoId: string, at: number) {
-    let changed = 0;
-    this.transaction(() => {
-      changed = recordMergedReviews(this.db, repoId, at);
-    }, true);
-    return changed;
-  }
-  codeHealthMergedReviews(repoId: string) {
-    return mergedReviewRecords(this.db, repoId);
-  }
-  remeasureCodeHealth(repoId: string, at: number, checkout?: string) {
-    let done: string[] = [];
-    this.transaction(() => {
-      done = remeasureDue(this, this.db, repoId, at, checkout);
-    }, true);
-    return done;
-  }
-  linkCodeHealthRecommendation(
-    repoId: string,
-    id: string,
-    link: string,
-    actor: string,
-    at: number,
-  ) {
-    this.transaction(() => {
-      linkRecommendation(this.db, repoId, id, link, at);
-      this.addFlightDecision({
-        at,
-        kind: "ticket",
-        seatId: actor,
-        targetRunId: null,
-        ref: id,
-        questionId: null,
-        about: `Code health ${repoId}: ${id}`,
-        decision: `Linked ${link}`,
-        basis: "Accepted recommendation; existing authorised FLIGHT ticket path.",
-      });
-    });
-  }
-
-  beginCodeHealthWork(repoId: string, id: string, fingerprint: string, at: number): boolean {
-    const result = this.db
-      .prepare(
-        "UPDATE code_health_recommendations SET work_attempt=? WHERE repo_id=? AND id=? AND work_attempt IS NULL AND json_extract(state,'$.kind')='accepted'",
-      )
-      .run(JSON.stringify({ fingerprint, at }), repoId, id);
-    return Number(result.changes) === 1;
-  }
-  completeCodeHealthWork(repoId: string, id: string) {
-    this.db
-      .prepare(
-        "UPDATE code_health_recommendations SET work_ready=1 WHERE repo_id=? AND id=? AND linked_work IS NOT NULL",
-      )
-      .run(repoId, id);
-  }
-
-  codeHealthDatedRisk(repoId: string, from: number, until: number) {
-    return aggregateDatedRisk(datedPrFiles(this.db, repoId, from, until));
-  }
-  codeHealthGitSource(repoId: string, checkout: string) {
-    return gitFileSource(this.db, repoId, checkout);
-  }
-  recordCodeHealthGitSource(
-    repoId: string,
-    checkout: string,
-    source: Parameters<typeof recordGitFileSource>[3],
-    at: number,
-  ) {
-    this.transaction(() => recordGitFileSource(this.db, repoId, checkout, source, at));
-  }
-  markCodeHealthGitChecked(repoId: string, checkout: string, sha: string, at: number) {
-    markGitFileChecked(this.db, repoId, checkout, sha, at);
-  }
-  failCodeHealthGitSource(repoId: string, checkout: string, sha: string | null, at: number) {
-    failGitFileSource(this.db, repoId, checkout, sha, at);
-  }
-  codeHealthGitMetrics(repoId: string, checkout: string, from: number, until: number, at: number) {
-    return gitFileMetrics(this.db, repoId, checkout, from, until, at);
-  }
-  codeHealthReviewedFiles(repoId: string, from: number, until: number) {
-    return reviewedFileMembership(this.db, repoId, from, until);
-  }
-  recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
-    recordRiskMembership(this.db, input);
-  }
-  codeHealthOverviewRow(repoId: string, window: CodeHealthWindow) {
-    return readOverviewRow(this.db, repoId, window);
-  }
-  saveCodeHealthOverview(repoId: string, window: CodeHealthWindow, row: StoredOverview) {
-    writeOverviewRow(this.db, repoId, window, row);
-  }
-  codeHealthMergedAggregate(repoId: string, from: number, until: number) {
-    return mergedAggregate(this.db, repoId, from, until);
-  }
-  codeHealthMergedObserved(repoId: string) {
-    return mergedObserved(this.db, repoId);
-  }
-  codeHealthCostAggregate(repoId: string, from: number, until: number) {
-    return costAggregate(this.db, repoId, from, until);
-  }
-  codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
-    return landingAggregate(this.db, repoId, from, until, limit);
-  }
-  codeHealthDecidedRecommendations(repoId: string, limit: number) {
-    return decidedRecommendationRows(this.db, repoId, limit);
-  }
-  codeHealthFunnel(repoId: string) {
-    return recommendationFunnel(this.db, repoId);
-  }
-  codeHealthRemeasureCounts(repoId: string) {
-    return remeasureCounts(this.db, repoId);
-  }
-  codeHealthRevision(repoId: string): string {
-    return codeHealthSourceRevision(this.db, repoId);
-  }
-
-  /** A consistent, deferred read snapshot; WAL writers remain independent. */
-  codeHealthSnapshot<T>(read: () => T): T {
-    let result: T | undefined;
-    this.transaction(() => {
-      result = read();
-    });
-    return result as T;
-  }
-
-  codeHealthReviews(repoId: string, from: number, until: number) {
-    return codeHealthReviewSource(this.db, repoId, from, until);
-  }
-
-  codeHealthCi(repoId: string, from: number, until: number) {
-    return codeHealthCiSource(this.db, repoId, from, until);
-  }
-
-  codeHealthSizes(checkout: string) {
-    return codeHealthSizeSource(this.db, checkout);
-  }
-  codeHealthSizeSnapshot(repoId: string, checkout: string) {
-    return fileSizeSource(this.db, repoId, checkout);
-  }
-  codeHealthSizedPaths(
-    repoId: string,
-    checkout: string,
-    sha: string,
-    paths: readonly string[],
-    minimum: number,
-  ) {
-    return sizedPaths(this.db, repoId, checkout, sha, paths, minimum);
-  }
-  recordCodeHealthSizeSnapshot(
-    repoId: string,
-    checkout: string,
-    snapshot: Parameters<typeof recordFileSizes>[3],
-    at: number,
-  ) {
-    this.transaction(() => recordFileSizes(this.db, repoId, checkout, snapshot, at));
-  }
-  checkCodeHealthSizes(repoId: string, checkout: string, sha: string, at: number) {
-    checkFileSizes(this.db, repoId, checkout, sha, at);
-  }
-  failCodeHealthSizes(repoId: string, checkout: string, sha: string | null, at: number) {
-    failFileSizes(this.db, repoId, checkout, sha, at);
-  }
-  codeHealthSizeHistory(
-    repoId: string,
-    checkout: string,
-    paths: readonly string[],
-    from: number,
-    until: number,
-    sha: string,
-  ) {
-    return fileSizeHistory(this.db, repoId, checkout, paths, from, until, sha);
-  }
-
-  codeHealthEvidence(query: Parameters<typeof codeHealthEvidenceSource>[1]) {
-    return codeHealthEvidenceSource(this.db, query);
   }
 
   /** One-time-safe reconstruction from sources that already survived retention. */
@@ -885,7 +454,7 @@ export class Store {
 
   /** The usage sample and controller usage queries (store/usage.ts). */
   private get usageQ(): ReturnType<typeof usageQueries> {
-    this.usageQueriesCache ??= usageQueries(this.db, (fn) => this.transaction(fn));
+    this.usageQueriesCache ??= usageQueries(this.db);
     return this.usageQueriesCache;
   }
 
@@ -935,19 +504,14 @@ export class Store {
     return this.seatQueriesCache;
   }
 
-  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  /** The ticket plans and their sign-off (store/ticket-plans.ts). */
+  get plans(): ReturnType<typeof ticketPlanQueries> {
+    return ticketPlanQueries(this.db);
+  }
+
+  /** The spend report's and the retrospective's queries (spend/waste.ts). */
   get waste(): ReturnType<typeof wasteQueries> {
     return wasteQueries(this.db);
-  }
-
-  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
-  addRerunRefusal(runId: string, command: string, sha: string, at: number): void {
-    this.appendAttempt(runId, RERUN_REFUSED_ATTEMPT, at, { command, sha, at });
-  }
-
-  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
-  addResumeAttempt(runId: string, at: number): void {
-    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
@@ -1039,277 +603,6 @@ export class Store {
           .all(from, to) as { tool: string; calls: number; chars: number }[]
       ).map((r) => [r.tool, { calls: r.calls, chars: r.chars }]),
     );
-  }
-
-  /** Stores a run's token audit and its calls; a run audited twice keeps the later read. */
-  saveRunTokenAudit(
-    runId: string,
-    at: number,
-    audit: RunTokenAudit,
-    calls: readonly TokenCall[],
-  ): void {
-    this.transaction(() => {
-      this.db.prepare("DELETE FROM run_token_calls WHERE run_id = ?").run(runId);
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
-             cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command, sessions, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        )
-        .run(
-          runId,
-          at,
-          audit.calls,
-          audit.peakContext,
-          audit.medianContext,
-          audit.cacheRead,
-          audit.cacheWrite,
-          audit.output,
-          audit.rewrites,
-          audit.rewriteTokens,
-          audit.readAfterReport,
-          JSON.stringify(audit.bySource),
-          JSON.stringify(audit.byCommand),
-          JSON.stringify(audit.sessions ?? []),
-        );
-      const insert = this.db.prepare(
-        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      for (const [i, c] of calls.entries()) {
-        insert.run(
-          runId,
-          i,
-          c.context,
-          c.cacheRead,
-          c.cacheWrite,
-          c.output,
-          JSON.stringify(c.added),
-          c.at ?? null,
-        );
-      }
-    });
-  }
-
-  /** A run's stored calls, in order. */
-  runTokenCalls(runId: string): TokenCall[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
-        .all(runId) as Row[]
-    ).map(toTokenCall);
-  }
-
-  /** Audited runs with calls whose call times were never looked for, oldest first (the back-fill). */
-  runsToRetimeTokens(limit: number): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT r.* FROM run_token_audit a JOIN runs r ON r.id = a.run_id
-           WHERE a.timestamps_checked = 0 AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC LIMIT ?`,
-        )
-        .all(limit) as Row[]
-    ).map(toRun);
-  }
-
-  /** Records that a run's transcript could not give call times, so it is not tried again. */
-  markTokenTimesChecked(runId: string): void {
-    markTokenTimesChecked(this.db, runId);
-  }
-
-  /**
-   * Every stored call of each run that made a call in `(from, to]`, in order, so a window can read
-   * the calls before it (the context a call grew from) and after it (what re-read an addition).
-   */
-  tokenCallsOfRunsActiveIn(from: number, to: number): { run: Run; calls: TokenCall[] }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT r.*, c.context AS c_context, c.cache_read AS c_cache_read, c.cache_write AS c_cache_write,
-           c.output AS c_output, c.added AS c_added, c.at AS c_at
-         FROM run_token_calls c JOIN runs r ON r.id = c.run_id
-         WHERE c.run_id IN (SELECT run_id FROM run_token_calls WHERE at > ? AND at <= ?)
-         ORDER BY r.started_at DESC, r.seq DESC, c.run_id, c.idx`,
-      )
-      .all(from, to) as Row[];
-    const out: { run: Run; calls: TokenCall[] }[] = [];
-    for (const r of rows) {
-      let last = out.at(-1);
-      if (last === undefined || last.run.id !== (r.id as string)) {
-        last = { run: toRun(r), calls: [] };
-        out.push(last);
-      }
-      last.calls.push({
-        at: (r.c_at as number | null) ?? null,
-        context: r.c_context as number,
-        cacheRead: r.c_cache_read as number,
-        cacheWrite: r.c_cache_write as number,
-        output: r.c_output as number,
-        added: JSON.parse(r.c_added as string) as TokenSourceAdd[],
-      });
-    }
-    return out;
-  }
-
-  /**
-   * For each run overlapping `[from, to]`: whether its token audit is stored, whether it has calls,
-   * and whether any call has no time. What an event window can and cannot say.
-   */
-  tokenAuditStates(
-    from: number,
-    to: number,
-  ): { runId: string; stored: boolean; calls: number; untimed: boolean }[] {
-    const ids = this.overlappingRuns("id", from, to + 1).map((r) => r.id as string);
-    const state = this.db.prepare(
-      `SELECT a.calls AS calls, (SELECT COUNT(*) FROM run_token_calls c WHERE c.run_id = ? AND c.at IS NULL) AS untimed
-       FROM run_token_audit a WHERE a.run_id = ?`,
-    );
-    return ids.map((runId) => {
-      const row = state.get(runId, runId) as { calls: number; untimed: number } | undefined;
-      return {
-        runId,
-        stored: row !== undefined,
-        calls: row?.calls ?? 0,
-        untimed: (row?.untimed ?? 0) > 0,
-      };
-    });
-  }
-
-  /** Ended runs started since `since` with no token audit yet, newest first. */
-  runsToAuditTokens(since: number, limit: number): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE ended_at IS NOT NULL AND started_at >= ?
-             AND id NOT IN (SELECT run_id FROM run_token_audit)
-           ORDER BY started_at DESC, seq DESC LIMIT ?`,
-        )
-        .all(since, limit) as Row[]
-    ).map(toRun);
-  }
-
-  /** The stored token audits of runs that started since `since`, with the run each belongs to. */
-  runTokenAudits(since: number): { run: Run; audit: RunTokenAudit }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
-           a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
-           a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
-           a.sessions AS a_sessions
-         FROM run_token_audit a JOIN runs r ON r.id = a.run_id
-         WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
-      )
-      .all(since) as Row[];
-    return rows.map((r) => ({
-      run: toRun(r),
-      audit: {
-        calls: r.a_calls as number,
-        peakContext: r.a_peak as number,
-        medianContext: r.a_median as number,
-        cacheRead: r.a_cache_read as number,
-        cacheWrite: r.a_cache_write as number,
-        output: r.a_output as number,
-        rewrites: r.a_rewrites as number,
-        rewriteTokens: r.a_rewrite_tokens as number,
-        readAfterReport: r.a_after as number | null,
-        bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
-        byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
-        ...sessionsOf(r.a_sessions),
-      },
-    }));
-  }
-
-  /** Context size of every stored model call of runs that started since `since`. */
-  runCallContexts(since: number): { runId: string; context: number }[] {
-    return this.db
-      .prepare(
-        `SELECT c.run_id AS runId, c.context AS context FROM run_token_calls c
-         JOIN runs r ON r.id = c.run_id WHERE r.started_at >= ?`,
-      )
-      .all(since) as { runId: string; context: number }[];
-  }
-
-  /** Review runs that started since `since` on a ticket, oldest first. */
-  reviewRunsSince(since: number): Run[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT * FROM runs WHERE review_id IS NOT NULL AND ticket IS NOT NULL AND started_at >= ?
-           ORDER BY started_at, seq`,
-        )
-        .all(since) as Row[]
-    ).map(toRun);
-  }
-
-  /** PRs merged in `[from, to]`, and every run on a ticket one of them closed. */
-  mergedTicketRuns(from: number, to: number): { mergedPrs: number; runs: Run[] } {
-    const merged = this.db
-      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
-      .get(from, to) as { n: number };
-    const runs = (
-      this.db
-        .prepare(
-          `WITH merged_tickets AS (
-             SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
-             WHERE merged_at >= ? AND merged_at <= ?
-           ) SELECT r.* FROM runs r JOIN merged_tickets t ON r.repo_id = t.repo_id AND r.ticket = t.ticket
-           ORDER BY r.started_at, r.seq`,
-        )
-        .all(from, to) as Row[]
-    ).map(toRun);
-    return { mergedPrs: merged.n, runs };
-  }
-
-  /** For each prompt section recorded since `since`, the run that sent the most of it. */
-  promptSectionTopRuns(since: number): {
-    section: PromptSection;
-    runId: string;
-    agentId: string;
-    ticket: string | null;
-    tokens: number;
-  }[] {
-    return this.db
-      .prepare(
-        `SELECT section, runId, agentId, ticket, tokens FROM (
-           SELECT p.section AS section, p.run_id AS runId, r.agent_id AS agentId, r.ticket AS ticket,
-             SUM(p.tokens) AS tokens,
-             ROW_NUMBER() OVER (PARTITION BY p.section ORDER BY SUM(p.tokens) DESC, p.run_id) AS n
-           FROM prompt_sections p JOIN runs r ON r.id = p.run_id WHERE p.at >= ?
-           GROUP BY p.section, p.run_id)
-         WHERE n = 1`,
-      )
-      .all(since) as never;
-  }
-
-  /** Prompt-section tokens by section for prompts recorded since `since`. */
-  promptSectionTotals(since: number): { section: PromptSection; tokens: number }[] {
-    return this.db
-      .prepare(
-        "SELECT section, SUM(tokens) AS tokens FROM prompt_sections WHERE at >= ? GROUP BY section",
-      )
-      .all(since) as { section: PromptSection; tokens: number }[];
-  }
-
-  /**
-   * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
-   * session's copy of its history or a subagent file, counts once; the larger output is kept.
-   */
-  saveControllerMessages(sessionId: string, messages: readonly ControllerMessageUsage[]): void {
-    this.usageQ.saveControllerMessages(sessionId, messages);
-  }
-
-  /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
-  controllerUsageSince(since: number): ControllerUsageTotals {
-    return this.usageQ.controllerUsageSince(since);
-  }
-
-  /** The mtime a controller file was last read at, or null when it has not been read. */
-  controllerFileMtime(path: string): number | null {
-    return this.usageQ.controllerFileMtime(path);
-  }
-
-  markControllerFile(path: string, mtime: number): void {
-    this.usageQ.markControllerFile(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
@@ -1418,8 +711,55 @@ export class Store {
       : null;
   }
 
+  /** Records the model and effort recommended for a ticket's step; a later write replaces it. */
+  setModelAdvice(repoId: RepoId, issue: number, a: ModelAdvice): void {
+    this.db
+      .prepare(
+        `INSERT INTO model_advice (repo_id, issue, step, model, effort, reason, by, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo_id, issue, step) DO UPDATE SET model = excluded.model,
+           effort = excluded.effort, reason = excluded.reason, by = excluded.by, at = excluded.at`,
+      )
+      .run(repoId, issue, a.step, a.model, a.effort, a.reason, a.by, a.at);
+    if (a.by === "step-up")
+      this.db
+        .prepare("INSERT INTO model_step_ups (repo_id, issue, at) VALUES (?, ?, ?)")
+        .run(repoId, issue, a.at);
+  }
+
+  modelAdvice(repoId: RepoId, issue: number, step: AdviceStep): ModelAdvice | null {
+    const r = this.db
+      .prepare(
+        "SELECT model, effort, reason, by, at FROM model_advice WHERE repo_id = ? AND issue = ? AND step = ?",
+      )
+      .get(repoId, issue, step) as Row | undefined;
+    return r
+      ? {
+          step,
+          model: r.model as string | null,
+          effort: r.effort as string | null,
+          reason: r.reason as string,
+          by: r.by as ModelAdvice["by"],
+          at: r.at as number,
+        }
+      : null;
+  }
+
+  /** The runs and seat changes behind Audit's model table, for a window of `since` to `until`. */
+  modelTableData(since: number, until: number): ModelTableData {
+    return modelTableData(this.db, since, until);
+  }
+
   run(id: string): Run | null {
     return this.runQ.run(id);
+  }
+
+  /** When the seat started its first run after `after`, or null when it has not. */
+  nextRunStart(agentId: AgentId, after: number): number | null {
+    const row = this.db
+      .prepare("SELECT MIN(started_at) AS at FROM runs WHERE agent_id = ? AND started_at > ?")
+      .get(agentId, after) as { at: number | null };
+    return row.at;
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
@@ -1433,11 +773,6 @@ export class Store {
     heldRunIds: readonly string[] = [],
   ): Map<AgentId, Run[]> {
     return this.runQ.runsForAgents(agentIds, limit, heldRunIds);
-  }
-
-  /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
-  mapAsideRuns(agentId: AgentId): Run[] {
-    return this.runQ.mapAsideRuns(agentId);
   }
 
   /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
@@ -1465,7 +800,7 @@ export class Store {
 
   /**
    * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
-   * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
+   * someone releases it. Only the latest run counts.
    */
   branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
     return this.runQ.branchMergeHold(repoId, branch);
@@ -1517,8 +852,8 @@ export class Store {
   }
 
   /** The runs that have not ended and are off their seat in review, oldest first. */
-  asideRuns(): Run[] {
-    return this.runQ.asideRuns();
+  offSeatRuns(): Run[] {
+    return this.runQ.offSeatRuns();
   }
 
   /** The tickets (`repo#n`) of the runs that have not ended. */
@@ -1537,7 +872,7 @@ export class Store {
       found("SELECT 1 FROM queues WHERE taken_at IS NULL LIMIT 1") ||
       found("SELECT 1 FROM reviews WHERE state = ? LIMIT 1", "queued") ||
       found(
-        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
+        "SELECT 1 FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND (loop IS NULL OR json_extract(loop, '$.hold.worktree') IS NULL) LIMIT 1",
       )
     );
   }
@@ -1697,101 +1032,12 @@ export class Store {
       .run(runId, JSON.stringify(d));
   }
 
-  mapCacheGet(kind: string, scope: string, key: string): string | null {
-    const row = this.db
-      .prepare("SELECT value FROM map_cache WHERE kind = ? AND scope = ? AND key = ?")
-      .get(kind, scope, key) as { value: string } | undefined;
-    return row?.value ?? null;
-  }
-
-  /** Stores a map cache row; `exclusive` drops the kind and scope's other rows (superseded keys). */
-  mapCachePut(kind: string, scope: string, key: string, value: string, exclusive: boolean): void {
-    this.transaction(() => {
-      if (exclusive)
-        this.db
-          .prepare("DELETE FROM map_cache WHERE kind = ? AND scope = ? AND key <> ?")
-          .run(kind, scope, key);
-      this.db
-        .prepare(
-          `INSERT INTO map_cache (kind, scope, key, value) VALUES (?, ?, ?, ?)
-           ON CONFLICT(kind, scope, key) DO UPDATE SET value = excluded.value`,
-        )
-        .run(kind, scope, key, value);
-    });
-  }
-
   digest(runId: string): RunDigest | null {
     const row = this.db.prepare("SELECT digest FROM run_digests WHERE run_id = ?").get(runId) as
       | { digest: string }
       | undefined;
     if (!row) return null;
-    return this.withRereads(parseDigest(row.digest), this.rereads([runId]).get(runId));
-  }
-
-  private withRereads(d: RunDigest, r: RunDigest["rereads"]): RunDigest {
-    return r ? { ...d, rereads: r } : d;
-  }
-
-  /** Refused re-reads per run (those with any): how many, and the tokens they are estimated to have saved. */
-  private rereads(runIds: string[]): Map<string, NonNullable<RunDigest["rereads"]>> {
-    const out = new Map<string, NonNullable<RunDigest["rereads"]>>();
-    for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
-      const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows = this.statement(
-        `SELECT run_id, count, tokens_saved FROM run_rereads WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
-      ).all(...ids) as { run_id: string; count: number; tokens_saved: number }[];
-      for (const r of rows) out.set(r.run_id, { count: r.count, tokensSaved: r.tokens_saved });
-    }
-    return out;
-  }
-
-  /** The run's earlier whole read of `path` by `agentId` ('' is the seat), if it made one. */
-  runRead(runId: string, agentId: string, path: string): ReadRecord | undefined {
-    const r = this.db
-      .prepare(
-        "SELECT size, mtime_ms, compactions, tool_use_id, at FROM run_reads WHERE run_id = ? AND agent_id = ? AND path = ?",
-      )
-      .get(runId, agentId, path) as
-      | { size: number; mtime_ms: number; compactions: number; tool_use_id: string; at: number }
-      | undefined;
-    return (
-      r && {
-        size: r.size,
-        mtimeMs: r.mtime_ms,
-        compactions: r.compactions,
-        toolUseId: r.tool_use_id,
-        at: r.at,
-      }
-    );
-  }
-
-  /** Remembers the run's whole read of `path`, replacing an earlier one. */
-  setRunRead(runId: string, agentId: string, path: string, r: ReadRecord): void {
-    this.db
-      .prepare(
-        `INSERT INTO run_reads (run_id, agent_id, path, size, mtime_ms, compactions, tool_use_id, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(run_id, agent_id, path) DO UPDATE SET size = excluded.size, mtime_ms = excluded.mtime_ms,
-           compactions = excluded.compactions, tool_use_id = excluded.tool_use_id, at = excluded.at`,
-      )
-      .run(runId, agentId, path, r.size, r.mtimeMs, r.compactions, r.toolUseId, r.at);
-  }
-
-  /** Forgets the whole read made by tool call `toolUseId`, as when that call failed. */
-  forgetRunRead(runId: string, toolUseId: string): void {
-    this.db
-      .prepare("DELETE FROM run_reads WHERE run_id = ? AND tool_use_id = ?")
-      .run(runId, toolUseId);
-  }
-
-  /** Counts one refused re-read that saved about `tokens`. */
-  addReread(runId: string, tokens: number): void {
-    this.db
-      .prepare(
-        `INSERT INTO run_rereads (run_id, count, tokens_saved) VALUES (?, 1, ?)
-         ON CONFLICT(run_id) DO UPDATE SET count = count + 1, tokens_saved = tokens_saved + excluded.tokens_saved`,
-      )
-      .run(runId, tokens);
+    return parseDigest(row.digest);
   }
 
   digests(runIds: string[]): Map<string, RunDigest> {
@@ -1802,10 +1048,6 @@ export class Store {
         `SELECT run_id, digest FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`,
       ).all(...ids) as { run_id: string; digest: string }[];
       for (const r of rows) out.set(r.run_id, parseDigest(r.digest));
-    }
-    for (const [id, r] of this.rereads(runIds)) {
-      const d = out.get(id);
-      if (d) out.set(id, this.withRereads(d, r));
     }
     return out;
   }
@@ -1946,21 +1188,6 @@ export class Store {
     return rows.map((r) => this.boardMoveOf(r));
   }
 
-  /**
-   * Whether a real run in this store moved the issue's card to a column (done). Rows under
-   * `pr:` and `dep:` ids have no run, so another hub's moves never count.
-   */
-  runMovedCard(repoId: RepoId, issue: number): boolean {
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM board_moves m JOIN runs r ON r.id = m.run_id
-           WHERE m.repo_id = ? AND m.issue = ? AND m.state = 'done' LIMIT 1`,
-        )
-        .get(repoId, issue) !== undefined
-    );
-  }
-
   /** Every move of the run's card, oldest first, pending ones too. */
   boardMovesOfRun(runId: string): BoardMove[] {
     const rows = this.db
@@ -1993,20 +1220,10 @@ export class Store {
 
   private historyNextTable = 0;
   private operationalHistoryNextTable = 0;
-  private riskMembershipPruneCursor = { at: -1, id: 0 };
-
   /** Retain live work; expiry starts at completion, with bounded transactions and sweep cost. */
   async pruneHistory(now: number): Promise<void> {
-    this.riskMembershipPruneCursor = pruneRiskMemberships(
-      this.db,
-      now,
-      this.riskMembershipPruneCursor,
-    );
     const day = 24 * 60 * 60_000;
     this.db.prepare("DELETE FROM ci_runs WHERE at < ?").run(now - QA_RETENTION_DAYS * day);
-    this.db
-      .prepare("DELETE FROM escaped_defects WHERE merged_at < ?")
-      .run(now - QA_RETENTION_DAYS * day);
     this.db
       .prepare(
         `DELETE FROM pr_files WHERE NOT EXISTS (
@@ -2038,14 +1255,12 @@ export class Store {
       // A seat's question to FLIGHT and FLIGHT's answer to it are kept as long as a run.
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", AUDIT_RETENTION_DAYS],
       ["flight_decisions", `at < ? AND kind IN (${DECISION_KINDS_KEPT_SQL})`, AUDIT_RETENTION_DAYS],
-      ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["mcp_tool_calls", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["question_choices", "chosen_at < ?", AUDIT_RETENTION_DAYS],
       // a question message and the replies to it outlive the 90-day message log
       ["comms", `at < ? AND (${COMMS_QUESTION_THREAD_SQL})`, AUDIT_RETENTION_DAYS],
       ["question_closures", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
-      ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
       [
         "briefs",
         `at < ? AND NOT (
@@ -2071,8 +1286,6 @@ export class Store {
         AUDIT_RETENTION_DAYS,
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
-      ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
-      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -2121,14 +1334,7 @@ export class Store {
             const values = runIds.map(({ id }) => id);
             if (values.length > 0) {
               const runMarks = values.map(() => "?").join(",");
-              for (const child of [
-                "run_commits",
-                "run_pushes",
-                "run_attempts",
-                "run_digests",
-                "run_reads",
-                "run_rereads",
-              ])
+              for (const child of ["run_commits", "run_pushes", "run_attempts", "run_digests"])
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
@@ -2144,7 +1350,7 @@ export class Store {
     }
     const endedRun = `r.ended_at IS NOT NULL
       AND COALESCE(json_extract(r.loop, '$.phase'), '') != 'parked'
-      AND json_extract(r.loop, '$.aside') IS NULL
+      AND json_extract(r.loop, '$.hold.worktree') IS NULL
       AND NOT EXISTS (SELECT 1 FROM reviews v
         WHERE (v.author_run_id = r.id OR v.run_id = r.id)
           AND (v.ended_at IS NULL OR v.state IN ('queued', 'starting', 'running')))`;
@@ -2354,7 +1560,6 @@ export class Store {
           i.defectRefs ? JSON.stringify(i.defectRefs) : null,
         );
       }
-      this.captureEscapedDefects(repoId);
     });
   }
 
@@ -2390,53 +1595,6 @@ export class Store {
       .prepare("SELECT * FROM board_items WHERE repo_id = ? AND issue_number = ?")
       .get(repoId, issueNumber) as Row | undefined;
     return row === undefined ? null : toBoardItem(row);
-  }
-
-  /** The hub-owned wait for a ticket. GitHub's board state remains the source for every other field. */
-  ticketWait(repoId: RepoId, issue: number): TicketWait | null {
-    const row = this.db
-      .prepare("SELECT reason, frees_when, at FROM ticket_waits WHERE repo_id = ? AND issue = ?")
-      .get(repoId, issue) as Row | undefined;
-    return row === undefined
-      ? null
-      : { reason: row.reason as string, freesWhen: row.frees_when as string, at: row.at as number };
-  }
-
-  /** Every ticket of the repo that is waiting, oldest first. */
-  ticketWaits(repoId: RepoId): ({ issue: number } & TicketWait)[] {
-    const rows = this.db
-      .prepare(
-        "SELECT issue, reason, frees_when, at FROM ticket_waits WHERE repo_id = ? ORDER BY at, issue",
-      )
-      .all(repoId) as Row[];
-    return rows.map((row) => ({
-      issue: row.issue as number,
-      reason: row.reason as string,
-      freesWhen: row.frees_when as string,
-      at: row.at as number,
-    }));
-  }
-
-  /** Records that a ticket, rather than its former seat, waits for a known condition. */
-  setTicketWait({ repoId, issue, ...wait }: { repoId: RepoId; issue: number } & TicketWait): void {
-    this.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO ticket_waits (repo_id, issue, reason, frees_when, at) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(repo_id, issue) DO UPDATE SET reason = excluded.reason,
-             frees_when = excluded.frees_when, at = excluded.at`,
-        )
-        .run(repoId, issue, wait.reason, wait.freesWhen, wait.at);
-    });
-  }
-
-  /** Clears a condition the hub has observed to be resolved. */
-  clearTicketWait(repoId: RepoId, issue: number): void {
-    this.transaction(() => {
-      this.db
-        .prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?")
-        .run(repoId, issue);
-    });
   }
 
   /**
@@ -2531,8 +1689,8 @@ export class Store {
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
          review, ci, created_at, updated_at, merged_at, read_at, head_sha, mergeable, author,
          assignees, checks, closing_issues, merge_commit_sha, additions, deletions, changed_files,
-         base)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         base, is_cross_repository)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(repo_id, number) DO UPDATE SET title = excluded.title, url = excluded.url,
          branch = excluded.branch, ticket = excluded.ticket, state = excluded.state,
          is_draft = excluded.is_draft, review = excluded.review, ci = excluded.ci,
@@ -2542,7 +1700,8 @@ export class Store {
          assignees = excluded.assignees, checks = excluded.checks,
          closing_issues = excluded.closing_issues, merge_commit_sha = excluded.merge_commit_sha,
          additions = excluded.additions, deletions = excluded.deletions,
-         changed_files = excluded.changed_files, base = excluded.base, stale = 0`,
+         changed_files = excluded.changed_files, base = excluded.base,
+         is_cross_repository = excluded.is_cross_repository, stale = 0`,
     );
     const deleteFiles = this.db.prepare("DELETE FROM pr_files WHERE repo_id = ? AND pr_number = ?");
     const addFile = this.db.prepare(
@@ -2570,6 +1729,9 @@ export class Store {
          url = excluded.url, at = excluded.at`,
     );
     for (const p of prs) {
+      const old = this.db
+        .prepare("SELECT state FROM pull_requests WHERE repo_id = ? AND number = ?")
+        .get(repoId, p.number) as Row | undefined;
       if (p.headSha)
         for (const c of p.checks ?? [])
           addCiRun.run(
@@ -2590,6 +1752,9 @@ export class Store {
             readAt,
             readAt,
           );
+      for (const check of p.checks ?? [])
+        if (check.completedAt != null)
+          this.recordSilenceEvent("ci-result-observed", check.completedAt);
       const runs = this.db
         .prepare(
           `SELECT id FROM runs INDEXED BY runs_loop_pr_number
@@ -2613,25 +1778,6 @@ export class Store {
       if (p.files !== undefined) {
         deleteFiles.run(repoId, p.number);
         for (const f of p.files) addFile.run(repoId, p.number, f.path, f.changeType);
-        if (p.headSha) {
-          try {
-            recordRiskMembership(this.db, {
-              repoId,
-              pr: p.number,
-              sha: p.headSha,
-              kind: "github-head",
-              files: p.files.map((file) => file.path),
-              declaredFiles: p.changedFiles ?? null,
-              at: readAt,
-            });
-          } catch {
-            this.db
-              .prepare(
-                "DELETE FROM code_health_file_memberships WHERE repo_id=? AND pr_number=? AND sha=? AND kind='github-head'",
-              )
-              .run(repoId, p.number, p.headSha);
-          }
-        }
       }
       this.markMovedPullRequest(repoId, p, readAt);
       ins.run(
@@ -2660,9 +1806,20 @@ export class Store {
         p.deletions ?? null,
         p.changedFiles ?? null,
         p.base ?? null,
+        p.isCrossRepository == null ? null : p.isCrossRepository ? 1 : 0,
       );
+      if (
+        p.state === "merged" &&
+        old?.state !== "merged" &&
+        this.db
+          .prepare(
+            "SELECT 1 FROM reviews WHERE repo_id = ? AND pr_number = ? AND verdict IS NOT NULL",
+          )
+          .get(repoId, p.number) !== undefined
+      )
+        this.recordSilenceEvent("merged-pr-review-recorded", p.mergedAt ?? readAt);
       if (p.mergedAt !== null) {
-        const { files: _files, escapedDefects: _defects, ...record } = p;
+        const { files: _files, ...record } = p;
         addHistory.run(repoId, p.number, p.mergedAt, JSON.stringify(record));
         const additions = p.additions ?? null;
         const deletions = p.deletions ?? null;
@@ -2679,109 +1836,12 @@ export class Store {
         );
       }
     }
-    this.captureEscapedDefects(repoId);
   }
 
   /**
-   * Records each bug card against the PRs merged within QA_RETENTION_DAYS before it was filed that
-   * it names (see linkEscapedDefect). Rerun on every board and PR write, so a bug read before its
-   * PR's diff still links on the next poll; a recorded link is never rewritten.
-   */
-  private captureEscapedDefects(repoId: RepoId): void {
-    const bugs = (
-      this.db
-        .prepare(
-          "SELECT issue_number, labels, created_at, defect_refs FROM board_items WHERE repo_id = ? AND defect_refs IS NOT NULL",
-        )
-        .all(repoId) as Row[]
-    ).filter((b) => isBugLabelled(JSON.parse(b.labels as string) as string[]));
-    if (bugs.length === 0) return;
-    const newest = Math.max(...bugs.map((b) => b.created_at as number));
-    const oldest = Math.min(...bugs.map((b) => b.created_at as number));
-    const merged = this.db
-      .prepare(
-        `SELECT h.number, h.merged_at, json_extract(h.record, '$.branch') AS branch,
-           COALESCE(p.head_sha, json_extract(h.record, '$.headSha')) AS head_sha,
-           COALESCE(p.merge_commit_sha, json_extract(h.record, '$.mergeCommitSha')) AS merge_sha
-         FROM pr_history h LEFT JOIN pull_requests p ON p.repo_id = h.repo_id AND p.number = h.number
-         WHERE h.repo_id = ? AND h.merged_at >= ? AND h.merged_at <= ?`,
-      )
-      .all(repoId, oldest - QA_RETENTION_DAYS * DAY_MS, newest) as Row[];
-    if (merged.length === 0) return;
-    const filesOf = this.db.prepare(
-      "SELECT path FROM pr_files WHERE repo_id = ? AND pr_number = ?",
-    );
-    const commitsOf = this.db.prepare(
-      "SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ?",
-    );
-    const facts = new Map<number, MergedPrFacts & { branch: string }>();
-    for (const m of merged) {
-      const branch = (m.branch as string | null) ?? "";
-      facts.set(m.number as number, {
-        number: m.number as number,
-        mergedAt: m.merged_at as number,
-        branch,
-        shas: [
-          ...[m.head_sha, m.merge_sha].filter((x): x is string => typeof x === "string"),
-          ...(commitsOf.all(repoId, branch) as Row[]).map((c) => c.sha as string),
-        ],
-        files: (filesOf.all(repoId, m.number) as Row[]).map((f) => f.path as string),
-      });
-    }
-    const authorOf = this.db.prepare(
-      `SELECT agent_id, model FROM runs WHERE repo_id = ? AND branch = ? AND id NOT IN (
-         SELECT run_id FROM reviews WHERE run_id IS NOT NULL) ORDER BY started_at DESC LIMIT 1`,
-    );
-    const add = this.db.prepare(
-      `INSERT OR IGNORE INTO escaped_defects
-         (repo_id, issue_number, pr_number, via, filed_at, merged_at, seat, model)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const b of bugs) {
-      const filedAt = b.created_at as number;
-      const window = [...facts.values()].filter(
-        (f) => f.mergedAt >= filedAt - QA_RETENTION_DAYS * DAY_MS,
-      );
-      const refs = JSON.parse(b.defect_refs as string) as DefectRefs;
-      for (const link of linkEscapedDefect({ createdAt: filedAt, refs }, window)) {
-        const f = facts.get(link.prNumber);
-        if (f === undefined) continue;
-        const author = authorOf.get(repoId, f.branch) as Row | undefined;
-        add.run(
-          repoId,
-          b.issue_number as number,
-          f.number,
-          link.via,
-          filedAt,
-          f.mergedAt,
-          (author?.agent_id as string | undefined) ?? null,
-          (author?.model as string | undefined) ?? null,
-        );
-      }
-    }
-  }
-
-  /**
-   * The QA board's workflow figures for work that ended or merged at or after `since`: escaped
-   * defects, review wait and time per head, rework ratio per seat and model, tests per PR.
+   * The QA board's workflow figures for work that ended or merged at or after `since`: review wait and time per head, rework ratio per seat and model, tests per PR.
    */
   qaFlow(since: number): Omit<QaFlowView, "days" | "since" | "metrics"> {
-    const escapedDefects = (
-      this.db
-        .prepare(
-          "SELECT * FROM escaped_defects WHERE merged_at >= ? ORDER BY filed_at DESC, issue_number DESC, pr_number",
-        )
-        .all(since) as Row[]
-    ).map((r) => ({
-      repoId: r.repo_id as string,
-      issueNumber: r.issue_number as number,
-      prNumber: r.pr_number as number,
-      via: r.via as DefectVia,
-      filedAt: r.filed_at as number,
-      mergedAt: r.merged_at as number,
-      seat: r.seat as string | null,
-      model: r.model as string | null,
-    }));
     const reviews = this.db
       .prepare(
         `SELECT v.id, v.repo_id, v.pr_number, v.sha, v.created_at, v.started_at, v.ended_at,
@@ -2829,7 +1889,6 @@ export class Store {
       byPr.set(key, row);
     }
     return {
-      escapedDefects,
       reviewTimings: { ...timings, heads },
       rework: reworkRatios(
         reviews.map((v) => ({
@@ -2918,7 +1977,7 @@ export class Store {
         `SELECT a.run_id AS runId, (SELECT agent_id FROM runs WHERE id = a.run_id) AS agentId,
           COUNT(*) AS parks FROM run_attempts a
          WHERE a.kind = 'loop' AND a.at >= ? AND a.at <= ?
-           AND json_extract(a.data, '$.parked') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
+           AND json_extract(a.data, '$.hold.kind') IS NOT NULL GROUP BY a.run_id ORDER BY parks DESC`,
         since,
         until,
       ) as unknown as AuditView["deathLoops"],
@@ -3010,7 +2069,7 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
-      bugEscapes: bugEscapes(this.db, since, until),
+      bugEscapes: [],
       improvements: [
         ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
@@ -3026,24 +2085,6 @@ export class Store {
     };
   }
 
-  /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
-  bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
-    return bugFixCandidates(this.db, repoId, limit);
-  }
-
-  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
-    noteBugTraceTried(this.db, repoId, issue, at);
-  }
-
-  introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
-    return introducingPrFacts(this.db, repoId, pr);
-  }
-
-  /** Records a traced bug once per ticket; a repeat leaves the row as it was. */
-  recordBugEscape(e: Parameters<typeof recordBugEscape>[1]): void {
-    recordBugEscape(this.db, e);
-  }
-
   /**
    * Records an Audit item once per kind and subject; its tier comes from the kind (unknown kinds
    * are Go-ahead). A repeat leaves the item as it was, except that an open item may become done.
@@ -3056,6 +2097,107 @@ export class Store {
     at: number;
   }): void {
     recordAuditItem(this.db, i);
+  }
+
+  /** Records a successful occurrence of a routine event watched by Audit. */
+  recordSilenceEvent(kind: SilenceWatchedEventKind, at: number): void {
+    const before = auditEventLastSeen(this.db, kind);
+    recordAuditEvent(this.db, kind, at);
+    // Re-reporting the same observation must not move its quiet-time marker.
+    if (before !== at && auditEventLastSeen(this.db, kind) === at)
+      this.setSetting(
+        `silence-quiet-at-seen:${kind}`,
+        JSON.stringify({
+          lastSeenAt: at,
+          quietTotal: this.silenceQuietTotal(this.silenceClock(kind)),
+        }),
+      );
+  }
+
+  /** When a watched event last succeeded, or null if it never has. */
+  silenceEventLastSeen(kind: SilenceWatchedEventKind): number | null {
+    return auditEventLastSeen(this.db, kind);
+  }
+
+  /**
+   * Opens alarms for routine events that stopped, and clears resumed ones. A quiet period (the crew
+   * paused, stopped on its budget, or no seat working a ticket) leaves every alarm as it was.
+   */
+  checkSilenceAlarms(
+    at: number,
+    quiet: {
+      crewPaused: boolean;
+      budgetStopped: boolean;
+      noSeatRan: boolean;
+      readyWorkForIdleSeat?: boolean;
+    },
+  ): void {
+    const active = !(quiet.crewPaused || quiet.budgetStopped || quiet.noSeatRan);
+    const quietTotal = this.advanceSilenceQuietTime(SILENCE_CLOCK, at, !active);
+    const seatStartQuietTotal = this.advanceSilenceQuietTime(
+      SILENCE_SEAT_START_CLOCK,
+      at,
+      !active || quiet.readyWorkForIdleSeat !== true,
+    );
+    for (const event of SILENCE_WATCHED_EVENTS) {
+      const lastSeenAt = auditEventLastSeen(this.db, event.kind);
+      if (lastSeenAt === null) continue;
+      const total = event.kind === "seat-run-started" ? seatStartQuietTotal : quietTotal;
+      const quietAtSeen = this.silenceQuietAtSeen(event.kind, lastSeenAt, total);
+      const silent = at - lastSeenAt - (total - quietAtSeen) > event.gapMs;
+      // Opening needs a live crew (and, for seat starts, Ready work an idle seat could take); a resumed event always clears its own alarm.
+      const canOpen =
+        active && (event.kind !== "seat-run-started" || quiet.readyWorkForIdleSeat === true);
+      if (silent && !canOpen) continue;
+      const detail = silent
+        ? `${event.label} went silent after ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`
+        : `${event.label} resumed at ${new Date(lastSeenAt).toISOString()}; normal gap ${Math.round(event.gapMs / 3_600_000)} hours.`;
+      if (silent) recordSilenceAlarm(this.db, event.kind, "open", detail, at);
+      else recordSilenceAlarm(this.db, event.kind, "done", detail, at);
+    }
+  }
+
+  /** The clock that excludes quiet intervals for a watched event. */
+  private silenceClock(kind: SilenceWatchedEventKind): string {
+    return kind === "seat-run-started" ? SILENCE_SEAT_START_CLOCK : SILENCE_CLOCK;
+  }
+
+  /** Advances a quiet-time total, assigning each interval to the preceding tick's state. */
+  private advanceSilenceQuietTime(clock: string, at: number, quiet: boolean): number {
+    const lastTick = Number(this.getSetting(`${clock}-last-tick`));
+    const lastQuiet = this.getSetting(`${clock}-last-quiet`) === "true";
+    let total = this.silenceQuietTotal(clock);
+    if (Number.isFinite(lastTick) && lastQuiet && at > lastTick) total += at - lastTick;
+    this.setSetting(`${clock}-last-tick`, String(at));
+    this.setSetting(`${clock}-last-quiet`, String(quiet));
+    this.setSetting(`${clock}-quiet-total`, String(total));
+    return total;
+  }
+
+  private silenceQuietTotal(clock: string): number {
+    const total = Number(this.getSetting(`${clock}-quiet-total`));
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  /** The quiet-time total in force when the event's current observation was made. */
+  private silenceQuietAtSeen(
+    kind: SilenceWatchedEventKind,
+    lastSeenAt: number,
+    total: number,
+  ): number {
+    const key = `silence-quiet-at-seen:${kind}`;
+    try {
+      const seen = JSON.parse(this.getSetting(key) ?? "null") as {
+        lastSeenAt?: unknown;
+        quietTotal?: unknown;
+      } | null;
+      if (seen?.lastSeenAt === lastSeenAt && typeof seen.quietTotal === "number")
+        return seen.quietTotal;
+    } catch {
+      // A damaged cursor should start measuring from this check, not stop Audit.
+    }
+    this.setSetting(key, JSON.stringify({ lastSeenAt, quietTotal: total }));
+    return total;
   }
 
   /** Items recorded in range, newest first. */
@@ -3346,7 +2488,7 @@ export class Store {
     return out;
   }
 
-  /** The newest PR of a branch, as its number and state: one narrow row, for the design previews. */
+  /** The newest PR of a branch, as its number and state: one narrow row. */
   pullRequestOfBranch(
     repoId: RepoId,
     branch: string,
@@ -3489,7 +2631,7 @@ export class Store {
   ): TicketQuestion[] {
     const rows =
       this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis,
-        (SELECT x.item_key FROM item_discussions x WHERE x.item_key = 'ask:' || q.id LIMIT 1)
+        (SELECT x.item_key FROM comms x WHERE x.item_key = 'ask:' || q.id LIMIT 1)
           AS discussion_key
       FROM seat_questions q JOIN runs r ON r.id = q.run_id
       LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
@@ -3596,24 +2738,7 @@ export class Store {
   }
 
   private pullRequestRows(rows: Row[]): PullRequestView[] {
-    const defects = new Map<string, NonNullable<PullRequestView["escapedDefects"]>>();
-    for (const d of this.statement(
-      "SELECT repo_id, pr_number, issue_number, via, filed_at FROM escaped_defects ORDER BY filed_at",
-    ).all() as Row[]) {
-      const key = `${d.repo_id}#${d.pr_number}`;
-      defects.set(key, [
-        ...(defects.get(key) ?? []),
-        {
-          issueNumber: d.issue_number as number,
-          via: d.via as DefectVia,
-          filedAt: d.filed_at as number,
-        },
-      ]);
-    }
     return rows.map((r) => ({
-      ...(defects.has(`${r.repo_id}#${r.number}`)
-        ? { escapedDefects: defects.get(`${r.repo_id}#${r.number}`) }
-        : {}),
       repoId: r.repo_id as string,
       number: r.number as number,
       title: r.title as string,
@@ -3634,6 +2759,7 @@ export class Store {
       assignees: JSON.parse(r.assignees as string) as string[],
       checks: JSON.parse(r.checks as string) as PrCheck[],
       closingIssues: JSON.parse(r.closing_issues as string) as number[],
+      ...(r.is_cross_repository == null ? {} : { isCrossRepository: r.is_cross_repository === 1 }),
       ...(r.additions == null ? {} : { additions: r.additions as number }),
       ...(r.deletions == null ? {} : { deletions: r.deletions as number }),
       ...(r.changed_files == null ? {} : { changedFiles: r.changed_files as number }),
@@ -4236,103 +3362,6 @@ export class Store {
     if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
   }
 
-  /** An unfinished author gets one immutable context record; Git status can be filled afterward. */
-  recordHandoff(h: RunHandoff): void {
-    this.statement(
-      "INSERT OR IGNORE INTO run_handoffs (run_id, repo_id, ticket, at, record) VALUES (?, ?, ?, ?, ?)",
-    ).run(h.runId, h.repoId, h.ticket, h.at, JSON.stringify(h));
-  }
-
-  handoff(runId: string): RunHandoff | null {
-    const row = this.statement(
-      "SELECT record, accepted_by, accepted_run_id FROM run_handoffs WHERE run_id = ?",
-    ).get(runId) as Row | undefined;
-    return row
-      ? {
-          ...JSON.parse(row.record as string),
-          acceptedBy: row.accepted_by as string | null,
-          acceptedRunId: row.accepted_run_id as string | null,
-        }
-      : null;
-  }
-
-  openHandoff(repoId: string, ticket: string): RunHandoff | null {
-    const row = this.statement(
-      "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND ticket = ? ORDER BY at DESC, run_id DESC LIMIT 1",
-    ).get(repoId, ticket) as Row | undefined;
-    const h = row ? this.handoff(row.run_id as string) : null;
-    return h?.acceptedRunId == null ? h : null;
-  }
-
-  receivedHandoff(runId: string): RunHandoff | null {
-    const row = this.statement(
-      "SELECT run_id FROM run_handoffs WHERE accepted_run_id = ? ORDER BY at DESC LIMIT 1",
-    ).get(runId) as Row | undefined;
-    return row ? this.handoff(row.run_id as string) : null;
-  }
-
-  latestHandoffs(repoId: string): RunHandoff[] {
-    return (
-      this.statement(`SELECT h.run_id FROM run_handoffs h WHERE repo_id = ? AND h.run_id = (
-      SELECT fresh.run_id FROM run_handoffs fresh WHERE fresh.repo_id = h.repo_id AND fresh.ticket = h.ticket ORDER BY fresh.at DESC, fresh.run_id DESC LIMIT 1
-    )`).all(repoId) as Row[]
-    ).flatMap((r) => {
-      const h = this.handoff(r.run_id as string);
-      return h ? [h] : [];
-    });
-  }
-
-  /** Enrichment never changes the reservation or the seat that accepted the work. */
-  handoffGit(runId: string, gitStatus: string[], gitState: RunHandoff["gitState"]): void {
-    const h = this.handoff(runId);
-    if (h)
-      this.statement("UPDATE run_handoffs SET record = ? WHERE run_id = ?").run(
-        JSON.stringify({ ...h, gitStatus, gitState }),
-        runId,
-      );
-  }
-
-  claimHandoff(runId: string, token: string): boolean {
-    return (
-      this.statement(
-        "UPDATE run_handoffs SET claim_token = ? WHERE run_id = ? AND claim_token IS NULL AND accepted_run_id IS NULL",
-      ).run(token, runId).changes === 1
-    );
-  }
-
-  /** Handoffs a seat has claimed and not yet accepted into a run row: a seat is starting on them. */
-  claimedHandoffs(repoId: string): RunHandoff[] {
-    return (
-      this.statement(
-        "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND claim_token IS NOT NULL AND accepted_run_id IS NULL",
-      ).all(repoId) as Row[]
-    ).flatMap((r) => {
-      const h = this.handoff(r.run_id as string);
-      return h ? [h] : [];
-    });
-  }
-
-  releaseHandoff(runId: string, token: string): void {
-    this.statement(
-      "UPDATE run_handoffs SET claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",
-    ).run(runId, token);
-  }
-
-  acceptHandoff(runId: string, token: string, seatId: string, newRunId: string): boolean {
-    return (
-      this.statement(
-        "UPDATE run_handoffs SET accepted_by = ?, accepted_run_id = ?, claim_token = NULL WHERE run_id = ? AND claim_token = ? AND accepted_run_id IS NULL",
-      ).run(seatId, newRunId, runId, token).changes === 1
-    );
-  }
-
-  /** Called only by the supervisor after it acquires the single crew lock on startup. */
-  releaseHandoffClaims(): void {
-    this.statement(
-      "UPDATE run_handoffs SET claim_token = NULL WHERE accepted_run_id IS NULL",
-    ).run();
-  }
-
   /** Ends the run: when, with what status, and who ended it. */
   setRunEnded(
     runId: string,
@@ -4832,6 +3861,12 @@ export class Store {
       const author = row.author_run_id as string;
       const repoId = row.repo_id as string;
       const prNumber = row.pr_number as number;
+      const merged =
+        (
+          this.db
+            .prepare("SELECT state FROM pull_requests WHERE repo_id = ? AND number = ?")
+            .get(repoId, prNumber) as Row | undefined
+        )?.state === "merged";
       // late: a later round's finding on a file the author did not touch since the last review
       const changed =
         (row.round as number) >= 2 && row.changed_since !== null
@@ -4926,9 +3961,7 @@ export class Store {
         // earlier heads, but only those its brief listed: a review does not accept what it never saw.
         if (author === externalReviewKey(repoId, prNumber)) {
           const previous = this.reviewsOfRun(author)
-            .filter(
-              (x) => x.id < reviewId && x.epoch === Number(row.epoch) && x.state === "reported",
-            )
+            .filter((x) => x.id < reviewId && x.state === "reported")
             .at(-1);
           const resolveListed = this.db.prepare(
             `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
@@ -4947,6 +3980,7 @@ export class Store {
         findings: r.findings,
       });
       this.clearNoReportNotes(runId, r.at);
+      if (merged) this.recordSilenceEvent("merged-pr-review-recorded", r.at);
       if (r.qaReport && !this.putQaReport(r.qaReport))
         throw new Error("QA report snapshot already exists");
       recorded = true;
@@ -5167,11 +4201,6 @@ export class Store {
     return this.commsStore.addComms(row, rate, repeatSince, flightContextTitle);
   }
 
-  /** How many exact repeats of a stored message were turned away at or after `since`. */
-  commsRepeatCount(since: number): number {
-    return this.commsStore.commsRepeatCount(since);
-  }
-
   /** Records that the recipient took a message; the first time wins. */
   markCommsDelivered(id: string, at: number): void {
     this.commsStore.markCommsDelivered(id, at);
@@ -5389,13 +4418,6 @@ export class Store {
     rows: CommsRow[];
   } {
     return this.commsStore.commsForTicket(ref, ticketContext);
-  }
-  commsLinkedPr(ref: string): string | null {
-    const ticket = Number(ref.replace(/^(?:#|PR )/, ""));
-    const row = this.db
-      .prepare("SELECT number FROM pull_requests WHERE ticket=? ORDER BY number DESC LIMIT 1")
-      .get(ticket) as { number: number } | undefined;
-    return row === undefined ? null : `PR ${row.number}`;
   }
   /**
    * Direct-link counts since `since`, each with its newest message (id, time and the first
@@ -5663,6 +4685,11 @@ export class Store {
     return attention.telemetryNoteIntervals(this.db, seatId, since, now, kinds);
   }
 
+  /** Like telemetryNoteIntervals, each episode with the run its note belongs to. */
+  telemetryNoteEpisodes(seatId: string, since: number, now: number, kinds: string[]) {
+    return attention.telemetryNoteEpisodes(this.db, seatId, since, now, kinds);
+  }
+
   openNoteKeys(runId: string): string[] {
     return attention.openNoteKeys(this.db, runId);
   }
@@ -5688,7 +4715,7 @@ export class Store {
     const row = this.db
       .prepare("SELECT run_id, last_turn_ended_at FROM seat_sessions WHERE seat_id = ?")
       .get(seatId) as { run_id: string | null; last_turn_ended_at: number | null } | undefined;
-    const newest = row?.run_id ? this.newestRunCommit(row.run_id) : null;
+    const newest = row?.run_id ? this.newestAuthoredCommit(row.run_id) : null;
     const committed = newest !== null && newest.at > (row?.last_turn_ended_at ?? 0);
     this.db
       .prepare(
@@ -5702,11 +4729,11 @@ export class Store {
     this.seatQ.setSeatTurnStarted(seatId, at);
   }
 
-  /** Commits since `since`, per agent, joined to their runs. */
+  /** Commits the crew authored since `since` (followed ones left out), per agent, joined to their runs. */
   commitsSince(since: number): { agentId: AgentId; n: number }[] {
     const rows = this.db
       .prepare(`SELECT r.agent_id, COUNT(*) AS n FROM run_commits c
-      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? GROUP BY r.agent_id ORDER BY r.agent_id`)
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? AND c.followed = 0 GROUP BY r.agent_id ORDER BY r.agent_id`)
       .all(since) as Row[];
     return rows.map((r) => ({ agentId: r.agent_id as string, n: r.n as number }));
   }
@@ -5845,24 +4872,6 @@ export class Store {
         };
   }
 
-  /** The newest results (a pass, or a failure with an exit code) of `command` by this run on `headSha`. */
-  latestCheckResults(
-    runId: string,
-    command: string,
-    headSha: string,
-    limit: number,
-  ): { ok: boolean; exitCode: number | null }[] {
-    return (
-      this.db
-        .prepare(
-          `SELECT ok, exit_code FROM check_runs
-           WHERE run_id = ? AND command = ? AND head_sha = ? AND (ok = 1 OR exit_code IS NOT NULL)
-           ORDER BY at DESC, id DESC LIMIT ?`,
-        )
-        .all(runId, command, headSha, limit) as Row[]
-    ).map((r) => ({ ok: r.ok === 1, exitCode: (r.exit_code as number | null) ?? null }));
-  }
-
   /** The newest result this run recorded for `command`, regardless of commit. */
   newestCheckRun(
     runId: string,
@@ -5913,6 +4922,11 @@ export class Store {
    * One held call ended. `failed` is the Post hook event (PostToolUseFailure): the hold's outcome is
    * `fail` when any of its calls failed, else `pass`; with no event (undefined) it is `done`.
    */
+  /** The run's hold lasts until it ends: a restart restores it as such. */
+  pinLockHolds(runId: string): void {
+    this.db.prepare("UPDATE test_lock_holds SET pinned = 1 WHERE run_id = ?").run(runId);
+  }
+
   deleteLockHold(runId: string, toolUseId: string, at = Date.now(), failed?: boolean): void {
     this.db
       .prepare("DELETE FROM test_lock_holds WHERE run_id = ? AND tool_use_id = ?")
@@ -6033,6 +5047,7 @@ export class Store {
       seatId: r.seat_id as string,
       command: r.command as string,
       since: r.since as number,
+      ...(r.pinned === 1 ? { pinned: true } : {}),
     }));
   }
 
@@ -6101,13 +5116,15 @@ export class Store {
     branch: string;
     sha: string;
     at: number;
+    /** Someone else's commit the run follows: not one Mission Control or the seat made. */
+    followed?: boolean;
   }): void {
     this.db
       .prepare(
-        `INSERT INTO run_commits (run_id, repo_id, branch, sha, at) VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO run_commits (run_id, repo_id, branch, sha, at, followed) VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(run_id, sha) DO NOTHING`,
       )
-      .run(c.runId, c.repoId, c.branch, c.sha, c.at);
+      .run(c.runId, c.repoId, c.branch, c.sha, c.at, c.followed === true ? 1 : 0);
   }
 
   commitLines(sha: string): { additions: number | null; deletions: number | null } | null {
@@ -6135,7 +5152,7 @@ export class Store {
     const rows = this.db
       .prepare(
         `SELECT c.run_id, c.repo_id, c.sha, c.at FROM run_commits c
-         WHERE c.at >= ? AND c.at <= ? AND c.id = (
+         WHERE c.at >= ? AND c.at <= ? AND c.followed = 0 AND c.id = (
            SELECT first.id FROM run_commits first
            WHERE first.repo_id = c.repo_id AND first.sha = c.sha ORDER BY first.at, first.id LIMIT 1
          ) ORDER BY c.at, c.id`,
@@ -6153,7 +5170,9 @@ export class Store {
   commitsOnBranch(repoId: RepoId, branch: string): { sha: string; at: number }[] {
     return (
       this.db
-        .prepare("SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? ORDER BY at, id")
+        .prepare(
+          "SELECT sha, at FROM run_commits WHERE repo_id = ? AND branch = ? AND followed = 0 ORDER BY at, id",
+        )
         .all(repoId, branch) as { sha: string; at: number }[]
     ).map((r) => ({ sha: r.sha, at: r.at }));
   }
@@ -6171,13 +5190,29 @@ export class Store {
     return rows.map((r) => r.sha);
   }
 
+  /** How many commits the run itself made (followed ones left out). */
+  authoredCommitCount(runId: string): number {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM run_commits WHERE run_id = ? AND followed = 0")
+      .get(runId) as { n: number };
+    return r.n;
+  }
+
+  /** The run's commits that someone else made and the run only follows (see `addRunCommit`). */
+  followedCommits(runId: string): Set<string> {
+    const rows = this.db
+      .prepare("SELECT sha FROM run_commits WHERE run_id = ? AND followed = 1")
+      .all(runId) as { sha: string }[];
+    return new Set(rows.map((r) => r.sha));
+  }
+
   /** The commits the commit tool made at or after `since`, oldest first, with their run's agent and ticket. */
   runCommitsSince(
     since: number,
   ): { runId: string; agentId: AgentId; sha: string; at: number; ticket: string | null }[] {
     const rows = this.db
       .prepare(`SELECT c.run_id, r.agent_id, c.sha, c.at, r.ticket FROM run_commits c
-      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? ORDER BY c.at, c.id`)
+      JOIN runs r ON r.id = c.run_id WHERE c.at >= ? AND c.followed = 0 ORDER BY c.at, c.id`)
       .all(since) as Row[];
     return rows.map((r) => ({
       runId: r.run_id as string,
@@ -6196,13 +5231,23 @@ export class Store {
     return r ? { sha: r.sha, at: r.at } : null;
   }
 
+  /** The run's newest commit that it made itself (followed ones left out), else null. */
+  newestAuthoredCommit(runId: string): { sha: string; at: number } | null {
+    const r = this.db
+      .prepare(
+        "SELECT sha, at FROM run_commits WHERE run_id = ? AND followed = 0 ORDER BY id DESC LIMIT 1",
+      )
+      .get(runId) as { sha: string; at: number } | undefined;
+    return r ? { sha: r.sha, at: r.at } : null;
+  }
+
   /**
    * Every commit any run made on `branch`: a later run on the same ticket reuses the branch, and
    * the earlier run's unpushed commits still count as the hub's.
    */
   branchCommits(repoId: RepoId, branch: string): Set<string> {
     const rows = this.db
-      .prepare("SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ?")
+      .prepare("SELECT sha FROM run_commits WHERE repo_id = ? AND branch = ? AND followed = 0")
       .all(repoId, branch) as { sha: string }[];
     return new Set(rows.map((r) => r.sha));
   }
@@ -6222,6 +5267,48 @@ export class Store {
     return first === undefined || last === undefined ? null : { first: first.sha, last: last.sha };
   }
 
+  /**
+   * The run takes someone else's commit on top of its push as its own push, in one transaction:
+   * the commit (followed, so the merge gate still treats it as from outside the run), the push, a
+   * loop event and a FLIGHT decision that records the hub took it in. Once per run and sha.
+   */
+  adoptFollowedHead(a: {
+    runId: string;
+    repoId: RepoId;
+    branch: string;
+    sha: string;
+    at: number;
+    ticket: string | null;
+    eventKey: string;
+    eventText: string;
+  }): void {
+    this.transaction(() => {
+      this.addRunCommit({
+        runId: a.runId,
+        repoId: a.repoId,
+        branch: a.branch,
+        sha: a.sha,
+        at: a.at,
+        followed: true,
+      });
+      this.setRunPush({ runId: a.runId, sha: a.sha, at: a.at });
+      if (!this.addLoopEvent(a.eventKey, a.runId, a.eventText, a.at)) return;
+      this.addFlightDecision({
+        at: a.at,
+        kind: "settle",
+        // the hub's own call: no seat made it
+        seatId: null,
+        targetRunId: a.runId,
+        ref: a.ticket,
+        questionId: null,
+        about: "followed commit",
+        decision: a.eventText,
+        basis:
+          "The commit was taken as the run's push, so it does not park the run as stuck; the merge gate still counts it as outside the run's own commits.",
+      });
+    });
+  }
+
   /** Records that a run's branch is on origin at `sha` (replacing an earlier push of the run). */
   setRunPush(p: { runId: string; sha: string; at: number }): void {
     this.appendAttempt(p.runId, "push", p.at, { sha: p.sha });
@@ -6239,41 +5326,6 @@ export class Store {
       | { sha: string; at: number }
       | undefined;
     return r ? { sha: r.sha, at: r.at } : null;
-  }
-
-  /** Records strays; one already there (same session and path) takes the new seat, kind and time. */
-  addStrays(strays: Omit<Stray, "key">[]): void {
-    this.transaction(() => {
-      const ins = this.db.prepare(
-        // `at` stays first-seen: a retry of the same stray is not a new one (its ack holds)
-        `INSERT INTO strays (key, session_id, path, agent_id, kind, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(key) DO UPDATE SET agent_id = excluded.agent_id, kind = excluded.kind`,
-      );
-      for (const x of strays) {
-        ins.run(strayKey(x.sessionId, x.path), x.sessionId, x.path, x.agentId, x.kind, x.at);
-      }
-    });
-  }
-
-  /** Every stray, oldest first (then by path). */
-  strays(): Stray[] {
-    const rows = this.db.prepare("SELECT * FROM strays ORDER BY at ASC, path ASC").all() as Row[];
-    return rows.map((r) => ({
-      key: r.key as string,
-      sessionId: r.session_id as string,
-      path: r.path as string,
-      agentId: r.agent_id as string,
-      kind: r.kind as StrayKind,
-      at: r.at as number,
-    }));
-  }
-
-  /** Drops the session's strays on `paths` (reverted, or the run that made them ended). */
-  clearStrays(sessionId: string, paths: readonly string[]): void {
-    this.transaction(() => {
-      const del = this.db.prepare("DELETE FROM strays WHERE key = ?");
-      for (const p of paths) del.run(strayKey(sessionId, p));
-    });
   }
 
   /** Records a seat's question; returns its id. */
@@ -6396,10 +5448,7 @@ export class Store {
       stored = this.insertClosure(c);
       if (!stored) return;
       if (c.key.startsWith("note:")) this.dismissNote(c.key.slice("note:".length), c.at);
-      else if (c.key.startsWith("crew-error:")) {
-        const id = Number(c.key.slice("crew-error:".length));
-        if (Number.isSafeInteger(id) && id > 0) this.ackCrewError(id);
-      } else if (c.key.startsWith(COMMS_OPEN_PREFIX))
+      else if (c.key.startsWith(COMMS_OPEN_PREFIX))
         this.settleCommsItem(c.key.slice(COMMS_OPEN_PREFIX.length), c.by, c.reason, c.at);
       this.db
         .prepare(`INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
@@ -6486,32 +5535,6 @@ export class Store {
   /** The seat has no run now: each of its open questions closes, with that reason. */
   endSeatQuestions(agentId: AgentId, at: number): void {
     this.endQuestions("agent_id", agentId, at);
-  }
-
-  /** Records an mc tool failure for the operator; returns its id. */
-  addCrewError(e: Omit<CrewError, "id">): number {
-    const r = this.db
-      .prepare("INSERT INTO crew_errors (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
-      .run(e.agentId, e.runId, e.text, e.at);
-    return Number(r.lastInsertRowid);
-  }
-
-  /** Crew errors not yet acked, oldest first. */
-  crewErrors(): CrewError[] {
-    const rows = this.db
-      .prepare("SELECT * FROM crew_errors WHERE acked = 0 ORDER BY id ASC")
-      .all() as Row[];
-    return rows.map((r) => ({
-      id: r.id as number,
-      agentId: r.agent_id as string,
-      runId: r.run_id as string | null,
-      text: r.text as string,
-      at: r.at as number,
-    }));
-  }
-
-  ackCrewError(id: number): void {
-    this.db.prepare("UPDATE crew_errors SET acked = 1 WHERE id = ?").run(id);
   }
 
   addDraft(
@@ -6618,15 +5641,8 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(
-    runId: string,
-    at: number,
-    reasons: string[],
-    wakeId?: string,
-    rode: string[] = [],
-    immediate: string[] = [],
-  ): void {
-    this.flightQ.addFlightWake(runId, at, reasons, wakeId, rode, immediate);
+  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
@@ -6637,14 +5653,6 @@ export class Store {
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     return this.flightQ.flightWakes(since);
-  }
-
-  flightWakeActions(
-    since: number,
-    until: number,
-    nonActing: readonly string[],
-  ): FlightWakeAction[] {
-    return this.flightQ.flightWakeActions(since, until, nonActing);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
@@ -6849,151 +5857,6 @@ export class Store {
     return this.flightQ.flightBrief(sessionId);
   }
 
-  /** A stable, bounded thread for one exact version of an item. */
-  ensureDiscussion(
-    itemKey: string,
-    version: string,
-    opening?: { text: string; at: number },
-  ): ItemDiscussion {
-    const id = randomUUID();
-    const messages: ItemChatMessage[] = opening
-      ? [
-          {
-            id: `${id}:opening`,
-            itemKey,
-            correlationId: id,
-            role: "flight",
-            text: opening.text,
-            at: opening.at,
-          },
-        ]
-      : [];
-    this.db
-      .prepare(
-        `INSERT OR IGNORE INTO item_discussions (id, item_key, version, messages) VALUES (?, ?, ?, ?)`,
-      )
-      .run(id, itemKey, version, JSON.stringify(messages));
-    const row = this.db
-      .prepare("SELECT id FROM item_discussions WHERE item_key = ? AND version = ?")
-      .get(itemKey, version) as Row;
-    return this.discussion(itemKey, row.id as string) as ItemDiscussion;
-  }
-
-  discussion(itemKey: string, id: string): ItemDiscussion | null {
-    const row = this.db
-      .prepare("SELECT * FROM item_discussions WHERE item_key = ? AND id = ?")
-      .get(itemKey, id) as Row | undefined;
-    return row
-      ? {
-          id,
-          itemKey,
-          version: row.version as string,
-          messages: JSON.parse(row.messages as string) as ItemChatMessage[],
-        }
-      : null;
-  }
-
-  /** The newest stored conversation for an item which is no longer in attention. */
-  discussionForItem(itemKey: string): ItemDiscussion | null {
-    const row = this.db
-      .prepare("SELECT id FROM item_discussions WHERE item_key = ? ORDER BY rowid DESC LIMIT 1")
-      .get(itemKey) as Row | undefined;
-    return row ? this.discussion(itemKey, row.id as string) : null;
-  }
-
-  private discussionById(id: string): ItemDiscussion | null {
-    const row = this.db.prepare("SELECT item_key FROM item_discussions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return row ? this.discussion(row.item_key as string, id) : null;
-  }
-
-  private saveDiscussion(thread: ItemDiscussion): void {
-    this.db
-      .prepare("UPDATE item_discussions SET messages = ? WHERE id = ?")
-      .run(JSON.stringify(thread.messages.slice(-100)), thread.id);
-  }
-
-  askDiscussion(id: string, messageId: string, text: string, at: number): boolean {
-    const thread = this.discussionById(id);
-    if (!thread) throw new Error("Unknown discussion.");
-    const prior = thread.messages.find((m) => m.id === messageId);
-    if (prior) {
-      if (prior.role !== "operator" || prior.text !== text)
-        throw new Error("Message id already used.");
-      return false;
-    }
-    thread.messages.push({
-      id: messageId,
-      itemKey: thread.itemKey,
-      correlationId: id,
-      role: "operator",
-      text,
-      at,
-    });
-    this.saveDiscussion(thread);
-    return true;
-  }
-
-  replyDiscussion(
-    id: string,
-    replyTo: string,
-    messageId: string,
-    text: string,
-    at: number,
-  ): boolean {
-    const thread = this.discussionById(id);
-    if (!thread?.messages.some((m) => m.id === replyTo && m.role === "operator")) return false;
-    const prior = thread.messages.find((m) => m.id === messageId || m.replyTo === replyTo);
-    if (prior) return prior.id === messageId && prior.replyTo === replyTo && prior.text === text;
-    thread.messages.push({
-      id: messageId,
-      itemKey: thread.itemKey,
-      correlationId: id,
-      replyTo,
-      role: "flight",
-      text,
-      at,
-    });
-    this.saveDiscussion(thread);
-    return true;
-  }
-
-  discussionSent(id: string, messageId: string): boolean {
-    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return row ? (JSON.parse(row.sent as string) as string[]).includes(messageId) : false;
-  }
-
-  markDiscussionSent(id: string, messageId: string): void {
-    const row = this.db.prepare("SELECT sent FROM item_discussions WHERE id = ?").get(id) as Row;
-    const sent = JSON.parse(row.sent as string) as string[];
-    this.db
-      .prepare("UPDATE item_discussions SET sent = ? WHERE id = ?")
-      .run(JSON.stringify([...new Set([...sent, messageId])].slice(-100)), id);
-  }
-
-  pendingDiscussions(): ItemDiscussion[] {
-    const rows = this.db
-      .prepare(`
-        SELECT d.item_key, d.id,
-          (SELECT MIN(json_extract(q.value, '$.at'))
-           FROM json_each(d.messages) AS q
-           WHERE json_extract(q.value, '$.role') = 'operator'
-             AND NOT EXISTS (
-               SELECT 1 FROM json_each(d.messages) AS r
-               WHERE json_extract(r.value, '$.replyTo') = json_extract(q.value, '$.id')
-             )) AS waiting_since
-        FROM item_discussions AS d
-        WHERE waiting_since IS NOT NULL
-        ORDER BY waiting_since ASC, d.rowid ASC
-        LIMIT 100
-      `)
-      .all() as Row[];
-    return rows.map((r) => this.discussion(r.item_key as string, r.id as string) as ItemDiscussion);
-  }
-
   /** Stores FLIGHT's brief on an attention key; returns its id. */
   addBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
     let id = 0;
@@ -7144,17 +6007,6 @@ export class Store {
     return id;
   }
 
-  /** Whether the key was ever briefed for the operator (a brief with no reader predates routing). */
-  operatorBriefed(key: string): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM briefs WHERE key = ? AND (structured IS NULL OR json_extract(structured, '$.for') IS NOT 'flight') LIMIT 1",
-        )
-        .get(key) !== undefined
-    );
-  }
-
   /** The newest brief on each attention key. */
   briefs(): Map<string, AttentionBrief> {
     const rows = this.db
@@ -7188,49 +6040,6 @@ export class Store {
           },
         ]),
     );
-  }
-
-  /** Holds a card in Backlog behind PR `waitsOn`; an earlier open hold on the card is replaced. */
-  addHold(h: { ref: string; waitsOn: number; basis: string; at: number }): void {
-    this.releaseHold(h.ref, h.at);
-    this.db
-      .prepare("INSERT INTO holds (ref, waits_on, basis, at) VALUES (?, ?, ?, ?)")
-      .run(h.ref, h.waitsOn, h.basis, h.at);
-  }
-
-  /** Releases the card's open hold, if it has one. */
-  releaseHold(ref: string, at: number): void {
-    this.db
-      .prepare("UPDATE holds SET released_at = ? WHERE ref = ? AND released_at IS NULL")
-      .run(at, ref);
-  }
-
-  /** The holds not yet released, oldest first. */
-  activeHolds(): Hold[] {
-    const rows = this.db
-      .prepare("SELECT * FROM holds WHERE released_at IS NULL ORDER BY at, id")
-      .all() as Row[];
-    return rows.map((r) => ({
-      ref: r.ref as string,
-      waitsOn: r.waits_on as number,
-      basis: r.basis as string,
-      at: r.at as number,
-      releasedAt: r.released_at as number | null,
-      seen: r.seen === 1,
-      toldState: (r.told_state as string | null) ?? null,
-    }));
-  }
-
-  /** The board has shown the card's open hold in Backlog. */
-  markHoldSeen(ref: string): void {
-    this.db.prepare("UPDATE holds SET seen = 1 WHERE ref = ? AND released_at IS NULL").run(ref);
-  }
-
-  /** FLIGHT has been told the card's open hold waits on a PR in `state`. */
-  markHoldTold(ref: string, state: string): void {
-    this.db
-      .prepare("UPDATE holds SET told_state = ? WHERE ref = ? AND released_at IS NULL")
-      .run(state, ref);
   }
 
   /** How many briefs were written at or after `since`. */
