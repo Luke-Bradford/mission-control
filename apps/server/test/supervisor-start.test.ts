@@ -1714,6 +1714,27 @@ describe("startRun", () => {
     expect(brief).not.toContain("pnpm");
   });
 
+  const pytestRules = async () =>
+    freezeRules({ ...DEFAULT_REPO_RULES, needs: [], checks: ["pytest -q"] });
+
+  it("a non-hub repo's full_suite entry that is one of its CLAUDE.md checks takes the test lock", async () => {
+    const { sup } = make({
+      hubRepo: "hub",
+      rules: pytestRules,
+      repo: { fullSuite: ["pytest -q"] },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0] as string).toContain("A whole suite (`pytest -q`) takes the test lock");
+  });
+
+  it("refuses a start whose non-hub repo's full_suite entry is not one of its checks", async () => {
+    const { sup } = make({ hubRepo: "hub", rules: pytestRules, repo: { fullSuite: ["rm -rf /"] } });
+    sup.start();
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow("writer validation commands");
+  });
+
   it("the hub's own repo with no commands still gets the pnpm defaults", async () => {
     const { sup } = make({
       hubRepo: "mc",

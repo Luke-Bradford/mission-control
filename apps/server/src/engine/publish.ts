@@ -44,6 +44,7 @@ import {
   withSection,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
+import { ownsHubFiles } from "../config.ts";
 import {
   COMMIT_ADD_PATHSPEC,
   editRunPrBody,
@@ -59,6 +60,7 @@ import {
   seatWroteBody,
   withEngineSection,
 } from "../mcp/tools.ts";
+import { WEB_AREA_LABEL } from "../preview/review.ts";
 import { qaReportGitSummary } from "../qa/reports.ts";
 import { runPathGrants } from "../repo/path-grants.ts";
 import {
@@ -73,7 +75,7 @@ import { crewGit } from "../runtime/git.ts";
 import { originHeads } from "../runtime/origin-heads.ts";
 import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import { onlyHubMerges, yes } from "./hub-merges.ts";
-import { mcSection } from "./rules.ts";
+import { mcSection, RepoRulesError } from "./rules.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
 export const NO_FAILED_RUN = "(no failed Actions run to read)";
@@ -651,6 +653,9 @@ const errText = (e: unknown): string =>
   Array.from(cleanLog(e instanceof Error ? e.message : String(e)).trim())
     .slice(0, STDERR_TEXT_MAX)
     .join("");
+
+const globMatchesAny = (globs: readonly string[], path: string): boolean =>
+  globs.some((g) => globMatches(g, path));
 
 export function createPublisher(deps: McToolsDeps): Publisher {
   const cwd = () => crewDir(deps.dbPath);
@@ -1526,6 +1531,18 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             /* an unreadable rules block stays protected */
           }
         }
+        // the repo's own web area; `apps/web/**` is only the default on the repo the hub runs from
+        const configured = await deps.rules?.(run.repoId);
+        const areaGlobs =
+          configured === undefined || configured instanceof RepoRulesError
+            ? []
+            : (configured.areas[WEB_AREA_LABEL] ?? []);
+        const webGlobs =
+          areaGlobs.length > 0
+            ? areaGlobs
+            : ownsHubFiles(deps.config, run.repoId)
+              ? ["apps/web", "apps/web/**"]
+              : [];
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
         const grants = runPathGrants(deps.store, run.id);
         const strays = names.filter(
@@ -1539,7 +1556,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             containsMain,
             hubOnly,
             strays,
-            webChanged: names.some((p) => p === "apps/web" || p.startsWith("apps/web/")),
+            webChanged: names.some((p) => globMatchesAny(webGlobs, p)),
             ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
           },
         };

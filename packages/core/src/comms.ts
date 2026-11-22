@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE } from "./util.ts";
+
 /** Shared stored-Comms contract.  Keep the wire values here: seats and the hub use the same set. */
 export const COMMS_LABELS = ["question", "handoff", "blocker", "none"] as const;
 /** The required classification a seat or FLIGHT chooses for a Comms message. */
@@ -140,9 +142,10 @@ export function commsStateLine(
   state: CommsDeliveryState,
   deliveredAt: number | null,
   timeZone: string,
+  locale: string = DEFAULT_LOCALE,
 ): string {
   if (state === "stored" || deliveredAt === null) return "Stored";
-  const time = new Intl.DateTimeFormat("en-GB", {
+  const time = new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,

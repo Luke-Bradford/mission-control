@@ -135,7 +135,8 @@ export interface Metrics {
 
 /** `/api/config`: the loaded config, read-only, never including the password hash. */
 export interface ConfigView {
-  operator: { id: string; timezone: string };
+  /** `locale` is the operator's BCP 47 locale for dates and numbers; the web falls back to en-GB without it. */
+  operator: { id: string; timezone: string; locale?: string };
   /**
    * The GitHub login the hub acts as (the authenticated `gh` user). The server always sets it, null
    * when the read fails; optional only until the web fixtures carry it.

@@ -26,6 +26,7 @@ import {
   clockHm,
   crewHudState,
   currentReview,
+  DEFAULT_LOCALE,
   type DriverStop,
   driverStopKey,
   type Escalation,
@@ -1180,12 +1181,19 @@ export function flightNotTriagingDueAt(config: CcConfig, store: Store, now: numb
 }
 
 /** "14:05" today, "27 Oct 14:05" before today, in the operator's timezone. */
-export function sinceText(at: number, now: number, timeZone: string): string {
+export function sinceText(
+  at: number,
+  now: number,
+  timeZone: string,
+  locale: string = DEFAULT_LOCALE,
+): string {
   const hm = clockHm(at, timeZone);
   if (at >= startOfLocalDay(now, timeZone)) return hm;
-  const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(
-    at,
-  );
+  const day = new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    timeZone,
+  }).format(at);
   return `${day} ${hm}`;
 }
 

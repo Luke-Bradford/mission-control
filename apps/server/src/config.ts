@@ -239,7 +239,7 @@ export interface CcConfig {
     /** Message-problem thresholds for Audit; each left out takes `AUDIT_THRESHOLD_DEFAULTS`. */
     thresholds?: Partial<AuditThresholds>;
   };
-  operator: { id: string; timezone: string; githubLogins?: string[] };
+  operator: { id: string; timezone: string; locale?: string; githubLogins?: string[] };
   /** The configured repo the hub's own code lives in, set at startup; unset: unknown, so every repo is treated as it. */
   hubRepo?: RepoId;
   accounts: {
@@ -546,6 +546,15 @@ const fileSchema = z
             return false;
           }
         }, "must be a valid IANA timezone"),
+        locale: nonEmpty
+          .refine((tag) => {
+            try {
+              return Intl.getCanonicalLocales(tag).length === 1;
+            } catch {
+              return false;
+            }
+          }, "must be a valid BCP 47 locale such as en-GB or en-US")
+          .optional(),
       }),
     ),
     accounts: z.array(
@@ -753,6 +762,7 @@ const fileSchema = z
           ? {}
           : { githubLogins: f.operator.github_logins }),
         timezone: f.operator.timezone,
+        ...(f.operator.locale === undefined ? {} : { locale: f.operator.locale }),
       },
       accounts: f.accounts.map((a) => ({
         id: a.id,
@@ -1412,6 +1422,21 @@ function isExecutableFile(p: string): boolean {
 const writerOf = (r: { commands?: { writer: readonly string[] } }): readonly string[] =>
   r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer;
 
+/**
+ * Why a repo's `full_suite` does not fit its effective writer commands, or null. Config loading
+ * leaves a repo with no `commands` unchecked; this runs once the effective list is known.
+ */
+export function fullSuiteProblem(
+  fullSuite: readonly string[],
+  writer: readonly string[],
+): string | null {
+  for (const cmd of fullSuite) {
+    if (!isValidationCommand(writer, cmd))
+      return `${cmd} is not one of the repo's writer validation commands`;
+  }
+  return null;
+}
+
 /** Whether `cmd` is one of the repo's writer validation commands or extends one (a word prefix). */
 function isValidationCommand(writer: readonly string[], cmd: string): boolean {
   return writer.some((p) => cmd === p || cmd.startsWith(`${p} `));
@@ -1507,6 +1532,9 @@ export function parseConfig(
   // full_suite names which validation commands take the test lock; it is not an allowlist (seats
   // run ordinary commands in their sandbox), so each entry must be a writer validation command.
   cfg.repos.forEach((r, i) => {
+    // a repo with no `commands` has no writer list yet: the hub's own repo uses the pnpm defaults,
+    // any other the checks in its CLAUDE.md block, which load later; `fullSuiteProblem` checks it
+    // then, so only the pnpm lock rule below runs here
     for (const cmd of r.fullSuite ?? []) {
       // a shorter writer command also runs the suite: it must be a full_suite entry itself
       const shorter = writerOf(r).find(
@@ -1518,7 +1546,7 @@ export function parseConfig(
           `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${shorter}" in full_suite too, or name "${cmd}" as the writer command instead`,
         );
       }
-      if (!isValidationCommand(writerOf(r), cmd)) {
+      if (r.commands !== undefined && !isValidationCommand(writerOf(r), cmd)) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
           `${cmd} is not one of the repo's writer validation commands (commands.writer)`,

@@ -152,6 +152,7 @@ import {
   type CrewSessionConfig,
   crewOwnFolders,
   defaultSeatCommands,
+  fullSuiteProblem,
   gitCommonDir,
   isInside,
   ownsHubFiles,
@@ -1826,7 +1827,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       binding === null
         ? configured
         : { ...configured, seat: seatForAccount(configured.seat, binding.target) };
-    const info = { ...seated, repo: { ...seated.repo, commands: await commandsOf(seated.repo) } };
+    const commands = await commandsOf(seated.repo);
+    const suiteProblem = fullSuiteProblem(seated.repo.fullSuite ?? [], commands.writer);
+    if (suiteProblem !== null && seated.repo.commands === undefined)
+      throw new SupervisorError(409, `repos[].full_suite: ${suiteProblem}`);
+    const info = { ...seated, repo: { ...seated.repo, commands } };
     if (runBindingProblem(run, info.seat.accountId))
       throw new SupervisorError(
         409,

@@ -17,6 +17,7 @@ import {
   CREW_EFFORTS,
   DEFAULT_CREW_NODE,
   DEFAULT_REPO_RULES,
+  DEFAULT_SEAT_COMMANDS,
   FLIGHT_TOOLS,
 } from "@mc/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
@@ -30,6 +31,7 @@ import {
   DEFAULT_PORT,
   findHubRoot,
   flightPowersOf,
+  fullSuiteProblem,
   isPreview,
   loadConfig,
   ownsHubFiles,
@@ -1568,16 +1570,20 @@ describe("guard config", () => {
   });
 
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
-    "refuses full_suite entry %j that crew seats may not run",
+    "finds full_suite entry %j that crew seats may not run, against the writer commands",
     (cmd) => {
-      const t = text.replace(FULL_SUITE_BLOCK, `full_suite: [${JSON.stringify(cmd)}]`);
-      const e = errorOf(() => parse(t));
-      expect(e.path).toBe("repos[2].full_suite");
-      expect(e.message).toBe(
-        `repos[2].full_suite: ${cmd} is not one of the repo's writer validation commands (commands.writer)`,
+      expect(fullSuiteProblem([cmd], DEFAULT_SEAT_COMMANDS.writer)).toBe(
+        `${cmd} is not one of the repo's writer validation commands`,
       );
     },
   );
+
+  it("loads a full_suite for a repo with no commands, to be checked against its CLAUDE.md checks at launch", () => {
+    const t = text.replace(FULL_SUITE_BLOCK, 'full_suite: ["pytest -q"]');
+    expect(parse(t).repos[2]?.fullSuite).toEqual(["pytest -q"]);
+    expect(fullSuiteProblem(["pytest -q"], ["pytest -q"])).toBeNull();
+    expect(fullSuiteProblem(["pytest -q --lf"], ["pytest -q"])).toBeNull();
+  });
 
   it.each([
     ["v22.5.1", "is Node 22.5.1; 22.6 or later is needed"],
@@ -1992,5 +1998,26 @@ describe("ownsHubFiles", () => {
   it("is true only for the hub's own repo once it is known", () => {
     expect(ownsHubFiles({ hubRepo: "a" }, "a")).toBe(true);
     expect(ownsHubFiles({ hubRepo: "a" }, "b")).toBe(false);
+  });
+});
+
+describe("operator.locale", () => {
+  const withLocale = (tag: string) =>
+    tmpConfig((t) => t.replace("timezone: UTC", `timezone: UTC\n  locale: ${tag}`));
+
+  it("is unset by default and reaches the config view as en-GB", () => {
+    const c = loadConfig(tmpConfig((t) => t));
+    expect(c.operator.locale).toBeUndefined();
+    expect(configView(c).operator.locale).toBe("en-GB");
+  });
+
+  it("loads a set locale into the config and the view", () => {
+    const c = loadConfig(withLocale("en-US"));
+    expect(c.operator.locale).toBe("en-US");
+    expect(configView(c).operator.locale).toBe("en-US");
+  });
+
+  it("refuses a locale that is not a BCP 47 tag", () => {
+    expect(() => loadConfig(withLocale("not_a_locale"))).toThrow(/locale/);
   });
 });
