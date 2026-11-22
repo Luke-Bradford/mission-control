@@ -23,14 +23,18 @@ if (command === "new-workspace") {
     name: at("--name"),
     cwd: at("--cwd"),
     command: at("--command"),
+    session_calls: 0,
   });
   save();
   process.stdout.write(`${workspaceId}\n`);
   process.exit(0);
 }
 if (command === "sessions") {
+  for (const session of state.sessions) session.session_calls = (session.session_calls ?? 0) + 1;
   save();
-  process.stdout.write(JSON.stringify({ sessions: state.sessions }));
+  process.stdout.write(
+    JSON.stringify({ sessions: state.sessions.filter((session) => session.session_calls > 1) }),
+  );
   process.exit(0);
 }
 if (command === "send" || command === "send-key" || command === "read-screen") {

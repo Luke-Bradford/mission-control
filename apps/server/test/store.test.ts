@@ -2940,20 +2940,21 @@ describe("seat sessions", () => {
     expect(store.seatSession("guido")).toEqual(row);
   });
 
-  it("lists active sessions only: a run, and idle/starting/running/parked", () => {
+  it("lists active sessions only: a run, and idle/starting/running/waiting/parked", () => {
     store.setSeatSession(seat({ seatId: "a", state: "idle" }));
     store.setSeatSession(seat({ seatId: "b", state: "starting" }));
     store.setSeatSession(seat({ seatId: "c", state: "running" }));
     store.setSeatSession(seat({ seatId: "d", state: "parked" }));
-    store.setSeatSession(seat({ seatId: "e", state: "stopped" }));
-    store.setSeatSession(seat({ seatId: "f", state: "error" }));
-    store.setSeatSession(seat({ seatId: "g", state: "running", runId: null }));
+    store.setSeatSession(seat({ seatId: "e", state: "needs-input" }));
+    store.setSeatSession(seat({ seatId: "f", state: "stopped" }));
+    store.setSeatSession(seat({ seatId: "g", state: "error" }));
+    store.setSeatSession(seat({ seatId: "h", state: "running", runId: null }));
     expect(
       store
         .activeSeatSessions()
         .map((r) => r.seatId)
         .sort(),
-    ).toEqual(["a", "b", "c", "d"]);
+    ).toEqual(["a", "b", "c", "d", "e"]);
   });
 
   it("adds the table to a database made before it", () => {

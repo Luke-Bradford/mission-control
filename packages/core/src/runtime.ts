@@ -1350,10 +1350,6 @@ export function crewCliArgs(i: CrewCliInput): string[] {
     ...(i.effort ? ["--effort", i.effort] : []),
     ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
-    // Seats use the repository's CLAUDE.md and local/project settings, plus the hub's explicit
-    // settings below. Never load the operator's user-level settings or plugins in a cmux seat.
-    "--setting-sources",
-    "project,local",
     "--settings",
     crewSandboxSettings(i.sandbox, i.mode, i.hook, profile),
     "--mcp-config",

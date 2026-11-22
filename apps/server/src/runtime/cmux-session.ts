@@ -82,6 +82,8 @@ function cmuxSession(
   let source = "";
   let sessionId = i.cliSessionId;
   let lifecycle: "idle" | "running" | "needsInput" | null = null;
+  let trustSent = false;
+  let sendChain = Promise.resolve();
   let timer: NodeJS.Timeout | null = null;
   const listeners = new Set<(event: SessionEvent) => void>();
   const emit = (event: SessionEvent) => {
@@ -159,7 +161,21 @@ function cmuxSession(
     if (!alive || detached || workspace === null) return;
     try {
       const record = (await i.cmux.agents()).find((a) => a.workspaceId === workspace);
-      if (!record || record.pid === null) return ended("the Claude process in cmux ended");
+      if (!record || record.pid === null) {
+        // cmux registers Claude only after its shell and hooks have started. A brand-new
+        // workspace has no pid yet, so absence here is startup, not an exited process.
+        if (pid === undefined && attachedWorkspace === undefined) {
+          if (!trustSent) {
+            const screen = await i.cmux.readScreen(workspace);
+            if (/trust.*folder|folder.*trust/i.test(screen)) {
+              await i.cmux.sendKey(workspace, "enter");
+              trustSent = true;
+            }
+          }
+          return;
+        }
+        return ended("the Claude process in cmux ended");
+      }
       if (pid !== undefined && record.pid !== pid)
         return ended("the Claude process in cmux was restored", true);
       pid = record.pid;
@@ -172,7 +188,9 @@ function cmuxSession(
       }
       if (record.transcriptPath) source = record.transcriptPath;
       copy();
-      if (lifecycle !== record.lifecycle) {
+      if (lifecycle === null) {
+        lifecycle = record.lifecycle;
+      } else if (lifecycle !== record.lifecycle) {
         lifecycle = record.lifecycle;
         if (lifecycle === "running") emit({ kind: "turn-start" });
         if (lifecycle === "needsInput") emit({ kind: "needs-input" });
@@ -182,7 +200,6 @@ function cmuxSession(
             '{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","mc_cmux":true}\n',
             { mode: 0o600 },
           );
-          lines++;
           emit({ kind: "result", isError: false, stopReason: "end_turn" });
         }
       }
@@ -225,10 +242,6 @@ function cmuxSession(
         workspace = await i.cmux.newWorkspace({ name: i.name, cwd: i.cwd, command: script });
         i.onWorkspace?.(workspace, null);
       }
-      // Claude asks this once for a new worktree. It is the hub-created checkout already used to
-      // build the restricted command, so accepting the folder prompt does not widen its tools.
-      const screen = await i.cmux.readScreen(workspace);
-      if (/trust.*folder|folder.*trust/i.test(screen)) await i.cmux.sendKey(workspace, "y");
       const deadline = Date.now() + (i.startWaitMs ?? 60_000);
       while (Date.now() < deadline && alive) {
         await poll();
@@ -255,10 +268,7 @@ function cmuxSession(
           body = `Mission Control sent you a message. Read ${file} and act on it.`;
         }
         while (alive) {
-          if (workspace === null) {
-            await sleep(25);
-            continue;
-          }
+          if (workspace === null) throw new SessionControlError("ended", "session ended");
           const sent = await i.cmux.send(workspace, body);
           if (sent === "sent") {
             await i.cmux.sendKey(workspace, "enter");
@@ -267,7 +277,12 @@ function cmuxSession(
           await sleep(2000);
         }
       };
-      void deliver().catch((error) =>
+      sendChain = sendChain.then(async () => {
+        await ready;
+        if (!alive) throw new SessionControlError("ended", "session ended");
+        await deliver();
+      });
+      void sendChain.catch((error) =>
         i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`),
       );
     },
