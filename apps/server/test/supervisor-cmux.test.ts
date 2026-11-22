@@ -151,6 +151,7 @@ it("no keeper for any Claude seat", async () => {
   mkdirSync(rolesDir, { recursive: true });
   writeFileSync(join(rolesDir, "FLIGHT.md"), "# FLIGHT: head agent\n");
   writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
+  writeFileSync(join(rolesDir, "GUIDO.md"), "# GUIDO: developer\n");
   const { sup } = make({
     cmuxCommand: [process.execPath, fake, state],
     rolesDir,
