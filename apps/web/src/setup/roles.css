@@ -329,7 +329,7 @@ button.rg-chip {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: flex-start;
 }
 .rg-edit textarea {
