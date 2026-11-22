@@ -12,8 +12,36 @@
   gap: var(--sp-2);
 }
 
-.audit-panel:last-child {
+.audit-panel:last-child,
+.audit-wide {
   grid-column: 1 / -1;
+}
+
+.model-scroll-inner {
+  overflow-x: auto;
+}
+
+.model-scroll.scrolls .model-scroll-inner {
+  max-height: calc(12 * var(--table-row) + var(--table-row));
+  overflow-y: auto;
+}
+
+.model-scroll th,
+.model-scroll td {
+  max-width: 28ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-scroll th.num,
+.model-scroll td.num {
+  text-align: right;
+}
+
+.model-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
 }
 
 .audit-list {

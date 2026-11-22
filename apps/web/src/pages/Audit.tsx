@@ -12,6 +12,7 @@ import { cost, elapsed, percent, plural, prLabel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { agentPath, tracePath } from "../router.ts";
+import { ModelPanels } from "./ModelTable.tsx";
 import "./audit.css";
 
 const RANGES = ["7d", "30d", "90d", "365d"] as const;
@@ -82,6 +83,7 @@ function AuditDashboard() {
           <PrSizes sizes={audit.prSizes} />
           <Changes changes={audit.changes} />
           <Checks audit={audit} />
+          <ModelPanels range={range} />
           <Proposals />
         </div>
       )}
