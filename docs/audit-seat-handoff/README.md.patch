@@ -8,9 +8,9 @@ index 0b6d6cd23..72b4e6ba2 100644
  | **FAO** | Planner | Reads a ticket and the code, and writes the `## Plan` a developer builds from. | read-only | Opus | plan | none |
 +| **AUDIT** | Auditor | Wakes on a timer (default every 4 hours), reads the crew's record and the role prompts, and saves one report: a verdict and ranked problems, each with evidence and who acts. Changes nothing. | read-only | Opus | audit | none |
  | **RETRO** | Reviewer (QA) | Reviews each PR in a throwaway copy, and sends blocking findings, each with its exact fix, back to the author. Posts `mc/review`. | scratch | Opus | review | none |
- 
+
  ## Planned (in the mockup, not built yet)
- 
+
  | Call sign | Title | What it would do |
  |---|---|---|
 -| **AUDIT** | Auditor | Runs a nightly read-only report: why runs cost cycles, with a few evidence-backed proposals (#172). |
