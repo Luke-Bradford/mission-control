@@ -84,6 +84,7 @@ function cmuxSession(
   let lifecycle: "idle" | "running" | "needsInput" | null = null;
   let trustSent = false;
   let sendChain = Promise.resolve();
+  let attached = attachedWorkspace !== undefined;
   let timer: NodeJS.Timeout | null = null;
   const listeners = new Set<(event: SessionEvent) => void>();
   const emit = (event: SessionEvent) => {
@@ -157,7 +158,7 @@ function cmuxSession(
       }
     }
   };
-  const poll = async () => {
+  const pollOnce = async () => {
     if (!alive || detached || workspace === null) return;
     try {
       const record = (await i.cmux.agents()).find((a) => a.workspaceId === workspace);
@@ -190,6 +191,10 @@ function cmuxSession(
       copy();
       if (lifecycle === null) {
         lifecycle = record.lifecycle;
+        if (attached) {
+          attached = false;
+          emit({ kind: "attached", awaiting: lifecycle !== "idle" });
+        }
       } else if (lifecycle !== record.lifecycle) {
         lifecycle = record.lifecycle;
         if (lifecycle === "running") emit({ kind: "turn-start" });
@@ -206,9 +211,15 @@ function cmuxSession(
       resolveReady();
     } catch (error) {
       i.log?.(`cmux poll: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      if (alive && !detached) timer = setTimeout(() => void poll(), i.pollMs ?? 1000);
     }
+  };
+  const schedulePoll = () => {
+    if (!alive || detached || timer) return;
+    timer = setTimeout(async () => {
+      timer = null;
+      await pollOnce();
+      schedulePoll();
+    }, i.pollMs ?? 1000);
   };
   const launch = async () => {
     try {
@@ -244,8 +255,11 @@ function cmuxSession(
       }
       const deadline = Date.now() + (i.startWaitMs ?? 60_000);
       while (Date.now() < deadline && alive) {
-        await poll();
-        if (pid !== undefined) return;
+        await pollOnce();
+        if (pid !== undefined) {
+          schedulePoll();
+          return;
+        }
         await sleep(100);
       }
       if (workspace) await i.cmux.close(workspace);
@@ -277,12 +291,15 @@ function cmuxSession(
           await sleep(2000);
         }
       };
-      sendChain = sendChain.then(async () => {
-        await ready;
-        if (!alive) throw new SessionControlError("ended", "session ended");
-        await deliver();
-      });
-      void sendChain.catch((error) =>
+      const next = sendChain
+        .catch(() => {})
+        .then(async () => {
+          await ready;
+          if (!alive) throw new SessionControlError("ended", "session ended");
+          await deliver();
+        });
+      sendChain = next;
+      void next.catch((error) =>
         i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`),
       );
     },

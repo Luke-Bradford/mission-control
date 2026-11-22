@@ -2315,8 +2315,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
             log,
-            onWorkspace: (workspace, pid) =>
-              store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify({ workspace, pid })),
+            onWorkspace: (workspace, pid) => {
+              store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify({ workspace, pid }));
+              const l = live.get(info.seat.id);
+              if (l?.run.id === run.id) l.spawn = `cmux:${workspace}`;
+            },
           });
         }
       }
@@ -3084,7 +3087,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             });
             track(info, run, session, grant(info, run), {
               spawn: `cmux:${saved.workspace}`,
-              inTurn: row.state !== "idle",
+              attaching: true,
+              inTurn: false,
             });
             return;
           }

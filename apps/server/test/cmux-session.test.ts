@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Cmux } from "../src/runtime/cmux.ts";
-import { launcherScript, startCmuxSession } from "../src/runtime/cmux-session.ts";
+import {
+  attachCmuxSession,
+  launcherScript,
+  startCmuxSession,
+} from "../src/runtime/cmux-session.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -167,7 +171,7 @@ it("waits for Claude to register, baselines idle, and keeps its source cursor", 
   const cmux: Cmux = {
     ensure: async () => {},
     newWorkspace: async () => "workspace-1",
-    agents: async () => (Date.now() - started < 30 ? [] : [record]),
+    agents: async () => (Date.now() - started < 250 ? [] : [record]),
     send: async () => "sent",
     sendKey: async (_workspace, key) => {
       keys.push(key);
@@ -258,5 +262,98 @@ it("queues messages until Claude is ready and preserves their order after busy",
   expect(sent).toEqual([]);
   available = true;
   await vi.waitFor(() => expect(sent).toEqual(["first", "second"]), { timeout: 3000 });
+  await session.close();
+});
+
+it("continues queued delivery after a send error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const sent: string[] = [];
+  let failed = false;
+  const cmux: Cmux = {
+    ensure: async () => {},
+    newWorkspace: async () => "workspace-1",
+    agents: async () => [
+      {
+        workspaceId: "workspace-1",
+        sessionId: "session-1",
+        pid: 42,
+        lifecycle: "idle",
+        transcriptPath: null,
+      },
+    ],
+    send: async (_workspace, text) => {
+      if (!failed) {
+        failed = true;
+        throw new Error("socket hiccup");
+      }
+      sent.push(text);
+      return "sent";
+    },
+    sendKey: async () => {},
+    readScreen: async () => "",
+    close: async () => {},
+  };
+  const session = startCmuxSession({
+    cmux,
+    name: "GUIDO · mc#2194",
+    cwd: dir,
+    command: "claude",
+    args: [],
+    env: {},
+    dir: join(dir, "run"),
+    transcriptPath: join(dir, "run.jsonl"),
+    cliSessionId: "session-1",
+    messageDir: join(dir, "messages"),
+    pollMs: 5,
+  });
+  session.send("first");
+  session.send("second");
+  await vi.waitFor(() => expect(sent).toEqual(["second"]));
+  expect(session.alive).toBe(true);
+  await session.close();
+});
+
+it("attaches an idle workspace as idle without a synthetic result", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const cmux: Cmux = {
+    ensure: async () => {},
+    newWorkspace: async () => "workspace-1",
+    agents: async () => [
+      {
+        workspaceId: "workspace-1",
+        sessionId: "session-1",
+        pid: 42,
+        lifecycle: "idle",
+        transcriptPath: null,
+      },
+    ],
+    send: async () => "sent",
+    sendKey: async () => {},
+    readScreen: async () => "",
+    close: async () => {},
+  };
+  const session = attachCmuxSession({
+    cmux,
+    workspace: "workspace-1",
+    pid: 42,
+    from: 0,
+    name: "GUIDO · mc#2194",
+    cwd: dir,
+    command: "claude",
+    args: [],
+    env: {},
+    dir: join(dir, "run"),
+    transcriptPath: join(dir, "run.jsonl"),
+    cliSessionId: "session-1",
+    messageDir: join(dir, "messages"),
+    pollMs: 5,
+  });
+  const events: string[] = [];
+  session.on((event) => events.push(event.kind));
+  await session.ready;
+  expect(events).toContain("attached");
+  expect(events).not.toContain("result");
   await session.close();
 });
