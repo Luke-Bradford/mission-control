@@ -30,10 +30,12 @@ async function readCollaborator(
   repo: string,
   login: string | null | undefined,
   now: number,
+  /** Read the permission from GitHub now, ignoring the cache; for decisions that run code. */
+  fresh = false,
 ): Promise<boolean> {
   if (!login || !/^[A-Za-z0-9-]{1,39}$/.test(login)) return false;
   store.pruneCollaborators(now - 7 * TTL);
-  const saved = store.getSetting(key(repo, login));
+  const saved = fresh ? null : store.getSetting(key(repo, login));
   if (saved) {
     try {
       if (now - JSON.parse(saved).at < TTL) return trustedAuthor(store, repo, login, now);

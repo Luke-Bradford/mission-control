@@ -51,6 +51,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
     repoId: "mc",
     workDir: join(root, "work"),
     baseUrl: "http://127.0.0.1:7421",
+    trusted: async () => true,
     mainSha: async () => MAIN,
     snapshot: async (to) => {
       snapshots.push(to);
@@ -404,6 +405,13 @@ describe("PrEvidence capture", () => {
     expect(t.started).toHaveLength(2); // no second capture, only the post
   });
 
+  it("builds nothing for an untrusted PR", async () => {
+    const t = setup({ trusted: async () => false });
+    await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
+    expect(t.started).toEqual([]);
+    expect(t.snapshots).toEqual([]);
+  });
+
   it("reposts stored pairs after a hub restart before releasing draft", async () => {
     const t = setup();
     const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
@@ -413,6 +421,7 @@ describe("PrEvidence capture", () => {
       repoId: "mc",
       workDir: tmp(),
       baseUrl: "http://localhost",
+      trusted: async () => true,
       mainSha: async () => MAIN,
       snapshot: async () => {
         throw new Error("must not recapture");

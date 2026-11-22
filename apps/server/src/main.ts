@@ -115,6 +115,7 @@ import { previewBrowserInHelper } from "./preview/browser.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
 import { resolvePreviewRepo } from "./preview/repo.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
+import { trustedPullRequest } from "./preview/trust.ts";
 import { createQaReports } from "./qa/reports.ts";
 import { claimAs, readLogin } from "./queue/claim.ts";
 import {
@@ -198,10 +199,17 @@ export async function main(): Promise<void> {
       ),
     );
   }
+  // Read at call time: `gh` is built below, and a build only starts once the hub is serving.
+  const trustedHead = async (pr: number, sha?: string): Promise<boolean> => {
+    const github = config.repos.find((r) => r.id === previewRepoId)?.github;
+    if (github === undefined || hubRoot === null) return false;
+    return await trustedPullRequest(store, gh, hubRoot, github, pr, sha, Date.now());
+  };
   const previewCheckouts = new Map<string, { checkout: string; worktree: string; ref: string }>();
   const previews = isPreview(port, process.env)
     ? undefined
     : new PreviewManager({
+        trusted: ({ pr, sha }) => trustedHead(pr, sha),
         capacity: () => {
           const capacityConfig = config.crew?.machineCapacity;
           const c = capacityConfig ?? MACHINE_CAPACITY_DEFAULTS;
@@ -416,6 +424,7 @@ export async function main(): Promise<void> {
       ? createPrEvidence({
           store: evidenceStore,
           repoId: previewRepoId,
+          trusted: ({ pr, sha }) => trustedHead(pr, sha),
           workDir: join(dirname(dbPath), "pr-evidence-work"),
           baseUrl: `http://${HOST}:${port}`,
           webGraph: async (sha, signal) => {

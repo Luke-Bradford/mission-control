@@ -48,6 +48,8 @@ export interface PrEvidenceDeps {
   workDir: string;
   /** The hub's own address, for the links in the PR body. */
   baseUrl: string;
+  /** Whether this PR head is from the crew or a collaborator; an untrusted head is never built. */
+  trusted(target: EvidenceTarget): Promise<boolean>;
   /** The commit main points at now. */
   mainSha(signal: AbortSignal): Promise<string>;
   /** Writes a consistent copy of the live database to `to`. */
@@ -461,6 +463,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     baseUrl: deps.baseUrl,
     async ensure(t) {
       if (stopped || t.repoId !== deps.repoId) return;
+      if (!(await deps.trusted(t))) return;
       const pages = await pagesFor(t);
       if (stopped || pages.length === 0) return;
       const key = keyOf(t);
