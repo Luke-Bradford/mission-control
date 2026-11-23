@@ -108,8 +108,20 @@ it("reads only merged PRs from the last window, so the hourly scan stays bounded
   store.upsertPullRequests(
     "mc",
     [
-      prView({ repoId: "mc", number: 6, state: "merged", mergeCommitSha: "c".repeat(40), mergedAt: NOW - 1000 }),
-      prView({ repoId: "mc", number: 7, state: "merged", mergeCommitSha: "d".repeat(40), mergedAt: NOW - 10_000_000 }),
+      prView({
+        repoId: "mc",
+        number: 6,
+        state: "merged",
+        mergeCommitSha: "c".repeat(40),
+        mergedAt: NOW - 1000,
+      }),
+      prView({
+        repoId: "mc",
+        number: 7,
+        state: "merged",
+        mergeCommitSha: "d".repeat(40),
+        mergedAt: NOW - 10_000_000,
+      }),
     ],
     NOW,
   );
