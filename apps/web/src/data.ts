@@ -176,6 +176,7 @@ export const RESOURCES = {
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
   }),
+  auditReport: { path: "/api/audit/report", topic: "agents" } as ResourceRef,
   comms: (agentId: string): ResourceRef => ({
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",

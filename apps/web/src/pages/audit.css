@@ -133,3 +133,17 @@
 .model-scroll thead tr:nth-child(2) th {
   top: var(--table-row);
 }
+
+.audit-verdict {
+  font-size: var(--fs-lg, 1.1em);
+  margin: 0 0 var(--sp-1);
+}
+
+.audit-findings {
+  margin: var(--sp-1) 0 0;
+  padding-left: 1.5em;
+}
+
+.audit-findings a {
+  margin-right: var(--sp-1);
+}

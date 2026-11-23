@@ -1,6 +1,9 @@
 import {
   AUDIT_PR_OUTLIER_LINES,
   type AuditChange,
+  type AuditReportView,
+  auditNoteText,
+  MC_AUDIT_NO_REPORT,
   type AuditPrSize,
   type AuditView,
   type ConfigView,
@@ -43,8 +46,71 @@ export function Audit() {
       <div className="toolbar">
         <h1 className="toolbar-heading">Audit</h1>
       </div>
+      <ReportBand />
       <AuditDashboard />
     </section>
+  );
+}
+
+const DECIDERS = [
+  { value: "all", label: "All" },
+  { value: "flight", label: "FLIGHT" },
+  { value: "operator", label: "You" },
+] as const;
+type Decider = (typeof DECIDERS)[number]["value"];
+const whenLabel = (at: number): string =>
+  new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+/** The AUDIT seat's latest report: a verdict, then the findings ranked, each with who acts. */
+function ReportBand() {
+  const res = useResource<AuditReportView>(RESOURCES.auditReport);
+  const [decider, setDecider] = useState<Decider>("all");
+  const report = res.data?.report ?? null;
+  if (!report) {
+    return res.data || res.error ? (
+      <p className="s fg2 audit-report-note">{MC_AUDIT_NO_REPORT}</p>
+    ) : null;
+  }
+  const next = res.data?.nextDueAt;
+  const findings = [...report.findings]
+    .sort((a, b) => a.rank - b.rank)
+    .filter((f) => decider === "all" || f.owner === decider);
+  return (
+    <Panel title="AUDIT's verdict" className="audit-report">
+      <div className="pb">
+        <p className="audit-verdict">{report.verdict}</p>
+        <p className="s fg2 audit-report-note">
+          {auditNoteText(
+            whenLabel(report.at),
+            next == null ? "the next timer tick" : whenLabel(next),
+          )}
+        </p>
+        <Seg label="Decider" options={DECIDERS} value={decider} onChange={setDecider} />
+        <ol className="audit-findings">
+          {findings.map((f) => (
+            <li key={f.rank}>
+              <details>
+                <summary>
+                  <b>{f.problem}</b>{" "}
+                  <span className="chip">{f.owner === "operator" ? "You" : "FLIGHT"}</span>
+                </summary>
+                <p>
+                  <b>Evidence</b> {f.evidence}
+                </p>
+                <p>
+                  <b>Likely cause</b> {f.cause}
+                </p>
+                {f.links.map((l) => (
+                  <a key={l.href} href={l.href}>
+                    {l.label}
+                  </a>
+                ))}
+              </details>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </Panel>
   );
 }
 

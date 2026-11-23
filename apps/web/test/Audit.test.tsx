@@ -426,3 +426,61 @@ it("sizes a one-line PR as 1 line", async () => {
   render(<Audit />);
   expect(await screen.findByText(/^1 line$/)).toBeTruthy();
 });
+
+const REPORT = {
+  report: {
+    id: 1,
+    repoId: "mission-control",
+    runId: "r1",
+    at: NOW - HOUR,
+    verdict: "One dev of four is running while 12 tickets wait.",
+    findings: [1, 2, 3, 4, 5, 6].map((rank) => ({
+      rank,
+      area: "flow" as const,
+      problem: `Problem ${rank}`,
+      evidence: `Evidence ${rank}`,
+      cause: `Cause ${rank}`,
+      links: [{ label: `Link ${rank}`, href: "/board" }],
+      owner: rank % 2 === 0 ? ("operator" as const) : ("flight" as const),
+    })),
+  },
+  nextDueAt: NOW + 3 * HOUR,
+};
+
+it("opens on the AUDIT report's verdict with findings ranked, and You filters", async () => {
+  stubFetch({
+    "/api/audit?range=30d": AUDIT,
+    "/api/config": CONFIG,
+    "/api/audit/report": {
+      ...REPORT,
+      report: { ...REPORT.report, findings: [...REPORT.report.findings].reverse() },
+    },
+  });
+  render(<Audit />);
+  expect(await screen.findByText(REPORT.report.verdict)).toBeTruthy();
+  const items = () => screen.getAllByRole("listitem").filter((li) => li.querySelector("summary"));
+  expect(items().map((li) => li.querySelector("b")?.textContent)).toEqual(
+    [1, 2, 3, 4, 5, 6].map((n) => `Problem ${n}`),
+  );
+  expect(screen.getByText(/^AUDIT's report, written .*\. Next by .*\.$/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "You" }));
+  expect(items().map((li) => li.querySelector("b")?.textContent)).toEqual([
+    "Problem 2",
+    "Problem 4",
+    "Problem 6",
+  ]);
+});
+
+it("says so when there is no AUDIT report yet", async () => {
+  stubFetch({
+    "/api/audit?range=30d": AUDIT,
+    "/api/config": CONFIG,
+    "/api/audit/report": { report: null, nextDueAt: null },
+  });
+  render(<Audit />);
+  expect(
+    await screen.findByText(
+      "No AUDIT report yet. Until the first one, these are the hub's own checks.",
+    ),
+  ).toBeTruthy();
+});
