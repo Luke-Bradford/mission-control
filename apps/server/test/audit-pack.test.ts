@@ -216,8 +216,8 @@ describe("the AUDIT pack", () => {
         decision: "d",
         basis: "b",
       });
-    for (const n of [1, 2]) decide("flight-1", "mc#1");
-    for (const n of [1, 2, 3]) decide("flight-2", "other#9");
+    for (let i = 0; i < 2; i++) decide("flight-1", "mc#1");
+    for (let i = 0; i < 3; i++) decide("flight-2", "other#9");
     const packOf = (seatId: string) =>
       JSON.parse(buildAuditPack({ config, store, busy: [], now: NOW, seatId }));
     const one = packOf("audit-1");
