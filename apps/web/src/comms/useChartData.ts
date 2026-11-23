@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
-import type { RailEdgeView, RailSeatView } from "./CommsRails.tsx";
 import {
   type FeedMessage,
   type Flow,
@@ -13,7 +12,16 @@ import {
   presenceOf,
   type Waiting,
 } from "./chartTypes.ts";
-import type { RailGroup } from "./rails.ts";
+
+type RailSeatView = {
+  id: string; name: string; role: string | null; color: string; presence: Presence; state: string | null;
+  since: number | null; alert: boolean; hub: boolean; sent: number; received: number;
+};
+type RailEdgeView = {
+  key: string; a: string; b: string; aToB: number; bToA: number; weight: number;
+  last: LastMessage | null; waiting: Waiting | null;
+};
+type RailGroup = { key: string; ids: string[]; header: boolean };
 
 /** One direction of a link over the window, with its newest message (absent on older hubs). */
 type Link = {

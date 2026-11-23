@@ -336,7 +336,6 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/comms/Conversation.tsx":
     "page: Comms views, the ticket, the operator's own thread with an agent",
   "src/comms/TicketsList.tsx": "page: Comms ticket thread, ticket",
-  "src/comms/chartPaths.ts": "page: chart filter",
   "src/comms/messages.tsx": "page: links inside message text",
   "src/components/ExternalLink.tsx": "external",
   "src/components/NeedButton.tsx": "pane: a need named in text",
