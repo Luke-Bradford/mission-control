@@ -1,6 +1,10 @@
+import { act, render } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
 import { ACTIONS, hub, parseTopic, RESOURCES, startStream } from "../src/data.ts";
+import { Overview } from "../src/pages/Overview.tsx";
+import { CONFIG, METRICS_VIEW, OVERVIEW, seatRow } from "./fixtures.ts";
 import { flightLedger, ledgerEntry } from "./flightSummaryFixture.ts";
 
 afterEach(() => {
@@ -323,6 +327,101 @@ describe("startStream", () => {
     es?.emit("changed", { data: "not json" });
     await settle();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("paces metrics and FLIGHT's live seat state after an agents event", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    const metrics = RESOURCES.metrics();
+    sub(metrics.path, metrics.topic, () => {});
+    sub(RESOURCES.flight.path, RESOURCES.flight.topic, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    start();
+    FakeEventSource.instances[0]?.emit("changed", { data: '{"topic":"agents"}' });
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(fetched(fetchMock).sort()).toEqual(
+      [metrics.path, RESOURCES.flight.path, metrics.path, RESOURCES.flight.path].sort(),
+    );
+  });
+
+  it("keeps a five-seat Overview within its agents-event request budget", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const rows = Array.from({ length: 5 }, (_, index) =>
+      seatRow({ id: `seat-${index}`, index, hudState: "running" }),
+    );
+    const api: Record<string, unknown> = {
+      "/api/overview": OVERVIEW,
+      "/api/metrics": METRICS_VIEW,
+      "/api/overview/timeline": { from: 0, to: 1, lanes: [] },
+      "/api/crew?shape=summary": { rows, firstRunToday: null },
+      "/api/attention": [],
+      "/api/machine": { latest: null, warning: null },
+      "/api/limits": [],
+      "/api/limits/github": { queries: {}, pollCost: null },
+      "/api/health": [],
+      "/api/activity": [],
+      "/api/settings/away": { on: false, until: "", may: {} },
+      "/api/settings/crew-pause": null,
+      "/api/config": CONFIG,
+      "/api/test-lock": { holder: null, waiting: [] },
+      "/api/crew/status": { enabled: true, note: null },
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/flight/brief": { items: [] },
+    };
+    const fetchMock = vi.fn(async (path: string) => Response.json(api[path] ?? []));
+    vi.stubGlobal("fetch", fetchMock);
+    render(createElement(Overview));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    start();
+    const [es] = FakeEventSource.instances;
+    for (let second = 0; second < 10; second++) {
+      es?.emit("changed", { data: '{"topic":"agents"}' });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+    }
+    const counts = new Map<string, number>();
+    for (const url of fetched(fetchMock))
+      counts.set(String(url), (counts.get(String(url)) ?? 0) + 1);
+    for (const [path, count] of counts) expect(count, path).toBeLessThanOrEqual(2);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(20);
+    // the change is not lost: the last event's refetch lands once the pace allows it
+    const beforeTrailing = fetchMock.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    const trailing = fetched(fetchMock).slice(beforeTrailing).sort();
+    expect(trailing).toEqual(
+      [
+        "/api/activity?since=0",
+        "/api/crew?shape=summary",
+        "/api/flight",
+        "/api/metrics",
+        "/api/overview",
+      ].sort(),
+    );
+    const beforeBackground = fetchMock.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14_000);
+    });
+    expect(fetched(fetchMock).slice(beforeBackground).sort()).toEqual(
+      ["/api/overview/timeline", "/api/settings/crew-pause"].sort(),
+    );
+  });
+
+  it("a local refetch of agents (after a send) is not paced", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    sub("/api/comms/flight?x=2", "agents", () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    fetchMock.mockClear();
+    hub.refetchTopic("agents");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("a resource whose last listener left is not refetched by its topic", async () => {

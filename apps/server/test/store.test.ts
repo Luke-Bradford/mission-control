@@ -1995,9 +1995,171 @@ describe("Store", () => {
         changedFiles: 2,
       });
       expect(prSizes.outliers.map((p) => p.number)).toEqual([2]);
+      // Every merge in range is counted per day, sized or not, and the count is not cut.
+      const { mergedPerDay } = store.audit(100, 200) as unknown as AuditView;
+      expect(mergedPerDay?.reduce((n, d) => n + d.merged, 0)).toBe(3);
+      expect(mergedPerDay).toEqual([
+        { day: 0, merged: 3, noReview: 3, round1: 0, round2: 0, round3: 0 },
+      ]);
       expect((store.audit(300, 400) as unknown as AuditView).prSizes).toEqual({
         prs: [],
         outliers: [],
+      });
+    });
+
+    it("splits each day's merges by highest review round and ranks files by findings per touch", () => {
+      const files = (...paths: string[]) => paths.map((path) => ({ path, changeType: "modified" }));
+      store.upsertPullRequests(
+        "repo",
+        [
+          mergedPr(1, 150, { files: files("src/a.ts", "pnpm-lock.yaml") }),
+          mergedPr(2, 160, { files: files("src/a.ts") }),
+          mergedPr(3, 170, { files: files("src/b.ts") }),
+          mergedPr(4, 180),
+        ],
+        200,
+      );
+      const review = (pr: number, round: number, seq: number, settle = true) => {
+        store.upsertRun(run({ id: `r${seq}`, startedAt: 110 }));
+        const id = store.requestReview({
+          authorRunId: `r${seq}`,
+          repoId: "repo",
+          seatId: "retro",
+          prNumber: pr,
+          sha: `s${seq}`,
+          epoch: 0,
+          attempt: 1,
+          round,
+          at: 160,
+        }) as number;
+        if (settle) store.setReviewState(id, ["queued"], "reported", { at: 170 });
+        else store.setReviewState(id, ["queued"], "running", { at: 165, runId: `r${seq}` });
+        return { id, runId: `r${seq}` };
+      };
+      const first = review(1, 3, 1, false);
+      review(2, 1, 2);
+      review(3, 2, 3);
+      const finding = (file: string, severity: "Important" | "Minor") => ({
+        severity,
+        file,
+        line: 1,
+        summary: "s",
+        scenario: "s",
+        fix: "f",
+      });
+      store.recordFindings(first.id, first.runId, {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        at: 171,
+        findings: [
+          finding("src/a.ts", "Important"),
+          finding("src/a.ts", "Important"),
+          finding("src/b.ts", "Important"),
+          finding("src/a.ts", "Minor"),
+          finding("pnpm-lock.yaml", "Important"),
+        ],
+      });
+      const audit = store.audit(100, 200) as unknown as AuditView;
+      expect(audit.mergedPerDay).toEqual([
+        { day: 0, merged: 4, noReview: 1, round1: 1, round2: 1, round3: 1 },
+      ]);
+      expect(audit.findingFiles).toEqual([
+        { file: "src/a.ts", findings: 2, touches: 2 },
+        { file: "src/b.ts", findings: 1, touches: 1 },
+      ]);
+    });
+
+    describe("findings by file", () => {
+      const finding = (file: string) => ({
+        severity: "Important" as const,
+        file,
+        line: 1,
+        summary: "s",
+        scenario: "s",
+        fix: "f",
+      });
+      const round = (
+        authorRun: string,
+        n: number,
+        findings: ReturnType<typeof finding>[],
+        resolutions: {
+          findingRef: { reviewId: number; pos: number };
+          outcome: "fixed" | "reply-accepted" | "held" | "waived";
+        }[] = [],
+      ) => {
+        const id = store.requestReview({
+          authorRunId: authorRun,
+          repoId: "repo",
+          seatId: "retro",
+          prNumber: 1,
+          sha: `s${n}`,
+          epoch: 0,
+          attempt: 1,
+          round: n,
+          at: 100 + n,
+        }) as number;
+        store.setReviewState(id, ["queued"], "running", { at: 110 + n, runId: `rv${n}` });
+        store.recordFindings(id, `rv${n}`, {
+          verdict: { spec: "fail", quality: "fail" },
+          summary: "s",
+          at: 120 + n,
+          findings,
+          resolutions,
+        });
+        return id;
+      };
+
+      it("counts a held finding once across rounds, and fixed, accepted and new ones as they are", () => {
+        store.upsertRun(run({ id: "author", startedAt: 100 }));
+        const r1 = round("author", 1, [
+          finding("src/a.ts"),
+          finding("src/a.ts"),
+          finding("src/b.ts"),
+          finding("src/c.ts"),
+          finding("src/d.ts"),
+        ]);
+        round(
+          "author",
+          2,
+          [finding("src/a.ts"), finding("src/a.ts")],
+          [
+            { findingRef: { reviewId: r1, pos: 0 }, outcome: "held" },
+            { findingRef: { reviewId: r1, pos: 1 }, outcome: "fixed" },
+            { findingRef: { reviewId: r1, pos: 2 }, outcome: "reply-accepted" },
+            { findingRef: { reviewId: r1, pos: 3 }, outcome: "waived" },
+          ],
+        );
+        const files = (store.audit(100, 200) as unknown as AuditView).findingFiles ?? [];
+        // a.ts: two raised in round 1, round 2 lists the held one again plus one new = 3 findings
+        expect(Object.fromEntries(files.map((f) => [f.file, f.findings]))).toEqual({
+          "src/a.ts": 3,
+          "src/b.ts": 1,
+          "src/c.ts": 1,
+          "src/d.ts": 1,
+        });
+      });
+
+      it("ranks by findings per touch before cutting to the limit", () => {
+        store.upsertRun(run({ id: "author", startedAt: 100 }));
+        const many = Array.from({ length: 55 }, (_, i) => `src/busy${i}.ts`);
+        // busy files: 2 findings in 10 touches (0.2); the rare file: 1 finding in 1 touch (1.0)
+        const prs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) =>
+          mergedPr(n, 150, {
+            files: (n === 1 ? [...many, "src/rare.ts"] : many).map((path) => ({
+              path,
+              changeType: "modified",
+            })),
+          }),
+        );
+        store.upsertPullRequests("repo", prs, 200);
+        round("author", 1, [
+          ...many.flatMap((f) => [finding(f), finding(f)]),
+          finding("src/rare.ts"),
+        ]);
+        const files = (store.audit(100, 200) as unknown as AuditView).findingFiles ?? [];
+        expect(files).toHaveLength(50);
+        // 1 finding in 1 touch (1.0) beats 2 in 10 (0.2), though it has fewer findings
+        expect(files[0]).toEqual({ file: "src/rare.ts", findings: 1, touches: 1 });
       });
     });
 

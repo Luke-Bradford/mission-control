@@ -1,7 +1,13 @@
 /** Puts a web PR's screenshot pairs where its reviewer can read them. */
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { EVIDENCE_KINDS, type EvidencePair, evidenceImageName, evidenceWidthOf } from "@mc/core";
+import {
+  EVIDENCE_KINDS,
+  EVIDENCE_PAGES,
+  type EvidencePair,
+  evidenceImageName,
+  evidenceWidthOf,
+} from "@mc/core";
 import type { PrEvidenceStore } from "./store.ts";
 
 /** Where in a review's scratch copy the images go. */
@@ -23,16 +29,14 @@ export async function stageReviewEvidence(
   scratchPath: string,
 ): Promise<StagedEvidence | undefined> {
   const manifest = store?.manifest(repoId, pr, sha) ?? null;
-  if (
-    store === undefined ||
-    manifest === null ||
-    (manifest.pairs.length === 0 && (manifest.submitted?.length ?? 0) === 0)
-  )
-    return undefined;
+  if (store === undefined || manifest === null) return undefined;
+  // A stored manifest may name a page that is no longer captured; its images are not staged.
+  const pairs = manifest.pairs.filter((p) => EVIDENCE_PAGES.includes(p.page));
+  if (pairs.length === 0 && (manifest.submitted?.length ?? 0) === 0) return undefined;
   await mkdir(join(scratchPath, ".mc-review"), { recursive: true });
   const stage = await mkdtemp(join(scratchPath, ".mc-review", ".evidence-"));
   try {
-    for (const p of manifest.pairs) {
+    for (const p of pairs) {
       for (const kind of EVIDENCE_KINDS) {
         const name = evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p));
         const png = store.image(repoId, pr, sha, name);
@@ -52,7 +56,7 @@ export async function stageReviewEvidence(
   return {
     dir: REVIEW_EVIDENCE_DIR,
     mainSha: manifest.mainSha,
-    pairs: manifest.pairs,
+    pairs,
     submitted: manifest.submitted ?? [],
   };
 }
