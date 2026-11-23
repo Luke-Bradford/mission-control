@@ -81,7 +81,7 @@ import { recordingShotSaves, runSilenceCheck } from "./engine/silence.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { flightConflicts } from "./flight/conflicts.ts";
-import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
+import { renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { MergeConflicts } from "./flight/merge-conflicts.ts";
 import { operatorCall } from "./flight/operator-call.ts";
