@@ -99,6 +99,31 @@ const api = {
 
 const { renderAt } = browserSession();
 
+const LONG = (word: string, n: number) => Array.from({ length: n }, () => word).join(" ");
+/** Six findings, the first with the longest allowed problem, evidence and cause. */
+const report = {
+  report: {
+    id: 1,
+    repoId: "mission-control",
+    runId: "audit-1:r",
+    at: now - HOUR,
+    verdict: "One of four build seats is running while 12 tickets wait.",
+    findings: [1, 2, 3, 4, 5, 6].map((rank) => ({
+      rank,
+      area: "flow",
+      problem: rank === 1 ? `${LONG("stalled", 40)}`.slice(0, 300) : `Problem ${rank}`,
+      evidence: rank === 1 ? LONG("evidence", 150).slice(0, 1000) : `Evidence ${rank}`,
+      cause: rank === 1 ? LONG("cause", 100).slice(0, 600) : `Cause ${rank}`,
+      links: [
+        { label: `PR ${rank}`, href: "https://github.com/Luke-Bradford/mission-control/pull/1" },
+      ],
+      owner: rank % 2 === 0 ? "operator" : "flight",
+    })),
+  },
+  nextDueAt: null,
+};
+const withReport = { ...api, "/api/audit/report": report };
+
 /** The audit with only the rows `n` asks for: none, one (a death loop), or all the sources at once. */
 const withRows = (n: 0 | 1 | "all") => {
   if (n === "all") return api;
@@ -341,4 +366,130 @@ describeRendered("Audit first screen in a browser", () => {
       BROWSER_TEST_TIMEOUT_MS,
     );
   }
+
+  for (const [width, height, colorScheme] of [
+    [1920, 940, "light"],
+    [1920, 940, "dark"],
+    [2560, 1145, "light"],
+    [2560, 1145, "dark"],
+  ] as const) {
+    it(
+      `opens on the AUDIT report: verdict, five ranked rows, no page scroll, long text reachable at ${width}×${height} in ${colorScheme}`,
+      async () => {
+        const page = await renderAt({
+          page: "test/auditBarBrowser.html",
+          width,
+          height,
+          colorScheme,
+          api: withReport,
+        });
+        const text = (q: string) =>
+          page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", q);
+        // The page fetches its reads one after another: wait for the report's verdict to land.
+        for (let i = 0; i < 100; i++) {
+          if ((await text(".audit-verdict-text")).includes(report.report.verdict)) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(await text(".audit-verdict-text")).toContain(report.report.verdict);
+        // No report-less fallback note, and the written note names a next time, not 1970.
+        expect(await text(".audit-verdict-text")).toContain("the next timer tick");
+        const rows = await page.boxes("tr.rec");
+        expect(rows.length).toBe(6);
+        // Each of the first five rows is painted inside the visible list box, not clipped by it.
+        const list = await page.box(".audit-next .audit-scroll");
+        for (const row of rows.slice(0, 5)) {
+          expect(row.y).toBeGreaterThanOrEqual(list.y);
+          expect(row.y + row.height).toBeLessThanOrEqual(list.y + list.height);
+          expect(row.y + row.height).toBeLessThanOrEqual(height);
+        }
+        const ranks = await page.evaluate(
+          () => [...document.querySelectorAll("tr.rec .n")].map((n) => n.textContent),
+          null,
+        );
+        expect(ranks).toEqual(["1", "2", "3", "4", "5", "6"]);
+        const scrolls = () =>
+          page.evaluate(() => document.documentElement.scrollHeight > window.innerHeight, null);
+        expect(await scrolls()).toBe(false);
+        // Keyboard: focus the first finding's trigger and expand it; its full problem is visible.
+        await page.evaluate(() => {
+          document.querySelector<HTMLElement>("tr.rec .audit-rt")?.focus();
+        }, null);
+        await page.press("Enter");
+        const detail = await page.evaluate((full) => {
+          const mg = document.querySelector(".audit-mg");
+          const ps = [...(mg?.querySelectorAll("p") ?? [])].map((p) => p.textContent ?? "");
+          const links = [...(mg?.querySelectorAll("a") ?? [])].map((a) => a.textContent);
+          return { full: ps.includes(full), n: ps.length, links };
+        }, report.report.findings[0].problem);
+        expect(detail.full).toBe(true);
+        expect(detail.links).toContain("PR 1");
+        const panel = await page.box(".audit-next");
+        for (const h of await page.boxes(".audit-mg h3")) {
+          expect(h.x).toBeGreaterThanOrEqual(panel.x);
+          expect(h.x + h.width).toBeLessThanOrEqual(panel.x + panel.width);
+        }
+        expect(await scrolls()).toBe(false);
+        // Decider filter: You keeps the three operator findings.
+        await page.evaluate(() => {
+          [...document.querySelectorAll<HTMLElement>(".audit-next button")]
+            .find((b) => b.textContent === "You")
+            ?.click();
+        }, null);
+        expect(await page.boxes("tr.rec")).toHaveLength(3);
+        await page.close();
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+  }
+
+  it(
+    "shows the no-report note and keeps the hub rows when there is no report or the read fails",
+    async () => {
+      for (const extra of [
+        { "/api/audit/report": { report: null, nextDueAt: null } },
+        {}, // no route: the read fails
+      ]) {
+        const page = await renderAt({
+          page: "test/auditBarBrowser.html",
+          width: 1920,
+          height: 940,
+          api: { ...api, ...extra },
+        });
+        expect((await page.boxes("tr.rec")).length).toBeGreaterThanOrEqual(5);
+        let note = "";
+        for (let i = 0; i < 100 && !note.includes("No AUDIT report yet"); i++) {
+          note = await page.evaluate(() => document.body.textContent ?? "", null);
+          if (!note.includes("No AUDIT report yet")) await new Promise((r) => setTimeout(r, 100));
+        }
+        expect(note).toContain("No AUDIT report yet");
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps the saved report findings usable when the legacy audit request fails",
+    async () => {
+      const page = await renderAt({
+        page: "test/auditBarBrowser.html",
+        width: 1920,
+        height: 940,
+        api: {
+          "/api/config": api["/api/config"],
+          "/api/waste": api["/api/waste"],
+          "/api/audit/report": report,
+        },
+      });
+      let text = "";
+      for (let i = 0; i < 100 && !text.includes(report.report.verdict); i++) {
+        text = await page.evaluate(() => document.body.textContent ?? "", null);
+        if (!text.includes(report.report.verdict)) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(text).toContain(report.report.verdict);
+      expect((await page.boxes("tr.rec")).length).toBeGreaterThanOrEqual(5);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

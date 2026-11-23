@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   AWAY_QUOTA_REFUSED,
   AWAY_SETTING,
+  auditStartRefusedText,
   type BoardItem,
   CANNOT_START,
   CHECK_BASH_TIMEOUT_MS,
@@ -3241,6 +3242,22 @@ describe("repo guidance at launch", () => {
       "tool_results",
     );
     await sup.message("flight-1", "cue: the turn ends", { interrupt: false });
+  });
+
+  it("starts the AUDIT seat with its brief and pack, and refuses a ticket start on it", async () => {
+    const AUDIT: CrewSeatConfig = { ...FLIGHT, id: "audit-1", role: "AUDIT" };
+    const { sup } = make({ extraSeat: AUDIT, auditPack: () => '{"buildSeats":{"configured":4}}' });
+    sup.start();
+    await expect(sup.startRun("audit-1", 5)).rejects.toMatchObject({
+      status: 409,
+      message: auditStartRefusedText("AUDIT-1"),
+    });
+    await sup.startAudit("audit-1");
+    await until(() => expect(userLines()).toHaveLength(1));
+    const first = userLines()[0] as string;
+    expect(first).toContain("you keep the crew honest");
+    expect(first).toContain('"buildSeats"');
+    await sup.endRun("audit-1");
   });
 
   it("gives Claude FLIGHT guidance only, without changing its prompt or tool grants", async () => {

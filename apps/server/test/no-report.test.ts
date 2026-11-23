@@ -305,4 +305,12 @@ describe("missing reports", () => {
     expect(store.notes()[0]?.text).toContain("signal SIGKILL");
     expect(store.notes()[0]?.text).toContain("out of memory");
   });
+
+  it("flags an audit run that ended without report_audit, and not one that saved a report", () => {
+    expect(recordNoReport(store, run, "audit", exit, facts, 2)).toBe(true);
+    expect(store.run(run.id)?.noReport).toBeTruthy();
+    store.upsertRun({ ...run, id: "r2", noReport: undefined });
+    store.recordAuditReport({ repoId: "mc", runId: "r2", at: 1, verdict: "v", findings: [] });
+    expect(recordNoReport(store, { ...run, id: "r2" }, "audit", exit, facts, 2)).toBe(false);
+  });
 });

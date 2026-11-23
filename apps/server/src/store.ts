@@ -30,6 +30,7 @@ import {
   type AuditMetrics,
   type AuditOveruseFacts,
   type AuditPrSize,
+  type AuditReport,
   type AuditRunKind,
   type AuditThresholds,
   type AuditTokenOveruse,
@@ -2011,6 +2012,113 @@ export class Store {
     });
   }
 
+  /** Saves the AUDIT seat's report for a run; false when the run already saved one. */
+  recordAuditReport(r: Omit<AuditReport, "id">): boolean {
+    const done = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO audit_reports (repo_id, run_id, at, verdict, findings) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(r.repoId, r.runId, r.at, r.verdict, JSON.stringify(r.findings));
+    return Number(done.changes) > 0;
+  }
+
+  /** The newest AUDIT report of a repo, or null before the first. */
+  latestAuditReport(repoId: RepoId): AuditReport | null {
+    return this.auditReportRow(
+      "SELECT * FROM audit_reports WHERE repo_id = ? ORDER BY at DESC, id DESC LIMIT 1",
+      repoId,
+    );
+  }
+
+  /**
+   * What the AUDIT pack reads of QA for one repo over a window: PRs by their highest review round,
+   * blocking findings per reviewer and model (and how many were late), review findings filed under
+   * the `scope` category (outside the ask), spec-failed verdicts, and reviews thrown away
+   * (superseded or failed before a verdict).
+   */
+  reviewPackFor(
+    repoId: RepoId,
+    since: number,
+    until: number,
+  ): {
+    rounds: { rounds: number; count: number }[];
+    late: { seatId: string; model: string | null; findings: number; late: number }[];
+    scopeFindings: number;
+    specFailed: number;
+    superseded: number;
+    failed: number;
+  } {
+    const n = (sql: string): number => (this.db.prepare(sql).get(repoId, since) as { n: number }).n;
+    return {
+      rounds: this.db
+        .prepare(
+          `SELECT rounds, COUNT(*) AS count FROM (
+             SELECT MAX(round) AS rounds FROM reviews
+             WHERE repo_id = ? AND state = 'reported' AND ended_at >= ? AND ended_at <= ?
+             GROUP BY author_run_id, pr_number
+           ) GROUP BY rounds ORDER BY rounds`,
+        )
+        .all(repoId, since, until) as unknown as { rounds: number; count: number }[],
+      late: this.db
+        .prepare(
+          `SELECT v.seat_id AS seatId, r.model AS model, COUNT(*) AS findings, SUM(f.late) AS late
+           FROM review_findings f JOIN reviews v ON v.id = f.review_id
+           LEFT JOIN runs r ON r.id = v.run_id
+           WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at <= ?
+             AND f.severity IN (${BLOCKING_SEVERITIES.map(() => "?").join(", ")})
+           GROUP BY v.seat_id, r.model ORDER BY late DESC, v.seat_id, r.model`,
+        )
+        .all(repoId, since, until, ...BLOCKING_SEVERITIES) as unknown as {
+        seatId: string;
+        model: string | null;
+        findings: number;
+        late: number;
+      }[],
+      scopeFindings: n(
+        `SELECT COUNT(*) AS n FROM review_findings f JOIN reviews r ON r.id = f.review_id
+         WHERE f.category = 'scope' AND r.repo_id = ? AND r.created_at >= ?`,
+      ),
+      specFailed: n(
+        `SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'reported'
+           AND json_extract(verdict, '$.spec') = 'fail' AND created_at >= ?`,
+      ),
+      superseded: n(
+        "SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'superseded' AND created_at >= ?",
+      ),
+      failed: n(
+        "SELECT COUNT(*) AS n FROM reviews WHERE repo_id = ? AND state = 'failed' AND created_at >= ?",
+      ),
+    };
+  }
+
+  /** The report a run saved, or null. */
+  auditReportOfRun(runId: string): AuditReport | null {
+    return this.auditReportRow("SELECT * FROM audit_reports WHERE run_id = ?", runId);
+  }
+
+  private auditReportRow(sql: string, arg: string): AuditReport | null {
+    const row = this.db.prepare(sql).get(arg) as
+      | {
+          id: number;
+          repo_id: string;
+          run_id: string;
+          at: number;
+          verdict: string;
+          findings: string;
+        }
+      | undefined;
+    return row === undefined
+      ? null
+      : {
+          id: row.id,
+          repoId: row.repo_id,
+          runId: row.run_id,
+          at: row.at,
+          verdict: row.verdict,
+          findings: JSON.parse(row.findings) as AuditReport["findings"],
+        };
+  }
+
   /**
    * Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP.
    * One section is built per step, and a step is a pause point, so a caller can let the event loop
@@ -3888,18 +3996,39 @@ export class Store {
     );
   }
 
-  /** The QA image ids (sha256) that a report of an open PR cites. */
-  qaAssetIdsOfOpenPrs(): Set<string> {
+  /** Merged PRs (`repoId#number`) with their merge commit: the ones whose change may not be live yet. */
+  mergedPrs(): { key: string; mergeSha: string | null }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT repo_id, number, merge_commit_sha FROM pull_requests WHERE state = 'merged'",
+        )
+        .all() as Row[]
+    ).map((r) => ({
+      key: `${r.repo_id as string}#${r.number as number}`,
+      mergeSha: (r.merge_commit_sha as string | null) ?? null,
+    }));
+  }
+
+  /**
+   * The QA image ids (sha256) that a report of an open PR cites, or of a PR in `alsoHeld` (merged,
+   * not live yet). Only the PR's current head counts: an older head's pictures are not kept.
+   */
+  qaAssetIdsOfOpenPrs(alsoHeld: ReadonlySet<string> = new Set()): Set<string> {
     const ids = new Set<string>();
     const rows = this.db
       .prepare(
-        `SELECT q.report FROM qa_reports q JOIN pull_requests p
-           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state = 'open'`,
+        `SELECT q.report, p.state, p.repo_id, p.number FROM qa_reports q JOIN pull_requests p
+           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state IN ('open', 'merged')
+          AND (p.head_sha IS NULL OR p.head_sha = q.head_sha)`,
       )
       .all() as Row[];
-    for (const r of rows)
+    for (const r of rows) {
+      if (r.state !== "open" && !alsoHeld.has(`${r.repo_id as string}#${r.number as number}`))
+        continue;
       for (const m of (r.report as string).matchAll(/\/api\/qa-report-assets\/([0-9a-f]{64})/g))
         ids.add(m[1]);
+    }
     return ids;
   }
 
@@ -3918,16 +4047,21 @@ export class Store {
   }
 
   /** The review screenshot ids of reviews of open PRs. */
-  reviewShotIdsOfOpenPrs(): Set<string> {
+  reviewShotIdsOfOpenPrs(alsoHeld: ReadonlySet<string> = new Set()): Set<string> {
+    const rows = this.db
+      .prepare(
+        `SELECT s.shot_id, p.state, p.repo_id, p.number FROM review_shots s
+           JOIN reviews v ON v.id = s.review_id
+           JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
+            AND p.state IN ('open', 'merged')`,
+      )
+      .all() as Row[];
     return new Set(
-      (
-        this.db
-          .prepare(
-            `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
-               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
-          )
-          .all() as Row[]
-      ).map((r) => r.shot_id as string),
+      rows
+        .filter(
+          (r) => r.state === "open" || alsoHeld.has(`${r.repo_id as string}#${r.number as number}`),
+        )
+        .map((r) => r.shot_id as string),
     );
   }
 

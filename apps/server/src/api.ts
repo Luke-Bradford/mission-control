@@ -11,10 +11,13 @@ import {
   type AttentionCompactItem,
   type AttentionItem,
   type AttentionMaterialsResponse,
+  type AuditReportView,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
+  auditStartedKey,
+  auditStartRefusedText,
   type ChangedFiles,
   CI_TRIES,
   type CiRunsView,
@@ -197,6 +200,7 @@ import {
   setAsideQuestions,
 } from "./attention/needs-you-actions.ts";
 import { withRepoWatch } from "./attention/unwatched-repos.ts";
+import { nextAuditDueAt } from "./audit/timer.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -4043,6 +4047,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         await refreshAudit(range, days);
         return auditCache.get(range)?.value;
       });
+      // Reader: apps/web/src/pages/Audit.tsx#Audit (the AUDIT seat's latest report and when the next is due)
+      api.get("/audit/report", async (): Promise<AuditReportView> => {
+        const repoId = flightSeat(config)?.session.repoId ?? config.crew?.sessions[0]?.repoId;
+        return {
+          report: repoId === undefined ? null : store.latestAuditReport(repoId),
+          nextDueAt: repoId === undefined ? null : nextAuditDueAt(config, store, repoId),
+        };
+      });
       // Reader: docs/runbook.md#audit-api (rework and cost by model, and before and after each change)
       api.get<{ Querystring: { range?: string } }>("/audit/models", async (req, reply) => {
         const match = /^(7|30|90|365)d$/.exec(req.query.range ?? "30d");
@@ -4541,6 +4553,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
           started = await sup.startWatch(id, { operator: true });
+        } else if (loop === "audit") {
+          if (b.issue !== undefined) {
+            throw new SupervisorError(400, auditStartRefusedText(seatCallSign(id)));
+          }
+          started = await sup.startAudit(id);
+          store.setSetting(auditStartedKey(id), String(at));
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts

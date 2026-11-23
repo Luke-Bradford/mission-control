@@ -5,6 +5,7 @@ import {
   carriedFrom,
   type EvidenceManifest,
   evidenceImageName,
+  evidenceWidthOf,
   HUD_STATE_LABEL,
   type PullRequestView,
   type RunLoopView,
@@ -170,7 +171,7 @@ export function agentDetail({
     if (shots)
       for (const pair of shots.pairs)
         for (const kind of ["before", "after"] as const) {
-          const name = evidenceImageName(pair.page, pair.scheme, kind);
+          const name = evidenceImageName(pair.page, pair.scheme, kind, evidenceWidthOf(pair));
           deliverables.push({
             id: `shot:${pr.number}:${shots.sha}:${name}`,
             kind: "screenshot",

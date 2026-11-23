@@ -1,9 +1,8 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { OPERATOR_TOKEN_FILE } from "../src/operator.ts";
 import {
   createPrEvidence,
   type EvidenceTarget,
@@ -87,7 +86,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
   return {
     workDir: deps.workDir,
     evidence: { ...evidence, ensure },
-    store,
+    store: deps.store,
     started,
     stopped,
     rendered,
@@ -97,102 +96,273 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
 }
 
 const WEB = ["apps/web/src/board/Card.tsx"];
+/** A change about colour: photographed in light and dark. */
+const BOTH = ["apps/web/src/board/theme.ts"];
 
-describe("token-guarded pages", () => {
-  it("renders each side with the token its own hub wrote, and never stores or logs it", async () => {
-    const logs: string[] = [];
-    const seen: { sha: string; token: string | undefined }[] = [];
+describe("Demo renders on both sides", () => {
+  it("renders main and the head in light at 1600 wide, and keeps the pair of a changed page", async () => {
+    const seen: { sha: string; scheme: string; width: number; height: number }[] = [];
     const t = setup({
-      log: (line) => logs.push(line),
-      startSide: async ({ sha, db }) => {
-        // each hub writes its own token beside its database copy, as the real hub does
-        mkdirSync(dirname(db), { recursive: true });
-        writeFileSync(join(dirname(db), OPERATOR_TOKEN_FILE), `token-of-${sha.slice(0, 4)}\n`);
-        return { origin: `http://side/${sha}`, stop: async () => {} };
-      },
-      render: async (origin, _path, scheme, _signal, token) => {
+      render: async (origin, _path, scheme, viewport) => {
         const sha = origin.split("/").pop() ?? "";
-        seen.push({ sha, token });
-        // a guarded page shows its data only with the side's own token, else the 401 state
-        return encodePng(
-          token === `token-of-${sha.slice(0, 4)}`
-            ? pageBox(sha, scheme)
-            : fixtureRaster(320, 200, [], [200, 0, 0]),
-        );
+        seen.push({ sha, scheme, ...viewport });
+        return encodePng(pageBox(sha, scheme));
       },
     });
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
-    expect(seen.length).toBeGreaterThan(0);
-    for (const s of seen) expect(s.token).toBe(`token-of-${s.sha.slice(0, 4)}`);
-    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
-    // the 401 state is identical on both sides: any difference is the populated page
-    expect(m.pairs.find((p) => p.scheme === "light")?.changedPixels).toBeGreaterThan(0);
-    const stored = JSON.stringify(m) + logs.join("\n");
-    expect(stored).not.toContain("token-of-");
-    expect(t.posted.length).toBe(1);
-    expect(JSON.stringify(t.posted)).not.toContain("token-of-");
-  });
-});
-
-describe("Demo renders of the head", () => {
-  const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
-  const asked: { sha: string; path: string; width: number; height: number }[] = [];
-  const withDemo = (over: Partial<PrEvidenceDeps> = {}) => {
-    asked.length = 0;
-    return setup({
-      renderDemo: async (origin, path, viewport) => {
-        asked.push({ sha: origin.split("/").pop() ?? "", path, ...viewport });
-        return demoShot;
-      },
-      ...over,
-    });
-  };
-
-  it("asks for each page in Demo at both sizes on the head, and stores them", async () => {
-    const t = withDemo();
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
-    expect(asked).toEqual([
-      { sha: HEAD, path: "/board", width: 1920, height: 940 },
-      { sha: HEAD, path: "/board", width: 2560, height: 1145 },
+    expect(seen).toEqual([
+      { sha: MAIN, scheme: "light", width: 1600, height: 1000 },
+      { sha: HEAD, scheme: "light", width: 1600, height: 1000 },
     ]);
     const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
-    expect(m.demos).toEqual([
-      { page: "board", width: 1920, height: 940 },
-      { page: "board", width: 2560, height: 1145 },
-    ]);
-    expect(t.store.image("mc", 7, HEAD, "board-demo-1920.png")).toEqual(demoShot);
-    expect(t.store.image("mc", 7, HEAD, "board-demo-2560.png")).toEqual(demoShot);
-    // the live pairs are unchanged: 1600x1000 comes from `render`, both sides, light and dark
-    expect(m.pairs).toHaveLength(2);
-    expect(t.rendered).toHaveLength(4);
-    expect(t.posted[0]?.demos).toHaveLength(2);
-    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toBeNull();
+    expect(m.pairs.map((p) => `${p.page}:${p.scheme}`)).toEqual(["board:light"]);
+    expect(m.unchanged).toEqual([]);
+    for (const kind of EVIDENCE_KINDS)
+      expect(t.store.hasImage("mc", 7, HEAD, `board-light-${kind}.png`)).toBe(true);
+    expect(t.store.hasImage("mc", 7, HEAD, "board-dark-before.png")).toBe(false);
   });
 
-  it("shows a failed Demo render as missing evidence, naming the page and size", async () => {
-    const t = withDemo({
-      renderDemo: async (_origin, _path, viewport) => {
-        if (viewport.width === 2560) throw new Error("Demo marker never came");
-        return demoShot;
-      },
+  it("an untouched page diffs to zero, keeps no pictures, and still counts as captured", async () => {
+    const t = setup({
+      render: async (_origin, _path, scheme) => encodePng(pageBox(HEAD, scheme)),
     });
     const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
     await t.evidence.ensure(target);
-    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
-    const why = t.evidence.gate(target) ?? "";
-    expect(why).toContain("missing pages: board");
-    expect(why).toContain("board page, Demo at 2560x1145, head side: Demo marker never came");
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.pairs).toEqual([]);
+    expect(m.unchanged).toEqual(["board"]);
+    expect(t.store.hasImage("mc", 7, HEAD, "board-light-before.png")).toBe(false);
+    expect(t.evidence.gate(target)).toBeNull();
+    // captured once: a second look finds nothing missing and renders nothing
+    const before = t.rendered.length;
+    await t.evidence.ensure(target);
+    expect(t.rendered.length).toBe(before);
   });
 
-  it("recaptures a head stored without Demo renders", async () => {
-    const t = withDemo();
+  it("photographs both schemes when the change is about colour, both widths when about width", async () => {
+    const seen = new Set<string>();
+    const t = setup({
+      render: async (origin, _path, scheme, viewport) => {
+        seen.add(`${scheme}:${viewport.width}`);
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/board/theme.ts"] });
+    expect([...seen].sort()).toEqual(["dark:1600", "light:1600"]);
+    seen.clear();
+    await t.evidence.ensure({ pr: 8, sha: HEAD, paths: ["apps/web/src/board/layout.ts"] });
+    expect([...seen].sort()).toEqual(["light:1600", "light:2560"]);
+    expect(t.store.hasImage("mc", 8, HEAD, "board-light-2560-after.png")).toBe(true);
+  });
+
+  it("publishes only the changed pages' before and after, and records where", async () => {
+    const published: { names: string[] }[] = [];
+    const t = setup({
+      publish: async ({ images }) => {
+        published.push({ names: images.map((i) => i.name) });
+        return "https://github.com/o/r/releases/download/qa-pr-7";
+      },
+    });
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
-    t.store.save({ ...(t.store.manifest("mc", 7, HEAD) as EvidenceManifest), demos: [] }, []);
-    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain("Demo");
-    asked.length = 0;
+    expect(published).toEqual([{ names: ["board-light-before.png", "board-light-after.png"] }]);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.published?.baseUrl).toBe("https://github.com/o/r/releases/download/qa-pr-7");
+    expect(t.posted[0]?.published).toBeDefined();
+  });
+
+  it("keeps the capture when the upload fails, linking the hub's own copies", async () => {
+    const logs: string[] = [];
+    const t = setup({
+      log: (l) => logs.push(l),
+      publish: async () => {
+        throw new Error("gh refused");
+      },
+    });
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
-    expect(asked).toHaveLength(2);
-    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).demos).toHaveLength(2);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.published).toBeUndefined();
+    expect(m.pairs).toHaveLength(1);
+    expect(logs.join("\n")).toContain("gh refused");
+  });
+
+  it("keeps a page whose colour moved by less than the diff threshold", async () => {
+    const t = setup({
+      render: async (origin) => {
+        const head = origin.endsWith(HEAD);
+        // a step of 6 per channel: under the diff's tolerance, but a real change
+        return encodePng(fixtureRaster(64, 40, [], head ? [250, 250, 250] : [244, 244, 244]));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.unchanged).toEqual([]);
+    expect(m.pairs).toHaveLength(1);
+    expect(m.pairs[0]?.changedPixels).toBe(0);
+    expect(t.store.hasImage("mc", 7, HEAD, "board-light-before.png")).toBe(true);
+  });
+
+  it("decides schemes and widths from the changed lines of an ordinary CSS file", async () => {
+    const seen = new Set<string>();
+    const t = setup({
+      changeText: async () => "+  background: #101018;\n+@media (max-width: 900px) {",
+      render: async (origin, _path, scheme, viewport) => {
+        seen.add(`${scheme}:${viewport.width}`);
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/hud.css"] });
+    expect([...seen].sort()).toEqual(["dark:1600", "dark:2560", "light:1600", "light:2560"]);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.variants).toHaveLength(4);
+    expect(
+      t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: ["apps/web/src/hud.css"] }),
+    ).toBeNull();
+  });
+
+  it("photographs every scheme and width when the change cannot be read", async () => {
+    const seen = new Set<string>();
+    const t = setup({
+      changeText: async () => {
+        throw new Error("no diff");
+      },
+      render: async (origin, _path, scheme, viewport) => {
+        seen.add(`${scheme}:${viewport.width}`);
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(seen.size).toBe(4);
+  });
+
+  it("does not publish a head the PR has already moved past", async () => {
+    const publish = vi.fn(async () => "https://x");
+    let calls = 0;
+    // true to start the capture, false when it is about to publish
+    const t = setup({ publish, trusted: async () => ++calls === 1 });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).not.toHaveBeenCalled();
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toBeUndefined();
+  });
+
+  it("takes the pictures down when the PR body refuses them because the head moved", async () => {
+    const unpublish = vi.fn(async () => {});
+    let calls = 0;
+    // true to start, true to publish, false once the post has been refused
+    const t = setup({
+      publish: async () => "https://x",
+      unpublish,
+      trusted: async () => ++calls <= 2,
+    });
+    await t.evidence.ensure({
+      pr: 7,
+      sha: HEAD,
+      paths: WEB,
+      onStored: async () => {
+        throw new Error("the PR closed or its head changed before evidence was posted");
+      },
+    });
+    expect(unpublish).toHaveBeenCalledWith(7);
+  });
+
+  it("takes the release down when the head moved before it was published", async () => {
+    const unpublish = vi.fn(async () => {});
+    let calls = 0;
+    // trusted to start the capture, not when it is about to publish
+    const t = setup({ publish: async () => "x", unpublish, trusted: async () => ++calls === 1 });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(unpublish).toHaveBeenCalledWith(7);
+  });
+
+  it("publishes again on the next ensure after the upload failed once", async () => {
+    let calls = 0;
+    const publish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+      return "https://x";
+    });
+    const t = setup({ publish });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toBeUndefined();
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toEqual({
+      baseUrl: "https://x",
+    });
+  });
+
+  it("deletes again on the next ensure after the removal failed once (no changed page)", async () => {
+    let calls = 0;
+    const unpublish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+    });
+    const t = setup({
+      publish: async () => "x",
+      unpublish,
+      render: async (_o, _p, scheme) => encodePng(pageBox(HEAD, scheme)),
+    });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+  });
+
+  it("publishes after a restart when the upload failed once", async () => {
+    let calls = 0;
+    const publish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+      return "https://x";
+    });
+    const before = setup({ publish });
+    await before.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).toHaveBeenCalledTimes(1);
+    // a fresh instance over the same stored pictures: nothing is carried in memory
+    const after = setup({ publish, store: before.store });
+    await after.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect((after.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toEqual({
+      baseUrl: "https://x",
+    });
+  });
+
+  it("deletes after a restart when the removal failed once", async () => {
+    let calls = 0;
+    const unpublish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+    });
+    const render = async (_o: string, _p: string, scheme: string) =>
+      encodePng(pageBox(HEAD, scheme));
+    const before = setup({ publish: async () => "x", unpublish, render });
+    await before.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(1);
+    const after = setup({ publish: async () => "x", unpublish, render, store: before.store });
+    await after.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+    expect(
+      (after.store.manifest("mc", 7, NEXT) as EvidenceManifest).releaseRemoval,
+    ).toBeUndefined();
+    await after.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes an older head's release down when the new head changes no page", async () => {
+    const unpublish = vi.fn(async () => {});
+    const t = setup({
+      publish: async () => "x",
+      unpublish,
+      render: async (_o, _p, scheme) => encodePng(pageBox(HEAD, scheme)),
+    });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledWith(7);
+  });
+
+  it("publishes nothing when no page changed", async () => {
+    const publish = vi.fn(async () => "x");
+    const t = setup({
+      publish,
+      render: async (_o, _p, scheme) => encodePng(pageBox(HEAD, scheme)),
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).not.toHaveBeenCalled();
   });
 });
 
@@ -309,9 +479,9 @@ describe("PrEvidence capture", () => {
     expect([...new Set(t.rendered.map((r) => r.path))]).toEqual(["/comms"]);
   });
 
-  it("renders each affected page in light and dark on main and head from one snapshot", async () => {
+  it("renders each affected page in light and dark on main and head from one snapshot when the change is about colour", async () => {
     const t = setup();
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     expect(t.snapshots).toHaveLength(1);
     expect(t.started.map((s) => s.sha)).toEqual([MAIN, HEAD]);
     // each side opens its own copy, and both hold the one snapshot's data
@@ -328,7 +498,7 @@ describe("PrEvidence capture", () => {
 
   it("captures a pair for the fixture page and computes its diff", async () => {
     const t = setup();
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     const manifest = t.store.manifest("mc", 7, HEAD);
     expect(manifest?.mainSha).toBe(MAIN);
     expect(manifest?.pairs.map((p) => `${p.page}:${p.scheme}`)).toEqual([
@@ -475,7 +645,7 @@ describe("PrEvidence capture", () => {
         return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
       },
     });
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     expect(tries).toBe(2);
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
   });
@@ -507,7 +677,7 @@ describe("PrEvidence capture", () => {
     await t.evidence.ensure(target);
     expect(new Set(seen.map((r) => r.path))).toEqual(new Set(["/comms"]));
     const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
-    expect(m.pairs.map((p) => p.page).sort()).toEqual(["board", "board", "comms", "comms"]);
+    expect(m.pairs.map((p) => p.page).sort()).toEqual(["board", "comms"]);
     expect(t.evidence.gate(target)).toBeNull();
   });
 
@@ -538,71 +708,16 @@ describe("PrEvidence capture", () => {
         );
       },
     });
-    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: BOTH };
     await t.evidence.ensure(target);
     broken = false;
     now += 1001;
     await t.evidence.ensure(target);
     expect(n).toBe(1);
     const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
-    expect(m.pairs.map((p) => p.changedPixels)).toEqual([0, 0]);
-  });
-
-  it("retries a Demo render once, and skips the Demo renders it already kept", async () => {
-    let now = 5000;
-    let broken = true;
-    const asked: string[] = [];
-    let flaked = false;
-    const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
-    const t = setup({
-      now: () => now,
-      render: async (origin, _path, scheme) => {
-        if (broken && origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
-        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
-      },
-      renderDemo: async (_origin, _path, viewport) => {
-        asked.push(String(viewport.width));
-        if (viewport.width === 2560 && !flaked) {
-          flaked = true;
-          throw new Error("Demo timed out");
-        }
-        return demoShot;
-      },
-    });
-    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
-    await t.evidence.ensure(target); // live head render fails before any Demo render
-    expect(asked).toEqual([]);
-    broken = false;
-    now += 1001;
-    await t.evidence.ensure(target);
-    expect(asked).toEqual(["1920", "2560", "2560"]); // 2560 retried once, at once
-    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).demos).toHaveLength(2);
-  });
-
-  it("does not re-ask for Demo renders an earlier attempt kept", async () => {
-    let now = 5000;
-    let broken = true;
-    const asked: string[] = [];
-    const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
-    const paths = ["apps/web/src/board/Card.tsx", "apps/web/src/comms/ItemBrief.tsx"];
-    const t = setup({
-      now: () => now,
-      webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["comms"] }),
-      renderDemo: async (_origin, path, viewport) => {
-        asked.push(`${path}:${viewport.width}`);
-        if (broken && path === "/comms") throw new Error("Demo timed out");
-        return demoShot;
-      },
-    });
-    const target = { repoId: "mc", pr: 7, sha: HEAD, paths };
-    await t.evidence.ensure(target);
-    // board's Demo renders worked; comms' failed twice
-    expect(asked).toEqual(["/board:1920", "/board:2560", "/comms:1920", "/comms:1920"]);
-    asked.length = 0;
-    broken = false;
-    now += 1001;
-    await t.evidence.ensure(target);
-    expect(asked).toEqual(["/comms:1920", "/comms:2560"]);
+    // the same code on both sides, the same snapshot: nothing changed, so no pictures are kept
+    expect(m.pairs).toEqual([]);
+    expect(m.unchanged).toEqual(["board"]);
   });
 
   it("renders main again on the new main when main moves between attempts", async () => {
@@ -621,7 +736,7 @@ describe("PrEvidence capture", () => {
         return encodePng(pageBox(sha === NEWMAIN ? MAIN : sha, scheme));
       },
     });
-    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: BOTH };
     await t.evidence.ensure(target);
     broken = false;
     main = NEWMAIN;
@@ -646,11 +761,11 @@ describe("PrEvidence capture", () => {
       },
     });
     const kept = join(t.workDir, "kept-7");
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     expect(existsSync(kept)).toBe(true);
     broken = false;
     now += 1001;
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     expect(existsSync(kept)).toBe(false);
   });
 
@@ -664,10 +779,10 @@ describe("PrEvidence capture", () => {
       },
     });
     const kept = join(t.workDir, "kept-7");
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     expect(existsSync(kept)).toBe(true);
     now += 1001;
-    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: BOTH });
     // NEXT succeeded, so nothing of the old head or the new one is left
     expect(existsSync(kept)).toBe(false);
   });
@@ -684,15 +799,15 @@ describe("PrEvidence capture", () => {
         return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
       },
     });
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     broken = false;
     now += 1001;
     renders = 0;
-    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: BOTH });
     expect(renders).toBe(4); // both sides, both schemes: nothing reused
     // and the old head's kept renders are gone: going back to it renders everything again
     renders = 0;
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     expect(renders).toBe(4);
   });
 
@@ -706,11 +821,11 @@ describe("PrEvidence capture", () => {
         return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
       },
     });
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: BOTH });
     const expected =
-      "board page, dark scheme, head side: HUD screenshot timed out: the 30000 ms deadline expired.";
+      "board page, dark scheme at 1600, head side: HUD screenshot timed out: the 30000 ms deadline expired.";
     expect(lines.join("\n")).toContain(expected);
-    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain(expected);
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: BOTH })).toContain(expected);
   });
 });
 
@@ -853,7 +968,7 @@ describe("PrEvidence gate", () => {
     await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
     const text = t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
     expect(text).toContain("board");
-    expect(text).toContain("board page, light scheme, main side: page did not render");
+    expect(text).toContain("board page, light scheme at 1600, main side: page did not render");
     // another head has no failure to report
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: NEXT, paths: WEB })).not.toContain(
       "capture failed",

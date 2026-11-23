@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AUDIT_MEASURED_TOOLS,
+  auditStartedKey,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
@@ -236,6 +237,7 @@ const stubSupervisor = (): Supervisor => {
     transferAccount: call("transfer", { outcome: "resumed" as const }),
     startRun: call("start", { runId: "r-1", branch: "feature/5-x" }),
     startWatch: call("startWatch", { runId: "r-3" }),
+    startAudit: call("startAudit", { runId: "r-4" }),
     checkCli: call("checkCli", { kind: "no-seat" as const }),
     startReview: call("startReview", { runId: "r-2" }),
     message: call("message", undefined),
@@ -1884,6 +1886,7 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/models"],
+  ["GET", "/api/audit/report"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -6803,6 +6806,47 @@ describe("crew routes", () => {
     expect(supervisorCalls).toEqual([
       ["message", "guido-1", "  - item\n", { interrupt: false, questions: "none" }],
     ]);
+  });
+
+  describe("the AUDIT seat", () => {
+    beforeEach(() => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "audit-1",
+        role: "AUDIT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+    });
+
+    it("starts with {} through startAudit", async () => {
+      const r = await postBody("/api/seats/audit-1/start", {});
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ runId: "r-4" });
+      expect(supervisorCalls).toEqual([["startAudit", "audit-1"]]);
+      expect(store.getSetting(auditStartedKey("audit-1"))).toBe(String(NOW));
+    });
+
+    it("refuses an issue with 400", async () => {
+      const r = await postBody("/api/seats/audit-1/start", { issue: 5 });
+      expect(r.statusCode).toBe(400);
+      expect(supervisorCalls).toEqual([]);
+    });
+
+    it("reports nothing and no due time before the first report, then the saved report", async () => {
+      expect((await get("/api/audit/report")).json()).toEqual({ report: null, nextDueAt: null });
+      store.recordAuditReport({
+        repoId: "shop-app",
+        runId: "audit-1:r",
+        at: 1_000,
+        verdict: "Two seats idle.",
+        findings: [],
+      });
+      const saved = (await get("/api/audit/report")).json();
+      expect(saved.report).toMatchObject({ runId: "audit-1:r", verdict: "Two seats idle." });
+      // A manual first report, before the timer wrote its start: no due time, never 1970.
+      expect(saved.nextDueAt).toBeNull();
+    });
   });
 
   describe("the watch seat", () => {

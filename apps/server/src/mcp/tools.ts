@@ -16,8 +16,16 @@ import {
   ASK_FLIGHT_COMMS_POINTER,
   ASK_FLIGHT_SELF,
   ASKED_FLIGHT,
+  AUDIT_REPORT_AREAS,
+  AUDIT_REPORT_FINDINGS_MAX,
+  AUDIT_REPORT_LINKS_MAX,
+  AUDIT_REPORT_OWNERS,
   AWAY_PLAN_REFUSED,
   alreadyOnOriginText,
+  auditBadLinkText,
+  auditHrefOk,
+  auditSecretText,
+  auditTooManyText,
   BLOCKING_SEVERITIES,
   CALL_FLIGHT_SELF,
   CALLED_FLIGHT,
@@ -84,6 +92,9 @@ import {
   grantedPath,
   isProtectedPath,
   liftPark,
+  MC_AUDIT_ALREADY,
+  MC_AUDIT_NOT_AUDIT,
+  MC_AUDIT_SAVED,
   MC_BAD_ARGS,
   MC_COMMIT_MERGE_UNKNOWN,
   MC_COMMIT_TOO_BIG,
@@ -296,6 +307,8 @@ export interface McToolsDeps {
   rules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
   onPlanned?: (seatId: string, runId: string) => void | Promise<void>;
+  /** Called after the AUDIT seat's `report_audit` saves its report (the supervisor ends that run). */
+  onAudited?: (seatId: string, runId: string) => void;
   /**
    * The run's repo's configured checks (`mc.checks`), read for each push; empty: the push is not
    * gated on them. Throws when the rules cannot be read (the push then fails and is retried).
@@ -429,6 +442,23 @@ const PlanStepArgs = z.strictObject({
   model: text(MODEL_ADVICE_FIELD_MAX),
   effort: text(MODEL_ADVICE_FIELD_MAX).optional(),
   reason: text(ADVICE_REASON_MAX),
+});
+const AuditFindingArgs = z.strictObject({
+  rank: z.number().int().min(1).max(100),
+  area: z.enum(AUDIT_REPORT_AREAS),
+  problem: text(300),
+  evidence: text(1_200),
+  cause: text(600),
+  links: z
+    .array(z.strictObject({ label: text(80), href: text(300) }))
+    .max(AUDIT_REPORT_LINKS_MAX)
+    .default([]),
+  owner: z.enum(AUDIT_REPORT_OWNERS),
+});
+/** The findings are checked for their count in the tool, so its refusal can say how many. */
+const AuditArgs = z.strictObject({
+  verdict: text(400),
+  findings: z.array(AuditFindingArgs),
 });
 const PlanArgs = z
   .strictObject({
@@ -2325,6 +2355,43 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             ).split("\0"),
           );
           for (const p of paths) if (!differs.has(p)) fromMain.add(p);
+          // A path git merged on its own (both sides changed it, no conflict) is not the seat's
+          // edit either: the index entry equals the tree `merge-tree` writes for HEAD and
+          // MERGE_HEAD. A conflicted path holds markers there, so the seat's resolution differs.
+          const rest = paths.filter((p) => !fromMain.has(p));
+          if (rest.length > 0) {
+            // exit 1 is a conflict: stdout still has the tree, then the conflicted paths. Any other
+            // failure (an old git) leaves nothing merged on its own, so the area check stands.
+            const merged = await g(
+              [
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                "--name-only",
+                "-z",
+                "HEAD",
+                mergeHead,
+              ],
+              { timeoutMs: CREW_GIT_SLOW_MS },
+            ).catch((e: unknown) =>
+              (e as { code?: unknown } | null)?.code === 1
+                ? String((e as { stdout?: unknown }).stdout ?? "")
+                : "",
+            );
+            const [tree = "", ...conflicted] = merged.split("\0");
+            if (/^[0-9a-f]{40,64}$/.test(tree)) {
+              const sure = new Set(conflicted);
+              const auto = new Set(
+                (
+                  await g(["diff", "--cached", "--name-only", "--no-renames", "-z", tree, "--"], {
+                    timeoutMs: CREW_GIT_SLOW_MS,
+                    maxBuffer: INDEX_LIST_MAX_BUFFER,
+                  })
+                ).split("\0"),
+              );
+              for (const p of rest) if (!auto.has(p) && !sure.has(p)) fromMain.add(p);
+            }
+          }
         }
         const own = paths.filter((p) => !fromMain.has(p));
 
@@ -2888,6 +2955,63 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (rules !== undefined && !(rules instanceof RepoRulesError))
       return rules.planSignoff ?? "never";
     return config.repos.find((r) => r.id === repoId)?.rules?.planSignoff ?? "never";
+  }
+
+  /** The AUDIT seat's report: saved once per run, then the run ends. No GitHub write. */
+  async function reportAudit(ctx: McToolContext, args: unknown): Promise<Result> {
+    const parsed = AuditArgs.safeParse(args);
+    if (!parsed.success) return badArgs(parsed.error);
+    const live = liveRun(ctx);
+    if (live === null) return ENDED;
+    const { run } = live;
+    const place = seatPlace(config, ctx.seatId);
+    if (place === null) return ENDED;
+    if (seatDef(place.seat).loop !== "audit") return { text: MC_AUDIT_NOT_AUDIT, isError: true };
+    if (store.auditReportOfRun(run.id) !== null) return { text: MC_AUDIT_ALREADY, isError: true };
+    const { verdict, findings } = parsed.data;
+    if (findings.length > AUDIT_REPORT_FINDINGS_MAX)
+      return { text: auditTooManyText(findings.length), isError: true };
+    for (const f of findings)
+      for (const l of f.links)
+        if (!auditHrefOk(l.href)) return { text: auditBadLinkText(l.href), isError: true };
+    const known = await readKnown(deps, "report_audit");
+    const all = [
+      verdict,
+      ...findings.flatMap((f) => [
+        f.problem,
+        f.evidence,
+        f.cause,
+        ...f.links.flatMap((l) => [l.label, l.href]),
+      ]),
+    ].join("\n");
+    const secret = scanText("report", all, known)[0];
+    if (secret !== undefined) {
+      store.addGuardHit({
+        agentId: ctx.seatId,
+        runId: run.id,
+        rule: "secret",
+        text: mcToolHitText("secret", "report_audit"),
+        at: now(),
+      });
+      bus.emit("guard");
+      return { text: auditSecretText(secret.kind), isError: true };
+    }
+    // ranked 1..n in the order given, whatever ranks the model wrote
+    const ranked = findings
+      .slice()
+      .sort((a, b) => a.rank - b.rank)
+      .map((f, i) => ({ ...f, rank: i + 1 }));
+    const saved = store.recordAuditReport({
+      repoId: run.repoId,
+      runId: run.id,
+      at: now(),
+      verdict,
+      findings: ranked,
+    });
+    if (!saved) return { text: MC_AUDIT_ALREADY, isError: true };
+    bus.emit("agents");
+    deps.onAudited?.(ctx.seatId, ctx.runId);
+    return { text: MC_AUDIT_SAVED };
   }
 
   /** Planner runs whose plan is saved but whose end failed, with the answer their retry gets. */
@@ -3566,6 +3690,14 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       },
       modes: ["scratch"],
       call: reportFindings,
+    },
+    {
+      name: MC_TOOL_NAMES.reportAudit,
+      description: `Save your audit report, once: a verdict and at most ${AUDIT_REPORT_FINDINGS_MAX} findings, ranked by impact. Each finding names the problem, its evidence (numbers and links), the likely cause and who acts. Links start with / (a page of the app) or https://github.com/. Mission Control then ends this run. Nothing is posted to GitHub.`,
+      inputSchema: z.toJSONSchema(AuditArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: reportAudit,
     },
     {
       name: MC_TOOL_NAMES.reportPlan,

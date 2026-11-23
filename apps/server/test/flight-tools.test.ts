@@ -1485,6 +1485,52 @@ describe("add_review_evidence", () => {
     expect(ghCalls.every((call) => call[0] === "api" && !call.includes("--method"))).toBe(true);
   });
 
+  it("keeps a stored release-removal retry when a picture is added", async () => {
+    reviewEvidence.save(
+      {
+        repoId: "mc",
+        pr: 9,
+        sha: SHA,
+        mainSha: MAIN,
+        capturedAt: NOW,
+        pairs: [],
+        releaseRemoval: true,
+      },
+      [],
+    );
+    ghImpl = async (call) => {
+      if (call[1]?.endsWith("/pulls/9"))
+        return { code: 0, stdout: JSON.stringify({ head: { sha: SHA } }), stderr: "" };
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          type: "file",
+          path: "docs/audit.png",
+          sha: blob,
+          size: picture.length,
+          encoding: "base64",
+          content: picture.toString("base64"),
+        }),
+        stderr: "",
+      };
+    };
+    const tool = need(tools.find((candidate) => candidate.name === "add_review_evidence"));
+    await tool.call(ctx(), {
+      pr: 9,
+      head: SHA,
+      images: [
+        {
+          path: "docs/audit.png",
+          caption: "Audit",
+          viewport: { width: 1280, height: 900 },
+          side: "reference",
+        },
+      ],
+      basis: "Checked the committed PNG.",
+    });
+    expect(reviewEvidence.manifest("mc", 9, SHA)?.releaseRemoval).toBe(true);
+  });
+
   it("refuses a changed head and a blob that is not PNG", async () => {
     const tool = need(tools.find((candidate) => candidate.name === "add_review_evidence"));
     ghImpl = async () => ({
@@ -11748,5 +11794,71 @@ describe("plan sign-off", () => {
       refused(PLAN_SEND_REFUSED),
     );
     expect((await call("send_to_planner", { issue: 99, basis: "x" })).isError).toBe(true);
+  });
+});
+
+describe("the AUDIT seat's read tools", () => {
+  beforeEach(() => {
+    cfg.crew?.sessions[0]?.seats.push(seat("audit-1", "AUDIT"));
+    live("audit-1", "r-audit");
+    live("guido-1", "r-guido");
+    ghImpl = async () => json({ data: { repository: { issues: { pageInfo: {}, nodes: [] } } } });
+  });
+
+  it.each(["list_tickets", "read_pr"])(
+    "%s passes the seat check for the AUDIT seat",
+    async (name) => {
+      const r = await call(
+        name,
+        name === "read_pr" ? { pr: 9 } : { limit: 10 },
+        ctx("audit-1", "r-audit"),
+      );
+      expect(r.text).not.toBe(MC_FLIGHT_ONLY);
+    },
+  );
+
+  it("reads the AUDIT seat's own repo when FLIGHT watches another", async () => {
+    const other = cfg.crew?.sessions[1];
+    if (other === undefined) throw new Error("fixture");
+    other.seats.push(seat("audit-2", "AUDIT"));
+    live("audit-2", "r-audit");
+
+    await call("read_pr", { pr: 9 }, ctx("audit-2", "r-audit"));
+    expect(ghCalls[0]).toContain("--repo=o/other");
+  });
+
+  it.each(["list_tickets", "read_pr"])("%s still refuses a build seat", async (name) => {
+    const r = await call(
+      name,
+      name === "read_pr" ? { pr: 9 } : { limit: 10 },
+      ctx("guido-1", "r-guido"),
+    );
+    expect(r).toEqual({ text: MC_FLIGHT_ONLY, isError: true });
+  });
+});
+
+describe("flight_state and the AUDIT report", () => {
+  it("shows the report once, then marks it told", async () => {
+    store.recordAuditReport({
+      repoId: "mc",
+      runId: "audit-1:r",
+      at: NOW,
+      verdict: "Three seats idle.",
+      findings: [
+        {
+          rank: 1,
+          area: "flow",
+          problem: "p",
+          evidence: "e",
+          cause: "c",
+          links: [],
+          owner: "flight",
+        },
+      ],
+    });
+    expect(JSON.parse((await call("flight_state", {})).text).audit).toMatchObject({
+      verdict: "Three seats idle.",
+    });
+    expect(JSON.parse((await call("flight_state", {})).text).audit).toBeUndefined();
   });
 });

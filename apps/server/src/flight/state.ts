@@ -92,6 +92,7 @@ import {
   questionFacts,
   subjectId,
 } from "../attention/question-watch.ts";
+import { pendingAudit } from "../audit/wake.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
 import { pausedSeat, readCrewPause } from "../config/crew-pause.ts";
@@ -1445,6 +1446,7 @@ export function flightState(i: {
     instructionRevision: store.instructions.revision(),
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
+    ...auditOf(store, session.repoId),
     ...(planned.length > 0 ? { planned } : {}),
     wake: withCovered(
       wakeInputs({
@@ -1663,6 +1665,12 @@ export function flightWake(
   };
 }
 
+/** The `audit` key of FLIGHT's state: set only while a report is untold. */
+const auditOf = (store: Store, repoId: string): { audit?: FlightState["audit"] } => {
+  const audit = pendingAudit(store, repoId);
+  return audit === undefined ? {} : { audit };
+};
+
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
 const parkOf = (store: Store, run: Run): FlightPark | null => {
   if (run.loop?.phase !== "parked") return null;
@@ -1693,6 +1701,8 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
     retrospective: s.retrospective ? [s.retrospective.day] : [],
+    // an AUDIT report not yet told: urgent, since the auditor runs every few hours at most
+    audit: s.audit ? [s.audit.id] : [],
     teams: s.teamsDigest?.matches.map((m) => [m.arrival.arrivalId, m.arrival.version]) ?? [],
     signals: s.signals
       .filter((s) => !s.told)
@@ -1753,6 +1763,7 @@ const flightParkKind = (kind: string): boolean => kind === RULING_PARK || kind =
 export function pending(s: FlightState & TeamsDigestState): boolean {
   return (
     s.retrospective !== undefined ||
+    s.audit !== undefined ||
     (s.teamsDigest?.matches.length ?? 0) > 0 ||
     s.signals.some((s) => !s.told) ||
     s.triage.length > 0 ||
@@ -1785,6 +1796,7 @@ const URGENT_CATEGORIES: readonly string[] = [
   "instructions",
   "planned",
   "retrospective",
+  "audit",
 ];
 
 /** Whether a changed fact set adds an urgent fact: one of the categories above, or a seat's call. */

@@ -1,10 +1,14 @@
 import {
   type AuditAction,
   type AuditChange,
+  type AuditReport,
+  type AuditReportView,
   type AuditView,
   auditActions,
+  auditNoteText,
   auditVerdict,
   type ConfigView,
+  MC_AUDIT_NO_REPORT,
   type WasteReport,
 } from "@mc/core";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -53,6 +57,9 @@ function AuditDashboard() {
   const res = useResource<AuditData>(RESOURCES.audit(range));
   const configRes = useResource<ConfigView>(RESOURCES.config);
   const wasteRes = useResource<WasteReport>(RESOURCES.waste);
+  const reportRes = useResource<AuditReportView>(RESOURCES.auditReport);
+  const report = reportRes.data?.report ?? null;
+  const reportLoaded = reportRes.data !== undefined || reportRes.error !== null;
   const [last, setLast] = useState<{ range: AuditRange; data: AuditData }>();
   useEffect(() => {
     if (res.data) setLast({ range, data: res.data });
@@ -87,17 +94,21 @@ function AuditDashboard() {
   return (
     <div className={res.data === undefined && audit ? "audit-page refetching" : "audit-page"}>
       <div className="audit-verdict">
-        <Verdict
-          audit={audit}
-          actions={actions}
-          classified={config !== undefined}
-          loading={loading}
-          error={res.error && !res.data ? res.error : null}
-          configError={configRes.error}
-          stale={staleRange ? last?.range : undefined}
-          range={range}
-          waste={waste}
-        />
+        {report ? (
+          <ReportVerdict report={report} nextDueAt={reportRes.data?.nextDueAt ?? null} />
+        ) : (
+          <Verdict
+            audit={audit}
+            actions={actions}
+            classified={config !== undefined}
+            loading={loading}
+            error={res.error && !res.data ? res.error : null}
+            configError={configRes.error}
+            stale={staleRange ? last?.range : undefined}
+            range={range}
+            waste={waste}
+          />
+        )}
         <button
           type="button"
           className="audit-retry"
@@ -108,21 +119,34 @@ function AuditDashboard() {
         </button>
         <Seg label="Range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>
-      {audit && !models && (
+      {(audit || report) && !models && (
         <div className="audit-cols">
           <div className="audit-col">
-            <DoNext
-              actions={actions}
-              classified={config !== undefined}
-              audit={audit}
-              waste={waste}
-            />
+            {report ? (
+              <ReportNext report={report} />
+            ) : audit ? (
+              <>
+                {reportLoaded && <p className="s fg2 audit-foot">{MC_AUDIT_NO_REPORT}</p>}
+                <DoNext
+                  actions={actions}
+                  classified={config !== undefined}
+                  audit={audit}
+                  waste={waste}
+                />
+              </>
+            ) : null}
             <NewOutside />
           </div>
           <div className="audit-col">
-            <HowWeBuild audit={audit} waste={wasteRes.data} wasteError={wasteRes.error} />
-            <WhereFindingsLand audit={audit} />
-            <Past changes={audit.changes} range={range} />
+            {audit ? (
+              <>
+                <HowWeBuild audit={audit} waste={wasteRes.data} wasteError={wasteRes.error} />
+                <WhereFindingsLand audit={audit} />
+                <Past changes={audit.changes} range={range} />
+              </>
+            ) : (
+              <LegacyAuditUnavailable error={res.error} range={range} />
+            )}
           </div>
         </div>
       )}
@@ -136,6 +160,25 @@ function AuditDashboard() {
 }
 
 type WasteState = { kind: "ok" } | { kind: "loading" } | { kind: "error"; message: string };
+
+function LegacyAuditUnavailable({ error, range }: { error: Error | null; range: AuditRange }) {
+  return (
+    <Panel title="Hub checks">
+      <div className="pb">
+        <p>{error ? `Could not load hub checks: ${error.message}.` : "Hub checks are loading."}</p>
+        {error && (
+          <button
+            type="button"
+            className="audit-retry"
+            onClick={() => hub.refetch(RESOURCES.audit(range).path)}
+          >
+            Retry hub checks
+          </button>
+        )}
+      </div>
+    </Panel>
+  );
+}
 
 const wasteNotice = (w: WasteState): string | null =>
   w.kind === "ok"
@@ -214,6 +257,120 @@ function Verdict({
         </span>
       )}
     </p>
+  );
+}
+
+const whenLabel = (at: number): string =>
+  new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+/** The AUDIT seat's verdict, and when it was written and when the next is due. */
+function ReportVerdict({ report, nextDueAt }: { report: AuditReport; nextDueAt: number | null }) {
+  return (
+    <p className="audit-verdict-text">
+      <b>{report.verdict}</b>{" "}
+      <span className="fg2">
+        {auditNoteText(
+          whenLabel(report.at),
+          nextDueAt === null ? "the next timer tick" : whenLabel(nextDueAt),
+        )}
+      </span>
+    </p>
+  );
+}
+
+/** Do next from the AUDIT report: findings ranked, with who acts; the detail carries the proof. */
+function ReportNext({ report }: { report: AuditReport }) {
+  const [filter, setFilter] = useState<DeciderFilter>("all");
+  // Collapsed on first open, so the first five ranked rows stay on screen whatever a finding's length.
+  const [open, setOpen] = useState<number | null>(null);
+  const ranked = [...report.findings].sort((a, b) => a.rank - b.rank);
+  const shown = ranked.filter(
+    (f) => filter === "all" || (filter === "you" ? f.owner === "operator" : f.owner === "flight"),
+  );
+  return (
+    <Panel
+      title="Do next"
+      sub={`${plural(report.findings.length, "finding")} · ranked by AUDIT`}
+      className="audit-next"
+      actions={<Seg label="Decider" options={FILTER_OPTIONS} value={filter} onChange={setFilter} />}
+    >
+      <div className="audit-scroll">
+        {shown.length === 0 ? (
+          <p className="s fg2 audit-empty">No finding for this decider.</p>
+        ) : (
+          <table className="audit-table">
+            <thead>
+              <tr>
+                <th className="n">#</th>
+                <th>Problem</th>
+                <th className="src">Area</th>
+                <th className="dec">Decides</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((f) => {
+                const isOpen = f.rank === open;
+                const you = f.owner === "operator";
+                return (
+                  <Fragment key={f.rank}>
+                    <tr className={isOpen ? "rec open" : "rec"}>
+                      <td className="n">{f.rank}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="audit-rt"
+                          aria-expanded={isOpen}
+                          onClick={() => setOpen(isOpen ? null : f.rank)}
+                        >
+                          <i aria-hidden="true">{isOpen ? "▾" : "▸"}</i>
+                          {f.problem}
+                        </button>
+                      </td>
+                      <td className="src">{f.area}</td>
+                      <td className="dec">
+                        <b className={you ? "you" : undefined}>{you ? "You" : "FLIGHT"}</b>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="more">
+                        <td colSpan={4}>
+                          <div className="audit-mg">
+                            <div>
+                              <h3>Problem</h3>
+                              <p>{f.problem}</p>
+                            </div>
+                            <div>
+                              <h3>Evidence</h3>
+                              <p>{f.evidence}</p>
+                            </div>
+                            <div>
+                              <h3>Likely cause</h3>
+                              <p>{f.cause}</p>
+                            </div>
+                            <div>
+                              <h3>Look at</h3>
+                              <p className="audit-links">
+                                {f.links.length === 0
+                                  ? "No link."
+                                  : f.links.map((l) => (
+                                      <a key={l.href} href={l.href}>
+                                        {l.label}
+                                      </a>
+                                    ))}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </Panel>
   );
 }
 

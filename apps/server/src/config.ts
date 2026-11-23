@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import {
   type AccountId,
   type AgentId,
+  AUDIT_EVERY_HOURS_MAX,
+  AUDIT_EVERY_HOURS_MIN,
   type AuditThresholds,
   BUILTIN_ROLES,
   COMMS_CREW,
@@ -238,6 +240,8 @@ export interface CcConfig {
   audit?: {
     /** Message-problem thresholds for Audit; each left out takes `AUDIT_THRESHOLD_DEFAULTS`. */
     thresholds?: Partial<AuditThresholds>;
+    /** Hours between the AUDIT seat's runs; unset: AUDIT_EVERY_HOURS_DEFAULT. */
+    reportEveryHours?: number;
   };
   operator: { id: string; timezone: string; locale?: string; githubLogins?: string[] };
   /** The configured repo the hub's own code lives in, set at startup; unset: unknown, so every repo is treated as it. */
@@ -643,6 +647,12 @@ const fileSchema = z
         controller_wait_minutes: z.number().int().min(1).max(10_080).optional(),
         ticket_text_factor: z.number().min(1.1).max(100).optional(),
         notice_repeats: z.number().int().min(2).max(100).optional(),
+        report_every_hours: z
+          .number()
+          .int()
+          .min(AUDIT_EVERY_HOURS_MIN)
+          .max(AUDIT_EVERY_HOURS_MAX)
+          .optional(),
       })
       .default({}),
     updates: z
@@ -835,6 +845,9 @@ const fileSchema = z
       },
       audit: {
         ...auditThresholdsOf(f.audit),
+        ...(f.audit.report_every_hours === undefined
+          ? {}
+          : { reportEveryHours: f.audit.report_every_hours }),
       },
       updates: { hub: f.updates.hub, cli: f.updates.cli },
       ...(f.crew === undefined

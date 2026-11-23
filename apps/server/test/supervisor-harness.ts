@@ -355,6 +355,7 @@ function make(
     /** The area GUIDO-1 may write, in place of apps/**. */
     guidoArea?: string[];
     extraSeat?: CrewSeatConfig;
+    auditPack?: (seatId: string) => string;
     /** A second, seatless session "other". */
     secondSession?: boolean;
     autonomy?: "merge" | "draft";
@@ -412,6 +413,7 @@ function make(
     store,
     bus,
     dbPath,
+    ...(over.auditPack === undefined ? {} : { auditPack: over.auditPack }),
     rules: over.rules ?? (async () => START_RULES),
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,

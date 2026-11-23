@@ -68,4 +68,10 @@ export const ROLES: readonly RoleRow[] = [
     here: "planner: writes each ticket's plan for the developers",
     mode: "read-only",
   },
+  {
+    callSign: "AUDIT",
+    position: "Auditor",
+    here: "auditor: reads the crew's record on a timer and reports what is going wrong",
+    mode: "read-only",
+  },
 ];

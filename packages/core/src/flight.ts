@@ -10,6 +10,7 @@ export {
   type FlightNotTriagingCause,
 } from "./flight-model.ts";
 
+import type { AuditReportFinding } from "./audit.ts";
 import { priorityRank } from "./board.ts";
 import type { TicketSize } from "./hud.ts";
 import type { AttentionKind, HudColumn } from "./hud-model.ts";
@@ -48,6 +49,9 @@ export const HUD_PAGE_PATHS = {
 export const watchStartRefusedText = (call: string): string =>
   `${call} runs the crew and is started without a ticket.`;
 export const notWatchSeatText = (call: string): string => `${call} is not a watch seat.`;
+export const notAuditSeatText = (call: string): string => `${call} is not an audit seat.`;
+export const auditStartRefusedText = (call: string): string =>
+  `${call} audits the crew on a timer and takes no ticket.`;
 export const ISSUE_REQUIRED = "issue: an issue number is required";
 export const oneWatchSeatText = (first: string): string =>
   `only one seat may run the watch loop; ${first} already does`;
@@ -1114,6 +1118,13 @@ export interface FlightState {
   prFlow?: FlightPrFlow;
   memory?: FlightMemoryTitle[];
   retrospective?: FlightRetrospective;
+  /** The newest AUDIT report FLIGHT has not been told: its verdict and top findings. */
+  audit?: {
+    id: number;
+    at: number;
+    verdict: string;
+    top: AuditReportFinding[];
+  };
   signals: FlightSignal[];
   triage: FlightTriage[];
   /** Tickets waiting on unmerged work, each with its chain and wait so far. */
