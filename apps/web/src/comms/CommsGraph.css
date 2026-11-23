@@ -107,7 +107,7 @@
   min-height: calc(var(--sp-7) + var(--sp-1));
   padding: var(--sp-1);
   transform: translate(-50%, -50%);
-  color: var(--fg);
+  color: var(--void-ink);
   text-align: center;
   background: color-mix(in srgb, var(--void) 88%, var(--seat));
   border: 1px solid var(--seat);
@@ -145,7 +145,7 @@
 .crew-map-seat small {
   display: block;
   overflow: hidden;
-  color: var(--fg-2);
+  color: var(--void-muted);
   font-size: var(--fs-micro);
   line-height: var(--lh-s);
   text-overflow: ellipsis;

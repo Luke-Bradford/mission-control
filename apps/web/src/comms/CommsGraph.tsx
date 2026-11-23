@@ -46,7 +46,7 @@ export function CommsGraph({
     const pinSet = full ? pins.full : pins.panel;
     if (pinSet[id]) return pinSet[id];
     if (id === chart.flight) return { x: 50, y: 50 };
-    if (id === CAPCOM) return { x: 50, y: 8 };
+    if (id === CAPCOM) return crowded ? { x: 50, y: 8 } : { x: 18, y: 20 };
     const index = others.findIndex((seat) => seat.id === id);
     if (crowded) {
       const rows = Math.ceil(others.length / 2);
@@ -158,7 +158,7 @@ export function CommsGraph({
               const row = rows.find((candidate) => candidate.id === seat.id);
               const used = row?.digest?.contextTokens;
               const limit = row?.digest?.contextWindow ?? 150_000;
-              const wait = youngWaits.some((edge) => edge.waiting?.youngOwed === seat.id);
+              const wait = youngWaits.some((edge) => edge.waiting?.youngOwedIds.includes(seat.id));
               const tool = row?.digest?.liveTool?.name ?? "no tool running";
               return (
                 <button

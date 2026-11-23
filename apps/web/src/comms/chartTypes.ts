@@ -45,6 +45,8 @@ export type Waiting = {
   old: number;
   /** The recipient of the oldest young ask, if there is one. */
   youngOwed?: string;
+  /** Every recipient with a young unanswered ask on this pair. */
+  youngOwedIds: string[];
   /** The sender of the oldest young ask, if there is one. */
   youngAsker?: string;
   youngMs?: number;

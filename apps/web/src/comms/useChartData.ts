@@ -124,6 +124,9 @@ export function waitingByPair(
       young: (before?.young ?? 0) + Number(young),
       old: (before?.old ?? 0) + Number(!young),
       youngOwed: oldestYoung ? to : before?.youngOwed,
+      youngOwedIds: young
+        ? [...new Set([...(before?.youngOwedIds ?? []), to])]
+        : (before?.youngOwedIds ?? []),
       youngAsker: oldestYoung ? from : before?.youngAsker,
       youngMs: oldestYoung ? item.waitedMs : before?.youngMs,
     });
