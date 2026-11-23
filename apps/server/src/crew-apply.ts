@@ -36,6 +36,7 @@ export const areaWaitText = (other: string) =>
   `its area overlaps ${other}'s, which has not changed yet`;
 
 const READ_FAILED = "cannot read config.yaml";
+const LOOP_KINDS_FAILED = "could not record the seats' loop kinds; nothing was changed";
 
 export interface CrewPlan {
   /** Per applied session id: the seats to hold now. */
@@ -299,15 +300,17 @@ export function createCrewReloader(deps: {
    * Records the loop kind of each seat in `cfg` on its runs that lack one, before a reload or a
    * session removal can retire the seat and leave Audit unable to tell what it ran.
    */
-  const recordLoopKinds = (cfg: CcConfig): void => {
+  const recordLoopKinds = (cfg: CcConfig): boolean => {
     try {
       const kinds = new Map<string, LoopKind>();
       for (const session of cfg.crew?.sessions ?? []) {
         for (const s of session.seats) kinds.set(s.id, seatDef(s).loop);
       }
       store.backfillRunLoopKinds(kinds);
+      return true;
     } catch (e) {
       log(`could not record seat loop kinds: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
   };
 
@@ -500,7 +503,10 @@ export function createCrewReloader(deps: {
       return { ...status(), applied: [] };
     }
     // the applied config still lists the seats this load may remove
-    recordLoopKinds(config);
+    if (!recordLoopKinds(config)) {
+      setError(LOOP_KINDS_FAILED);
+      return { ...status(), applied: [] };
+    }
     target = loaded;
     setError(null);
     const applied = settle();
@@ -569,7 +575,7 @@ export function createCrewReloader(deps: {
         const active = session.seats.filter((s) => !stopped(s.id)).length;
         if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
         // Removing it synchronously prevents any new supervisor start during the file write.
-        recordLoopKinds(config);
+        if (!recordLoopKinds(config)) throw new ConfigWriteError("write", LOOP_KINDS_FAILED);
         removing = true;
         sessions.splice(index, 1);
         let saved = false;

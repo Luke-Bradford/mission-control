@@ -1,6 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { INSTRUCTION_PRECEDENCE, instructionSnapshot, seatInstructionBlock } from "@mc/core";
 import type { CrewSeatConfig } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 import type { PromptPiece } from "../telemetry/prompt-cost.ts";
 import { readBaseEntry } from "./checkouts.ts";
@@ -47,7 +48,7 @@ export function directionContext(store: Store, runId: string): DirectionContext 
     );
   let parsed: DirectionContext;
   try {
-    parsed = JSON.parse(raw);
+    parsed = parseJson<unknown>(raw, undefined, rethrowJson) as DirectionContext;
   } catch (cause) {
     throw new DirectionContextError(
       "FLIGHT's retained direction context is invalid. Resume from a verified base.",

@@ -40,6 +40,7 @@ import {
 import type { ChangeBus } from "./bus.ts";
 import type { CliHold } from "./cli/update.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { cleanText } from "./repo/clean.ts";
 import { gitEnv } from "./repo/files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
@@ -640,6 +641,45 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
 // no credential prompt: a remote that wants one fails instead of hanging until the timeout
 const gitEnvironment = () => ({ ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0" });
 
+/** Whether `ancestor` is in the history of `descendant` in `root`; false when either is unknown to git. */
+export async function isAncestor(
+  root: string,
+  ancestor: string,
+  descendant: string,
+  exec: Exec = realExec,
+): Promise<boolean> {
+  if (!/^[0-9a-f]{40,64}$/.test(ancestor) || !/^[0-9a-f]{40,64}$/.test(descendant)) return false;
+  try {
+    await exec("git", [...SAFE_CONFIG, "merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd: root,
+      env: gitEnvironment(),
+      timeoutMs: UPDATE_STEP_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Every commit in the history of `head` in `root`, read once; null when git cannot list it. */
+export async function commitsOf(
+  root: string,
+  head: string,
+  exec: Exec = realExec,
+): Promise<Set<string> | null> {
+  if (!/^[0-9a-f]{40,64}$/.test(head)) return null;
+  try {
+    const out = await exec("git", [...SAFE_CONFIG, "rev-list", head], {
+      cwd: root,
+      env: gitEnvironment(),
+      timeoutMs: UPDATE_STEP_TIMEOUT_MS,
+    });
+    return new Set(out.stdout.split("\n").filter((l) => l !== ""));
+  } catch {
+    return null;
+  }
+}
+
 /** HEAD of `root` through the same safe git as Update (main.ts reads it once, at startup). */
 export async function headSha(root: string, exec: Exec = realExec): Promise<string | null> {
   try {
@@ -811,8 +851,10 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   async function hubInstallEnv(): Promise<NodeJS.ProcessEnv> {
     const env = installEnv(root);
     try {
-      const modules = JSON.parse(
+      const modules = parseJson<unknown>(
         await readFile(join(root, "node_modules", ".modules.yaml"), "utf8"),
+        undefined,
+        rethrowJson,
       ) as { storeDir?: unknown };
       if (typeof modules.storeDir === "string" && /[/\\]v\d+$/.test(modules.storeDir)) {
         env[PNPM_STORE_ENV] = dirname(modules.storeDir);

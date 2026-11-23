@@ -127,6 +127,7 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { loopPause } from "./loop/pause.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
@@ -536,7 +537,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const restarts = (until: number): number[] => {
       let list: unknown;
       try {
-        list = JSON.parse(store.getSetting(FILE_SERVICE_RESTARTS_SETTING) ?? "[]");
+        list = parseJson(store.getSetting(FILE_SERVICE_RESTARTS_SETTING), []);
       } catch {
         list = [];
       }
@@ -1642,19 +1643,26 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /** Never rejects: the timers call it as `void tick(job)`, where a rejection would kill the process. */
   const tick = async (job: Job): Promise<"ran" | "skipped"> => {
     if (inFlight.has(job)) return "skipped";
-    const p = (async () => {
+    let p: Promise<void> | undefined;
+    p = (async () => {
       try {
         await jobs[job]();
       } catch (e) {
         recordStatus(`scheduler:${job}`, false, msg(e));
+      } finally {
+        try {
+          if (SIGNAL_LOOPS.includes(job)) {
+            flightLoopHeartbeat(store, job, now(), intervals[job]);
+          }
+        } catch (e) {
+          recordStatus(`scheduler:${job}:heartbeat`, false, msg(e));
+        } finally {
+          if (p !== undefined && inFlight.get(job) === p) inFlight.delete(job);
+        }
       }
     })();
     inFlight.set(job, p);
     await p;
-    if (SIGNAL_LOOPS.includes(job)) {
-      flightLoopHeartbeat(store, job, now(), intervals[job]);
-    }
-    inFlight.delete(job);
     return "ran";
   };
 
@@ -1729,7 +1737,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       const saved = store.getSetting(USAGE_BACKOFF_SETTING);
       if (saved !== null) {
         try {
-          const parsed = JSON.parse(saved);
+          const parsed = parseJson<{ waitMs: number; notBefore: number } | undefined>(
+            saved,
+            undefined,
+            rethrowJson,
+          );
           if (
             parsed &&
             Number.isFinite(parsed.waitMs) &&

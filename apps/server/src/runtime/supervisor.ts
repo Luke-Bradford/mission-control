@@ -41,6 +41,7 @@ import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   adviceStepOf,
+  auditStartRefusedText,
   BLOCKING_SEVERITIES,
   CANNOT_START,
   CODEX_COMMAND,
@@ -90,6 +91,7 @@ import {
   mergedMainText,
   modeOfSeat,
   NOT_ASIDE,
+  notAuditSeatText,
   notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
@@ -164,6 +166,7 @@ import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -202,6 +205,7 @@ import {
 } from "../telemetry/prompt-cost.ts";
 import {
   AGENTS_MD_HEADING,
+  auditBrief,
   BRIEF_DECISIONS_MAX,
   CLAUDE_MD_HEADING,
   cutNoteText,
@@ -479,6 +483,8 @@ export interface SupervisorDeps {
   superuserTools?: readonly McToolName[];
   /** FLIGHT alone inherits controller credentials; kept out of keeper specs and transcripts. */
   flightEnvironment?: () => Promise<Record<string, string>>;
+  /** The AUDIT seat's pack of the crew's record, as one JSON line (`audit/pack.ts`). */
+  auditPack?: (seatId: string) => string;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Fresh same-repository/default-branch provenance, only for a non-crew review subject. */
   externalReviewSubject?: (
@@ -678,6 +684,11 @@ export interface Supervisor {
       operator?: boolean;
     },
   ): Promise<{ runId: string }>;
+  /**
+   * Starts the AUDIT seat: no ticket and no branch, a detached read-only worktree of the default
+   * branch, and the audit brief (the pack of the crew's record) as its one first line.
+   */
+  startAudit(seatId: string, opts?: { first?: string }): Promise<{ runId: string }>;
   /**
    * The live check of a CLI update (`cli-auto.ts`): starts one build seat of `vendor` that holds no
    * run, through the same start path a real run takes (its account binding, seat config, sandbox
@@ -928,10 +939,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return undefined;
   }
 
+  /** The queued handoff lines in a Codex outbox file; an unreadable file reads as empty. */
+  const readOutbox = (path: string): [string, string][] => {
+    const entries = parseJson<unknown>(readFileSync(path, "utf8"), []);
+    return Array.isArray(entries)
+      ? entries.filter(
+          (e): e is [string, string] =>
+            Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "string",
+        )
+      : [];
+  };
+
   const transferKey = (runId: string) => `account-transfer:${runId}`;
   function transferState(runId: string): AccountTransfer | null {
     const text = store.getSetting(transferKey(runId));
-    return text === null ? null : (JSON.parse(text) as AccountTransfer);
+    return parseJson<AccountTransfer | null>(text, null);
   }
   function runBindingProblem(run: Run, accountId: string): boolean {
     const account = config.accounts.find((a) => a.id === accountId);
@@ -1880,7 +1902,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!init && !line.includes('"total_cost_usd"')) continue;
         let ev: unknown;
         try {
-          ev = JSON.parse(line);
+          ev = parseJson<unknown>(line, undefined, rethrowJson);
         } catch {
           continue;
         }
@@ -2385,7 +2407,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function removeCodexTmp(runId: string, value: string): boolean {
     let saved: { worktree: string; tmp: string };
     try {
-      saved = JSON.parse(value) as { worktree: string; tmp: string };
+      saved = parseJson<unknown>(value, undefined, rethrowJson) as {
+        worktree: string;
+        tmp: string;
+      };
       if (typeof saved.worktree !== "string" || typeof saved.tmp !== "string") return false;
       const parent = dirname(saved.tmp);
       const key = basename(saved.tmp);
@@ -2838,7 +2863,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           return;
         }
-        const denied = JSON.parse(store.getSetting(profilePolicyKey(run.id)) ?? "[]") as string[];
+        const denied = parseJson(store.getSetting(profilePolicyKey(run.id)), []) as string[];
         const flight = crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full";
         const credentialsChanged =
           flight &&
@@ -3334,7 +3359,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     transfer.queued = [
       ...new Map<string, string>([
         ...(transfer.queued ?? []),
-        ...(existsSync(outboxPath) ? JSON.parse(readFileSync(outboxPath, "utf8")) : []),
+        ...(existsSync(outboxPath) ? readOutbox(outboxPath) : []),
       ]),
     ].filter(([id]) => id !== transfer.handoffId && !superseded.has(id));
     save();
@@ -3371,7 +3396,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (stopping || runGone(run.id, seatId)) return refused(SHUTTING_DOWN);
     const mergeOutbox = (handoff = false) => {
       const entries = existsSync(outboxPath)
-        ? new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")))
+        ? new Map<string, string>(readOutbox(outboxPath))
         : new Map<string, string>();
       for (const id of superseded) entries.delete(id);
       for (const [id, text] of transfer.queued ?? []) entries.set(id, text);
@@ -3406,8 +3431,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (existsSync(run.transcriptPath)) {
         for (const line of readFileSync(run.transcriptPath, "utf8").split("\n")) {
           try {
-            const receipt = JSON.parse(line);
-            if (receipt.type === CODEX_DELIVERY) entries.delete(receipt.id);
+            const receipt = parseJson<{ type?: unknown; id?: unknown } | undefined>(
+              line,
+              undefined,
+              rethrowJson,
+            );
+            if (receipt === undefined) continue;
+            if (receipt.type === CODEX_DELIVERY && typeof receipt.id === "string")
+              entries.delete(receipt.id);
           } catch {
             // A partial final transcript line has no receipt yet.
           }
@@ -3453,7 +3484,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       transfer.target = transfer.source;
       // A failed fresh start must not deliver its handoff to the recovered source.
       if (transfer.handoffId && existsSync(outboxPath)) {
-        const entries = new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")));
+        const entries = new Map<string, string>(readOutbox(outboxPath));
         entries.delete(transfer.handoffId);
         writePrivate(outboxPath, JSON.stringify([...entries]));
       }
@@ -3539,6 +3570,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     if (def.loop === "watch") {
       throw new SupervisorError(409, watchStartRefusedText(call(info)));
+    }
+    if (def.loop === "audit") {
+      throw new SupervisorError(409, auditStartRefusedText(call(info)));
     }
     const busy = new SupervisorError(409, `${call(info)} already has a run`);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
@@ -4096,6 +4130,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return { runId };
   }
 
+  async function startAudit(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
+    const { runId } = await startDetached(seatId, { ...(opts ?? {}), audit: true });
+    return { runId };
+  }
+
   /**
    * A run in a detached checkout of the default branch, started through `checkedLaunch`. The watch
    * seat's start, and (`opts.check`, which gets the checkout's path and returns the one line to
@@ -4109,6 +4148,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       first?: string;
       firstPieces?: readonly PromptPiece[];
       check?: (checkout: string) => string;
+      /** The AUDIT seat's start: its loop is `audit`, and its brief carries the pack. */
+      audit?: boolean;
       operator?: boolean;
       /** Set once the check has got as far as invoking the new CLI (before that, a failure is not its). */
       stage?: { cli: boolean };
@@ -4120,8 +4161,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (check === undefined) refuseWhileHeld();
-    if (check === undefined && def.loop !== "watch") {
-      throw new SupervisorError(409, notWatchSeatText(call(info)));
+    if (check === undefined && def.loop !== (opts.audit === true ? "audit" : "watch")) {
+      throw new SupervisorError(
+        409,
+        opts.audit === true ? notAuditSeatText(call(info)) : notWatchSeatText(call(info)),
+      );
     }
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
@@ -4188,14 +4232,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const brief =
         check !== undefined
           ? check(checkout.path)
-          : watchBrief({
-              call: call(info),
-              repo: info.repo.github,
-              seats: info.session.seats
-                .filter((s) => seatDef(s).mode === "writer")
-                .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
-              fullSuite: info.repo.fullSuite ?? [],
-            });
+          : opts.audit === true
+            ? auditBrief({
+                call: call(info),
+                repo: info.repo.github,
+                pack: deps.auditPack?.(seatId) ?? "{}",
+              })
+            : watchBrief({
+                call: call(info),
+                repo: info.repo.github,
+                seats: info.session.seats
+                  .filter((s) => seatDef(s).mode === "writer")
+                  .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+                fullSuite: info.repo.fullSuite ?? [],
+              });
       const inbox =
         check !== undefined
           ? { text: brief, messageIds: [] as readonly string[] }
@@ -5440,6 +5490,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     startRun,
 
     startWatch,
+    startAudit,
 
     checkCli,
 

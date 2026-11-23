@@ -47,6 +47,7 @@ import {
 import type { CcConfig } from "../config.ts";
 import { observeFlightChecks, observeFlightMain } from "../flight/signals.ts";
 import { singleSelectField } from "../github/fields.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import { hasQuestionFence, parseAutonomyQuestion } from "../sd32.ts";
 import type { Store } from "../store.ts";
@@ -391,7 +392,7 @@ export async function readGithubJson(res: Response): Promise<unknown> {
     );
   }
   try {
-    return JSON.parse(text);
+    return parseJson<unknown>(text, undefined, rethrowJson);
   } catch {
     throw new Error(
       `github: response was not JSON (${res.headers.get("content-type") ?? "unknown"})`,

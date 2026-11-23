@@ -1,4 +1,5 @@
 import { approvedGrantPaths } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 const RUN_GRANT_KEY = (runId: string): string => `run-path-grant:${runId}`;
@@ -8,7 +9,7 @@ export function runPathGrants(store: Pick<Store, "getSetting">, runId: string): 
   const raw = store.getSetting(RUN_GRANT_KEY(runId));
   if (raw === null) return [];
   try {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed: unknown = parseJson<unknown>(raw, undefined, rethrowJson);
     return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === "string") : [];
   } catch {
     return [];

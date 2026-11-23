@@ -25,6 +25,7 @@ import { refillQueues } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { MoveResult } from "../github/board.ts";
 import { matchesConfiguredFocus } from "../instructions/focus.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 import { waitReader } from "./dependencies.ts";
 
@@ -409,7 +410,7 @@ export async function reorderQueue(
   } catch (e) {
     // Refused before any write: drop the record, so it can never be approved later.
     const raw = deps.store.getSetting(key);
-    if (raw !== null && (JSON.parse(raw) as Proposal).state === "pending")
+    if (raw !== null && parseJson<Partial<Proposal>>(raw, {}).state === "pending")
       deps.store.deleteSetting(key);
     throw e;
   }
@@ -442,7 +443,8 @@ async function resolve(
   if (!key.startsWith(PREFIX)) refuse("Unknown queue approval.");
   const raw = deps.store.getSetting(key);
   if (!raw) return refuse("Unknown queue approval.");
-  const p = JSON.parse(raw) as Proposal;
+  const p = parseJson<Proposal | null>(raw, null);
+  if (p === null) return refuse("Unknown queue approval.");
   if (p.state !== "pending")
     refuse("This proposal has already been handled; refresh the board before proposing again.");
   const save = (state: Proposal["state"]) => {

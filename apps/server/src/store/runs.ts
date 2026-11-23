@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type { AgentId, LoopKind, PullRequestView, RepoId, Run, RunLoop, RunStatus } from "@mc/core";
+import { parseJson } from "../json.ts";
 import { toRun } from "./rows.ts";
 import { MAX_OPEN_RUN_AGE_MS, RUN_ATTEMPTS_KEEP_MS, RUN_SNAPSHOT_KEEP_MS } from "./types.ts";
 
@@ -26,7 +27,7 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
         runId: r.run_id as string,
         kind: r.kind as string,
         at: r.at as number,
-        data: JSON.parse(r.data as string) as Record<string, unknown>,
+        data: parseJson<Record<string, unknown>>(r.data, {}),
       }));
     },
 

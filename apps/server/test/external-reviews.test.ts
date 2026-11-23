@@ -619,6 +619,37 @@ describe("external PR review subjects", () => {
     expect(h.writes.at(-1)?.body).toMatchObject({ state: "success", context: "mc/review" });
   });
 
+  it("publishes one comment and status when separate sync services race", async () => {
+    store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
+    buildRun({ endedAt: 2 });
+    const id = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
+    store.setReviewState(id, ["queued"], "running", { at: 4, runId: "retro:review" });
+    store.recordFindings(id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      checked: [],
+      tests: [],
+      at: 5,
+    });
+    const h = harness();
+    await Promise.all([createExternalReviews(h.deps).sync(), createExternalReviews(h.deps).sync()]);
+    expect(h.comments).toHaveLength(1);
+    expect(h.writes.filter((w) => w.path.includes("/statuses/"))).toHaveLength(1);
+  });
+
   it("posts a reported crew review over an earlier pending external row on the same head", async () => {
     store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
     buildRun({ endedAt: 2 });

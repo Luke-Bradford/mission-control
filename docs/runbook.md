@@ -219,7 +219,7 @@ review data includes its PR, head and waiting reason even when the reviewer cann
 The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
 tests. It links the available before/after screenshot manifest for that head, or states that no pairs
 were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
-isolated previews and copied data; it never reconstructs a historical approval. Each affected page is also rendered on the head alone in the web app's Demo mode at 1920×940 and 2560×1145 (the Demo scene at its busiest), stored beside the live pairs and linked in the PR body; a Demo render that fails keeps the PR in draft like a live one. Which pages a web change is photographed on comes from the static imports of the PR head's
+isolated previews and copied data; it never reconstructs a historical approval. Both sides of each pair are rendered in the web app's Demo mode, so a page the change did not touch is identical on both and keeps no pictures. Which pages a web change is photographed on comes from the static imports of the PR head's
 `apps/web/src`: each file in `pages/` is a page (a lazy `import()` of it is the boundary), what
 `main.tsx` and `App.tsx` reach counts for every page, and CSS belongs to the file that imports it.
 A file listed with no photographed pages needs no pairs (for example, one reached only by the unphotographed Ticket page). A file the graph does not list, or a graph that cannot be read, falls back to the folder rule. Graph reads use a temporary archive of the fetched head, share one read per head, retry after failure and are cancelled on shutdown. A reviewer run is
@@ -2616,23 +2616,33 @@ applies only to the repository whose checkout runs the hub, and only on the live
 pages: a page's own directory under `apps/web/src/` or its `pages/` file affects that page;
 `hud.css`, `shell/`, `components/` and any file that cannot be placed affect every page in the nav
 catalogue; test files and paths outside `apps/web` affect none. For each page the hub renders
-1600×1000 in the light and in the dark scheme, on main and on the PR head. Both sides are
+1600×1000 in the light scheme, on main and on the PR head, in the web app's **Demo** mode (simulated
+crew; nothing is read from the hub), so before and after are both Demo data and a page the change
+did not touch diffs to zero. A change about colour adds the dark scheme and one about size adds a 2560×1145
+viewport. That is judged from the file names (theme, dark, light, colour, tokens, palette; width,
+responsive, breakpoint, viewport, layout, resize) and from the added and removed lines of the diff
+against main (colours, `prefers-color-scheme`, `@media`, `min-width`, and the like), so an ordinary
+CSS file counts too. A diff that cannot be read photographs every scheme and width. A page counts
+as changed on an exact pixel comparison, not the diff's colour tolerance, so a small colour step
+keeps its pictures. Both sides are
 hubs started as `MC_NO_LOOP_WRITES=1` previews on a free loopback port, each from its own copy of
-one `VACUUM INTO` snapshot of the live database, so they show the same data. Each side is a
+one `VACUUM INTO` snapshot of the live database. Each side is a
 detached worktree with `pnpm install --offline --frozen-lockfile` and a web build, torn down when
 its pages are done. Captures run one at a time; a failed capture is tried again after ten minutes.
 
 **What is stored.** Under `pr-evidence/<repo>/<pr>/<head sha>/` in the data dir (directories
-`0700`, files `0600`): `<page>-<light|dark>-<before|after|diff>.png` and `manifest.json`, which
-lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
+`0700`, files `0600`): `<page>-<light|dark>[-2560]-<before|after|diff>.png` for the pages that changed and `manifest.json`, which
+names the pages that did not change (`unchanged`; they keep no pictures) and lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
 first). A pixel counts as changed when its colour differs by more than 24 across the three
-channels; regions group changes on a 16 px grid. The three newest heads of a PR are kept. The
-manifest is written last, so a head with no manifest was never captured. Nothing is uploaded.
+channels; regions group changes on a 16 px grid. Only the latest head of a PR is kept; storing a newer head removes every older one. The
+manifest is written last, so a head with no manifest was never captured.
+
+**On GitHub.** The before and after pictures of the changed pages (not the diff) are uploaded with `gh release create` as the files of one prerelease tagged `qa-pr-<n>` at the PR head, replaced for each new head. The PR body then shows them as images from `https://github.com/<repo>/releases/download/qa-pr-<n>/`. Only Demo data is in them (the repo is public). A head that moved or a PR that closed during the capture is not published, and a release whose PR-body post was refused for that reason is deleted. The hub's hourly data-folder sweep deletes the release (and its tag) of every PR that is neither open nor merged-but-not-live yet, with the same rule that removes the pictures on disk, whether or not the engine is on. If the upload fails the capture still stands and the PR body links the hub's own copies.
 
 **Where it is read.** `GET /api/prs/<n>/evidence` answers the newest head's manifest (`?sha=` for
 one head, `?repo=` when two repos have the number) and `GET /api/prs/<n>/evidence/<sha>/<name>.png`
 an image. Neither needs the operator token, like the other read routes. The PR body gets a
-`## Screenshot evidence` section with one line per pair and links to its three images; it is
+`## Screenshot evidence` section with one entry per changed page (before and after side by side) and the names of the unchanged ones; it is
 rewritten for each new head and kept when RETRO's Minor findings are posted. RETRO's brief lists
 the pairs and the images are copied into its scratch copy under `.mc-review/evidence/`.
 
@@ -2641,10 +2651,8 @@ the pairs for its current head exist, so the reviewer always has them and a PR a
 draft cannot merge on a new head without them. Each pass that is held records a loop event naming
 the pages still missing; the run is not parked, and moves on at the next pass once the capture
 lands. A capture that fails (or runs past its 15-minute deadline) is retried after ten minutes and
-the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`. A capture stopped by a hub shutdown says so and names no page. The review is held at that point too, not let through: the engine asks for no review, marks nothing ready and merges nothing until the pairs exist, so a capture that keeps failing stops the PR visibly, with that reason in the loop event, instead of reaching RETRO without pictures. A push makes a
+the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme at 1600, head side: <reason>`. A capture stopped by a hub shutdown says so and names no page. The review is held at that point too, not let through: the engine asks for no review, marks nothing ready and merges nothing until the pairs exist, so a capture that keeps failing stops the PR visibly, with that reason in the loop event, instead of reaching RETRO without pictures. A push makes a
 new head, which needs its own pairs.
-
-**Token-guarded pages.** Pages such as Audit read routes that need the operator token, and the renderer is refused the token's bootstrap on purpose. Each side's hub writes its own throwaway token (`operator-token`) beside its database copy, so each side gets a folder of its own under `capture-*`. The capture reads that file and gives it to the render, which adds it as `x-mc-operator` to that hub's `/api/` GET reads only, outside the page. The live hub's token is never used, and the page's script, the images, the manifest, the logs and the PR body never hold it. If a side wrote no token file, its pages render as before and may show the sign-in error.
 
 **After a restart.** A hub that stops in the middle of a capture leaves database copies in `capture-*` folders and side checkouts (with their git worktree registrations) under `pr-evidence-work/` in the data dir. At start the live hub deletes both, runs `git worktree prune` on its checkout, and logs what it removed; nothing else uses that folder. To see what a capture would store without a PR, run `node --experimental-strip-types apps/server/src/pr-evidence/probe.ts http://127.0.0.1:<port> [out dir]` against a preview hub: it saves `<page>-<scheme>.png` for every page.
 
@@ -2657,6 +2665,10 @@ system Chrome, `playwright-core` and the repo's pnpm store offline, as the FLIGH
 branch previews do.
 
 ## Audit API
+
+**The AUDIT seat.** A seat with the role `AUDIT` (loop `audit`, read-only, no ticket) is the crew's auditor. The hub starts it on a timer: each minute `auditTick` (`apps/server/src/audit/timer.ts`, only where the engine runs, never in a preview) looks at the first AUDIT seat of each session and starts it when its setting `audit-seat-started:<seat>` is missing or at least `audit.report_every_hours` old (config, 1–48, default 4). The setting is written before the start, so a failed start waits a full interval. A crew pause for the seat, a seat that has a run and an account at its stop skip the tick. The operator may also start it by hand (`POST /api/seats/:id/start` with no issue). The run's brief is a pack of the crew's record (`apps/server/src/audit/pack.ts`): seats, build seats running against configured, board counts per column, open PRs with stage and hours in it, open questions' ages, tickets opened and closed over 7 days, FLIGHT starts in 24 hours, spend, review rounds and spec bounces over 7 days, and the previous report; every list holds at most 20 rows and PR titles are wrapped as outside text. The auditor reads `roles/*.md`, may search the web, checks the pack against the live board with `read_ticket`, `list_tickets` and `read_pr`, and calls `report_audit` once (a verdict and at most 10 findings, each with `rank`, `area`, `problem`, `evidence`, `cause`, at most 5 `links` that start with `/` or `https://github.com/`, and `owner`: `flight` or `operator`). The report is saved in `audit_reports` (one row per run; nothing is posted to GitHub), then the hub ends the run. A run that ends with no report raises the usual no-report flag. FLIGHT's next wake carries the newest report it has not been told (`audit`: id, time, verdict and the top 3 findings); it is an urgent wake fact and is marked told when FLIGHT is sent it or reads `flight_state`.
+
+`GET /api/audit/report` returns `{ report, nextDueAt }`: `report` is the newest `AuditReport` of the FLIGHT session's repo (`id`, `repoId`, `runId`, `at`, `verdict`, `findings`), or null before the first; `nextDueAt` is when the next run is due (null: no AUDIT seat, or the timer has not started it yet).
 
 `GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. The hub reads the 30d range once at start and keeps each range's view for 30 seconds; an older view is still served at once while a fresh one is built behind the reply, so repeats never wait on the store (a view can be up to one rebuild behind). Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
 
@@ -3054,7 +3066,10 @@ are excluded from the current projection.
 
 The hub removes its own finished work so its data folder stops growing (#1756). Once an hour (and two minutes after boot) on the live hub, `apps/server/src/disk/sweep.ts` runs one sweep and logs `disk sweep: removed N item(s), B bytes, from the data folder` when it removed anything.
 
-- **Pictures and evidence only while a PR is open.** A PR's `pr-evidence/<repo>/<pr>` folder, its QA report images (`qa-report-assets`) its review screenshots (`review-screenshots`) and the pictures attached to a Needs-you question (`attention-material-assets`, until the question is answered or closed) are removed once the PR is no longer open and its files have sat untouched for an hour. The QA history keeps its text record; its picture links then stop resolving.
+- **Pictures and evidence only until the change is live.** A PR's `pr-evidence/<repo>/<pr>` folder, its `pr-evidence-work/kept-<pr>` work folder, its QA report images (`qa-report-assets`) its review screenshots (`review-screenshots`) and the pictures attached to a Needs-you question (`attention-material-assets`, until the question is answered or closed) are removed once the PR is closed unmerged, or merged and live, and its files have sat untouched for an hour. Live means the PR's merge commit is in the history of the code the hub runs (the SHA `GET /api/version` reports); a merged PR the hub has not updated past keeps its pictures. This applies only to the hub's own repo; a merged PR of any other repo, one with no merge commit on record, or any PR when the running SHA is unreadable counts as finished at merge. The QA history keeps its text record; its picture links then stop resolving.
+- **One head's QA pictures.** For an open PR only the images cited by a QA report of its current head are kept; an older head's go on the next sweep. PR evidence keeps the latest head and the one before it (`PR_EVIDENCE_KEEP`).
+- **Size caps.** Each picture store has a cap (`IMAGE_CAPS`: evidence 384 MB, QA images 256 MB, review shots, HUD shots and Needs-you pictures 128 MB each). Over its cap, the sweep removes that store's oldest pictures first (a head folder for evidence), even ones an open PR cites.
+- **One-off clean.** The first sweep after the hub first runs this code (setting `disk-leftovers-cleaned`) uses no grace period, so what merged PRs already left behind goes at once.
 - **Scratch is temporary.** Every folder (plain files, such as the controller monitor's state, are left) under the data folder's `controller/` (except `controller/designs`) and under `pr-evidence-work/` that has been untouched for 3 days is removed.
 - **Only inside the data folder.** The sweep never follows a symlink and never removes a path that resolves outside the data folder. It does not touch observed loops or their worktrees.
 - **What the hub holds.** `GET /api/disk-use` returns bytes by kind: `worktrees` (the crew's worktree folder), `pictures`, `evidence`, `scratch`, `database`, and their `total`. It is measured at most once a minute.

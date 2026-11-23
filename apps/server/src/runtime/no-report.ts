@@ -13,6 +13,7 @@ const REPORT_TOOLS = {
   build: MC_TOOL_NAMES.reportEvidence,
   review: MC_TOOL_NAMES.reportFindings,
   plan: MC_TOOL_NAMES.reportPlan,
+  audit: MC_TOOL_NAMES.reportAudit,
 } as const;
 
 /**
@@ -27,7 +28,9 @@ export function runReported(store: Store, run: Run, loop: LoopKind): boolean {
     ? ev !== null && !(fresh.loop?.phase === "working" && ev.id <= fresh.loop.reportedEvidenceId)
     : loop === "review"
       ? review?.runId === run.id && review.verdict !== null
-      : store.loopEventsOfRun(run.id).some((e) => e.key === `${run.id}:plan`);
+      : loop === "audit"
+        ? store.auditReportOfRun(run.id) !== null
+        : store.loopEventsOfRun(run.id).some((e) => e.key === `${run.id}:plan`);
 }
 
 /** Records an unreported exit, including one recovered from an exited keeper after a restart. */

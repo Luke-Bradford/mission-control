@@ -1,6 +1,8 @@
 /** The fail-closed browser boundary for FLIGHT's read-only HUD screenshots. */
 import { type ChildProcess, fork } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEMO_MARKER_LABEL,
@@ -506,6 +508,10 @@ export function renderHudInHelper(
     const value = process.env[key];
     if (value !== undefined) env[key] = value;
   }
+  // Chrome puts its profile folder in TMPDIR; a Chrome that is killed never removes it. Give this
+  // helper a TMPDIR of its own and delete it once the helper has been stopped.
+  const scratch = mkdtempSync(join(tmpdir(), "mc-hud-"));
+  env.TMPDIR = scratch;
   const child = fork(options.helperPath ?? HELPER_PATH, [], {
     detached: true,
     env,
@@ -519,7 +525,10 @@ export function renderHudInHelper(
       done = true;
       clearTimeout(timer);
       options.signal?.removeEventListener("abort", abort);
-      void stopHelper(child, closeMs).then(settle);
+      void stopHelper(child, closeMs).then(() => {
+        rmSync(scratch, { recursive: true, force: true });
+        settle();
+      });
     };
     const timer = setTimeout(
       () => finish(() => reject(new Error(`HUD screenshot timed out after ${deadlineMs} ms.`))),

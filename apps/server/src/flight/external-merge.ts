@@ -22,6 +22,7 @@ import {
   setExternalPrControl,
 } from "../external-pr-control.ts";
 import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
+import { parseJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { branchOwned, isExternalReview, readExternalSubject } from "../review/external.ts";
 import type { Store } from "../store.ts";
@@ -63,7 +64,7 @@ export async function mergeExternalPr(i: {
   const read = async (args: string[]): Promise<unknown> => {
     const reply = await i.gh(args, { cwd: i.cwd });
     if (reply.code !== 0) throw new Error("The PR merge evidence could not be read.");
-    return JSON.parse(reply.stdout);
+    return parseJson<unknown>(reply.stdout, null);
   };
   try {
     const subject = await readExternalSubject(i.gh, i.cwd, repo, number, sha);

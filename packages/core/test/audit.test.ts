@@ -3,12 +3,19 @@ import {
   AUDIT_EXPECTED_TOKENS_DEFAULT,
   AUDIT_KIND_TIERS,
   AUDIT_TIERS,
+  auditHrefOk,
   auditTier,
   classifyOveruse,
   groupOveruse,
   overusePrevention,
   tokenBaselines,
 } from "../src/audit.ts";
+
+describe("auditHrefOk", () => {
+  it("refuses a backslash path that URL parsing would send to another origin", () => {
+    expect(auditHrefOk("/\\evil.com")).toBe(false);
+  });
+});
 
 const facts = (over: Partial<Parameters<typeof classifyOveruse>[0]> = {}) => ({
   size: "M" as string | null,

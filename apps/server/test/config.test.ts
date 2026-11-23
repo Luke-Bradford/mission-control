@@ -785,7 +785,7 @@ ${seats.join("\n")}
         "SCOUT: { prompt: roles/SCOUT.md, model: haiku, mode: read-only, loop: build }",
       ]);
       expect(e.message).toBe(
-        "crew.roles.SCOUT.loop: a read-only role's loop is none or plan or watch, not build",
+        "crew.roles.SCOUT.loop: a read-only role's loop is none or plan or watch or audit, not build",
       );
     });
 

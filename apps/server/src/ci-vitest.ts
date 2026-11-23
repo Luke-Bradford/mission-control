@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
+import { parseJson, rethrowJson } from "./json.ts";
 
 export const WORKER_RPC_TIMEOUT = '[vitest-worker]: Timeout calling "onTaskUpdate"';
 
@@ -49,10 +50,18 @@ export function vitestVerdict(
 
 export function readVitestReportTotals(file: string): VitestReportTotals | undefined {
   try {
-    const j = JSON.parse(readFileSync(file, "utf8"));
-    const unfinished = (j.testResults ?? []).flatMap(
-      (f: { assertionResults?: { status?: string }[] }) =>
-        (f.assertionResults ?? []).filter((a) => !FINAL_STATUSES.has(String(a.status))),
+    const j = parseJson<
+      | {
+          testResults?: { assertionResults?: { status?: string }[] }[];
+          numFailedTests?: unknown;
+          numFailedTestSuites?: unknown;
+          numTotalTestSuites?: unknown;
+        }
+      | undefined
+    >(readFileSync(file, "utf8"), undefined, rethrowJson);
+    if (j === undefined) return undefined;
+    const unfinished = (j.testResults ?? []).flatMap((f) =>
+      (f.assertionResults ?? []).filter((a) => !FINAL_STATUSES.has(String(a.status))),
     );
     return {
       numUnfinishedTests: unfinished.length,

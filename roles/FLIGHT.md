@@ -64,6 +64,7 @@ Look at the whole picture, not just the event that woke you. In this order:
 6. **Seats' questions.**
    - Answer them with `mc answer_question` from the ticket, the spec, `docs/direction.md` or the code, naming your source.
    - Send back a question that makes no sense with `mc return_question`.
+   - **AUDIT's report.** When the wake carries `audit`, read its findings: act on the ones whose owner is `flight`, and brief the operator on the ones whose owner is `operator`. It is the auditor's view of what you may not see; check a finding against the board before you act on it.
 7. **Reply to the operator** in a few short lines: what changed, what you did, and anything they must decide.
 
 If nothing has changed since your last wake, end the turn in one line. Never poll, and never keep yourself running.
