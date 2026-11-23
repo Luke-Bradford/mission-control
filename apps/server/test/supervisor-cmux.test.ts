@@ -180,6 +180,37 @@ const restart = async (state: string, first: { sup: { stopAll(): Promise<void> }
   return next;
 };
 
+it("a usage limit in the transcript parks the seat", async () => {
+  const state = join(dir, "fake-cmux.json");
+  const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
+  sup.start();
+  await sup.startRun("guido-1", 42);
+  await until(() => expect(readFileSync(state, "utf8")).toContain("workspace_id"));
+  const source = join(dir, "limit-source.jsonl");
+  writeFileSync(source, "");
+  edit(state, (session) => {
+    session.transcript_path = source;
+    session.agent_lifecycle = "running";
+  });
+  await until(() => expect(seatState("guido-1")).toBe("running"));
+  appendFileSync(
+    source,
+    `${JSON.stringify({
+      type: "assistant",
+      isApiErrorMessage: true,
+      error: "rate_limit",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Claude AI usage limit reached|1900000000" }],
+      },
+    })}\n`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  setLifecycle(state, "idle");
+  await until(() => expect(store.seatSession("guido-1")).toMatchObject({ state: "parked" }));
+  expect(store.seatSession("guido-1")?.reason).toContain("rate limited until");
+});
+
 it("an operator's own prompt is a turn", async () => {
   const { state, run } = await idleRun();
   const started = store.seatSession("guido-1")?.lastTurnStartedAt ?? 0;

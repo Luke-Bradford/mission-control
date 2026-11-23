@@ -429,6 +429,92 @@ it("lists a message cmux never took as undelivered once the session ends", async
   expect(session.undelivered).toEqual(["the prompt"]);
 });
 
+const idleAt = (source: string) => ({
+  workspaceId: "workspace-1",
+  sessionId: "session-1",
+  pid: 42,
+  lifecycle: "idle" as const,
+  transcriptPath: source,
+});
+const line = (value: unknown) => `${JSON.stringify(value)}\n`;
+
+it("finishes a turn that began and ended between two polls", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const source = join(dir, "source.jsonl");
+  writeFileSync(source, "");
+  const session = stubSession(
+    dir,
+    stubCmux({
+      agents: async () => [idleAt(source)],
+      // cmux only ever reports idle: the turn fell between two samples
+      send: async () => {
+        appendFileSync(
+          source,
+          line({ type: "user", message: { role: "user", content: "wake" } }) +
+            line({
+              type: "assistant",
+              message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+            }),
+        );
+        return "sent";
+      },
+    }),
+  );
+  const events: SessionEvent[] = [];
+  session.on((event) => events.push(event));
+  await session.ready;
+  session.send("wake");
+  await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
+  expect(events.map((e) => e.kind)).toContain("turn-start");
+  expect(readFileSync(join(dir, "run.jsonl"), "utf8")).toContain('"mc_cmux":true');
+  await session.close();
+});
+
+it("reports a usage limit as a rate limit and the turn as an error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const source = join(dir, "source.jsonl");
+  writeFileSync(source, "");
+  const session = stubSession(
+    dir,
+    stubCmux({
+      agents: async () => [idleAt(source)],
+      send: async () => {
+        appendFileSync(
+          source,
+          line({ type: "user", message: { role: "user", content: "wake" } }) +
+            line({
+              type: "assistant",
+              isApiErrorMessage: true,
+              error: "rate_limit",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: "Claude AI usage limit reached|1900000000" }],
+              },
+            }),
+        );
+        return "sent";
+      },
+    }),
+  );
+  const events: SessionEvent[] = [];
+  session.on((event) => events.push(event));
+  await session.ready;
+  session.send("wake");
+  await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
+  expect(events).toContainEqual({
+    kind: "rate-limit",
+    status: "rejected",
+    resetsAt: 1_900_000_000_000,
+  });
+  expect(events.findLast((e) => e.kind === "result")).toMatchObject({ isError: true });
+  expect(events.findIndex((e) => e.kind === "rate-limit")).toBeLessThan(
+    events.findIndex((e) => e.kind === "result"),
+  );
+  await session.close();
+});
+
 it("ends a registered seat whose cmux stops answering", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
   dirs.push(dir);

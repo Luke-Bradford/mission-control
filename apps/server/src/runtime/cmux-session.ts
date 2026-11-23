@@ -40,6 +40,21 @@ export interface CmuxSessionInput {
   onWorkspace?: (workspace: string, pid: number | null) => void;
 }
 
+const LIMIT_TEXT = /usage limit|hit your limit|limit reached|rate.?limit/i;
+/** The text of an API-error assistant line. */
+function apiErrorText(data: Record<string, unknown>): string {
+  const content = isObj(data.message) ? data.message.content : null;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => (isObj(part) && typeof part.text === "string" ? part.text : ""))
+    .join(" ");
+}
+/** The reset time of a limit line (`...limit reached|<epoch seconds>`), in ms; null when it has none. */
+function limitResetsAt(text: string): number | null {
+  const seconds = /\|(\d{9,11})\b/.exec(text)?.[1];
+  return seconds === undefined ? null : Number(seconds) * 1000;
+}
+
 /** Polls in a row that may fail before a registered seat is given up on. */
 export const POLL_FAILURE_LIMIT = 5;
 /** Failed tries between two log lines while a message keeps being retried. */
@@ -118,6 +133,13 @@ function cmuxSession(
   let lifecycle: "idle" | "running" | "needsInput" | null = null;
   let trustSent = false;
   let pollFailures = 0;
+  // A hub message was sent and its turn is not finished yet. cmux can go idle, running, idle between
+  // two polls, so a turn is also finished when Claude's answer is in the transcript and cmux is idle.
+  let expectTurn = false;
+  let answered = false;
+  let turnStarted = false;
+  // The turn ended in an API error (a usage limit, say): its result is an error.
+  let turnError = false;
   const undelivered: string[] = [];
   let sendChain = Promise.resolve();
   let attached = attachedWorkspace !== undefined;
@@ -172,6 +194,15 @@ function cmuxSession(
             model: typeof data.model === "string" ? data.model : null,
           });
         }
+        if (isObj(data) && data.type === "assistant") {
+          if (expectTurn) answered = true;
+          if (data.isApiErrorMessage === true) {
+            turnError = true;
+            const text = apiErrorText(data);
+            if (data.error === "rate_limit" || LIMIT_TEXT.test(text))
+              emit({ kind: "rate-limit", status: "rejected", resetsAt: limitResetsAt(text) });
+          }
+        }
         if (
           isObj(data) &&
           data.type === "user" &&
@@ -194,6 +225,19 @@ function cmuxSession(
         /* transcript diagnostics are still copied */
       }
     }
+  };
+  const finishTurn = () => {
+    appendFileSync(
+      i.transcriptPath,
+      `{"type":"result","subtype":"${turnError ? "error_during_execution" : "success"}","is_error":${turnError},"stop_reason":"end_turn","mc_cmux":true}\n`,
+      { mode: 0o600 },
+    );
+    const isError = turnError;
+    expectTurn = false;
+    answered = false;
+    turnStarted = false;
+    turnError = false;
+    emit({ kind: "result", isError, stopReason: "end_turn" });
   };
   const pollOnce = async () => {
     if (!alive || detached || workspace === null) return;
@@ -225,18 +269,12 @@ function cmuxSession(
         emit({ kind: "init", sessionId, model: null });
       }
       if (record.transcriptPath) source = record.transcriptPath;
+      const linesBefore = lines;
       copy();
       if (lifecycle === null) {
         lifecycle = record.lifecycle;
         if (attached) {
-          if (lifecycle === "idle" && i.awaiting) {
-            appendFileSync(
-              i.transcriptPath,
-              '{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","mc_cmux":true}\n',
-              { mode: 0o600 },
-            );
-            emit({ kind: "result", isError: false, stopReason: "end_turn" });
-          }
+          if (lifecycle === "idle" && i.awaiting) finishTurn();
           if (lifecycle === "needsInput") emit({ kind: "needs-input" });
           if (lifecycle === "running" && i.savedState !== "running") emit({ kind: "turn-start" });
           attached = false;
@@ -244,16 +282,17 @@ function cmuxSession(
         }
       } else if (lifecycle !== record.lifecycle) {
         lifecycle = record.lifecycle;
-        if (lifecycle === "running") emit({ kind: "turn-start" });
-        if (lifecycle === "needsInput") emit({ kind: "needs-input" });
-        if (lifecycle === "idle") {
-          appendFileSync(
-            i.transcriptPath,
-            '{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","mc_cmux":true}\n',
-            { mode: 0o600 },
-          );
-          emit({ kind: "result", isError: false, stopReason: "end_turn" });
+        if (lifecycle === "running") {
+          turnStarted = true;
+          emit({ kind: "turn-start" });
         }
+        if (lifecycle === "needsInput") emit({ kind: "needs-input" });
+        if (lifecycle === "idle") finishTurn();
+      } else if (lifecycle === "idle" && expectTurn && answered && lines === linesBefore) {
+        // The whole turn fell between two polls: Claude's answer is in the transcript, cmux is
+        // idle and the transcript has stopped growing.
+        if (!turnStarted) emit({ kind: "turn-start" });
+        finishTurn();
       }
       pollFailures = 0;
       resolveReady();
@@ -348,6 +387,9 @@ function cmuxSession(
             if (sent === "sent") {
               textIn = true;
               await i.cmux.sendKey(workspace, "enter");
+              expectTurn = true;
+              answered = false;
+              turnStarted = false;
             }
           } catch (error) {
             // The supervisor has already recorded this prompt as delivered, so it is never
