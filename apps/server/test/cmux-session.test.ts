@@ -40,44 +40,48 @@ describe("cmux launcher", () => {
     expect(script).toContain(`rm -f '${envFile}'`);
   });
 
-  it("starts the CLI from a clean environment that keeps cmux's variables", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
-    dirs.push(dir);
-    const envFile = join(dir, "env");
-    writeFileSync(envFile, "export PRIVATE_KEY='secret'\n");
-    const file = join(dir, "launch.zsh");
-    writeFileSync(
-      file,
-      launcherScript({
-        command: "env",
-        args: [],
-        env: { PATH: "/operator/path", LANG: "en_GB.UTF-8", HOME: "/seat/home" },
-        privateKeys: ["PRIVATE_KEY"],
-        nodeDir: "/usr/bin",
-        envFile,
-      }),
-      { mode: 0o700 },
-    );
-    const out = spawnSync("/bin/zsh", [file], {
-      encoding: "utf8",
-      env: {
-        PATH: "/usr/bin:/bin",
-        GH_TOKEN: "x",
-        ANTHROPIC_API_KEY: "y",
-        CMUX_SOCKET_PATH: "/s",
-        TERM: "xterm",
-      },
-    }).stdout;
-    expect(out).toContain("CMUX_SOCKET_PATH=/s");
-    expect(out).toContain("TERM=xterm");
-    expect(out).toContain("LANG=en_GB.UTF-8");
-    expect(out).toContain("HOME=/seat/home");
-    expect(out).toContain("PRIVATE_KEY=secret");
-    expect(out).toContain("PATH=/usr/bin:/usr/bin:/bin");
-    expect(out).not.toContain("GH_TOKEN");
-    expect(out).not.toContain("ANTHROPIC_API_KEY");
-    expect(existsSync(envFile)).toBe(false);
-  });
+  // the launcher is a zsh script for a Mac; a runner without zsh cannot run it
+  it.skipIf(!existsSync("/bin/zsh"))(
+    "starts the CLI from a clean environment that keeps cmux's variables",
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+      dirs.push(dir);
+      const envFile = join(dir, "env");
+      writeFileSync(envFile, "export PRIVATE_KEY='secret'\n");
+      const file = join(dir, "launch.zsh");
+      writeFileSync(
+        file,
+        launcherScript({
+          command: "env",
+          args: [],
+          env: { PATH: "/operator/path", LANG: "en_GB.UTF-8", HOME: "/seat/home" },
+          privateKeys: ["PRIVATE_KEY"],
+          nodeDir: "/usr/bin",
+          envFile,
+        }),
+        { mode: 0o700 },
+      );
+      const out = spawnSync("/bin/zsh", [file], {
+        encoding: "utf8",
+        env: {
+          PATH: "/usr/bin:/bin",
+          GH_TOKEN: "x",
+          ANTHROPIC_API_KEY: "y",
+          CMUX_SOCKET_PATH: "/s",
+          TERM: "xterm",
+        },
+      }).stdout;
+      expect(out).toContain("CMUX_SOCKET_PATH=/s");
+      expect(out).toContain("TERM=xterm");
+      expect(out).toContain("LANG=en_GB.UTF-8");
+      expect(out).toContain("HOME=/seat/home");
+      expect(out).toContain("PRIVATE_KEY=secret");
+      expect(out).toContain("PATH=/usr/bin:/usr/bin:/bin");
+      expect(out).not.toContain("GH_TOKEN");
+      expect(out).not.toContain("ANTHROPIC_API_KEY");
+      expect(existsSync(envFile)).toBe(false);
+    },
+  );
 
   it("copies the cmux transcript and follows a running, waiting and idle seat", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
