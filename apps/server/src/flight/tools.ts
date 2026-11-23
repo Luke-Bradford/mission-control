@@ -3736,6 +3736,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           pairs: old?.pairs ?? [],
           ...(old?.unchanged ? { unchanged: old.unchanged } : {}),
           ...(old?.published ? { published: old.published } : {}),
+          ...(old?.releaseRemoval ? { releaseRemoval: true as const } : {}),
           submitted: [...(old?.submitted ?? []), ...submitted].filter(
             (image, index, all) => all.findIndex((other) => other.name === image.name) === index,
           ),
