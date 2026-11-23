@@ -2294,7 +2294,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             stopGraceMs: deps.stopGraceMs,
           });
         } else {
-          const ref = run.reviewId != null ? `PR ${run.reviewId}` : (run.ticket ?? def.loop);
+          const ref =
+            run.reviewId != null
+              ? `PR ${store.review(run.reviewId)?.prNumber ?? run.reviewId}`
+              : (run.ticket ?? def.loop);
           session = startCmuxSession({
             cmux: createCmux(deps.cmuxCommand, log),
             name: `${info.seat.id} · ${ref}`,

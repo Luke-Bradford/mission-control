@@ -18,7 +18,9 @@ for (;;) {
   try {
     mkdirSync(lockPath);
     break;
-  } catch {
+  } catch (error) {
+    // A state folder that is gone means the test ended: stop instead of waiting for a lock.
+    if (error?.code !== "EEXIST") process.exit(1);
     // A lock older than a second belongs to a call that was killed: take it over.
     try {
       if (Date.now() - statSync(lockPath).mtimeMs > 1000)
