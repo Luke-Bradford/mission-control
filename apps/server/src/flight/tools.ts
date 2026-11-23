@@ -3952,6 +3952,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           `--repo=${repo.github}`,
           "--json=author,isCrossRepository,headRefOid,headRefName",
         ]);
+        // The head moved while the run waited for FLIGHT: adopt it, as for any outside head.
+        if (
+          value &&
+          value.headRefName === run.branch &&
+          value.isCrossRepository === false &&
+          typeof value.headRefOid === "string" &&
+          value.headRefOid !== sha
+        )
+          return adoptOutsideHead(run, a, repo, ctx);
         if (
           !value ||
           value.headRefOid !== sha ||
