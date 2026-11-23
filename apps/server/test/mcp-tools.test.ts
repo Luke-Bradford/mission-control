@@ -6785,6 +6785,46 @@ describe("commit: a merge of main in progress", () => {
     expect(parents()).toEqual([tip, mainSha]);
   });
 
+  describe("a file both sides changed that merges cleanly", () => {
+    /** The branch's earlier commit edits docs/d.md's top; main edits its bottom. */
+    beforeEach(() => {
+      git(wt, "merge", "--abort");
+      // main starts over from the commit before the outer "main moves", so the branch merges it clean
+      git(clone, "reset", "-q", "--hard", "HEAD~1");
+      const body = (top: string, bottom: string) =>
+        `${top}\n${Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n")}\n${bottom}\n`;
+      writeFileSync(join(clone, "docs/d.md"), body("top", "bottom"));
+      git(clone, "add", "docs/d.md");
+      git(clone, "commit", "-qm", "main adds d");
+      git(wt, "merge", "-q", "--no-edit", git(clone, "rev-parse", "main").trim());
+      write("docs/d.md", body("top by branch", "bottom"));
+      git(wt, "commit", "-qam", "branch edits d");
+      tip = head();
+      store.addRunCommit({ runId: RUN, repoId: "mc", branch: BRANCH, sha: tip, at: NOW });
+      writeFileSync(join(clone, "docs/d.md"), body("top", "bottom by main"));
+      git(clone, "commit", "-qam", "main edits d");
+      mainSha = git(clone, "rev-parse", "main").trim();
+      startMerge();
+      merging({ mainSha, files: ["apps/a.ts"] });
+      write("apps/a.ts", "both\n");
+    });
+
+    it("commits: the clean merge of docs/d.md is neither main's nor the seat's edit", async () => {
+      expect(readFileSync(join(wt, "docs/d.md"), "utf8")).toContain("top by branch");
+      const r = await commit("merge: main into the branch");
+      expect(r.text).toMatch(/^Committed /);
+      expect(parents()).toEqual([tip, mainSha]);
+    });
+
+    it("still refuses the seat's own edit of that file", async () => {
+      write("docs/d.md", "mine\n");
+      const r = await commit("merge: main into the branch");
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("docs/d.md");
+      expect(mergeHead()).toBe(mainSha);
+    });
+  });
+
   it("refuses conflict markers left in a file, and keeps the merge", async () => {
     const r = await commit("merge: main into the branch");
     expect(r).toEqual({ text: commitMarkersText(["apps/a.ts"]), isError: true });
