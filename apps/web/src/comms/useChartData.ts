@@ -14,12 +14,27 @@ import {
 } from "./chartTypes.ts";
 
 type RailSeatView = {
-  id: string; name: string; role: string | null; color: string; presence: Presence; state: string | null;
-  since: number | null; alert: boolean; hub: boolean; sent: number; received: number;
+  id: string;
+  name: string;
+  role: string | null;
+  color: string;
+  presence: Presence;
+  state: string | null;
+  since: number | null;
+  alert: boolean;
+  hub: boolean;
+  sent: number;
+  received: number;
 };
 type RailEdgeView = {
-  key: string; a: string; b: string; aToB: number; bToA: number; weight: number;
-  last: LastMessage | null; waiting: Waiting | null;
+  key: string;
+  a: string;
+  b: string;
+  aToB: number;
+  bToA: number;
+  weight: number;
+  last: LastMessage | null;
+  waiting: Waiting | null;
 };
 type RailGroup = { key: string; ids: string[]; header: boolean };
 
