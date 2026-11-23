@@ -1079,6 +1079,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    */
   async function cmuxPreflight(info: SeatInfo): Promise<void> {
     if (isCodex(info) || (deps.command !== undefined && deps.cmuxCommand === undefined)) return;
+    // a busy seat is refused as busy by its own check, whatever cmux says
+    if (
+      starting.has(info.seat.id) ||
+      live.has(info.seat.id) ||
+      isActive(store.seatSession(info.seat.id))
+    )
+      return;
     const cmux = createCmux(
       deps.cmuxCommand,
       log,
@@ -3698,12 +3705,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (def.loop === "watch") {
       throw new SupervisorError(409, watchStartRefusedText(call(info)));
     }
+    await cmuxPreflight(info);
     const busy = new SupervisorError(409, `${call(info)} already has a run`);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw busy;
     }
-    await cmuxPreflight(info);
     const waiting = store.offSeatRuns();
     const ref = `${info.repo.id}#${issue}`;
     const inReview = !readOnly
@@ -4283,11 +4290,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, notWatchSeatText(call(info)));
     }
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
+    await cmuxPreflight(info);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
-    await cmuxPreflight(info);
     starting.add(seatId);
     let prepared: string | null = null;
     try {
@@ -4620,11 +4627,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (modeOfSeat(info.seat) !== "scratch") {
       throw new SupervisorError(409, notReviewSeatText(call(info)));
     }
+    await cmuxPreflight(info);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
-    await cmuxPreflight(info);
     starting.add(seatId);
     try {
       const notWanted = new SupervisorError(409, REVIEW_NOT_WANTED);
@@ -5205,6 +5212,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const unavailable = seatUnavailable(info.seat, run.model ?? undefined, run.vendor ?? "claude");
     if (unavailable) throw new SupervisorError(409, unavailable);
     refuseWhileHeld();
+    await cmuxPreflight(info);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
