@@ -69,7 +69,13 @@ describe("OperatorActions", () => {
       target: { value: "2020-01-01T09:30" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save slow pace" }));
-    expect(await screen.findByText(/must end in the future/)).toBeTruthy();
+    const message = await screen.findByText(/must end in the future/);
+    // the refusal sits in the Slow pace group, tied to its Until field, not below every group
+    expect(message.closest("fieldset")?.querySelector("legend")?.textContent).toBe("Slow pace");
+    expect(message.getAttribute("role")).toBe("alert");
+    expect(screen.getByLabelText("Slow pace until").getAttribute("aria-describedby")).toBe(
+      message.id,
+    );
     expect(posts(fetch)).toHaveLength(0);
   });
 
@@ -152,6 +158,6 @@ it("grant approval with no end time says so and posts nothing", async () => {
   const fetch = stubFetch({ "/api/config": { repos: [] } });
   render(<OperatorActions />);
   fireEvent.click(screen.getByRole("button", { name: "Grant approval" }));
-  expect((await screen.findByRole("status")).textContent).toBe("Choose when the approval ends.");
+  expect((await screen.findByRole("alert")).textContent).toBe("Choose when the approval ends.");
   expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
 });

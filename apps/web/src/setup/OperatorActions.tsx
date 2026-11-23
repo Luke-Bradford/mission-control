@@ -3,6 +3,22 @@ import { useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 
+type ActionGroup = "pace" | "approval" | "pr";
+
+/** A result line inside its own group; `alert` announces a refusal and keeps it next to the button. */
+function GroupMessage({ id, text }: { id: string; text?: string }) {
+  if (!text) return null;
+  return (
+    <p
+      id={id}
+      role={text === "Saved." ? "status" : "alert"}
+      className={text === "Saved." ? "muted s" : "crit-t s"}
+    >
+      {text}
+    </p>
+  );
+}
+
 /** Operator-facing words for each approval rule; the typed value is what the request carries. */
 export const APPROVAL_RULE_LABELS: Record<FlightApprovalRule, string> = {
   "merge-floor": "Merge floor (a PR that touches CLAUDE.md or .github)",
@@ -48,7 +64,10 @@ export function zonedToEpoch(local: string, timeZone: string): number | null {
 
 /** Operator-only safety controls. The server checks authority and validates every request. */
 export function OperatorActions() {
-  const [message, setMessage] = useState<string | null>(null);
+  // Each action group keeps its own result, beside its own fields and button.
+  const [messages, setMessages] = useState<Partial<Record<ActionGroup, string>>>({});
+  const say = (group: ActionGroup, text: string | null) =>
+    setMessages((all) => ({ ...all, [group]: text ?? undefined }));
   const [pace, setPace] = useState({ on: false, until: "", labels: "", maxStarts: "", note: "" });
   const [approval, setApproval] = useState({
     rule: FLIGHT_APPROVAL_RULES[0],
@@ -69,17 +88,17 @@ export function OperatorActions() {
   const chosen = open.find((pr) => String(pr.number) === prNumber);
   const prAction = (path: string, body: Record<string, unknown>) => {
     if (!chosen?.headSha) {
-      setMessage("Choose a repo and an open PR first.");
+      say("pr", "Choose a repo and an open PR first.");
       return;
     }
-    void post(path, { sha: chosen.headSha, ...body });
+    void post("pr", path, { sha: chosen.headSha, ...body });
   };
-  const post = async (path: string, body: unknown) => {
+  const post = async (group: ActionGroup, path: string, body: unknown) => {
     try {
       await apiPost(path, body);
-      setMessage("Saved.");
+      say(group, "Saved.");
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      say(group, e instanceof Error ? e.message : String(e));
     }
   };
   return (
@@ -99,6 +118,8 @@ export function OperatorActions() {
           Until{" "}
           <input
             aria-label="Slow pace until"
+            aria-invalid={messages.pace?.startsWith("Slow pace must") ? true : undefined}
+            aria-describedby={messages.pace ? "pace-message" : undefined}
             type="datetime-local"
             value={pace.until}
             onChange={(e) => setPace({ ...pace, until: e.target.value })}
@@ -129,10 +150,10 @@ export function OperatorActions() {
           onClick={() => {
             const until = pace.until === "" ? null : zonedToEpoch(pace.until, zone);
             if (pace.until !== "" && (until === null || until <= Date.now())) {
-              setMessage("Slow pace must end in the future: choose a later date and time.");
+              say("pace", "Slow pace must end in the future: choose a later date and time.");
               return;
             }
-            void post(ACTIONS.pace, {
+            void post("pace", ACTIONS.pace, {
               on: pace.on,
               until,
               labels: pace.labels
@@ -146,6 +167,7 @@ export function OperatorActions() {
         >
           Save slow pace
         </button>
+        <GroupMessage id="pace-message" text={messages.pace} />
       </fieldset>
       <fieldset className="fgroup">
         <legend>FLIGHT approval</legend>
@@ -192,14 +214,18 @@ export function OperatorActions() {
           onClick={() => {
             const until = new Date(approval.until);
             if (Number.isNaN(until.getTime())) {
-              setMessage("Choose when the approval ends.");
+              say("approval", "Choose when the approval ends.");
               return;
             }
-            void post(ACTIONS.flightApprovals, { ...approval, until: until.toISOString() });
+            void post("approval", ACTIONS.flightApprovals, {
+              ...approval,
+              until: until.toISOString(),
+            });
           }}
         >
           Grant approval
         </button>
+        <GroupMessage id="approval-message" text={messages.approval} />
       </fieldset>
       <fieldset className="fgroup">
         <legend>Hand-opened PR</legend>
@@ -284,8 +310,8 @@ export function OperatorActions() {
         >
           Fail controller check
         </button>
+        <GroupMessage id="pr-message" text={messages.pr} />
       </fieldset>
-      {message && <p role="status">{message}</p>}
     </section>
   );
 }
