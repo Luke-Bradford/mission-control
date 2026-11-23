@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -6,18 +7,18 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO = join(here, "../../..");
-const SKIP_DIRS = new Set(["node_modules", "dist", ".git", "coverage"]);
-
-/** Every `*.test.ts` and `*.test.tsx` file in the repository. */
-const walk = (dir: string, out: string[] = []): string[] => {
-  for (const name of readdirSync(dir)) {
-    if (SKIP_DIRS.has(name)) continue;
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) walk(path, out);
-    else if (/\.test\.tsx?$/.test(name)) out.push(path);
-  }
-  return out;
-};
+/**
+ * Every tracked `*.test.ts` and `*.test.tsx` file. Git's index, not a live walk: other tests create
+ * and delete scratch folders meanwhile, and untracked scratch tests are not the repo's.
+ */
+const testFiles = (): string[] =>
+  execFileSync("git", ["ls-files", "-z", "--", "*.test.ts", "*.test.tsx"], {
+    cwd: REPO,
+    encoding: "utf8",
+  })
+    .split("\0")
+    .filter(Boolean)
+    .map((path) => join(REPO, path));
 
 /** The identifier a call chain starts from: `it.skipIf(x)(...)` and `expect(x).toBe` give it and expect. */
 const rootOf = (node: ts.Expression): string | null => {
@@ -154,7 +155,7 @@ describe("every test asserts something", () => {
   });
 
   it("has no test anywhere in the repository that never reaches an assertion", () => {
-    const missing = walk(REPO).flatMap((file) =>
+    const missing = testFiles().flatMap((file) =>
       testsWithoutAssertion(file, readFileSync(file, "utf8")),
     );
     expect(missing).toEqual([]);
