@@ -16,6 +16,7 @@ export * from "./flight-access.ts";
 export * from "./flight-memory.ts";
 export * from "./guard.ts";
 export * from "./handoff.ts";
+export * from "./hub-settings.ts";
 export * from "./hud.ts";
 export * from "./hud-paths.ts";
 export * from "./loop.ts";

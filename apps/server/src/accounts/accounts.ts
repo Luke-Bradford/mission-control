@@ -8,6 +8,13 @@ import { CodexModels } from "../runtime/codex-models.ts";
 import { type CliBinding, codexProfile } from "./bindings.ts";
 
 type Account = CliBinding & { id: string };
+/** The aliases a Claude seat can run: Claude exposes no model list, so these are the ones the CLI takes. */
+export const CLAUDE_MODELS: readonly { model: string; efforts: readonly string[] }[] = [
+  { model: "opus", efforts: ["low", "medium", "high"] },
+  { model: "sonnet", efforts: ["low", "medium", "high"] },
+  { model: "haiku", efforts: ["low", "medium", "high"] },
+];
+
 export type AccountModels = {
   accountId: string;
   models: { id: string; efforts: readonly string[] }[];

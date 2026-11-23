@@ -279,6 +279,14 @@ export function answer(path: string): Response {
   if (/^\/api\/runs\/([^/]+)\/loop$/.test(path))
     return json({ runId: path.split("/")[3], loop: null, events: [], tries: [] });
   if (/^\/api\/agents\/[^/]+\/runs\?/.test(path)) return json([]);
+  if (path === "/api/config/settings")
+    return json({
+      base: "demo-config",
+      values: { "operator.timezone": "UTC", "poll.usage_minutes": 30 },
+      repos: {},
+    });
+  if (path === "/api/settings/pace")
+    return json({ on: false, until: 0, since: 0, labels: [], maxStarts: 0, note: "" });
   // An older page of a list is empty: Demo has no history behind what it shows.
   if (/[?&]before=/.test(path))
     return json({ messages: [], events: [], more: false, nextBefore: null });

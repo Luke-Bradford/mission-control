@@ -18,17 +18,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Setup } from "../src/pages/Setup.tsx";
 import { SETUP_TABS, type SetupTab } from "../src/router.ts";
 import {
-  addedText,
   FOLDER_FREE,
-  loadErrorText,
   RELOADED,
   refusedText,
   removedText,
-  restartText,
-  SAVE_NOTE,
-  SCRATCH_LABEL,
   SESSIONS_NOTE,
-  savedText,
 } from "../src/setup/Sessions.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
@@ -152,11 +146,11 @@ beforeEach(() => vi.useFakeTimers({ toFake: ["Date"], now: NOW }));
 afterEach(() => vi.useRealTimers());
 
 describe("Setup tabs", () => {
-  it("the dependency-order sidebar routes its six sections", async () => {
+  it("the dependency-order sidebar routes its seven sections", async () => {
     load();
     render(<Setup tab="sessions" />);
     const tabs = screen.getByRole("navigation", { name: "Setup sections" });
-    expect(SETUP_TABS).toHaveLength(7);
+    expect(SETUP_TABS).toHaveLength(8);
     fireEvent.click(within(tabs).getByRole("button", { name: "Accounts" }));
     expect(window.location.pathname).toBe("/setup/accounts");
     fireEvent.click(within(tabs).getByRole("button", { name: "Roles & guards" }));
@@ -766,51 +760,98 @@ describe("Setup tabs", () => {
   });
 
   describe("Sessions: seats", () => {
-    it.each(["s1", "s2", "unknown"])(
-      "?add=%s opens only the matching session's form",
+    it.each(["s1", "unknown"])(
+      "?add=%s on Repos & seats opens only the matching session's seat form",
       async (id) => {
-        const crew = CREW_CONFIG.crew;
-        const first = crew?.sessions[0];
-        if (!crew || !first) throw new Error("no crew session");
         load({
-          "/api/config": {
-            ...SESSIONS_CFG,
-            crew: { ...crew, sessions: [first, { ...first, id: "s2", seats: [] }] },
-          },
+          "/api/config": SESSIONS_CFG,
           "/api/crew/changes": CHANGES,
+          "/api/accounts/models": [],
         });
-        window.history.replaceState(null, "", `/setup/sessions?add=${id}`);
-        render(<Setup tab="sessions" />);
-        await screen.findByRole("region", { name: "s/s2" });
-        await settled(fetchFn, "/api/crew/changes");
+        window.history.replaceState(null, "", `/setup/repos?add=${id}`);
+        render(<Setup tab="repos" />);
+        await settled(fetchFn, "/api/config");
         if (id === "unknown") {
-          expect(screen.queryByRole("form")).toBeNull();
+          await settled(fetchFn, "/api/crew/changes");
+          expect(screen.queryByRole("form", { name: "Add seat" })).toBeNull();
         } else {
-          const form = await screen.findByRole("form", { name: `Add agent to s/${id}` });
-          expect(screen.getAllByRole("form")).toEqual([form]);
-          fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
-          expect(screen.queryByRole("form")).toBeNull();
+          expect(await screen.findByRole("form", { name: "Add seat" })).toBeTruthy();
+          expect(window.location.search).toBe("");
         }
       },
     );
 
-    it("replaces the add-agent URL, stays closed after Cancel, and does not reopen on reload", async () => {
-      load({ "/api/config": SESSIONS_CFG, "/api/crew/changes": CHANGES });
-      window.history.replaceState(null, "", "/setup/sessions?add=s1");
-      const historyLength = window.history.length;
-      const page = render(<Setup tab="sessions" />);
-      const form = await screen.findByRole("form", { name: "Add agent to s/s1" });
-      expect(window.location.search).toBe("");
-      expect(window.location.pathname).toBe("/setup/sessions");
-      expect(window.history.length).toBe(historyLength);
-      // The same form element: clearing the URL did not remount Sessions and close it.
-      expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBe(form);
-      fireEvent.click(within(screen.getByRole("form")).getByRole("button", { name: "Cancel" }));
-      expect(screen.queryByRole("form")).toBeNull();
-      page.unmount();
-      render(<Setup tab="sessions" />);
-      await screen.findByRole("region", { name: "s/s1" });
-      expect(screen.queryByRole("form")).toBeNull();
+    it("?edit= on Repos & seats opens that seat's edit form", async () => {
+      load({
+        "/api/config": SESSIONS_CFG,
+        "/api/crew/changes": CHANGES,
+        "/api/accounts/models": [],
+      });
+      window.history.replaceState(null, "", "/setup/repos?edit=s1:guido-1");
+      render(<Setup tab="repos" />);
+      expect(await screen.findByRole("form", { name: "Edit guido-1" })).toBeTruthy();
+    });
+
+    it("?edit= waits for the crew changes, so saving another field keeps the seat's effort", async () => {
+      load({
+        "/api/config": SESSIONS_CFG,
+        "/api/crew/changes": CHANGES,
+        "/api/accounts/models": [],
+        "POST /api/crew/sessions/s1/seats": () => ({
+          status: 200,
+          body: { backup: "b", changes: { ...CHANGES, applied: [] } },
+        }),
+      });
+      const answer = fetchFn.getMockImplementation();
+      if (!answer) throw new Error("no fetch implementation");
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const withEffort = {
+        ...CHANGES,
+        sessions: [{ id: "s1", seats: [{ ...GUIDO_SEAT, effort: "high" }, RETRO_SEAT] }],
+      };
+      fetchFn.mockImplementation(async (input, init) => {
+        if (input !== "/api/crew/changes") return answer(input, init);
+        await gate;
+        return new Response(JSON.stringify(withEffort), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      window.history.replaceState(null, "", "/setup/repos?edit=s1:guido-1");
+      render(<Setup tab="repos" />);
+      expect(await screen.findByText("Loading the seats…")).toBeTruthy();
+      expect(screen.queryByRole("form", { name: "Edit guido-1" })).toBeNull();
+      release();
+      const form = await screen.findByRole("form", { name: "Edit guido-1" });
+      fireEvent.change(within(form).getByLabelText("Area"), { target: { value: "docs/**" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+      await waitFor(() =>
+        expect(
+          fetchFn.mock.calls.some(
+            ([p, i]) => p === "/api/crew/sessions/s1/seats" && i?.method === "POST",
+          ),
+        ).toBe(true),
+      );
+      const call = fetchFn.mock.calls.find(
+        ([p, i]) => p === "/api/crew/sessions/s1/seats" && i?.method === "POST",
+      );
+      const sent = JSON.parse(String(call?.[1]?.body));
+      expect(sent.seats[0]).toMatchObject({ id: "guido-1", effort: "high", area: ["docs/**"] });
+    });
+
+    it("Sessions: Add agent and Edit open the Repos & seats editor", async () => {
+      const p = await seats();
+      fireEvent.click(within(p).getByRole("button", { name: "Add agent" }));
+      expect(window.location.pathname + window.location.search).toBe("/setup/repos?add=s1");
+      window.history.replaceState(null, "", "/setup/sessions");
+      const row = within(p).getByRole("row", { name: /guido-1/ });
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      expect(window.location.pathname + window.location.search).toBe(
+        "/setup/repos?edit=s1%3Aguido-1",
+      );
     });
 
     it("renders safely without a form while crew changes are unresolved", async () => {
@@ -827,22 +868,6 @@ describe("Setup tabs", () => {
       expect(screen.getByRole("region", { name: "s/s1" })).toBeTruthy();
       expect(screen.queryByRole("form")).toBeNull();
       expect(window.location.search).toBe("?add=s1");
-    });
-
-    it("keeps the requested session visible outside the session filter after Cancel", async () => {
-      load({ "/api/config": SESSIONS_CFG, "/api/crew/changes": CHANGES });
-      setSession("site-builder");
-      const page = at("sessions");
-      await settled(fetchFn, "/api/config");
-      expect(screen.getByText(SESSIONS_NOTE)).toBeTruthy();
-      expect(screen.queryByRole("region", { name: "s/s1" })).toBeNull();
-      page.unmount();
-      window.history.replaceState(null, "", "/setup/sessions?add=s1");
-      render(<Setup tab="sessions" />);
-      const form = await screen.findByRole("form", { name: "Add agent to s/s1" });
-      fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
-      expect(screen.queryByRole("form")).toBeNull();
-      expect(screen.getByRole("region", { name: "s/s1" })).toBeTruthy();
     });
 
     const BACKUP = "config.yaml.bak-x";
@@ -874,7 +899,7 @@ describe("Setup tabs", () => {
       await within(p).findByRole("table", { name: "Seats of s/s1 in config.yaml" });
       return p;
     }
-    const open = async (p: HTMLElement) => {
+    const _open = async (p: HTMLElement) => {
       fireEvent.click(within(p).getByRole("button", { name: "Add agent" }));
       return screen.findByRole("form", { name: "Add agent to s/s1" });
     };
@@ -985,86 +1010,6 @@ describe("Setup tabs", () => {
       expect(wrap?.className).toBe("wide");
     });
 
-    it("Add agent: defaults, tiles, body", async () => {
-      const p = await seats();
-      const form = await open(p);
-      fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "INCO" } });
-      expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", "inco-1");
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
-      const tile = within(p).getByRole("button", { name: /apps\// });
-      expect(tile.getAttribute("aria-pressed")).toBe("false");
-      fireEvent.click(tile);
-      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "apps/**");
-      expect(form.textContent).toContain(SAVE_NOTE);
-      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      await waitFor(() => expect(toastText()).toBe(addedText("INCO-1", "s1", BACKUP)));
-      expect(post("/api/crew/sessions/s1/seats")).toEqual({
-        base: [GUIDO_SEAT, RETRO_SEAT],
-        seats: [
-          GUIDO_SEAT,
-          RETRO_SEAT,
-          {
-            id: "inco-1",
-            role: "INCO",
-            accountId: "claude-main",
-            model: "sonnet",
-            area: ["apps/**"],
-          },
-        ],
-      });
-      await waitFor(() => expect(screen.queryByRole("form")).toBeNull());
-    });
-
-    it("Add agent: a read-only role", async () => {
-      const p = await seats();
-      const form = await open(p);
-      fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "RETRO" } });
-      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("disabled", true);
-      expect(within(p).queryByRole("button", { name: /apps\// })).toBeNull();
-      fireEvent.click(within(form).getByLabelText(SCRATCH_LABEL));
-      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
-      expect(post("/api/crew/sessions/s1/seats").seats[2]).toEqual({
-        id: "retro-2",
-        role: "RETRO",
-        accountId: "claude-main",
-        model: "opus",
-        area: [],
-        mode: "scratch",
-      });
-    });
-
-    it("a bad call sign is explained and blocks the save", async () => {
-      const p = await seats();
-      const form = await open(p);
-      fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: "Bad Name" } });
-      expect(form.textContent).toContain("lower-case letters, digits and -");
-      const submit = within(form).getByRole("button", { name: "Add agent" });
-      expect(submit).toHaveProperty("disabled", false);
-      fireEvent.click(submit);
-      expect(within(form).getByRole("region", { name: "Fix before saving" })).toBeTruthy();
-      expect(posts("/api/crew/sessions/s1/seats")).toBe(0);
-    });
-
-    it("Edit", async () => {
-      const p = await seats();
-      const row = within(p).getByRole("row", { name: /guido-1/ });
-      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
-      const form = await screen.findByRole("form", { name: "Edit guido-1" });
-      expect(within(form).getByLabelText("Role")).toHaveProperty("value", "GUIDO");
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
-      expect(within(form).getByLabelText("Effort")).toHaveProperty("value", "");
-      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "apps/**");
-      fireEvent.change(within(form).getByLabelText("Model"), { target: { value: "opus" } });
-      fireEvent.change(within(form).getByLabelText("Effort"), { target: { value: "high" } });
-      fireEvent.click(within(form).getByRole("button", { name: "Save guido-1" }));
-      await waitFor(() => expect(toastText()).toBe(savedText("GUIDO-1", BACKUP)));
-      expect(post("/api/crew/sessions/s1/seats").seats).toEqual([
-        { ...GUIDO_SEAT, model: "opus", effort: "high" },
-        RETRO_SEAT,
-      ]);
-    });
-
     it("Remove needs a confirm", async () => {
       const p = await seats();
       const row = within(p).getByRole("row", { name: /retro-1/ });
@@ -1076,223 +1021,6 @@ describe("Setup tabs", () => {
         base: [GUIDO_SEAT, RETRO_SEAT],
         seats: [GUIDO_SEAT],
       });
-    });
-
-    it("A refusal keeps the form", async () => {
-      const error =
-        "crew.sessions[0].seats[2].area: areas overlap: guido-1 and inco-1; one folder, one owner";
-      const p = await seats({
-        "POST /api/crew/sessions/s1/seats": () => ({ status: 400, body: { error } }),
-      });
-      const form = await open(p);
-      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      const alert = await within(form).findByRole("alert");
-      expect(alert.textContent).toBe(refusedText(error));
-      expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBeTruthy();
-    });
-
-    it("A conflict refetches", async () => {
-      const p = await seats({
-        "POST /api/crew/sessions/s1/seats": () => ({
-          status: 409,
-          body: { error: "the seats changed since this page loaded them; reload and try again" },
-        }),
-      });
-      const form = await open(p);
-      const fetched = (path: string) => fetchFn.mock.calls.filter(([u]) => u === path).length;
-      const before = fetched("/api/crew/changes");
-      const configBefore = fetched("/api/config");
-      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      await waitFor(() => expect(fetched("/api/crew/changes")).toBe(before + 1));
-      await waitFor(() => expect(fetched("/api/config")).toBe(configBefore + 1));
-    });
-
-    it("Edit: a scratch seat opens with the scratch box checked", async () => {
-      const p = await seats({
-        "/api/crew/changes": {
-          ...CHANGES,
-          sessions: [{ id: "s1", seats: [GUIDO_SEAT, { ...RETRO_SEAT, mode: "scratch" }] }],
-        },
-      });
-      const row = within(p).getByRole("row", { name: /retro-1/ });
-      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
-      const form = await screen.findByRole("form", { name: "Edit retro-1" });
-      expect(within(form).getByLabelText(SCRATCH_LABEL)).toHaveProperty("checked", true);
-    });
-
-    it("a role change to a read-only role clears Area and resets Model; empty Model is explained and blocks the save", async () => {
-      const p = await seats();
-      const form = await open(p);
-      fireEvent.click(within(p).getByRole("button", { name: /apps\// }));
-      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "apps/**");
-      fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "RETRO" } });
-      expect(within(form).getByLabelText(/^Area/)).toHaveProperty("value", "");
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "opus");
-      fireEvent.change(within(form).getByLabelText("Model"), { target: { value: " " } });
-      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      expect(within(form).getByRole("link", { name: "Model is required." })).toBeTruthy();
-      expect(posts("/api/crew/sessions/s1/seats")).toBe(0);
-    });
-
-    it("adds Codex seats and resets the model only when the account provider changes", async () => {
-      const p = await seats();
-      const form = await open(p);
-      const account = within(form).getByLabelText("Account");
-      const model = within(form).getByLabelText("Model");
-      fireEvent.change(account, { target: { value: "codex-main" } });
-      expect(account).toHaveProperty("value", "codex-main");
-      expect(model).toHaveProperty("value", "gpt-5.6-sol");
-      fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "RETRO" } });
-      expect(model).toHaveProperty("value", "gpt-5.6-sol");
-      fireEvent.submit(form);
-      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
-      expect(post("/api/crew/sessions/s1/seats").seats[2]).toMatchObject({
-        accountId: "codex-main",
-        model: "gpt-5.6-sol",
-        role: "RETRO",
-        area: [],
-      });
-    });
-
-    it("opens a persisted Codex seat with its model and switches back to the role default", async () => {
-      const codex = { ...GUIDO_SEAT, accountId: "codex-main", model: "gpt-5.6-sol" };
-      const p = await seats({
-        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [codex] }] },
-      });
-      fireEvent.click(within(p).getByRole("button", { name: "Edit" }));
-      const form = screen.getByRole("form", { name: "Edit guido-1" });
-      expect(within(form).getByLabelText("Account")).toHaveProperty("value", "codex-main");
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "gpt-5.6-sol");
-      fireEvent.change(within(form).getByLabelText("Account"), {
-        target: { value: "claude-main" },
-      });
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
-      fireEvent.change(within(form).getByLabelText("Account"), {
-        target: { value: "codex-main" },
-      });
-      fireEvent.change(within(form).getByLabelText("Effort"), { target: { value: "high" } });
-      fireEvent.submit(form);
-      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
-      const saved = post("/api/crew/sessions/s1/seats").seats[0];
-      expect(saved).toEqual({ ...codex, effort: "high" });
-      cleanup();
-      const reloaded = await seats({
-        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [saved] }] },
-      });
-      fireEvent.click(within(reloaded).getByRole("button", { name: "Edit" }));
-      const reopened = screen.getByRole("form", { name: "Edit guido-1" });
-      expect(within(reopened).getByLabelText("Account")).toHaveProperty("value", "codex-main");
-      expect(within(reopened).getByLabelText("Model")).toHaveProperty("value", "gpt-5.6-sol");
-      expect(within(reopened).getByLabelText("Effort")).toHaveProperty("value", "high");
-    });
-
-    it("switching to Claude never keeps a role's Codex default model", async () => {
-      const crew = SESSIONS_CFG.crew;
-      if (!crew?.roles) throw new Error("missing crew roles");
-      const codex = { ...GUIDO_SEAT, accountId: "codex-main", model: "gpt-5.6-sol" };
-      const p = await seats({
-        "/api/config": {
-          ...SESSIONS_CFG,
-          crew: {
-            ...crew,
-            roles: crew.roles.map((r) => (r.name === "GUIDO" ? { ...r, model: "gpt-5.6-sol" } : r)),
-          },
-        },
-        "/api/crew/changes": { ...CHANGES, sessions: [{ id: "s1", seats: [codex] }] },
-      });
-      fireEvent.click(within(p).getByRole("button", { name: "Edit" }));
-      const form = screen.getByRole("form", { name: "Edit guido-1" });
-      fireEvent.change(within(form).getByLabelText("Account"), {
-        target: { value: "claude-main" },
-      });
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "sonnet");
-    });
-
-    it.each(["unknown", "not-logged-in"])(
-      "shows the external CLI hint for %s status",
-      async (status) => {
-        const p = await seats({
-          "/api/accounts/status": [
-            {
-              accountId: "codex-main",
-              provider: "codex",
-              binding: "machine",
-              identity: null,
-              plan: null,
-              status,
-              checkedAt: NOW,
-              detail: null,
-            },
-          ],
-        });
-        const form = await open(p);
-        fireEvent.change(within(form).getByLabelText("Account"), {
-          target: { value: "codex-main" },
-        });
-        expect(await within(form).findByText(/Sign in with the CLI on this machine/)).toBeTruthy();
-      },
-    );
-
-    it("defaults to a configured Codex account when no Claude account exists", async () => {
-      const p = await seats({
-        "/api/config": {
-          ...SESSIONS_CFG,
-          accounts: SESSIONS_CFG.accounts.filter((a) => a.vendor === "codex"),
-        },
-      });
-      const form = await open(p);
-      expect(within(form).getByLabelText("Account")).toHaveProperty("value", "codex-main");
-      expect(within(form).getByLabelText("Model")).toHaveProperty("value", "gpt-5.6-sol");
-      const account = within(form).getByLabelText("Account");
-      account.focus();
-      expect(document.activeElement).toBe(account);
-      fireEvent.submit(form);
-      await waitFor(() => expect(posts("/api/crew/sessions/s1/seats")).toBe(1));
-      expect(post("/api/crew/sessions/s1/seats").seats[2]).toMatchObject({
-        accountId: "codex-main",
-        model: "gpt-5.6-sol",
-      });
-    });
-
-    it("no accounts: the Account select is empty and Save explains why it cannot save", async () => {
-      const p = await seats({
-        "/api/config": {
-          ...SESSIONS_CFG,
-          accounts: [],
-        },
-      });
-      const form = await open(p);
-      expect(within(form).getByLabelText("Account")).toHaveProperty("options.length", 0);
-      fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-      expect(within(form).getByRole("link", { name: /Account: none is configured/ })).toBeTruthy();
-      expect(posts("/api/crew/sessions/s1/seats")).toBe(0);
-    });
-
-    it("every save, remove and reload button is disabled while a post is out", async () => {
-      const p = await seats();
-      const real = fetchFn.getMockImplementation();
-      if (!real) throw new Error("no fetch stub");
-      let answer = () => {};
-      const gate = new Promise<void>((r) => {
-        answer = r;
-      });
-      fetchFn.mockImplementation(async (u, i) => {
-        if (i?.method === "POST") await gate;
-        return real(u, i);
-      });
-      const form = await open(p);
-      const submit = within(form).getByRole("button", { name: "Add agent" });
-      fireEvent.click(submit);
-      await waitFor(() => expect(submit).toHaveProperty("disabled", true));
-      expect(screen.getByRole("button", { name: "Reload config.yaml" })).toHaveProperty(
-        "disabled",
-        true,
-      );
-      for (const b of within(p).getAllByRole("button", { name: "Remove" })) {
-        expect(b).toHaveProperty("disabled", true);
-      }
-      answer();
-      await waitFor(() => expect(toastText()).toBe(addedText("GUIDO-2", "s1", BACKUP)));
     });
 
     it("a refused reload shows the alert", async () => {
@@ -1310,10 +1038,6 @@ describe("Setup tabs", () => {
         "/api/crew/changes": { ...CHANGES, error: "bad yaml", restartNeeded: ["loops"] },
         "POST /api/config/reload": () => ({ status: 200, body: { ...CHANGES, applied: [] } }),
       });
-      expect((await screen.findByText(loadErrorText("bad yaml"))).getAttribute("role")).toBe(
-        "alert",
-      );
-      expect(screen.getByText(restartText(["loops"]))).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "Reload config.yaml" }));
       await waitFor(() => expect(toastText()).toBe(RELOADED));
       expect(post("/api/config/reload")).toEqual({});
@@ -1330,30 +1054,31 @@ describe("Setup tabs", () => {
   });
 });
 
-describe("Setup is read-only (except Repos, Sessions and Accounts)", () => {
-  it.each(SETUP_TABS.filter((t) => t !== "repos" && t !== "sessions" && t !== "accounts"))(
-    "%s: no enabled field, and no button posts",
-    async (tab) => {
-      load();
-      at(tab);
-      // the config-gated tabs show a placeholder until the config answers: scan the real content
-      await waitFor(() => {
-        const grid = document.querySelector(".sgrid") as HTMLElement;
-        expect(grid.textContent).not.toBe("");
-        expect(within(grid).queryByText(/^(Loading…|Could not load)/)).toBeNull();
-      });
-      const body = document.querySelector(".sgrid") as HTMLElement;
-      for (const el of body.querySelectorAll("input, select, textarea")) {
-        if (tab === "loops" && el.id === "loop-run-picker") continue;
-        // the repo picker chooses which repo's rules to read; it changes nothing
-        if (tab === "roles" && el.closest(".rg-picker")) continue;
-        expect((el as HTMLInputElement).disabled).toBe(true);
-      }
-      for (const b of body.querySelectorAll("button")) fireEvent.click(b);
-      const posts = fetchFn.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
-      expect(posts).toEqual([]);
-    },
-  );
+describe("Setup is read-only (except Hub, Repos, Sessions, Accounts and Safety)", () => {
+  it.each(
+    SETUP_TABS.filter(
+      (t) => t !== "hub" && t !== "repos" && t !== "sessions" && t !== "accounts" && t !== "access",
+    ),
+  )("%s: no enabled field, and no button posts", async (tab) => {
+    load();
+    at(tab);
+    // the config-gated tabs show a placeholder until the config answers: scan the real content
+    await waitFor(() => {
+      const grid = document.querySelector(".sgrid") as HTMLElement;
+      expect(grid.textContent).not.toBe("");
+      expect(within(grid).queryByText(/^(Loading…|Could not load)/)).toBeNull();
+    });
+    const body = document.querySelector(".sgrid") as HTMLElement;
+    for (const el of body.querySelectorAll("input, select, textarea")) {
+      if (tab === "loops" && el.id === "loop-run-picker") continue;
+      // the repo picker chooses which repo's rules to read; it changes nothing
+      if (tab === "roles" && el.closest(".rg-picker")) continue;
+      expect((el as HTMLInputElement).disabled).toBe(true);
+    }
+    for (const b of body.querySelectorAll("button")) fireEvent.click(b);
+    const posts = fetchFn.mock.calls.filter(([, init]) => (init?.method ?? "GET") !== "GET");
+    expect(posts).toEqual([]);
+  });
 });
 
 function cleanupAndAt(tab: SetupTab) {
@@ -2590,5 +2315,80 @@ describe("Setup toolbar: Update", () => {
     at("sessions");
     await screen.findByRole("region", { name: "shop-app · observed loops" });
     expect(within(toolbar()).queryByRole("button", { name: "Update" })).toBeNull();
+  });
+});
+
+describe("Setup: first run, config status and restart", () => {
+  const SETTINGS = {
+    base: "b".repeat(64),
+    values: { "operator.timezone": "UTC" },
+    repos: {},
+  };
+  const EMPTY = { ...CFG, accounts: [], repos: [], loops: [], crew: undefined };
+
+  it("First run lists the four steps for an empty config and hides when all are set", async () => {
+    load({ "/api/config": EMPTY, "/api/config/settings": SETTINGS });
+    at("hub");
+    const panel = await screen.findByRole("region", { name: "First run" });
+    for (const step of ["Time zone", "Accounts", "Crew folder", "First repo"])
+      expect(
+        within(panel).getByRole("img", { name: new RegExp(`^${step} (done|to do)$`) }),
+      ).toBeTruthy();
+    expect(within(panel).getByRole("img", { name: "Time zone done" })).toBeTruthy();
+    expect(within(panel).getByRole("img", { name: "Crew folder to do" })).toBeTruthy();
+    cleanup();
+    load({
+      "/api/config": CREW_CONFIG,
+      "/api/config/settings": {
+        ...SETTINGS,
+        values: { ...SETTINGS.values, "crew.worktrees": "/tmp/crew" },
+      },
+    });
+    at("hub");
+    await screen.findByRole("region", { name: "Hub settings" });
+    expect(screen.queryByRole("region", { name: "First run" })).toBeNull();
+  });
+
+  it.each(["hub", "sessions", "roles"] as const)(
+    "shows restart-needed and the config error on the %s tab",
+    async (tab) => {
+      load({
+        "/api/config/settings": SETTINGS,
+        "/api/crew/changes": {
+          sessions: [],
+          pending: [],
+          restartNeeded: ["poll"],
+          error: "bad",
+          checkedAt: NOW,
+        },
+      });
+      at(tab);
+      expect(await screen.findByText("Restart needed: poll.")).toBeTruthy();
+      expect(screen.getAllByRole("alert").some((a) => a.textContent?.includes("bad"))).toBe(true);
+    },
+  );
+
+  it("Restart asks first, then posts to the restart route", async () => {
+    load({
+      "/api/config/settings": SETTINGS,
+      "POST /api/hub/restart": () => ({ status: 202, body: { restarting: true } }),
+    });
+    render(<Toast />);
+    at("hub");
+    const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const button = await screen.findByRole("button", { name: "Restart hub" });
+    fireEvent.click(button);
+    const restarts = () =>
+      fetchFn.mock.calls.filter(([p, i]) => p === "/api/hub/restart" && i?.method === "POST");
+    expect(restarts()).toHaveLength(0);
+    fireEvent.click(button);
+    expect(ask).toHaveBeenLastCalledWith(
+      "Restart the hub now? Crew runs resume after the restart.",
+    );
+    await waitFor(() => expect(restarts()).toHaveLength(1));
+    expect(
+      await screen.findByText("Restarting… the HUD reconnects when the hub is back."),
+    ).toBeTruthy();
+    ask.mockRestore();
   });
 });

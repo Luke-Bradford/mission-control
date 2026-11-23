@@ -29,9 +29,7 @@ export const SOURCE_TEXT: Record<RuleSource, { label: string; hint: string }> = 
 /** Where the repo file's value replaces a value the user set. */
 export const REPO_FILE_WINS = "Repo file wins";
 /** Why Authority is read-only. */
-export const AUTHORITY_NOTE = "Only config.yaml sets this. A change restarts FLIGHT.";
-/** Why every Edit is off until the write route exists. */
-export const EDIT_SOON = "Saving these rules comes next.";
+export const AUTHORITY_NOTE = "Set on Repos & seats.";
 
 export const RULE_GROUPS = [
   {
@@ -96,4 +94,49 @@ export function ruleChips(view: RepoRulesView, key: RuleKey): string[] {
       Array.isArray(globs) ? `${name}: ${globs.join(", ")}` : name,
     );
   return value === undefined || value === null ? [] : [String(value)];
+}
+
+/** A rule's current value as the editor's text: lines, `label: glob, glob` lines, or one word. */
+export function ruleDraft(value: unknown): string {
+  if (Array.isArray(value)) return value.map(String).join("\n");
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "object" && value !== null)
+    return Object.entries(value)
+      .map(([name, globs]) => `${name}: ${Array.isArray(globs) ? globs.join(", ") : ""}`)
+      .join("\n");
+  return value === undefined || value === null ? "" : String(value);
+}
+
+/** The editor's text back as the value the route takes. */
+export function ruleValue(key: RuleKey, current: unknown, text: string): unknown {
+  if (typeof current === "boolean") return text === "true";
+  if (key === "areas")
+    return Object.fromEntries(
+      text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const at = line.indexOf(":");
+          return [
+            line.slice(0, at).trim(),
+            line
+              .slice(at + 1)
+              .split(",")
+              .map((g) => g.trim())
+              .filter(Boolean),
+          ];
+        }),
+    );
+  if (key === "hard_rules_by") return text;
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+/** `commands.*` and `uat.*` send one leaf; every other rule sends itself. */
+export function ruleBody(key: RuleKey, value: unknown): Record<string, unknown> {
+  const dot = key.indexOf(".");
+  return dot < 0 ? { [key]: value } : { [key.slice(0, dot)]: { [key.slice(dot + 1)]: value } };
 }

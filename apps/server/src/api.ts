@@ -85,7 +85,9 @@ import {
   globMatches,
   guardAckKey,
   guardDenyOutput,
+  HUB_SETTING_KEYS,
   HUD_RENDERER_HEADER,
+  type HubSettingKey,
   ISSUE_REQUIRED,
   isOperatorItem,
   itemOwner,
@@ -168,6 +170,7 @@ import Fastify, {
 import { z } from "zod";
 import {
   type AccountModels,
+  CLAUDE_MODELS,
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
@@ -284,6 +287,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./config/crew-pause.ts";
+import { readHubSettings, removeRepo, setHubSetting } from "./config/hub-settings.ts";
 import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
 import { repoRulesView } from "./config/repo-roles-view.ts";
@@ -452,6 +456,7 @@ import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
   createHeldUpdateNote,
+  crewRefusal,
   HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
   HUB_UNSAFE_NEEDS_PERSON,
@@ -625,6 +630,8 @@ export interface AppDeps {
   configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
   crewReloader?: CrewReloader;
+  /** Stops the hub so its supervisor starts it again; absent (a preview): restart answers 409. */
+  restartHub?: () => void;
   /** True when this server may write crew seats to `configPath` (not a preview on the live file). */
   seatWrites?: boolean;
   /** Starts, messages and ends the crew's seats; absent: crew routes answer 409 (disabled). */
@@ -786,6 +793,16 @@ const FlightApprovalBody = z.strictObject({
   scope: z.string().trim().min(1).max(500),
   until: z.iso.datetime({ offset: true }),
   reason: z.string().trim().min(1).max(500),
+});
+export const RESTART_OPERATOR_ONLY = "Only the operator restarts the hub, from its page.";
+export const RESTART_UNAVAILABLE = "This hub cannot restart itself.";
+export const HUB_SETTINGS_OPERATOR_ONLY = "Only the operator changes hub settings.";
+/** `POST /api/config/settings`: one hub setting; `base` is the config.yaml digest the page read. */
+const HubSettingBody = z.strictObject({
+  base: z.string().regex(/^[a-f0-9]{64}$/),
+  key: z.enum(HUB_SETTING_KEYS as [HubSettingKey, ...HubSettingKey[]]),
+  repoId: z.string().min(1).max(100).optional(),
+  value: z.unknown(),
 });
 /** The answer to a seat that calls a route only the operator may. */
 const SEAT_REFUSED = "a seat cannot use the operator's routes";
@@ -1221,6 +1238,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       path === OPERATOR_BOOTSTRAP_PATH ||
       path === "/api/flight/approvals" ||
       path === "/api/flight/runaway/lift" ||
+      path === "/api/hub/restart" ||
+      path === "/api/config/settings" ||
       path.startsWith("/api/attention/")
     )
       return reply.code(403).send({ error: SEAT_REFUSED });
@@ -3055,8 +3074,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const catalogFor = deps.codexModelsFor ?? codexModelsFor;
         return config.accounts.map((account) => ({
           accountId: account.id,
-          // Claude currently exposes no model/list equivalent. An empty catalog is more honest
-          // than offering values inferred from roles (which can include Codex-only models).
+          // Claude exposes no model/list equivalent: it gets the fixed aliases the CLI takes.
           models:
             account.vendor === "codex"
               ? catalogFor(account)
@@ -3065,7 +3083,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                     model,
                     efforts: [...efforts],
                   }))
-              : [],
+              : CLAUDE_MODELS.map(({ model, efforts }) => ({ model, efforts: [...efforts] })),
         }));
       });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
@@ -3362,6 +3380,79 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           return rolesError(reply, e);
         }
+      });
+
+      // Operator-only: the hub's own config. The controller's key and a valid FLIGHT actor both
+      // reach the operator's routes, so both are refused here.
+      const operatorOnly = (req: FastifyRequest, reply: FastifyReply, what: string): boolean => {
+        if (!controllerRequests.has(req) && !flightActor(req)) return true;
+        reply.code(403).send({ error: what });
+        return false;
+      };
+
+      // Reader: apps/web/src/setup/HubSettings.tsx
+      api.get("/config/settings", async (_req, reply) => {
+        const readPath = deps.configPath ?? deps.configReadPath;
+        if (!readPath) return reply.code(409).send({ error: CONFIG_FILE_UNAVAILABLE });
+        try {
+          return await readHubSettings(readPath);
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: apps/web/src/setup/HubSettings.tsx
+      api.post("/config/settings", async (req, reply) => {
+        if (!operatorOnly(req, reply, HUB_SETTINGS_OPERATOR_ONLY)) return;
+        const { configPath, crewReloader } = deps;
+        if (!configPath || !crewReloader)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = HubSettingBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setHubSetting(
+            configPath,
+            body.data.base,
+            body.data.key,
+            body.data.value,
+            now(),
+            body.data.repoId,
+          );
+          const changes = await crewReloader.reload();
+          return { backup: basename(result.backup), changes };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: apps/web/src/setup/Repos.tsx (Remove repo)
+      api.delete<{ Params: { repoId: string } }>("/repos/:repoId", async (req, reply) => {
+        if (!operatorOnly(req, reply, HUB_SETTINGS_OPERATOR_ONLY)) return;
+        const { configPath, crewReloader } = deps;
+        if (!configPath || !crewReloader)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        try {
+          const result = await removeRepo(configPath, req.params.repoId, now());
+          const changes = await crewReloader.reload();
+          return { backup: basename(result.backup), changes };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: apps/web/src/setup/ConfigStatus.tsx (Restart)
+      api.post("/hub/restart", async (req, reply) => {
+        if (!operatorOnly(req, reply, RESTART_OPERATOR_ONLY)) return;
+        if (!NoBody.safeParse(req.body ?? {}).success)
+          return reply.code(400).send({ error: "no fields are taken" });
+        if (!deps.restartHub) return reply.code(409).send({ error: RESTART_UNAVAILABLE });
+        const refusal = deps.supervisor
+          ? crewRefusal(config, deps.supervisor, (id) => store.seatSession(id))
+          : null;
+        if (refusal !== null) return reply.code(409).send({ error: refusal });
+        store.addHubEvent("Restarted by the operator", now());
+        deps.restartHub();
+        return reply.code(202).send({ restarting: true });
       });
 
       // Reader: docs/runbook.md#what-it-observes

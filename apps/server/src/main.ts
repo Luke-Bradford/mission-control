@@ -57,6 +57,7 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./config/crew-pause.ts";
+import { ensureConfigFile, starterLogText } from "./config/hub-settings.ts";
 import { loadProfiles, PROFILES_FILE } from "./config/profiles.ts";
 import {
   ConfigError,
@@ -167,6 +168,7 @@ import {
   crewRefusal,
   headSha,
   raiseUpdatePersonNote,
+  UPDATE_EXIT_DELAY_MS,
   UPDATE_LOG,
 } from "./update.ts";
 
@@ -186,6 +188,12 @@ export async function main(): Promise<void> {
   let port: number;
   try {
     port = portFromEnv(process.env.MC_PORT, process.env);
+    // A first start has no file: write a starter, so Setup can take the operator from there.
+    if (!isPreview(port, process.env)) {
+      const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      if (ensureConfigFile(configPath, zone))
+        process.stdout.write(`${starterLogText(configPath)}\n`);
+    }
     config = loadConfig(configPath);
   } catch (e) {
     if (e instanceof ConfigError) {
@@ -1176,6 +1184,10 @@ export async function main(): Promise<void> {
     // Reads may use the loaded file on any server: a preview shows its rules and cannot save them.
     configReadPath: configPath,
     crewReloader: writableConfigPath === undefined ? undefined : crewReloader,
+    // launchd's KeepAlive starts the hub again; a preview has no supervisor, so it cannot restart
+    restartHub: preview
+      ? undefined
+      : () => void setTimeout(() => void shutdown("restart"), UPDATE_EXIT_DELAY_MS),
     // A preview writes only a config file it was explicitly pointed at, never the live one.
     seatWrites: !preview || process.env.MC_CONFIG !== undefined,
     supervisor,
