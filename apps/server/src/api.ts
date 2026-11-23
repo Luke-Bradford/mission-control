@@ -611,6 +611,8 @@ export interface AppDeps {
    * so a preview can never write into a live loop.
    */
   noLoopWrites?: boolean;
+  /** Read the Audit page's default range once at start, so its first request is a cache hit. */
+  prewarmAudit?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
   /**
@@ -975,6 +977,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     at: number;
     value: ReturnType<typeof transcriptFootprint>;
   } | null = null;
+  /** Audit views by range: served while younger than AUDIT_CACHE_MS, then refreshed behind the reply. */
+  const auditCache = new Map<
+    string,
+    { at: number; value: ReturnType<typeof capAudit> | null; pending: Promise<void> | null }
+  >();
+  const AUDIT_CACHE_MS = 30_000;
+  const refreshAudit = (range: string, days: number): Promise<void> => {
+    const entry = auditCache.get(range) ?? { at: 0, value: null, pending: null };
+    auditCache.set(range, entry);
+    if (entry.pending !== null) return entry.pending;
+    const until = now();
+    const kinds = new Map<string, AuditRunKind>(
+      configuredAgents(config).map((a) => [
+        a.id,
+        a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
+      ]),
+    );
+    entry.pending = store
+      .auditStepped(until - days * 86_400_000, until, kinds, config.audit?.thresholds)
+      .then((view) => {
+        entry.value = capAudit(view);
+        entry.at = until;
+      })
+      .finally(() => {
+        entry.pending = null;
+      });
+    return entry.pending;
+  };
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
   const accountModels = new Map<string, AccountModels>();
   let localAccountUpdate: Promise<void> | null = null;
@@ -1517,6 +1547,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   });
   app.addHook("onReady", async () => {
     scheduleNotifications();
+  });
+  app.addHook("onReady", async () => {
+    if (deps.prewarmAudit === true) void refreshAudit("30d", 30).catch(() => {});
   });
   app.addHook("onReady", async () => {
     // Map work starts from a map SSE subscription, not from the idle hub lifecycle.
@@ -4072,21 +4105,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const range = req.query.range ?? "30d";
         const match = /^(7|30|90|365)d$/.exec(range);
         if (!match) return reply.code(400).send({ error: "range must be 7d, 30d, 90d, or 365d" });
-        const until = now();
-        const kinds = new Map<string, AuditRunKind>(
-          configuredAgents(config).map((a) => [
-            a.id,
-            a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
-          ]),
-        );
-        return capAudit(
-          await store.auditStepped(
-            until - Number(match[1]) * 86_400_000,
-            until,
-            kinds,
-            config.audit?.thresholds,
-          ),
-        );
+        const days = Number(match[1]);
+        const hit = auditCache.get(range);
+        if (hit?.value != null) {
+          // Stale is served at once and refreshed behind the reply, so a repeat never waits.
+          if (now() - hit.at >= AUDIT_CACHE_MS) void refreshAudit(range, days).catch(() => {});
+          return hit.value;
+        }
+        await refreshAudit(range, days);
+        return auditCache.get(range)?.value;
       });
       // Reader: docs/runbook.md#audit-api (rework and cost by model, and before and after each change)
       api.get<{ Querystring: { range?: string } }>("/audit/models", async (req, reply) => {

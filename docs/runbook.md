@@ -423,6 +423,11 @@ The report is hub code over recorded runs and reviews (`apps/server/src/spend/wa
 - `GET /waste` also serves `counts`: the latest daily retrospective's tickets opened and closed, runs per
   ticket (tickets with runs, mean, busiest), review rounds (reported, failed) and idle seat-hours, over the
   retrospective's 24 hours; null before the first. `alarms` and `checks` are always empty.
+- The Audit page is one screen: a verdict, then "Do next" (one ranked row per cause, from
+  `GET /api/audit`, built by `auditActions` in `packages/core`), "New
+  outside", "How we build", "Where findings land" and "What past recommendations achieved". Each row
+  shows a number now, a target that comes from an existing limit (or zero), and who decides. No
+  proposal is stored, so a row has no accept step or review date; the last panels say what is not collected.
 - `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged
   change and the share spent on building (developer runs). A cost is
   `null` where no run recorded one, never zero or an estimate: Codex runs record tokens but not cost,
@@ -2653,7 +2658,7 @@ branch previews do.
 
 ## Audit API
 
-`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
+`GET /api/audit?range=7d|30d|90d|365d` returns the `AuditView` type from mc/core, every panel bounded by the range. The hub reads the 30d range once at start and keeps each range's view for 30 seconds; an older view is still served at once while a fresh one is built behind the reply, so repeats never wait on the store (a view can be up to one rebuild behind). Besides long runners, death loops, rework, refusals, questions, cost per merged ticket and the model and prompt timeline, it serves:
 
 - `prSizes`: each merged PR's additions, deletions and changed files (PRs merged before size capture are left out) and the outliers at or above `AUDIT_PR_OUTLIER_LINES`.
 - `agentId` and `runId` on long runners, death loops, rework, `refusals` and `spendOutliers` (runs costing at least twice the range's median run).

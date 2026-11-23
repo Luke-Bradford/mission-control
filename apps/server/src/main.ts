@@ -1067,6 +1067,7 @@ export async function main(): Promise<void> {
       fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
     },
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
+    prewarmAudit: true,
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath: writableConfigPath,
     // Reads may use the loaded file on any server: a preview shows its rules and cannot save them.
