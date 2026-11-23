@@ -482,6 +482,8 @@ describe("audit", () => {
     refusalSpikes: [],
     spendOutliers: [],
     prSizes: { prs: [], outliers: [] },
+    mergedPerDay: [],
+    findingFiles: [],
     chatter: [],
     flakes: [],
     changes: [],
@@ -624,6 +626,34 @@ describe("audit", () => {
     expect(audit.capped).toEqual({ longRunners: 60, modelPromptTimeline: 60 });
     const sorted = audit.longRunners.map((r) => r.durationMs);
     expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
+  });
+
+  it("answers repeats from a cache instead of reading the store again", async () => {
+    const read = vi.spyOn(store, "auditStepped");
+    await get("/api/audit?range=30d");
+    await get("/api/audit?range=30d");
+    await get("/api/audit?range=30d");
+    expect(read).toHaveBeenCalledTimes(1);
+    await get("/api/audit?range=7d");
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("rebuilds an old view behind the reply, and the next read gets the new one", async () => {
+    const read = vi.spyOn(store, "auditStepped");
+    const first = (await get("/api/audit?range=30d")).json<AuditView>();
+    clock += 10_000;
+    await get("/api/audit?range=30d");
+    expect(read).toHaveBeenCalledTimes(1);
+
+    const changed = { ...first, flakes: [{ key: "ci/lint", count: 3 }] } as AuditView;
+    read.mockResolvedValue(changed);
+    clock += 31_000;
+    expect((await get("/api/audit?range=30d")).json<AuditView>()).toEqual(first);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    await vi.waitFor(async () =>
+      expect((await get("/api/audit?range=30d")).json<AuditView>().flakes).toHaveLength(1),
+    );
+    expect(read).toHaveBeenCalledTimes(2);
   });
 
   it("rejects an invalid range", async () => {
@@ -5532,6 +5562,15 @@ describe("activity", () => {
     }
   });
 
+  it("GET /api/overview writes nothing, so it leaves the store version and memos alone", async () => {
+    const write = vi.spyOn(store, "setSetting");
+    const before = store.readVersion();
+    const r = await get("/api/overview");
+    expect(r.statusCode).toBe(200);
+    expect(write).not.toHaveBeenCalled();
+    expect(store.readVersion()).toBe(before);
+  });
+
   it("reuses slow responses until a topic changes or ten seconds pass", async () => {
     for (const path of ["/api/telemetry", "/api/attention", "/api/config"]) {
       const spy =
@@ -5540,7 +5579,12 @@ describe("activity", () => {
       spy.mockClear();
       await get(path);
       expect(spy, path).not.toHaveBeenCalled();
+      // `agents` moves often and the cache is checked against the store version: an unchanged
+      // store keeps it.
       bus.emit("agents");
+      await get(path);
+      expect(spy, path).not.toHaveBeenCalled();
+      bus.emit("config");
       await get(path);
       expect(spy, path).toHaveBeenCalled();
       spy.mockClear();
@@ -10280,7 +10324,17 @@ describe("overview", () => {
     reads.mockRestore();
   });
 
-  it.each(["agents", "boards", "escalations", "health", "settings", "config", "guard"] as const)(
+  it("keeps the crew view memo on agents while the store is unchanged", async () => {
+    const reads = vi.spyOn(store, "offSeatRuns");
+    await get("/api/crew");
+    bus.emit("agents");
+    await get("/api/overview");
+    await get("/api/crew");
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockRestore();
+  });
+
+  it.each(["boards", "escalations", "health", "settings", "config", "guard"] as const)(
     "invalidates shared crew on %s",
     async (topic) => {
       const reads = vi.spyOn(store, "offSeatRuns");

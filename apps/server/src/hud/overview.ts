@@ -49,6 +49,51 @@ export interface OverviewScope {
   attention: readonly AttentionItem[];
 }
 
+type NeedEpisode = { key: string; openedAt: number; resolvedAt: number | null };
+const NEEDS_HISTORY_KEY = "overview:needs";
+
+/**
+ * Keeps episodes after disappearance so resolving a need cannot rewrite prior minutes. Derived
+ * items have no common resolution event; absence is observed when this runs. Pure: the caller
+ * decides whether to persist `kept`.
+ */
+function needEpisodes(
+  store: Store,
+  needs: readonly { key: string; at: number }[],
+  now: number,
+  since: number,
+): { retained: NeedEpisode[]; kept: string; stored: string | null } {
+  const stored = store.getSetting(NEEDS_HISTORY_KEY);
+  const episodes: NeedEpisode[] = JSON.parse(stored ?? "[]");
+  const open = new Map(episodes.filter((e) => e.resolvedAt === null).map((e) => [e.key, e]));
+  const present = new Set(needs.map((i) => i.key));
+  for (const episode of open.values()) {
+    if (!present.has(episode.key)) {
+      const question = /^ask:(\d+)$/.exec(episode.key);
+      episode.resolvedAt = question
+        ? (store.question(Number(question[1]))?.answeredAt ?? now)
+        : now;
+    }
+  }
+  for (const item of needs) {
+    if (!open.has(item.key)) episodes.push({ key: item.key, openedAt: item.at, resolvedAt: null });
+  }
+  const retained = episodes.filter((e) => e.resolvedAt === null || e.resolvedAt > since);
+  return { retained, kept: JSON.stringify(retained), stored };
+}
+
+/** Persists the need-episode history. Called from the notification reconcile, never from a read. */
+export function recordNeedsHistory(
+  store: Store,
+  attention: readonly AttentionItem[],
+  now: number,
+): void {
+  const since = Math.floor(now / MINUTE_MS) * MINUTE_MS - MINUTES * MINUTE_MS;
+  const needs = needsYouItems(attention).filter((i) => i.at <= now);
+  const { kept, stored } = needEpisodes(store, needs, now, since);
+  if (kept !== stored) store.setSetting(NEEDS_HISTORY_KEY, kept);
+}
+
 /** Aggregates store data and retains derived attention episodes for minute history. */
 export function overviewSummary(store: Store, now: number, scope: OverviewScope): OverviewSummary {
   const repos = new Set(scope.repoIds);
@@ -139,28 +184,7 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     const fail = outcomes.filter((h) => h.outcome === "fail").length;
     return pass + fail ? (100 * pass) / (pass + fail) : null;
   });
-  // Keep episodes after disappearance so resolving a need cannot rewrite prior minutes.
-  // Derived items have no common resolution event; absence is observed at this request time.
-  type NeedEpisode = { key: string; openedAt: number; resolvedAt: number | null };
-  const historyKey = "overview:needs";
-  const stored = store.getSetting(historyKey);
-  const episodes: NeedEpisode[] = JSON.parse(stored ?? "[]");
-  const open = new Map(episodes.filter((e) => e.resolvedAt === null).map((e) => [e.key, e]));
-  const present = new Set(needs.map((i) => i.key));
-  for (const episode of open.values()) {
-    if (!present.has(episode.key)) {
-      const question = /^ask:(\d+)$/.exec(episode.key);
-      episode.resolvedAt = question
-        ? (store.question(Number(question[1]))?.answeredAt ?? now)
-        : now;
-    }
-  }
-  for (const item of needs) {
-    if (!open.has(item.key)) episodes.push({ key: item.key, openedAt: item.at, resolvedAt: null });
-  }
-  const retained = episodes.filter((e) => e.resolvedAt === null || e.resolvedAt > since);
-  const kept = JSON.stringify(retained);
-  if (kept !== stored) store.setSetting(historyKey, kept);
+  const retained = needEpisodes(store, needs, now, since).retained;
   const needSeries = minuteEnds.map(
     (at) =>
       retained.filter((e) => e.openedAt < at && (e.resolvedAt === null || e.resolvedAt > at))
