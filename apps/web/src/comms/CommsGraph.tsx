@@ -1,6 +1,7 @@
 import type { CrewRow } from "@mc/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type CommsView, commsAgentPath, navigate } from "../router.ts";
+import { pairFilter, searchWithFocus } from "./commsFilter.ts";
 import { CAPCOM, useChartData } from "./useChartData.ts";
 
 type Point = { x: number; y: number };
@@ -199,7 +200,17 @@ export function CommsGraph({
                     <li key={edge.key}>
                       <button
                         type="button"
-                        onClick={() => navigate(commsAgentPath(edge.waiting?.owed ?? edge.b))}
+                        onClick={() =>
+                          navigate(
+                            searchWithFocus(
+                              "",
+                              pairFilter(
+                                edge.waiting?.asker ?? edge.a,
+                                edge.waiting?.owed ?? edge.b,
+                              ),
+                            ),
+                          )
+                        }
                       >
                         {edge.waiting?.asker} → {edge.waiting?.owed}
                       </button>
