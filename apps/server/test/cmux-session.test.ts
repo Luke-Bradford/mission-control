@@ -502,6 +502,47 @@ it("finishes a turn that began and ended between two polls once Claude's Stop ho
   await session.close();
 });
 
+it("counts a Stop marker written before send-key returns as the turn's end", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const source = join(dir, "source.jsonl");
+  const stopFile = join(dir, "turn-end");
+  writeFileSync(source, "");
+  const session = startCmuxSession({
+    cmux: stubCmux({
+      agents: async () => [idleAt(source)],
+      // Claude answers and its Stop hook fires before the Enter call returns
+      sendKey: async () => {
+        appendFileSync(
+          source,
+          line({ type: "user", message: { role: "user", content: "wake" } }) +
+            msg([{ type: "text", text: "done" }], "m1"),
+        );
+        appendFileSync(stopFile, "stop\n");
+      },
+    }),
+    name: "GUIDO · mc#2194",
+    cwd: dir,
+    command: "claude",
+    args: [],
+    env: {},
+    dir: join(dir, "run"),
+    stopFile,
+    transcriptPath: join(dir, "run.jsonl"),
+    cliSessionId: "session-1",
+    messageDir: join(dir, "messages"),
+    pollMs: 5,
+  });
+  const events: SessionEvent[] = [];
+  session.on((event) => events.push(event));
+  await session.ready;
+  session.send("wake");
+  await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(events.filter((e) => e.kind === "result")).toHaveLength(1);
+  await session.close();
+});
+
 it("reports a usage limit as a rate limit and the turn as an error", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
   dirs.push(dir);

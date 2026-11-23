@@ -392,34 +392,44 @@ function cmuxSession(
           chmodSync(file, 0o600);
           body = `Mission Control sent you a message. Read ${file} and act on it.`;
         }
-        while (alive && !detached) {
-          if (workspace === null) throw new SessionControlError("ended", "session ended");
-          let sent: "sent" | "busy";
-          try {
-            // after the text went in, a retry sends only the Enter, never the text twice
-            sent = textIn ? "sent" : await i.cmux.send(workspace, body);
-            if (sent === "sent") {
-              textIn = true;
-              await i.cmux.sendKey(workspace, "enter");
-              expectTurn = true;
-              answered = false;
-              turnStarted = false;
-              stopsAtSend = countStops();
+        // Armed before the first Enter: Claude can answer and fire its Stop hook before `send-key`
+        // returns, and that marker must count as this turn's. The baseline is kept across retries.
+        const wasExpecting = expectTurn;
+        expectTurn = true;
+        answered = false;
+        turnStarted = false;
+        stopsAtSend = countStops();
+        let delivered = false;
+        try {
+          while (alive && !detached) {
+            if (workspace === null) throw new SessionControlError("ended", "session ended");
+            let sent: "sent" | "busy";
+            try {
+              // after the text went in, a retry sends only the Enter, never the text twice
+              sent = textIn ? "sent" : await i.cmux.send(workspace, body);
+              if (sent === "sent") {
+                textIn = true;
+                await i.cmux.sendKey(workspace, "enter");
+              }
+            } catch (error) {
+              // The supervisor has already recorded this prompt as delivered, so it is never
+              // dropped: it stays queued and is retried until it arrives or the session ends
+              // (a seat that cmux stops answering for ends through the poll check).
+              if (failedTries++ % SEND_TRIES === 0)
+                i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`);
+              await sleep(i.pollMs ?? 1000);
+              continue;
             }
-          } catch (error) {
-            // The supervisor has already recorded this prompt as delivered, so it is never
-            // dropped: it stays queued and is retried until it arrives or the session ends
-            // (a seat that cmux stops answering for ends through the poll check).
-            if (failedTries++ % SEND_TRIES === 0)
-              i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`);
-            await sleep(i.pollMs ?? 1000);
-            continue;
+            if (sent === "sent") {
+              undelivered.splice(undelivered.indexOf(text), 1);
+              delivered = true;
+              return;
+            }
+            await sleep(2000);
           }
-          if (sent === "sent") {
-            undelivered.splice(undelivered.indexOf(text), 1);
-            return;
-          }
-          await sleep(2000);
+        } finally {
+          // delivery ended without the prompt going in: no turn is expected for it
+          if (!delivered) expectTurn = wasExpecting;
         }
       };
       const next = sendChain
