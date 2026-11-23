@@ -395,7 +395,13 @@ describeRendered("Audit first screen in a browser", () => {
         expect(await text(".audit-verdict-text")).toContain("the next timer tick");
         const rows = await page.boxes("tr.rec");
         expect(rows.length).toBe(6);
-        for (const row of rows.slice(0, 5)) expect(row.y + row.height).toBeLessThanOrEqual(height);
+        // Each of the first five rows is painted inside the visible list box, not clipped by it.
+        const list = await page.box(".audit-next .audit-scroll");
+        for (const row of rows.slice(0, 5)) {
+          expect(row.y).toBeGreaterThanOrEqual(list.y);
+          expect(row.y + row.height).toBeLessThanOrEqual(list.y + list.height);
+          expect(row.y + row.height).toBeLessThanOrEqual(height);
+        }
         const ranks = await page.evaluate(
           () => [...document.querySelectorAll("tr.rec .n")].map((n) => n.textContent),
           null,
@@ -406,9 +412,7 @@ describeRendered("Audit first screen in a browser", () => {
         expect(await scrolls()).toBe(false);
         // Keyboard: focus the first finding's trigger and expand it; its full problem is visible.
         await page.evaluate(() => {
-          const el = document.querySelector<HTMLElement>("tr.rec .audit-rt");
-          el?.focus();
-          if (el?.getAttribute("aria-expanded") === "true") el.click();
+          document.querySelector<HTMLElement>("tr.rec .audit-rt")?.focus();
         }, null);
         await page.press("Enter");
         const detail = await page.evaluate((full) => {

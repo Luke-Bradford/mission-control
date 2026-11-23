@@ -255,12 +255,12 @@ function ReportVerdict({ report, nextDueAt }: { report: AuditReport; nextDueAt: 
 /** Do next from the AUDIT report: findings ranked, with who acts; the detail carries the proof. */
 function ReportNext({ report }: { report: AuditReport }) {
   const [filter, setFilter] = useState<DeciderFilter>("all");
-  const [open, setOpen] = useState<number | null | undefined>(undefined);
+  // Collapsed on first open, so the first five ranked rows stay on screen whatever a finding's length.
+  const [open, setOpen] = useState<number | null>(null);
   const ranked = [...report.findings].sort((a, b) => a.rank - b.rank);
   const shown = ranked.filter(
     (f) => filter === "all" || (filter === "you" ? f.owner === "operator" : f.owner === "flight"),
   );
-  const openRank = open === undefined ? shown[0]?.rank : open;
   return (
     <Panel
       title="Do next"
@@ -283,7 +283,7 @@ function ReportNext({ report }: { report: AuditReport }) {
             </thead>
             <tbody>
               {shown.map((f) => {
-                const isOpen = f.rank === openRank;
+                const isOpen = f.rank === open;
                 const you = f.owner === "operator";
                 return (
                   <Fragment key={f.rank}>

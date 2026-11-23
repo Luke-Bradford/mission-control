@@ -72,16 +72,20 @@ export function buildAuditPack(i: {
   const buildSeats = state.seats.filter((s) => s.loop === "build");
   const since = now - PACK_WINDOW_DAYS * DAY_MS;
   const counts = repoId === "" ? null : wasteCounts(config, store, repoId, "", since, now);
-  const waste = wasteReport(config, store, now);
+  const waste = wasteReport(config, store, now, repoId);
   const rows: FlightPrFlowRow[] = state.prFlow?.rows ?? [];
   const flightId = found?.seat.id;
   const flightStarts = store.waste
     .runsSince(now - DAY_MS)
     .filter((r) => r.agentId === flightId).length;
-  const audit = store.audit(since, now);
+  const review = store.reviewPackFor(repoId, since, now);
+  const seatIds = new Set(session?.seats.map((x) => x.id) ?? []);
   // Decisions on one subject more than once: the ones that may have gone round in circles.
   const bySubject = new Map<string, { about: string; count: number; kinds: Set<string> }>();
   for (const d of store.flightDecisions(since, 500)) {
+    // only this session's FLIGHT, or a decision about a ticket of this repo
+    if (!(d.seatId != null && seatIds.has(d.seatId)) && !(d.ref ?? "").startsWith(`${repoId}#`))
+      continue;
     const row = bySubject.get(d.about) ?? { about: d.about, count: 0, kinds: new Set<string>() };
     row.count += 1;
     row.kinds.add(d.kind);
@@ -155,10 +159,12 @@ export function buildAuditPack(i: {
     flightStarts24h: flightStarts,
     spend: waste.spend.map(spendRow),
     review7d: {
-      rounds: top(audit.reviewRounds?.prs ?? []),
-      late: top(audit.reviewRounds?.late ?? []),
-      specBounces: top(audit.specBounces?.counts ?? []),
-      ...store.reviewWaste(since),
+      rounds: top(review.rounds),
+      late: top(review.late),
+      specFailed: review.specFailed,
+      scopeFindings: review.scopeFindings,
+      superseded: review.superseded,
+      failed: review.failed,
     },
     flightRepeatedDecisions7d: top(repeatedDecisions),
     previous: previousOf(repoId === "" ? null : store.latestAuditReport(repoId), now),

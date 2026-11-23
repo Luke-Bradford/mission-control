@@ -573,9 +573,10 @@ it("opens on the AUDIT report's verdict with findings ranked, and You filters", 
   expect(screen.getByText(/AUDIT's report, written .*\. Next by .*\./)).toBeTruthy();
   const problems = () =>
     screen.getAllByRole("button", { name: /^[▾▸]?Problem \d$/ }).map((b) => b.textContent);
-  expect(problems()).toEqual(
-    [1, 2, 3, 4, 5, 6].map((n) => `▾Problem ${n}`.replace("▾", n === 1 ? "▾" : "▸")),
-  );
+  // Every finding starts collapsed, so the first five rows fit on screen whatever their length.
+  expect(problems()).toEqual([1, 2, 3, 4, 5, 6].map((n) => `▸Problem ${n}`));
+  expect(screen.queryByText("Evidence 1")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Problem 1$/ }));
   expect(screen.getByText("Evidence 1")).toBeTruthy();
   expect(screen.getByText("Cause 1")).toBeTruthy();
   const decider = screen.getByRole("group", { name: "Decider" });

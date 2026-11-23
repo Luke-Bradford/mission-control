@@ -180,6 +180,44 @@ describe("the AUDIT pack", () => {
       "mc",
       Array.from({ length: 5 }, (_, i) => card(i + 1, "Backlog", NOW - HOUR)),
     );
+    // distinct spend, review and decision rows per repo
+    store.upsertRun(
+      runRow("a:r", "guido-1", {
+        repoId: "mc",
+        tokens: { input: 100, output: 0, cacheRead: 0, cacheCreate: 0 },
+      }),
+    );
+    store.upsertRun(
+      runRow("b:r", "guido-9", {
+        repoId: "other",
+        tokens: { input: 900, output: 0, cacheRead: 0, cacheCreate: 0 },
+      }),
+    );
+    const db = (store as unknown as { db: DatabaseSync }).db;
+    const review = (id: number, repo: string, state: string) =>
+      db
+        .prepare(
+          `INSERT INTO reviews (id, author_run_id, repo_id, seat_id, pr_number, sha, epoch, attempt,
+             round, state, created_at) VALUES (?, 'r', ?, 'retro-1', 1, ?, 1, 1, 1, ?, ?)`,
+        )
+        .run(id, repo, `sha${id}`, state, NOW - HOUR);
+    review(1, "mc", "superseded");
+    review(2, "other", "superseded");
+    review(3, "other", "failed");
+    const decide = (seatId: string, about: string) =>
+      store.addFlightDecision({
+        at: NOW - HOUR,
+        kind: "note",
+        seatId,
+        targetRunId: null,
+        ref: about,
+        questionId: null,
+        about,
+        decision: "d",
+        basis: "b",
+      });
+    for (const n of [1, 2]) decide("flight-1", "mc#1");
+    for (const n of [1, 2, 3]) decide("flight-2", "other#9");
     const packOf = (seatId: string) =>
       JSON.parse(buildAuditPack({ config, store, busy: [], now: NOW, seatId }));
     const one = packOf("audit-1");
@@ -189,5 +227,13 @@ describe("the AUDIT pack", () => {
     expect(two.board.open).toBe(0);
     expect(two.buildSeats.configured).toBe(1);
     expect(two.seats.map((s: { id: string }) => s.id)).not.toContain("guido-1");
+    const day = (p: { spend: { window: string; tokens: number }[] }) =>
+      p.spend.find((x) => x.window === "24h" || x.window === "day")?.tokens ?? p.spend[0]?.tokens;
+    expect(day(one)).toBe(100);
+    expect(day(two)).toBe(900);
+    expect(one.review7d).toMatchObject({ superseded: 1, failed: 0 });
+    expect(two.review7d).toMatchObject({ superseded: 1, failed: 1 });
+    expect(one.flightRepeatedDecisions7d).toEqual([expect.objectContaining({ count: 2 })]);
+    expect(two.flightRepeatedDecisions7d).toEqual([expect.objectContaining({ count: 3 })]);
   });
 });
