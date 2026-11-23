@@ -9,6 +9,7 @@ import {
   type Flows,
   type LastMessage,
   type OpenItem,
+  type Presence,
   presenceOf,
   type Waiting,
 } from "./chartTypes.ts";
