@@ -5,7 +5,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
-  CMUX_NEEDS_INPUT_TEXT,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -1191,16 +1190,6 @@ describe("crew seats in the rows", () => {
     );
     expect(rowOf(c, "RETRO-1")?.accountId).toBe("claude-main");
     expect(rowOf(c, "shop-app-ta")?.accountId).toBe("claude-main");
-  });
-
-  it("shows a cmux needs-input seat as waiting for the operator, with its reason", () => {
-    const c = withCrew();
-    store.upsertRun(crewRun({ endedAt: null, status: "running" }));
-    store.setSeatSession(seat({ state: "needs-input", reason: CMUX_NEEDS_INPUT_TEXT }));
-    expect(agentViews(c, store, NOW).find((a) => a.id === "GUIDO-1")).toMatchObject({
-      state: "waiting-you",
-      note: "Needs your input in cmux",
-    });
   });
 
   it("lists seats after the loops, with role, mode, area, model and session", () => {

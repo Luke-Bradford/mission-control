@@ -368,8 +368,6 @@ export function crewHudState(
         : "running";
     case "idle":
       return "idle";
-    case "needs-input":
-      return "blocked";
     case "parked":
       return "parked";
     case "stopped":
