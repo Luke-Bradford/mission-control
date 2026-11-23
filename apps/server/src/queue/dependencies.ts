@@ -12,6 +12,7 @@ import {
   ticketWaits,
   waitChains,
 } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 type WaitCard = Pick<BoardItem, "issueNumber" | "blockedBy" | "after">;
@@ -47,8 +48,10 @@ export const WAIT_RECORD_SETTING = "dependency-waits";
 
 export function readWaitRecord(store: Store, repoId: RepoId): WaitRecord {
   try {
-    const v = JSON.parse(
+    const v = parseJson<unknown>(
       store.getSetting(`${WAIT_RECORD_SETTING}:${repoId}`) ?? "null",
+      undefined,
+      rethrowJson,
     ) as Partial<WaitRecord> | null;
     return { waiting: v?.waiting ?? {} };
   } catch {

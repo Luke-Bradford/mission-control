@@ -10,19 +10,22 @@ export interface MergedPr {
 
 /**
  * The merged PRs whose pictures and work files must stay: the merge commit is not in the history of
- * the code the hub runs, in the hub's own repo only. With no running SHA, or no merge commit on record, nothing is held (the
- * PR counts as finished, as it did before this rule).
+ * the code the hub runs, in the hub's own repo only. With no running SHA, no readable history (no
+ * hub checkout, or git failing), or no merge commit on record, nothing is held (the PR counts as
+ * finished, as it did before this rule). The history is read once, not once per PR.
  */
 export async function notLivePrKeys(
   hubRepoId: string | undefined,
   merged: readonly MergedPr[],
   runningSha: string | null,
-  inRunning: (mergeSha: string, runningSha: string) => Promise<boolean>,
+  historyOf: (runningSha: string) => Promise<ReadonlySet<string> | null>,
 ): Promise<Set<string>> {
   const held = new Set<string>();
   if (runningSha === null || hubRepoId === undefined) return held;
+  const history = await historyOf(runningSha);
+  if (history === null) return held;
   // only the hub's own repo has its commits in the hub checkout; other repos' PRs finish at merge
   for (const pr of merged.filter((p) => p.key.startsWith(`${hubRepoId}#`)))
-    if (pr.mergeSha !== null && !(await inRunning(pr.mergeSha, runningSha))) held.add(pr.key);
+    if (pr.mergeSha !== null && !history.has(pr.mergeSha)) held.add(pr.key);
   return held;
 }

@@ -143,6 +143,8 @@ import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
+import { watchPreviewParent } from "./runtime/preview-parent.ts";
+import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
@@ -152,13 +154,13 @@ import { Store } from "./store.ts";
 import { restartFileService } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
+  commitsOf,
   createAutoUpdate,
   createHeldUpdateNote,
   createQuietGate,
   createUpdater,
   crewRefusal,
   headSha,
-  isAncestor,
   raiseUpdatePersonNote,
   UPDATE_LOG,
 } from "./update.ts";
@@ -410,18 +412,10 @@ export async function main(): Promise<void> {
     };
   })();
   const previewParentPid = process.env.MC_PREVIEW_PARENT_PID;
-  if (preview && previewParentPid !== undefined) {
-    const parentPid = Number(previewParentPid);
-    if (Number.isSafeInteger(parentPid) && parentPid > 1) {
-      setInterval(() => {
-        try {
-          process.kill(parentPid, 0);
-        } catch {
-          process.exit(0);
-        }
-      }, 15_000).unref();
-    }
-  }
+  const previewParentTimer =
+    preview && previewParentPid !== undefined
+      ? watchPreviewParent(Number(previewParentPid))
+      : undefined;
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
@@ -746,13 +740,7 @@ export async function main(): Promise<void> {
     log: (line) => log(line),
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),
-    onPlanned: (_s, runId) => {
-      supervisor.endRunByEngine(runId).catch((e: unknown) => {
-        log(
-          `mc report_plan: could not end ${runId}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-      });
-    },
+    onPlanned: (_s, runId) => supervisor.endRunByEngine(runId),
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined
@@ -1119,6 +1107,16 @@ export async function main(): Promise<void> {
   });
   hubApp = app;
   log = (line) => app.log.warn(line);
+  installHubErrorHandlers(log);
+  const backgroundTimers: NodeJS.Timeout[] = [];
+  const trackTimer = <T extends NodeJS.Timeout>(timer: T): T => {
+    backgroundTimers.push(timer);
+    return timer;
+  };
+  if (previewParentTimer !== undefined) trackTimer(previewParentTimer);
+  app.addHook("onClose", async () => {
+    for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
+  });
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
@@ -1193,7 +1191,7 @@ export async function main(): Promise<void> {
       const unsubscribe = bus.subscribe((topic) => {
         if (topic === "boards") void sweep.tick();
       });
-      const retry = setInterval(() => void sweep.tick(), 60_000);
+      const retry = trackTimer(setInterval(() => void sweep.tick(), 60_000));
       retry.unref();
       void sweep.tick();
       stopEvidenceSweep = () => {
@@ -1212,9 +1210,9 @@ export async function main(): Promise<void> {
       });
     };
     const everyTenMinutes = quietly("local prune", () => tidy.pruneLocal());
-    setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
-    setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
-    setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
+    trackTimer(setInterval(everyTenMinutes, TIDY_EVERY_MS)).unref();
+    trackTimer(setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS)).unref();
   }
   // Local only: pictures, evidence and scratch of finished work are removed from the data folder.
   if (!preview) {
@@ -1229,8 +1227,7 @@ export async function main(): Promise<void> {
           previewRepoId,
           store.mergedPrs(Date.now() - NOT_LIVE_WINDOW_MS),
           (await updater?.version().catch(() => null))?.sha || null,
-          (mergeSha, running) =>
-            hubRoot === null ? Promise.resolve(false) : isAncestor(hubRoot, mergeSha, running),
+          (running) => (hubRoot === null ? Promise.resolve(null) : commitsOf(hubRoot, running)),
         );
         const openPrs = new Set([...store.openPrKeys(), ...notLive]);
         // The PR's pictures on GitHub go the same way as the ones on disk: once the change is live.
@@ -1268,14 +1265,16 @@ export async function main(): Promise<void> {
           sweeping = false;
         });
     };
-    setInterval(() => diskSweep(), DISK_SWEEP_EVERY_MS).unref();
+    trackTimer(setInterval(() => diskSweep(), DISK_SWEEP_EVERY_MS)).unref();
     // The first boot after the cap and live-removal rule: one clean with no grace period, so what
     // merged PRs already left behind goes at once. Later boots use the plain sweep.
-    setTimeout(() => {
-      const firstClean = store.getSetting(DISK_CLEAN_SETTING) === null;
-      if (firstClean) store.setSetting(DISK_CLEAN_SETTING, String(Date.now()));
-      diskSweep(firstClean ? 0 : undefined);
-    }, 2 * 60_000).unref();
+    trackTimer(
+      setTimeout(() => {
+        const firstClean = store.getSetting(DISK_CLEAN_SETTING) === null;
+        if (firstClean) store.setSetting(DISK_CLEAN_SETTING, String(Date.now()));
+        diskSweep(firstClean ? 0 : undefined);
+      }, 2 * 60_000),
+    ).unref();
     // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
     if (engineOn) {
       const worktreeTidy = () => {
@@ -1291,8 +1290,8 @@ export async function main(): Promise<void> {
             log(`worktree tidy failed: ${e instanceof Error ? e.message : String(e)}`);
           });
       };
-      setInterval(worktreeTidy, TIDY_EVERY_MS).unref();
-      setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
+      trackTimer(setInterval(worktreeTidy, TIDY_EVERY_MS)).unref();
+      trackTimer(setTimeout(worktreeTidy, TIDY_EVERY_MS)).unref();
     }
   }
   // Local only: Audit checks routine hub activity without GitHub work.
@@ -1303,8 +1302,8 @@ export async function main(): Promise<void> {
       log(`silence check failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  setInterval(silence, 60_000).unref();
-  setTimeout(silence, 60_000).unref();
+  trackTimer(setInterval(silence, 60_000)).unref();
+  trackTimer(setTimeout(silence, 60_000)).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = () => {
     try {
@@ -1314,8 +1313,8 @@ export async function main(): Promise<void> {
       log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  setInterval(leftovers, LEFTOVERS_EVERY_MS).unref();
-  setTimeout(leftovers, 5_000).unref();
+  trackTimer(setInterval(leftovers, LEFTOVERS_EVERY_MS)).unref();
+  trackTimer(setTimeout(leftovers, 5_000)).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

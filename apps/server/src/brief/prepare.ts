@@ -16,6 +16,7 @@ import { pausedSeat } from "../config/crew-pause.ts";
 import type { CcConfig } from "../config.ts";
 import { runawayTrip } from "../flight/runaway.ts";
 import { isOperatorCall, questionWithOperator } from "../hud/hud.ts";
+import { parseJson } from "../json.ts";
 import { parseTicket } from "../run/view.ts";
 import type { Store } from "../store.ts";
 import { CompleteBriefContent } from "./schema.ts";
@@ -328,7 +329,10 @@ export async function prepareBriefActions(
           throw new BriefError(409, "Queue proposal identity changed.");
         let proposal: { state?: string } | null;
         try {
-          proposal = JSON.parse(store.getSetting(action.key.slice(5)) ?? "null");
+          proposal = parseJson<{ state?: string } | null>(
+            store.getSetting(action.key.slice(5)),
+            null,
+          );
         } catch {
           throw new BriefError(409, "The stored queue proposal is unreadable; refresh it.");
         }

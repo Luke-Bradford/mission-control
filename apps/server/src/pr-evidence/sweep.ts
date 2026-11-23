@@ -8,6 +8,7 @@ import {
   type RepoId,
   withSection,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { ownsPr } from "../queue/ownership.ts";
 import type { Store } from "../store.ts";
@@ -21,10 +22,11 @@ export async function trustedEvidenceHead(
 ): Promise<boolean> {
   const result = await gh(["api", `repos/${repo}/pulls/${pr.number}`], { cwd });
   if (result.code !== 0) return false;
-  const current = JSON.parse(result.stdout) as {
+  const current = parseJson<{
     state?: string;
     head?: { sha?: string; repo?: { full_name?: string } };
-  };
+  } | null>(result.stdout, null);
+  if (current === null) return false;
   return (
     current.state === "open" &&
     current.head?.sha === pr.headSha &&
@@ -42,11 +44,12 @@ export async function postPrEvidence(
   const endpoint = `repos/${repo}/pulls/${manifest.pr}`;
   const viewed = await gh(["api", endpoint], { cwd });
   if (viewed.code !== 0) throw new Error("the PR could not be read for screenshot evidence");
-  const pr = JSON.parse(viewed.stdout) as {
+  const pr = parseJson<{
     state?: string;
     head?: { sha?: string };
     body?: string | null;
-  };
+  } | null>(viewed.stdout, null);
+  if (pr === null) throw new Error("the PR could not be read for screenshot evidence");
   if (pr.state !== "open" || pr.head?.sha !== manifest.sha)
     throw new Error("the PR closed or its head changed before evidence was posted");
   const body = withSection(pr.body ?? "", EVIDENCE_HEADING, evidenceSectionText(manifest, baseUrl));

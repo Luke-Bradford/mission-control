@@ -25,6 +25,25 @@ it("marks strangers and missing authors untrusted and caches collaborator permis
   store.close();
 });
 
+it("shares one permission read when callers race before the cache is written", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mc-trust-"));
+  dirs.push(dir);
+  const store = new Store(join(dir, "db"));
+  let release: () => void = () => {};
+  const gh = vi.fn(
+    () =>
+      new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+        release = () => resolve({ code: 0, stdout: '{"permission":"write"}', stderr: "" });
+      }),
+  );
+  const first = collaborator(store, gh, dir, "o/r", "author", 10);
+  const second = collaborator(store, gh, dir, "o/r", "author", 10);
+  await vi.waitFor(() => expect(gh).toHaveBeenCalledTimes(1));
+  release();
+  await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+  store.close();
+});
+
 it.each(["read", "triage", "write", "maintain", "admin"])(
   "caches %s permission for 24h and prunes after 7 days",
   async (permission) => {

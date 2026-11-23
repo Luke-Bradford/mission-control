@@ -11,6 +11,7 @@ import {
   parkedEventText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
+import { parseJson } from "../json.ts";
 import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit, crewGitBytes } from "../runtime/git.ts";
 import { originHeads } from "../runtime/origin-heads.ts";
@@ -54,7 +55,7 @@ interface RetrospectiveRecord {
 const setting = (repo: string): string => `${FLIGHT_RETROSPECTIVE_SETTING}:${repo}`;
 const read = (store: Store, repo: string): RetrospectiveRecord | null => {
   try {
-    return JSON.parse(store.getSetting(setting(repo)) ?? "null");
+    return parseJson(store.getSetting(setting(repo)), null);
   } catch {
     return null;
   }

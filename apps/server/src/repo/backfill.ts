@@ -200,6 +200,7 @@ export function rewriteCrewSummaries(i: {
 export const TITLES_FILLED_DONE = "crew-titles-filled";
 /** Where the title fill stopped: `<startedAt>:<run id>` of the last run it handled. */
 const TITLES_CURSOR = "crew-titles-cursor";
+const titleFills = new WeakMap<Store, Promise<{ filled: number; done: boolean }>>();
 /** GitHub reads per fillTicketTitles call. */
 export const TITLE_FETCH_MAX = 20;
 
@@ -213,7 +214,7 @@ export const TITLE_FETCH_MAX = 20;
  * Returns how many runs got a title. A crash after the cursor moves loses nothing: the cursor is
  * written after the title.
  */
-export async function fillTicketTitles(i: {
+async function fillTicketTitlesOnce(i: {
   config: CcConfig;
   store: Store;
   fetchTicket: (
@@ -266,4 +267,12 @@ export async function fillTicketTitles(i: {
       store.setSetting(TITLES_CURSOR, `${run.startedAt}:${run.id}`);
     }
   }
+}
+
+export function fillTicketTitles(i: Parameters<typeof fillTicketTitlesOnce>[0]) {
+  const current = titleFills.get(i.store);
+  if (current !== undefined) return current;
+  const fill = fillTicketTitlesOnce(i).finally(() => titleFills.delete(i.store));
+  titleFills.set(i.store, fill);
+  return fill;
 }

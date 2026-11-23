@@ -105,6 +105,7 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud/hud.ts";
+import { parseJson } from "../json.ts";
 import { prFlow, prFlowFacts } from "../pr/flow.ts";
 import { blockedWork, waitReader } from "../queue/dependencies.ts";
 import { parseTicket } from "../run/view.ts";
@@ -302,7 +303,7 @@ interface WakeRecord {
 
 function readWakeRecord(store: Store, repo: string): WakeRecord | null {
   try {
-    const r = JSON.parse(store.getSetting(FLIGHT_WAKE_SETTING) ?? "null") as WakeRecord | null;
+    const r = parseJson(store.getSetting(FLIGHT_WAKE_SETTING), null) as WakeRecord | null;
     return r !== null && r.repo === repo && Number.isFinite(r.at) && Array.isArray(r.wokeOn)
       ? r
       : null;
@@ -656,7 +657,7 @@ const shownPrs = (store: Store): Set<string> => {
   if (cached !== undefined) return cached;
   let saved: unknown = [];
   try {
-    saved = JSON.parse(store.getSetting(FLIGHT_PRS_SHOWN_SETTING) ?? "[]");
+    saved = parseJson(store.getSetting(FLIGHT_PRS_SHOWN_SETTING), []);
   } catch {
     // A damaged old setting must not stop a PR from being delivered again.
   }
@@ -700,10 +701,7 @@ export const deliveredFacts = (s: FlightState): string =>
 /** The items FLIGHT was last shown, by key, each with a hash of its text. */
 const seenItems = (store: Store): Record<string, string> => {
   try {
-    return JSON.parse(store.getSetting(FLIGHT_ITEMS_SEEN_SETTING) ?? "{}") as Record<
-      string,
-      string
-    >;
+    return parseJson(store.getSetting(FLIGHT_ITEMS_SEEN_SETTING), {}) as Record<string, string>;
   } catch {
     return {};
   }
@@ -798,7 +796,7 @@ export const FLIGHT_IDLE_SEAT_SETTING = "flight.idle-seat";
 
 const readIdleState = (store: Store): { seats: Record<string, number>; delivered: string[] } => {
   try {
-    const v = JSON.parse(store.getSetting(FLIGHT_IDLE_SEAT_SETTING) || "null") as {
+    const v = parseJson(store.getSetting(FLIGHT_IDLE_SEAT_SETTING), null) as {
       seats?: Record<string, unknown>;
       delivered?: unknown;
     } | null;
@@ -1660,7 +1658,7 @@ export function flightWake(
             ),
           }
         : {}),
-      facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
+      facts: parseJson<FlightWake["facts"]>(wakeFacts(state), {} as FlightWake["facts"]),
     },
   };
 }
@@ -1791,8 +1789,8 @@ const URGENT_CATEGORIES: readonly string[] = [
 
 /** Whether a changed fact set adds an urgent fact: one of the categories above, or a seat's call. */
 export function urgentChange(previous: string, current: string): boolean {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
+  const before = parseJson<Facts>(previous, {});
+  const after = parseJson<Facts>(current, {});
   const added = (category: string): unknown[] => {
     const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));
     return (after[category] ?? []).filter((v) => !old.has(JSON.stringify(v)));
@@ -1809,8 +1807,8 @@ export function urgentChange(previous: string, current: string): boolean {
  * lifting is not settled: either one frees work FLIGHT can act on, so it wakes FLIGHT at once.
  */
 export function onlySettled(previous: string, current: string): boolean {
-  const before = JSON.parse(previous || "{}") as Facts;
-  const after = JSON.parse(current) as Facts;
+  const before = parseJson<Facts>(previous, {});
+  const after = parseJson<Facts>(current, {});
   let removed = false;
   for (const category of new Set([...Object.keys(before), ...Object.keys(after)])) {
     const old = new Set((before[category] ?? []).map((v) => JSON.stringify(v)));

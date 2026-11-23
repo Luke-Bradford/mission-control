@@ -399,7 +399,10 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
         try {
           // A head pushed during the capture, or a PR closed, is not published: its release would
           // outlive the PR's own head.
-          if (!(await abortable(deps.trusted(t), signal))) throw new Error("the PR head changed");
+          if (!(await abortable(deps.trusted(t), signal))) {
+            if (deps.unpublish) await deps.unpublish(t.pr).catch(() => {});
+            throw new Error("the PR head changed");
+          }
           published = await abortable(
             deps.publish({
               pr: t.pr,
@@ -483,11 +486,14 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     try {
       await t.onStored(manifest);
       posted.add(keyOf(t));
+      failedWhy.delete(keyOf(t));
     } catch (e) {
       // A head that changed or a PR that closed before its pictures were posted: take them down.
       if (manifest.published && deps.unpublish && !(await deps.trusted(t).catch(() => true)))
         await deps.unpublish(t.pr).catch(() => {});
-      log(`#${t.pr}: evidence not posted to the PR: ${e instanceof Error ? e.message : String(e)}`);
+      const why = `evidence not posted to the PR: ${e instanceof Error ? e.message : String(e)}`;
+      failedWhy.set(keyOf(t), why);
+      log(`#${t.pr}: ${why}`);
     }
   }
 
@@ -550,7 +556,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (missing.length === 0)
         return posted.has(keyOf(t))
           ? null
-          : "kept in draft until its screenshot evidence links are posted to the PR";
+          : `kept in draft until its screenshot evidence links are posted to the PR${
+              failedWhy.has(keyOf(t)) ? `; ${failedWhy.get(keyOf(t))}` : ""
+            }`;
       const why = failedWhy.get(keyOf(t));
       // A page whose renders a failed attempt kept is not missing: the next attempt skips it.
       const keep = kept.get(t.pr);

@@ -264,6 +264,15 @@ describe("Demo renders on both sides", () => {
     expect(unpublish).toHaveBeenCalledWith(7);
   });
 
+  it("takes the release down when the head moved before it was published", async () => {
+    const unpublish = vi.fn(async () => {});
+    let calls = 0;
+    // trusted to start the capture, not when it is about to publish
+    const t = setup({ publish: async () => "x", unpublish, trusted: async () => ++calls === 1 });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(unpublish).toHaveBeenCalledWith(7);
+  });
+
   it("takes an older head's release down when the new head changes no page", async () => {
     const unpublish = vi.fn(async () => {});
     const t = setup({
@@ -486,6 +495,7 @@ describe("PrEvidence capture", () => {
     await t.evidence.ensure(target);
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
     expect(t.evidence.gate(target)).toContain("links are posted");
+    expect(t.evidence.gate(target)).toContain("gh down");
     fail = false;
     await t.evidence.ensure(target);
     expect(t.evidence.gate(target)).toBeNull();

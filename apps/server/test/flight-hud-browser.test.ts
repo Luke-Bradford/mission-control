@@ -196,7 +196,7 @@ const render = (path: string, over: { deadlineMs?: number } = {}) => {
 if (CHROME === undefined && process.env.CI)
   describe("HUD screenshots in a real browser", () => {
     it("needs a Chrome executable on CI (set MC_BROWSER_EXECUTABLE)", () => {
-      throw new Error("no Chrome or Chromium found; the real-browser HUD suite cannot run");
+      expect.fail("no Chrome or Chromium found; the real-browser HUD suite cannot run");
     });
   });
 

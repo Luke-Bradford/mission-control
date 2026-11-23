@@ -8,6 +8,7 @@ import {
   OWNER_OPERATOR,
 } from "@mc/core";
 import { z } from "zod";
+import { parseJson, rethrowJson } from "./json.ts";
 import type { Store } from "./store.ts";
 
 /** `YYYY-MM-DD` naming a real calendar day. */
@@ -49,7 +50,7 @@ export function readAwaySettings(store: Store): AwaySettings {
   const raw = store.getSetting(AWAY_SETTING);
   if (raw === null) return DEFAULT_AWAY;
   try {
-    const parsed = AwayBody.safeParse(JSON.parse(raw));
+    const parsed = AwayBody.safeParse(parseJson<unknown>(raw, undefined, rethrowJson));
     if (parsed.success) return parsed.data;
   } catch {
     /* A corrupt row must not enable writes. */

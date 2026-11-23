@@ -6,6 +6,7 @@ import {
   type SeatRun,
   type TokenUsage,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 
 type Row = Record<string, SQLInputValue>;
 
@@ -42,7 +43,8 @@ export function modelTableData(db: DatabaseSync, since: number, until: number): 
       "SELECT repo_id, ticket, tokens FROM runs WHERE ticket IS NOT NULL AND tokens IS NOT NULL",
     )
     .all() as Row[]) {
-    const u = JSON.parse(t.tokens as string) as TokenUsage;
+    const u = parseJson<TokenUsage | null>(t.tokens, null);
+    if (u === null) continue;
     const key = `${t.repo_id}\n${t.ticket}`;
     tokens.set(key, (tokens.get(key) ?? 0) + u.input + u.output + u.cacheCreate);
   }
@@ -51,11 +53,11 @@ export function modelTableData(db: DatabaseSync, since: number, until: number): 
     const ticket = r.ticket as string;
     const n = ticketNumber(ticket);
     const size = n === null ? undefined : (sizeOf.get(r.repo_id, n) as Row | undefined);
-    const plan = r.plan === null ? null : (JSON.parse(r.plan as string) as { skipped?: string });
+    const plan = r.plan === null ? null : parseJson<{ skipped?: string } | null>(r.plan, null);
     const profile =
       r.profile === null
         ? null
-        : (JSON.parse(r.profile as string) as { profile?: { name?: string } });
+        : parseJson<{ profile?: { name?: string } } | null>(r.profile, null);
     return {
       runId: r.id as string,
       seatId: r.agent_id as string,

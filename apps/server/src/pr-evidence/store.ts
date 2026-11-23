@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { type EvidenceManifest, isEvidenceImageName } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 
 /** Heads kept per PR: the latest only; every older head goes once a newer one is stored. */
 export const PR_EVIDENCE_KEEP = 1;
@@ -42,7 +43,11 @@ export function prEvidenceStore(root: string): PrEvidenceStore {
 
   const read = (dir: string): EvidenceManifest | null => {
     try {
-      return JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as EvidenceManifest;
+      return parseJson<unknown>(
+        readFileSync(join(dir, MANIFEST), "utf8"),
+        undefined,
+        rethrowJson,
+      ) as EvidenceManifest;
     } catch {
       return null;
     }
