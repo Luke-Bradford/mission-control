@@ -172,6 +172,7 @@ import {
   LEDGER_KIND_CHANGE_TEXT,
   LEDGER_TRACK_CLOSED_TEXT,
   LIST_TICKETS_DESCRIPTION,
+  type LoopKind,
   labelCountText,
   ledgerClosedText,
   ledgerNextText,
@@ -328,6 +329,7 @@ import {
   questionAskAt,
   releaseHold,
 } from "../attention/holds.ts";
+import { markAuditShown } from "../audit/wake.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
@@ -927,14 +929,15 @@ export function seatFree(store: Store, busy: readonly SeatBusy[], seatId: string
 
 /**
  * What every FLIGHT tool checks first: the arguments (strict zod), that the token's run is its
- * seat's unended run, and that the seat's loop is `watch`. Returns the parsed arguments, or the
- * refusal to give.
+ * seat's unended run, and that the seat's loop is `watch` (or one of `loops`). Returns the parsed
+ * arguments, or the refusal to give.
  */
 export function flightCall<S extends z.ZodType>(
   deps: Pick<FlightToolsDeps, "config" | "store">,
   ctx: McToolContext,
   schema: S,
   args: unknown,
+  loops: readonly LoopKind[] = ["watch"],
 ): { ok: true; args: z.output<S> } | { ok: false; result: Result } {
   const parsed = schema.safeParse(args);
   if (!parsed.success) return { ok: false, result: badArgs(parsed.error) };
@@ -943,7 +946,7 @@ export function flightCall<S extends z.ZodType>(
   if (row?.runId !== ctx.runId || run === null || run.endedAt !== null) {
     return { ok: false, result: { text: MC_RUN_ENDED, isError: true } };
   }
-  if (crewSeatDef(deps.config, ctx.seatId).loop !== "watch") {
+  if (!loops.includes(crewSeatDef(deps.config, ctx.seatId).loop)) {
     return { ok: false, result: { text: MC_FLIGHT_ONLY, isError: true } };
   }
   return { ok: true, args: parsed.data };
@@ -1234,7 +1237,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     const place = seatPlace(config, ctx.seatId);
     const loop = place === null ? null : seatDef(place.seat).loop;
-    if (place === null || (loop !== "watch" && loop !== "plan")) {
+    if (place === null || (loop !== "watch" && loop !== "plan" && loop !== "audit")) {
       return fail(MC_TICKET_READERS_ONLY);
     }
     // a seat reads only its own session's repo; FLIGHT also the issue of an open loop escalation
@@ -2622,6 +2625,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     markPrsShown(store, state);
     markItemsShown(store, state);
     markRetrospectiveShown(store, state);
+    markAuditShown(store, state);
     markPointersShown(store, config, state, now());
     deps.seen?.(ctx.runId, state);
     const { wake: _wake, ...shown } = state;
@@ -2980,9 +2984,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   ):
     | { ok: true; args: z.output<S>; repo: CcConfig["repos"][number] }
     | { ok: false; result: Result } {
-    const c = flightCall(deps, ctx, schema, args);
+    // the AUDIT seat reads the same GitHub state FLIGHT does, through the tools it is granted
+    const c = flightCall(deps, ctx, schema, args, ["watch", "audit"]);
     if (!c.ok) return c;
-    const repo = repoOf();
+    const repoId = seatPlace(config, ctx.seatId)?.session.repoId;
+    const repo = config.repos.find((r) => r.id === repoId);
     if (repo === undefined) return { ok: false, result: fail(READ_NO_REPO) };
     return { ok: true, args: c.args, repo };
   }

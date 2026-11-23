@@ -36,6 +36,8 @@ import {
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
+import { buildAuditPack } from "./audit/pack.ts";
+import { AUDIT_TICK_MS, auditTick } from "./audit/timer.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
@@ -601,6 +603,8 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    auditPack: (seatId) =>
+      buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
       GH_TOKEN: await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
       MC_HUB: `http://${HOST}:${port}`,
@@ -745,6 +749,13 @@ export async function main(): Promise<void> {
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),
     onPlanned: (_s, runId) => supervisor.endRunByEngine(runId),
+    onAudited: (_s, runId) => {
+      supervisor.endRunByEngine(runId).catch((e: unknown) => {
+        log(
+          `mc report_audit: could not end ${runId}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      });
+    },
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined
@@ -1179,6 +1190,16 @@ export async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  // The AUDIT seat runs on a timer wherever the engine does: never in a preview.
+  if (engineOn) {
+    const auditPass = () => {
+      auditTick({ config, store, supervisor, now: Date.now(), log: (line) => log(line) }).catch(
+        (e: unknown) => log(`audit: pass failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    };
+    setInterval(auditPass, AUDIT_TICK_MS).unref();
+    setTimeout(auditPass, 30_000).unref();
+  }
   // Github's board topic and a retry tick cover every open hub-repo PR, including ones without
   // a live run. Preview/read-only hubs never capture or edit Github.
   if (engineOn && prEvidence && previewRepoId && hubRoot) {

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -92,6 +92,14 @@ describe("renderHudInHelper", () => {
     const { result, grandchild } = await run("fail");
     await expect(result).rejects.toThrow("render exploded");
     await expect.poll(async () => alive(await grandchild())).toBe(false);
+  });
+
+  it("removes the scratch folder the helper's Chrome profile was left in", async () => {
+    const { result, marker } = await run("profile");
+    await result;
+    const scratch = readFileSync(marker, "utf8");
+    expect(scratch).not.toBe(tmpdir());
+    expect(existsSync(scratch)).toBe(false);
   });
 
   it("reports a crashed helper", async () => {

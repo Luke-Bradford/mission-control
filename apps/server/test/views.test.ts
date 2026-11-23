@@ -301,6 +301,7 @@ describe("configView crew roles", () => {
   it("lists the roles sorted by name, and each seat's loop", () => {
     const crew = configView(cfg).crew;
     expect(crew?.roles?.map((r) => r.name)).toEqual([
+      "AUDIT",
       "FAO",
       "FLIGHT",
       "GUIDO",

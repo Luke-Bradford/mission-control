@@ -41,6 +41,7 @@ import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   adviceStepOf,
+  auditStartRefusedText,
   BLOCKING_SEVERITIES,
   CANNOT_START,
   CODEX_COMMAND,
@@ -90,6 +91,7 @@ import {
   mergedMainText,
   modeOfSeat,
   NOT_ASIDE,
+  notAuditSeatText,
   notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
@@ -203,6 +205,7 @@ import {
 } from "../telemetry/prompt-cost.ts";
 import {
   AGENTS_MD_HEADING,
+  auditBrief,
   BRIEF_DECISIONS_MAX,
   CLAUDE_MD_HEADING,
   cutNoteText,
@@ -480,6 +483,8 @@ export interface SupervisorDeps {
   superuserTools?: readonly McToolName[];
   /** FLIGHT alone inherits controller credentials; kept out of keeper specs and transcripts. */
   flightEnvironment?: () => Promise<Record<string, string>>;
+  /** The AUDIT seat's pack of the crew's record, as one JSON line (`audit/pack.ts`). */
+  auditPack?: (seatId: string) => string;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Fresh same-repository/default-branch provenance, only for a non-crew review subject. */
   externalReviewSubject?: (
@@ -679,6 +684,11 @@ export interface Supervisor {
       operator?: boolean;
     },
   ): Promise<{ runId: string }>;
+  /**
+   * Starts the AUDIT seat: no ticket and no branch, a detached read-only worktree of the default
+   * branch, and the audit brief (the pack of the crew's record) as its one first line.
+   */
+  startAudit(seatId: string, opts?: { first?: string }): Promise<{ runId: string }>;
   /**
    * The live check of a CLI update (`cli-auto.ts`): starts one build seat of `vendor` that holds no
    * run, through the same start path a real run takes (its account binding, seat config, sandbox
@@ -3561,6 +3571,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (def.loop === "watch") {
       throw new SupervisorError(409, watchStartRefusedText(call(info)));
     }
+    if (def.loop === "audit") {
+      throw new SupervisorError(409, auditStartRefusedText(call(info)));
+    }
     const busy = new SupervisorError(409, `${call(info)} already has a run`);
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
@@ -4117,6 +4130,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return { runId };
   }
 
+  async function startAudit(seatId: string, opts?: { first?: string }): Promise<{ runId: string }> {
+    const { runId } = await startDetached(seatId, { ...(opts ?? {}), audit: true });
+    return { runId };
+  }
+
   /**
    * A run in a detached checkout of the default branch, started through `checkedLaunch`. The watch
    * seat's start, and (`opts.check`, which gets the checkout's path and returns the one line to
@@ -4130,6 +4148,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       first?: string;
       firstPieces?: readonly PromptPiece[];
       check?: (checkout: string) => string;
+      /** The AUDIT seat's start: its loop is `audit`, and its brief carries the pack. */
+      audit?: boolean;
       operator?: boolean;
       /** Set once the check has got as far as invoking the new CLI (before that, a failure is not its). */
       stage?: { cli: boolean };
@@ -4141,8 +4161,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
     if (check === undefined) refuseWhileHeld();
-    if (check === undefined && def.loop !== "watch") {
-      throw new SupervisorError(409, notWatchSeatText(call(info)));
+    if (check === undefined && def.loop !== (opts.audit === true ? "audit" : "watch")) {
+      throw new SupervisorError(
+        409,
+        opts.audit === true ? notAuditSeatText(call(info)) : notWatchSeatText(call(info)),
+      );
     }
     if (info.seat.retiring) throw new SupervisorError(409, retiringText(call(info)));
     if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
@@ -4209,14 +4232,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const brief =
         check !== undefined
           ? check(checkout.path)
-          : watchBrief({
-              call: call(info),
-              repo: info.repo.github,
-              seats: info.session.seats
-                .filter((s) => seatDef(s).mode === "writer")
-                .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
-              fullSuite: info.repo.fullSuite ?? [],
-            });
+          : opts.audit === true
+            ? auditBrief({
+                call: call(info),
+                repo: info.repo.github,
+                pack: deps.auditPack?.(seatId) ?? "{}",
+              })
+            : watchBrief({
+                call: call(info),
+                repo: info.repo.github,
+                seats: info.session.seats
+                  .filter((s) => seatDef(s).mode === "writer")
+                  .map((s) => ({ call: seatCallSign(s.id), area: s.area })),
+                fullSuite: info.repo.fullSuite ?? [],
+              });
       const inbox =
         check !== undefined
           ? { text: brief, messageIds: [] as readonly string[] }
@@ -5461,6 +5490,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     startRun,
 
     startWatch,
+    startAudit,
 
     checkCli,
 

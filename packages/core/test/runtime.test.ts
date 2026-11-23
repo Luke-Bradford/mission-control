@@ -364,6 +364,7 @@ describe("the allowlist in phase 2b", () => {
       reportFindings: "mcp__mc__report_findings",
       restoreFile: "mcp__mc__restore_file",
       reportPlan: "mcp__mc__report_plan",
+      reportAudit: "mcp__mc__report_audit",
       logDecision: "mcp__mc__log_decision",
       readTicket: "mcp__mc__read_ticket",
       answerQuestion: "mcp__mc__answer_question",
@@ -716,6 +717,14 @@ describe("crew constants", () => {
         tools: ["report_plan", "read_ticket"],
         here: "planner: writes each ticket's plan for the developers",
       },
+      AUDIT: {
+        prompt: "roles/AUDIT.md",
+        model: "opus",
+        mode: "read-only",
+        loop: "audit",
+        tools: ["report_audit", "read_ticket", "list_tickets", "read_pr"],
+        here: "auditor: reads the crew's record on a timer and reports what is going wrong",
+      },
       FLIGHT: {
         prompt: "roles/FLIGHT.md",
         model: "opus",
@@ -795,6 +804,25 @@ describe("seatDef", () => {
       loop: "plan",
       mcTools: ["report_plan", "read_ticket"],
     });
+  });
+
+  it("AUDIT is a read-only audit seat that reports with report_audit and writes nothing", () => {
+    expect(seatDef({ role: "AUDIT" })).toMatchObject({
+      mode: "read-only",
+      loop: "audit",
+      mcTools: ["report_audit", "read_ticket", "list_tickets", "read_pr"],
+    });
+    const args = crewCliArgs({
+      ...base,
+      mode: "read-only",
+      mcTools: seatDef({ role: "AUDIT" }).mcTools,
+    });
+    const allowed = args.slice(
+      args.indexOf("--allowedTools") + 1,
+      args.indexOf("--disallowedTools"),
+    );
+    expect(allowed).toContain("mcp__mc__report_audit");
+    expect(allowed.some((t) => t === "Edit" || t === "Write" || t.startsWith("Edit("))).toBe(false);
   });
 
   it("scratch turns a read-only role into a reviewer, and leaves a writer", () => {
@@ -905,7 +933,11 @@ describe("mc tool grants", () => {
       "gh_write",
       "crew_tidy",
     ]);
-    expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual(["report_plan", ...FLIGHT_TOOLS]);
+    expect(MC_TOOL_GRANTS["read-only"].grantable).toEqual([
+      "report_plan",
+      "report_audit",
+      ...FLIGHT_TOOLS,
+    ]);
     expect(MC_TOOL_GRANTS["read-only"].grantable).not.toContain("commit");
     expect(MC_TOOL_GRANTS.writer.grantable).toEqual([]);
     expect(MC_TOOL_GRANTS.writer.grantable).not.toContain("log_decision");
