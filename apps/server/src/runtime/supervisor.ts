@@ -1070,6 +1070,32 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const isCodex = (info: SeatInfo) =>
     config.accounts.find((a) => a.id === info.seat.accountId)?.vendor === "codex";
 
+  /** The text cmux last refused a start with, until it answers again. */
+  let cmuxHold: string | null = null;
+  /**
+   * Before a Claude start makes a run: cmux must answer. A refusal (socket control off, cmux down)
+   * is a 409 with its setup text and leaves the seat idle with that reason, holding no run, so no
+   * failed run or Needs-you flag is made. While held, a start only pings cmux (never opens it).
+   */
+  async function cmuxPreflight(info: SeatInfo): Promise<void> {
+    if (isCodex(info) || (deps.command !== undefined && deps.cmuxCommand === undefined)) return;
+    const cmux = createCmux(
+      deps.cmuxCommand,
+      log,
+      cmuxHold === null ? deps.cmuxOptions : { open: [], waitMs: 0 },
+    );
+    try {
+      await cmux.ensure();
+      cmuxHold = null;
+    } catch (error) {
+      const text = errText(error);
+      if (text !== CMUX_REFUSED_TEXT && text !== CMUX_DOWN_TEXT) return;
+      cmuxHold = text;
+      setSeat(info.seat.id, { state: "idle", reason: text });
+      throw new SupervisorError(409, text);
+    }
+  }
+
   const resumeModel = (info: SeatInfo, run: Run): string => {
     if (run.model !== null) return run.model;
     const vendor = run.vendor ?? "claude";
@@ -1282,8 +1308,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const failedReview =
       fresh?.reviewId != null && store.review(fresh.reviewId)?.state === "failed";
     const isCheck = checkRuns.has(l.run.id);
+    const cmuxSetup = e.reason === CMUX_REFUSED_TEXT || e.reason === CMUX_DOWN_TEXT;
     if (
       !isCheck &&
+      !cmuxSetup &&
       (l.endedBy === null || parked === "silent" || parked === "budget" || failedReview)
     )
       noteMissingReport(
@@ -1310,7 +1338,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } else if (isCheck) {
       // a check that died is the check's answer, not an error on the seat
       setSeat(seatId, { state: "idle", reason: null, runId: null });
-    } else if (e.reason === CMUX_REFUSED_TEXT || e.reason === CMUX_DOWN_TEXT) {
+    } else if (cmuxSetup) {
       // cmux setup is the operator's to fix, not a failed seat: the start answers 409 and the seat
       // is left idle, with the exact setup text as its reason, holding no run, session or worktree
       setSeat(seatId, {
@@ -3675,6 +3703,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw busy;
     }
+    await cmuxPreflight(info);
     const waiting = store.offSeatRuns();
     const ref = `${info.repo.id}#${issue}`;
     const inReview = !readOnly
@@ -4258,6 +4287,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
+    await cmuxPreflight(info);
     starting.add(seatId);
     let prepared: string | null = null;
     try {
@@ -4594,6 +4624,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (starting.has(seatId) || live.has(seatId) || isActive(store.seatSession(seatId))) {
       throw new SupervisorError(409, `${call(info)} already has a run`);
     }
+    await cmuxPreflight(info);
     starting.add(seatId);
     try {
       const notWanted = new SupervisorError(409, REVIEW_NOT_WANTED);

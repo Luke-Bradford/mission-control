@@ -30,7 +30,7 @@ const UUID = /[0-9a-f]{8}-[0-9a-f-]{27,}/i;
 const isDenied = (text: string) => /access denied|not authorised|not authorized/i.test(text);
 
 export interface CmuxOptions {
-  /** Starts the cmux app when it is not running (default: `/usr/bin/open -g -a cmux`). */
+  /** Starts the cmux app when it is not running (default: `/usr/bin/open -g -a cmux`; empty: never). */
   open?: readonly string[];
   /** How long to wait for it after that (default 10 s). */
   waitMs?: number;
@@ -65,6 +65,7 @@ export function createCmux(
       .flatMap((line) => UUID.exec(line)?.[0] ?? []);
   };
   const wake = async () => {
+    if (options.open?.length === 0) return;
     try {
       const [openBin = "/usr/bin/open", ...openArgs] = options.open ?? [
         "/usr/bin/open",

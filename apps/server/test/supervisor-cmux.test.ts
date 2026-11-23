@@ -262,6 +262,12 @@ describe.each([
     sup.start();
     await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({ status: 409, message: text });
     expect(calls(state).some((c) => c[0] === "new-workspace")).toBe(false);
+    const noReport = () => store.notes().filter((n) => n.key.startsWith("no_report:"));
+    expect(noReport()).toEqual([]);
+    // the engine's next try gets the same answer, and makes no run and no flag
+    await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({ status: 409, message: text });
+    expect(noReport()).toEqual([]);
+    expect(calls(state).some((c) => c[0] === "new-workspace")).toBe(false);
     expect(store.seatSession("guido-1")).toMatchObject({
       state: "idle",
       reason: text,
