@@ -83,6 +83,10 @@ import {
   isResumeLineKey,
   LOOPBACK_HOST,
   type LoopKind,
+  loopOf,
+  loopPlanSizes,
+  loopStepSetting,
+  loopStepSettingRefusedText,
   MC_TMP_DIR_NAME,
   MCP_PATH,
   type McToolName,
@@ -95,7 +99,6 @@ import {
   notOnBoardText,
   notReviewSeatText,
   notWatchSeatText,
-  PLAN_SIZES,
   PNPM_STORE_ENV,
   type Profile,
   type ProfileOverride,
@@ -155,6 +158,7 @@ import {
   gitCommonDir,
   isInside,
   realish,
+  seatModelProblem,
   seatUnavailable,
 } from "../config.ts";
 import { offSeatHold, wakeDueAsideRun } from "../engine/aside.ts";
@@ -1087,6 +1091,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return info.seat.model;
   };
 
+  /** What the run's loop sets for its own step (plan or build); the seat's own values fill the rest. */
+  const stepSetOf = (run: Run): { model?: string; effort?: string } =>
+    run.profile && (run.loopKind === "plan" || run.loopKind === "build")
+      ? loopStepSetting(loopOf(run.profile.profile), run.loopKind)
+      : {};
+  const runEffort = (info: SeatInfo, run: Run): string | null =>
+    stepSetOf(run).effort ?? info.seat.effort ?? null;
+
   async function startedOn(info: SeatInfo, ignoreHold = false): Promise<{ cliVersion?: string }> {
     if (isCodex(info)) return {};
     if (!ignoreHold) refuseWhileHeld();
@@ -1950,7 +1962,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? resumeModel(info, run)
         : run.reviewId != null && run.model !== null
           ? run.model
-          : info.seat.model;
+          : (stepSetOf(run).model ?? info.seat.model);
     const tokenPath = crewTokenPath(deps.dbPath, run.id);
     const mcpPath = crewMcpPath(deps.dbPath, run.id);
     const hub = `http://${LOOPBACK_HOST}:${deps.hubPort}`;
@@ -2206,7 +2218,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           spawn: keeperSpawn,
           marker,
           model,
-          effort: info.seat.effort ?? null,
+          effort: runEffort(info, run),
           developerInstructions: readFileSync(promptPath, "utf8"),
           resumeThreadId: resume ? cliSessionId : null,
           outboxPath: join(runDir, CODEX_OUTBOX_FILE),
@@ -2256,7 +2268,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           protectedFiles: info.repo.protectedFiles,
           granted: runPathGrants(store, run.id),
           model,
-          effort: info.seat.effort,
+          effort: runEffort(info, run) ?? undefined,
           maxBudgetUsd: sessionBudget(run, cliSessionId),
           mode: def.mode,
           profile: crewProfileOf(info.seat.role, def.loop),
@@ -3159,7 +3171,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 developerInstructions,
                 model: resumeModel(info, run),
                 outboxPath: join(crewCodexDir(deps.dbPath, run.id), CODEX_OUTBOX_FILE),
-                effort: info.seat.effort ?? null,
+                effort: runEffort(info, run),
                 approve: codexApprover(info, run, row.worktree ?? ""),
                 controlTimeoutMs: deps.controlTimeoutMs,
                 log,
@@ -3639,6 +3651,27 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if ("refusal" in chosen) {
         throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
       }
+      // the model and effort the loop sets for this step: checked against the seat's vendor now
+      const stepSet = loopStepSetting(loopOf(chosen.profile), planner ? "plan" : "build");
+      if (stepSet.model !== undefined || stepSet.effort !== undefined) {
+        const problem = seatModelProblem({
+          ...info.seat,
+          model: stepSet.model ?? info.seat.model,
+          lightModel: undefined,
+          effort: stepSet.effort ?? info.seat.effort,
+        });
+        if (problem !== null) {
+          throw new SupervisorError(
+            422,
+            loopStepSettingRefusedText(
+              planner ? "plan" : "build",
+              chosen.profile.name,
+              problem.key === "effort" ? "its own effort" : "its own model",
+              problem.reason,
+            ),
+          );
+        }
+      }
       const away = activeAway(store, now(), config.operator.timezone);
       const pace = paceStartCheck(store, config, now());
       if (
@@ -3704,7 +3737,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? undefined
           : hasPlanSection(ticket.body)
             ? (store.ticketPlan(info.repo.id, ref) ?? { by: null, at: null, ref })
-            : card.size !== null && !PLAN_SIZES.includes(card.size)
+            : card.size !== null && !loopPlanSizes(loopOf(chosen.profile)).includes(card.size)
               ? { skipped: `Size ${card.size}` }
               : undefined;
       const title = ticket.title;
@@ -3854,9 +3887,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         status: "running",
         sessionId: cliSessionId,
         vendor: isCodex(info) ? "codex" : "claude",
-        model: info.seat.model,
+        model: stepSet.model ?? info.seat.model,
         accountId: info.seat.accountId,
-        effort: info.seat.effort ?? null,
+        effort: stepSet.effort ?? info.seat.effort ?? null,
         loopKind: def.loop,
         ...on,
         branch: planner || readOnly ? null : checkout.branch,
