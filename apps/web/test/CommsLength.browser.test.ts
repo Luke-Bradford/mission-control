@@ -24,7 +24,9 @@ describeRendered("The Comms right column with a living crew map in a browser", (
         });
         await page.box(".crew-map");
         await expect
-          .poll(() => page.evaluate(() => document.querySelectorAll(".crew-map-seat").length))
+          .poll(() =>
+            page.evaluate(() => document.querySelectorAll(".crew-map-seat").length, undefined),
+          )
           .toBe(3);
         const clear = await page.evaluate(() => {
           const panel = document.querySelector(".crew-map");
