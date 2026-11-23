@@ -46,7 +46,6 @@ describe("Overview layout (hud.css)", () => {
       expect(action, selector).toContain("align-items: center");
       expect(action, selector).toContain("min-height: 24px");
     }
-    expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
     expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
 

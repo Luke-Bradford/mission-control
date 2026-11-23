@@ -184,7 +184,9 @@
   border-left: 1px solid var(--line);
 }
 .comms-metric button {
-  font: var(--fs-s) / var(--lh-s) var(--mono);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
 }
 .crew-map-side section {
   padding: var(--sp-2);
