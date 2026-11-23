@@ -14,7 +14,7 @@ export function RunPrActions({ runId, sha }: { runId: string; sha: string }) {
     }
   };
   return (
-    <div className="vhold">
+    <div className="vhold run-pr-actions">
       <label>
         Merge hold reason <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
