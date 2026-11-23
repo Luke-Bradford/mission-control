@@ -76,15 +76,22 @@ export function SettingRow({
   const id = `hub-setting-${repoId ?? "hub"}-${settingKey}`;
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const shown = draft ?? textOf(value, def);
   const save = async () => {
+    const next = draftValue(shown, def);
+    if (def.kind === "number" && typeof next === "number" && !Number.isFinite(next)) {
+      setError(`${def.label} must be a finite number.`);
+      return;
+    }
+    setError(null);
     setSaving(true);
     try {
       await apiPost(ACTIONS.hubSettings, {
         base,
         key: settingKey,
         ...(repoId === undefined ? {} : { repoId }),
-        value: draftValue(shown, def),
+        value: next,
       });
       toast(`${def.label} saved. ${APPLIES_TEXT[def.applies]}.`);
       setDraft(null);
@@ -106,10 +113,20 @@ export function SettingRow({
             id={id}
             value={shown}
             placeholder={def.kind === "map" ? "Column: state" : "One per line"}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError(null);
+            }}
           />
         ) : def.kind === "choice" ? (
-          <select id={id} value={shown} onChange={(e) => setDraft(e.target.value)}>
+          <select
+            id={id}
+            value={shown}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError(null);
+            }}
+          >
             <option value="">Not set</option>
             {def.choices?.map((choice) => (
               <option key={choice} value={choice}>
@@ -122,17 +139,31 @@ export function SettingRow({
             id={id}
             type="checkbox"
             checked={shown === "true"}
-            onChange={(e) => setDraft(String(e.target.checked))}
+            onChange={(e) => {
+              setDraft(String(e.target.checked));
+              setError(null);
+            }}
           />
         ) : (
           <input
             id={id}
-            type={def.kind === "number" ? "number" : "text"}
+            type="text"
+            inputMode={def.kind === "number" ? "decimal" : undefined}
             value={shown}
-            onChange={(e) => setDraft(e.target.value)}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? `${id}-error` : undefined}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError(null);
+            }}
           />
         )}
         {def.unit && <span className="fhint muted xs">{def.unit}</span>}
+        {error && (
+          <span id={`${id}-error`} role="alert" className="crit-t s">
+            {error}
+          </span>
+        )}
       </div>
       <span className="muted s">{APPLIES_TEXT[def.applies]}</span>
       <button

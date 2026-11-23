@@ -1,5 +1,5 @@
 import { APPLIES_TEXT, HUB_SETTINGS } from "@mc/core";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { HubSettings } from "../src/setup/HubSettings.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -22,6 +22,31 @@ it("shows a setting and saves its value", async () => {
     base: "base",
     key: "poll.usage_minutes",
     value: 15,
+  });
+});
+
+it("refuses a non-finite number but lets an empty optional number remove its setting", async () => {
+  const fetch = stubFetch({
+    "/api/config/settings": { base: "base", values: { "audit.notice_repeats": 3 }, repos: {} },
+    "POST /api/config/settings": { backup: "config.yaml.bak", changes: {} },
+  });
+  render(<HubSettings />);
+  const field = await screen.findByLabelText("Notice repeats");
+  fireEvent.change(field, { target: { value: "1e309" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Notice repeats" }));
+  expect(await screen.findByText("Notice repeats must be a finite number.")).toBeTruthy();
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+  fireEvent.change(field, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save Notice repeats" }));
+  await waitFor(() =>
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1),
+  );
+  const call = fetch.mock.calls.find(
+    ([path, init]) => path === "/api/config/settings" && init?.method === "POST",
+  );
+  expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+    key: "audit.notice_repeats",
+    value: null,
   });
 });
 
