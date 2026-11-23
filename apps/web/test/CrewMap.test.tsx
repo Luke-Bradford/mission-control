@@ -22,6 +22,9 @@ it("shows FLIGHT at the centre and a live crew map", async () => {
   );
   expect(await screen.findByRole("heading", { name: "Crew map" })).toBeTruthy();
   expect(document.querySelector(".crew-map-seat.flight[aria-label*='Running']")).toBeTruthy();
+  expect(document.querySelector(".crew-map-side li button")?.textContent).toContain(
+    "no tool running",
+  );
   expect(screen.getByRole("button", { name: "Open the map full screen" })).toBeTruthy();
 });
 
@@ -67,9 +70,14 @@ it("opens the full map and keeps held states distinct from stopped seats", async
       ]}
     />,
   );
-  const stalled = await screen.findByRole("button", { name: /guido-1, stalled/i });
-  expect(stalled.className).toContain("held");
-  expect(screen.getByRole("button", { name: /guido-2, stopped/i }).className).toContain("stopped");
+  const stalled = document.querySelector<HTMLButtonElement>(
+    ".crew-map-seat[aria-label^='GUIDO-1, Stalled']",
+  );
+  expect(stalled?.className).toContain("held");
+  expect(
+    document.querySelector<HTMLButtonElement>(".crew-map-seat[aria-label^='GUIDO-2, Stopped']")
+      ?.className,
+  ).toContain("stopped");
   fireEvent.click(screen.getByRole("button", { name: "Open the map full screen" }));
   expect(document.querySelector(".crew-map-full")).toBeTruthy();
 });

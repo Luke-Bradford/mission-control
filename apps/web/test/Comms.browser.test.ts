@@ -295,3 +295,70 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 });
+
+describeRendered("The busy living crew map, rendered", () => {
+  it.each([
+    [1920, 940],
+    [2560, 1145],
+  ])("keeps a busy crew readable in the panel and full map at %ix%i", async (width, height) => {
+    mkdirSync(SHOTS, { recursive: true });
+    const page = await renderAt({
+      page: "test/commsBrowser.html",
+      width,
+      height,
+      search: "?at=/comms",
+      api: {
+        ...flightApi,
+        "/api/comms/links": {
+          links: SEATS.slice(0, 8).map((id, index) => ({
+            from: id,
+            to: "flight-1",
+            count: index + 1,
+          })),
+        },
+        "/api/comms/open": { items: [] },
+        "/api/comms/feed": { messages: flightPage.messages },
+      },
+    });
+    await page.box(".crew-map-seat.flight");
+    const panel = await page.evaluate(() => {
+      const stage = document.querySelector(".crew-map-stage")?.getBoundingClientRect();
+      const list = document.querySelector(".crew-map-side")?.getBoundingClientRect();
+      const seats = [...document.querySelectorAll(".crew-map-seat")].map((seat) =>
+        seat.getBoundingClientRect(),
+      );
+      return {
+        seats: seats.length,
+        allInStage:
+          !!stage &&
+          seats.every(
+            (seat) =>
+              seat.left >= stage.left &&
+              seat.right <= stage.right &&
+              seat.top >= stage.top &&
+              seat.bottom <= stage.bottom,
+          ),
+        hasList: !!list && list.height > 100,
+      };
+    }, undefined);
+    expect(panel.seats).toBeGreaterThanOrEqual(17);
+    expect(panel.allInStage).toBe(true);
+    expect(panel.hasList).toBe(true);
+    await page.screenshot(join(SHOTS, `crew-map-panel-${width}x${height}.png`));
+
+    await page.click(".crew-map-head button");
+    await page.box(".crew-map-full");
+    const full = await page.evaluate(() => {
+      const host = document.querySelector(".crew-map-full")?.getBoundingClientRect();
+      const stage = document.querySelector(".crew-map-stage")?.getBoundingClientRect();
+      return {
+        fillsWindow: !!host && host.width === window.innerWidth && host.height === window.innerHeight,
+        stageArea: stage ? stage.width * stage.height : 0,
+      };
+    }, undefined);
+    expect(full.fillsWindow).toBe(true);
+    expect(full.stageArea).toBeGreaterThan(width * height * 0.4);
+    await page.screenshot(join(SHOTS, `crew-map-full-${width}x${height}.png`));
+    await page.close();
+  }, BROWSER_TEST_TIMEOUT_MS);
+});

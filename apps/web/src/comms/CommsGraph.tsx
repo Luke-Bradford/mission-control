@@ -225,11 +225,29 @@ export function CommsGraph({
               <h3>Seats</h3>
               <ul>
                 {seats.map((seat) => (
-                  <li key={seat.id}>
-                    <button type="button" onClick={() => navigate(commsAgentPath(seat.id))}>
-                      {seat.name} · {seat.state ?? seat.presence}
-                    </button>
-                  </li>
+                  (() => {
+                    const row = rows.find((candidate) => candidate.id === seat.id);
+                    const used = row?.digest?.contextTokens;
+                    const limit = row?.digest?.contextWindow ?? 150_000;
+                    const tool = row?.digest?.liveTool?.name ?? "no tool running";
+                    const context =
+                      used == null
+                        ? "context unknown"
+                        : `${Math.round(used / 1000)}K of ${Math.round(limit / 1000)}K context`;
+                    return (
+                      <li key={seat.id}>
+                        <button
+                          type="button"
+                          aria-label={`${seat.name}, ${seat.state ?? seat.presence}, ${context}, ${tool}`}
+                          onClick={() => navigate(commsAgentPath(seat.id))}
+                        >
+                          <b>{seat.name} · {seat.state ?? seat.presence}</b>
+                          <small>{context}</small>
+                          <small>{tool}</small>
+                        </button>
+                      </li>
+                    );
+                  })()
                 ))}
               </ul>
             </section>
