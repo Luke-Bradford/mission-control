@@ -78,6 +78,8 @@ export interface EvidenceManifest {
   variants?: EvidenceVariant[];
   /** Where the before and after pictures are published on GitHub (release files), when they were. */
   published?: { baseUrl: string };
+  /** Set when taking the PR's release down failed, so the next sweep (after a restart too) tries again. */
+  releaseRemoval?: true;
   /** Extra committed pictures, retained only for this exact review head. */
   submitted?: EvidenceSubmission[];
 }

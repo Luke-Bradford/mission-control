@@ -86,7 +86,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
   return {
     workDir: deps.workDir,
     evidence: { ...evidence, ensure },
-    store,
+    store: deps.store,
     started,
     stopped,
     rendered,
@@ -306,21 +306,41 @@ describe("Demo renders on both sides", () => {
     expect(unpublish).toHaveBeenCalledTimes(2);
   });
 
-  it("deletes again on the next ensure after the removal failed once (head moved)", async () => {
+  it("publishes after a restart when the upload failed once", async () => {
+    let calls = 0;
+    const publish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+      return "https://x";
+    });
+    const before = setup({ publish });
+    await before.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).toHaveBeenCalledTimes(1);
+    // a fresh instance over the same stored pictures: nothing is carried in memory
+    const after = setup({ publish, store: before.store });
+    await after.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect((after.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toEqual({
+      baseUrl: "https://x",
+    });
+  });
+
+  it("deletes after a restart when the removal failed once", async () => {
     let calls = 0;
     const unpublish = vi.fn(async () => {
       if (++calls === 1) throw new Error("GitHub said no");
     });
-    let trust = 0;
-    // trusted to start, lost when about to publish, back for the retry
-    const t = setup({
-      publish: async () => "x",
-      unpublish,
-      trusted: async () => ++trust !== 2,
-    });
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const render = async (_o: string, _p: string, scheme: string) =>
+      encodePng(pageBox(HEAD, scheme));
+    const before = setup({ publish: async () => "x", unpublish, render });
+    await before.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
     expect(unpublish).toHaveBeenCalledTimes(1);
-    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const after = setup({ publish: async () => "x", unpublish, render, store: before.store });
+    await after.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+    expect(
+      (after.store.manifest("mc", 7, NEXT) as EvidenceManifest).releaseRemoval,
+    ).toBeUndefined();
+    await after.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
     expect(unpublish).toHaveBeenCalledTimes(2);
   });
 
