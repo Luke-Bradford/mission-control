@@ -1,13 +1,13 @@
 import {
   AUDIT_PR_OUTLIER_LINES,
   type AuditChange,
-  type AuditReportView,
-  auditNoteText,
-  MC_AUDIT_NO_REPORT,
   type AuditPrSize,
+  type AuditReportView,
   type AuditView,
+  auditNoteText,
   type ConfigView,
   GUARD_RULES,
+  MC_AUDIT_NO_REPORT,
 } from "@mc/core";
 import { useEffect, useState } from "react";
 import { RESOURCES, useResource } from "../data.ts";
