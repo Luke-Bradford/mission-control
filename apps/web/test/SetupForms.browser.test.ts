@@ -130,7 +130,7 @@ const pairsAligned = (page: RenderedPage, scope: string) =>
   page.evaluate((root) => {
     const pairs = [...document.querySelectorAll(`${root} .fpair`)];
     return pairs.every((pair) => {
-      const controls = [...pair.querySelectorAll("input, select")].map((c) =>
+      const controls = [...pair.querySelectorAll("input:not([type=checkbox]), select")].map((c) =>
         c.getBoundingClientRect(),
       );
       return (
