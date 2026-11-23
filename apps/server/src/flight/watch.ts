@@ -48,9 +48,11 @@ import {
   wakeLine,
 } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
+import { BoundedMap, BoundedSet } from "../bounded.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { wakePieces } from "../telemetry/prompt-cost.ts";
@@ -82,7 +84,12 @@ import {
   wakeFacts,
 } from "./state.ts";
 
+export const ANNOUNCED_MAX = 1000;
+const FIRST_CONTEXT_MAX = 200;
+
 export interface FlightWatchDeps {
+  /** How many announced missed items are remembered; tests lower it. */
+  announcedMax?: number;
   config: CcConfig;
   refreshAuthors?: (repoId: string) => Promise<void>;
   store: Store;
@@ -127,12 +134,12 @@ export interface FlightWatch {
 
 /** Whether any list of a `wakeFacts` string has an entry. */
 const hasFacts = (facts: string): boolean =>
-  Object.values(JSON.parse(facts) as Record<string, unknown[]>).some((l) => l.length > 0);
+  Object.values(parseJson<Record<string, unknown[]>>(facts, {})).some((l) => l.length > 0);
 
 /** Describe changes against the same baseline used to decide whether a wake is due. */
 export const changedWakeFacts = (previous: string, current: string): string[] => {
-  const before = JSON.parse(previous || "{}") as Record<string, unknown[]>;
-  const after = JSON.parse(current) as Record<string, unknown[]>;
+  const before = parseJson<Record<string, unknown[]>>(previous, {});
+  const after = parseJson<Record<string, unknown[]>>(current, {});
   return Object.keys(after)
     .filter((key) => JSON.stringify(before[key] ?? []) !== JSON.stringify(after[key]))
     .map((key) => {
@@ -177,7 +184,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** When FLIGHT was handed a fresh session this hour: rotations count against their own cap. */
   let rotations: number[] = [];
   /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
-  const firstContext = new Map<string, number>();
+  const firstContext = new BoundedMap<string, number>(FIRST_CONTEXT_MAX);
   let rotationRequested = false;
   /** The failure in plain words for the operator's alert; the raw error stays in the hub log. */
   let lastReason: string | null = null;
@@ -188,7 +195,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
    */
   const readGuard = (): { retryAt: number | null; restartedAt: number | null } => {
     try {
-      const v = JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) || "null") as {
+      const v = parseJson(store.getSetting(FLIGHT_GUARD_SETTING), null) as {
         retryAt?: unknown;
         restartedAt?: unknown;
       } | null;
@@ -204,7 +211,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
-  const announced = new Set<string>();
+  /** Missed-triage identities already announced; the oldest go once the cap is passed. */
+  const announced = new BoundedSet<string>(deps.announcedMax ?? ANNOUNCED_MAX);
   let preparingDay: string | null = null;
   let attemptedDay: string | null = null;
   let retryAt = 0;
@@ -366,6 +374,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     await deps.refreshAuthors?.(found.session.repoId);
     if (stopped) return;
     let added = false;
+    const missedNow = new Set<string>();
     let nextDue = Infinity;
     for (const item of operatorItems(
       config,
@@ -378,11 +387,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (item.flightTriage === "waiting" && item.triageDueAt !== undefined)
         nextDue = Math.min(nextDue, item.triageDueAt);
       const identity = `${item.key}:${item.at}`;
+      if (item.flightTriage === "missed") missedNow.add(identity);
       if (item.flightTriage === "missed" && !announced.has(identity)) {
         announced.add(identity);
         added = true;
       }
     }
+    // an item that is no longer missed leaves the set, so it holds only what is missed now
+    for (const identity of announced) if (!missedNow.has(identity)) announced.delete(identity);
     if (triageTimer !== null) clearTimeout(triageTimer);
     triageTimer = null;
     if (Number.isFinite(nextDue)) {
@@ -685,7 +697,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     const raw = store.getSetting(FLIGHT_RUN_TOOLS_SETTING);
     if (raw === null) return false;
     try {
-      const kept = JSON.parse(raw) as { runId?: unknown; tools?: unknown };
+      const kept = parseJson<unknown>(raw, undefined, rethrowJson) as {
+        runId?: unknown;
+        tools?: unknown;
+      };
       return kept.runId === runId && kept.tools !== flightToolsDigest();
     } catch {
       return false;

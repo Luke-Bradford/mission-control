@@ -40,6 +40,7 @@ import {
 import type { ChangeBus } from "./bus.ts";
 import type { CliHold } from "./cli/update.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { cleanText } from "./repo/clean.ts";
 import { gitEnv } from "./repo/files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
@@ -811,8 +812,10 @@ export function createUpdater(deps: UpdaterDeps): Updater {
   async function hubInstallEnv(): Promise<NodeJS.ProcessEnv> {
     const env = installEnv(root);
     try {
-      const modules = JSON.parse(
+      const modules = parseJson<unknown>(
         await readFile(join(root, "node_modules", ".modules.yaml"), "utf8"),
+        undefined,
+        rethrowJson,
       ) as { storeDir?: unknown };
       if (typeof modules.storeDir === "string" && /[/\\]v\d+$/.test(modules.storeDir)) {
         env[PNPM_STORE_ENV] = dirname(modules.storeDir);

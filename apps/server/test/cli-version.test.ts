@@ -207,4 +207,53 @@ describe("the stuck fixture", () => {
     writeFileSync(pidFile, `${child.pid}\n`);
     expect(() => killFixture(pidFile)).not.toThrow();
   });
+
+  describe("caches stay bounded", () => {
+    const COUNT = 205;
+    const runsOf = (name: string): number => {
+      const file = join(dir, `runs-${name}`);
+      return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0;
+    };
+    const fixture = (name: string, body: string) => {
+      const bin = join(dir, name);
+      writeFileSync(bin, `#!/bin/sh\necho x >> "${dir}/runs-${name}"\n${body}\n`);
+      chmodSync(bin, 0o755);
+    };
+    /** The first goes in alone and the last goes in alone, so they are the oldest and newest entries. */
+    const probeAll = async (names: string[]) => {
+      await probeClaudeVersion(names[0] as string);
+      const middle = names.slice(1, -1);
+      for (let i = 0; i < middle.length; i += 25)
+        await Promise.all(middle.slice(i, i + 25).map((n) => probeClaudeVersion(n)));
+      await probeClaudeVersion(names[names.length - 1] as string);
+    };
+
+    it("forgets the oldest version once more than 200 binaries were read", async () => {
+      const names = Array.from({ length: COUNT }, (_, i) => `ok-${i}`);
+      for (const n of names) fixture(n, "echo 1.2.3");
+      await probeAll(names);
+      await probeClaudeVersion("ok-204");
+      expect(runsOf("ok-204")).toBe(1); // still cached
+      await probeClaudeVersion("ok-0");
+      expect(runsOf("ok-0")).toBe(2); // dropped, so probed again
+    });
+
+    it("forgets the oldest recent failure once more than 200 binaries failed", async () => {
+      const names = Array.from({ length: COUNT }, (_, i) => `bad-${i}`);
+      for (const n of names) fixture(n, "exit 1");
+      await probeAll(names);
+      await probeClaudeVersion("bad-204");
+      expect(runsOf("bad-204")).toBe(1);
+      await probeClaudeVersion("bad-0");
+      expect(runsOf("bad-0")).toBe(2);
+    });
+
+    it("forgets the oldest not-found answer once more than 200 names were missing", async () => {
+      const names = Array.from({ length: COUNT }, (_, i) => `gone-${i}`);
+      await probeAll(names); // none exists: each miss is remembered
+      for (const n of ["gone-0", "gone-204"]) fixture(n, "echo 1.2.3");
+      expect(await probeClaudeVersion("gone-204")).toBeNull(); // the recent miss still stands
+      expect(await probeClaudeVersion("gone-0")).toBe("1.2.3"); // the oldest miss was dropped
+    });
+  });
 });

@@ -14,6 +14,7 @@
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { CcConfig } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { ownsBranch } from "../queue/ownership.ts";
 import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
@@ -115,8 +116,11 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
       } | null;
       try {
         repository =
-          (JSON.parse(r.stdout) as { data?: { repository?: typeof repository } }).data
-            ?.repository ?? null;
+          (
+            parseJson<unknown>(r.stdout, undefined, rethrowJson) as {
+              data?: { repository?: typeof repository };
+            }
+          ).data?.repository ?? null;
       } catch {
         return null;
       }
@@ -155,7 +159,7 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
     );
     if (r.code !== 0) return null;
     try {
-      const parsed: unknown = JSON.parse(r.stdout);
+      const parsed: unknown = parseJson<unknown>(r.stdout, undefined, rethrowJson);
       if (!Array.isArray(parsed)) return null;
       const out = new Set<string>();
       for (const p of parsed as { headRefName?: unknown; baseRefName?: unknown }[]) {

@@ -15,6 +15,7 @@ import {
   type Run,
   startOfLocalDay,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 import { reworkReview } from "../queue/rework.ts";
 import { parseTicket } from "../run/view.ts";
 import { runSpend } from "../spend/spend.ts";
@@ -64,7 +65,7 @@ function needEpisodes(
   since: number,
 ): { retained: NeedEpisode[]; kept: string; stored: string | null } {
   const stored = store.getSetting(NEEDS_HISTORY_KEY);
-  const episodes: NeedEpisode[] = JSON.parse(stored ?? "[]");
+  const episodes = parseJson<NeedEpisode[]>(stored, []);
   const open = new Map(episodes.filter((e) => e.resolvedAt === null).map((e) => [e.key, e]));
   const present = new Set(needs.map((i) => i.key));
   for (const episode of open.values()) {

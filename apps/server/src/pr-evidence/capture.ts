@@ -451,8 +451,11 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     try {
       await t.onStored(manifest);
       posted.add(keyOf(t));
+      failedWhy.delete(keyOf(t));
     } catch (e) {
-      log(`#${t.pr}: evidence not posted to the PR: ${e instanceof Error ? e.message : String(e)}`);
+      const why = `evidence not posted to the PR: ${e instanceof Error ? e.message : String(e)}`;
+      failedWhy.set(keyOf(t), why);
+      log(`#${t.pr}: ${why}`);
     }
   }
 
@@ -515,7 +518,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (missing.length === 0 && demoGaps.length === 0)
         return posted.has(keyOf(t))
           ? null
-          : "kept in draft until its screenshot evidence links are posted to the PR";
+          : `kept in draft until its screenshot evidence links are posted to the PR${
+              failedWhy.has(keyOf(t)) ? `; ${failedWhy.get(keyOf(t))}` : ""
+            }`;
       const why = failedWhy.get(keyOf(t));
       // A page whose renders a failed attempt kept is not missing: the next attempt skips it.
       const keep = kept.get(t.pr);

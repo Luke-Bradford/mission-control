@@ -1,5 +1,6 @@
 import type { QaHistoryPage, QaNativeHistory } from "@mc/core";
 import type { CcConfig } from "../config.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 import { qaNativeIdentity } from "./history-key.ts";
 
@@ -30,8 +31,12 @@ export function qaHistoryPage(
   if (query.cursor !== undefined) {
     if (typeof query.cursor !== "string" || query.cursor.length > 256) return null;
     try {
-      const decoded = JSON.parse(Buffer.from(query.cursor, "base64url").toString());
+      const decoded = parseJson<{ at?: unknown; key?: unknown }>(
+        Buffer.from(query.cursor, "base64url").toString(),
+        {},
+      );
       if (
+        typeof decoded.at !== "number" ||
         !Number.isSafeInteger(decoded.at) ||
         decoded.at < 0 ||
         typeof decoded.key !== "string" ||

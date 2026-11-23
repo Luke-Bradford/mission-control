@@ -361,6 +361,7 @@ import {
 import { seatFocus } from "../instructions/focus.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -952,7 +953,7 @@ export function flightCall<S extends z.ZodType>(
 function openIssues(stdout: string): { number: number; title: string }[] | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = parseJson<unknown>(stdout, undefined, rethrowJson);
   } catch {
     return null;
   }
@@ -3027,7 +3028,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const r = await ghRead(tool, argv);
     if (!r.ok) return { value: null, stderr: r.stderr };
     try {
-      const parsed: unknown = JSON.parse(r.stdout);
+      const parsed: unknown = parseJson<unknown>(r.stdout, undefined, rethrowJson);
       const value = asRecord(parsed);
       return { value: parsed === value ? value : null, stderr: "" };
     } catch {
@@ -3647,7 +3648,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         });
         let pr: { head?: { sha?: unknown } };
         try {
-          pr = JSON.parse(pull.stdout);
+          pr = parseJson<unknown>(pull.stdout, undefined, rethrowJson) as typeof pr;
         } catch {
           return fail("The PR head could not be verified.");
         }
@@ -3674,7 +3675,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             content?: unknown;
           };
           try {
-            file = JSON.parse(result.stdout);
+            file = parseJson<unknown>(result.stdout, undefined, rethrowJson) as typeof file;
           } catch {
             return fail(`Picture could not be read: ${image.path}.`);
           }
@@ -3703,7 +3704,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
               { cwd: deps.dbPath, timeoutMs: 5000, maxBuffer: 12 * 1024 * 1024 },
             );
             try {
-              content = JSON.parse(blob.stdout);
+              content = parseJson<unknown>(blob.stdout, undefined, rethrowJson) as typeof content;
             } catch {
               return fail(`Picture could not be read: ${image.path}.`);
             }

@@ -7,6 +7,9 @@
 import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { delimiter, join } from "node:path";
+import { BoundedMap } from "../bounded.ts";
+
+const MAX_KEYS = 200;
 
 /** The command that runs the Claude CLI: the version probe and the crew spawn both use it. */
 export const CLAUDE_COMMAND = "claude";
@@ -17,10 +20,10 @@ const NOT_FOUND_TTL_MS = 30_000;
 /** How long a failed run stands before the binary is probed again (one slow start must not stick). */
 const FAILURE_TTL_MS = 60_000;
 /** Versions read, per path and mtime. */
-const cache = new Map<string, string>();
-const failedUntil = new Map<string, number>();
+const cache = new BoundedMap<string, string>(MAX_KEYS);
+const failedUntil = new BoundedMap<string, number>(MAX_KEYS);
 const inFlight = new Map<string, Promise<string | null>>();
-const notFoundUntil = new Map<string, number>();
+const notFoundUntil = new BoundedMap<string, number>(MAX_KEYS);
 
 interface Located {
   path: string;

@@ -331,7 +331,7 @@ import {
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
-import type { TestLock } from "./guard/lock.ts";
+import { LockStoreError, type TestLock } from "./guard/lock.ts";
 import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
@@ -354,6 +354,7 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { loopTries } from "./loop/history.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -989,6 +990,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return entry.pending;
   };
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const flightAudits = new Set<string>();
   const accountModels = new Map<string, AccountModels>();
   let localAccountUpdate: Promise<void> | null = null;
   const withAccountUpdate = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -1169,7 +1171,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const raw = req.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
     if (typeof raw !== "string") return null;
     try {
-      const value = JSON.parse(raw);
+      const value = parseJson<{ seatId?: unknown; runId?: unknown } | undefined>(
+        raw,
+        undefined,
+        rethrowJson,
+      );
       if (typeof value?.seatId !== "string" || typeof value.runId !== "string") return null;
       const seat = configuredAgents(config).find(
         (agent) => agent.kind === "crew" && agent.id === value.seatId,
@@ -2593,38 +2599,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.tool_name === "Bash" &&
               typeof command === "string" &&
               flightShellWrite(command) &&
+              !flightAudits.has(auditKey) &&
               store.getSetting(auditKey) === null
             ) {
-              let shown = command;
-              let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
-              for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
-                if (secret !== "") {
-                  shown = shown.split(secret).join("[redacted]");
-                  cwd = cwd.split(secret).join("[redacted]");
+              flightAudits.add(auditKey);
+              try {
+                let shown = command;
+                let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
+                for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
+                  if (secret !== "") {
+                    shown = shown.split(secret).join("[redacted]");
+                    cwd = cwd.split(secret).join("[redacted]");
+                  }
                 }
-              }
-              shown = cleanText(shown, 1500);
-              cwd = cleanText(cwd, 1000);
-              store.addFlightDecision({
-                at: now(),
-                kind: "shell",
-                seatId: who.seatId,
-                targetRunId: who.runId,
-                ref: null,
-                questionId: null,
-                about: shown,
-                decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
-                basis: "The CLI's post-execution hook recorded this result.",
-              });
-              store.setSetting(auditKey, "recorded");
-              if (
-                flightShellBreakerWrite(
-                  command,
-                  flightShellContext(store, who.runId, body.data.cwd),
+                shown = cleanText(shown, 1500);
+                cwd = cleanText(cwd, 1000);
+                store.addFlightDecision({
+                  at: now(),
+                  kind: "shell",
+                  seatId: who.seatId,
+                  targetRunId: who.runId,
+                  ref: null,
+                  questionId: null,
+                  about: shown,
+                  decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
+                  basis: "The CLI's post-execution hook recorded this result.",
+                });
+                store.setSetting(auditKey, "recorded");
+                if (
+                  flightShellBreakerWrite(
+                    command,
+                    flightShellContext(store, who.runId, body.data.cwd),
+                  )
                 )
-              )
-                noteFlightWrite(store, bus, now(), "shell", { command: shown });
-              bus.emit("flight");
+                  noteFlightWrite(store, bus, now(), "shell", { command: shown });
+                bus.emit("flight");
+              } finally {
+                flightAudits.delete(auditKey);
+              }
             }
             return answer();
           }
@@ -2712,13 +2724,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
           res.on("close", onClose);
           try {
-            const granted = await lock.acquire(
-              key,
-              who.seatId,
-              verdict.command,
-              LOCK_WAIT_MS,
-              hungUp.signal,
-            );
+            let granted: boolean;
+            try {
+              granted = await lock.acquire(
+                key,
+                who.seatId,
+                verdict.command,
+                LOCK_WAIT_MS,
+                hungUp.signal,
+              );
+            } catch (e) {
+              if (e instanceof LockStoreError) return answer(e.message);
+              throw e;
+            }
             if (granted && !hungUp.signal.aborted) {
               // `finish` means the answer was handed to the kernel, not that the hook received it.
               // On a real socket this release only catches an async gap between the send and the
@@ -5017,7 +5035,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             try {
               comments = z
                 .object({ comments: z.array(z.object({ body: z.string() })) })
-                .parse(JSON.parse(latest.stdout)).comments;
+                .parse(parseJson<unknown>(latest.stdout, undefined, rethrowJson)).comments;
             } catch {
               /* A failed read must not turn into a second post. */
             }
@@ -6613,7 +6631,7 @@ export function githubRate(store: Store): GithubRateState {
   const raw = store.getSetting(GITHUB_RATE_SETTING);
   if (raw === null) return { queries: {}, pollCost: null };
   try {
-    return JSON.parse(raw) as GithubRateState;
+    return parseJson<unknown>(raw, undefined, rethrowJson) as GithubRateState;
   } catch {
     return { queries: {}, pollCost: null };
   }
@@ -6641,11 +6659,16 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
     let nextTryAt: number | undefined;
     if (acct.vendor === "claude") {
       try {
-        const backoff = JSON.parse(store.getSetting(USAGE_BACKOFF_SETTING) ?? "null");
+        const backoff = parseJson<{ waitMs?: number; notBefore?: number } | null>(
+          store.getSetting(USAGE_BACKOFF_SETTING),
+          null,
+        );
         if (
           backoff &&
+          typeof backoff.waitMs === "number" &&
           Number.isFinite(backoff.waitMs) &&
           backoff.waitMs > 0 &&
+          typeof backoff.notBefore === "number" &&
           Number.isFinite(backoff.notBefore)
         ) {
           const capped = Math.min(backoff.notBefore, now + USAGE_BACKOFF_CAP_MS);

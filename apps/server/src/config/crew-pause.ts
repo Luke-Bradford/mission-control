@@ -6,6 +6,7 @@ import {
   seatIsPaused,
 } from "@mc/core";
 import { z } from "zod";
+import { parseJson, rethrowJson } from "../json.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 
@@ -41,7 +42,7 @@ export function readCrewPause(store: Store): CrewPause | null {
   const raw = store.getSetting(CREW_PAUSE_SETTING);
   if (raw === null || raw === "null") return null;
   try {
-    const parsed = record.safeParse(JSON.parse(raw));
+    const parsed = record.safeParse(parseJson<unknown>(raw, undefined, rethrowJson));
     if (parsed.success) {
       const { except, legacyExcept, ...base } = parsed.data;
       const oldSeats = [
@@ -126,8 +127,10 @@ type ReviewClock = { id: number; seatId: string; startedAt: number | null; creat
 export function reviewPausedMs(store: Store, row: ReviewClock, at: number): number {
   const key = `crew.review-pause.${row.id}`;
   const saved = store.getSetting(key);
-  const clock: { elapsed: number; since: number | null } =
-    saved === null ? { elapsed: 0, since: null } : JSON.parse(saved);
+  const clock: { elapsed: number; since: number | null } = parseJson(saved, {
+    elapsed: 0,
+    since: null,
+  });
   const pause = pausedSeat(store, row.seatId);
   if (pause && clock.since === null)
     clock.since = Math.max(pause.at, row.startedAt ?? row.createdAt);

@@ -13,6 +13,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { CODEX_COMMAND, CODEX_MIN_VERSION } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { CliCheckResult } from "../runtime/cli-check.ts";
 import { codexVersionAllowed } from "../runtime/codex-floor.ts";
 import type { Store } from "../store.ts";
@@ -123,7 +124,7 @@ export function pendingCliUpdate(store: Store, tool: AutoCliTool): PendingCliUpd
   const raw = store.getSetting(pendingKey(tool));
   if (raw === null) return null;
   try {
-    const v = JSON.parse(raw) as Partial<PendingCliUpdate>;
+    const v = parseJson<unknown>(raw, undefined, rethrowJson) as Partial<PendingCliUpdate>;
     return asVersion(v.from ?? null) !== null && asVersion(v.to ?? null) !== null
       ? {
           from: v.from as string,

@@ -5753,6 +5753,7 @@ describe("report_plan", () => {
   const PLAN = "### Outcome\n\nDo X, then Y.\n\n### Tests\n\n- First, in `a.test.ts`.";
   let ghDir: string;
   let told: [string, string][];
+  let endFails = false;
   let pt: McTool[];
 
   const ghState = (state: Record<string, { code?: number; stdout?: string; stderr?: string }>) =>
@@ -5781,6 +5782,7 @@ describe("report_plan", () => {
     writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
     ghState(view("Do X."));
+    endFails = false;
     const cfg = config();
     cfg.crew?.sessions[0]?.seats.push({
       id: "fao-1",
@@ -5794,7 +5796,10 @@ describe("report_plan", () => {
       deps({
         config: cfg,
         gh: createGh(join(ghDir, "gh")),
-        onPlanned: (s, r) => told.push([s, r]),
+        onPlanned: (s, r) => {
+          told.push([s, r]);
+          if (endFails) throw new Error("could not end");
+        },
       }),
     );
     store.upsertRun(run({ id: FAO_RUN, agentId: "fao-1", branch: null, ticket: "mc#7" }));
@@ -5819,6 +5824,64 @@ describe("report_plan", () => {
     expect(await plan()).toEqual(refused(AWAY_PLAN_REFUSED));
     expect(ghCalls()).toEqual([]);
     expect(told).toEqual([]);
+  });
+
+  it("tells the seat when the run could not be ended after the plan was saved", async () => {
+    endFails = true;
+    const result = await plan();
+    expect(result).toMatchObject({ isError: true });
+    expect(result.text).toContain("could not end the run");
+    expect(told).toEqual([["fao-1", FAO_RUN]]);
+  });
+
+  it("ends the run on the retry after the plan was saved, without writing it again", async () => {
+    endFails = true;
+    await plan();
+    ghState(view(ghCalls().at(-1)?.body ?? ""));
+    endFails = false;
+    const second = await plan();
+    expect(second).not.toMatchObject({ isError: true });
+    expect(told).toHaveLength(2);
+  });
+
+  it("keeps at most 50 planner runs waiting for an end retry, dropping the oldest", async () => {
+    endFails = true;
+    const asRun = (i: number) => `${FAO_RUN}:${i}`;
+    for (let i = 0; i < 55; i++) {
+      store.upsertRun(
+        run({ id: asRun(i), agentId: "fao-1", branch: null, ticket: "mc#7", seq: 100 + i }),
+      );
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: asRun(i),
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      ghState(view("Do X."));
+      await plan(PLAN, { seatId: "fao-1", runId: asRun(i) });
+    }
+    endFails = false;
+    const writes = () => ghCalls().filter((c) => c.body !== undefined).length;
+    const retry = async (i: number) => {
+      store.setSeatSession({
+        seatId: "fao-1",
+        runId: asRun(i),
+        cliSessionId: "cli-2",
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      ghState(view("Do X."));
+      const before = writes();
+      await plan(PLAN, { seatId: "fao-1", runId: asRun(i) });
+      return writes() - before;
+    };
+    expect(await retry(54)).toBe(0); // still remembered: the retry only ends the run
+    expect(await retry(0)).toBe(1); // dropped: the retry writes the plan again
   });
 
   it("rechecks away after reading the issue and before editing it", async () => {

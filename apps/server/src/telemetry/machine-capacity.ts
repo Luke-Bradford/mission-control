@@ -1,5 +1,6 @@
 import type { MachineSample } from "@mc/core";
 import { FILE_SERVICE } from "../collectors/machine.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
@@ -178,7 +179,7 @@ export function storedMachineCapacity(
   let persistedAt: number | null = null;
   let known = false;
   try {
-    const saved: unknown = JSON.parse(raw ?? "null");
+    const saved: unknown = parseJson<unknown>(raw ?? "null", undefined, rethrowJson);
     if (
       saved !== null &&
       typeof saved === "object" &&

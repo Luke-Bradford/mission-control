@@ -1,4 +1,6 @@
 /** Head-bound operator evidence for PRs with no crew author run. */
+
+import { parseJson, rethrowJson } from "./json.ts";
 import type { Store } from "./store.ts";
 
 export interface ExternalPrControl {
@@ -23,7 +25,7 @@ export function externalPrControl(
   const value = store.getSetting(key(repo, pr, sha));
   if (value === null) return null;
   try {
-    const row = JSON.parse(value) as ExternalPrControl;
+    const row = parseJson<unknown>(value, undefined, rethrowJson) as ExternalPrControl;
     if (
       typeof row.since !== "number" ||
       ![row.uatRequired, row.uatAccepted, row.controllerRequired, row.controllerPassed].every(
@@ -91,7 +93,7 @@ function readAsk(store: Store, repo: string, pr: number): Ask | null {
   const value = store.getSetting(askKey(repo, pr));
   if (value === null) return null;
   try {
-    const ask = JSON.parse(value) as Ask;
+    const ask = parseJson<unknown>(value, undefined, rethrowJson) as Ask;
     return typeof ask.sha === "string" ? ask : null;
   } catch {
     return null;

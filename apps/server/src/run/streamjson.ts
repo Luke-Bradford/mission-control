@@ -17,6 +17,7 @@ import {
   type TokenUsage,
   workSummary,
 } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import { cleanText } from "../repo/clean.ts";
 import { codexPlan, codexTool, transcriptVendor } from "../transcript/codex-transcript.ts";
 import { str } from "../util.ts";
@@ -658,7 +659,11 @@ function foldCodex(
           name: tool.name,
           at: startedAt,
           live: true,
-          detail: toolDetail(tool.name, tool.input ? JSON.parse(tool.input) : null, d.cwd),
+          detail: toolDetail(
+            tool.name,
+            tool.input ? parseJson<unknown>(tool.input, null) : null,
+            d.cwd,
+          ),
         });
       }
       if (completed) {
@@ -824,7 +829,7 @@ export function foldTranscript(
     if (!line.startsWith("{") || line.startsWith(STREAM_EVENT_PREFIX)) continue;
     let ev: unknown;
     try {
-      ev = JSON.parse(line);
+      ev = parseJson<unknown>(line, undefined, rethrowJson);
     } catch {
       continue;
     }

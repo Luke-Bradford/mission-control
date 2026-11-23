@@ -2,6 +2,7 @@ import { type BriefChoiceRequest, COMMS_CAPCOM, type TestLockState } from "@mc/c
 import { decisionDefault } from "../attention/holds.ts";
 import type { CcConfig } from "../config.ts";
 import { attentionItems, NO_LOCK } from "../hud/hud.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 import { type BriefChoiceDeps, chooseBrief, retainedBriefChoice } from "./choices.ts";
 import { BriefDeferred, checkBriefRun, currentBriefFlight } from "./prepare.ts";
@@ -32,7 +33,7 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
     for (const pending of store.pendingDecisionDeliveries()) {
       if (!pending.binding) continue;
       try {
-        const bound = JSON.parse(pending.binding) as PendingBinding;
+        const bound = parseJson<unknown>(pending.binding, undefined, rethrowJson) as PendingBinding;
         const prior = retainedBriefChoice({ store }, bound.epoch);
         if (prior && !["pending", "dispatching"].includes(prior.state)) {
           settle(pending.key, pending.briefAt, prior);
