@@ -112,7 +112,7 @@
   overflow: hidden;
   color: var(--fg-2);
   font-size: var(--fs-micro);
-  line-height: var(--lh-axis);
+  line-height: var(--lh-s);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -148,7 +148,7 @@
 }
 .crew-map-side li {
   overflow: hidden;
-  padding: 2px 0;
+  padding: var(--sp-1) 0;
   color: var(--fg-2);
   font: var(--fs-micro) / var(--lh-s) var(--mono);
   text-overflow: ellipsis;
