@@ -7186,6 +7186,35 @@ describe("superuser housekeeping", () => {
     expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
     expect(adoptCalls).toEqual([]);
   });
+  it("merge_pr adopts a moved head on a run that still awaits FLIGHT, and refuses a head on another branch", async () => {
+    elevated();
+    runPr();
+    const MOVED = "e".repeat(40);
+    expect(need(store.run("r-pr")?.loop).awaitingFlight).toBe(SHA);
+    store.setRunPush({ runId: "r-pr", sha: SHA, at: NOW });
+    let branch = "mc/7";
+    ghImpl = async (a) => ({
+      code: 0,
+      stdout:
+        a[0] === "pr" && a[1] === "view"
+          ? JSON.stringify({
+              state: "OPEN",
+              isCrossRepository: false,
+              headRefOid: MOVED,
+              headRefName: branch,
+            })
+          : "",
+      stderr: "",
+    });
+    branch = "other";
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(adoptCalls).toEqual([]);
+    branch = "mc/7";
+    const r = await call("merge_pr", { pr: 12 });
+    expect(r).not.toHaveProperty("isError", true);
+    expect(adoptCalls).toEqual([["r-pr", MOVED]]);
+    expect(clearanceCalls).toEqual([]);
+  });
   it.each(["ruling", "review-failed", "conflict"])("cannot accept a %s park", async (kind) => {
     elevated();
     runPr();
