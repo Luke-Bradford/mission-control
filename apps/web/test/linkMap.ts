@@ -272,6 +272,11 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
         /^\/agent\/[\w-]+(\?trace=[\w-]+)?$/,
         "A finding opens the seat's run trace.",
       ),
+      rule(
+        /^[\w-]+ run$/,
+        /^\/agent\/[\w-]+\?trace=[\w-]+$/,
+        "A Do next row's run link opens that run's trace on its seat's page.",
+      ),
     ],
   },
   setup: {

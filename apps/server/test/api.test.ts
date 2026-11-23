@@ -481,6 +481,8 @@ describe("audit", () => {
     refusalSpikes: [],
     spendOutliers: [],
     prSizes: { prs: [], outliers: [] },
+    mergedPerDay: [],
+    findingFiles: [],
     chatter: [],
     flakes: [],
     changes: [],
@@ -623,6 +625,34 @@ describe("audit", () => {
     expect(audit.capped).toEqual({ longRunners: 60, modelPromptTimeline: 60 });
     const sorted = audit.longRunners.map((r) => r.durationMs);
     expect(sorted).toEqual([...sorted].sort((a, b) => b - a));
+  });
+
+  it("answers repeats from a cache instead of reading the store again", async () => {
+    const read = vi.spyOn(store, "auditStepped");
+    await get("/api/audit?range=30d");
+    await get("/api/audit?range=30d");
+    await get("/api/audit?range=30d");
+    expect(read).toHaveBeenCalledTimes(1);
+    await get("/api/audit?range=7d");
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("rebuilds an old view behind the reply, and the next read gets the new one", async () => {
+    const read = vi.spyOn(store, "auditStepped");
+    const first = (await get("/api/audit?range=30d")).json<AuditView>();
+    clock += 10_000;
+    await get("/api/audit?range=30d");
+    expect(read).toHaveBeenCalledTimes(1);
+
+    const changed = { ...first, flakes: [{ key: "ci/lint", count: 3 }] } as AuditView;
+    read.mockResolvedValue(changed);
+    clock += 31_000;
+    expect((await get("/api/audit?range=30d")).json<AuditView>()).toEqual(first);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    await vi.waitFor(async () =>
+      expect((await get("/api/audit?range=30d")).json<AuditView>().flakes).toHaveLength(1),
+    );
+    expect(read).toHaveBeenCalledTimes(2);
   });
 
   it("rejects an invalid range", async () => {

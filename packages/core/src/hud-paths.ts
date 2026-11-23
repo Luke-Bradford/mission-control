@@ -63,7 +63,7 @@ export function firstLoadPaths(page: string, c: FirstLoadContext): string[] {
         `/api/boards/${enc(repo)}`,
       ];
     case "Audit":
-      return ["/api/audit?range=30d"];
+      return ["/api/audit?range=30d", "/api/waste"];
     case "Agent":
       return [
         prListPath(repo),
