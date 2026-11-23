@@ -70,7 +70,11 @@ if (command === "new-workspace") {
   const workspaceId = randomUUID();
   const sessionId = randomUUID();
   // The launcher must at least be valid zsh, as cmux would run it.
-  if (state.bridge && spawnSync("/bin/zsh", ["-n", at("--command")]).status !== 0) {
+  if (
+    state.bridge &&
+    existsSync("/bin/zsh") &&
+    spawnSync("/bin/zsh", ["-n", at("--command")]).status !== 0
+  ) {
     process.stderr.write("Error: launcher is not valid zsh\n");
     save();
     process.exit(1);
