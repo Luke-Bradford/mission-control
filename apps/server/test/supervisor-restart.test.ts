@@ -15,12 +15,16 @@ import {
 import { dirname, join } from "node:path";
 import {
   CANNOT_START,
+  DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   FLIGHT_GHOST_MS,
   freezeRules,
+  type LoopDef,
+  loopOf,
   MC_TMP_DIR_NAME,
   NEW_LOOP,
   otherLaneText,
+  type Profile,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli/update.ts";
@@ -234,6 +238,41 @@ describe("the CLI update hold", () => {
     hold.release();
     await until(() => expect(sup.seatFacts("guido-1")).not.toBeNull());
     expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId });
+  });
+});
+
+describe("a loop's model and effort on resume", () => {
+  it("a resumed run launches on the build step's model and effort", async () => {
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    const loop = loopOf(feature) as LoopDef;
+    const profiles: Profile[] = [
+      {
+        ...feature,
+        loop: {
+          ...loop,
+          steps: loop.steps.map((x) =>
+            x.id === "build" ? { ...x, model: "claude-opus-4-1", effort: "low" } : x,
+          ),
+        },
+      },
+    ];
+    const first = make({ profiles: () => profiles });
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await first.sup.stopAll();
+    await noKeepers(); // a reboot: no keeper is left, so the next hub resumes the session
+    const second = make({ profiles: () => profiles });
+    second.sup.start();
+    await until(() => expect(recorded().filter((l) => Array.isArray(l.argv))).toHaveLength(2));
+    const argv = recorded()
+      .filter((l) => Array.isArray(l.argv))
+      .map((l) => l.argv as string[]);
+    for (const a of argv) {
+      expect(a.slice(a.indexOf("--model"))[1]).toBe("claude-opus-4-1");
+      expect(a.slice(a.indexOf("--effort"))[1]).toBe("low");
+    }
+    expect(store.run(runId)).toMatchObject({ model: "claude-opus-4-1", effort: "low" });
   });
 });
 

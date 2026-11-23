@@ -3652,7 +3652,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
       }
       // the model and effort the loop sets for this step: checked against the seat's vendor now
-      const stepSet = loopStepSetting(loopOf(chosen.profile), planner ? "plan" : "build");
+      // only the seats that run the plan or build step take its settings; a read-only seat keeps its own
+      const loopStep = def.loop === "plan" || def.loop === "build" ? def.loop : null;
+      const stepSet = loopStep === null ? {} : loopStepSetting(loopOf(chosen.profile), loopStep);
       if (stepSet.model !== undefined || stepSet.effort !== undefined) {
         const problem = seatModelProblem({
           ...info.seat,
@@ -3664,7 +3666,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           throw new SupervisorError(
             422,
             loopStepSettingRefusedText(
-              planner ? "plan" : "build",
+              loopStep ?? "build",
               chosen.profile.name,
               problem.key === "effort" ? "its own effort" : "its own model",
               problem.reason,

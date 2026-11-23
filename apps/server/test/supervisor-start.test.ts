@@ -679,6 +679,33 @@ describe("startRun profiles", () => {
     expect(claim).not.toHaveBeenCalled();
   });
 
+  it("a read-only seat keeps its own model: the build step's settings are not its own", async () => {
+    const profiles = [withBuild({ model: "gpt-9" })];
+    const { sup } = make({ profiles: () => profiles });
+    sup.start();
+    const { runId } = await sup.startRun("retro", 42);
+    expect(store.run(runId)?.model).toBe("haiku");
+  });
+
+  it("a loop's plan sizes decide which Sizes need no plan", async () => {
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    const loop = loopOf(feature) as LoopDef;
+    const profiles: Profile[] = [
+      {
+        ...feature,
+        loop: {
+          ...loop,
+          steps: loop.steps.map((x) => (x.id === "plan" ? { ...x, sizes: ["L", "XL"] } : x)),
+        },
+      },
+    ];
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+    const { sup } = make({ profiles: () => profiles });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.run(runId)?.plan).toEqual({ skipped: "Size M" });
+  });
+
   it("refuses an unknown profile with 422, before a worktree or claim", async () => {
     const claim = vi.fn(async () => {});
     const { sup } = make({ claim });

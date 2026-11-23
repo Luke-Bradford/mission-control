@@ -33,6 +33,7 @@ import {
   claimedText,
   createDependsText,
   DEFAULT_AWAY,
+  DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
   FLIGHT_ABOUT_ARG_MAX,
   FLIGHT_BRIEF_INPUT_MAX,
@@ -85,6 +86,7 @@ import {
   LEDGER_FULL_TEXT,
   LEDGER_KIND_CHANGE_TEXT,
   LEDGER_TRACK_CLOSED_TEXT,
+  type LoopDef,
   leaveSeat,
   ledgerClosedText,
   ledgerNextText,
@@ -92,6 +94,7 @@ import {
   ledgerOwnerText,
   ledgerTitleText,
   liftPark,
+  loopOf,
   MC_BAD_ARGS,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
@@ -107,6 +110,7 @@ import {
   PLAN_SEND_REFUSED,
   PROFILE_PAIR_TEXT,
   PROTECTED_ITEM_REFUSED,
+  type Profile,
   type PullRequestView,
   parkHold,
   passNeedsBriefText,
@@ -128,6 +132,7 @@ import {
   runawaySameReason,
   runawayWritesReason,
   type SeatSessionRow,
+  smallNoPlanText,
   startMissingNeedsText,
   type TestLockState,
   type TicketView,
@@ -11753,6 +11758,25 @@ describe("plan sign-off", () => {
     board(backlog({ closed: true }));
     expect((await call("send_to_planner", { issue: 7, basis: "x" })).isError).toBe(true);
     expect(store.plans.get("mc", 7)).toBeNull();
+  });
+
+  it("the planner start follows the loop's plan sizes", async () => {
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    const loop = loopOf(feature) as LoopDef;
+    const profiles: Profile[] = [
+      {
+        ...feature,
+        loop: {
+          ...loop,
+          steps: loop.steps.map((x) => (x.id === "plan" ? { ...x, sizes: ["L", "XL"] } : x)),
+        },
+      },
+    ];
+    board(backlog({ size: "M" }));
+    const custom = createFlightTools({ ...flightDeps(), profiles: () => profiles });
+    const start = custom.find((t) => t.name === "start_seat");
+    const r = await need(start).call(ctx(), { seat: "fao-1", issue: 7, basis: "to plan" });
+    expect(r).toEqual(refused(smallNoPlanText("mc#7", "M")));
   });
 
   it("a Size S ticket nobody sent still has no planner", async () => {

@@ -76,6 +76,12 @@ export function validateLoop(def: LoopDef): string | null {
     if ((s.runner === "agent" || s.runner === "fresh-agent") && s.report === undefined)
       return refuse(`agent step ${s.id} has no report tool`);
   }
+  // the hub reads a model and effort only for the steps whose seat it starts: plan and build
+  for (const s of def.steps) {
+    if (s.id === "plan" || s.id === "build") continue;
+    if (s.model !== undefined) return refuse(`step ${s.id} takes no model`);
+    if (s.effort !== undefined) return refuse(`step ${s.id} takes no effort`);
+  }
   for (const s of def.steps) {
     if (s.sizes === undefined) continue;
     if (s.id !== "plan") return refuse(`step ${s.id} takes no sizes`);
