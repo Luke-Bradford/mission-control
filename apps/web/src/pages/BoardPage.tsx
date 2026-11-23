@@ -280,11 +280,16 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   };
 
   const errors = boards.flatMap((b, i) => (b.error ? [`${repos[i]?.id}: ${b.error.message}`] : []));
-  // A card's agent, PR and Needs-you lines arrive independently. Hold the Board's card surface
-  // until each source settles, so those lines never grow a card after its first paint.
-  const boardDataReady =
+  // The cards are the boards' items: they show as soon as those arrive. A card's agent, PR and
+  // Needs-you lines come from other sources and fill in as each one lands. Apart waits for the
+  // profiles, since its columns depend on them.
+  const cardsReady =
     Boolean(reposRes.data || reposRes.error) &&
     boards.every((res) => Boolean(res.data || res.error)) &&
+    (!(layoutOn && layout === "apart") || Boolean(profilesRes.data || profilesRes.error));
+  // The view editor's options come from every source, so it waits for all of them.
+  const boardDataReady =
+    cardsReady &&
     prRes.every((res) => Boolean(res.data || res.error)) &&
     Boolean(crewRes.data || crewRes.error) &&
     Boolean(flowRes.data || flowRes.error) &&
@@ -344,7 +349,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
           onCancel={closeView}
         />
       )}
-      {loading && <p className="muted s">Loading the board…</p>}
+      {!cardsReady && <p className="muted s">Loading the board…</p>}
       {errors.map((e) => (
         <p key={e} className="crit-t s">
           Could not load the board — {e}
@@ -354,7 +359,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
         <h2 id="board-content" className="sr-only" tabIndex={-1}>
           Work board
         </h2>
-        {!boardDataReady ? (
+        {!cardsReady ? (
           <div className="board-placeholder" />
         ) : layoutOn && layout === "apart" ? (
           <div className="repokanbans">
