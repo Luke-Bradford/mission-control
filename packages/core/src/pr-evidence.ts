@@ -74,6 +74,8 @@ export interface EvidenceManifest {
   pairs: EvidencePair[];
   /** The pages photographed that did not change: nothing is kept for them. */
   unchanged?: EvidencePage[];
+  /** The schemes and widths this head was photographed in; absent on a capture made before they were recorded. */
+  variants?: EvidenceVariant[];
   /** Where the before and after pictures are published on GitHub (release files), when they were. */
   published?: { baseUrl: string };
   /** Extra committed pictures, retained only for this exact review head. */
@@ -218,22 +220,40 @@ export interface EvidenceGap extends EvidenceVariant {
   page: EvidencePage;
 }
 
-/** A change to files named for colour is photographed in both schemes. */
+/** A change to files named for colour, or whose changed lines set colour, is photographed in both schemes. */
 const THEME_FILE = /(?:theme|dark|light|colou?r|tokens?|palette)/i;
-/** A change to files named for size is photographed at both widths. */
+const THEME_TEXT =
+  /prefers-color-scheme|data-theme|color-scheme|\b(?:dark|light)\b|#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|color-mix)\(|(?:^|[\s;{])(?:background(?:-color)?|color|border(?:-\w+)?-color|fill|stroke)\s*:|--[\w-]*(?:color|bg|fg|surface|ink)/im;
+/** The same for size: file names, or changed lines with a media query, a width or a breakpoint. */
 const WIDTH_FILE = /(?:width|responsive|breakpoint|viewport|layout|resize)/i;
+const WIDTH_TEXT =
+  /@media|@container|\b(?:min|max)-(?:width|inline-size)\b|\bvw\b|\bclamp\(|grid-template-columns|breakpoint/im;
+
+const variantsOf = (
+  schemes: readonly EvidenceScheme[],
+  widths: readonly number[],
+): EvidenceVariant[] => schemes.flatMap((scheme) => widths.map((width) => ({ scheme, width })));
+
+/** Every scheme at every width: what a change that cannot be read is photographed in. */
+export const evidenceAllVariants = (): EvidenceVariant[] =>
+  variantsOf(EVIDENCE_SCHEMES, EVIDENCE_WIDTHS);
 
 /**
- * What each changed page is photographed in: light at 1600 wide, plus dark when a changed file is
- * about colour, plus the wide viewport when one is about width.
+ * What each changed page is photographed in: light at 1600 wide, plus dark when a changed web file
+ * is named for colour or its changed lines (`changeText`, the diff's added and removed lines) set
+ * colour, plus the wide viewport when the same holds for width.
  */
-export function evidenceVariants(paths: readonly string[] = []): EvidenceVariant[] {
+export function evidenceVariants(
+  paths: readonly string[] = [],
+  changeText = "",
+): EvidenceVariant[] {
   const names = paths.filter((p) => p.startsWith(WEB_PREFIX)).map((p) => p.split("/").at(-1) ?? "");
-  const schemes = names.some((n) => THEME_FILE.test(n)) ? EVIDENCE_SCHEMES : (["light"] as const);
-  const widths = names.some((n) => WIDTH_FILE.test(n))
-    ? EVIDENCE_WIDTHS
-    : ([EVIDENCE_VIEWPORT.width] as const);
-  return schemes.flatMap((scheme) => widths.map((width) => ({ scheme, width })));
+  const theme = names.some((n) => THEME_FILE.test(n)) || THEME_TEXT.test(changeText);
+  const wide = names.some((n) => WIDTH_FILE.test(n)) || WIDTH_TEXT.test(changeText);
+  return variantsOf(
+    theme ? EVIDENCE_SCHEMES : ["light"],
+    wide ? EVIDENCE_WIDTHS : [EVIDENCE_VIEWPORT.width],
+  );
 }
 
 /** The width a pair was taken at. */
@@ -335,16 +355,14 @@ export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string)
     manifest.published?.baseUrl ?? `${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}`;
   const link = (p: EvidencePair, kind: EvidenceKind): string =>
     `${where}/${evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p))}`;
-  const entries = manifest.pairs
-    .filter((p) => p.changedPixels > 0)
-    .map((p) => {
-      const width = evidenceWidthOf(p);
-      const label = `${p.page}, ${p.scheme}${width === EVIDENCE_VIEWPORT.width ? "" : `, ${width} wide`}`;
-      const head = `- ${label}: ${p.changedPercent}% changed, ${regionsText(p.regions.length)}`;
-      return manifest.published
-        ? `${head}\n\n  | before | after |\n  | --- | --- |\n  | ![before](${link(p, "before")}) | ![after](${link(p, "after")}) |`
-        : `${head} ([before](${link(p, "before")}) · [after](${link(p, "after")}) · [diff](${link(p, "diff")}))`;
-    });
+  const entries = manifest.pairs.map((p) => {
+    const width = evidenceWidthOf(p);
+    const label = `${p.page}, ${p.scheme}${width === EVIDENCE_VIEWPORT.width ? "" : `, ${width} wide`}`;
+    const head = `- ${label}: ${p.changedPixels === 0 ? "no difference above the diff threshold" : `${p.changedPercent}% changed, ${regionsText(p.regions.length)}`}`;
+    return manifest.published
+      ? `${head}\n\n  | before | after |\n  | --- | --- |\n  | ![before](${link(p, "before")}) | ![after](${link(p, "after")}) |`
+      : `${head} ([before](${link(p, "before")}) · [after](${link(p, "after")}) · [diff](${link(p, "diff")}))`;
+  });
   const same = manifest.unchanged ?? [];
   return [
     EVIDENCE_HEADING,

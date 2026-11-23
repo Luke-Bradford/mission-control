@@ -185,6 +185,85 @@ describe("Demo renders on both sides", () => {
     expect(logs.join("\n")).toContain("gh refused");
   });
 
+  it("keeps a page whose colour moved by less than the diff threshold", async () => {
+    const t = setup({
+      render: async (origin) => {
+        const head = origin.endsWith(HEAD);
+        // a step of 6 per channel: under the diff's tolerance, but a real change
+        return encodePng(fixtureRaster(64, 40, [], head ? [250, 250, 250] : [244, 244, 244]));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.unchanged).toEqual([]);
+    expect(m.pairs).toHaveLength(1);
+    expect(m.pairs[0]?.changedPixels).toBe(0);
+    expect(t.store.hasImage("mc", 7, HEAD, "board-light-before.png")).toBe(true);
+  });
+
+  it("decides schemes and widths from the changed lines of an ordinary CSS file", async () => {
+    const seen = new Set<string>();
+    const t = setup({
+      changeText: async () => "+  background: #101018;\n+@media (max-width: 900px) {",
+      render: async (origin, _path, scheme, viewport) => {
+        seen.add(`${scheme}:${viewport.width}`);
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/hud.css"] });
+    expect([...seen].sort()).toEqual(["dark:1600", "dark:2560", "light:1600", "light:2560"]);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.variants).toHaveLength(4);
+    expect(
+      t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: ["apps/web/src/hud.css"] }),
+    ).toBeNull();
+  });
+
+  it("photographs every scheme and width when the change cannot be read", async () => {
+    const seen = new Set<string>();
+    const t = setup({
+      changeText: async () => {
+        throw new Error("no diff");
+      },
+      render: async (origin, _path, scheme, viewport) => {
+        seen.add(`${scheme}:${viewport.width}`);
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(seen.size).toBe(4);
+  });
+
+  it("does not publish a head the PR has already moved past", async () => {
+    const publish = vi.fn(async () => "https://x");
+    let calls = 0;
+    // true to start the capture, false when it is about to publish
+    const t = setup({ publish, trusted: async () => ++calls === 1 });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).not.toHaveBeenCalled();
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toBeUndefined();
+  });
+
+  it("takes the pictures down when the PR body refuses them because the head moved", async () => {
+    const unpublish = vi.fn(async () => {});
+    let calls = 0;
+    // true to start, true to publish, false once the post has been refused
+    const t = setup({
+      publish: async () => "https://x",
+      unpublish,
+      trusted: async () => ++calls <= 2,
+    });
+    await t.evidence.ensure({
+      pr: 7,
+      sha: HEAD,
+      paths: WEB,
+      onStored: async () => {
+        throw new Error("the PR closed or its head changed before evidence was posted");
+      },
+    });
+    expect(unpublish).toHaveBeenCalledWith(7);
+  });
+
   it("publishes nothing when no page changed", async () => {
     const publish = vi.fn(async () => "x");
     const t = setup({

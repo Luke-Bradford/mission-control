@@ -118,7 +118,11 @@ import {
   runEvidenceCommand,
 } from "./pr-evidence/hubs.ts";
 import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
-import { publishEvidenceRelease, removeFinishedEvidenceReleases } from "./pr-evidence/releases.ts";
+import {
+  deleteEvidenceRelease,
+  publishEvidenceRelease,
+  removeFinishedEvidenceReleases,
+} from "./pr-evidence/releases.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
@@ -489,6 +493,28 @@ export async function main(): Promise<void> {
             },
           }),
           render: evidenceDemoRender,
+          changeText: async ({ sha, mainSha, paths, signal }) => {
+            await runEvidenceCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", sha, mainSha],
+              undefined,
+              signal,
+            );
+            const diff = await gitOutput(
+              evidenceCheckout,
+              ["diff", "--unified=0", `${mainSha}...${sha}`, "--", ...paths],
+              signal,
+            );
+            return diff
+              .split("\n")
+              .filter((l) => /^[+-](?![+-])/.test(l))
+              .join("\n");
+          },
+          unpublish: async (pr) => {
+            const repo = config.repos.find((r) => r.id === previewRepoId);
+            if (repo !== undefined)
+              await deleteEvidenceRelease(gh, evidenceCheckout, repo.github, pr);
+          },
           publish: async ({ pr, sha, images, signal }) => {
             signal.throwIfAborted();
             const repo = config.repos.find((r) => r.id === previewRepoId);
@@ -1209,7 +1235,7 @@ export async function main(): Promise<void> {
         const openPrs = new Set([...store.openPrKeys(), ...notLive]);
         // The PR's pictures on GitHub go the same way as the ones on disk: once the change is live.
         const releaseRepo = config.repos.find((r) => r.id === previewRepoId);
-        if (engineOn && prEvidence && releaseRepo && hubRoot) {
+        if (prEvidence && releaseRepo && hubRoot) {
           const removed = await removeFinishedEvidenceReleases({
             gh,
             cwd: hubRoot,

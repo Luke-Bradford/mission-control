@@ -15,6 +15,7 @@ import {
   type EvidencePair,
   type EvidenceScheme,
   type EvidenceVariant,
+  evidenceAllVariants,
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
@@ -67,6 +68,19 @@ export interface PrEvidenceDeps {
     viewport: { width: number; height: number },
     signal: AbortSignal,
   ): Promise<Buffer>;
+  /**
+   * The added and removed lines of the head's change to `paths` (the diff against main), so the
+   * capture can tell whether it is about colour or width. A rejection photographs every scheme and
+   * width.
+   */
+  changeText?(input: {
+    sha: string;
+    mainSha: string;
+    paths: readonly string[];
+    signal: AbortSignal;
+  }): Promise<string>;
+  /** Removes the PR's published pictures; called when a published head turns out stale or closed. */
+  unpublish?(pr: number): Promise<void>;
   /**
    * Publishes the before and after pictures of the changed pages where the PR can show them (a
    * GitHub release's files) and returns the folder URL they are under. A rejection keeps the
@@ -170,12 +184,20 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
    * what is missing. Per PR, one head at a time: a new head drops the old one's.
    */
   const kept = new Map<number, Kept>();
+  /** The variants each head was last captured in, for the gate and the missing check. */
+  const variantsOfHead = new Map<string, EvidenceVariant[]>();
   /** Successfully read head graphs, plus deduplicated reads still in flight. */
   const pagesOf = new Map<string, EvidencePage[]>();
   const readingPages = new Map<string, Promise<EvidencePage[]>>();
   let stopped = false;
   /** Captures run one at a time: each builds two hubs. */
   let queue: Promise<void> = Promise.resolve();
+
+  /** What `t` is photographed in: as captured, as stored, else by what its file names say. */
+  const variantsFor = (t: EvidenceTarget): EvidenceVariant[] =>
+    variantsOfHead.get(keyOf(t)) ??
+    deps.store.manifest(deps.repoId, t.pr, t.sha)?.variants ??
+    evidenceVariants(t.paths);
 
   function manifest(t: EvidenceTarget): EvidenceManifest | null {
     const m = deps.store.manifest(deps.repoId, t.pr, t.sha);
@@ -280,12 +302,30 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     pages: EvidencePage[],
     signal: AbortSignal,
   ): Promise<void> {
-    const variants = evidenceVariants(t.paths);
     await mkdir(deps.workDir, { recursive: true, mode: 0o700 });
     const dir = await mkdtemp(join(deps.workDir, "capture-"));
     try {
       signal.throwIfAborted();
       const mainSha = await abortable(deps.mainSha(signal), signal);
+      // What the change is about decides the schemes and widths; a diff that cannot be read
+      // photographs them all.
+      let variants: EvidenceVariant[];
+      try {
+        const text = deps.changeText
+          ? await abortable(
+              deps.changeText({ sha: t.sha, mainSha, paths: t.paths, signal }),
+              signal,
+            )
+          : "";
+        variants = evidenceVariants(t.paths, text);
+      } catch (e) {
+        if (signal.aborted) throw e;
+        log(
+          `#${t.pr}: change not read, photographing every scheme and width: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        variants = evidenceAllVariants();
+      }
+      variantsOfHead.set(keyOf(t), variants);
       // Renders kept from a failed attempt stay, with the snapshot they were taken from, so a
       // retried page is paired with renders of the same data. Main's are stale once main moves.
       let keep = kept.get(t.pr);
@@ -319,11 +359,21 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       const unchanged: EvidencePage[] = [];
       for (const page of pages) {
         const found: EvidencePair[] = [];
+        let differs = false;
         const kinds: EvidenceImage[] = [];
         for (const v of variants) {
           const b = shots.get(shotKey("main", page, v)) as Buffer;
           const a = shots.get(shotKey("head", page, v)) as Buffer;
-          const d = diffImages(decodePng(b), decodePng(a));
+          const rb = decodePng(b);
+          const ra = decodePng(a);
+          const d = diffImages(rb, ra);
+          // The diff ignores small colour steps; whether a page changed does not.
+          if (
+            rb.width !== ra.width ||
+            rb.height !== ra.height ||
+            !Buffer.from(rb.data).equals(Buffer.from(ra.data))
+          )
+            differs = true;
           found.push({
             page,
             scheme: v.scheme,
@@ -337,7 +387,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
             kinds.push({ name: evidenceImageName(page, v.scheme, kind, v.width), png: png[kind] });
         }
         // A page that did not change in any variant keeps nothing: it is only named.
-        if (found.every((p) => p.changedPixels === 0)) unchanged.push(page);
+        if (!differs) unchanged.push(page);
         else {
           pairs.push(...found);
           images.push(...kinds);
@@ -347,6 +397,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       let published: string | undefined;
       if (deps.publish && images.length > 0) {
         try {
+          // A head pushed during the capture, or a PR closed, is not published: its release would
+          // outlive the PR's own head.
+          if (!(await abortable(deps.trusted(t), signal))) throw new Error("the PR head changed");
           published = await abortable(
             deps.publish({
               pr: t.pr,
@@ -373,6 +426,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
           capturedAt: now(),
           pairs,
           unchanged,
+          variants,
           ...(published === undefined ? {} : { published: { baseUrl: published } }),
           ...(prior?.submitted ? { submitted: prior.submitted } : {}),
         },
@@ -428,6 +482,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       await t.onStored(manifest);
       posted.add(keyOf(t));
     } catch (e) {
+      // A head that changed or a PR that closed before its pictures were posted: take them down.
+      if (manifest.published && deps.unpublish && !(await deps.trusted(t).catch(() => true)))
+        await deps.unpublish(t.pr).catch(() => {});
       log(`#${t.pr}: evidence not posted to the PR: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
@@ -441,8 +498,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (stopped || pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
-      if (evidenceMissing(have, t.sha, pages, evidenceVariants(t.paths)).length === 0)
-        return post(t);
+      if (evidenceMissing(have, t.sha, pages, variantsFor(t)).length === 0) return post(t);
       const failed = failedAt.get(key);
       if (failed !== undefined && now() - failed < retryMs) return;
       const going = running.get(key);
@@ -487,7 +543,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       const pages = pagesOf.get(keyOf(t)) ?? prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const have = manifest(t);
-      const variants = evidenceVariants(t.paths);
+      const variants = variantsFor(t);
       const missing = evidenceMissing(have, t.sha, pages, variants);
       if (missing.length === 0)
         return posted.has(keyOf(t))

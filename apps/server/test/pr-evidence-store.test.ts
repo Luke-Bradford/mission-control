@@ -59,7 +59,7 @@ describe("prEvidenceStore", () => {
     expect(() => store.save(manifest(sha("a"), 1), [{ name: "evil.png", png }])).toThrow();
   });
 
-  it("keeps only the newest heads of a PR", () => {
+  it("keeps only the latest head of a PR", () => {
     const root = tmp();
     const store = prEvidenceStore(root);
     const heads = ["1", "2", "3", "4", "5"].map(sha);
@@ -68,6 +68,7 @@ describe("prEvidenceStore", () => {
     });
     const left = readdirSync(join(root, "mc", "5"));
     expect(left).toHaveLength(PR_EVIDENCE_KEEP);
+    expect(left).toEqual([sha("5")]);
     expect(left).not.toContain(sha("1"));
     expect(left).toContain(sha("5"));
   });
@@ -151,7 +152,6 @@ describe("stageReviewEvidence", () => {
       },
       [{ name, png }],
     );
-    store.save({ ...manifest(current, 2), pairs: [] }, []);
     const scratch = join(root, "scratch");
     mkdirSync(scratch);
     const staged = await stageReviewEvidence(store, "mc", 5, old, scratch);
@@ -159,6 +159,9 @@ describe("stageReviewEvidence", () => {
       { caption: "Audit state", viewport: { width: 1280, height: 900 }, side: "head" },
     ]);
     expect(readFileSync(join(scratch, ".mc-review/evidence", name))).toEqual(png);
+    // a newer head replaces the old head's pictures; they are not staged for it
+    store.save({ ...manifest(current, 2), pairs: [] }, []);
+    expect(await stageReviewEvidence(store, "mc", 5, old, root)).toBeUndefined();
     expect(await stageReviewEvidence(store, "mc", 5, current, root)).toBeUndefined();
   });
 

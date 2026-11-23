@@ -2618,9 +2618,13 @@ pages: a page's own directory under `apps/web/src/` or its `pages/` file affects
 catalogue; test files and paths outside `apps/web` affect none. For each page the hub renders
 1600×1000 in the light scheme, on main and on the PR head, in the web app's **Demo** mode (simulated
 crew; nothing is read from the hub), so before and after are both Demo data and a page the change
-did not touch diffs to zero. A changed file named for colour (theme, dark, light, colour, tokens,
-palette) adds the dark scheme; one named for size (width, responsive, breakpoint, viewport, layout,
-resize) adds a 2560×1145 viewport. Both sides are
+did not touch diffs to zero. A change about colour adds the dark scheme and one about size adds a 2560×1145
+viewport. That is judged from the file names (theme, dark, light, colour, tokens, palette; width,
+responsive, breakpoint, viewport, layout, resize) and from the added and removed lines of the diff
+against main (colours, `prefers-color-scheme`, `@media`, `min-width`, and the like), so an ordinary
+CSS file counts too. A diff that cannot be read photographs every scheme and width. A page counts
+as changed on an exact pixel comparison, not the diff's colour tolerance, so a small colour step
+keeps its pictures. Both sides are
 hubs started as `MC_NO_LOOP_WRITES=1` previews on a free loopback port, each from its own copy of
 one `VACUUM INTO` snapshot of the live database. Each side is a
 detached worktree with `pnpm install --offline --frozen-lockfile` and a web build, torn down when
@@ -2630,10 +2634,10 @@ its pages are done. Captures run one at a time; a failed capture is tried again 
 `0700`, files `0600`): `<page>-<light|dark>[-2560]-<before|after|diff>.png` for the pages that changed and `manifest.json`, which
 names the pages that did not change (`unchanged`; they keep no pictures) and lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
 first). A pixel counts as changed when its colour differs by more than 24 across the three
-channels; regions group changes on a 16 px grid. The three newest heads of a PR are kept. The
+channels; regions group changes on a 16 px grid. Only the latest head of a PR is kept; storing a newer head removes every older one. The
 manifest is written last, so a head with no manifest was never captured.
 
-**On GitHub.** The before and after pictures of the changed pages (not the diff) are uploaded with `gh release create` as the files of one prerelease tagged `qa-pr-<n>` at the PR head, replaced for each new head. The PR body then shows them as images from `https://github.com/<repo>/releases/download/qa-pr-<n>/`. Only Demo data is in them (the repo is public). The hub's hourly data-folder sweep deletes the release (and its tag) of every PR that is neither open nor merged-but-not-live yet, with the same rule that removes the pictures on disk. If the upload fails the capture still stands and the PR body links the hub's own copies.
+**On GitHub.** The before and after pictures of the changed pages (not the diff) are uploaded with `gh release create` as the files of one prerelease tagged `qa-pr-<n>` at the PR head, replaced for each new head. The PR body then shows them as images from `https://github.com/<repo>/releases/download/qa-pr-<n>/`. Only Demo data is in them (the repo is public). A head that moved or a PR that closed during the capture is not published, and a release whose PR-body post was refused for that reason is deleted. The hub's hourly data-folder sweep deletes the release (and its tag) of every PR that is neither open nor merged-but-not-live yet, with the same rule that removes the pictures on disk, whether or not the engine is on. If the upload fails the capture still stands and the PR body links the hub's own copies.
 
 **Where it is read.** `GET /api/prs/<n>/evidence` answers the newest head's manifest (`?sha=` for
 one head, `?repo=` when two repos have the number) and `GET /api/prs/<n>/evidence/<sha>/<name>.png`

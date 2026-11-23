@@ -12,6 +12,20 @@ import type { EvidenceImage } from "./store.ts";
 /** The most releases one clean-up reads. */
 const RELEASES_LISTED = 200;
 
+/** Deletes the PR's picture release and its tag; true when it is gone (or never was). */
+export async function deleteEvidenceRelease(
+  gh: GhRunner,
+  cwd: string,
+  repo: string,
+  pr: number,
+): Promise<boolean> {
+  const r = await gh(
+    ["release", "delete", evidenceReleaseTag(pr), "--repo", repo, "--cleanup-tag", "--yes"],
+    { cwd },
+  );
+  return r.code === 0;
+}
+
 /**
  * Replaces the PR's release with one holding `images`, tagged at `sha`, and returns the folder URL
  * its files download from. Throws when GitHub refuses.
@@ -38,9 +52,7 @@ export async function publishEvidenceRelease(o: {
       files.push(file);
     }
     // The previous head's release (and its tag) goes first; no release yet is fine.
-    await o.gh(["release", "delete", tag, "--repo", o.repo, "--cleanup-tag", "--yes"], {
-      cwd: o.cwd,
-    });
+    await deleteEvidenceRelease(o.gh, o.cwd, o.repo, o.pr);
     const made = await o.gh(
       [
         "release",
@@ -88,10 +100,7 @@ export async function removeFinishedEvidenceReleases(o: {
   for (const tag of tags) {
     const pr = Number(tag.slice(EVIDENCE_RELEASE_PREFIX.length));
     if (o.keep(pr)) continue;
-    const r = await o.gh(["release", "delete", tag, "--repo", o.repo, "--cleanup-tag", "--yes"], {
-      cwd: o.cwd,
-    });
-    if (r.code === 0) removed.push(pr);
+    if (await deleteEvidenceRelease(o.gh, o.cwd, o.repo, pr)) removed.push(pr);
   }
   return removed;
 }

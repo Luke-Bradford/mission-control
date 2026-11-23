@@ -176,6 +176,16 @@ describe("evidenceVariants", () => {
     expect(
       evidenceVariants(["apps/web/src/shell/useViewportWidth.ts"]).map((v) => v.width),
     ).toEqual([1600, 2560]);
+    // an ordinary CSS file: its changed lines decide
+    const css = ["apps/web/src/hud.css"];
+    expect(evidenceVariants(css, "+  background: #101018;").map((v) => v.scheme)).toEqual([
+      "light",
+      "dark",
+    ]);
+    expect(evidenceVariants(css, "+@media (max-width: 900px) {").map((v) => v.width)).toEqual([
+      1600, 2560,
+    ]);
+    expect(evidenceVariants(css, "+  padding: 4px;")).toEqual([{ scheme: "light", width: 1600 }]);
     // a server file about layout does not widen a web capture
     expect(evidenceVariants(["apps/server/src/layout.ts"])).toHaveLength(1);
   });
@@ -269,10 +279,7 @@ describe("evidenceSectionText", () => {
       manifest({
         published: { baseUrl: `https://github.com/o/r/releases/download/${evidenceReleaseTag(7)}` },
         unchanged: ["map", "comms"],
-        pairs: [
-          { ...manifest().pairs[0], width: 2560 } as EvidenceManifest["pairs"][number],
-          { ...manifest().pairs[0], page: "board", changedPixels: 0 },
-        ],
+        pairs: [{ ...manifest().pairs[0], width: 2560 } as EvidenceManifest["pairs"][number]],
       }),
       "http://h",
     );
@@ -285,7 +292,14 @@ describe("evidenceSectionText", () => {
     expect(text).not.toContain("diff.png");
     expect(text).not.toContain("http://h");
     expect(text).toContain("Unchanged: map, comms.");
-    expect(text).not.toContain("board, light:");
+  });
+
+  it("keeps a page whose pairs the diff threshold hides, saying so", () => {
+    const text = evidenceSectionText(
+      manifest({ pairs: [{ ...manifest().pairs[0], changedPixels: 0 } as never] }),
+      "http://h",
+    );
+    expect(text).toContain("board, light: no difference above the diff threshold");
   });
 
   it("says so when nothing changed", () => {
