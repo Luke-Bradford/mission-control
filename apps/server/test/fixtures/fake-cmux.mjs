@@ -54,7 +54,8 @@ if (command === "ping") {
 if (command === "list-workspaces") {
   for (const session of state.sessions)
     if ((session.list_hidden ?? 0) > 0) session.list_hidden -= 1;
-    else process.stdout.write(`  workspace:${session.n} ${session.workspace_id}  ${session.name}\n`);
+    else
+      process.stdout.write(`  workspace:${session.n} ${session.workspace_id}  ${session.name}\n`);
   save();
   process.exit(0);
 }
@@ -76,7 +77,9 @@ if (command === "new-workspace") {
     list_hidden: state.list_hidden ?? 0,
   });
   save();
-  process.stdout.write(state.short ? `OK workspace:${state.sessions.length}\n` : `${workspaceId}\n`);
+  process.stdout.write(
+    state.short ? `OK workspace:${state.sessions.length}\n` : `${workspaceId}\n`,
+  );
   process.exit(0);
 }
 if (command === "sessions") {
