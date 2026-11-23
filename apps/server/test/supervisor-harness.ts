@@ -26,6 +26,7 @@ import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import type { ReviewPreviews } from "../src/preview/review.ts";
+import type { CmuxOptions } from "../src/runtime/cmux.ts";
 import { endKeeper, KEEPER_SOCKET } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -339,6 +340,7 @@ function make(
     cliCheckTimeoutMs?: number;
     codexCommand?: string;
     cmuxCommand?: string[];
+    cmuxOptions?: CmuxOptions;
     codexAuthPath?: string;
     worktrees?: string;
     extraArgs?: string[];
@@ -415,6 +417,7 @@ function make(
     command: over.command ?? process.execPath,
     codexCommand: over.codexCommand,
     cmuxCommand: over.cmuxCommand,
+    ...(over.cmuxOptions === undefined ? {} : { cmuxOptions: over.cmuxOptions }),
     codexAuthPath,
     commandArgs:
       over.command === undefined

@@ -29,10 +29,18 @@ const run = promisify(execFile);
 const UUID = /[0-9a-f]{8}-[0-9a-f-]{27,}/i;
 const isDenied = (text: string) => /access denied|not authorised|not authorized/i.test(text);
 
+export interface CmuxOptions {
+  /** Starts the cmux app when it is not running (default: `/usr/bin/open -g -a cmux`). */
+  open?: readonly string[];
+  /** How long to wait for it after that (default 10 s). */
+  waitMs?: number;
+}
+
 /** cmux is local-only; all arguments here are hub generated, never operator text. */
 export function createCmux(
   command: readonly string[] = [CMUX_COMMAND],
   log?: (message: string) => void,
+  options: CmuxOptions = {},
 ): Cmux {
   const [bin, ...prefix] = command;
   if (!bin) throw new Error("cmux command is empty");
@@ -58,7 +66,13 @@ export function createCmux(
   };
   const wake = async () => {
     try {
-      await run("/usr/bin/open", ["-g", "-a", "cmux"], {
+      const [openBin = "/usr/bin/open", ...openArgs] = options.open ?? [
+        "/usr/bin/open",
+        "-g",
+        "-a",
+        "cmux",
+      ];
+      await run(openBin, openArgs, {
         env: {
           HOME: process.env.HOME ?? "",
           USER: process.env.USER ?? "",
@@ -81,7 +95,7 @@ export function createCmux(
       } catch (error) {
         if (error instanceof Error && error.message === CMUX_REFUSED_TEXT) throw error;
         await wake();
-        const until = Date.now() + 10_000;
+        const until = Date.now() + (options.waitMs ?? 10_000);
         while (Date.now() < until) {
           await new Promise((resolve) => setTimeout(resolve, 200));
           try {

@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
+import { CMUX_DOWN_TEXT, CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -248,15 +248,26 @@ describe("a restart attaches to the workspace", () => {
   });
 });
 
-it("a start with cmux's socket refused is a 409 with the setup text and a clean run", async () => {
-  const state = join(dir, "fake-cmux.json");
-  writeFileSync(state, JSON.stringify({ sessions: [], calls: [], ping: "denied" }));
-  const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
-  sup.start();
-  await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
-    status: 409,
-    message: CMUX_REFUSED_TEXT,
+describe.each([
+  ["denied", CMUX_REFUSED_TEXT],
+  ["down", CMUX_DOWN_TEXT],
+])("a start with cmux %s", (ping, text) => {
+  it("is a 409 with the setup text and leaves the seat idle with no run", async () => {
+    const state = join(dir, "fake-cmux.json");
+    writeFileSync(state, JSON.stringify({ sessions: [], calls: [], ping }));
+    const { sup } = make({
+      cmuxCommand: [process.execPath, fake, state],
+      cmuxOptions: { open: ["/usr/bin/true"], waitMs: 600 },
+    });
+    sup.start();
+    await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({ status: 409, message: text });
+    expect(calls(state).some((c) => c[0] === "new-workspace")).toBe(false);
+    expect(store.seatSession("guido-1")).toMatchObject({
+      state: "idle",
+      reason: text,
+      runId: null,
+      cliSessionId: null,
+      worktree: null,
+    });
   });
-  expect(calls(state).some((c) => c[0] === "new-workspace")).toBe(false);
-  expect(store.seatSession("guido-1")?.state).toBe("error");
 });

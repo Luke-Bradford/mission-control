@@ -47,6 +47,10 @@ if (command === "ping") {
     process.stderr.write("Error: Access denied\n");
     process.exit(1);
   }
+  if (state.ping === "down") {
+    process.stderr.write("Error: connection refused\n");
+    process.exit(1);
+  }
   process.exit(0);
 }
 // A state with `short: true` answers like cmux 0.65: a short reference, UUIDs only in the list.

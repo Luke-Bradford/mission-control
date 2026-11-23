@@ -245,7 +245,7 @@ import {
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
-import { CMUX_DOWN_TEXT, CMUX_REFUSED_TEXT, createCmux } from "./cmux.ts";
+import { CMUX_DOWN_TEXT, CMUX_REFUSED_TEXT, type CmuxOptions, createCmux } from "./cmux.ts";
 import { attachCmuxSession, cmuxWorkspaceKey, startCmuxSession } from "./cmux-session.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
@@ -485,6 +485,8 @@ export interface SupervisorDeps {
   commandArgs?: string[];
   /** Local cmux command; tests pass a fake executable and its prefix arguments. */
   cmuxCommand?: string[];
+  /** How the cmux wrapper starts cmux and how long it waits (tests only). */
+  cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
   codexCommand?: string;
   /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
@@ -1308,6 +1310,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } else if (isCheck) {
       // a check that died is the check's answer, not an error on the seat
       setSeat(seatId, { state: "idle", reason: null, runId: null });
+    } else if (e.reason === CMUX_REFUSED_TEXT || e.reason === CMUX_DOWN_TEXT) {
+      // cmux setup is the operator's to fix, not a failed seat: the start answers 409 and the seat
+      // is left idle, with the exact setup text as its reason, holding no run, session or worktree
+      setSeat(seatId, {
+        state: "idle",
+        reason: e.reason,
+        runId: null,
+        cliSessionId: null,
+        worktree: null,
+      });
     } else {
       // Neither a code nor a signal: the CLI never started (its stderr event says why).
       const how = e.code ?? e.signal;
@@ -2307,7 +2319,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               ? `PR ${store.review(run.reviewId)?.prNumber ?? run.reviewId}`
               : (run.ticket ?? def.loop);
           session = startCmuxSession({
-            cmux: createCmux(deps.cmuxCommand, log),
+            cmux: createCmux(deps.cmuxCommand, log, deps.cmuxOptions),
             name: `${info.seat.id} · ${ref}`,
             cwd,
             // cmux must invoke Claude by its command name so its shim remains in control. A
@@ -2541,7 +2553,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       try {
         const value: unknown = JSON.parse(saved);
         if (isObj(value) && typeof value.workspace === "string")
-          await createCmux(deps.cmuxCommand, log).close(value.workspace);
+          await createCmux(deps.cmuxCommand, log, deps.cmuxOptions).close(value.workspace);
       } catch (e) {
         log(`${seatId}: could not close cmux workspace of ${runId}: ${errText(e)}`);
         return false;
@@ -3062,7 +3074,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       try {
         const saved: unknown = JSON.parse(store.getSetting(cmuxWorkspaceKey(runId)) ?? "null");
         if (isObj(saved) && typeof saved.workspace === "string" && typeof saved.pid === "number") {
-          const cmux = createCmux(deps.cmuxCommand, log);
+          const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
           const record = (await cmux.agents()).find(
             (agent) => agent.workspaceId === saved.workspace && agent.pid === saved.pid,
           );
