@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CONTROLLER_HEADER, OPERATOR_HEADER } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { buildApp, HUB_SETTINGS_OPERATOR_ONLY, RESTART_OPERATOR_ONLY, RESTART_UNAVAILABLE } from "../src/api.ts";
+import {
+  buildApp,
+  HUB_SETTINGS_OPERATOR_ONLY,
+  RESTART_OPERATOR_ONLY,
+  RESTART_UNAVAILABLE,
+} from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { readHubSettings } from "../src/config/hub-settings.ts";
 import { loadConfig } from "../src/config.ts";
@@ -138,7 +143,9 @@ describe("a real FLIGHT actor", () => {
         headers,
         payload: {},
       });
-      expect([settings.statusCode, removal.statusCode, restart.statusCode]).toEqual([403, 403, 403]);
+      expect([settings.statusCode, removal.statusCode, restart.statusCode]).toEqual([
+        403, 403, 403,
+      ]);
       expect(settings.json()).toEqual({ error: HUB_SETTINGS_OPERATOR_ONLY });
       expect(restart.json()).toEqual({ error: RESTART_OPERATOR_ONLY });
       expect(readFileSync(path)).toEqual(before);
