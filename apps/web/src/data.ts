@@ -176,7 +176,10 @@ export const RESOURCES = {
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
   }),
-  auditReport: { path: "/api/audit/report", topic: "agents" } as ResourceRef,
+  /** The AUDIT seat's newest report and when the next is due; Audit's verdict and Do next read it. */
+  auditReport: { path: "/api/audit/report", topic: "agents" },
+  /** Spend per merged change, the building share and the open waste alarms; Audit's Do next and How we build read it. */
+  waste: { path: "/api/waste", topic: "agents" },
   comms: (agentId: string): ResourceRef => ({
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
