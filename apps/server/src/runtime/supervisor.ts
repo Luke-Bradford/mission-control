@@ -250,7 +250,13 @@ import {
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
-import { CMUX_DOWN_TEXT, CMUX_REFUSED_TEXT, type CmuxOptions, createCmux } from "./cmux.ts";
+import {
+  CMUX_DOWN_TEXT,
+  CMUX_REFUSED_TEXT,
+  type CmuxAgent,
+  type CmuxOptions,
+  createCmux,
+} from "./cmux.ts";
 import { attachCmuxSession, cmuxWorkspaceKey, startCmuxSession } from "./cmux-session.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
@@ -2649,8 +2655,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (store.run(runId)?.vendor !== "codex" && saved !== null) {
       try {
         const value: unknown = JSON.parse(saved);
-        if (isObj(value) && typeof value.workspace === "string")
-          await createCmux(deps.cmuxCommand, log, deps.cmuxOptions).close(value.workspace);
+        if (isObj(value) && typeof value.workspace === "string") {
+          const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
+          // cmux may have quit: start it before closing, or the workspace is restored unguarded
+          await cmux.ensure();
+          try {
+            await cmux.close(value.workspace);
+          } catch (e) {
+            if (!/no such|not found|unknown/i.test(errText(e))) throw e;
+          }
+        }
       } catch (e) {
         log(`${seatId}: could not close cmux workspace of ${runId}: ${errText(e)}`);
         return false;
@@ -3176,12 +3190,26 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           // A workspace saved before Claude registered (pid null) has nothing to attach to; it is
           // closed below so it cannot register later as an untracked duplicate.
           const savedPid = typeof saved.pid === "number" ? saved.pid : null;
-          const record =
-            savedPid === null
-              ? undefined
-              : (await cmux.agents()).find(
-                  (agent) => agent.workspaceId === saved.workspace && agent.pid === savedPid,
-                );
+          // After a reboot the hub can start before cmux. Never start a new workspace while the
+          // saved one is unknown: cmux would restore the old agent without the hub's settings.
+          const agentsOf = async () => (savedPid === null ? [] : await cmux.agents());
+          let agents: CmuxAgent[];
+          try {
+            agents = await agentsOf();
+          } catch {
+            try {
+              await cmux.ensure();
+              agents = await agentsOf();
+            } catch (error) {
+              log(
+                `${row.seatId}: cmux does not answer, the old workspace is kept: ${errText(error)}`,
+              );
+              return failResume(row, `${RESUME_FAILED}: cmux is not answering`);
+            }
+          }
+          const record = agents.find(
+            (agent) => agent.workspaceId === saved.workspace && agent.pid === savedPid,
+          );
           if (record && savedPid !== null) {
             try {
               deps.tokens.adopt(
@@ -3223,6 +3251,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           // settings): close it before the resume starts another on the same session. A
           // workspace that is already gone counts as closed.
           try {
+            await cmux.ensure();
             await cmux.close(saved.workspace);
           } catch (error) {
             if (!/no such|not found|unknown/i.test(errText(error))) {

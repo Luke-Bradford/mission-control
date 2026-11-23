@@ -11,6 +11,7 @@ import { dbPath, dir, make, seatState, store, until } from "./supervisor-harness
 skipTestsIf(await blockedHere("crew-run"));
 
 const fake = fileURLToPath(new URL("./fixtures/fake-cmux.mjs", import.meta.url));
+const opener = fileURLToPath(new URL("./fixtures/fake-cmux-open.mjs", import.meta.url));
 const files: string[] = [];
 afterEach(() => files.splice(0));
 beforeEach(() => vi.stubEnv("TMPDIR", dir));
@@ -63,7 +64,11 @@ it.skipIf(!existsSync("/bin/zsh"))(
   async () => {
     const state = join(dir, "fake-cmux.json");
     writeFileSync(state, JSON.stringify({ sessions: [], calls: [], bridge: true }));
-    const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
+    // opening cmux brings the fake back up, so only a recovery that starts cmux first can succeed
+    const { sup } = make({
+      cmuxCommand: [process.execPath, fake, state],
+      cmuxOptions: { open: [process.execPath, opener, state], waitMs: 2000 },
+    });
     sup.start();
     const run = await sup.startRun("guido-1", 42);
     const copied = () => readFileSync(store.run(run.runId)?.transcriptPath ?? "", "utf8");
@@ -82,14 +87,18 @@ it.skipIf(!existsSync("/bin/zsh"))(
       interrupt: false,
       questions: "none",
     });
-    // cmux is down: send, sessions, close and ping all fail, so the session ends, is retaken, and the
-    // old workspace cannot be closed until cmux answers again
-    await new Promise((resolve) => setTimeout(resolve, 8000));
-    failing(false);
+    // cmux is down: send, sessions, close and ping all fail, so the session ends and is retaken,
+    // and the old workspace can only be closed once the recovery has started cmux again
+    const old = sessions(state)[0]?.workspace_id;
     await vi.waitFor(() => expect(copied()).toContain("Please do the exact lost prompt"), {
-      timeout: 40_000,
+      timeout: 45_000,
       interval: 100,
     });
+    const all = calls(state);
+    expect(all.some((c) => c[0] === "close-workspace" && c.includes(old as string))).toBe(true);
+    expect(all.filter((c) => c[0] === "new-workspace")).toHaveLength(2);
+    expect(readFileSync(sessions(state).at(-1)?.command as string, "utf8")).toContain("--resume");
+    expect(store.run(run.runId)?.endedAt).toBeNull();
     for (const session of JSON.parse(readFileSync(state, "utf8")).sessions)
       try {
         process.kill(-session.pgid, "SIGTERM");
@@ -298,6 +307,29 @@ describe("a restart attaches to the workspace", () => {
     await until(() => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(2));
     const all = calls(state);
     const closed = all.findIndex((c) => c[0] === "close-workspace" && c.includes(old as string));
+    expect(closed).toBeGreaterThan(-1);
+    expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
+  });
+
+  it("starts cmux and closes the restored workspace before it resumes when cmux was down at restart", async () => {
+    const { state, first } = await idleRun();
+    const old = sessions(state)[0]?.workspace_id;
+    await first.sup.stopAll();
+    const value = JSON.parse(readFileSync(state, "utf8"));
+    value.ping = "down";
+    value.sessions_fail = true;
+    writeFileSync(state, JSON.stringify(value));
+    // opening cmux brings it back and restores the saved agent with a new pid, without the hub's settings
+    const next = make({
+      cmuxCommand: [process.execPath, fake, state],
+      cmuxOptions: { open: [process.execPath, opener, state, "restore"], waitMs: 2000 },
+    });
+    next.sup.start();
+    await until(() => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(2));
+    const all = calls(state);
+    const closed = all.findIndex(
+      (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
+    );
     expect(closed).toBeGreaterThan(-1);
     expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
   });
