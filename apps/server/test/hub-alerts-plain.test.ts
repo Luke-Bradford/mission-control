@@ -1,6 +1,7 @@
 import { flightDownText, flightNotTriagingText, flightStartFailedText } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { sinceText } from "../src/hud/hud.ts";
+import { CMUX_DOWN_TEXT, CMUX_REFUSED_PLAIN } from "../src/runtime/cmux.ts";
 import { hubCodeHeldText } from "../src/update.ts";
 
 // Hub alerts are read by a person who has never seen the project (#1582): no raw key, no 10+ digit
@@ -43,6 +44,8 @@ describe("the not-triaging alert", () => {
         flightStartFailedText("it would not start; the server log has the error"),
       ),
     );
+    expectPlain(flightStartFailedText(CMUX_REFUSED_PLAIN));
+    expectPlain(flightStartFailedText(CMUX_DOWN_TEXT));
     expectPlain(
       flightNotTriagingText(
         "down",

@@ -98,6 +98,7 @@ import {
 } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { foldTranscript } from "../src/run/streamjson.ts";
+import { CMUX_REFUSED_PLAIN, CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
@@ -1684,7 +1685,7 @@ describe("the FLIGHT watcher", () => {
     expect(startCalls).toEqual([]);
   });
 
-  it("starts FLIGHT 3 times an hour, then raises a note once; a live FLIGHT clears it", async () => {
+  it("starts FLIGHT 3 times an hour, raises a note once, then tries once per cooldown; a live FLIGHT clears it", async () => {
     startFails = "boom";
     for (let i = 0; i < 3; i++) await watch.check();
     expect(startCalls).toHaveLength(3);
@@ -1700,10 +1701,18 @@ describe("the FLIGHT watcher", () => {
         text: flightStartFailedText("it would not start; the server log has the error"),
       },
     ]);
-    // the open note holds past the hour, after the start count has expired
-    nowMs += 61 * MIN;
+    // the hub does not wait for the operator: one more start per cooldown, under the same note
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS - MIN;
     await watch.check();
     expect(startCalls).toHaveLength(3);
+    nowMs += MIN;
+    await watch.check();
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    expect(notesOpen()).toHaveLength(1);
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(5);
     expect(notesOpen()).toHaveLength(1);
     live("flight-1", "r-hand");
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
@@ -1712,8 +1721,35 @@ describe("the FLIGHT watcher", () => {
     // the clear emptied the start count: three more starts before the next note
     noFlight();
     for (let i = 0; i < 3; i++) await watch.check();
-    expect(startCalls).toHaveLength(6);
+    expect(startCalls).toHaveLength(8);
     expect(notesOpen()).toEqual([]);
+  });
+
+  it("a retry that starts FLIGHT clears the note without the operator", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    expect(notesOpen()).toHaveLength(1);
+    startFails = null;
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    await watch.check();
+    expect(notesOpen()).toEqual([]);
+  });
+
+  it("the operator's Stop holds against the retry too", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    store.setSeatSession(row("flight-1", null, "stopped"));
+    nowMs += 2 * FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+  });
+
+  it("names cmux's refusal in the note, without its path", async () => {
+    startFails = CMUX_REFUSED_TEXT;
+    for (let i = 0; i < 4; i++) await watch.check();
+    expect(notesOpen()).toMatchObject([{ text: flightStartFailedText(CMUX_REFUSED_PLAIN) }]);
   });
 
   describe("a FLIGHT run with no live session (#798)", () => {

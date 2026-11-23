@@ -1526,8 +1526,9 @@ export function flightNotTriagingText(
 }
 export const flightDownText = (reason: string): string =>
   `FLIGHT is down: ${reason}. Nothing is triaging the crew until it is back.`;
+/** The hub keeps trying by itself; the operator's Start is only the faster way. */
 export const flightStartFailedText = (reason: string): string =>
-  `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
+  `FLIGHT could not be kept running: ${reason}. The hub tries again every ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes. Start in FLIGHT's dock tries now.`;
 export const WAKE_ASK =
   "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 
