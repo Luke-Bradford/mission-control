@@ -127,6 +127,7 @@ import {
   seatDef,
   seatInstructionBlock,
   signedOffQaPlan,
+  stopHookCommand,
   type TicketView,
   TOOL_OUTPUT_DIR,
   TRIM_HOOK_TIMEOUT_S,
@@ -2426,6 +2427,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (repoDocs?.skills !== undefined && repoDocs.skills.skills.length > 0) {
           writeSkillPlugin(skillsDir, info.repo.id, repoDocs.skills.skills);
         }
+        // Claude's Stop hook marks the end of each turn in this file; the cmux driver reads it
+        const stopFile = join(tmp, "mc-turn-end");
         const args = crewCliArgs({
           pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
@@ -2457,6 +2460,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
               timeoutS: TRIM_HOOK_TIMEOUT_S,
             },
+            stop: { command: stopHookCommand(stopFile), timeoutS: 5 },
           },
         });
         const env = crewEnv(
@@ -2506,6 +2510,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               Object.entries(env).filter((e): e is [string, string] => typeof e[1] === "string"),
             ),
             dir: crewKeeperDir(deps.dbPath, run.id),
+            stopFile,
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
             log,
@@ -3314,6 +3319,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               args: [],
               env: {},
               dir,
+              stopFile: join(seatTmp(runId), "mc-turn-end"),
               transcriptPath: run.transcriptPath,
               cliSessionId: row.cliSessionId ?? record.sessionId,
               messageDir: join(seatTmp(runId), "mc-messages"),

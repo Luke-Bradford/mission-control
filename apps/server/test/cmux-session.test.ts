@@ -438,89 +438,67 @@ const idleAt = (source: string) => ({
 });
 const line = (value: unknown) => `${JSON.stringify(value)}\n`;
 
-it("finishes a turn that began and ended between two polls", async () => {
+const msg = (content: unknown[], id: string) =>
+  line({ type: "assistant", message: { id, role: "assistant", stop_reason: null, content } });
+
+it("finishes a turn that began and ended between two polls once Claude's Stop hook marks it", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
   dirs.push(dir);
   const source = join(dir, "source.jsonl");
+  const stopFile = join(dir, "turn-end");
   writeFileSync(source, "");
-  const session = stubSession(
-    dir,
-    stubCmux({
+  const session = startCmuxSession({
+    cmux: stubCmux({
       agents: async () => [idleAt(source)],
       // cmux only ever reports idle: the turn fell between two samples
       send: async () => {
         appendFileSync(
           source,
           line({ type: "user", message: { role: "user", content: "wake" } }) +
-            line({
-              type: "assistant",
-              // the interactive transcript's real shape: no stop reason, even on the final answer
-              message: {
-                role: "assistant",
-                stop_reason: null,
-                content: [{ type: "text", text: "done" }],
-              },
-            }),
+            msg([{ type: "text", text: "Let me look." }], "m1"),
         );
         return "sent";
       },
     }),
-  );
+    name: "GUIDO · mc#2194",
+    cwd: dir,
+    command: "claude",
+    args: [],
+    env: {},
+    dir: join(dir, "run"),
+    stopFile,
+    transcriptPath: join(dir, "run.jsonl"),
+    cliSessionId: "session-1",
+    messageDir: join(dir, "messages"),
+    pollMs: 5,
+  });
   const events: SessionEvent[] = [];
   session.on((event) => events.push(event));
   await session.ready;
   session.send("wake");
-  await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
-  expect(events.map((e) => e.kind)).toContain("turn-start");
-  expect(readFileSync(join(dir, "run.jsonl"), "utf8")).toContain('"mc_cmux":true');
-  await session.close();
-});
-
-it("does not finish a turn on a tool call while cmux still reads idle", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
-  dirs.push(dir);
-  const source = join(dir, "source.jsonl");
-  writeFileSync(source, "");
-  const session = stubSession(
-    dir,
-    stubCmux({
-      agents: async () => [idleAt(source)],
-      send: async () => {
-        appendFileSync(
-          source,
-          line({ type: "user", message: { role: "user", content: "wake" } }) +
-            line({
-              type: "assistant",
-              message: {
-                role: "assistant",
-                stop_reason: null,
-                content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }],
-              },
-            }),
-        );
-        return "sent";
-      },
-    }),
-  );
-  const events: SessionEvent[] = [];
-  session.on((event) => events.push(event));
-  await session.ready;
-  session.send("wake");
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  expect(events.map((e) => e.kind)).not.toContain("result");
-  // the terminal answer arrives: now the turn is done
+  // records keep arriving: a text preamble, then the same message with its tool call, then the
+  // tool result. The transcript alone never ends the turn.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  appendFileSync(source, msg([{ type: "tool_use", id: "t1", name: "Bash", input: {} }], "m1"));
+  await new Promise((resolve) => setTimeout(resolve, 200));
   appendFileSync(
     source,
     line({
-      type: "assistant",
+      type: "user",
       message: {
-        role: "assistant",
-        stop_reason: null,
-        content: [{ type: "text", text: "ok" }],
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }],
       },
-    }),
+    }) + msg([{ type: "text", text: "done" }], "m2"),
   );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(events.map((e) => e.kind)).not.toContain("result");
+  // Claude's Stop hook fires: the turn is over
+  appendFileSync(stopFile, "stop\n");
   await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
+  expect(events.map((e) => e.kind)).toContain("turn-start");
+  expect(events.filter((e) => e.kind === "result")).toHaveLength(1);
+  expect(readFileSync(join(dir, "run.jsonl"), "utf8")).toContain('"mc_cmux":true');
   await session.close();
 });
 

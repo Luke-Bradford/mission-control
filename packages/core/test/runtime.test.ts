@@ -62,6 +62,7 @@ import {
   seatDef,
   skillFileProblem,
   skillPluginManifest,
+  stopHookCommand,
   trimHookCommand,
   WRITER_TOOLS,
 } from "../src/runtime.ts";
@@ -1277,6 +1278,20 @@ describe("crew sandbox and scoped edits", () => {
     ]);
     expect(j.hooks.PreToolUse).toHaveLength(1);
     expect(j.hooks.PostToolUseFailure).toHaveLength(1);
+  });
+
+  it("adds Claude's Stop hook, which marks each turn's end in the run's own file", () => {
+    const stop = { command: stopHookCommand("/mc/tmp/mc-turn-end"), timeoutS: 5 };
+    const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", { ...base.hook, stop }));
+    expect(j.hooks.Stop).toEqual([
+      {
+        hooks: [
+          { type: "command", command: "/bin/echo stop >> '/mc/tmp/mc-turn-end'", timeout: 5 },
+        ],
+      },
+    ]);
+    expect(() => stopHookCommand("relative")).toThrow();
+    expect(() => stopHookCommand("/a'b")).toThrow();
   });
 
   it("denies reading credential folders and the hub's data dir, in every mode", () => {

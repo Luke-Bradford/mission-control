@@ -27,6 +27,8 @@ export interface CmuxSessionInput {
   env: Record<string, string>;
   privateEnv?: Record<string, string>;
   dir: string;
+  /** Claude's Stop hook adds a line here at the end of each turn (`stopHookCommand`). */
+  stopFile?: string;
   transcriptPath: string;
   cliSessionId: string;
   messageDir: string;
@@ -41,11 +43,6 @@ export interface CmuxSessionInput {
 }
 
 const LIMIT_TEXT = /usage limit|hit your limit|limit reached|rate.?limit/i;
-/** Whether an assistant record holds a tool call. */
-function hasToolUse(data: Record<string, unknown>): boolean {
-  const content = isObj(data.message) ? data.message.content : null;
-  return Array.isArray(content) && content.some((part) => isObj(part) && part.type === "tool_use");
-}
 /** The text of an API-error assistant line. */
 function apiErrorText(data: Record<string, unknown>): string {
   const content = isObj(data.message) ? data.message.content : null;
@@ -143,6 +140,12 @@ function cmuxSession(
   let expectTurn = false;
   let answered = false;
   let turnStarted = false;
+  // Stop-hook markers when the hub's message went in; a later one ends the hub's turn
+  let stopsAtSend = 0;
+  const countStops = () => {
+    if (!i.stopFile || !existsSync(i.stopFile)) return 0;
+    return readFileSync(i.stopFile, "utf8").split("\n").filter(Boolean).length;
+  };
   // The turn ended in an API error (a usage limit, say): its result is an error.
   let turnError = false;
   const undelivered: string[] = [];
@@ -200,11 +203,9 @@ function cmuxSession(
           });
         }
         if (isObj(data) && data.type === "assistant") {
-          // The interactive transcript's stop reasons are null, so the latest assistant record
-          // decides: one with a tool call means Claude is still working (its result is pending),
-          // any other answers the prompt. A later record changes the answer again.
-          if (expectTurn) answered = data.isApiErrorMessage === true || !hasToolUse(data);
           if (data.isApiErrorMessage === true) {
+            // an API error ends the turn without a Stop hook
+            if (expectTurn) answered = true;
             turnError = true;
             const text = apiErrorText(data);
             if (data.error === "rate_limit" || LIMIT_TEXT.test(text))
@@ -296,9 +297,14 @@ function cmuxSession(
         }
         if (lifecycle === "needsInput") emit({ kind: "needs-input" });
         if (lifecycle === "idle") finishTurn();
-      } else if (lifecycle === "idle" && expectTurn && answered && lines === linesBefore) {
-        // The whole turn fell between two polls: Claude's answer is in the transcript, cmux is
-        // idle and the transcript has stopped growing.
+      } else if (
+        lifecycle === "idle" &&
+        expectTurn &&
+        (answered || countStops() > stopsAtSend) &&
+        lines === linesBefore
+      ) {
+        // The whole turn fell between two polls: Claude's own Stop hook marked the end of the turn
+        // the hub started (or an API error ended it), cmux is idle and the transcript has settled.
         if (!turnStarted) emit({ kind: "turn-start" });
         finishTurn();
       }
@@ -398,6 +404,7 @@ function cmuxSession(
               expectTurn = true;
               answered = false;
               turnStarted = false;
+              stopsAtSend = countStops();
             }
           } catch (error) {
             // The supervisor has already recorded this prompt as delivered, so it is never

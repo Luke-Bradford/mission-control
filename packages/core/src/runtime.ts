@@ -1070,6 +1070,8 @@ export interface CrewHook {
   timeoutS: number;
   /** The trim hook (#1045): after every tool, a huge result is cut before it enters context. */
   trim?: { command: string; timeoutS: number };
+  /** The Stop hook: Claude's own end-of-turn signal, one marker per turn (`stopHookCommand`). */
+  stop?: { command: string; timeoutS: number };
 }
 
 /** The tools whose Post events the hook sees: only a Bash call can hold the test lock. */
@@ -1080,9 +1082,9 @@ const POST_HOOK_MATCHER = "Bash";
  * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
  * a call that holds the test lock releases it.
  */
-function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
+function guardHooks(hook: CrewHook): Record<string, unknown[]> {
   const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
-  const out = {} as Record<GuardHookEvent, unknown[]>;
+  const out = {} as Record<GuardHookEvent, unknown[]> & Record<string, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) {
     out[e] = [{ matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] }];
   }
@@ -1092,6 +1094,10 @@ function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
       hooks: [{ type: "command", command: hook.trim.command, timeout: hook.trim.timeoutS }],
     });
   }
+  if (hook.stop !== undefined)
+    out.Stop = [
+      { hooks: [{ type: "command", command: hook.stop.command, timeout: hook.stop.timeoutS }] },
+    ];
   return out;
 }
 
@@ -1330,6 +1336,17 @@ export function trimHookCommand(i: TrimHookInput): string {
   }
   const q = (v: string) => `'${v}'`;
   return `${q(i.node)} --experimental-strip-types ${q(i.entry)} ${q(i.dir)}`;
+}
+
+/**
+ * The Stop hook's command: Claude runs it when a turn ends, and it adds one line to the run's own
+ * marker file, which the cmux driver reads as the end of the turn the hub started.
+ */
+export function stopHookCommand(file: string): string {
+  if (/['\n\r]/.test(file))
+    throw new Error("crew stop hook: the file holds a quote or a line break");
+  if (!file.startsWith("/")) throw new Error("crew stop hook: the file must be absolute");
+  return `/bin/echo stop >> '${file}'`;
 }
 
 /** The argv (after `claude`) for one interactive crew process. */
