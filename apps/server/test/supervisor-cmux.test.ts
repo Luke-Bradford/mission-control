@@ -61,43 +61,48 @@ it.skipIf(!existsSync("/bin/zsh"))("starts a Claude run in a cmux workspace", as
 });
 
 it.skipIf(!existsSync("/bin/zsh"))(
-  "a prompt that cmux never took reaches Claude after an outage that also refuses close",
+  "a run whose cmux is down beyond every retry waits, then closes its workspace before it recovers",
   async () => {
     const state = join(dir, "fake-cmux.json");
     writeFileSync(state, JSON.stringify({ sessions: [], calls: [], bridge: true }));
-    // opening cmux brings the fake back up, so only a recovery that starts cmux first can succeed
+    // the open command does nothing: cmux stays down until the test brings it back
     const { sup } = make({
       cmuxCommand: [process.execPath, fake, state],
-      cmuxOptions: { open: [process.execPath, opener, state], waitMs: 2000 },
+      cmuxOptions: { open: ["/usr/bin/true"], waitMs: 300 },
     });
     sup.start();
     const run = await sup.startRun("guido-1", 42);
     const copied = () => readFileSync(store.run(run.runId)?.transcriptPath ?? "", "utf8");
     await until(() => expect(copied()).toContain('"mc_cmux":true'));
     await until(() => expect(seatState("guido-1")).toBe("idle"));
-    const failing = (on: boolean) => {
-      const value = JSON.parse(readFileSync(state, "utf8"));
-      value.send_fail = on;
-      value.sessions_fail = on;
-      value.close_fail = on;
-      value.ping = on ? "down" : undefined;
-      writeFileSync(state, JSON.stringify(value));
-    };
-    failing(true);
+    const old = sessions(state)[0]?.workspace_id;
+    const value = JSON.parse(readFileSync(state, "utf8"));
+    Object.assign(value, { send_fail: true, sessions_fail: true, close_fail: true, ping: "down" });
+    writeFileSync(state, JSON.stringify(value));
     await sup.message("guido-1", "Please do the exact lost prompt", {
       interrupt: false,
       questions: "none",
     });
-    // cmux is down: send, sessions, close and ping all fail, so the session ends and is retaken,
-    // and the old workspace can only be closed once the recovery has started cmux again
-    const old = sessions(state)[0]?.workspace_id;
+    // the session ends, every close try fails: the run waits and keeps its seat
+    await vi.waitFor(
+      () => expect(store.seatSession("guido-1")?.reason).toContain("cmux not answering"),
+      {
+        timeout: 40_000,
+        interval: 100,
+      },
+    );
+    expect(store.run(run.runId)?.endedAt).toBeNull();
+    expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
+    // cmux returns: the old workspace is closed first, then the run resumes and gets the prompt
+    spawnSync(process.execPath, [opener, state]);
     await vi.waitFor(() => expect(copied()).toContain("Please do the exact lost prompt"), {
-      timeout: 45_000,
+      timeout: 40_000,
       interval: 100,
     });
     const all = calls(state);
-    expect(all.some((c) => c[0] === "close-workspace" && c.includes(old as string))).toBe(true);
-    expect(all.filter((c) => c[0] === "new-workspace")).toHaveLength(2);
+    const closed = all.findIndex((c) => c[0] === "close-workspace" && c.includes(old as string));
+    expect(closed).toBeGreaterThan(-1);
+    expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
     expect(readFileSync(sessions(state).at(-1)?.command as string, "utf8")).toContain("--resume");
     expect(store.run(run.runId)?.endedAt).toBeNull();
     for (const session of JSON.parse(readFileSync(state, "utf8")).sessions)
@@ -105,7 +110,7 @@ it.skipIf(!existsSync("/bin/zsh"))(
         process.kill(-session.pgid, "SIGTERM");
       } catch {}
   },
-  60_000,
+  120_000,
 );
 
 it("seat state follows cmux and /clear keeps the run", async () => {
@@ -335,8 +340,8 @@ describe("a restart attaches to the workspace", () => {
     expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
   });
 
-  it("closes the saved workspace once cmux returns after an outage longer than every retry", async () => {
-    const { state, first } = await idleRun();
+  it("holds the run while cmux is down at restart, then closes the workspace before it recovers", async () => {
+    const { state, first, run } = await idleRun();
     const old = sessions(state)[0]?.workspace_id;
     await first.sup.stopAll();
     const value = JSON.parse(readFileSync(state, "utf8"));
@@ -344,27 +349,31 @@ describe("a restart attaches to the workspace", () => {
     value.sessions_fail = true;
     value.close_fail = true;
     writeFileSync(state, JSON.stringify(value));
-    // cmux cannot be started (the open command does nothing): the run fails with the workspace unconfirmed
+    // cmux cannot be started (the open command does nothing)
     const next = make({
       cmuxCommand: [process.execPath, fake, state],
       cmuxOptions: { open: ["/usr/bin/true"], waitMs: 300 },
     });
     next.sup.start();
-    await until(() => expect(seatState("guido-1")).toBe("error"));
+    await until(() => expect(store.seatSession("guido-1")?.reason).toContain("cmux not answering"));
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    // the run waits: not ended, its seat kept, no new workspace made
+    expect(store.run(run.runId)?.endedAt).toBeNull();
+    expect(store.seatSession("guido-1")?.runId).toBe(run.runId);
     expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
-    // cmux comes back later and restores the agent with a new pid: the hub closes it by itself
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // cmux returns and restores the agent with a new pid: it is closed first, then the run recovers
     spawnSync(process.execPath, [opener, state, "restore"]);
     await vi.waitFor(
-      () =>
-        expect(
-          calls(state).some(
-            (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
-          ),
-        ).toBe(true),
-      { timeout: 10_000, interval: 100 },
+      () => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(2),
+      { timeout: 15_000, interval: 100 },
     );
-    expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
+    const all = calls(state);
+    const closed = all.findIndex(
+      (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
+    );
+    expect(closed).toBeGreaterThan(-1);
+    expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
+    expect(store.run(run.runId)?.endedAt).toBeNull();
   });
 
   it("a saved running row does not start a second turn", async () => {

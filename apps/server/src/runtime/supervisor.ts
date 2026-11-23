@@ -253,7 +253,6 @@ import {
 import {
   CMUX_DOWN_TEXT,
   CMUX_REFUSED_TEXT,
-  type Cmux,
   type CmuxAgent,
   type CmuxOptions,
   createCmux,
@@ -332,6 +331,7 @@ const LAST_TURN_ERROR = "last turn ended in an error";
 const SHUTTING_DOWN = "the server is shutting down";
 const RESUMED = "resumed after a restart; send a message to continue";
 const RESUME_FAILED = "could not resume the session";
+const CMUX_HELD_TEXT = "cmux not answering: the run waits until its workspace can be closed";
 /** How long `stopAll` waits for a Stop's `close` line to reach its keeper's socket. */
 const CLOSE_SENT_WAIT_MS = 1000;
 const RESUME_MODE_CHANGED = "could not resume: the seat's mode changed";
@@ -499,7 +499,7 @@ export interface SupervisorDeps {
   cmuxCommand?: string[];
   /** Wait between tries to close a cmux workspace while cmux is down (2000). */
   cmuxRetryMs?: number;
-  /** How often workspaces that could not be closed are retried once cmux answers (30000). */
+  /** How often a held run retries closing its cmux workspace once cmux answers (30000). */
   cmuxSweepMs?: number;
   /** How the cmux wrapper starts cmux and how long it waits (tests only). */
   cmuxOptions?: CmuxOptions;
@@ -1275,53 +1275,41 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * `--resume` / `thread/resume` instead of failing as "exited". Never throws.
    */
   /**
-   * Saved cmux workspaces that could not be closed (cmux was down). Starting cmux restores their
-   * Claude without the hub's settings, so they are closed before any new workspace is made, and
-   * retried on a timer once cmux answers.
+   * One rule: while a Claude run's cmux workspace is not confirmed closed, the run never ends, its
+   * worktree is never dropped and its seat is never freed. Starting cmux restores the saved agent
+   * without the hub's settings, so the run waits ("cmux not answering") and, once cmux answers, the
+   * workspace is closed first and only then does `then` end or recover the run. Undelivered
+   * prompts stay on the run until then. True when the run is held.
    */
-  const ORPHANS_KEY = "cmux.orphans";
-  function readOrphans(): string[] {
-    try {
-      const value: unknown = JSON.parse(store.getSetting(ORPHANS_KEY) ?? "[]");
-      return Array.isArray(value) ? value.filter((t): t is string => typeof t === "string") : [];
-    } catch {
-      return [];
-    }
-  }
-  function addOrphan(workspace: string): void {
-    const kept = readOrphans();
-    if (!kept.includes(workspace))
-      store.setSetting(ORPHANS_KEY, JSON.stringify([...kept, workspace]));
-  }
-  function dropOrphan(workspace: string): void {
-    const rest = readOrphans().filter((w) => w !== workspace);
-    if (rest.length === 0) store.deleteSetting(ORPHANS_KEY);
-    else store.setSetting(ORPHANS_KEY, JSON.stringify(rest));
-  }
-  /** Closes every orphaned workspace; throws when one cannot be closed. */
-  async function sweepOrphans(cmux: Cmux): Promise<void> {
-    for (const workspace of readOrphans()) {
-      try {
-        await cmux.close(workspace);
-      } catch (e) {
-        if (!/no such|not found|unknown/i.test(errText(e))) throw e;
+  const cmuxHolds = new Set<string>();
+  function holdForCmux(row: SeatSessionRow, then: () => void | Promise<void>): boolean {
+    const runId = row.runId;
+    if (runId === null || store.run(runId)?.endedAt !== null) return false;
+    if (store.run(runId)?.vendor === "codex" || store.getSetting(cmuxWorkspaceKey(runId)) === null)
+      return false;
+    if (cmuxHolds.has(runId)) return true;
+    cmuxHolds.add(runId);
+    setSeat(row.seatId, { state: "error", reason: CMUX_HELD_TEXT });
+    const tick = async (): Promise<void> => {
+      if (stopping || runGone(runId, row.seatId)) {
+        cmuxHolds.delete(runId);
+        return;
       }
-      dropOrphan(workspace);
-    }
-  }
-  let orphanTimer: NodeJS.Timeout | undefined;
-  function watchOrphans(): void {
-    if (orphanTimer !== undefined) return;
-    orphanTimer = setInterval(() => {
-      if (stopping || readOrphans().length === 0) return;
-      const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
-      // no wake: only a cmux that is already up is cleaned, and a quit one is left alone
-      void cmux
-        .agents()
-        .then(() => sweepOrphans(cmux))
-        .catch(() => {});
-    }, deps.cmuxSweepMs ?? 30_000);
-    orphanTimer.unref();
+      try {
+        // no wake: a cmux the operator quit is left alone until it is running again
+        await createCmux(deps.cmuxCommand, log, deps.cmuxOptions).agents();
+        if (await endAndRemoveKeeper(row.seatId, runId)) {
+          cmuxHolds.delete(runId);
+          await then();
+          return;
+        }
+      } catch {
+        /* cmux still down: try again */
+      }
+      setTimeout(() => void tick(), deps.cmuxSweepMs ?? 30_000).unref();
+    };
+    setTimeout(() => void tick(), 0).unref();
+    return true;
   }
 
   /** Prompts cmux never took, kept per run so they survive a failed close and a seat error. */
@@ -1381,7 +1369,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ended = await endAndRemoveKeeper(seatId, runId);
         }
         if (!ended) {
-          failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
+          const again = () => {
+            const fresh = store.seatSession(seatId);
+            return fresh === null ? undefined : recoverSession(fresh);
+          };
+          if (!holdForCmux(row, again))
+            failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
           return;
         }
       }
@@ -2470,9 +2463,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             run.reviewId != null
               ? `PR ${store.review(run.reviewId)?.prNumber ?? run.reviewId}`
               : (run.ticket ?? def.loop);
-          const startCmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
           session = startCmuxSession({
-            cmux: startCmux,
+            cmux: createCmux(deps.cmuxCommand, log, deps.cmuxOptions),
             name: `${info.seat.id} · ${ref}`,
             cwd,
             // cmux must invoke Claude by its command name so its shim remains in control. A
@@ -2491,7 +2483,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
             log,
-            beforeWorkspace: () => sweepOrphans(startCmux),
             onWorkspace: (workspace, pid) => {
               store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify({ workspace, pid }));
               const l = live.get(info.seat.id);
@@ -2717,12 +2708,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             await cmux.ensure();
             await cmux.close(value.workspace);
           } catch (e) {
-            if (!/no such|not found|unknown/i.test(errText(e))) {
-              addOrphan(value.workspace);
-              throw e;
-            }
+            if (!/no such|not found|unknown/i.test(errText(e))) throw e;
           }
-          dropOrphan(value.workspace);
         }
       } catch (e) {
         log(`${seatId}: could not close cmux workspace of ${runId}: ${errText(e)}`);
@@ -2800,6 +2787,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       exit?: Pick<NonNullable<Run["noReport"]>, "code" | "signal" | "lastStderr"> & { at: number };
     } = {},
   ): void {
+    // a Claude run whose cmux workspace is still open is held, then failed once it is closed
+    if (holdForCmux(row, () => failResume(store.seatSession(row.seatId) ?? row, reason, opts)))
+      return;
     const run = row.runId === null ? null : store.run(row.runId);
     const open = run !== null && run.endedAt === null;
     if (open) {
@@ -3263,7 +3253,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               log(
                 `${row.seatId}: cmux does not answer, the old workspace is kept: ${errText(error)}`,
               );
-              addOrphan(saved.workspace);
+              // the run waits for cmux and is then recovered, never failed with a workspace open
+              const again = () => {
+                const fresh = store.seatSession(row.seatId);
+                return fresh === null ? undefined : recoverSession(fresh);
+              };
+              if (holdForCmux(row, again)) return;
               return failResume(row, `${RESUME_FAILED}: cmux is not answering`);
             }
           }
@@ -3316,7 +3311,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           } catch (error) {
             if (!/no such|not found|unknown/i.test(errText(error))) {
               log(`${row.seatId}: could not close the old cmux workspace: ${errText(error)}`);
-              addOrphan(saved.workspace);
               return failResume(row, `${RESUME_FAILED}: could not end the old workspace`);
             }
           }
@@ -5644,7 +5638,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     start() {
       if (!deps.enabled || !crew || started) return;
       started = true;
-      watchOrphans();
       // a crew.node that failed its check at load: crew stays off with the reason, the hub runs on
       if (crew.nodeNote !== undefined) {
         lockNote = crew.nodeNote;
