@@ -59,7 +59,7 @@ it.skipIf(!existsSync("/bin/zsh"))("starts a Claude run in a cmux workspace", as
 });
 
 it.skipIf(!existsSync("/bin/zsh"))(
-  "a prompt that cmux never took reaches Claude after the poll loss recovery",
+  "a prompt that cmux never took reaches Claude after an outage that also refuses close",
   async () => {
     const state = join(dir, "fake-cmux.json");
     writeFileSync(state, JSON.stringify({ sessions: [], calls: [], bridge: true }));
@@ -73,6 +73,8 @@ it.skipIf(!existsSync("/bin/zsh"))(
       const value = JSON.parse(readFileSync(state, "utf8"));
       value.send_fail = on;
       value.sessions_fail = on;
+      value.close_fail = on;
+      value.ping = on ? "down" : undefined;
       writeFileSync(state, JSON.stringify(value));
     };
     failing(true);
@@ -80,7 +82,8 @@ it.skipIf(!existsSync("/bin/zsh"))(
       interrupt: false,
       questions: "none",
     });
-    // cmux keeps refusing the send and then stops answering polls, so the session ends and is retaken
+    // cmux is down: send, sessions, close and ping all fail, so the session ends, is retaken, and the
+    // old workspace cannot be closed until cmux answers again
     await new Promise((resolve) => setTimeout(resolve, 8000));
     failing(false);
     await vi.waitFor(() => expect(copied()).toContain("Please do the exact lost prompt"), {

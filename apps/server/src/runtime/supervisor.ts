@@ -204,6 +204,7 @@ import {
   textBytes,
   ticketPiece,
 } from "../telemetry/prompt-cost.ts";
+import { sleep } from "../util.ts";
 import {
   AGENTS_MD_HEADING,
   auditBrief,
@@ -489,6 +490,8 @@ export interface SupervisorDeps {
   commandArgs?: string[];
   /** Local cmux command; tests pass a fake executable and its prefix arguments. */
   cmuxCommand?: string[];
+  /** Wait between tries to close a cmux workspace while cmux is down (2000). */
+  cmuxRetryMs?: number;
   /** How the cmux wrapper starts cmux and how long it waits (tests only). */
   cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
@@ -1262,6 +1265,37 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * to; one that has gone (or left an exit) has its folder removed first, so the run resumes with
    * `--resume` / `thread/resume` instead of failing as "exited". Never throws.
    */
+  /** Prompts cmux never took, kept per run so they survive a failed close and a seat error. */
+  const undeliveredKey = (runId: string) => `cmux.undelivered:${runId}`;
+  function keepUndelivered(runId: string, texts: readonly string[]): void {
+    if (texts.length === 0) return;
+    const kept = readUndelivered(runId);
+    store.setSetting(undeliveredKey(runId), JSON.stringify([...kept, ...texts]));
+  }
+  function readUndelivered(runId: string): string[] {
+    try {
+      const value: unknown = JSON.parse(store.getSetting(undeliveredKey(runId)) ?? "[]");
+      return Array.isArray(value) ? value.filter((t): t is string => typeof t === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  /** Sends what a lost cmux session never took into the session that now holds the run, in order. */
+  function replayUndelivered(l: Live): void {
+    const texts = readUndelivered(l.run.id);
+    if (texts.length === 0) return;
+    store.deleteSetting(undeliveredKey(l.run.id));
+    for (const text of texts) {
+      try {
+        l.session.send(text);
+        l.inTurn = true;
+      } catch (e) {
+        log(`${l.info.seat.id}: could not replay a prompt into ${l.run.id}: ${errText(e)}`);
+        keepUndelivered(l.run.id, [text]);
+      }
+    }
+  }
+
   async function retake(l: Live): Promise<void> {
     const seatId = l.info.seat.id;
     const runId = l.run.id;
@@ -1270,6 +1304,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (row === null || row.runId !== runId || row.state === "stopped") return;
       if (store.run(runId)?.endedAt !== null) return;
       const dir = crewKeeperDir(deps.dbPath, runId);
+      // Prompts the dead session recorded as delivered but never got into cmux are kept on the run
+      // first, before any cleanup that can fail: whatever recovers the run next replays them.
+      keepUndelivered(runId, l.session.undelivered ?? []);
       // A Codex attach that could not confirm its floor closed its transport, so its keeper may
       // still be finishing while this exit reaches us. End it before its folder can be reused.
       if (l.run.vendor === "codex" && l.keeperPid !== null && pidAlive(l.keeperPid)) {
@@ -1278,25 +1315,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return;
         }
       } else if (readKeeperExit(dir) !== null || !keeperAlive(dir)) {
-        if (!(await endAndRemoveKeeper(seatId, runId))) {
+        // A cmux workspace cannot be closed while cmux is down: give it a few tries to answer.
+        let ended = await endAndRemoveKeeper(seatId, runId);
+        for (let n = 0; !ended && l.run.vendor !== "codex" && n < 5; n++) {
+          await sleep(deps.cmuxRetryMs ?? 2000);
+          ended = await endAndRemoveKeeper(seatId, runId);
+        }
+        if (!ended) {
           failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
           return;
         }
       }
-      // Prompts the old session recorded as delivered but never got into cmux go to the new one.
-      const lost = [...(l.session.undelivered ?? [])];
       await recoverSession(row);
-      const next = live.get(seatId);
-      if (lost.length > 0 && next !== undefined && next !== l && next.run.id === runId) {
-        for (const text of lost) {
-          try {
-            next.session.send(text);
-            next.inTurn = true;
-          } catch (e) {
-            log(`${seatId}: could not replay a prompt into ${runId}: ${errText(e)}`);
-          }
-        }
-      }
     } catch (e) {
       log(`${seatId}: could not take back ${runId}: ${errText(e)}`);
     }
@@ -2477,6 +2507,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function removeRunFiles(runId: string): void {
     pendingPromptVersions.delete(runId);
+    store.deleteSetting(undeliveredKey(runId));
     void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
@@ -2683,6 +2714,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     };
     live.set(info.seat.id, l);
     l.off = session.on((e) => onEvent(l, e));
+    if (run.vendor !== "codex") replayUndelivered(l);
     return l;
   }
 

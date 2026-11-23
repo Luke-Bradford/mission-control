@@ -419,6 +419,7 @@ function make(
     command: over.command ?? process.execPath,
     codexCommand: over.codexCommand,
     cmuxCommand: over.cmuxCommand,
+    cmuxRetryMs: 1500,
     ...(over.cmuxOptions === undefined ? {} : { cmuxOptions: over.cmuxOptions }),
     codexAuthPath,
     commandArgs:
