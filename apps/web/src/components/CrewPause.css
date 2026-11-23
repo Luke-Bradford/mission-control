@@ -7,8 +7,8 @@
   max-width: 100%;
 }
 
-/* Must outrank `.modal .panel` (same specificity as the old doubled class, so stylesheet load order decided the width). */
-.modal .panel.crew-pause-panel {
+/* Tripled, not under .modal: it must outrank `.modal .panel` (two classes) whatever the stylesheet load order, without leading with a class another area owns. */
+.crew-pause-panel.crew-pause-panel.crew-pause-panel {
   width: min(640px, 100%);
 }
 
