@@ -6,6 +6,7 @@ import {
   BLOCKING_SEVERITIES,
   EVIDENCE_KINDS,
   evidenceImageName,
+  evidenceWidthOf,
   FINDING_CATEGORIES,
   FINDING_RESOLUTION_OUTCOMES,
   FINDING_SEVERITIES,
@@ -292,7 +293,7 @@ export function createQaReports(i: {
             review.repoId,
             review.prNumber,
             review.sha,
-            evidenceImageName(pair.page, pair.scheme, kind),
+            evidenceImageName(pair.page, pair.scheme, kind, evidenceWidthOf(pair)),
           );
           if (!png) return null;
           const hash = retain(png, known);

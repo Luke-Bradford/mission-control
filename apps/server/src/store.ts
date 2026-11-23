@@ -3888,18 +3888,39 @@ export class Store {
     );
   }
 
-  /** The QA image ids (sha256) that a report of an open PR cites. */
-  qaAssetIdsOfOpenPrs(): Set<string> {
+  /** Merged PRs (`repoId#number`) with their merge commit: the ones whose change may not be live yet. */
+  mergedPrs(): { key: string; mergeSha: string | null }[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT repo_id, number, merge_commit_sha FROM pull_requests WHERE state = 'merged'",
+        )
+        .all() as Row[]
+    ).map((r) => ({
+      key: `${r.repo_id as string}#${r.number as number}`,
+      mergeSha: (r.merge_commit_sha as string | null) ?? null,
+    }));
+  }
+
+  /**
+   * The QA image ids (sha256) that a report of an open PR cites, or of a PR in `alsoHeld` (merged,
+   * not live yet). Only the PR's current head counts: an older head's pictures are not kept.
+   */
+  qaAssetIdsOfOpenPrs(alsoHeld: ReadonlySet<string> = new Set()): Set<string> {
     const ids = new Set<string>();
     const rows = this.db
       .prepare(
-        `SELECT q.report FROM qa_reports q JOIN pull_requests p
-           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state = 'open'`,
+        `SELECT q.report, p.state, p.repo_id, p.number FROM qa_reports q JOIN pull_requests p
+           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state IN ('open', 'merged')
+          AND (p.head_sha IS NULL OR p.head_sha = q.head_sha)`,
       )
       .all() as Row[];
-    for (const r of rows)
+    for (const r of rows) {
+      if (r.state !== "open" && !alsoHeld.has(`${r.repo_id as string}#${r.number as number}`))
+        continue;
       for (const m of (r.report as string).matchAll(/\/api\/qa-report-assets\/([0-9a-f]{64})/g))
         ids.add(m[1]);
+    }
     return ids;
   }
 
@@ -3918,16 +3939,21 @@ export class Store {
   }
 
   /** The review screenshot ids of reviews of open PRs. */
-  reviewShotIdsOfOpenPrs(): Set<string> {
+  reviewShotIdsOfOpenPrs(alsoHeld: ReadonlySet<string> = new Set()): Set<string> {
+    const rows = this.db
+      .prepare(
+        `SELECT s.shot_id, p.state, p.repo_id, p.number FROM review_shots s
+           JOIN reviews v ON v.id = s.review_id
+           JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
+            AND p.state IN ('open', 'merged')`,
+      )
+      .all() as Row[];
     return new Set(
-      (
-        this.db
-          .prepare(
-            `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
-               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
-          )
-          .all() as Row[]
-      ).map((r) => r.shot_id as string),
+      rows
+        .filter(
+          (r) => r.state === "open" || alsoHeld.has(`${r.repo_id as string}#${r.number as number}`),
+        )
+        .map((r) => r.shot_id as string),
     );
   }
 

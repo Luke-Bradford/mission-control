@@ -71,3 +71,34 @@ it("keeps only the Needs-you pictures that a waiting question's packet cites", (
   store.putAttentionMaterials(packet("p2", "question:2", answered) as never);
   expect([...store.attentionMaterialAssetIds(new Set(["question:1"]))]).toEqual([open]);
 });
+
+it("keeps only the latest head's QA images for an open PR, and a merged PR's until it is live", () => {
+  const store = new Store(":memory:");
+  const head = "b".repeat(40);
+  store.upsertPullRequests(
+    "mc",
+    [
+      prView({ repoId: "mc", number: 5, state: "open", headSha: head }),
+      prView({ repoId: "mc", number: 6, state: "merged", mergeCommitSha: "c".repeat(40) }),
+    ],
+    NOW,
+  );
+  const report = (id: string, pr: number, sha: string, image: string): QaReport =>
+    ({
+      id,
+      repoId: "mc",
+      prNumber: pr,
+      headSha: sha,
+      registeredAt: NOW,
+      before: { url: `/api/qa-report-assets/${image}` },
+    }) as unknown as QaReport;
+  store.putQaReport(report("old", 5, "a".repeat(40), "a".repeat(64)));
+  store.putQaReport(report("new", 5, head, "b".repeat(64)));
+  store.putQaReport(report("merged", 6, "d".repeat(40), "d".repeat(64)));
+  expect([...store.qaAssetIdsOfOpenPrs()]).toEqual(["b".repeat(64)]);
+  expect([...store.qaAssetIdsOfOpenPrs(new Set(["mc#6"]))].sort()).toEqual([
+    "b".repeat(64),
+    "d".repeat(64),
+  ]);
+  expect(store.mergedPrs()).toEqual([{ key: "mc#6", mergeSha: "c".repeat(40) }]);
+});

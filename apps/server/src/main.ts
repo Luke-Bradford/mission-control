@@ -64,7 +64,14 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
+import { runFirstClean } from "./disk/first-clean.ts";
+import { notLivePrKeys } from "./disk/live.ts";
+import {
+  DISK_CLEAN_SETTING,
+  DISK_SWEEP_EVERY_MS,
+  diskBudgetBytes,
+  sweepDataFolder,
+} from "./disk/sweep.ts";
 import { cachedDiskUse } from "./disk/use.ts";
 import { releaseAtAccountStop } from "./engine/account-release.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
@@ -75,7 +82,7 @@ import { recordingShotSaves, runSilenceCheck } from "./engine/silence.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { flightConflicts } from "./flight/conflicts.ts";
-import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
+import { renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { MergeConflicts } from "./flight/merge-conflicts.ts";
 import { operatorCall } from "./flight/operator-call.ts";
@@ -105,12 +112,18 @@ import {
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
+import { evidenceDemoRender } from "./pr-evidence/demo-render.ts";
 import {
   evidenceSideStarter,
   removeStaleEvidenceWork,
   runEvidenceCommand,
 } from "./pr-evidence/hubs.ts";
 import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
+import {
+  deleteEvidenceRelease,
+  publishEvidenceRelease,
+  sweepEvidenceReleases,
+} from "./pr-evidence/releases.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
@@ -142,6 +155,7 @@ import { Store } from "./store.ts";
 import { restartFileService } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
+  commitsOf,
   createAutoUpdate,
   createHeldUpdateNote,
   createQuietGate,
@@ -473,17 +487,45 @@ export async function main(): Promise<void> {
               return { stop: async () => await stopPreview(child) };
             },
           }),
-          render: (origin, path, colorScheme, signal, operatorToken) => {
-            const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, {
-              colorScheme,
+          render: evidenceDemoRender,
+          changeText: async ({ sha, mainSha, paths, signal }) => {
+            await runEvidenceCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", sha, mainSha],
+              undefined,
               signal,
-              ...(operatorToken === undefined ? {} : { operatorToken }),
-            });
+            );
+            const diff = await gitOutput(
+              evidenceCheckout,
+              ["diff", "--unified=0", `${mainSha}...${sha}`, "--", ...paths],
+              signal,
+            );
+            return diff
+              .split("\n")
+              .filter((l) => /^[+-](?![+-])/.test(l))
+              .join("\n");
           },
-          renderDemo: (origin, path, viewport, signal) => {
-            const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, { demo: true, viewport, signal });
+          unpublish: async (pr) => {
+            const repo = config.repos.find((r) => r.id === previewRepoId);
+            if (
+              repo !== undefined &&
+              !(await deleteEvidenceRelease(gh, evidenceCheckout, repo.github, pr))
+            )
+              throw new Error(`the release for PR ${pr} could not be deleted`);
+          },
+          publish: async ({ pr, sha, images, signal }) => {
+            signal.throwIfAborted();
+            const repo = config.repos.find((r) => r.id === previewRepoId);
+            if (repo === undefined) throw new Error("the hub's repo is not configured");
+            return publishEvidenceRelease({
+              gh,
+              cwd: evidenceCheckout,
+              repo: repo.github,
+              pr,
+              sha,
+              images,
+              scratch: join(dirname(dbPath), "pr-evidence-work", "release"),
+            });
           },
           log: (line) => log(line),
         })
@@ -1180,35 +1222,69 @@ export async function main(): Promise<void> {
   if (!preview) {
     const dataDir = dirname(dbPath);
     let sweeping = false;
-    const diskSweep = () => {
-      if (sweeping) return;
+    // true when the sweep ran to the end; false when it was skipped or failed
+    const diskSweep = (graceMs?: number): Promise<boolean> => {
+      if (sweeping) return Promise.resolve(false);
       sweeping = true;
-      sweepDataFolder({
-        dataDir,
-        now: Date.now,
-        openPrs: store.openPrKeys(),
-        citedAssets: store.qaAssetIdsOfOpenPrs(),
-        keptShots: store.reviewShotIdsOfOpenPrs(),
-        keptMaterials: store.attentionMaterialAssetIds(
-          new Set(
-            attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
-              (item) => item.key,
+      return (async () => {
+        // a merged PR's pictures stay until the hub runs code that holds its merge commit
+        const notLive = await notLivePrKeys(
+          hubRoot === null ? undefined : previewRepoId,
+          store.mergedPrs(),
+          (await updater?.version().catch(() => null))?.sha || null,
+          (running) => (hubRoot === null ? Promise.resolve(null) : commitsOf(hubRoot, running)),
+        );
+        const openPrs = new Set([...store.openPrKeys(), ...notLive]);
+        // The PR's pictures on GitHub go the same way as the ones on disk: once the change is live.
+        const releaseRepo = config.repos.find((r) => r.id === previewRepoId);
+        await sweepEvidenceReleases(
+          prEvidence && releaseRepo && hubRoot
+            ? { gh, cwd: hubRoot, repoId: releaseRepo.id, github: releaseRepo.github }
+            : null,
+          openPrs,
+          log,
+        );
+        await sweepDataFolder({
+          dataDir,
+          now: Date.now,
+          openPrs,
+          citedAssets: store.qaAssetIdsOfOpenPrs(notLive),
+          keptShots: store.reviewShotIdsOfOpenPrs(notLive),
+          keptMaterials: store.attentionMaterialAssetIds(
+            new Set(
+              attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
+                (item) => item.key,
+              ),
             ),
           ),
-        ),
-        budgetBytes: diskBudgetBytes(process.env),
-        holdings: () => hubDiskUse.read(),
-        log,
-      })
+          budgetBytes: diskBudgetBytes(process.env),
+          holdings: () => hubDiskUse.read(),
+          ...(graceMs === undefined ? {} : { graceMs }),
+          log,
+        });
+        return true;
+      })()
         .catch((e: unknown) => {
           log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+          return false;
         })
         .finally(() => {
           sweeping = false;
         });
     };
-    trackTimer(setInterval(diskSweep, DISK_SWEEP_EVERY_MS)).unref();
-    trackTimer(setTimeout(diskSweep, 2 * 60_000)).unref();
+    // The first clean after the cap and live-removal rule has no grace period, so what merged PRs
+    // already left behind goes at once; it counts as done only once a sweep has finished.
+    const sweepOrFirstClean = () =>
+      void runFirstClean(
+        {
+          get: () => store.getSetting(DISK_CLEAN_SETTING),
+          set: (v) => store.setSetting(DISK_CLEAN_SETTING, v),
+        },
+        diskSweep,
+        Date.now,
+      );
+    trackTimer(setInterval(sweepOrFirstClean, DISK_SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(sweepOrFirstClean, 2 * 60_000)).unref();
     // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
     if (engineOn) {
       const worktreeTidy = () => {

@@ -1485,6 +1485,52 @@ describe("add_review_evidence", () => {
     expect(ghCalls.every((call) => call[0] === "api" && !call.includes("--method"))).toBe(true);
   });
 
+  it("keeps a stored release-removal retry when a picture is added", async () => {
+    reviewEvidence.save(
+      {
+        repoId: "mc",
+        pr: 9,
+        sha: SHA,
+        mainSha: MAIN,
+        capturedAt: NOW,
+        pairs: [],
+        releaseRemoval: true,
+      },
+      [],
+    );
+    ghImpl = async (call) => {
+      if (call[1]?.endsWith("/pulls/9"))
+        return { code: 0, stdout: JSON.stringify({ head: { sha: SHA } }), stderr: "" };
+      return {
+        code: 0,
+        stdout: JSON.stringify({
+          type: "file",
+          path: "docs/audit.png",
+          sha: blob,
+          size: picture.length,
+          encoding: "base64",
+          content: picture.toString("base64"),
+        }),
+        stderr: "",
+      };
+    };
+    const tool = need(tools.find((candidate) => candidate.name === "add_review_evidence"));
+    await tool.call(ctx(), {
+      pr: 9,
+      head: SHA,
+      images: [
+        {
+          path: "docs/audit.png",
+          caption: "Audit",
+          viewport: { width: 1280, height: 900 },
+          side: "reference",
+        },
+      ],
+      basis: "Checked the committed PNG.",
+    });
+    expect(reviewEvidence.manifest("mc", 9, SHA)?.releaseRemoval).toBe(true);
+  });
+
   it("refuses a changed head and a blob that is not PNG", async () => {
     const tool = need(tools.find((candidate) => candidate.name === "add_review_evidence"));
     ghImpl = async () => ({

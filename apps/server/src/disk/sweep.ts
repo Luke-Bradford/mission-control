@@ -22,8 +22,18 @@ export function diskBudgetBytes(env: NodeJS.ProcessEnv): number {
   const gb = Number(env[DISK_BUDGET_ENV]);
   return (Number.isFinite(gb) && gb > 0 ? gb : DISK_BUDGET_GB) * 1024 ** 3;
 }
+/** Setting: set once the hub has run the one-off clean of what finished PRs left behind. */
+export const DISK_CLEAN_SETTING = "disk-leftovers-cleaned";
 /** How often the hub runs the sweep. */
 export const DISK_SWEEP_EVERY_MS = 3_600_000;
+/** The most each picture store may hold; over it, the oldest pictures go first, cited or not. */
+export const IMAGE_CAPS: Readonly<Record<string, number>> = {
+  [DATA_DIRS.evidence]: 384 * 1024 ** 2,
+  [DATA_DIRS.qaAssets]: 256 * 1024 ** 2,
+  [DATA_DIRS.reviewShots]: 128 * 1024 ** 2,
+  [DATA_DIRS.hudShots]: 128 * 1024 ** 2,
+  [DATA_DIRS.attentionMaterials]: 128 * 1024 ** 2,
+};
 /** The one folder under `controller/` that is kept. */
 export const CONTROLLER_KEEP = "designs";
 
@@ -32,7 +42,7 @@ const PR_DIR = /^[1-9][0-9]*$/;
 export interface SweepInput {
   dataDir: string;
   now: () => number;
-  /** Open PRs as `repoId#number`; every other PR's evidence is finished work. */
+  /** PRs as `repoId#number` whose work is not finished: open, or merged but not live yet. Every other PR's files go. */
   openPrs: ReadonlySet<string>;
   /** QA image ids (sha256 hex) cited by a report of an open PR. */
   citedAssets: ReadonlySet<string>;
@@ -44,6 +54,10 @@ export interface SweepInput {
   budgetBytes?: number;
   /** What the hub holds by kind, for the budget check and its log line (worktrees are the tidy's). */
   holdings?: () => Promise<DiskUse>;
+  /** Size caps by folder name; default `IMAGE_CAPS`. */
+  caps?: Readonly<Record<string, number>>;
+  /** How long a finished PR's files stay; default `FINISHED_GRACE_MS`. 0 for the one-off clean. */
+  graceMs?: number;
   log: (line: string) => void;
 }
 
@@ -84,7 +98,7 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
     result.files += 1;
     result.bytes += m.bytes;
   };
-  const finished = (newest: number): boolean => now - newest > FINISHED_GRACE_MS;
+  const finished = (newest: number): boolean => now - newest > (i.graceMs ?? FINISHED_GRACE_MS);
   const stale = (newest: number): boolean => now - newest > SCRATCH_MAX_AGE_MS;
   const idle = (newest: number): boolean => now - newest > SCRATCH_IN_USE_MS;
   const scratchDirs = [DATA_DIRS.controller, DATA_DIRS.evidenceWork];
@@ -106,6 +120,13 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
       await remove(join(evidence, repo, pr), finished);
     }
   }
+  // a PR's kept snapshot (`kept-<pr>`) is work files: gone with the PR's pictures
+  const heldNumbers = new Set([...i.openPrs].map((k) => k.slice(k.lastIndexOf("#") + 1)));
+  for (const name of await safeList(join(root, DATA_DIRS.evidenceWork))) {
+    const m = /^kept-([1-9][0-9]*)$/.exec(name);
+    if (m && !heldNumbers.has(m[1]))
+      await remove(join(root, DATA_DIRS.evidenceWork, name), finished);
+  }
   // a picture file keyed by an id: gone unless an open PR's work still cites it
   const pictures = async (dir: string, keep: ReadonlySet<string>, ext = ".png"): Promise<void> => {
     for (const name of await safeList(join(root, dir))) {
@@ -120,6 +141,32 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
   // scratch: every child of these folders, once untouched for 3 days
   for (const dir of scratchDirs) {
     for (const name of await scratchOf(dir)) await remove(join(root, dir, name), stale);
+  }
+
+  // caps: a store over its cap loses its oldest pictures first, open work or not
+  for (const [dir, cap] of Object.entries(i.caps ?? IMAGE_CAPS)) {
+    const units: { path: string; bytes: number; newest: number }[] = [];
+    const add = async (path: string): Promise<void> => {
+      if ((await lstat(path).catch(() => null))?.isSymbolicLink()) return;
+      units.push({ path, ...(await measure(path)) });
+    };
+    if (dir === DATA_DIRS.evidence) {
+      // <repo>/<pr>/<head sha>: one head is the unit
+      for (const repo of await safeList(join(root, dir)))
+        for (const pr of await safeList(join(root, dir, repo)))
+          for (const head of await safeList(join(root, dir, repo, pr)))
+            await add(join(root, dir, repo, pr, head));
+    } else {
+      for (const name of await safeList(join(root, dir))) await add(join(root, dir, name));
+    }
+    let total = units.reduce((n, u) => n + u.bytes, 0);
+    units.sort((a, b) => a.newest - b.newest);
+    for (const u of units) {
+      if (total <= cap) break;
+      const was = result.bytes;
+      await remove(u.path, () => true);
+      total -= result.bytes - was;
+    }
   }
 
   if (i.budgetBytes !== undefined && held !== null) {

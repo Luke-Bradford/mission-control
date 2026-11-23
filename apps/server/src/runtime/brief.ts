@@ -18,6 +18,7 @@ import {
   type EvidencePair,
   type EvidenceSubmission,
   evidenceImageName,
+  evidenceWidthOf,
   type LoopKind,
   MC_LINE_PREFIX,
   MC_PLAN_STEPS_HINT,
@@ -375,7 +376,9 @@ function evidenceLine(p: EvidencePair, dir: string): string {
   const more =
     p.regions.length > REGIONS_LISTED ? `; ${p.regions.length - REGIONS_LISTED} more` : "";
   const count = p.regions.length === 1 ? "1 region" : `${p.regions.length} regions`;
-  const files = EVIDENCE_KINDS.map((k) => `${dir}/${evidenceImageName(p.page, p.scheme, k)}`);
+  const files = EVIDENCE_KINDS.map(
+    (k) => `${dir}/${evidenceImageName(p.page, p.scheme, k, evidenceWidthOf(p))}`,
+  );
   return `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${count} (${where}${more})`} — ${files.join(", ")}`;
 }
 
@@ -472,7 +475,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
       ? [
           EVIDENCE_HEADING,
           "",
-          `Captured pairs render at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} on the same data, this head against main ${i.evidence.mainSha.slice(0, 7)}. Changed pixels are red in the diff. Submitted pictures name their own viewport and side. Judge each changed region as the design pass asks, and a page the PR should have changed but did not.`,
+          `Captured pairs render from Demo data at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} (light unless the change is about colour or width), this head against main ${i.evidence.mainSha.slice(0, 7)}; only changed pages have pairs. Changed pixels are red in the diff. Submitted pictures name their own viewport and side. Judge each changed region as the design pass asks, and a page the PR should have changed but did not.`,
           "",
           ...i.evidence.pairs.map((p) => evidenceLine(p, i.evidence?.dir ?? "")),
           ...i.evidence.submitted.map((p) => submittedEvidenceLine(p, i.evidence?.dir ?? "")),
