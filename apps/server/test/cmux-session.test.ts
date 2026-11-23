@@ -454,7 +454,11 @@ it("finishes a turn that began and ended between two polls", async () => {
           line({ type: "user", message: { role: "user", content: "wake" } }) +
             line({
               type: "assistant",
-              message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+              message: {
+                role: "assistant",
+                stop_reason: "end_turn",
+                content: [{ type: "text", text: "done" }],
+              },
             }),
         );
         return "sent";
@@ -468,6 +472,54 @@ it("finishes a turn that began and ended between two polls", async () => {
   await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
   expect(events.map((e) => e.kind)).toContain("turn-start");
   expect(readFileSync(join(dir, "run.jsonl"), "utf8")).toContain('"mc_cmux":true');
+  await session.close();
+});
+
+it("does not finish a turn on a tool call while cmux still reads idle", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const source = join(dir, "source.jsonl");
+  writeFileSync(source, "");
+  const session = stubSession(
+    dir,
+    stubCmux({
+      agents: async () => [idleAt(source)],
+      send: async () => {
+        appendFileSync(
+          source,
+          line({ type: "user", message: { role: "user", content: "wake" } }) +
+            line({
+              type: "assistant",
+              message: {
+                role: "assistant",
+                stop_reason: "tool_use",
+                content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }],
+              },
+            }),
+        );
+        return "sent";
+      },
+    }),
+  );
+  const events: SessionEvent[] = [];
+  session.on((event) => events.push(event));
+  await session.ready;
+  session.send("wake");
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(events.map((e) => e.kind)).not.toContain("result");
+  // the terminal answer arrives: now the turn is done
+  appendFileSync(
+    source,
+    line({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "ok" }],
+      },
+    }),
+  );
+  await vi.waitFor(() => expect(events.map((e) => e.kind)).toContain("result"), { timeout: 3000 });
   await session.close();
 });
 

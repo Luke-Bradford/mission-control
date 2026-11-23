@@ -195,7 +195,14 @@ function cmuxSession(
           });
         }
         if (isObj(data) && data.type === "assistant") {
-          if (expectTurn) answered = true;
+          // only a terminal answer finishes a missed turn: a tool call (`tool_use`) or a streamed
+          // part with no stop reason yet means Claude is still working
+          const stop = isObj(data.message) ? data.message.stop_reason : null;
+          if (
+            expectTurn &&
+            (data.isApiErrorMessage === true || (typeof stop === "string" && stop !== "tool_use"))
+          )
+            answered = true;
           if (data.isApiErrorMessage === true) {
             turnError = true;
             const text = apiErrorText(data);
