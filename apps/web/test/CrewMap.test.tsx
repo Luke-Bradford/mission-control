@@ -2,8 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
 import { hub } from "../src/data.ts";
-import { seatRow } from "./fixtures.ts";
 import { stubFetch } from "./fetchStub.ts";
+import { seatRow } from "./fixtures.ts";
 
 afterEach(() => hub.clear());
 

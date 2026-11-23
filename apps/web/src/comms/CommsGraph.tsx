@@ -1,6 +1,6 @@
 import type { CrewRow } from "@mc/core";
 import { useMemo, useState } from "react";
-import { commsAgentPath, navigate, type CommsView } from "../router.ts";
+import { type CommsView, commsAgentPath, navigate } from "../router.ts";
 import { CAPCOM, useChartData } from "./useChartData.ts";
 
 type Point = { x: number; y: number };
