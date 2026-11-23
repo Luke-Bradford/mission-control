@@ -197,7 +197,12 @@ export function CommsGraph({
                 {youngWaits.length ? (
                   youngWaits.map((edge) => (
                     <li key={edge.key}>
-                      {edge.waiting?.asker} → {edge.waiting?.owed}
+                      <button
+                        type="button"
+                        onClick={() => navigate(commsAgentPath(edge.waiting?.owed ?? edge.b))}
+                      >
+                        {edge.waiting?.asker} → {edge.waiting?.owed}
+                      </button>
                     </li>
                   ))
                 ) : (
@@ -210,7 +215,9 @@ export function CommsGraph({
               <ul>
                 {seats.map((seat) => (
                   <li key={seat.id}>
-                    {seat.name} · {seat.state ?? seat.presence}
+                    <button type="button" onClick={() => navigate(commsAgentPath(seat.id))}>
+                      {seat.name} · {seat.state ?? seat.presence}
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -52,7 +52,7 @@ describeRendered("Comms role labels", () => {
           colorScheme: theme,
           api,
         });
-        await page.box(".comms-node-name");
+        await page.box(".crew-map-seat");
         await page.evaluate(
           () =>
             new Promise<void>((resolve, reject) => {
@@ -60,16 +60,16 @@ describeRendered("Comms role labels", () => {
               let last = "",
                 stable = 0;
               const wait = () => {
-                const nodes = [...document.querySelectorAll<SVGElement>(".comms-node")].filter(
+                const nodes = [...document.querySelectorAll<HTMLElement>(".crew-map-seat")].filter(
                   (e) =>
                     ["RETRO-1", "RETRO-CX"].includes(
-                      e.querySelector(".comms-node-name")?.textContent?.toUpperCase() ?? "",
+                      e.querySelector("b")?.textContent?.toUpperCase() ?? "",
                     ),
                 );
                 const visible =
                   nodes.length === 2 &&
                   nodes.every((e) => {
-                    const label = e.querySelector(".comms-node-name");
+                    const label = e.querySelector("b");
                     if (!label) return false;
                     const box = label.getBoundingClientRect();
                     return (
@@ -79,7 +79,7 @@ describeRendered("Comms role labels", () => {
                       Number(getComputedStyle(label).opacity) > 0.1
                     );
                   });
-                const positions = nodes.map((e) => e.getAttribute("transform")).join("|");
+                const positions = nodes.map((e) => `${e.style.left}|${e.style.top}`).join("|");
                 stable = visible && positions === last ? stable + 1 : 0;
                 last = positions;
                 if (stable >= 5) return resolve();
@@ -92,7 +92,7 @@ describeRendered("Comms role labels", () => {
           null,
         );
         const labels = await page.evaluate(() => {
-          const nodes = [...document.querySelectorAll(".comms-node-name")].filter((e) =>
+          const nodes = [...document.querySelectorAll(".crew-map-seat b")].filter((e) =>
             ["RETRO-1", "RETRO-CX"].includes(e.textContent?.toUpperCase() ?? ""),
           );
           return nodes.map((e) => {
