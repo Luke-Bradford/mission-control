@@ -202,13 +202,14 @@ export function CommsGraph({
                         type="button"
                         onClick={() =>
                           navigate(
-                            searchWithFocus(
-                              "",
-                              pairFilter(
-                                edge.waiting?.asker ?? edge.a,
-                                edge.waiting?.owed ?? edge.b,
+                            window.location.pathname +
+                              searchWithFocus(
+                                "",
+                                pairFilter(
+                                  edge.waiting?.asker ?? edge.a,
+                                  edge.waiting?.owed ?? edge.b,
+                                ),
                               ),
-                            ),
                           )
                         }
                       >
