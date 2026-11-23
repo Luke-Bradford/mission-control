@@ -62,7 +62,6 @@ import {
   seatDef,
   skillFileProblem,
   skillPluginManifest,
-  stopHookCommand,
   trimHookCommand,
   WRITER_TOOLS,
 } from "../src/runtime.ts";
@@ -168,10 +167,14 @@ describe("crewCliArgs", () => {
 
   it("starts a new writer session with isolation, the allow and deny lists, and --session-id", () => {
     const a = crewCliArgs(base);
-    expect(a).not.toContain("-p");
-    expect(a).not.toContain("--input-format");
-    expect(a).not.toContain("--output-format");
-    expect(a).not.toContain("--verbose");
+    expect(a.slice(0, 6)).toEqual([
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ]);
     expect(a[a.indexOf("--model") + 1]).toBe("sonnet");
     const joined = a.join("\u0000");
     expect(joined).toContain(CREW_ISOLATION_FLAGS.join("\u0000"));
@@ -182,7 +185,7 @@ describe("crewCliArgs", () => {
     expect(a).not.toContain("--resume");
   });
 
-  it("uses --restricted without worktree settings and names the built-in tools", () => {
+  it("uses --restricted, not --setting-sources, and names the built-in tools", () => {
     const w = crewCliArgs(base);
     expect(w).toContain("--restricted");
     expect(w).not.toContain("--setting-sources");
@@ -251,9 +254,10 @@ describe("crewCliArgs", () => {
     expect(crewCliArgs({ ...base, effort: null })).not.toContain("--effort");
   });
 
-  it("does not pass a print-mode dollar cap to an interactive session", () => {
+  it("passes a per-run dollar cap when one is supplied", () => {
     const a = crewCliArgs({ ...base, maxBudgetUsd: 12.5 });
-    expect(count(a, "--max-budget-usd")).toBe(0);
+    expect(count(a, "--max-budget-usd")).toBe(1);
+    expect(a[a.indexOf("--max-budget-usd") + 1]).toBe("12.5");
     expect(crewCliArgs(base)).not.toContain("--max-budget-usd");
   });
 
@@ -788,15 +792,7 @@ describe("crew constants", () => {
   it("keeps the timeouts and seat states", () => {
     expect(CONTROL_TIMEOUT_MS).toBe(10_000);
     expect(STOP_GRACE_MS).toBe(10_000);
-    expect(SEAT_STATES).toEqual([
-      "idle",
-      "starting",
-      "running",
-      "needs-input",
-      "parked",
-      "stopped",
-      "error",
-    ]);
+    expect(SEAT_STATES).toEqual(["idle", "starting", "running", "parked", "stopped", "error"]);
   });
 });
 
@@ -1278,20 +1274,6 @@ describe("crew sandbox and scoped edits", () => {
     ]);
     expect(j.hooks.PreToolUse).toHaveLength(1);
     expect(j.hooks.PostToolUseFailure).toHaveLength(1);
-  });
-
-  it("adds Claude's Stop hook, which marks each turn's end in the run's own file", () => {
-    const stop = { command: stopHookCommand("/mc/tmp/mc-turn-end"), timeoutS: 5 };
-    const j = JSON.parse(crewSandboxSettings(base.sandbox, "writer", { ...base.hook, stop }));
-    expect(j.hooks.Stop).toEqual([
-      {
-        hooks: [
-          { type: "command", command: "/bin/echo stop >> '/mc/tmp/mc-turn-end'", timeout: 5 },
-        ],
-      },
-    ]);
-    expect(() => stopHookCommand("relative")).toThrow();
-    expect(() => stopHookCommand("/a'b")).toThrow();
   });
 
   it("denies reading credential folders and the hub's data dir, in every mode", () => {
