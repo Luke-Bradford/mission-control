@@ -274,7 +274,7 @@ function cmuxSession(
         i.onWorkspace?.(workspace, null);
       }
       const deadline = Date.now() + (i.startWaitMs ?? 60_000);
-      while (Date.now() < deadline && alive) {
+      while (Date.now() < deadline && alive && !detached) {
         await pollOnce();
         if (pid !== undefined) {
           schedulePoll();
@@ -282,6 +282,8 @@ function cmuxSession(
         }
         await sleep(100);
       }
+      // A detached session belongs to a stopping hub: leave the workspace for the next one.
+      if (detached) return;
       if (workspace) await i.cmux.close(workspace);
       ended("cmux did not start Claude");
     } catch (error) {
@@ -301,7 +303,7 @@ function cmuxSession(
           chmodSync(file, 0o600);
           body = `Mission Control sent you a message. Read ${file} and act on it.`;
         }
-        while (alive) {
+        while (alive && !detached) {
           if (workspace === null) throw new SessionControlError("ended", "session ended");
           const sent = await i.cmux.send(workspace, body);
           if (sent === "sent") {

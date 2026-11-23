@@ -502,7 +502,7 @@ afterAll(async () => {
   try {
     await expectNoLeftovers(tmpRoot);
   } finally {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
