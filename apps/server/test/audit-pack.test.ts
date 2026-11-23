@@ -1,9 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildAuditPack } from "../src/audit/pack.ts";
+import type { CcConfig } from "../src/config.ts";
 import type { Store } from "../src/store.ts";
 import { auditConfig, card, HOUR, NOW, newStore, runRow } from "./audit-fixtures.ts";
 
+const SEAT = "audit-1";
 let store: Store;
 beforeEach(() => {
   store = newStore();
@@ -72,6 +74,7 @@ describe("the AUDIT pack", () => {
         store,
         busy: [{ seatId: "guido-1", state: "running" }],
         now: NOW,
+        seatId: SEAT,
       }),
     );
     expect(pack.buildSeats).toEqual({ configured: 4, running: 1, idle: 3 });
@@ -113,7 +116,9 @@ describe("the AUDIT pack", () => {
       `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary,
          scenario, fix, category, state) VALUES (1, 'r', 0, 'important', 'f', 1, 's', 'c', 'x', 'scope', 'open')`,
     ).run();
-    const pack = JSON.parse(buildAuditPack({ config: auditConfig(), store, busy: [], now: NOW }));
+    const pack = JSON.parse(
+      buildAuditPack({ config: auditConfig(), store, busy: [], now: NOW, seatId: SEAT }),
+    );
     expect(pack.flightRepeatedDecisions7d).toHaveLength(1);
     expect(pack.flightRepeatedDecisions7d[0]).toMatchObject({ count: 2 });
     expect(pack.review7d).toMatchObject({ scopeFindings: 1, superseded: 1, failed: 0 });
@@ -141,7 +146,48 @@ describe("the AUDIT pack", () => {
       })),
       NOW,
     );
-    const pack = JSON.parse(buildAuditPack({ config: auditConfig(), store, busy: [], now: NOW }));
+    const pack = JSON.parse(
+      buildAuditPack({ config: auditConfig(), store, busy: [], now: NOW, seatId: SEAT }),
+    );
     expect(pack.prs.length).toBeLessThanOrEqual(20);
+  });
+
+  it("gives each auditor only its own session's repo, seats and board", () => {
+    const base = auditConfig();
+    const first = base.crew?.sessions[0];
+    if (first === undefined || base.crew === undefined) throw new Error("fixture");
+    const config = {
+      ...base,
+      repos: [...base.repos, { ...base.repos[0], id: "other", github: "o/other" }],
+      crew: {
+        ...base.crew,
+        sessions: [
+          first,
+          {
+            id: "s2",
+            repoId: "other",
+            checkout: "/tmp/none/clone2",
+            seats: [
+              { id: "flight-2", role: "FLIGHT", accountId: "main", model: "opus", area: [] },
+              { id: "guido-9", role: "GUIDO", accountId: "main", model: "sonnet", area: [] },
+              { id: "audit-2", role: "AUDIT", accountId: "main", model: "opus", area: [] },
+            ],
+          },
+        ],
+      },
+    } as CcConfig;
+    store.replaceBoard(
+      "mc",
+      Array.from({ length: 5 }, (_, i) => card(i + 1, "Backlog", NOW - HOUR)),
+    );
+    const packOf = (seatId: string) =>
+      JSON.parse(buildAuditPack({ config, store, busy: [], now: NOW, seatId }));
+    const one = packOf("audit-1");
+    const two = packOf("audit-2");
+    expect(one.board.open).toBe(5);
+    expect(one.buildSeats.configured).toBe(4);
+    expect(two.board.open).toBe(0);
+    expect(two.buildSeats.configured).toBe(1);
+    expect(two.seats.map((s: { id: string }) => s.id)).not.toContain("guido-1");
   });
 });

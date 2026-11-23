@@ -22,7 +22,7 @@ const auditSeats = (config: CcConfig) =>
     return seat === undefined ? [] : [seat];
   });
 
-/** When the auditor of a repo's session next runs; null without an AUDIT seat or before a first start. */
+/** When the auditor of a repo's session next runs; null without an AUDIT seat or before the timer's first start. */
 export function nextAuditDueAt(config: CcConfig, store: Store, repoId: string): number | null {
   const seat = config.crew?.sessions
     .filter((s) => s.repoId === repoId)
@@ -30,7 +30,7 @@ export function nextAuditDueAt(config: CcConfig, store: Store, repoId: string): 
     .find((s) => !s.retiring && seatDef(s).loop === "audit");
   if (seat === undefined) return null;
   const started = Number(store.getSetting(auditStartedKey(seat.id)));
-  return Number.isFinite(started) && started > 0 ? started + auditIntervalMs(config) : 0;
+  return Number.isFinite(started) && started > 0 ? started + auditIntervalMs(config) : null;
 }
 
 /**

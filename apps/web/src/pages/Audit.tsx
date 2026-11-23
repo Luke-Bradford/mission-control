@@ -310,6 +310,10 @@ function ReportNext({ report }: { report: AuditReport }) {
                         <td colSpan={4}>
                           <div className="audit-mg">
                             <div>
+                              <h3>Problem</h3>
+                              <p>{f.problem}</p>
+                            </div>
+                            <div>
                               <h3>Evidence</h3>
                               <p>{f.evidence}</p>
                             </div>

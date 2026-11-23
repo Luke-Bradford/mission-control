@@ -50,10 +50,22 @@ export function buildAuditPack(i: {
   store: Store;
   busy: readonly SeatBusy[];
   now: number;
+  /** The AUDIT seat the pack is for: its session's repo, seats and board are what the pack shows. */
+  seatId: string;
 }): string {
-  const { config, store, busy, now } = i;
+  const { store, busy, now } = i;
+  const session = i.config.crew?.sessions.find((s) => s.seats.some((seat) => seat.id === i.seatId));
+  // Only that session is visible to the state and spend reads below, so a second repo's auditor
+  // never sees the first one's seats, board or PRs.
+  const config: CcConfig = {
+    ...i.config,
+    crew:
+      i.config.crew === undefined
+        ? undefined
+        : { ...i.config.crew, sessions: session ? [session] : [] },
+  } as CcConfig;
   const found = flightSeat(config);
-  const repoId = found?.session.repoId ?? "";
+  const repoId = session?.repoId ?? "";
   const state = flightState({ config, store, busy, now });
   const byColumn: Record<string, number> = {};
   for (const t of state.tickets) byColumn[t.column] = (byColumn[t.column] ?? 0) + 1;

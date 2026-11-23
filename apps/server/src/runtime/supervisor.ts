@@ -483,7 +483,7 @@ export interface SupervisorDeps {
   /** FLIGHT alone inherits controller credentials; kept out of keeper specs and transcripts. */
   flightEnvironment?: () => Promise<Record<string, string>>;
   /** The AUDIT seat's pack of the crew's record, as one JSON line (`audit/pack.ts`). */
-  auditPack?: () => string;
+  auditPack?: (seatId: string) => string;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Fresh same-repository/default-branch provenance, only for a non-crew review subject. */
   externalReviewSubject?: (
@@ -4215,7 +4215,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? auditBrief({
                 call: call(info),
                 repo: info.repo.github,
-                pack: deps.auditPack?.() ?? "{}",
+                pack: deps.auditPack?.(seatId) ?? "{}",
               })
             : watchBrief({
                 call: call(info),

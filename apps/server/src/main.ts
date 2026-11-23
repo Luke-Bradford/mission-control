@@ -567,7 +567,8 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
-    auditPack: () => buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now() }),
+    auditPack: (seatId) =>
+      buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
       GH_TOKEN: await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
       MC_HUB: `http://${HOST}:${port}`,

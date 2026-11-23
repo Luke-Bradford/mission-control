@@ -11,6 +11,7 @@ import { auditTick, nextAuditDueAt } from "../src/audit/timer.ts";
 import type { Store } from "../src/store.ts";
 import { auditConfig, finding, HOUR, NOW, newStore, runRow } from "./audit-fixtures.ts";
 
+const SEAT = "audit-1";
 let store: Store;
 const startAudit = vi.fn(async (_seat: string) => ({ runId: "audit-1:r" }));
 const busy: { seatId: string; state: "running" }[] = [];
@@ -148,7 +149,9 @@ describe("the AUDIT seat's timer", () => {
       }),
     ).toBe(false);
     expect(store.latestAuditReport("mc")?.verdict).toBe("v");
-    const pack = JSON.parse(buildAuditPack({ config: auditConfig(), store, busy: [], now: NOW }));
+    const pack = JSON.parse(
+      buildAuditPack({ config: auditConfig(), store, busy: [], now: NOW, seatId: SEAT }),
+    );
     expect(pack.previous.findings).toEqual([{ rank: 1, area: "flow", problem: "problem 1" }]);
   });
 });

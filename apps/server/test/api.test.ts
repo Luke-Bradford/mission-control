@@ -6833,8 +6833,8 @@ describe("crew routes", () => {
       expect(supervisorCalls).toEqual([]);
     });
 
-    it("reports nothing and a due time of 0 before the first report, then the saved report", async () => {
-      expect((await get("/api/audit/report")).json()).toEqual({ report: null, nextDueAt: 0 });
+    it("reports nothing and no due time before the first report, then the saved report", async () => {
+      expect((await get("/api/audit/report")).json()).toEqual({ report: null, nextDueAt: null });
       store.recordAuditReport({
         repoId: "shop-app",
         runId: "audit-1:r",
@@ -6844,6 +6844,8 @@ describe("crew routes", () => {
       });
       const saved = (await get("/api/audit/report")).json();
       expect(saved.report).toMatchObject({ runId: "audit-1:r", verdict: "Two seats idle." });
+      // A manual first report, before the timer wrote its start: no due time, never 1970.
+      expect(saved.nextDueAt).toBeNull();
     });
   });
 
