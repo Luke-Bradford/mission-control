@@ -1416,7 +1416,10 @@ export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
 export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
 /** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
 export const FLIGHT_ROTATIONS_MAX = 4;
-/** After the handover guard stops FLIGHT, the hub starts it again on its own this long after. */
+/**
+ * After the handover guard stops FLIGHT, the hub starts it again on its own this long after. Also
+ * the gap between the hub's own tries after a start that threw.
+ */
 export const FLIGHT_GUARD_COOLDOWN_MS = 30 * 60_000;
 /**
  * The guard's note. The first trip says when FLIGHT comes back on its own; a trip right after that
@@ -1526,9 +1529,17 @@ export function flightNotTriagingText(
 }
 export const flightDownText = (reason: string): string =>
   `FLIGHT is down: ${reason}. Nothing is triaging the crew until it is back.`;
-/** The hub keeps trying by itself; the operator's Start is only the faster way. */
-export const flightStartFailedText = (reason: string): string =>
-  `FLIGHT could not be kept running: ${reason}. The hub tries again every ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes. Start in FLIGHT's dock tries now.`;
+/**
+ * `hubRetries`: the start threw and made no session, so the hub keeps trying by itself and the
+ * operator's Start is only the faster way. Without it FLIGHT started and died, each start was
+ * paid, and it stays stopped.
+ */
+export const flightStartFailedText = (reason: string, hubRetries: boolean): string =>
+  `FLIGHT could not be kept running: ${reason}. ${
+    hubRetries
+      ? `The hub tries again about every ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes unless FLIGHT is stopped or held. To try now, press Start in FLIGHT's dock.`
+      : "Start it again from FLIGHT's dock once that is fixed."
+  }`;
 export const WAKE_ASK =
   "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 

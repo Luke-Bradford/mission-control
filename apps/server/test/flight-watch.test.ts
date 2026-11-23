@@ -1698,7 +1698,7 @@ describe("the FLIGHT watcher", () => {
         kind: "blocked",
         seatId: "flight-1",
         repoId: "mc",
-        text: flightStartFailedText("it would not start; the server log has the error"),
+        text: flightStartFailedText("it would not start; the server log has the error", true),
       },
     ]);
     // the hub does not wait for the operator: one more start per cooldown, under the same note
@@ -1746,10 +1746,85 @@ describe("the FLIGHT watcher", () => {
     expect(startCalls).toHaveLength(3);
   });
 
+  it("a FLIGHT that starts and dies stays stopped: each of those starts is paid", async () => {
+    for (let i = 0; i < 3; i++) {
+      await watch.check();
+      noFlight();
+    }
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toMatchObject([
+      { text: flightStartFailedText("it stopped 3 times in an hour", false) },
+    ]);
+    nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toHaveLength(1);
+  });
+
+  it("a retry that starts a FLIGHT nobody sees live ends the retries", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    startFails = null;
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    noFlight(); // it died before any pass saw it
+    expect(startCalls).toHaveLength(4);
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    expect(notesOpen()).toMatchObject([
+      { text: flightStartFailedText("it stopped again after a retry started it", false) },
+    ]);
+  });
+
+  it("an old cmux refusal is not blamed for a FLIGHT that later starts and dies", async () => {
+    startFails = CMUX_REFUSED_TEXT;
+    await watch.check();
+    startFails = null;
+    for (let i = 0; i < 2; i++) {
+      await watch.check();
+      noFlight();
+    }
+    await watch.check();
+    expect(notesOpen()).toMatchObject([
+      { text: flightStartFailedText("it stopped 3 times in an hour", false) },
+    ]);
+  });
+
+  it("a retry that fails for a new reason says so in the same note", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    const raisedAt = notesOpen()[0]?.at;
+    startFails = CMUX_REFUSED_TEXT;
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(notesOpen()).toMatchObject([
+      { text: flightStartFailedText(CMUX_REFUSED_PLAIN, true), at: raisedAt },
+    ]);
+  });
+
+  it("keeps the retry through a hub restart", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    makeWatch(); // the hub restarted: a new watch with none of the old one's memory
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    makeWatch();
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    expect(notesOpen()).toHaveLength(1);
+  });
+
   it("names cmux's refusal in the note, without its path", async () => {
     startFails = CMUX_REFUSED_TEXT;
     for (let i = 0; i < 4; i++) await watch.check();
-    expect(notesOpen()).toMatchObject([{ text: flightStartFailedText(CMUX_REFUSED_PLAIN) }]);
+    expect(notesOpen()).toMatchObject([{ text: flightStartFailedText(CMUX_REFUSED_PLAIN, true) }]);
   });
 
   describe("a FLIGHT run with no live session (#798)", () => {
@@ -1851,6 +1926,7 @@ describe("the FLIGHT watcher", () => {
           seatId: "flight-1",
           text: flightStartFailedText(
             "its process is gone and it would not restart; the server log has the error",
+            true,
           ),
         },
       ]);
@@ -1864,7 +1940,7 @@ describe("the FLIGHT watcher", () => {
       alive = null;
       for (let i = 0; i < 4; i++) await watch.check();
       expect(notesOpen()).toMatchObject([
-        { text: flightStartFailedText("it would not start; the server log has the error") },
+        { text: flightStartFailedText("it would not start; the server log has the error", true) },
       ]);
     });
 

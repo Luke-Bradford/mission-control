@@ -41,11 +41,13 @@ describe("the not-triaging alert", () => {
         "start-failed",
         3,
         "14:30",
-        flightStartFailedText("it would not start; the server log has the error"),
+        flightStartFailedText("it would not start; the server log has the error", true),
       ),
     );
-    expectPlain(flightStartFailedText(CMUX_REFUSED_PLAIN));
-    expectPlain(flightStartFailedText(CMUX_DOWN_TEXT));
+    expectPlain(flightStartFailedText(CMUX_REFUSED_PLAIN, true));
+    expectPlain(flightStartFailedText(CMUX_DOWN_TEXT, true));
+    expectPlain(flightStartFailedText("it stopped 3 times in an hour", false));
+    expectPlain(flightStartFailedText("it stopped again after a retry started it", false));
     expectPlain(
       flightNotTriagingText(
         "down",

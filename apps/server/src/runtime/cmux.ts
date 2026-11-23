@@ -8,7 +8,7 @@ export const CMUX_REFUSED_TEXT =
 export const CMUX_DOWN_TEXT = "cmux is not running and could not be started";
 /** The same refusal for a hub alert, which carries no path or setting name (#1582). */
 export const CMUX_REFUSED_PLAIN =
-  "cmux refuses the hub until its automation setting allows local programs";
+  "cmux refuses the hub; FLIGHT's seat row shows the cmux setting to change";
 
 export interface CmuxAgent {
   sessionId: string;
