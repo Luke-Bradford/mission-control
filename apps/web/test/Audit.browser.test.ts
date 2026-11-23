@@ -385,6 +385,11 @@ describeRendered("Audit first screen in a browser", () => {
         });
         const text = (q: string) =>
           page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", q);
+        // The page fetches its reads one after another: wait for the report's verdict to land.
+        for (let i = 0; i < 100; i++) {
+          if ((await text(".audit-verdict-text")).includes(report.report.verdict)) break;
+          await new Promise((r) => setTimeout(r, 100));
+        }
         expect(await text(".audit-verdict-text")).toContain(report.report.verdict);
         // No report-less fallback note, and the written note names a next time, not 1970.
         expect(await text(".audit-verdict-text")).toContain("the next timer tick");
@@ -447,7 +452,11 @@ describeRendered("Audit first screen in a browser", () => {
           api: { ...api, ...extra },
         });
         expect((await page.boxes("tr.rec")).length).toBeGreaterThanOrEqual(5);
-        const note = await page.evaluate(() => document.body.textContent ?? "", null);
+        let note = "";
+        for (let i = 0; i < 100 && !note.includes("No AUDIT report yet"); i++) {
+          note = await page.evaluate(() => document.body.textContent ?? "", null);
+          if (!note.includes("No AUDIT report yet")) await new Promise((r) => setTimeout(r, 100));
+        }
         expect(note).toContain("No AUDIT report yet");
         await page.close();
       }
