@@ -13,8 +13,11 @@ it("holds a merged PR until the running code holds its merge commit", async () =
   expect([...held]).toEqual(["mc#2"]);
 });
 
-it("holds nothing when the running code is unknown", async () => {
-  expect([...(await notLivePrKeys("mc", merged, null, async () => new Set()))]).toEqual([]);
+it("holds every merged PR with a merge commit when the running code is unknown", async () => {
+  expect([...(await notLivePrKeys("mc", merged, null, async () => new Set()))]).toEqual([
+    "mc#1",
+    "mc#2",
+  ]);
 });
 
 it("does not hold a merged PR of another repo, whose commit the hub checkout cannot know", async () => {
@@ -34,6 +37,18 @@ it("reads the running history once, however many merged PRs there are", async ()
   expect(read).toHaveBeenCalledWith(running);
 });
 
-it("holds nothing when the history cannot be read (no hub checkout)", async () => {
-  expect([...(await notLivePrKeys("mc", merged, running, async () => null))]).toEqual([]);
+it("keeps the pictures when the history cannot be read, to try again next sweep", async () => {
+  expect([...(await notLivePrKeys("mc", merged, running, async () => null))]).toEqual([
+    "mc#1",
+    "mc#2",
+  ]);
+});
+
+it("holds nothing with no hub checkout (no repo id)", async () => {
+  expect([...(await notLivePrKeys(undefined, merged, running, async () => null))]).toEqual([]);
+});
+
+it("holds an old merge that is still not live", async () => {
+  const old = [{ key: "mc#1", mergeSha: "a".repeat(40) }];
+  expect([...(await notLivePrKeys("mc", old, running, async () => new Set()))]).toEqual(["mc#1"]);
 });

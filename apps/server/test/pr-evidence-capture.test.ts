@@ -273,6 +273,57 @@ describe("Demo renders on both sides", () => {
     expect(unpublish).toHaveBeenCalledWith(7);
   });
 
+  it("publishes again on the next ensure after the upload failed once", async () => {
+    let calls = 0;
+    const publish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+      return "https://x";
+    });
+    const t = setup({ publish });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toBeUndefined();
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).published).toEqual({
+      baseUrl: "https://x",
+    });
+  });
+
+  it("deletes again on the next ensure after the removal failed once (no changed page)", async () => {
+    let calls = 0;
+    const unpublish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+    });
+    const t = setup({
+      publish: async () => "x",
+      unpublish,
+      render: async (_o, _p, scheme) => encodePng(pageBox(HEAD, scheme)),
+    });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+  });
+
+  it("deletes again on the next ensure after the removal failed once (head moved)", async () => {
+    let calls = 0;
+    const unpublish = vi.fn(async () => {
+      if (++calls === 1) throw new Error("GitHub said no");
+    });
+    let trust = 0;
+    // trusted to start, lost when about to publish, back for the retry
+    const t = setup({
+      publish: async () => "x",
+      unpublish,
+      trusted: async () => ++trust !== 2,
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(1);
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(unpublish).toHaveBeenCalledTimes(2);
+  });
+
   it("takes an older head's release down when the new head changes no page", async () => {
     const unpublish = vi.fn(async () => {});
     const t = setup({

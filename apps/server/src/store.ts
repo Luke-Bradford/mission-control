@@ -3888,18 +3888,14 @@ export class Store {
     );
   }
 
-  /**
-   * Merged PRs (`repoId#number`) with their merge commit, merged at or after `since` (ms): the ones
-   * whose change may not be live yet. An older one counts as live, so the hourly scan stays bounded.
-   */
-  mergedPrs(since: number): { key: string; mergeSha: string | null }[] {
+  /** Merged PRs (`repoId#number`) with their merge commit: the ones whose change may not be live yet. */
+  mergedPrs(): { key: string; mergeSha: string | null }[] {
     return (
       this.db
         .prepare(
-          `SELECT repo_id, number, merge_commit_sha FROM pull_requests
-           WHERE state = 'merged' AND COALESCE(merged_at, updated_at) >= ?`,
+          "SELECT repo_id, number, merge_commit_sha FROM pull_requests WHERE state = 'merged'",
         )
-        .all(since) as Row[]
+        .all() as Row[]
     ).map((r) => ({
       key: `${r.repo_id as string}#${r.number as number}`,
       mergeSha: (r.merge_commit_sha as string | null) ?? null,

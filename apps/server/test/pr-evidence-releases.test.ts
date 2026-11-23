@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { GhOptions, GhResult, GhRunner } from "../src/mcp/gh.ts";
 import { evidenceDemoRender } from "../src/pr-evidence/demo-render.ts";
 import {
+  deleteEvidenceRelease,
   publishEvidenceRelease,
   removeFinishedEvidenceReleases,
   sweepEvidenceReleases,
@@ -77,6 +78,15 @@ describe("publishEvidenceRelease", () => {
       }),
     ).rejects.toThrow(/could not be created/);
     expect(readdirSync(scratch)).toEqual([]);
+  });
+});
+
+describe("deleteEvidenceRelease", () => {
+  it("counts an absent release as gone, and a refused deletion as not", async () => {
+    const absent = fakeGh(() => ({ code: 1, stdout: "", stderr: "release not found" }));
+    expect(await deleteEvidenceRelease(absent.gh, "/repo", "o/r", 7)).toBe(true);
+    const refused = fakeGh(() => ({ code: 1, stdout: "", stderr: "HTTP 502" }));
+    expect(await deleteEvidenceRelease(refused.gh, "/repo", "o/r", 7)).toBe(false);
   });
 });
 
@@ -180,7 +190,7 @@ describe("sweepEvidenceReleases", () => {
     const main = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
     const block = main.slice(
       main.indexOf("const openPrs = new Set("),
-      main.indexOf("return sweepDataFolder({"),
+      main.indexOf("await sweepDataFolder({"),
     );
     expect(block).toContain("sweepEvidenceReleases(");
     // the engine's state must not gate the clean: a release outlives the engine being on

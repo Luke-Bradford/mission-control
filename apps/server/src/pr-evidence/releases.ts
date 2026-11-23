@@ -12,7 +12,7 @@ import type { EvidenceImage } from "./store.ts";
 /** The most releases one clean-up reads. */
 const RELEASES_LISTED = 200;
 
-/** Deletes the PR's picture release and its tag; true when it is gone (or never was). */
+/** Deletes the PR's picture release and its tag; true when it is gone, including when none ever was. */
 export async function deleteEvidenceRelease(
   gh: GhRunner,
   cwd: string,
@@ -23,7 +23,7 @@ export async function deleteEvidenceRelease(
     ["release", "delete", evidenceReleaseTag(pr), "--repo", repo, "--cleanup-tag", "--yes"],
     { cwd },
   );
-  return r.code === 0;
+  return r.code === 0 || /not found|HTTP 404/i.test(r.stderr);
 }
 
 /**

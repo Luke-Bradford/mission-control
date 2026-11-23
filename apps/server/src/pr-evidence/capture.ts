@@ -178,6 +178,11 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   const failedWhy = new Map<string, string>();
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
+  /**
+   * Public-release work a failed GitHub call left, per PR: publish the head's pictures, or take the
+   * release down. Retried on the next `ensure`, so a failure is never permanent.
+   */
+  const releaseDue = new Map<number, { kind: "publish" | "remove"; sha: string }>();
   const controllers = new Set<AbortController>();
   /**
    * Renders of a head that succeeded in an attempt that failed, so the next attempt renders only
@@ -215,6 +220,90 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
         ),
       ),
     };
+  }
+
+  /** Takes the PR's release down; a failure is kept to retry. */
+  async function removeRelease(pr: number, sha: string): Promise<void> {
+    if (!deps.unpublish) return;
+    try {
+      await deps.unpublish(pr);
+      releaseDue.delete(pr);
+    } catch (e) {
+      releaseDue.set(pr, { kind: "remove", sha });
+      log(
+        `#${pr}: pictures not removed from GitHub: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /** Publishes a head's changed pages, keeping a failure to retry; returns the folder URL. */
+  async function publishRelease(
+    t: EvidenceTarget,
+    images: readonly EvidenceImage[],
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    if (!deps.publish) return undefined;
+    try {
+      // A head pushed during the capture, or a PR closed, is not published: its release would
+      // outlive the PR's own head.
+      if (!(await abortable(deps.trusted(t), signal))) {
+        await removeRelease(t.pr, t.sha);
+        throw new Error("the PR head changed");
+      }
+      const url = await abortable(
+        deps.publish({
+          pr: t.pr,
+          sha: t.sha,
+          images: images.filter((i) => !i.name.endsWith("-diff.png")),
+          signal,
+        }),
+        signal,
+      );
+      releaseDue.delete(t.pr);
+      return url;
+    } catch (e) {
+      if (signal.aborted) throw e;
+      if (releaseDue.get(t.pr)?.kind !== "remove")
+        releaseDue.set(t.pr, { kind: "publish", sha: t.sha });
+      log(
+        `#${t.pr}: pictures not published to GitHub: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /** Retries the release work a failed call left for this head's complete capture. */
+  async function settleRelease(t: EvidenceTarget): Promise<void> {
+    const due = releaseDue.get(t.pr);
+    if (!due) return;
+    const m = deps.store.manifest(deps.repoId, t.pr, t.sha);
+    if (m === null) return;
+    if (due.kind === "remove") {
+      // a head whose own pictures are published replaced the release already
+      if (m.published) releaseDue.delete(t.pr);
+      else await removeRelease(t.pr, t.sha);
+      return;
+    }
+    if (due.sha !== t.sha || m.published) {
+      releaseDue.delete(t.pr);
+      return;
+    }
+    const images: EvidenceImage[] = [];
+    for (const p of m.pairs)
+      for (const kind of EVIDENCE_KINDS) {
+        const name = evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p));
+        const png = deps.store.image(deps.repoId, t.pr, t.sha, name);
+        if (png !== null) images.push({ name, png });
+      }
+    if (images.length === 0) {
+      releaseDue.delete(t.pr);
+      return;
+    }
+    const controller = new AbortController();
+    const url = await publishRelease(t, images, controller.signal);
+    if (url === undefined) return;
+    deps.store.save({ ...m, published: { baseUrl: url } }, images);
+    posted.delete(keyOf(t));
   }
 
   /** Renders what `shots` lacks, once more at once if a render fails, and keeps each success. */
@@ -395,32 +484,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       }
       signal.throwIfAborted();
       let published: string | undefined;
-      if (deps.publish && images.length > 0) {
-        try {
-          // A head pushed during the capture, or a PR closed, is not published: its release would
-          // outlive the PR's own head.
-          if (!(await abortable(deps.trusted(t), signal))) {
-            if (deps.unpublish) await deps.unpublish(t.pr).catch(() => {});
-            throw new Error("the PR head changed");
-          }
-          published = await abortable(
-            deps.publish({
-              pr: t.pr,
-              sha: t.sha,
-              images: images.filter((i) => !i.name.endsWith("-diff.png")),
-              signal,
-            }),
-            signal,
-          );
-        } catch (e) {
-          if (signal.aborted) throw e;
-          log(
-            `#${t.pr}: pictures not published to GitHub: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
-      }
       // No changed page on this head: an older head's release must not outlive it.
-      if (images.length === 0 && deps.unpublish) await deps.unpublish(t.pr).catch(() => {});
+      if (images.length === 0) await removeRelease(t.pr, t.sha);
+      else published = await publishRelease(t, images, signal);
       const prior = deps.store.manifest(deps.repoId, t.pr, t.sha);
       deps.store.save(
         {
@@ -489,8 +555,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       failedWhy.delete(keyOf(t));
     } catch (e) {
       // A head that changed or a PR that closed before its pictures were posted: take them down.
-      if (manifest.published && deps.unpublish && !(await deps.trusted(t).catch(() => true)))
-        await deps.unpublish(t.pr).catch(() => {});
+      if (manifest.published && !(await deps.trusted(t).catch(() => true)))
+        await removeRelease(t.pr, t.sha);
       const why = `evidence not posted to the PR: ${e instanceof Error ? e.message : String(e)}`;
       failedWhy.set(keyOf(t), why);
       log(`#${t.pr}: ${why}`);
@@ -506,7 +572,10 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (stopped || pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
-      if (evidenceMissing(have, t.sha, pages, variantsFor(t)).length === 0) return post(t);
+      if (evidenceMissing(have, t.sha, pages, variantsFor(t)).length === 0) {
+        await settleRelease(t);
+        return post(t);
+      }
       const failed = failedAt.get(key);
       if (failed !== undefined && now() - failed < retryMs) return;
       const going = running.get(key);

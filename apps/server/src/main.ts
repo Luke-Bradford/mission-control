@@ -64,7 +64,8 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { NOT_LIVE_WINDOW_MS, notLivePrKeys } from "./disk/live.ts";
+import { runFirstClean } from "./disk/first-clean.ts";
+import { notLivePrKeys } from "./disk/live.ts";
 import {
   DISK_CLEAN_SETTING,
   DISK_SWEEP_EVERY_MS,
@@ -506,8 +507,11 @@ export async function main(): Promise<void> {
           },
           unpublish: async (pr) => {
             const repo = config.repos.find((r) => r.id === previewRepoId);
-            if (repo !== undefined)
-              await deleteEvidenceRelease(gh, evidenceCheckout, repo.github, pr);
+            if (
+              repo !== undefined &&
+              !(await deleteEvidenceRelease(gh, evidenceCheckout, repo.github, pr))
+            )
+              throw new Error(`the release for PR ${pr} could not be deleted`);
           },
           publish: async ({ pr, sha, images, signal }) => {
             signal.throwIfAborted();
@@ -1218,14 +1222,15 @@ export async function main(): Promise<void> {
   if (!preview) {
     const dataDir = dirname(dbPath);
     let sweeping = false;
-    const diskSweep = (graceMs?: number) => {
-      if (sweeping) return;
+    // true when the sweep ran to the end; false when it was skipped or failed
+    const diskSweep = (graceMs?: number): Promise<boolean> => {
+      if (sweeping) return Promise.resolve(false);
       sweeping = true;
-      void (async () => {
+      return (async () => {
         // a merged PR's pictures stay until the hub runs code that holds its merge commit
         const notLive = await notLivePrKeys(
-          previewRepoId,
-          store.mergedPrs(Date.now() - NOT_LIVE_WINDOW_MS),
+          hubRoot === null ? undefined : previewRepoId,
+          store.mergedPrs(),
           (await updater?.version().catch(() => null))?.sha || null,
           (running) => (hubRoot === null ? Promise.resolve(null) : commitsOf(hubRoot, running)),
         );
@@ -1239,7 +1244,7 @@ export async function main(): Promise<void> {
           openPrs,
           log,
         );
-        return sweepDataFolder({
+        await sweepDataFolder({
           dataDir,
           now: Date.now,
           openPrs,
@@ -1257,24 +1262,29 @@ export async function main(): Promise<void> {
           ...(graceMs === undefined ? {} : { graceMs }),
           log,
         });
+        return true;
       })()
         .catch((e: unknown) => {
           log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+          return false;
         })
         .finally(() => {
           sweeping = false;
         });
     };
-    trackTimer(setInterval(() => diskSweep(), DISK_SWEEP_EVERY_MS)).unref();
-    // The first boot after the cap and live-removal rule: one clean with no grace period, so what
-    // merged PRs already left behind goes at once. Later boots use the plain sweep.
-    trackTimer(
-      setTimeout(() => {
-        const firstClean = store.getSetting(DISK_CLEAN_SETTING) === null;
-        if (firstClean) store.setSetting(DISK_CLEAN_SETTING, String(Date.now()));
-        diskSweep(firstClean ? 0 : undefined);
-      }, 2 * 60_000),
-    ).unref();
+    // The first clean after the cap and live-removal rule has no grace period, so what merged PRs
+    // already left behind goes at once; it counts as done only once a sweep has finished.
+    const sweepOrFirstClean = () =>
+      void runFirstClean(
+        {
+          get: () => store.getSetting(DISK_CLEAN_SETTING),
+          set: (v) => store.setSetting(DISK_CLEAN_SETTING, v),
+        },
+        diskSweep,
+        Date.now,
+      );
+    trackTimer(setInterval(sweepOrFirstClean, DISK_SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(sweepOrFirstClean, 2 * 60_000)).unref();
     // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
     if (engineOn) {
       const worktreeTidy = () => {

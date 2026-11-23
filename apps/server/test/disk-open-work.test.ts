@@ -100,30 +100,5 @@ it("keeps only the latest head's QA images for an open PR, and a merged PR's unt
     "b".repeat(64),
     "d".repeat(64),
   ]);
-  expect(store.mergedPrs(0)).toEqual([{ key: "mc#6", mergeSha: "c".repeat(40) }]);
-});
-
-it("reads only merged PRs from the last window, so the hourly scan stays bounded", () => {
-  const store = new Store(":memory:");
-  store.upsertPullRequests(
-    "mc",
-    [
-      prView({
-        repoId: "mc",
-        number: 6,
-        state: "merged",
-        mergeCommitSha: "c".repeat(40),
-        mergedAt: NOW - 1000,
-      }),
-      prView({
-        repoId: "mc",
-        number: 7,
-        state: "merged",
-        mergeCommitSha: "d".repeat(40),
-        mergedAt: NOW - 10_000_000,
-      }),
-    ],
-    NOW,
-  );
-  expect(store.mergedPrs(NOW - 5_000_000).map((p) => p.key)).toEqual(["mc#6"]);
+  expect(store.mergedPrs()).toEqual([{ key: "mc#6", mergeSha: "c".repeat(40) }]);
 });
