@@ -1,5 +1,8 @@
 /** Which merged PRs are not live yet: their change has merged, but the running hub does not hold it. */
 
+/** A merged PR older than this counts as live; the hourly scan reads no further back. */
+export const NOT_LIVE_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
 export interface MergedPr {
   key: string;
   mergeSha: string | null;

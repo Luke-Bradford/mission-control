@@ -264,6 +264,17 @@ describe("Demo renders on both sides", () => {
     expect(unpublish).toHaveBeenCalledWith(7);
   });
 
+  it("takes an older head's release down when the new head changes no page", async () => {
+    const unpublish = vi.fn(async () => {});
+    const t = setup({
+      publish: async () => "x",
+      unpublish,
+      render: async (_o, _p, scheme) => encodePng(pageBox(HEAD, scheme)),
+    });
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(unpublish).toHaveBeenCalledWith(7);
+  });
+
   it("publishes nothing when no page changed", async () => {
     const publish = vi.fn(async () => "x");
     const t = setup({

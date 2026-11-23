@@ -416,6 +416,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
           );
         }
       }
+      // No changed page on this head: an older head's release must not outlive it.
+      if (images.length === 0 && deps.unpublish) await deps.unpublish(t.pr).catch(() => {});
       const prior = deps.store.manifest(deps.repoId, t.pr, t.sha);
       deps.store.save(
         {

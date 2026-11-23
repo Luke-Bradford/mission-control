@@ -64,7 +64,7 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { notLivePrKeys } from "./disk/live.ts";
+import { NOT_LIVE_WINDOW_MS, notLivePrKeys } from "./disk/live.ts";
 import {
   DISK_CLEAN_SETTING,
   DISK_SWEEP_EVERY_MS,
@@ -1227,7 +1227,7 @@ export async function main(): Promise<void> {
         // a merged PR's pictures stay until the hub runs code that holds its merge commit
         const notLive = await notLivePrKeys(
           previewRepoId,
-          store.mergedPrs(),
+          store.mergedPrs(Date.now() - NOT_LIVE_WINDOW_MS),
           (await updater?.version().catch(() => null))?.sha || null,
           (mergeSha, running) =>
             hubRoot === null ? Promise.resolve(false) : isAncestor(hubRoot, mergeSha, running),
