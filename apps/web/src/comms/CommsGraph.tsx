@@ -224,7 +224,7 @@ export function CommsGraph({
             <section>
               <h3>Seats</h3>
               <ul>
-                {seats.map((seat) => (
+                {seats.map((seat) =>
                   (() => {
                     const row = rows.find((candidate) => candidate.id === seat.id);
                     const used = row?.digest?.contextTokens;
@@ -241,14 +241,16 @@ export function CommsGraph({
                           aria-label={`${seat.name}, ${seat.state ?? seat.presence}, ${context}, ${tool}`}
                           onClick={() => navigate(commsAgentPath(seat.id))}
                         >
-                          <b>{seat.name} · {seat.state ?? seat.presence}</b>
+                          <b>
+                            {seat.name} · {seat.state ?? seat.presence}
+                          </b>
                           <small>{context}</small>
                           <small>{tool}</small>
                         </button>
                       </li>
                     );
-                  })()
-                ))}
+                  })(),
+                )}
               </ul>
             </section>
           </div>
