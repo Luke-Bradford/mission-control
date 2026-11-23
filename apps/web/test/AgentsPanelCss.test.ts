@@ -91,7 +91,7 @@ it("constrains the crew pause modal to the viewport, scrolling its body", () => 
   // the modal sits on the shared overlay: a fixed backdrop, and a panel capped at 86% of the viewport
   expect(css).toMatch(/\.modal \{[^}]*position: fixed/);
   expect(css).toMatch(/\.modal \.panel \{[^}]*max-height: calc\(86 \* var\(--vh\)\)/);
-  expect(css).toMatch(/\.crew-pause-panel\.crew-pause-panel \{[^}]*width: min\(640px, 100%\)/);
+  expect(css).toMatch(/(?:\.crew-pause-panel){3} \{[^}]*width: min\(640px, 100%\)/);
   // the body is the scroller (`.scroll`), so the footer's actions stay in view
   expect(css).toMatch(/\.scroll \{[^}]*overflow: auto/);
 });

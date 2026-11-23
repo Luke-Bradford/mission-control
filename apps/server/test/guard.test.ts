@@ -165,6 +165,19 @@ describe("TestLock", () => {
       expect(lock.state().holder).toBeNull();
     });
 
+    it("does not grant a lock whose hold cannot be stored, and stays free", async () => {
+      vi.spyOn(store, "addLockHold").mockImplementation(() => {
+        throw new Error("disk full");
+      });
+      const key = { runId: "A", toolUseId: "a1" };
+      await expect(lock.acquire(key, "s-A", "pnpm -s test", 1000, live())).rejects.toThrow(
+        "could not record your hold",
+      );
+      expect(lock.state().holder).toBeNull();
+      vi.restoreAllMocks();
+      expect(await lock.acquire(key, "s-A", "pnpm -s test", 1000, live())).toBe(true);
+    });
+
     it("restores a pinned hold as pinned: only releaseRun frees it", async () => {
       const key = { runId: "A", toolUseId: "a1" };
       await lock.acquire(key, "s-A", "pnpm -s test", 1000, live());
@@ -565,6 +578,46 @@ describe("POST /api/guard/check", () => {
           decision: "Shell completed; exit 0; cwd /repo",
         }),
       ]);
+    });
+
+    it("records one shell decision when the same post-tool hook arrives twice at once", async () => {
+      let release: (secrets: string[]) => void = () => {};
+      const gate = new Promise<string[]>((resolve) => {
+        release = resolve;
+      });
+      const cfg = config();
+      cfg.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "a",
+        model: "haiku",
+        area: [],
+      });
+      let secretReads = 0;
+      const held = await build({
+        config: cfg,
+        knownSecrets: () => {
+          secretReads += 1;
+          return gate;
+        },
+      });
+      try {
+        const body = {
+          ...post("twice"),
+          tool_input: { command: "gh pr close 12" },
+          cwd: "/repo",
+          exit_code: 0,
+        };
+        const both = Promise.all([check(tokF, body, held), check(tokF, body, held)]);
+        await vi.waitFor(() => expect(secretReads).toBeGreaterThan(0));
+        release([]);
+        await both;
+        expect(secretReads).toBe(1);
+        expect(shell()).toHaveLength(1);
+        expect(store.getSetting("flight-shell-audit:run-f:twice")).toBe("recorded");
+      } finally {
+        await held.close();
+      }
     });
 
     it("counts shell writes toward the runaway breaker, and holds them once it trips", async () => {

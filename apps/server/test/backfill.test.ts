@@ -578,6 +578,23 @@ describe("fillTicketTitles", () => {
     expect(fetchTicket).toHaveBeenCalledTimes(2);
   });
 
+  it("does not fetch the same title twice when two backfills begin together", async () => {
+    crewRun(1, { ticket: "shop-app#7" });
+    let release: () => void = () => {};
+    const fetchTicket = vi.fn(
+      () =>
+        new Promise<{ title: string }>((resolve) => {
+          release = () => resolve({ title: "Title 7" });
+        }),
+    );
+    const first = fillTicketTitles({ config, store, fetchTicket });
+    const second = fillTicketTitles({ config, store, fetchTicket });
+    await vi.waitFor(() => expect(fetchTicket).toHaveBeenCalledTimes(1));
+    release();
+    await Promise.all([first, second]);
+    expect(titleOf("guido-1:1")).toBe("Title 7");
+  });
+
   it("is bounded per call and continues where it stopped; a failed read is retried", async () => {
     for (let n = 1; n <= 5; n++) crewRun(n, { ticket: `shop-app#${n}` });
     const fetchTicket = vi.fn(async (_repo: unknown, n: number) => {

@@ -411,6 +411,12 @@ interface Harness {
   wakeError: Error | null;
   /** The run's local branch no longer exists (localBranchGone answers true). */
   branchGone: boolean;
+  /** Held promises the next send and localBranchGone wait on, and how often each was reached. */
+  sendGate: Promise<void> | null;
+  /** Every key send was called with, claimed or not. */
+  sendAttempts: string[];
+  branchGate: Promise<void> | null;
+  branchChecks: number;
   /** FLIGHT's CI re-runs asked for, and the next answers of rerunRuling and rerunState (empty: one run, pending). */
   rulingReruns: { repo: string; sha: string }[];
   rerunResults: RerunResult[];
@@ -504,6 +510,10 @@ function harness(): Harness {
     wakeOptions: [],
     wakeError: null,
     branchGone: false,
+    sendGate: null,
+    sendAttempts: [],
+    branchGate: null,
+    branchChecks: 0,
     rulingReruns: [],
     rerunResults: [],
     rerunStates: [],
@@ -648,7 +658,11 @@ function harness(): Harness {
         },
         deleteRemoteBranch: (r) => step("delete-remote", r),
         deleteLocalBranch: (r) => step("delete-local", r),
-        localBranchGone: async () => x.branchGone,
+        localBranchGone: async () => {
+          x.branchChecks += 1;
+          await x.branchGate;
+          return x.branchGone;
+        },
       };
       async function step(name: string, _r: Run): Promise<PublishResult> {
         x.steps.push(name);
@@ -665,6 +679,8 @@ function harness(): Harness {
             return () => void x.listeners.delete(fn);
           },
           async send(runId, key, text): Promise<SendResult> {
+            x.sendAttempts.push(key);
+            await x.sendGate;
             if (x.busy) return "busy";
             const r = store.run(runId);
             if (r === null || r.endedAt !== null) return "gone";
@@ -965,6 +981,51 @@ describe("controller PR scratch reviews", () => {
     expect(h.ended).toContain(reviewRun);
     expect(h.steps).not.toContain("merge");
     expect(h.moves.some((move) => move.issue === 77)).toBe(false);
+  });
+});
+
+describe("overlap guards", () => {
+  it("wakes an idle seat once when two passes for it overlap", async () => {
+    setLoop({ phase: "working", hold: null, prNumber: 12 });
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    store.addLoopEvent(`${RUN}:ci-failed`, RUN, `CI failed on ${SHA.slice(0, 7)}`, clock);
+    let release = () => {};
+    h.sendGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const idle = { kind: "idle", seatId: SEAT, runId: RUN, resumed: false } as const;
+    for (const fn of h.listeners) fn(idle);
+    for (const fn of h.listeners) fn(idle);
+    release();
+    await vi.waitFor(() => expect(sentKeys().some((k) => k.startsWith(`wake:${RUN}:`))).toBe(true));
+    await h.engine.tick();
+    expect(sentKeys().filter((k) => k.startsWith(`wake:${RUN}:`))).toHaveLength(1);
+    expect(h.sendAttempts.filter((k) => k.startsWith(`wake:${RUN}:`))).toHaveLength(1);
+  });
+
+  it("checks a cleanup note's branch once when two sweeps overlap", async () => {
+    store.setRunEnded(RUN, clock, "ok", "exit");
+    store.raiseNote({
+      key: cleanupBranchNoteKey(RUN),
+      kind: "blocked",
+      runId: RUN,
+      seatId: SEAT,
+      repoId: REPO,
+      text: "branch left",
+      at: clock,
+    });
+    h.branchChecks = 0;
+    let release = () => {};
+    h.branchGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = h.engine.tick();
+    const second = h.engine.tick();
+    await vi.waitFor(() => expect(h.branchChecks).toBeGreaterThan(0));
+    release();
+    await Promise.all([first, second]);
+    expect(h.branchChecks).toBe(1);
   });
 });
 

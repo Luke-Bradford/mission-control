@@ -45,6 +45,7 @@ import {
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import { ownsHubFiles } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import {
   COMMIT_ADD_PATHSPEC,
   editRunPrBody,
@@ -97,8 +98,10 @@ export const MERGE_NO_PR = "the run has no PR";
 export const MERGE_NO_SEAT = "the run's seat is no longer configured";
 export const MERGE_BAD_SHA = "not a commit sha";
 /** Ready succeeded but its head could not be confirmed and restoring draft failed. */
-export const READY_UNDO_FAILED = "the PR was marked ready but could not be restored to draft";
-export const MERGE_HEAD_MOVED = "the PR's head is not the commit that passed the gate";
+export const READY_UNDO_FAILED =
+  "the PR was marked ready but could not be restored to draft";
+export const MERGE_HEAD_MOVED =
+  "the PR's head is not the commit that passed the gate";
 export const MERGE_CONFLICTING = "the PR conflicts with main";
 /** The run's Activity line, once per head, when its merge waits for main to be merged in. */
 export const MERGE_WAITS_ON_MAIN =
@@ -109,13 +112,20 @@ export const MERGE_BRANCH_MOVED = "the branch has commits that were not merged";
 export const MERGE_PR_NOT_RUNS =
   "the PR is not this run's own branch into the repo's default branch";
 /** Why merging main into a run's branch was refused without a merge. */
-export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the session clone";
-export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
+export const UPDATE_NO_WORKTREE =
+  "the run's worktree is not a worktree of the session clone";
+export const UPDATE_MERGE_IN_PROGRESS =
+  "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
+export {
+  gitIdentity,
+  MC_FALLBACK_EMAIL,
+  MC_MERGE_AUTHOR,
+} from "../runtime/checkouts.ts";
 
-export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
+export type PublishResult =
+  { ok: true } | { ok: false; text: string; transient: boolean };
 /** A fast-forward's answer; `installNote` is a refusal or failure of the install that followed it. */
 export type FastForwardResult =
   | { ok: true; installNote?: string; commits?: number }
@@ -149,7 +159,14 @@ export type GateResult =
  * changes, so nothing was merged).
  */
 export type UpdateBranchResult =
-  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean; installNote?: string }
+  | {
+      ok: true;
+      kind: "merged";
+      sha: string;
+      parent: string;
+      prSame: boolean;
+      installNote?: string;
+    }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
@@ -164,7 +181,9 @@ export type RerunStateResult =
 const NOT_FAILED_CONCLUSIONS = ["success", "skipped", "neutral"];
 /** A run that failed, timed out or was cancelled has jobs to re-run. */
 const needsRerun = (conclusion: unknown): boolean =>
-  conclusion === "failure" || conclusion === "timed_out" || conclusion === "cancelled";
+  conclusion === "failure" ||
+  conclusion === "timed_out" ||
+  conclusion === "cancelled";
 
 /**
  * A PR diff without its index lines and hunk numbers, which a merge of main changes and the
@@ -198,7 +217,9 @@ export interface Publisher {
   mergeHead(run: Run, worktree: string): Promise<string | null>;
   mainTip(
     run: Run,
-  ): Promise<{ ok: true; sha: string } | { ok: false; text: string; transient: boolean }>;
+  ): Promise<
+    { ok: true; sha: string } | { ok: false; text: string; transient: boolean }
+  >;
   awayDiff(run: Run, sha: string): Promise<AwayDiff | null>;
   isDescendant(run: Run, ancestor: string, head: string): Promise<boolean>;
   /**
@@ -206,13 +227,22 @@ export interface Publisher {
    * `logins` or the account gh acts as, read from GitHub's push activity for the branch. False
    * when the read fails or the chain of pushes is not whole.
    */
-  pushesFrom(run: Run, ancestor: string, head: string, logins: string[]): Promise<boolean>;
+  pushesFrom(
+    run: Run,
+    ancestor: string,
+    head: string,
+    logins: string[],
+  ): Promise<boolean>;
   /** A run has ended: what the publisher kept for it is let go. */
   runEnded(runId: string): void;
   /** Pushes the run's branch; "Already on origin" and "Nothing to push" are success. */
   push(run: Run): Promise<PublishResult>;
   /** Opens the run's draft PR, or finds the one it already opened. */
-  openPr(run: Run, ticket: { issue: number; title: string }, note: string): Promise<OpenPrResult>;
+  openPr(
+    run: Run,
+    ticket: { issue: number; title: string },
+    note: string,
+  ): Promise<OpenPrResult>;
   /** Rewrites the run's open PR body with RETRO's Minor findings (none: without the section). */
   postMinorFindings(
     run: Run,
@@ -245,7 +275,11 @@ export interface Publisher {
    */
   rerunRuling(repo: string, sha: string): Promise<RerunResult>;
   /** What those re-runs came to: pending until each run is on a later attempt and completed. */
-  rerunState(repo: string, sha: string, runs: CiRerun["runs"]): Promise<RerunStateResult>;
+  rerunState(
+    repo: string,
+    sha: string,
+    runs: CiRerun["runs"],
+  ): Promise<RerunStateResult>;
   /** Hard-rule paths against a persisted base, a merge first parent, or main. */
   hardRuleTouches(
     run: Run,
@@ -257,7 +291,9 @@ export interface Publisher {
   /** origin's default branch and tip now (one `ls-remote`), for a caller that shares it across runs. */
   originTip(
     run: Run,
-  ): Promise<({ ok: true } & OriginTip) | { ok: false; text: string; transient: boolean }>;
+  ): Promise<
+    ({ ok: true } & OriginTip) | { ok: false; text: string; transient: boolean }
+  >;
   /**
    * The merge gate's reads for `sha`. origin's tip is read every call unless `tip` (a read the
    * caller shares) is given; when `known` is for the same sha and tip, it is returned without the
@@ -266,14 +302,20 @@ export interface Publisher {
   gateFacts(
     run: Run,
     sha: string,
-    known?: (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean }) | null,
+    known?:
+      | (Omit<GateFacts, "webChanged"> & { sha: string; webChanged?: boolean })
+      | null,
     tip?: OriginTip,
   ): Promise<GateResult>;
   /**
    * Merges `mainSha` into the run's branch in `worktree` (the seat's, or the aside run's), never by
    * moving the ref: a checked-out worktree's index would go stale.
    */
-  updateBranch(run: Run, mainSha: string, worktree: string): Promise<UpdateBranchResult>;
+  updateBranch(
+    run: Run,
+    mainSha: string,
+    worktree: string,
+  ): Promise<UpdateBranchResult>;
   /**
    * The paths in `worktree` that a commit would take but has not (what `updateBranch` waits on);
    * a refusal when the worktree cannot be read.
@@ -284,7 +326,11 @@ export interface Publisher {
    * (fetching it when needed). A worktree that is not behind `sha` on the same line, or that
    * the move would overwrite, is left as it is and refused.
    */
-  fastForward(run: Run, worktree: string, sha: string): Promise<FastForwardResult>;
+  fastForward(
+    run: Run,
+    worktree: string,
+    sha: string,
+  ): Promise<FastForwardResult>;
   /** Marks the run's PR ready for review (`gh pr ready`). */
   markReady(run: Run, expectedSha?: string): Promise<PublishResult>;
   markDraft(run: Run): Promise<PublishResult>;
@@ -326,7 +372,10 @@ const [C1_DCS, C1_SOS, C1_CSI, C1_ST, C1_OSC, C1_PM, C1_APC] = [
  * with intermediates (charset), and the single-character ones that remain (Fp, Fe, Fs).
  */
 const ESCAPES = [
-  new RegExp(`(?:${ESC}\\]|${C1_OSC})[^${BEL}${ESC}${C1_ST}]*(?:${BEL}|${ESC}\\\\|${C1_ST})`, "g"),
+  new RegExp(
+    `(?:${ESC}\\]|${C1_OSC})[^${BEL}${ESC}${C1_ST}]*(?:${BEL}|${ESC}\\\\|${C1_ST})`,
+    "g",
+  ),
   new RegExp(
     `(?:${ESC}[PX^_]|[${C1_DCS}${C1_SOS}${C1_PM}${C1_APC}])[^${ESC}${C1_ST}]*(?:${ESC}\\\\|${C1_ST})`,
     "g",
@@ -418,7 +467,11 @@ type Group = {
   /** Failing lines past FAILING_LINES_MAX, not kept at all. */
   dropped: number;
 };
-type Tier = { name: string; units: (g: Group) => string[][]; shown: string[][][] };
+type Tier = {
+  name: string;
+  units: (g: Group) => string[][];
+  shown: string[][][];
+};
 
 /** What a job's omitted failing lines are told as. */
 const omittedText = (n: number, job: string): string =>
@@ -463,7 +516,13 @@ export function ciLogBody(log: string, max: number): string {
     const job = m === null ? "" : (m[1] ?? "");
     const text = (m === null ? raw : (m[2] ?? "")).trim();
     if (text === "") continue;
-    const g = jobs.get(job) ?? { entries: [], marks: [], noise: [], rest: [], fails: 0 };
+    const g = jobs.get(job) ?? {
+      entries: [],
+      marks: [],
+      noise: [],
+      rest: [],
+      fails: 0,
+    };
     jobs.set(job, g);
     // a FAIL line's error window and a console block end where the job's lines do
     if (job !== lastJob) {
@@ -497,7 +556,12 @@ export function ciLogBody(log: string, max: number): string {
       open.push(line);
       sourced = true;
       sinceOpen++;
-    } else if (open !== null && !stream && sinceFail < ERROR_WINDOW && ERROR_LINE.test(text)) {
+    } else if (
+      open !== null &&
+      !stream &&
+      sinceFail < ERROR_WINDOW &&
+      ERROR_LINE.test(text)
+    ) {
       // under its FAIL line even when another test failed with the same words
       open.push(line);
       sinceFail++;
@@ -507,7 +571,8 @@ export function ciLogBody(log: string, max: number): string {
       sinceOpen++;
       if (CHECK_ERROR.test(text)) {
         if (once(`${job}\t${line}`)) g.entries.push([line]);
-      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) addOnce(g.marks, line);
+      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text))
+        addOnce(g.marks, line);
       else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
       else g.rest.push(text);
     }
@@ -561,9 +626,21 @@ export function ciLogBody(log: string, max: number): string {
   if (budget < 0) budget = max;
   const tiers: Tier[] = [
     { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
-    { name: "", units: (x) => x.marks.map((l) => [l]), shown: groups.map(() => []) },
-    { name: "console", units: (x) => x.noise.map((l) => [l]), shown: groups.map(() => []) },
-    { name: "last lines", units: (x) => x.rest.map((l) => [l]), shown: groups.map(() => []) },
+    {
+      name: "",
+      units: (x) => x.marks.map((l) => [l]),
+      shown: groups.map(() => []),
+    },
+    {
+      name: "console",
+      units: (x) => x.noise.map((l) => [l]),
+      shown: groups.map(() => []),
+    },
+    {
+      name: "last lines",
+      units: (x) => x.rest.map((l) => [l]),
+      shown: groups.map(() => []),
+    },
   ];
   const take = (t: Tier, gi: number, unit: string[]): boolean => {
     const x = groups[gi] as Group;
@@ -619,7 +696,8 @@ export function ciLogBody(log: string, max: number): string {
       ((tiers[1] as Tier).shown[gi] as string[][]).length;
     const note = omittedText(total - shown, x.job);
     // a notice only when it fits: the body never goes past `max`
-    if (total > shown && byteLength(`${out.join("\n")}\n${note}`) <= max) out.push(note);
+    if (total > shown && byteLength(`${out.join("\n")}\n${note}`) <= max)
+      out.push(note);
   });
   return out.join("\n");
 }
@@ -639,7 +717,8 @@ export function runPrBody(
   const around = `${heading}\n\n## What changed\n\n\n\n${extra}${end}`;
   const room = Math.max(0, MC_PR_BODY_MAX - around.length);
   // the note is cut, never the closing line, to keep the body inside what GitHub takes
-  const shown = note.length > room ? `${note.slice(0, Math.max(0, room - 1))}…` : note;
+  const shown =
+    note.length > room ? `${note.slice(0, Math.max(0, room - 1))}…` : note;
   return `${heading}\n\n## What changed\n\n${shown}\n\n${extra}${end}`;
 }
 
@@ -647,8 +726,16 @@ export function runPrBody(
 const mergeQueue = new Map<string, Promise<unknown>>();
 
 type Refusal = { ok: false; text: string; transient: boolean };
-const final = (text: string): Refusal => ({ ok: false, text, transient: false });
-const transient = (text: string): Refusal => ({ ok: false, text, transient: true });
+const final = (text: string): Refusal => ({
+  ok: false,
+  text,
+  transient: false,
+});
+const transient = (text: string): Refusal => ({
+  ok: false,
+  text,
+  transient: true,
+});
 const errText = (e: unknown): string =>
   Array.from(cleanLog(e instanceof Error ? e.message : String(e)).trim())
     .slice(0, STDERR_TEXT_MAX)
@@ -677,7 +764,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return await deps.inClone(checkout, async () => {
         const common = await realpath(join(checkout, ".git"));
         const g: G = (a) =>
-          git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          git(checkout, a, common, {
+            gitDir: common,
+            timeoutMs: CREW_GIT_SLOW_MS,
+          });
         return fn(g, place);
       });
     } catch (e) {
@@ -686,8 +776,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   const ghFailed = (what: string, stderr: string): Refusal => {
-    const why = Array.from(cleanLog(stderr).trim()).slice(0, STDERR_TEXT_MAX).join("");
-    return transient(why === "" ? `gh ${what} failed` : `gh ${what} failed: ${why}`);
+    const why = Array.from(cleanLog(stderr).trim())
+      .slice(0, STDERR_TEXT_MAX)
+      .join("");
+    return transient(
+      why === "" ? `gh ${what} failed` : `gh ${what} failed: ${why}`,
+    );
   };
 
   /**
@@ -700,12 +794,20 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     );
 
   /** gh's answer as a JSON object, or a transient refusal naming the call. */
-  async function ghJson(args: string[], what: string): Promise<Record<string, unknown> | Refusal> {
+  async function ghJson(
+    args: string[],
+    what: string,
+  ): Promise<Record<string, unknown> | Refusal> {
     const r = await deps.gh(args, { cwd: cwd() });
     if (r.code !== 0) return ghFailed(what, r.stderr);
     try {
-      const parsed: unknown = JSON.parse(r.stdout);
-      if (typeof parsed === "object" && parsed !== null) return parsed as Record<string, unknown>;
+      const parsed: unknown = parseJson<unknown>(
+        r.stdout,
+        undefined,
+        rethrowJson,
+      );
+      if (typeof parsed === "object" && parsed !== null)
+        return parsed as Record<string, unknown>;
     } catch {
       // falls through
     }
@@ -724,7 +826,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     repo: string,
     sha: string,
     fields: string,
-  ): Promise<{ id: number; status: string; conclusion: string; attempt: number }[] | Refusal> {
+  ): Promise<
+    | { id: number; status: string; conclusion: string; attempt: number }[]
+    | Refusal
+  > {
     const listed = await deps.gh(
       ["run", "list", `--repo=${repo}`, `--commit=${sha}`, `--json=${fields}`],
       { cwd: cwd() },
@@ -732,7 +837,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     if (listed.code !== 0) return ghFailed("run list", listed.stderr);
     let parsed: unknown;
     try {
-      parsed = JSON.parse(listed.stdout);
+      parsed = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
     } catch {
       return transient("gh run list gave no JSON");
     }
@@ -756,7 +861,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
   /** git's exit code 1 is an answer ("no"), anything else is a failure. */
   /** Whether the clone has commit `sha` (rev-parse exits 1 when not; `cat-file -e` exits 128). */
-  const have = (g: G, sha: string) => yes(g, ["rev-parse", "-q", "--verify", `${sha}^{commit}`]);
+  const have = (g: G, sha: string) =>
+    yes(g, ["rev-parse", "-q", "--verify", `${sha}^{commit}`]);
 
   /** origin's default branch and tip, and `branch`'s tip, now (never a local ref). */
   async function originNow(g: G, branch: string | null) {
@@ -778,17 +884,28 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   /** Fetches origin's default branch when the clone lacks its tip. */
-  async function fetchMain(g: G, defaultBranch: string, mainSha: string): Promise<void> {
+  async function fetchMain(
+    g: G,
+    defaultBranch: string,
+    mainSha: string,
+  ): Promise<void> {
     if (await have(g, mainSha)) return;
     await g(["fetch", "--no-tags", "origin", `refs/heads/${defaultBranch}`]);
-    if (!(await have(g, mainSha))) throw new Error("origin's tip could not be fetched");
+    if (!(await have(g, mainSha)))
+      throw new Error("origin's tip could not be fetched");
   }
 
   /** The run's branch when it is of the run's shape for its issue, else null. */
   function ownBranch(run: Run): string | null {
     const issue = issueOf(run);
     const m = run.branch === null ? null : RUN_BRANCH.exec(run.branch);
-    if (run.branch === null || m === null || issue === null || Number(m[1]) !== issue) return null;
+    if (
+      run.branch === null ||
+      m === null ||
+      issue === null ||
+      Number(m[1]) !== issue
+    )
+      return null;
     return run.branch;
   }
 
@@ -796,7 +913,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   async function openOnBranch(
     repo: string,
     branch: string,
-  ): Promise<{ number: number; createdAt: number; closes: number[]; partOf: number[] }[] | null> {
+  ): Promise<
+    | {
+        number: number;
+        createdAt: number;
+        closes: number[];
+        partOf: number[];
+      }[]
+    | null
+  > {
     const listed = await deps.gh(
       [
         "pr",
@@ -811,17 +936,29 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     if (listed.code !== 0) return null;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(listed.stdout);
+      parsed = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
     } catch {
       return null;
     }
     if (!Array.isArray(parsed)) return null;
-    const out: { number: number; createdAt: number; closes: number[]; partOf: number[] }[] = [];
+    const out: {
+      number: number;
+      createdAt: number;
+      closes: number[];
+      partOf: number[];
+    }[] = [];
     for (const p of parsed) {
       const n = (p as { number?: unknown } | null)?.number;
-      const at = Date.parse(String((p as { createdAt?: unknown } | null)?.createdAt));
-      if (typeof n === "number" && Number.isSafeInteger(n) && !Number.isNaN(at)) {
-        const refs = (p as { closingIssuesReferences?: unknown }).closingIssuesReferences;
+      const at = Date.parse(
+        String((p as { createdAt?: unknown } | null)?.createdAt),
+      );
+      if (
+        typeof n === "number" &&
+        Number.isSafeInteger(n) &&
+        !Number.isNaN(at)
+      ) {
+        const refs = (p as { closingIssuesReferences?: unknown })
+          .closingIssuesReferences;
         const closes = Array.isArray(refs)
           ? refs
               .filter((x) => {
@@ -829,7 +966,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
                 // only an issue of this repository: another repository's #7 is not this ticket
                 return (
                   typeof url === "string" &&
-                  url.toLowerCase().startsWith(`https://github.com/${repo.toLowerCase()}/issues/`)
+                  url
+                    .toLowerCase()
+                    .startsWith(
+                      `https://github.com/${repo.toLowerCase()}/issues/`,
+                    )
                 );
               })
               .map((x) => (x as { number?: unknown }).number)
@@ -838,9 +979,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const body = (p as { body?: unknown }).body;
         const partOf =
           typeof body === "string"
-            ? [...body.matchAll(/(?<![A-Za-z0-9])part of #(\d+)(?!\d|\w)/gi)].map((m) =>
-                Number(m[1]),
-              )
+            ? [
+                ...body.matchAll(/(?<![A-Za-z0-9])part of #(\d+)(?!\d|\w)/gi),
+              ].map((m) => Number(m[1]))
             : [];
         out.push({ number: n, createdAt: at, closes, partOf });
       }
@@ -849,20 +990,35 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   }
 
   /** The jobs of a run that have already failed; none when gh could not say. */
-  async function failedJobs(repo: string, runId: number): Promise<{ id: number; name: string }[]> {
-    const viewed = await deps.gh(["run", "view", `--repo=${repo}`, String(runId), "--json=jobs"], {
-      cwd: cwd(),
-    });
+  async function failedJobs(
+    repo: string,
+    runId: number,
+  ): Promise<{ id: number; name: string }[]> {
+    const viewed = await deps.gh(
+      ["run", "view", `--repo=${repo}`, String(runId), "--json=jobs"],
+      {
+        cwd: cwd(),
+      },
+    );
     if (viewed.code !== 0) return [];
-    const parsed = JSON.parse(viewed.stdout) as { jobs?: unknown } | null;
+    const parsed = parseJson<{ jobs?: unknown } | null>(viewed.stdout, null);
     if (!Array.isArray(parsed?.jobs)) return [];
     return parsed.jobs.flatMap((j: unknown) => {
-      const x = j as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+      const x = j as {
+        databaseId?: unknown;
+        name?: unknown;
+        conclusion?: unknown;
+      } | null;
       return x !== null &&
         x.conclusion === "failure" &&
         typeof x.databaseId === "number" &&
         Number.isSafeInteger(x.databaseId)
-        ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "job")).replace(/\t/g, " ") }]
+        ? [
+            {
+              id: x.databaseId,
+              name: cleanLog(String(x.name ?? "job")).replace(/\t/g, " "),
+            },
+          ]
         : [];
     });
   }
@@ -897,10 +1053,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     const lines: string[] = [];
     let read = false;
     for (const j of jobs) {
-      const got = await deps.gh(["api", `repos/${repo}/actions/jobs/${j.id}/logs`], {
-        cwd: cwd(),
-        maxBuffer: CI_LOG_MAX_BUFFER,
-      });
+      const got = await deps.gh(
+        ["api", `repos/${repo}/actions/jobs/${j.id}/logs`],
+        {
+          cwd: cwd(),
+          maxBuffer: CI_LOG_MAX_BUFFER,
+        },
+      );
       if (got.code !== 0) continue;
       read = true;
       for (const l of got.stdout.split("\n")) lines.push(`${j.name}\t-\t${l}`);
@@ -935,7 +1094,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return { ok: false, text: MC_PR_FAILED, transient: false };
       }
       const open = await openOnBranch(repo, run.branch);
-      if (open === null) return { ok: false, text: MC_PR_FAILED, transient: true };
+      if (open === null)
+        return { ok: false, text: MC_PR_FAILED, transient: true };
       const mine = open.find((p) => p.createdAt >= run.startedAt);
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
       // A ticket passes from run to run (restart, reassignment, handover) and the branch stays. A
@@ -943,7 +1103,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       // runs back, while no other run on the ticket is live (start_seat's rule). It never adopts a
       // PR merely because it happens to be open on that branch.
       const onTicket = deps.store.runsOnTicket(run.repoId, run.ticket ?? "");
-      const othersLive = onTicket.some((other) => other.id !== run.id && other.endedAt === null);
+      const othersLive = onTicket.some(
+        (other) => other.id !== run.id && other.endedAt === null,
+      );
       const adopted = othersLive
         ? undefined
         : open.find((p) =>
@@ -969,28 +1131,42 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         (lone.closes.includes(issue) || lone.partOf.includes(issue)) &&
         !deps.store
           .runsOnTicket(run.repoId, run.ticket ?? "")
-          .some((other) => other.id !== run.id && other.loop?.prNumber === lone.number)
+          .some(
+            (other) =>
+              other.id !== run.id && other.loop?.prNumber === lone.number,
+          )
       ) {
         return { ok: true, prNumber: lone.number };
       }
-      if (open.length > 0) return { ok: false, text: EARLIER_PR_OPEN, transient: false };
+      if (open.length > 0)
+        return { ok: false, text: EARLIER_PR_OPEN, transient: false };
 
       const known = await readKnown(deps, "draft_pr");
       const own = { repo, issue: ticket.issue, known };
       const heading = `#${ticket.issue}`;
       const withTitle = `${heading} ${ticket.title}`.slice(0, MC_PR_TITLE_MAX);
-      const titled = { title: withTitle, body: runPrBody(ticket, note, null, true) };
+      const titled = {
+        title: withTitle,
+        body: runPrBody(ticket, note, null, true),
+      };
       const flagged =
         prTextProblem(titled.title, { ...own, label: "PR title" }) !== null ||
         prTextProblem(titled.body, { ...own, label: "PR body" }) !== null;
-      const pr = flagged ? { title: heading, body: runPrBody(ticket, note, null, false) } : titled;
+      const pr = flagged
+        ? { title: heading, body: runPrBody(ticket, note, null, false) }
+        : titled;
 
       const made = await openDraftPr(deps, run.id, pr);
       if (made.isError === true) {
         // The branch moved past the push (a commit made since): not a refusal. The next pass
         // pushes the new tip and tries again.
-        if (made.text === MC_PUSH_FIRST) return { ok: true, prNumber: null, tipMoved: true };
-        return { ok: false, text: made.text, transient: made.text === MC_PR_FAILED };
+        if (made.text === MC_PUSH_FIRST)
+          return { ok: true, prNumber: null, tipMoved: true };
+        return {
+          ok: false,
+          text: made.text,
+          transient: made.text === MC_PR_FAILED,
+        };
       }
       const url = /\/pull\/(\d+)/.exec(made.text);
       if (url?.[1] !== undefined) return { ok: true, prNumber: Number(url[1]) };
@@ -1007,7 +1183,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return { ok: false, text: prNotRunsText(0), transient: false };
       }
       const note = deps.store.latestEvidence(run.id)?.note ?? "";
-      const title = run.ticketTitle ?? deps.store.boardItem(run.repoId, issue)?.title ?? "";
+      const title =
+        run.ticketTitle ?? deps.store.boardItem(run.repoId, issue)?.title ?? "";
       const ticket = { issue, title };
       const known = await readKnown(deps, "pr_body");
       const own = { repo, issue, known, label: "PR body", unclosed: true };
@@ -1018,37 +1195,70 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           label: "PR title",
           unclosed: false,
         }) !== null ||
-        prTextProblem(runPrBody(ticket, note, null, true), { ...own, unclosed: false }) !== null;
+        prTextProblem(runPrBody(ticket, note, null, true), {
+          ...own,
+          unclosed: false,
+        }) !== null;
       const withTitle = !flagged;
 
-      const minors = deps.store.findingsOf(review.id).filter((f) => f.severity === "Minor");
+      const minors = deps.store
+        .findingsOf(review.id)
+        .filter((f) => f.severity === "Minor");
       const lines = minors
         .slice(0, MINOR_LISTED_MAX)
-        .map((f) => (prTextProblem(minorLine(f), own) !== null ? MINOR_WITHHELD : minorLine(f)));
+        .map((f) =>
+          prTextProblem(minorLine(f), own) !== null
+            ? MINOR_WITHHELD
+            : minorLine(f),
+        );
       if (minors.length > MINOR_LISTED_MAX) {
         lines.push(minorMoreLine(minors.length - MINOR_LISTED_MAX));
       }
       let section =
         minors.length === 0
           ? null
-          : [MINOR_HEADING, "", minorIntro(review.retro, review.sha), "", ...lines].join("\n");
-      if (prTextProblem(runPrBody(ticket, note, section, withTitle), own) !== null) {
-        section = [MINOR_HEADING, "", minorFallback(review.retro, minors.length)].join("\n");
+          : [
+              MINOR_HEADING,
+              "",
+              minorIntro(review.retro, review.sha),
+              "",
+              ...lines,
+            ].join("\n");
+      if (
+        prTextProblem(runPrBody(ticket, note, section, withTitle), own) !== null
+      ) {
+        section = [
+          MINOR_HEADING,
+          "",
+          minorFallback(review.retro, minors.length),
+        ].join("\n");
       }
       const evidence = deps.prEvidenceSection?.(run) ?? null;
       const report = deps.store.qaReportForReview(review.id);
-      const reportSection = report ? qaReportGitSummary(report, deps.qaReportBaseUrl) : null;
-      const sections = [section, evidence, reportSection].filter((x): x is string => x !== null);
+      const reportSection = report
+        ? qaReportGitSummary(report, deps.qaReportBaseUrl)
+        : null;
+      const sections = [section, evidence, reportSection].filter(
+        (x): x is string => x !== null,
+      );
       const combined = sections.length === 0 ? null : sections.join("\n\n");
       const body = runPrBody(ticket, note, combined, withTitle);
       // a body the seat rewrote with pr_body keeps its text; only the hub's section is replaced
       const r = await editRunPrBody(deps, run.id, prNumber, (current) =>
         seatWroteBody(current, issue)
-          ? withEngineSection(withSection(current, EVIDENCE_HEADING, null), issue, combined)
+          ? withEngineSection(
+              withSection(current, EVIDENCE_HEADING, null),
+              issue,
+              combined,
+            )
           : body,
       );
       if (r.isError === true) {
-        return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
+        return {
+          ok: false,
+          text: r.text,
+          transient: r.text === MC_PR_EDIT_FAILED,
+        };
       }
       return { ok: true };
     },
@@ -1067,7 +1277,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return withSection(current, EVIDENCE_HEADING, section);
       });
       if (r.isError === true) {
-        return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
+        return {
+          ok: false,
+          text: r.text,
+          transient: r.text === MC_PR_EDIT_FAILED,
+        };
       }
       return { ok: true };
     },
@@ -1091,10 +1305,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         { cwd: cwd() },
       );
       if (r.code !== 0) {
-        const why = Array.from(cleanLog(r.stderr).trim()).slice(0, STDERR_TEXT_MAX).join("");
+        const why = Array.from(cleanLog(r.stderr).trim())
+          .slice(0, STDERR_TEXT_MAX)
+          .join("");
         return {
           ok: false,
-          text: why === "" ? REVIEW_STATUS_FAILED : `${REVIEW_STATUS_FAILED}: ${why}`,
+          text:
+            why === ""
+              ? REVIEW_STATUS_FAILED
+              : `${REVIEW_STATUS_FAILED}: ${why}`,
           transient: true,
         };
       }
@@ -1114,7 +1333,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           { cwd: cwd() },
         );
         if (listed.code !== 0) return CI_LOG_UNREADABLE;
-        const runs: unknown = JSON.parse(listed.stdout);
+        const runs: unknown = parseJson<unknown>(
+          listed.stdout,
+          undefined,
+          rethrowJson,
+        );
         if (!Array.isArray(runs)) return CI_LOG_UNREADABLE;
         const failed: {
           id: number;
@@ -1141,7 +1364,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           }
           const name = typeof x.name === "string" ? x.name : "CI";
           const attempt =
-            typeof x.attempt === "number" && Number.isSafeInteger(x.attempt) && x.attempt > 0
+            typeof x.attempt === "number" &&
+            Number.isSafeInteger(x.attempt) &&
+            x.attempt > 0
               ? x.attempt
               : null;
           if (x.conclusion === "failure") {
@@ -1152,7 +1377,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             // failed job comes before the attempt it re-runs.
             const jobs = await failedJobs(repo, x.databaseId);
             if (jobs.length > 0) {
-              failed.push({ id: x.databaseId, name, attempt, rerun: false, jobs });
+              failed.push({
+                id: x.databaseId,
+                name,
+                attempt,
+                rerun: false,
+                jobs,
+              });
               continue;
             }
             if (attempt === null || attempt <= 1) continue;
@@ -1170,9 +1401,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               { cwd: cwd() },
             );
             if (before.code !== 0) return CI_LOG_UNREADABLE;
-            const state: unknown = JSON.parse(before.stdout);
-            if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
-              failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
+            const state: unknown = parseJson<unknown>(
+              before.stdout,
+              undefined,
+              rethrowJson,
+            );
+            if (
+              (state as { conclusion?: unknown } | null)?.conclusion ===
+              "failure"
+            ) {
+              failed.push({
+                id: x.databaseId,
+                name,
+                attempt: attempt - 1,
+                rerun: true,
+              });
             }
           }
         }
@@ -1189,15 +1432,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const head = `${f.jobs === undefined ? named : f.attempt === null ? `${name} (still running)` : `${name} (attempt ${f.attempt}, still running)`}:\n`;
           // each run left gets an equal part of what is left; what one does not use passes on
           const left = failed.length - failed.indexOf(f);
-          const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
+          const share = Math.floor(
+            (budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left,
+          );
           const room = share - byteLength(head);
           if (room <= 0) continue; // no room for a header with anything under it
-          const log = f.jobs === undefined ? await failedLog(repo, f) : await jobsLog(repo, f.jobs);
+          const log =
+            f.jobs === undefined
+              ? await failedLog(repo, f)
+              : await jobsLog(repo, f.jobs);
           if (log === null) return CI_LOG_UNREADABLE;
           const body = ciLogBody(cleanLog(log).trimEnd(), room);
           if (body === "") continue;
           const section = head + body;
-          budget -= byteLength(section) + (sections.length > 0 ? SEPARATOR_BYTES : 0);
+          budget -=
+            byteLength(section) + (sections.length > 0 ? SEPARATOR_BYTES : 0);
           sections.push(section);
         }
         return sections.length === 0 ? EMPTY_LOG : sections.join(SEPARATOR);
@@ -1220,25 +1469,46 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           { cwd: cwd() },
         );
         if (listed.code !== 0) return null;
-        const runs: unknown = JSON.parse(listed.stdout);
+        const runs: unknown = parseJson<unknown>(
+          listed.stdout,
+          undefined,
+          rethrowJson,
+        );
         if (!Array.isArray(runs)) return null;
-        if (runs.some((r: unknown) => (r as { status?: unknown } | null)?.status !== "completed")) {
+        if (
+          runs.some(
+            (r: unknown) =>
+              (r as { status?: unknown } | null)?.status !== "completed",
+          )
+        ) {
           return "running";
         }
         const failed = runs.flatMap((r: unknown) => {
-          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+          const x = r as {
+            databaseId?: unknown;
+            name?: unknown;
+            conclusion?: unknown;
+          } | null;
           return x !== null &&
             needsRerun(x.conclusion) &&
             typeof x.databaseId === "number" &&
             Number.isSafeInteger(x.databaseId)
-            ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
+            ? [
+                {
+                  id: x.databaseId,
+                  name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX),
+                },
+              ]
             : [];
         });
         const done: { id: number; name: string }[] = [];
         for (const f of failed) {
-          const r = await deps.gh(["run", "rerun", `--repo=${repo}`, String(f.id), "--failed"], {
-            cwd: cwd(),
-          });
+          const r = await deps.gh(
+            ["run", "rerun", `--repo=${repo}`, String(f.id), "--failed"],
+            {
+              cwd: cwd(),
+            },
+          );
           if (r.code !== 0) return done.length === 0 ? null : done;
           done.push(f);
         }
@@ -1250,19 +1520,28 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async rerunRuling(repo, sha) {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
-      const listed = await actionsRuns(repo, sha, "databaseId,conclusion,attempt");
+      const listed = await actionsRuns(
+        repo,
+        sha,
+        "databaseId,conclusion,attempt",
+      );
       if (isRefusal(listed)) return listed;
       const failed = listed.filter((r) => needsRerun(r.conclusion));
       if (failed.length === 0) return final(NO_FAILED_RUN);
       const done: CiRerun["runs"] = [];
       for (const r of failed) {
-        const rerun = await deps.gh(["run", "rerun", `--repo=${repo}`, String(r.id), "--failed"], {
-          cwd: cwd(),
-        });
+        const rerun = await deps.gh(
+          ["run", "rerun", `--repo=${repo}`, String(r.id), "--failed"],
+          {
+            cwd: cwd(),
+          },
+        );
         // the runs already re-run are returned, so the caller records the re-run and never repeats
         // it; a failure before any run was re-run is a refusal
         if (rerun.code !== 0) {
-          return done.length > 0 ? { ok: true, runs: done } : ghFailed("run rerun", rerun.stderr);
+          return done.length > 0
+            ? { ok: true, runs: done }
+            : ghFailed("run rerun", rerun.stderr);
         }
         done.push({ id: r.id, attempt: r.attempt });
       }
@@ -1271,30 +1550,53 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async rerunState(repo, sha, saved) {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
-      const listed = await actionsRuns(repo, sha, "databaseId,status,conclusion,attempt");
+      const listed = await actionsRuns(
+        repo,
+        sha,
+        "databaseId,status,conclusion,attempt",
+      );
       if (isRefusal(listed)) return listed;
-      const now = saved.map((s) => ({ s, r: listed.find((r) => r.id === s.id) }));
-      if (now.some((x) => x.r === undefined)) return transient(RERUN_RUN_MISSING);
-      const runs = now.flatMap((x) => (x.r === undefined ? [] : [{ ...x.r, was: x.s.attempt }]));
+      const now = saved.map((s) => ({
+        s,
+        r: listed.find((r) => r.id === s.id),
+      }));
+      if (now.some((x) => x.r === undefined))
+        return transient(RERUN_RUN_MISSING);
+      const runs = now.flatMap((x) =>
+        x.r === undefined ? [] : [{ ...x.r, was: x.s.attempt }],
+      );
       if (runs.some((r) => r.attempt <= r.was || r.status !== "completed")) {
         return { ok: true, outcome: "pending" };
       }
       // a failed run that was not re-run (its re-run was refused) means CI still fails
       const failed =
         runs.some((r) => !NOT_FAILED_CONCLUSIONS.includes(r.conclusion)) ||
-        listed.some((r) => !saved.some((s) => s.id === r.id) && needsRerun(r.conclusion));
+        listed.some(
+          (r) => !saved.some((s) => s.id === r.id) && needsRerun(r.conclusion),
+        );
       return { ok: true, outcome: failed ? "failed" : "passed" };
     },
 
     async awayDiff(run, sha) {
       if (!SHA.test(sha)) return null;
       const result = await inGit(run, async (g) => {
-        const base = (await g(["merge-base", "refs/remotes/origin/HEAD", sha])).trim();
+        const base = (
+          await g(["merge-base", "refs/remotes/origin/HEAD", sha])
+        ).trim();
         if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
         const fields = (
-          await g(["diff", "--name-status", "-z", "--no-renames", base, sha, "--"])
+          await g([
+            "diff",
+            "--name-status",
+            "-z",
+            "--no-renames",
+            base,
+            sha,
+            "--",
+          ])
         ).split("\0");
-        if (fields.pop() !== "" || fields.length % 2 !== 0) throw new Error("unreadable diff");
+        if (fields.pop() !== "" || fields.length % 2 !== 0)
+          throw new Error("unreadable diff");
         const changes: AwayDiff["changes"] = [];
         for (let i = 0; i < fields.length; i += 2) {
           const status = fields[i];
@@ -1328,7 +1630,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         }
         return {
           ok: true as const,
-          descends: await yes(g, ["merge-base", "--is-ancestor", ancestor, head]),
+          descends: await yes(g, [
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            head,
+          ]),
         };
       });
       return result.ok && result.descends;
@@ -1337,14 +1644,23 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     async pushesFrom(run, ancestor, head, logins) {
       const repo = repoOf(run);
       const branch = ownBranch(run);
-      if (repo === undefined || branch === null || !SHA.test(ancestor) || !SHA.test(head))
+      if (
+        repo === undefined ||
+        branch === null ||
+        !SHA.test(ancestor) ||
+        !SHA.test(head)
+      )
         return false;
       // A proven chain does not change. A "no" may be GitHub's activity lagging behind the PR
       // poll, so it is kept only for a short pause and then read again; a failed read is not kept.
       const key = `${run.id}:${ancestor}:${head}`;
       const nowMs = (deps.now ?? Date.now)();
       const known = pushChains.get(key);
-      if (known !== undefined && (known.ok || nowMs - known.at < FETCH_RETRY_MS)) return known.ok;
+      if (
+        known !== undefined &&
+        (known.ok || nowMs - known.at < FETCH_RETRY_MS)
+      )
+        return known.ok;
       const listed = await ghJson(
         [
           "api",
@@ -1354,9 +1670,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       );
       if (isRefusal(listed) || !Array.isArray(listed)) return false;
       // the account gh acts as is always the operator's, whatever aliases are configured
-      const allowed = [...logins, ...(await ghLogin())].map((l) => l.toLowerCase());
+      const allowed = [...logins, ...(await ghLogin())].map((l) =>
+        l.toLowerCase(),
+      );
       if (allowed.length === 0) return false;
-      type Push = { before?: unknown; after?: unknown; actor?: { login?: unknown } | null };
+      type Push = {
+        before?: unknown;
+        after?: unknown;
+        actor?: { login?: unknown } | null;
+      };
       const pushes = listed as Push[];
       // Who pushed is GitHub's own record; a commit's committer or author is whatever its maker
       // wrote. The head follows the push only when every push from the run's own to the head was
@@ -1387,7 +1709,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const prefix = `${runId}:`;
       for (const key of [...unfetchable.keys()])
         if (key.startsWith(prefix)) unfetchable.delete(key);
-      for (const key of [...pushChains.keys()]) if (key.startsWith(prefix)) pushChains.delete(key);
+      for (const key of [...pushChains.keys()])
+        if (key.startsWith(prefix)) pushChains.delete(key);
     },
 
     async reviewPr(run, number) {
@@ -1433,7 +1756,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
 
     async hardRuleTouches(run, sha, hardRules, mergeCommitSha, baseSha) {
       const place = seatPlace(deps.config, run.agentId);
-      if (baseSha !== undefined && !SHA.test(baseSha)) throw new Error("invalid diff base");
+      if (baseSha !== undefined && !SHA.test(baseSha))
+        throw new Error("invalid diff base");
       if (mergeCommitSha !== undefined && !SHA.test(mergeCommitSha))
         throw new Error("invalid merge commit");
       if (place === null || !SHA.test(sha) || hardRules.length === 0) return [];
@@ -1442,26 +1766,46 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return deps.inClone(checkout, async () => {
         const common = await realpath(join(checkout, ".git"));
         const g = (a: string[]) =>
-          git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          git(checkout, a, common, {
+            gitDir: common,
+            timeoutMs: CREW_GIT_SLOW_MS,
+          });
         for (const commit of new Set(
-          [sha, mergeCommitSha ?? baseSha].filter((value): value is string => value !== undefined),
+          [sha, mergeCommitSha ?? baseSha].filter(
+            (value): value is string => value !== undefined,
+          ),
         )) {
           if (await have(g, commit)) continue;
           await g(["fetch", "--no-tags", "origin", commit]);
-          if (!(await have(g, commit))) throw new Error("diff input could not be fetched");
+          if (!(await have(g, commit)))
+            throw new Error("diff input could not be fetched");
         }
         const base = (
           await g([
             "merge-base",
-            mergeCommitSha ? `${mergeCommitSha}^1` : (baseSha ?? "refs/remotes/origin/HEAD"),
+            mergeCommitSha
+              ? `${mergeCommitSha}^1`
+              : (baseSha ?? "refs/remotes/origin/HEAD"),
             sha,
           ])
         ).trim();
         if (!SHA.test(base)) throw new Error("no merge base with origin/HEAD");
-        const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
+        const names = (
+          await g([
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            base,
+            sha,
+            "--",
+          ])
+        )
           .split("\0")
           .filter((p) => p !== "");
-        return names.filter((p) => hardRules.some((rule) => globMatches(rule, p, true)));
+        return names.filter((p) =>
+          hardRules.some((rule) => globMatches(rule, p, true)),
+        );
       });
     },
 
@@ -1476,8 +1820,18 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g, { seat }): Promise<GateResult> => {
         const { defaultBranch, mainSha } = tip ?? (await originNow(g, null));
-        if (known?.sha === sha && known.mainSha === mainSha && known.webChanged !== undefined) {
-          const { containsMain, hubOnly, strays, missionControlChanged, webChanged } = known;
+        if (
+          known?.sha === sha &&
+          known.mainSha === mainSha &&
+          known.webChanged !== undefined
+        ) {
+          const {
+            containsMain,
+            hubOnly,
+            strays,
+            missionControlChanged,
+            webChanged,
+          } = known;
           return {
             ok: true,
             facts: {
@@ -1486,27 +1840,47 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               hubOnly,
               strays: [...strays],
               webChanged,
-              ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
+              ...(missionControlChanged === undefined
+                ? {}
+                : { missionControlChanged }),
             },
           };
         }
         await fetchMain(g, defaultBranch, mainSha);
-        const containsMain = await yes(g, ["merge-base", "--is-ancestor", mainSha, sha]);
+        const containsMain = await yes(g, [
+          "merge-base",
+          "--is-ancestor",
+          mainSha,
+          sha,
+        ]);
         const mine = deps.store.branchCommits(run.repoId, run.branch ?? "");
         const ahead = (await g(["rev-list", sha, "--not", mainSha]))
           .split("\n")
           .filter((l) => l !== "");
         const hubOnly = ahead.every((c) => mine.has(c));
         const base = (await g(["merge-base", mainSha, sha])).trim();
-        if (!SHA.test(base)) throw new Error("no merge base with origin's default branch");
-        const names = (await g(["diff", "--name-only", "-z", "--no-renames", base, sha, "--"]))
+        if (!SHA.test(base))
+          throw new Error("no merge base with origin's default branch");
+        const names = (
+          await g([
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            base,
+            sha,
+            "--",
+          ])
+        )
           .split("\0")
           .filter((p) => p !== "");
         let missionControlChanged: boolean | undefined;
         if (names.some((p) => p.toLowerCase() === "claude.md")) {
           missionControlChanged = true;
           try {
-            const readClaude = async (commit: string): Promise<string | null> => {
+            const readClaude = async (
+              commit: string,
+            ): Promise<string | null> => {
               try {
                 await g(["cat-file", "-e", `${commit}:CLAUDE.md`]);
               } catch (e) {
@@ -1523,7 +1897,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             };
             const before = await readClaude(base);
             const after = await readClaude(sha);
-            missionControlChanged = mcSection(before ?? "") !== mcSection(after ?? "");
+            missionControlChanged =
+              mcSection(before ?? "") !== mcSection(after ?? "");
           } catch {
             /* an unreadable rules block stays protected */
           }
@@ -1540,11 +1915,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             : ownsHubFiles(deps.config, run.repoId)
               ? ["apps/web", "apps/web/**"]
               : [];
-        const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
+        const extra =
+          deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ??
+          [];
         const grants = runPathGrants(deps.store, run.id);
         const strays = names.filter(
           (p) =>
-            !grantedPath(grants, p) && (!pathInArea(seat.area, p) || isProtectedPath(p, extra)),
+            !grantedPath(grants, p) &&
+            (!pathInArea(seat.area, p) || isProtectedPath(p, extra)),
         );
         return {
           ok: true,
@@ -1554,7 +1932,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             hubOnly,
             strays,
             webChanged: names.some((p) => globMatchesAny(webGlobs, p)),
-            ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
+            ...(missionControlChanged === undefined
+              ? {}
+              : { missionControlChanged }),
           },
         };
       });
@@ -1581,7 +1961,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     },
 
     mainTip(run) {
-      return inGit(run, async (g) => ({ ok: true, sha: (await originNow(g, null)).mainSha }));
+      return inGit(run, async (g) => ({
+        ok: true,
+        sha: (await originNow(g, null)).mainSha,
+      }));
     },
 
     async updateBranch(run, mainSha, worktree) {
@@ -1593,117 +1976,140 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const git = deps.git ?? crewGit;
       const checkout = place.session.checkout;
       try {
-        return await deps.inClone(checkout, async (): Promise<UpdateBranchResult> => {
-          const common = await realpath(join(checkout, ".git"));
-          // the worktree's git dir as the clone registered it: never as the worktree's pointer says
-          const gitDir = await adminDirOf(common, worktree);
-          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
-          const g: G = (a) =>
-            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
-          const w = (a: string[], env?: NodeJS.ProcessEnv): Promise<string> =>
-            git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS, env });
-          const unmerged = async (): Promise<string[]> =>
-            (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
-              .split("\0")
-              .filter((p) => p !== "");
+        return await deps.inClone(
+          checkout,
+          async (): Promise<UpdateBranchResult> => {
+            const common = await realpath(join(checkout, ".git"));
+            // the worktree's git dir as the clone registered it: never as the worktree's pointer says
+            const gitDir = await adminDirOf(common, worktree);
+            if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+            const g: G = (a) =>
+              git(checkout, a, common, {
+                gitDir: common,
+                timeoutMs: CREW_GIT_SLOW_MS,
+              });
+            const w = (a: string[], env?: NodeJS.ProcessEnv): Promise<string> =>
+              git(worktree, a, common, {
+                gitDir,
+                timeoutMs: CREW_GIT_SLOW_MS,
+                env,
+              });
+            const unmerged = async (): Promise<string[]> =>
+              (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
+                .split("\0")
+                .filter((p) => p !== "");
 
-          const head = await w(["symbolic-ref", "--quiet", "HEAD"]).then(
-            (s) => s.trim(),
-            () => null, // detached
-          );
-          if (head !== `refs/heads/${branch}`) return final(MERGE_NOT_RUN_BRANCH);
-          const mergeHead = await w(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).then(
-            (s) => s.trim(),
-            (e: unknown) => {
-              if ((e as { code?: unknown } | null)?.code === 1) return null;
-              throw e;
-            },
-          );
-          if (mergeHead !== null) {
-            // this merge's conflict, left by a pass whose answer was lost: report it again
-            const files = mergeHead === mainSha ? await unmerged() : [];
-            return files.length > 0
-              ? { ok: true, kind: "conflict", files }
-              : final(UPDATE_MERGE_IN_PROGRESS);
-          }
-          const status = await w([
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-            ...COMMIT_ADD_PATHSPEC,
-          ]);
-          if (status !== "") return { ok: true, kind: "wait" };
-
-          const { defaultBranch } = await originNow(g, null);
-          await fetchMain(g, defaultBranch, mainSha);
-          const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
-          // No branch-only commits remain: there is nothing to merge main into.
-          if (await yes(g, ["merge-base", "--is-ancestor", before, mainSha])) {
-            return transient(UPDATE_UP_TO_DATE);
-          }
-          try {
-            await w(mainMergeArgs(branch, mainSha), gitIdentity(MC_MERGE_AUTHOR));
-          } catch (e) {
-            if ((e as { code?: unknown } | null)?.code === 1) {
-              const files = await unmerged();
-              if (files.length > 0) return { ok: true, kind: "conflict", files };
+            const head = await w(["symbolic-ref", "--quiet", "HEAD"]).then(
+              (s) => s.trim(),
+              () => null, // detached
+            );
+            if (head !== `refs/heads/${branch}`)
+              return final(MERGE_NOT_RUN_BRANCH);
+            const mergeHead = await w([
+              "rev-parse",
+              "-q",
+              "--verify",
+              "MERGE_HEAD",
+            ]).then(
+              (s) => s.trim(),
+              (e: unknown) => {
+                if ((e as { code?: unknown } | null)?.code === 1) return null;
+                throw e;
+              },
+            );
+            if (mergeHead !== null) {
+              // this merge's conflict, left by a pass whose answer was lost: report it again
+              const files = mergeHead === mainSha ? await unmerged() : [];
+              return files.length > 0
+                ? { ok: true, kind: "conflict", files }
+                : final(UPDATE_MERGE_IN_PROGRESS);
             }
-            await w(["merge", "--abort"]).catch(() => {});
-            return final(`${UPDATE_FAILED}: ${errText(e)}`);
-          }
-          const sha = (await w(["rev-parse", "--verify", "HEAD"])).trim();
-          if (sha === before) return transient(UPDATE_UP_TO_DATE);
-          deps.store.addRunCommit({
-            runId: run.id,
-            repoId: run.repoId,
-            branch,
-            sha,
-            at: (deps.now ?? Date.now)(),
-          });
-          // the PR's own change, before and after: the same when the merge only brought main in
-          let prSame = false;
-          try {
-            const b1 = (await g(["merge-base", mainSha, before])).trim();
-            const diffOf = (base: string, tip: string): Promise<string> =>
-              g([
-                "diff",
-                "--no-color",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                "--full-index",
-                "--binary",
-                base,
-                tip,
-                "--",
-              ]);
-            prSame =
-              SHA.test(b1) &&
-              prDiffKey(await diffOf(b1, before)) === prDiffKey(await diffOf(mainSha, sha));
-          } catch {
-            prSame = false;
-          }
-          const installNote = await installAfterSync(
-            checkout,
-            {
-              path: worktree,
-              gitDir,
+            const status = await w([
+              "status",
+              "--porcelain=v1",
+              "-z",
+              "--untracked-files=all",
+              ...COMMIT_ADD_PATHSPEC,
+            ]);
+            if (status !== "") return { ok: true, kind: "wait" };
+
+            const { defaultBranch } = await originNow(g, null);
+            await fetchMain(g, defaultBranch, mainSha);
+            const before = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+            // No branch-only commits remain: there is nothing to merge main into.
+            if (
+              await yes(g, ["merge-base", "--is-ancestor", before, mainSha])
+            ) {
+              return transient(UPDATE_UP_TO_DATE);
+            }
+            try {
+              await w(
+                mainMergeArgs(branch, mainSha),
+                gitIdentity(MC_MERGE_AUTHOR),
+              );
+            } catch (e) {
+              if ((e as { code?: unknown } | null)?.code === 1) {
+                const files = await unmerged();
+                if (files.length > 0)
+                  return { ok: true, kind: "conflict", files };
+              }
+              await w(["merge", "--abort"]).catch(() => {});
+              return final(`${UPDATE_FAILED}: ${errText(e)}`);
+            }
+            const sha = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+            if (sha === before) return transient(UPDATE_UP_TO_DATE);
+            deps.store.addRunCommit({
+              runId: run.id,
+              repoId: run.repoId,
               branch,
-              baseSha: mainSha,
-            },
-            before,
-            deps.config.crew?.worktrees ?? "",
-          );
-          return {
-            ok: true,
-            kind: "merged",
-            sha,
-            parent: before,
-            prSame,
-            ...(installNote ? { installNote } : {}),
-          };
-        });
+              sha,
+              at: (deps.now ?? Date.now)(),
+            });
+            // the PR's own change, before and after: the same when the merge only brought main in
+            let prSame = false;
+            try {
+              const b1 = (await g(["merge-base", mainSha, before])).trim();
+              const diffOf = (base: string, tip: string): Promise<string> =>
+                g([
+                  "diff",
+                  "--no-color",
+                  "--no-ext-diff",
+                  "--no-textconv",
+                  "--no-renames",
+                  "--full-index",
+                  "--binary",
+                  base,
+                  tip,
+                  "--",
+                ]);
+              prSame =
+                SHA.test(b1) &&
+                prDiffKey(await diffOf(b1, before)) ===
+                  prDiffKey(await diffOf(mainSha, sha));
+            } catch {
+              prSame = false;
+            }
+            const installNote = await installAfterSync(
+              checkout,
+              {
+                path: worktree,
+                gitDir,
+                branch,
+                baseSha: mainSha,
+              },
+              before,
+              deps.config.crew?.worktrees ?? "",
+            );
+            return {
+              ok: true,
+              kind: "merged",
+              sha,
+              parent: before,
+              prSame,
+              ...(installNote ? { installNote } : {}),
+            };
+          },
+        );
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);
       }
@@ -1715,27 +2121,36 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const git = deps.git ?? crewGit;
       const checkout = place.session.checkout;
       try {
-        return await deps.inClone(checkout, async (): Promise<string[] | Refusal> => {
-          const common = await realpath(join(checkout, ".git"));
-          const gitDir = await adminDirOf(common, worktree);
-          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
-          const status = await git(
-            worktree,
-            ["status", "--porcelain=v1", "-z", "--untracked-files=all", ...COMMIT_ADD_PATHSPEC],
-            common,
-            { gitDir, timeoutMs: CREW_GIT_SLOW_MS },
-          );
-          const paths: string[] = [];
-          const entries = status.split("\0");
-          for (let i = 0; i < entries.length; i++) {
-            const e = entries[i] ?? "";
-            if (e === "") continue;
-            paths.push(e.slice(3));
-            // a rename or copy is followed by the path it came from
-            if (e[0] === "R" || e[0] === "C") i++;
-          }
-          return paths;
-        });
+        return await deps.inClone(
+          checkout,
+          async (): Promise<string[] | Refusal> => {
+            const common = await realpath(join(checkout, ".git"));
+            const gitDir = await adminDirOf(common, worktree);
+            if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+            const status = await git(
+              worktree,
+              [
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=all",
+                ...COMMIT_ADD_PATHSPEC,
+              ],
+              common,
+              { gitDir, timeoutMs: CREW_GIT_SLOW_MS },
+            );
+            const paths: string[] = [];
+            const entries = status.split("\0");
+            for (let i = 0; i < entries.length; i++) {
+              const e = entries[i] ?? "";
+              if (e === "") continue;
+              paths.push(e.slice(3));
+              // a rename or copy is followed by the path it came from
+              if (e[0] === "R" || e[0] === "C") i++;
+            }
+            return paths;
+          },
+        );
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);
       }
@@ -1749,49 +2164,67 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const git = deps.git ?? crewGit;
       const checkout = place.session.checkout;
       try {
-        return await deps.inClone(checkout, async (): Promise<PublishResult> => {
-          const common = await realpath(join(checkout, ".git"));
-          const gitDir = await adminDirOf(common, worktree);
-          if (gitDir === null) return final(UPDATE_NO_WORKTREE);
-          const g: G = (a) => git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
-          // only the run's own branch moves; another branch, or a detached HEAD, is left alone
-          const head = await g(["symbolic-ref", "--quiet", "HEAD"]).then(
-            (s) => s.trim(),
-            () => null,
-          );
-          if (run.branch === null || head !== `refs/heads/${run.branch}`) {
-            return final(MERGE_NOT_RUN_BRANCH);
-          }
-          if (!(await have(g, sha))) await g(["fetch", "--no-tags", "origin", sha]);
-          if (!(await have(g, sha))) return final("the new commit could not be fetched");
-          if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {
-            return final("the branch has diverged from the PR's head; it was not changed");
-          }
-          const before = (await g(["rev-parse", "--verify", "HEAD"])).trim();
-          await g(["merge", "--ff-only", "--quiet", sha]);
-          // the moved-in commits may change the lockfile: the worktree's install follows them
-          const gc: G = (a) =>
-            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
-          let installNote: string | undefined;
-          try {
-            const { defaultBranch, mainSha } = await originNow(gc, null);
-            await fetchMain(gc, defaultBranch, mainSha);
-            installNote = await installAfterSync(
-              checkout,
-              { path: worktree, gitDir, branch: run.branch, baseSha: mainSha },
-              before,
-              deps.config.crew?.worktrees ?? "",
+        return await deps.inClone(
+          checkout,
+          async (): Promise<PublishResult> => {
+            const common = await realpath(join(checkout, ".git"));
+            const gitDir = await adminDirOf(common, worktree);
+            if (gitDir === null) return final(UPDATE_NO_WORKTREE);
+            const g: G = (a) =>
+              git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS });
+            // only the run's own branch moves; another branch, or a detached HEAD, is left alone
+            const head = await g(["symbolic-ref", "--quiet", "HEAD"]).then(
+              (s) => s.trim(),
+              () => null,
             );
-          } catch (e) {
-            installNote = `dependencies may have changed; install not run: ${errText(e)}`;
-          }
-          const counted = Number((await g(["rev-list", "--count", `${before}..${sha}`])).trim());
-          return {
-            ok: true,
-            ...(Number.isSafeInteger(counted) ? { commits: counted } : {}),
-            ...(installNote ? { installNote } : {}),
-          };
-        });
+            if (run.branch === null || head !== `refs/heads/${run.branch}`) {
+              return final(MERGE_NOT_RUN_BRANCH);
+            }
+            if (!(await have(g, sha)))
+              await g(["fetch", "--no-tags", "origin", sha]);
+            if (!(await have(g, sha)))
+              return final("the new commit could not be fetched");
+            if (!(await yes(g, ["merge-base", "--is-ancestor", "HEAD", sha]))) {
+              return final(
+                "the branch has diverged from the PR's head; it was not changed",
+              );
+            }
+            const before = (await g(["rev-parse", "--verify", "HEAD"])).trim();
+            await g(["merge", "--ff-only", "--quiet", sha]);
+            // the moved-in commits may change the lockfile: the worktree's install follows them
+            const gc: G = (a) =>
+              git(checkout, a, common, {
+                gitDir: common,
+                timeoutMs: CREW_GIT_SLOW_MS,
+              });
+            let installNote: string | undefined;
+            try {
+              const { defaultBranch, mainSha } = await originNow(gc, null);
+              await fetchMain(gc, defaultBranch, mainSha);
+              installNote = await installAfterSync(
+                checkout,
+                {
+                  path: worktree,
+                  gitDir,
+                  branch: run.branch,
+                  baseSha: mainSha,
+                },
+                before,
+                deps.config.crew?.worktrees ?? "",
+              );
+            } catch (e) {
+              installNote = `dependencies may have changed; install not run: ${errText(e)}`;
+            }
+            const counted = Number(
+              (await g(["rev-list", "--count", `${before}..${sha}`])).trim(),
+            );
+            return {
+              ok: true,
+              ...(Number.isSafeInteger(counted) ? { commits: counted } : {}),
+              ...(installNote ? { installNote } : {}),
+            };
+          },
+        );
       } catch (e) {
         return transient(`git failed: ${errText(e)}`);
       }
@@ -1803,17 +2236,34 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (repo === undefined || n === null) return final(MERGE_NO_PR);
       if (expectedSha !== undefined) {
         const pr = await ghJson(
-          ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
+          [
+            "pr",
+            "view",
+            String(n),
+            `--repo=${repo}`,
+            "--json",
+            "state,headRefOid",
+          ],
           "pr view",
         );
         if (isRefusal(pr)) return pr;
         if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
         if (pr.headRefOid !== expectedSha) return final(MERGE_HEAD_MOVED);
       }
-      const ready = await ghDo(["pr", "ready", String(n), `--repo=${repo}`], "pr ready");
+      const ready = await ghDo(
+        ["pr", "ready", String(n), `--repo=${repo}`],
+        "pr ready",
+      );
       if (!ready.ok || expectedSha === undefined) return ready;
       const after = await ghJson(
-        ["pr", "view", String(n), `--repo=${repo}`, "--json", "state,headRefOid"],
+        [
+          "pr",
+          "view",
+          String(n),
+          `--repo=${repo}`,
+          "--json",
+          "state,headRefOid",
+        ],
         "pr view",
       );
       if (isRefusal(after) || after.headRefOid !== expectedSha) {
@@ -1831,7 +2281,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const repo = repoOf(run);
       const n = run.loop?.prNumber ?? null;
       if (repo === undefined || n === null) return final(MERGE_NO_PR);
-      return ghDo(["pr", "ready", String(n), `--repo=${repo}`, "--undo"], "pr ready --undo");
+      return ghDo(
+        ["pr", "ready", String(n), `--repo=${repo}`, "--undo"],
+        "pr ready --undo",
+      );
     },
 
     async merge(run, sha) {
@@ -1839,48 +2292,72 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const n = run.loop?.prNumber ?? null;
       if (repo === undefined || n === null) return final(MERGE_NO_PR);
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
-      return queued(mergeQueue, run.repoId, async (): Promise<PublishResult> => {
-        const view = async (): Promise<Record<string, unknown> | Refusal> =>
-          ghJson(
+      return queued(
+        mergeQueue,
+        run.repoId,
+        async (): Promise<PublishResult> => {
+          const view = async (): Promise<Record<string, unknown> | Refusal> =>
+            ghJson(
+              [
+                "pr",
+                "view",
+                String(n),
+                `--repo=${repo}`,
+                "--json",
+                "state,headRefOid,baseRefName,headRefName,isCrossRepository,mergeable",
+              ],
+              "pr view",
+            );
+          const pr = await view();
+          if (isRefusal(pr)) return pr;
+          if (pr.state === "MERGED") return { ok: true };
+          if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
+          if (pr.headRefOid !== sha) return final(MERGE_HEAD_MOVED);
+          if (
+            pr.isCrossRepository !== false ||
+            pr.headRefName !== ownBranch(run)
+          ) {
+            return final(MERGE_PR_NOT_RUNS);
+          }
+          if (pr.mergeable === "CONFLICTING")
+            return transient(MERGE_CONFLICTING);
+          const base = await inGit(run, async (g): Promise<PublishResult> => {
+            const { defaultBranch } = await originNow(g, null);
+            return pr.baseRefName === defaultBranch
+              ? { ok: true }
+              : final(MERGE_PR_NOT_RUNS);
+          });
+          if (!base.ok) return base;
+          if (
+            activeAway(
+              deps.store,
+              (deps.now ?? Date.now)(),
+              deps.config.operator.timezone,
+            )
+          )
+            return final(AWAY_WRITES_REFUSED);
+          const merged = await ghDo(
             [
               "pr",
-              "view",
+              "merge",
               String(n),
               `--repo=${repo}`,
-              "--json",
-              "state,headRefOid,baseRefName,headRefName,isCrossRepository,mergeable",
+              "--merge",
+              `--match-head-commit=${sha}`,
             ],
-            "pr view",
+            "pr merge",
           );
-        const pr = await view();
-        if (isRefusal(pr)) return pr;
-        if (pr.state === "MERGED") return { ok: true };
-        if (pr.state !== "OPEN") return final(MERGE_PR_NOT_OPEN);
-        if (pr.headRefOid !== sha) return final(MERGE_HEAD_MOVED);
-        if (pr.isCrossRepository !== false || pr.headRefName !== ownBranch(run)) {
-          return final(MERGE_PR_NOT_RUNS);
-        }
-        if (pr.mergeable === "CONFLICTING") return transient(MERGE_CONFLICTING);
-        const base = await inGit(run, async (g): Promise<PublishResult> => {
-          const { defaultBranch } = await originNow(g, null);
-          return pr.baseRefName === defaultBranch ? { ok: true } : final(MERGE_PR_NOT_RUNS);
-        });
-        if (!base.ok) return base;
-        if (activeAway(deps.store, (deps.now ?? Date.now)(), deps.config.operator.timezone))
-          return final(AWAY_WRITES_REFUSED);
-        const merged = await ghDo(
-          ["pr", "merge", String(n), `--repo=${repo}`, "--merge", `--match-head-commit=${sha}`],
-          "pr merge",
-        );
-        if (merged.ok) return merged;
-        // the merge may have gone through with the reply lost, or GitHub has found a conflict
-        // its earlier answer did not show yet
-        const after = await view();
-        if (!isRefusal(after) && after.state === "MERGED") return { ok: true };
-        if (!isRefusal(after) && after.mergeable === "CONFLICTING")
-          return transient(MERGE_CONFLICTING);
-        return merged;
-      });
+          if (merged.ok) return merged;
+          // the merge may have gone through with the reply lost, or GitHub has found a conflict
+          // its earlier answer did not show yet
+          const after = await view();
+          if (!isRefusal(after) && after.state === "MERGED")
+            return { ok: true };
+          if (!isRefusal(after) && after.mergeable === "CONFLICTING")
+            return transient(MERGE_CONFLICTING);
+          return merged;
+        },
+      );
     },
 
     async fileMinorFindings(run, prNumber, techDebtIssue) {
@@ -1911,13 +2388,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return { ...added, issueNumber };
       };
       const remembered =
-        run.loop.minorIssueNumber ?? deps.store.run(run.id)?.loop?.minorIssueNumber;
+        run.loop.minorIssueNumber ??
+        deps.store.run(run.id)?.loop?.minorIssueNumber;
       if (remembered !== undefined) return addItem(remembered);
       const file = crewPrBodyPath(deps.dbPath);
       let wrote = false;
       try {
         const intent =
-          run.loop.minorIssueCreation ?? deps.store.run(run.id)?.loop?.minorIssueCreation;
+          run.loop.minorIssueCreation ??
+          deps.store.run(run.id)?.loop?.minorIssueCreation;
         if (intent !== undefined) {
           if (intent.prNumber !== prNumber)
             return final("minor issue creation intent names another PR");
@@ -1946,7 +2425,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               issue.title === minorIssueTitle(prNumber) &&
               "body" in issue &&
               typeof issue.body === "string" &&
-              issue.body.split(/\r?\n/)[0] === `Minor findings from #${prNumber}.` &&
+              issue.body.split(/\r?\n/)[0] ===
+                `Minor findings from #${prNumber}.` &&
               "number" in issue &&
               Number.isSafeInteger(issue.number) &&
               Number(issue.number) > 0,
@@ -1956,27 +2436,42 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               "minor issue creation outcome is uncertain; collect the findings manually",
             );
           const issueNumber = matches[0]?.number;
-          if (issueNumber === undefined) return final("minor issue could not be recovered");
+          if (issueNumber === undefined)
+            return final("minor issue could not be recovered");
           run.loop.minorIssueNumber = issueNumber;
           deps.store.setRunLoop(run.id, run.loop);
           return await addItem(issueNumber);
         }
         const pr = await ghJson(
-          ["pr", "view", String(prNumber), `--repo=${repo.github}`, "--json=body,labels"],
+          [
+            "pr",
+            "view",
+            String(prNumber),
+            `--repo=${repo.github}`,
+            "--json=body,labels",
+          ],
           "pr view",
         );
         if (isRefusal(pr)) return pr;
-        if (typeof pr.body !== "string") return final("the PR body could not be read");
+        if (typeof pr.body !== "string")
+          return final("the PR body could not be read");
         const findings = parseMinorFindings(pr.body);
         if (findings.length === 0) {
-          const section = pr.body.split(MINOR_HEADING)[1]?.split(/^#{1,2}\s/m)[0] ?? "";
-          if (/logged [1-9]\d* minor findings?; they are listed in Mission Control\./.test(section))
+          const section =
+            pr.body.split(MINOR_HEADING)[1]?.split(/^#{1,2}\s/m)[0] ?? "";
+          if (
+            /logged [1-9]\d* minor findings?; they are listed in Mission Control\./.test(
+              section,
+            )
+          )
             return final(
               "RETRO logged minor findings in Mission Control without listing them in the PR body",
             );
           return { ok: true };
         }
-        const appendRolling = async (issueNumber: number): Promise<PublishResult | null> => {
+        const appendRolling = async (
+          issueNumber: number,
+        ): Promise<PublishResult | null> => {
           const viewed = await deps.gh(
             [
               "issue",
@@ -1993,8 +2488,16 @@ export function createPublisher(deps: McToolsDeps): Publisher {
               : ghFailed("rolling tech-debt issue view", viewed.stderr);
           let issue: Record<string, unknown>;
           try {
-            const parsed: unknown = JSON.parse(viewed.stdout);
-            if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+            const parsed: unknown = parseJson<unknown>(
+              viewed.stdout,
+              undefined,
+              rethrowJson,
+            );
+            if (
+              typeof parsed !== "object" ||
+              parsed === null ||
+              Array.isArray(parsed)
+            )
               return transient("gh rolling tech-debt issue view gave no JSON");
             issue = parsed as Record<string, unknown>;
           } catch {
@@ -2014,7 +2517,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             )
           )
             return { ok: true };
-          await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+          await writeFile(file, minorIssueBody(prNumber, findings), {
+            mode: 0o600,
+            flag: "wx",
+          });
           wrote = true;
           return await ghDo(
             [
@@ -2041,9 +2547,14 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             ],
             { cwd: cwd() },
           );
-          if (listed.code !== 0) return ghFailed("rolling tech-debt issue list", listed.stderr);
+          if (listed.code !== 0)
+            return ghFailed("rolling tech-debt issue list", listed.stderr);
           try {
-            const issues: unknown = JSON.parse(listed.stdout);
+            const issues: unknown = parseJson<unknown>(
+              listed.stdout,
+              undefined,
+              rethrowJson,
+            );
             if (Array.isArray(issues)) {
               const matches = issues.filter(
                 (issue): issue is { number: number } =>
@@ -2075,7 +2586,9 @@ export function createPublisher(deps: McToolsDeps): Publisher {
                     : typeof l === "object" && l !== null && "name" in l
                       ? l.name
                       : null;
-                return typeof name === "string" && name.startsWith("area:") ? [name] : [];
+                return typeof name === "string" && name.startsWith("area:")
+                  ? [name]
+                  : [];
               })
             : [];
         const prAreas = areas(pr.labels);
@@ -2084,9 +2597,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             ? undefined
             : deps.store.boardItem(run.repoId, issueOf(run) as number);
         const labels = [
-          ...new Set([...(prAreas.length > 0 ? prAreas : areas(ticket?.labels)), "chore"]),
+          ...new Set([
+            ...(prAreas.length > 0 ? prAreas : areas(ticket?.labels)),
+            "chore",
+          ]),
         ];
-        await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+        await writeFile(file, minorIssueBody(prNumber, findings), {
+          mode: 0o600,
+          flag: "wx",
+        });
         wrote = true;
         run.loop.minorIssueCreation = { prNumber };
         deps.store.setRunLoop(run.id, run.loop);
@@ -2140,7 +2659,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (isRefusal(view)) return view;
       if (view.state !== "OPEN") return { ok: true };
       return ghDo(
-        ["issue", "close", String(issue), `--repo=${repo}`, "--reason=completed"],
+        [
+          "issue",
+          "close",
+          String(issue),
+          `--repo=${repo}`,
+          "--reason=completed",
+        ],
         "issue close",
       );
     },
@@ -2150,7 +2675,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (branch === null) return final(MERGE_NOT_RUN_BRANCH);
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       return inGit(run, async (g): Promise<PublishResult> => {
-        const { defaultBranch, mainSha, branchSha } = await originNow(g, branch);
+        const { defaultBranch, mainSha, branchSha } = await originNow(
+          g,
+          branch,
+        );
         if (branch === defaultBranch) return final(MERGE_NOT_RUN_BRANCH);
         if (branchSha === null) return { ok: true };
         let lease = sha;
@@ -2183,7 +2711,8 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             () => false,
           );
           if (gone) return { ok: true };
-          return typeof out === "string" && /^!\t[^\t]*\t\[rejected\]/m.test(out)
+          return typeof out === "string" &&
+            /^!\t[^\t]*\t\[rejected\]/m.test(out)
             ? final(MERGE_BRANCH_MOVED)
             : transient(errText(e));
         }
@@ -2198,7 +2727,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         let tip: string;
         try {
           tip = (
-            await g(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`])
+            await g([
+              "rev-parse",
+              "--verify",
+              "--quiet",
+              `refs/heads/${branch}^{commit}`,
+            ])
           ).trim();
         } catch (e) {
           if ((e as { code?: unknown } | null)?.code === 1) return { ok: true };
@@ -2209,10 +2743,18 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const { defaultBranch, mainSha } = await originNow(g, null);
           await fetchMain(g, defaultBranch, mainSha);
           const merged = run.loop?.merging?.sha;
-          const onMain = await yes(g, ["merge-base", "--is-ancestor", tip, mainSha]);
+          const onMain = await yes(g, [
+            "merge-base",
+            "--is-ancestor",
+            tip,
+            mainSha,
+          ]);
           if (
             !onMain &&
-            !(merged !== undefined && (await onlyHubMerges(g, branch, merged, tip, mainSha)))
+            !(
+              merged !== undefined &&
+              (await onlyHubMerges(g, branch, merged, tip, mainSha))
+            )
           ) {
             return final(MERGE_BRANCH_MOVED);
           }
@@ -2228,9 +2770,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       try {
         const r = await inGit(run, async (g): Promise<PublishResult> => {
           try {
-            await g(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}^{commit}`]);
+            await g([
+              "rev-parse",
+              "--verify",
+              "--quiet",
+              `refs/heads/${branch}^{commit}`,
+            ]);
           } catch (e) {
-            if ((e as { code?: unknown } | null)?.code === 1) return { ok: true };
+            if ((e as { code?: unknown } | null)?.code === 1)
+              return { ok: true };
             throw e;
           }
           return final(MERGE_BRANCH_MOVED);

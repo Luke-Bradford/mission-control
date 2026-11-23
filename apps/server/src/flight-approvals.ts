@@ -6,6 +6,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { FlightApprovalRule } from "@mc/core";
+import { parseJson } from "./json.ts";
 import type { Store } from "./store.ts";
 
 export const FLIGHT_APPROVALS_SETTING = "flight.approvals";
@@ -26,7 +27,7 @@ export interface FlightApproval {
 
 function read(store: Store): FlightApproval[] {
   try {
-    const parsed: unknown = JSON.parse(store.getSetting(FLIGHT_APPROVALS_SETTING) ?? "[]");
+    const parsed: unknown = parseJson(store.getSetting(FLIGHT_APPROVALS_SETTING), []);
     return Array.isArray(parsed) ? (parsed as FlightApproval[]) : [];
   } catch {
     return [];

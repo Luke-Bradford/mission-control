@@ -168,6 +168,7 @@ import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -937,10 +938,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return undefined;
   }
 
+  /** The queued handoff lines in a Codex outbox file; an unreadable file reads as empty. */
+  const readOutbox = (path: string): [string, string][] => {
+    const entries = parseJson<unknown>(readFileSync(path, "utf8"), []);
+    return Array.isArray(entries)
+      ? entries.filter(
+          (e): e is [string, string] =>
+            Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "string",
+        )
+      : [];
+  };
+
   const transferKey = (runId: string) => `account-transfer:${runId}`;
   function transferState(runId: string): AccountTransfer | null {
     const text = store.getSetting(transferKey(runId));
-    return text === null ? null : (JSON.parse(text) as AccountTransfer);
+    return parseJson<AccountTransfer | null>(text, null);
   }
   function runBindingProblem(run: Run, accountId: string): boolean {
     const account = config.accounts.find((a) => a.id === accountId);
@@ -1913,7 +1925,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!init && !line.includes('"total_cost_usd"')) continue;
         let ev: unknown;
         try {
-          ev = JSON.parse(line);
+          ev = parseJson<unknown>(line, undefined, rethrowJson);
         } catch {
           continue;
         }
@@ -2418,7 +2430,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function removeCodexTmp(runId: string, value: string): boolean {
     let saved: { worktree: string; tmp: string };
     try {
-      saved = JSON.parse(value) as { worktree: string; tmp: string };
+      saved = parseJson<unknown>(value, undefined, rethrowJson) as {
+        worktree: string;
+        tmp: string;
+      };
       if (typeof saved.worktree !== "string" || typeof saved.tmp !== "string") return false;
       const parent = dirname(saved.tmp);
       const key = basename(saved.tmp);
@@ -2871,7 +2886,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           });
           return;
         }
-        const denied = JSON.parse(store.getSetting(profilePolicyKey(run.id)) ?? "[]") as string[];
+        const denied = parseJson(store.getSetting(profilePolicyKey(run.id)), []) as string[];
         const flight = crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full";
         const credentialsChanged =
           flight &&
@@ -3367,7 +3382,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     transfer.queued = [
       ...new Map<string, string>([
         ...(transfer.queued ?? []),
-        ...(existsSync(outboxPath) ? JSON.parse(readFileSync(outboxPath, "utf8")) : []),
+        ...(existsSync(outboxPath) ? readOutbox(outboxPath) : []),
       ]),
     ].filter(([id]) => id !== transfer.handoffId && !superseded.has(id));
     save();
@@ -3404,7 +3419,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (stopping || runGone(run.id, seatId)) return refused(SHUTTING_DOWN);
     const mergeOutbox = (handoff = false) => {
       const entries = existsSync(outboxPath)
-        ? new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")))
+        ? new Map<string, string>(readOutbox(outboxPath))
         : new Map<string, string>();
       for (const id of superseded) entries.delete(id);
       for (const [id, text] of transfer.queued ?? []) entries.set(id, text);
@@ -3439,8 +3454,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (existsSync(run.transcriptPath)) {
         for (const line of readFileSync(run.transcriptPath, "utf8").split("\n")) {
           try {
-            const receipt = JSON.parse(line);
-            if (receipt.type === CODEX_DELIVERY) entries.delete(receipt.id);
+            const receipt = parseJson<{ type?: unknown; id?: unknown } | undefined>(
+              line,
+              undefined,
+              rethrowJson,
+            );
+            if (receipt === undefined) continue;
+            if (receipt.type === CODEX_DELIVERY && typeof receipt.id === "string")
+              entries.delete(receipt.id);
           } catch {
             // A partial final transcript line has no receipt yet.
           }
@@ -3486,7 +3507,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       transfer.target = transfer.source;
       // A failed fresh start must not deliver its handoff to the recovered source.
       if (transfer.handoffId && existsSync(outboxPath)) {
-        const entries = new Map<string, string>(JSON.parse(readFileSync(outboxPath, "utf8")));
+        const entries = new Map<string, string>(readOutbox(outboxPath));
         entries.delete(transfer.handoffId);
         writePrivate(outboxPath, JSON.stringify([...entries]));
       }

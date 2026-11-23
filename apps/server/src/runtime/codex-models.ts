@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { CODEX_COMMAND, CODEX_PROJECT_DOC_CONFIG } from "@mc/core";
 import { z } from "zod";
 import { type CliBinding, codexProfile } from "../accounts/bindings.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 
 const MODEL_TIMEOUT_MS = 20_000;
 const MAX_MODEL_BYTES = 1024 * 1024;
@@ -172,7 +173,7 @@ function readModels(deps: ModelDeps): Promise<Map<string, readonly string[]>> {
             buffer = buffer.slice(at + 1);
             let message: unknown;
             try {
-              message = JSON.parse(line);
+              message = parseJson<unknown>(line, undefined, rethrowJson);
             } catch {
               return finish("invalid app-server JSON");
             }

@@ -9,6 +9,7 @@ import {
 } from "@mc/core";
 import { z } from "zod";
 import type { CcConfig } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 /** A full PaceSettings. `until` is the end time; the server sets `since` when it is switched on. */
@@ -32,7 +33,7 @@ export function readPaceSettings(store: Store): PaceSettings {
   const raw = store.getSetting(PACE_SETTING);
   if (raw === null) return DEFAULT_PACE;
   try {
-    const parsed = PaceBody.safeParse(JSON.parse(raw));
+    const parsed = PaceBody.safeParse(parseJson<unknown>(raw, undefined, rethrowJson));
     if (parsed.success) return parsed.data;
   } catch {
     /* falls through to normal */

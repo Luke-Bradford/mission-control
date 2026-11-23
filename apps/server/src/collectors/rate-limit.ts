@@ -6,6 +6,7 @@ import {
   type GithubRateLimit,
   type GithubRateState,
 } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 const HOUR_MS = 60 * 60_000;
@@ -102,7 +103,7 @@ export class RateLimits {
     const raw = store.getSetting(GITHUB_RATE_SETTING);
     if (raw === null) return;
     try {
-      const saved = JSON.parse(raw) as GithubRateState;
+      const saved = parseJson<unknown>(raw, undefined, rethrowJson) as GithubRateState;
       this.queries = saved.queries;
       this.pollCost = saved.pollCost;
     } catch {

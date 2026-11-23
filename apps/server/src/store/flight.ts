@@ -25,6 +25,7 @@ import {
   memoryTopicKey,
   validateMemoryNote,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 import { toFlightDecision } from "./rows.ts";
 import type { FlightBriefRow } from "./types.ts";
 
@@ -45,14 +46,20 @@ export function flightQueries(
       db
         .prepare("SELECT entry FROM flight_plans WHERE session_id = ? ORDER BY id")
         .all(session) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightPlanInput & { createdAt: number });
+    ).flatMap((r) => {
+      const entry = parseJson<(FlightPlanInput & { createdAt: number }) | null>(r.entry, null);
+      return entry === null ? [] : [entry];
+    });
 
   const flightWatch = (session: string): FlightWatchEntry[] =>
     (
       db
         .prepare("SELECT entry FROM flight_watch WHERE session_id = ? ORDER BY id")
         .all(session) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightWatchEntry);
+    ).flatMap((r) => {
+      const entry = parseJson<FlightWatchEntry | null>(r.entry, null);
+      return entry === null ? [] : [entry];
+    });
 
   const prepareFlightPlans = (
     session: string,
@@ -186,7 +193,7 @@ export function flightQueries(
       return rows.map((r) => ({
         runId: r.run_id,
         at: r.at,
-        reasons: JSON.parse(r.reasons) as string[],
+        reasons: parseJson<string[]>(r.reasons, []),
         ...(r.wake_id === null ? {} : { wakeId: r.wake_id }),
       }));
     },
@@ -206,9 +213,10 @@ export function flightQueries(
         db
           .prepare("SELECT entry FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?")
           .all(FLIGHT_INCOMING_LIMIT) as Row[]
-      ).map((r) => {
-        const entry = JSON.parse(r.entry as string) as FlightArrivalDisposition;
-        return { ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null };
+      ).flatMap((r) => {
+        const entry = parseJson<FlightArrivalDisposition | null>(r.entry, null);
+        if (entry === null) return [];
+        return [{ ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null }];
       });
     },
 
@@ -426,10 +434,11 @@ export function flightQueries(
         db
           .prepare("SELECT entry FROM flight_ledger WHERE session_id = ? ORDER BY key")
           .all(session) as { entry: string }[]
-      ).map((r) => {
-        const entry = JSON.parse(r.entry) as FlightLedgerEntry;
+      ).flatMap((r) => {
+        const entry = parseJson<FlightLedgerEntry | null>(r.entry, null);
+        if (entry === null) return [];
         const held = pointers.get(entry.key);
-        return held === undefined ? entry : { ...entry, pointers: held };
+        return [held === undefined ? entry : { ...entry, pointers: held }];
       });
     },
 

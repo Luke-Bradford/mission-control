@@ -23,6 +23,7 @@ import { z } from "zod";
 import { activeAway } from "../away.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
 import { crewDir } from "../store/crew-paths.ts";
@@ -274,7 +275,10 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
             `repos/${repo.github}/milestones?state=all&per_page=100`,
           ]);
           try {
-            const milestones = JSON.parse(list.stdout) as { number: number; title: string }[];
+            const milestones = parseJson<unknown>(list.stdout, undefined, rethrowJson) as {
+              number: number;
+              title: string;
+            }[];
             const match = milestones.find((m) => m.title === a.milestone);
             if (!list.ok || match === undefined)
               return stop(`No milestone titled "${a.milestone}".`);

@@ -10,6 +10,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
@@ -102,7 +103,7 @@ export async function closeBlocker(
   let mentioning: Set<number> | null = null;
   if (searched.code === 0) {
     try {
-      const found: unknown = JSON.parse(searched.stdout);
+      const found: unknown = parseJson<unknown>(searched.stdout, undefined, rethrowJson);
       if (Array.isArray(found) && found.length < FLIGHT_CLOSE_SEARCH_LIMIT)
         mentioning = new Set(found.map((f) => asNum(asRecord(f).number)));
     } catch {

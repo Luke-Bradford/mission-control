@@ -116,6 +116,7 @@ import { accountAtStop } from "../engine/queue.ts";
 import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { loopTries } from "../loop/history.ts";
 import { loopPause } from "../loop/pause.ts";
 import { cloneData } from "../repo/clone.ts";
@@ -197,7 +198,7 @@ function readStop(store: Store, loopId: string): DriverStop | null {
   const raw = store.getSetting(driverStopKey(loopId));
   if (raw === null) return null;
   try {
-    const v = JSON.parse(raw) as Partial<DriverStop> | null;
+    const v = parseJson<unknown>(raw, undefined, rethrowJson) as Partial<DriverStop> | null;
     return v && typeof v.reason === "string" && typeof v.at === "number" ? (v as DriverStop) : null;
   } catch {
     return null;
