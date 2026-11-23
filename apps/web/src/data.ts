@@ -176,6 +176,8 @@ export const RESOURCES = {
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
   }),
+  /** Spend per merged change, the building share and the open waste alarms; Audit's Do next and How we build read it. */
+  waste: { path: "/api/waste", topic: "agents" },
   comms: (agentId: string): ResourceRef => ({
     path: `/api/comms/${enc(agentId)}`,
     topic: "agents",
