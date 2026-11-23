@@ -183,6 +183,9 @@
   overflow-y: auto;
   border-left: 1px solid var(--line);
 }
+.comms-metric button {
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+}
 .crew-map-side section {
   padding: var(--sp-2);
   border-bottom: 1px solid var(--line);
@@ -216,9 +219,6 @@
   white-space: nowrap;
   background: transparent;
   border: 0;
-}
-.comms-metric button {
-  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 .crew-map-full {
   position: fixed;
