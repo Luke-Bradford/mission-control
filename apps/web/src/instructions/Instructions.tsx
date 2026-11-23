@@ -9,7 +9,7 @@ import {
 } from "@mc/core";
 import { useEffect, useId, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
-import { useTz } from "../clock.ts";
+import { useLocale, useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import {
   ACTIONS,
@@ -132,6 +132,7 @@ function Entry({
   canEditFocus?: boolean;
 }) {
   const tz = useTz();
+  const locale = useLocale();
   const queueHref =
     canEditFocus && entry.seatId !== null ? `${agentPath(entry.seatId)}?side=queue` : null;
   const box = useRef<HTMLElement>(null);
@@ -144,7 +145,7 @@ function Entry({
   const date = (at: number) =>
     tz === null
       ? new Date(at).toISOString()
-      : `${new Date(at).toLocaleDateString("en-GB", { timeZone: tz })} ${hhmm(at, tz)}`;
+      : `${new Date(at).toLocaleDateString(locale, { timeZone: tz })} ${hhmm(at, tz, locale)}`;
   return (
     <article
       className="instruction-row"

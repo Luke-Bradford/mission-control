@@ -6,7 +6,7 @@ import {
   type OverviewTimeline,
   usageCollector,
 } from "@mc/core";
-import { useNow, useTz } from "../clock.ts";
+import { useLocale, useNow, useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm, kTokens, percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -64,6 +64,7 @@ function paceVerdict(
 
 /** The week so far against its limits, then where this pace ends by the reset. */
 function BurnUp({ row, now, tz }: { row: WeekRow; now: number; tz: string | null }) {
+  const locale = useLocale();
   if (!Number.isFinite(row.resetAt)) return <p className="s muted">Reset time unknown.</p>;
   const start = row.resetAt - WEEK_MS;
   const x = (at: number) => (Math.min(row.resetAt, Math.max(start, at)) - start) / (WEEK_MS / 100);
@@ -126,7 +127,7 @@ function BurnUp({ row, now, tz }: { row: WeekRow; now: number; tz: string | null
         {days.map((day, i) => (
           <span key={day} style={{ left: `${(i / days.length) * 100}%` }}>
             {tz
-              ? new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: tz }).format(day)
+              ? new Intl.DateTimeFormat(locale, { weekday: "short", timeZone: tz }).format(day)
               : ""}
           </span>
         ))}

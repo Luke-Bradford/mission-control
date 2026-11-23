@@ -174,6 +174,55 @@ describe("FlightThread", () => {
     await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
   });
 
+  it("shows times in the operator's configured locale", async () => {
+    stub([msg("comms:1", "hi")], true, undefined, {
+      ...CONFIG,
+      operator: { ...CONFIG.operator, timezone: "Asia/Tokyo", locale: "ar-EG" },
+    });
+    const { container } = render(<FlightThread />);
+    await screen.findByText("hi");
+    const expected = new Intl.DateTimeFormat("ar-EG", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "Asia/Tokyo",
+    }).format(NOW);
+    expect(expected).not.toMatch(/[0-9]/);
+    await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
+  });
+
+  it("writes an earlier day's message date in the operator's locale order", async () => {
+    stubFetch({
+      "/api/comms/crew": {
+        messages: [
+          {
+            ...msg("comms:1", "go", true),
+            to: "crew",
+            label: null,
+            ref: null,
+            ticket: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            pinned: false,
+            state: "stored",
+            deliveredAt: null,
+          },
+        ],
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": seat(true),
+      "/api/config": {
+        ...CONFIG,
+        operator: { ...CONFIG.operator, timezone: "Asia/Tokyo", locale: "en-US" },
+      },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    expect(await screen.findByText("Oct 17 21:00")).toBeTruthy();
+  });
+
   it("shows the Comms thread's Delivered time in the operator's configured zone, not London's", async () => {
     stubFetch({
       "/api/comms/crew": {

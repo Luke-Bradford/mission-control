@@ -4,19 +4,35 @@
  * shows its text without the time). A unit is chosen after rounding (99 960 tokens is `100k`,
  * 59.6 s is `1m 00s`).
  */
-import { startOfLocalDay, zoneFormatter } from "@mc/core";
+import { DEFAULT_LOCALE, startOfLocalDay, zoneFormatter } from "@mc/core";
 
 const DAY = 86_400_000;
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
-function format(ms: number, tz: string, opts: Intl.DateTimeFormatOptions): string {
-  return zoneFormatter(tz, opts).format(new Date(ms));
+function format(
+  ms: number,
+  tz: string,
+  opts: Intl.DateTimeFormatOptions,
+  locale: string = DEFAULT_LOCALE,
+): string {
+  return zoneFormatter(tz, opts, locale).format(new Date(ms));
 }
 
 const HHMM: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
 
 /** `14:05` */
-export const hhmm = (ms: number, tz: string): string => format(ms, tz, HHMM);
+export const hhmm = (ms: number, tz: string, locale: string = DEFAULT_LOCALE): string =>
+  format(ms, tz, HHMM, locale);
+
+/** `6 Nov` or `Nov 6`: the day and month in the order `locale` writes them (names stay `Mon`). */
+function dayAndMonth(d: number, m: number, locale: string): string {
+  const order = new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric" })
+    .formatToParts(new Date(0))
+    .filter((p) => p.type === "day" || p.type === "month")
+    .map((p) => p.type);
+  const mon = MONTHS[m - 1];
+  return order[0] === "month" ? `${mon} ${d}` : `${d} ${mon}`;
+}
 
 /**
  * Month and weekday names are fixed three-letter words: ICU's en-GB "short" month for September is
@@ -57,16 +73,16 @@ export function wkdTime(ms: number, tz: string): string {
 }
 
 /** `Fri 6 Nov 17:23`: a moment named in full, such as when an item was raised. */
-export function raisedAt(ms: number, tz: string): string {
+export function raisedAt(ms: number, tz: string, locale: string = DEFAULT_LOCALE): string {
   const { y, m, d } = localDate(ms, tz);
   const wd = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-  return `${wd} ${d} ${MONTHS[m - 1]} ${hhmm(ms, tz)}`;
+  return `${wd} ${dayAndMonth(d, m, locale)} ${hhmm(ms, tz, locale)}`;
 }
 
 /** `18 Oct` */
-export function dayMonth(ms: number, tz: string): string {
+export function dayMonth(ms: number, tz: string, locale: string = DEFAULT_LOCALE): string {
   const { m, d } = localDate(ms, tz);
-  return `${d} ${MONTHS[m - 1]}`;
+  return dayAndMonth(d, m, locale);
 }
 
 /** The calendar date of `ms` in `tz`, `plusDays` later, as `YYYY-MM-DD` (an `<input type="date">` value). */
@@ -147,8 +163,12 @@ export function kTokens(n: number): string {
 }
 
 /** `1 file` / `3 files`: the count with its noun, `-s` unless `many` is given (`fix`, `fixes`). */
-export const plural = (n: number, one: string, many = `${one}s`): string =>
-  `${n.toLocaleString("en-GB")} ${n === 1 ? one : many}`;
+export const plural = (
+  n: number,
+  one: string,
+  many = `${one}s`,
+  locale: string = DEFAULT_LOCALE,
+): string => `${n.toLocaleString(locale)} ${n === 1 ? one : many}`;
 
 /** The short form of a commit sha, as the HUD shows it everywhere. */
 export const shortSha = (sha: string): string => sha.slice(0, 7);

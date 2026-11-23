@@ -7,7 +7,7 @@ import {
 } from "@mc/core";
 import { type KeyboardEvent, memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { useTz } from "../clock.ts";
+import { useLocale, useTz } from "../clock.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import { useNoticeResource } from "../comms/model.ts";
 import type { OlderMessages } from "../comms/older.ts";
@@ -66,12 +66,14 @@ const ThreadMessage = memo(function ThreadMessage({
   repo,
   config,
   tz,
+  locale,
 }: {
   message: FlightConversationMessage;
   highlighted: boolean;
   repo: string | undefined;
   config: ConfigView | undefined;
   tz: string | null;
+  locale: string;
 }) {
   return (
     <article
@@ -82,7 +84,7 @@ const ThreadMessage = memo(function ThreadMessage({
         {senderWord(message)}
         <span className="at">
           {" "}
-          · <time>{message.at === null || !tz ? "—" : hhmm(message.at, tz)}</time>
+          · <time>{message.at === null || !tz ? "—" : hhmm(message.at, tz, locale)}</time>
         </span>
       </b>
       <div>
@@ -133,6 +135,7 @@ export function FlightThread({
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const tz = useTz();
+  const locale = useLocale();
   const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -268,11 +271,12 @@ export function FlightThread({
             repo={repo}
             config={config}
             tz={tz}
+            locale={locale}
           />
         ))}
         {run?.live && (
           <p role="status">
-            FLIGHT is working… since {run.since === null || !tz ? "—" : hhmm(run.since, tz)}
+            FLIGHT is working… since {run.since === null || !tz ? "—" : hhmm(run.since, tz, locale)}
           </p>
         )}
       </div>
