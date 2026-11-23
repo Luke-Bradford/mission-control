@@ -564,7 +564,8 @@ async function noKeepers(): Promise<void> {
 afterEach(async () => {
   await Promise.all(sups.splice(0).map((s) => s.stopAll()));
   await noKeepers();
-  rmSync(dir, { recursive: true, force: true });
+  // A cmux session's launcher may still be writing its run folder as the test ends: retry.
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   expect(authReads.splice(0), "tests must never read the operator's Codex home").toEqual([]);
 });
 
