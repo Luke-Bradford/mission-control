@@ -123,7 +123,7 @@ function AuditDashboard() {
           <div className="audit-col">
             {report ? (
               <ReportNext report={report} />
-            ) : (
+            ) : audit ? (
               <>
                 {reportLoaded && <p className="s fg2 audit-foot">{MC_AUDIT_NO_REPORT}</p>}
                 <DoNext
@@ -133,7 +133,7 @@ function AuditDashboard() {
                   waste={waste}
                 />
               </>
-            )}
+            ) : null}
             <NewOutside />
           </div>
           <div className="audit-col">
