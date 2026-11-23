@@ -2325,6 +2325,43 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             ).split("\0"),
           );
           for (const p of paths) if (!differs.has(p)) fromMain.add(p);
+          // A path git merged on its own (both sides changed it, no conflict) is not the seat's
+          // edit either: the index entry equals the tree `merge-tree` writes for HEAD and
+          // MERGE_HEAD. A conflicted path holds markers there, so the seat's resolution differs.
+          const rest = paths.filter((p) => !fromMain.has(p));
+          if (rest.length > 0) {
+            // exit 1 is a conflict: stdout still has the tree, then the conflicted paths. Any other
+            // failure (an old git) leaves nothing merged on its own, so the area check stands.
+            const merged = await g(
+              [
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                "--name-only",
+                "-z",
+                "HEAD",
+                mergeHead,
+              ],
+              { timeoutMs: CREW_GIT_SLOW_MS },
+            ).catch((e: unknown) =>
+              (e as { code?: unknown } | null)?.code === 1
+                ? String((e as { stdout?: unknown }).stdout ?? "")
+                : "",
+            );
+            const [tree = "", ...conflicted] = merged.split("\0");
+            if (/^[0-9a-f]{40,64}$/.test(tree)) {
+              const sure = new Set(conflicted);
+              const auto = new Set(
+                (
+                  await g(["diff", "--cached", "--name-only", "--no-renames", "-z", tree, "--"], {
+                    timeoutMs: CREW_GIT_SLOW_MS,
+                    maxBuffer: INDEX_LIST_MAX_BUFFER,
+                  })
+                ).split("\0"),
+              );
+              for (const p of rest) if (!auto.has(p) && !sure.has(p)) fromMain.add(p);
+            }
+          }
         }
         const own = paths.filter((p) => !fromMain.has(p));
 
