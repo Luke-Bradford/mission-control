@@ -6823,6 +6823,36 @@ describe("commit: a merge of main in progress", () => {
       expect(r.text).toContain("docs/d.md");
       expect(mergeHead()).toBe(mainSha);
     });
+
+    it("commits when the merge also conflicts elsewhere (merge-tree exits 1)", async () => {
+      git(wt, "merge", "--abort");
+      git(wt, "reset", "-q", "--hard");
+      writeFileSync(join(clone, "apps/a.ts"), "main again\n");
+      git(clone, "commit", "-qam", "main edits a");
+      mainSha = git(clone, "rev-parse", "main").trim();
+      startMerge();
+      merging({ mainSha, files: ["apps/a.ts"] });
+      write("apps/a.ts", "both\n");
+      expect(readFileSync(join(wt, "docs/d.md"), "utf8")).toContain("bottom by main");
+      const r = await commit("merge: main into the branch");
+      expect(r.text).toMatch(/^Committed /);
+      expect(parents()).toEqual([tip, mainSha]);
+    });
+
+    it("still refuses an out-of-area file the seat resolved by hand", async () => {
+      git(wt, "merge", "--abort");
+      git(wt, "reset", "-q", "--hard");
+      writeFileSync(join(clone, "docs/d.md"), "main rewrites d\n");
+      git(clone, "commit", "-qam", "main rewrites d");
+      mainSha = git(clone, "rev-parse", "main").trim();
+      startMerge();
+      merging({ mainSha, files: ["docs/d.md"] });
+      write("docs/d.md", "resolved\n");
+      const r = await commit("merge: main into the branch");
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("docs/d.md");
+      expect(mergeHead()).toBe(mainSha);
+    });
   });
 
   it("refuses conflict markers left in a file, and keeps the merge", async () => {
