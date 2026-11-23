@@ -8,6 +8,18 @@ import { FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, NOW, seatRow } from "./fixtures.ts";
 
+const markdownRenders = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../src/components/Markdown.tsx", async (importActual) => {
+  const actual = await importActual<typeof import("../src/components/Markdown.tsx")>();
+  return {
+    ...actual,
+    Markdown: (props: Parameters<typeof actual.Markdown>[0]) => {
+      markdownRenders.count++;
+      return actual.Markdown(props);
+    },
+  };
+});
+
 const seat = (live: boolean) => ({
   seat: { id: "flight-1", live, state: live ? "idle" : "stopped", model: "m", turns: null },
   decisions: [],
@@ -45,6 +57,20 @@ afterEach(() => {
 });
 
 describe("FlightThread", () => {
+  it("does not parse the messages as Markdown again on a keystroke", async () => {
+    stub([msg("comms:1", "**one**"), msg("comms:2", "two", true), msg("comms:3", "three")]);
+    render(<FlightThread />);
+    await screen.findByText("three");
+    const box = screen.getByLabelText("Message FLIGHT");
+    const before = markdownRenders.count;
+    expect(before).toBeGreaterThanOrEqual(3);
+    fireEvent.change(box, { target: { value: "h" } });
+    fireEvent.change(box, { target: { value: "he" } });
+    fireEvent.change(box, { target: { value: "hel" } });
+    expect((box as HTMLTextAreaElement).value).toBe("hel");
+    expect(markdownRenders.count).toBe(before);
+  });
+
   it("says there are no messages yet", async () => {
     stub([]);
     render(<FlightThread />);

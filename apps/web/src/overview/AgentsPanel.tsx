@@ -6,7 +6,6 @@ import {
   type ConfigView,
   type Crew,
   FLIGHT_TICK_MS,
-  type FlightBriefView,
   isOperatorItem,
   type OverviewTimeline,
   type RunLoop,
@@ -332,7 +331,6 @@ function FlightRow({
 }) {
   const now = useSecondWhile(showsSeconds(row, lock), useNow());
   const flight = useResource<FlightView>(RESOURCES.flight).data;
-  const brief = useResource<FlightBriefView>(RESOURCES.flightBrief).data;
   const turns = flight?.seat?.turns ?? null;
   const last = flight?.decisions.reduce<FlightView["decisions"][number] | null>(
     (a, b) => (!a || b.at > a.at ? b : a),
@@ -364,7 +362,7 @@ function FlightRow({
   const openAsks = items.filter((i) =>
     ["question", "person", "decision", "approval"].includes(i.kind),
   ).length;
-  const coverage = `watching ${brief?.watch?.length ?? 0} · triaging ${items.filter((i) => i.owner === "flight").length} · ${plural(openAsks, "open ask")} · ${last ? `last action ${elapsed(now - last.at)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
+  const coverage = `triaging ${items.filter((i) => i.owner === "flight").length} · ${plural(openAsks, "open ask")} · ${last ? `last action ${elapsed(now - last.at)} ago (${cutText(last.about, 60)})` : "no action recorded"}${nextCheck}`;
   const sessionTurns = `Turns this session: ${turns?.n ?? DASH}`;
   const doing = row ? doingLine(row, now, tz, undefined) : "";
   const needs = row ? needLine(row, items, now, lock) : [];
