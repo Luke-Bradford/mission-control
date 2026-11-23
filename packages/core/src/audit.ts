@@ -519,8 +519,16 @@ export const auditStartedKey = (seatId: string): string => `audit-seat-started:$
 export const auditToldKey = (repoId: string): string => `audit-told:${repoId}`;
 
 /** An href a finding may link to: a page of the app or of GitHub. */
-export const auditHrefOk = (href: string): boolean =>
-  (href.startsWith("/") && !href.startsWith("//")) || href.startsWith("https://github.com/");
+export const auditHrefOk = (href: string): boolean => {
+  if (href.includes("\\")) return false;
+  try {
+    const origin = "https://mission-control.invalid";
+    const url = new URL(href, origin);
+    return (href.startsWith("/") && url.origin === origin) || url.origin === "https://github.com";
+  } catch {
+    return false;
+  }
+};
 
 export interface AuditReportFinding {
   rank: number;

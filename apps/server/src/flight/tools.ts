@@ -2987,7 +2987,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // the AUDIT seat reads the same GitHub state FLIGHT does, through the tools it is granted
     const c = flightCall(deps, ctx, schema, args, ["watch", "audit"]);
     if (!c.ok) return c;
-    const repo = repoOf();
+    const repoId = seatPlace(config, ctx.seatId)?.session.repoId;
+    const repo = config.repos.find((r) => r.id === repoId);
     if (repo === undefined) return { ok: false, result: fail(READ_NO_REPO) };
     return { ok: true, args: c.args, repo };
   }

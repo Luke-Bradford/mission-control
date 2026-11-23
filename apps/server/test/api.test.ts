@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AUDIT_MEASURED_TOOLS,
+  auditStartedKey,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
@@ -6825,6 +6826,7 @@ describe("crew routes", () => {
       expect(r.statusCode).toBe(200);
       expect(r.json()).toEqual({ runId: "r-4" });
       expect(supervisorCalls).toEqual([["startAudit", "audit-1"]]);
+      expect(store.getSetting(auditStartedKey("audit-1"))).toBe(String(NOW));
     });
 
     it("refuses an issue with 400", async () => {

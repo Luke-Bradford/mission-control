@@ -16,6 +16,7 @@ import {
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
+  auditStartedKey,
   auditStartRefusedText,
   type ChangedFiles,
   CI_TRIES,
@@ -4556,6 +4557,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             throw new SupervisorError(400, auditStartRefusedText(seatCallSign(id)));
           }
           started = await sup.startAudit(id);
+          store.setSetting(auditStartedKey(id), String(at));
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts

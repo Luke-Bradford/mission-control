@@ -11771,6 +11771,16 @@ describe("the AUDIT seat's read tools", () => {
     },
   );
 
+  it("reads the AUDIT seat's own repo when FLIGHT watches another", async () => {
+    const other = cfg.crew?.sessions[1];
+    if (other === undefined) throw new Error("fixture");
+    other.seats.push(seat("audit-2", "AUDIT"));
+    live("audit-2", "r-audit");
+
+    await call("read_pr", { pr: 9 }, ctx("audit-2", "r-audit"));
+    expect(ghCalls[0]).toContain("--repo=o/other");
+  });
+
   it.each(["list_tickets", "read_pr"])("%s still refuses a build seat", async (name) => {
     const r = await call(
       name,

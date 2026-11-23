@@ -236,4 +236,20 @@ describe("the AUDIT pack", () => {
     expect(one.flightRepeatedDecisions7d).toEqual([expect.objectContaining({ count: 2 })]);
     expect(two.flightRepeatedDecisions7d).toEqual([expect.objectContaining({ count: 3 })]);
   });
+
+  it("names a missing FLIGHT seat instead of presenting its empty state as a board", () => {
+    const base = auditConfig();
+    const session = base.crew?.sessions[0];
+    if (session === undefined || base.crew === undefined) throw new Error("fixture");
+    const config = {
+      ...base,
+      crew: {
+        ...base.crew,
+        sessions: [{ ...session, seats: session.seats.filter((seat) => seat.role !== "FLIGHT") }],
+      },
+    } as CcConfig;
+
+    const pack = JSON.parse(buildAuditPack({ config, store, busy: [], now: NOW, seatId: SEAT }));
+    expect(pack.flightMissing).toBe(true);
+  });
 });

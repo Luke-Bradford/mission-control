@@ -98,6 +98,7 @@ export function buildAuditPack(i: {
   return JSON.stringify({
     at: now,
     repo: state.repo,
+    flightMissing: found === null,
     seats: top(
       state.seats.map((s) => ({
         id: s.id,
