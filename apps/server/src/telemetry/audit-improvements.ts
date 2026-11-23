@@ -8,6 +8,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CONTROLLER,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 
 type Row = Record<string, unknown>;
 
@@ -90,7 +91,7 @@ export function messageImprovements(
     if (seen === undefined || at < seen.at) firstReply.set(key, { text, at });
   };
   for (const d of all("SELECT item_key, messages FROM item_discussions")) {
-    const first = (JSON.parse(d.messages as string) as { role: string; text: string; at: number }[])
+    const first = parseJson<{ role: string; text: string; at: number }[]>(d.messages, [])
       .filter((m) => m.role === "operator")
       .sort((a, b) => a.at - b.at)[0];
     if (first !== undefined) note(d.item_key as string, first.text, first.at);

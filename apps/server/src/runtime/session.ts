@@ -28,6 +28,7 @@ import {
   STOP_GRACE_MS,
 } from "@mc/core";
 import { CLAUDE_COMMAND } from "../cli/version.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { cleanText } from "../repo/clean.ts";
 import { STREAM_EVENT_PREFIX } from "../run/streamjson.ts";
 import { toolResultBytes } from "../telemetry/prompt-cost.ts";
@@ -237,7 +238,7 @@ function firstLine(reader: LineReader): Promise<string | null> {
 /** The first line of `reader` as a hello's version: null when it is not a hello (or not JSON). */
 function parseHello(line: string): KeeperHello | { version: number | null } {
   try {
-    const v: unknown = JSON.parse(line);
+    const v: unknown = parseJson<unknown>(line, undefined, rethrowJson);
     if (isObj(v) && v.t === "hello") {
       const version = typeof v.version === "number" ? v.version : null;
       if (version === KEEPER_PROTOCOL_VERSION) {
@@ -364,7 +365,7 @@ function createDriver(i: {
     if (!line.startsWith("{") || line.startsWith(STREAM_EVENT_PREFIX)) return;
     let ev: unknown;
     try {
-      ev = JSON.parse(line);
+      ev = parseJson<unknown>(line, undefined, rethrowJson);
     } catch {
       return;
     }
@@ -438,7 +439,7 @@ function createDriver(i: {
     if (finished || detached) return;
     let m: unknown;
     try {
-      m = JSON.parse(text);
+      m = parseJson<unknown>(text, undefined, rethrowJson);
     } catch {
       return;
     }
@@ -843,7 +844,7 @@ export function endsAtResult(path: string): boolean {
       if (text === "") return undefined;
       let m: unknown;
       try {
-        m = JSON.parse(text);
+        m = parseJson<unknown>(text, undefined, rethrowJson);
       } catch {
         return final ? false : undefined;
       }

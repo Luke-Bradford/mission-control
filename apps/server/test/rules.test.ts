@@ -1,18 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_HARD_RULES, DEFAULT_REPO_RULES, globMatches } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const reads = vi.hoisted(() => ({ count: 0, failNext: false }));
+const reads = vi.hoisted(() => ({ count: 0, failNext: false, markdown: null as string | null }));
 vi.mock("../src/runtime/brief.ts", async (orig) => {
   const real = await orig<typeof import("../src/runtime/brief.ts")>();
   return {
     ...real,
     readRepoClaudeMd: (...a: Parameters<typeof real.readRepoClaudeMd>) => {
       reads.count++;
+      if (reads.markdown !== null) return Promise.resolve(reads.markdown);
       if (reads.failNext) {
         reads.failNext = false;
         return Promise.reject(new Error("object read failed"));
@@ -516,8 +517,25 @@ describe("readRepoRules", () => {
     git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
     reads.count = 0;
     reads.failNext = false;
+    reads.markdown = null;
   });
   afterEach(() => rmSync(repo, { recursive: true, force: true }));
+
+  it("keeps rules for at most 200 checkouts: the oldest is read again", async () => {
+    reads.markdown = promote(true);
+    const sha = "a".repeat(40);
+    const checkouts = Array.from({ length: 205 }, (_, i) => {
+      const dir = join(repo, `c${i}`);
+      mkdirSync(join(dir, ".git"), { recursive: true });
+      return dir;
+    });
+    for (const c of checkouts) await readRepoRules("o/r", c, DEFAULT_REPO_RULES, [], sha);
+    expect(reads.count).toBe(205);
+    await readRepoRules("o/r", checkouts[204] as string, DEFAULT_REPO_RULES, [], sha);
+    expect(reads.count).toBe(205); // the newest is still cached
+    await readRepoRules("o/r", checkouts[0] as string, DEFAULT_REPO_RULES, [], sha);
+    expect(reads.count).toBe(206); // the oldest was dropped
+  });
 
   it("returns malformed-template notes to the caller once per cached read", async () => {
     commit(block("mc: {templates: [bad]}"));

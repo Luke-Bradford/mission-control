@@ -1,4 +1,5 @@
 import type { CrewVendor, StreamEvent } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import { cleanText } from "../repo/clean.ts";
 import { CODEX_MCP_ELICITATION } from "../runtime/codex-wire.ts";
 import {
@@ -167,7 +168,7 @@ function parseLine(buf: Buffer, offset: number, vendor?: CrewVendor): Keyed[] {
   if (buf.subarray(0, STREAM_EVENT_BYTES.length).equals(STREAM_EVENT_BYTES)) return [];
   let ev: unknown;
   try {
-    ev = JSON.parse(buf.toString("utf8"));
+    ev = parseJson<unknown>(buf.toString("utf8"), undefined, rethrowJson);
   } catch {
     return [];
   }
@@ -264,7 +265,7 @@ export function readStreamPage(
       fd.read(first, 0, first.length, 0);
       for (const line of first.toString("utf8").split("\n")) {
         try {
-          const ev: unknown = JSON.parse(line);
+          const ev: unknown = parseJson<unknown>(line, undefined, rethrowJson);
           if (isObj(ev)) vendor = transcriptVendor(ev);
           if (vendor !== undefined) break;
         } catch {

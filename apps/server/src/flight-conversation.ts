@@ -5,6 +5,7 @@ import {
   type FlightConversationPage,
   type StreamEvent,
 } from "@mc/core";
+import { parseJson, rethrowJson } from "./json.ts";
 import { statNoted } from "./repo/file-deps.ts";
 import { readStreamPage } from "./run/stream.ts";
 import { timeOf } from "./run/streamjson.ts";
@@ -44,7 +45,7 @@ export class FlightConversationCursorError extends Error {}
 
 function readBound(store: Store, flightId: string): (Rank & { id: string }) | null {
   try {
-    const value = JSON.parse(store.getSetting(readKey(flightId)) ?? "null") as
+    const value = parseJson(store.getSetting(readKey(flightId)), null) as
       | (Rank & { id: string })
       | null;
     return value &&
@@ -74,7 +75,10 @@ async function codexTurnStarts(transcriptPath: string): Promise<TurnStart[]> {
     const take = (line: Buffer, offset: number) => {
       if (!line.includes('"turn/started"')) return;
       try {
-        const ev = JSON.parse(line.toString("utf8")) as { method?: unknown; timestamp?: unknown };
+        const ev = parseJson<unknown>(line.toString("utf8"), undefined, rethrowJson) as {
+          method?: unknown;
+          timestamp?: unknown;
+        };
         if (ev.method === "turn/started") starts.push({ offset, at: timeOf(ev.timestamp) });
       } catch {
         // a partial or non-JSON line starts no turn

@@ -7,6 +7,7 @@
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseJson, rethrowJson } from "../json.ts";
 
 /** How long a check may take, from the seat's start to its answer. */
 export const CLI_CHECK_TIMEOUT_MS = 3 * 60_000;
@@ -76,7 +77,7 @@ export function judgeCliCheck(transcript: string, nonce: string): { ok: boolean;
     if (!line.startsWith("{")) continue;
     let ev: unknown;
     try {
-      ev = JSON.parse(line);
+      ev = parseJson<unknown>(line, undefined, rethrowJson);
     } catch {
       continue;
     }

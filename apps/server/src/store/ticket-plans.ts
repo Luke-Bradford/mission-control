@@ -1,5 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { PlanMockup, PlanState, TicketPlan } from "@mc/core";
+import { parseJson } from "../json.ts";
 
 type Row = Record<string, SQLInputValue>;
 
@@ -23,7 +24,7 @@ const toPlan = (r: Row): TicketPlan => ({
   proposal: (r.proposal as string | null) ?? null,
   sizeEstimate: (r.size_estimate as string | null) ?? null,
   risks: (r.risks as string | null) ?? null,
-  mockups: JSON.parse(r.mockups as string) as PlanMockup[],
+  mockups: parseJson<PlanMockup[]>(r.mockups, []),
   note: (r.note as string | null) ?? null,
   requestedAt: r.requested_at as number,
   plannedAt: (r.planned_at as number | null) ?? null,

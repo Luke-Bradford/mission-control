@@ -18,6 +18,7 @@ import {
   type Run,
   type TokenUsage,
 } from "@mc/core";
+import { parseJson } from "../json.ts";
 import { toRun } from "./rows.ts";
 import {
   type CommsLinkCount,
@@ -1104,7 +1105,8 @@ export class CommsQueries {
       ) as Row[];
     return rows.reduce((total, row) => {
       if (row.tokens === null) return total;
-      const tokens = JSON.parse(row.tokens as string) as TokenUsage;
+      const tokens = parseJson<TokenUsage | null>(row.tokens, null);
+      if (tokens === null) return total;
       return total + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     }, 0);
   }

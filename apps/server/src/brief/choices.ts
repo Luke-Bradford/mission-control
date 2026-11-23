@@ -15,6 +15,7 @@ import {
   isFlightOperatorQuestion,
 } from "../comms/question.ts";
 import { recordWrite, runawayTrip, watchRunaway } from "../flight/runaway.ts";
+import { parseJson } from "../json.ts";
 import { briefActionRoute } from "./dispatch.ts";
 import {
   BriefActionRefused,
@@ -24,6 +25,14 @@ import {
   validBriefActor,
 } from "./prepare.ts";
 import { briefHash, briefReadState, briefSourceRevision } from "./source.ts";
+
+/** A stored choice record; an unreadable one refuses the request rather than guessing its state. */
+function storedRecord(raw: string): ChoiceRecord {
+  const record = parseJson<ChoiceRecord | null>(raw, null);
+  if (record === null)
+    throw new BriefError(409, "The stored choice for this decision is unreadable.");
+  return record;
+}
 
 export interface BriefChoiceDeps extends BriefPreparationDeps {
   bus?: ChangeBus;
@@ -73,7 +82,7 @@ export async function chooseBrief(
   const requestKey = `brief-request:${key}:${request.requestId}`;
   const completedRefusal = deps.store.getSetting(`${requestKey}:receipt`);
   if (completedRefusal) {
-    const record = JSON.parse(completedRefusal) as ChoiceRecord;
+    const record = storedRecord(completedRefusal);
     const expected = briefHash({
       key,
       epoch: record.receipt.epoch,
@@ -90,7 +99,7 @@ export async function chooseBrief(
   if (retainedEpoch) {
     const raw = deps.store.getSetting(setting(retainedEpoch));
     if (raw) {
-      const retained = JSON.parse(raw) as ChoiceRecord;
+      const retained = storedRecord(raw);
       const expected = briefHash({
         key,
         epoch: retainedEpoch,
@@ -139,7 +148,7 @@ export async function chooseBrief(
   const existing = deps.store.getSetting(setting(binding.epoch));
   let resumeRecord: ChoiceRecord | undefined;
   if (existing) {
-    const record = JSON.parse(existing) as ChoiceRecord;
+    const record = storedRecord(existing);
     if (record.fingerprint !== fingerprint)
       throw new BriefError(409, "This decision already has a different choice or default.");
     const live = running.get(deps.store)?.get(binding.epoch);
@@ -267,9 +276,10 @@ export async function chooseBrief(
             claim.record,
           ));
     if (!claimed) {
-      const other = JSON.parse(
-        deps.store.getSetting(setting(binding.epoch)) ?? "null",
-      ) as ChoiceRecord | null;
+      const other = parseJson<ChoiceRecord | null>(
+        deps.store.getSetting(setting(binding.epoch)),
+        null,
+      );
       if (other?.fingerprint === fingerprint) return other.receipt;
       throw new BriefError(409, "Another answer/default claimed this decision first.");
     }

@@ -222,6 +222,7 @@ import {
 } from "@mc/core";
 import { z } from "zod";
 import { activeAway } from "../away.ts";
+import { BoundedMap } from "../bounded.ts";
 import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
@@ -232,6 +233,7 @@ import { RepoRulesError } from "../engine/rules.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { keepMockups } from "../plans/assets.ts";
 import {
   PREVIEW_READY_WAIT_MS,
@@ -304,7 +306,7 @@ export interface McToolsDeps {
   /** The repo's rules as the engine reads them; `report_plan` reads `plan_signoff` from them. Absent: the config's. */
   rules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   /** Called after a planner's `report_plan` writes a plan (the supervisor ends that run). */
-  onPlanned?: (seatId: string, runId: string) => void;
+  onPlanned?: (seatId: string, runId: string) => void | Promise<void>;
   /** Called after the AUDIT seat's `report_audit` saves its report (the supervisor ends that run). */
   onAudited?: (seatId: string, runId: string) => void;
   /**
@@ -642,6 +644,9 @@ const FindingResolutionSchema = {
   additionalProperties: false,
 };
 
+const MC_PLAN_NOT_ENDED =
+  "The plan was saved, but the hub could not end the run. Call report_plan again with the same plan to end it; nothing is rewritten.";
+
 export function badArgs(e: z.ZodError): Result {
   const issue = e.issues[0];
   const path = issue?.path.join(".") ?? "";
@@ -947,7 +952,11 @@ export async function pushRun(deps: McToolsDeps, runId: string): Promise<Result>
       );
       let state: unknown;
       try {
-        state = viewed.code === 0 ? (JSON.parse(viewed.stdout) as { state?: unknown }).state : null;
+        state =
+          viewed.code === 0
+            ? (parseJson<unknown>(viewed.stdout, undefined, rethrowJson) as { state?: unknown })
+                .state
+            : null;
       } catch {
         state = null;
       }
@@ -1375,7 +1384,7 @@ async function draftPr(
   if (listed.code !== 0) return failed("pr list", listed);
   let open: unknown;
   try {
-    open = JSON.parse(listed.stdout);
+    open = parseJson<unknown>(listed.stdout, undefined, rethrowJson);
   } catch {
     return failed("pr list", { code: listed.code, stderr: "not JSON" });
   }
@@ -1465,7 +1474,7 @@ export async function editRunPrBody(
   if (viewed.code !== 0) return failed("pr view", viewed);
   let info: { headRefName?: unknown; state?: unknown; body?: unknown } | null;
   try {
-    info = JSON.parse(viewed.stdout) as typeof info;
+    info = parseJson<unknown>(viewed.stdout, undefined, rethrowJson) as typeof info;
   } catch {
     return failed("pr view", { code: viewed.code, stderr: "not JSON" });
   }
@@ -2960,6 +2969,9 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     return { text: MC_AUDIT_SAVED };
   }
 
+  /** Planner runs whose plan is saved but whose end failed, with the answer their retry gets. */
+  const planEndPending = new BoundedMap<string, Result>(50);
+
   async function reportPlan(ctx: McToolContext, args: unknown): Promise<Result> {
     const parsed = PlanArgs.safeParse(args);
     if (!parsed.success) return badArgs(parsed.error);
@@ -2967,13 +2979,19 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       return { text: AWAY_PLAN_REFUSED, isError: true };
     const plan = parsed.data.plan;
     const live = liveRun(ctx);
-    if (live === null) return ENDED;
+    if (live === null) {
+      planEndPending.delete(ctx.runId);
+      return ENDED;
+    }
     const { run } = live;
     const place = seatPlace(config, ctx.seatId);
     if (place === null) return ENDED;
     const loop = seatDef(place.seat).loop;
     const planlessBuild = loop === "build" && run.plan === undefined && !store.planLanded(run);
     if (loop !== "plan" && !planlessBuild) return { text: MC_PLAN_NOT_FAO, isError: true };
+    // The plan is already saved and only ending the run failed: the retry ends it, nothing is rewritten.
+    const savedPlan = planEndPending.get(run.id);
+    if (savedPlan !== undefined) return endPlannerRun(ctx, savedPlan);
     const issue = issueOf(run);
     const repo = repoOf(deps, run);
     if (issue === null || repo === "") return ENDED;
@@ -3106,7 +3124,10 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       if (viewed.code !== 0) return failed("issue view", viewed);
       let issueJson: { body?: unknown; state?: unknown };
       try {
-        issueJson = JSON.parse(viewed.stdout) as { body?: unknown; state?: unknown };
+        issueJson = parseJson<unknown>(viewed.stdout, undefined, rethrowJson) as {
+          body?: unknown;
+          state?: unknown;
+        };
       } catch {
         return failed("issue view", { code: viewed.code, stderr: "not JSON" });
       }
@@ -3224,8 +3245,23 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       text: planned,
     });
     bus.emit("agents");
-    if (loop === "plan") deps.onPlanned?.(ctx.seatId, ctx.runId);
-    return loop === "plan" ? written : { text: MC_PLAN_WRITTEN_CONTINUE };
+    if (loop === "plan") return endPlannerRun(ctx, written);
+    return { text: MC_PLAN_WRITTEN_CONTINUE };
+  }
+
+  /** Ends a planner's run after its plan is saved; a failure is kept so the seat's retry only ends it. */
+  async function endPlannerRun(ctx: McToolContext, written: Result): Promise<Result> {
+    try {
+      await deps.onPlanned?.(ctx.seatId, ctx.runId);
+    } catch (e) {
+      deps.log?.(
+        `mc report_plan: could not end ${ctx.runId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      planEndPending.set(ctx.runId, written);
+      return { text: MC_PLAN_NOT_ENDED, isError: true };
+    }
+    planEndPending.delete(ctx.runId);
+    return written;
   }
 
   return [

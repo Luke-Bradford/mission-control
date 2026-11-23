@@ -10334,6 +10334,13 @@ describe("FLIGHT ledger views", () => {
 });
 
 describe("overview", () => {
+  it("answers when the stored needs history is unreadable", async () => {
+    store.setSetting("overview:needs", "{not json");
+    const res = await get("/api/overview");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().kpis).toBeDefined();
+  });
+
   it("limits the All pipeline to repos with crew sessions", async () => {
     for (const repoId of ["shop-app", "site-builder"])
       store.upsertRun(run({ id: repoId, repoId, ticket: `${repoId}#1`, loop: { ...NEW_LOOP } }));

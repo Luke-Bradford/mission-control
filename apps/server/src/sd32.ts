@@ -1,4 +1,5 @@
 import type { AutonomyQuestion } from "@mc/core";
+import { parseJson, rethrowJson } from "./json.ts";
 
 // Port of an earlier loop engine's SD-32 question parser (SD-32 §8).
 // Strict by design: a lenient parser would surface a half-formed question as if triaged.
@@ -52,7 +53,7 @@ export function parseAutonomyQuestion(
   const newest = candidates[candidates.length - 1];
   if (!newest) return null;
   try {
-    return validate(JSON.parse(newest.block));
+    return validate(parseJson<unknown>(newest.block, undefined, rethrowJson));
   } catch {
     return null;
   }

@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { parseArgs, promisify } from "node:util";
 import { BLOCKING_SEVERITIES, FINDING_SEVERITIES } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 
 const exec = promisify(execFile);
 type Row = Record<string, SQLInputValue>;
@@ -69,7 +70,10 @@ async function ask(o: TrialOptions, prompt: string): Promise<Answer> {
       );
       child.stdin.end(prompt);
     });
-    const parsed = JSON.parse(out) as { result?: string; total_cost_usd?: number };
+    const parsed = parseJson<unknown>(out, undefined, rethrowJson) as {
+      result?: string;
+      total_cost_usd?: number;
+    };
     return { text: parsed.result ?? "", cost: parsed.total_cost_usd ?? 0 };
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -82,7 +86,7 @@ export function jsonOf(text: string): Record<string, unknown> | null {
   const b = text.lastIndexOf("}");
   if (a < 0 || b < a) return null;
   try {
-    const v = JSON.parse(text.slice(a, b + 1)) as unknown;
+    const v = parseJson<unknown>(text.slice(a, b + 1), undefined, rethrowJson) as unknown;
     return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : null;
   } catch {
     return null;
