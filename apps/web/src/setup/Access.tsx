@@ -5,6 +5,7 @@ import { deliverNotification, enableBrowser, permissionState } from "../browserN
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { toast } from "../shell/Toast.tsx";
+import { OperatorActions } from "./OperatorActions.tsx";
 
 const NOTIFY: [NotificationCategory, string][] = [
   ["asks", "Asks FLIGHT has briefed for me"],
@@ -200,6 +201,9 @@ export function Access() {
   const resource = useResource<NotificationPreferences>(RESOURCES.notificationPreferences);
   return (
     <>
+      <Panel title="Operator actions" sub="Slow pace and temporary approval controls">
+        <OperatorActions />
+      </Panel>
       <Panel title="Auto-approve" sub="outward writes wait for you until switched on" phase="P2">
         <div className="pb">
           {AUTO_APPROVE.map((label) => (

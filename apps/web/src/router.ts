@@ -47,6 +47,7 @@ export const useHash = (): string =>
   useSyncExternalStore(subscribeHash, () => window.location.hash);
 
 export const SETUP_TABS = [
+  "hub",
   "sessions",
   "repos",
   "loops",
@@ -179,6 +180,9 @@ export function withoutAddAgentParam(): string {
   const qs = q.toString();
   return pathname + (qs ? `?${qs}` : "") + hash;
 }
+/** `?addRepo=1` opens Repos & seats with the Add repo form showing. */
+export const ADD_REPO_PARAM = "addRepo";
+export const addRepoPath = (): string => `${setupPath("repos")}?${ADD_REPO_PARAM}=1`;
 /** The query parameter that names the seat whose edit form should open (`?edit=s1:guido-1`). */
 export const EDIT_SEAT_PARAM = "edit";
 /** The session and seat a URL's edit query names; null when it names none. */
@@ -198,9 +202,9 @@ export function withoutEditSeatParam(): string {
 }
 /** Setup › Sessions with one seat's edit form open. */
 export const editSeatPath = (sessionId: string, seatId: string): string =>
-  `${setupPath("sessions")}?${EDIT_SEAT_PARAM}=${enc(`${sessionId}:${seatId}`)}`;
+  `${setupPath("repos")}?${EDIT_SEAT_PARAM}=${enc(`${sessionId}:${seatId}`)}`;
 export const addAgentPath = (sessionId: string): string =>
-  `${setupPath("sessions")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
+  `${setupPath("repos")}?${ADD_AGENT_PARAM}=${enc(sessionId)}`;
 
 /** A popped-out window (`?popout=1`, the Agent header's Pop out): the page alone, no chrome. */
 export const isPopout = (search: string): boolean =>

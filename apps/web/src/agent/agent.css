@@ -292,6 +292,20 @@
   border-color: var(--warn-mark);
 }
 
+.run-pr-actions {
+  flex-wrap: wrap;
+  align-items: end;
+}
+
+.run-pr-actions label {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.run-pr-actions > span {
+  flex-basis: 100%;
+}
+
 .idrow .big .rt {
   font-family: var(--sans, inherit);
   font-size: var(--fs-s);

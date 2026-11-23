@@ -691,7 +691,9 @@ describe("the reloader", () => {
     const r = make();
     loaded = new ConfigError("crew.sessions[0]", "boom");
     const out = await r.reload();
-    expect(out.error).toBe("crew.sessions[0]: boom");
+    expect(out.error).toBe(
+      "config.yaml does not load: crew.sessions[0]: boom. The hub runs on the last good copy.",
+    );
     expect(out.applied).toEqual([]);
     expect(seatsOf(applied)).toEqual(["guido-1"]);
     expect(topics).toContain("config");

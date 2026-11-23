@@ -207,12 +207,23 @@ export function planCrew(
   return plan;
 }
 
+export const configErrorText = (e: string): string =>
+  `config.yaml does not load: ${e}. The hub runs on the last good copy.`;
+
 const lists = (c: CcConfig["crew"]) => c?.sessions.map((s) => [s.id, s.repoId, s.checkout]);
 
 /** Config keys that differ and only apply after a restart. */
 export function restartNeeded(applied: CcConfig, target: CcConfig): string[] {
   const out: string[] = [];
-  for (const key of ["operator", "accounts", "repos", "loops", "poll"] as const) {
+  for (const key of [
+    "operator",
+    "accounts",
+    "repos",
+    "loops",
+    "poll",
+    "updates",
+    "audit",
+  ] as const) {
     // `flight_powers` reloads live (`settle` copies it), so it never asks for a restart
     const strip = (c: CcConfig) =>
       key === "repos" ? c.repos.map(({ flightPowers: _p, ...rest }) => rest) : c[key];
@@ -488,7 +499,7 @@ export function createCrewReloader(deps: {
     try {
       loaded = load(configPath);
     } catch (e) {
-      setError(e instanceof ConfigError ? e.message : READ_FAILED);
+      setError(e instanceof ConfigError ? configErrorText(e.message) : READ_FAILED);
       return { ...status(), applied: [] };
     }
     // the applied config still lists the seats this load may remove

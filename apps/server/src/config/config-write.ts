@@ -216,6 +216,13 @@ const errCode = (e: unknown): string => String((e as NodeJS.ErrnoException | nul
 // Writers run one at a time, so two Add clicks never read the same file and lose one repo.
 let queue: Promise<unknown> = Promise.resolve();
 
+/** Runs one config.yaml write after every earlier one, so two writes never interleave. */
+export function enqueueWrite<T>(job: () => Promise<T>): Promise<T> {
+  const run = queue.then(job);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 /** Appends `repo` to the config.yaml at `path`; resolves with the new config and the backup's path. */
 export function addRepo(
   path: string,
@@ -424,7 +431,7 @@ async function onboard(
  * The file as it is now, which may have been edited by hand since the server started. A link
  * would make the backup and the write land somewhere other than the file named by the path.
  */
-async function readCurrent(
+export async function readCurrent(
   path: string,
   hubRoot?: string | null,
 ): Promise<{ bytes: Buffer; text: string; current: CcConfig }> {
@@ -490,7 +497,8 @@ export function setRepoRoles(
   return run;
 }
 
-const repoRolesHash = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+export const repoRolesHash = (bytes: Buffer): string =>
+  createHash("sha256").update(bytes).digest("hex");
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

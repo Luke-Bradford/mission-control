@@ -14,6 +14,9 @@ import { plural, rel, shortSha } from "../fmt.ts";
 import { navigate, type SetupTab, setupPath } from "../router.ts";
 import { Access } from "../setup/Access.tsx";
 import { Accounts } from "../setup/Accounts.tsx";
+import { ConfigStatus } from "../setup/ConfigStatus.tsx";
+import { FirstRun } from "../setup/FirstRun.tsx";
+import { HubSettings } from "../setup/HubSettings.tsx";
 import { Loops } from "../setup/Loops.tsx";
 import { Repos } from "../setup/Repos.tsx";
 import { Roles } from "../setup/Roles.tsx";
@@ -26,6 +29,7 @@ import { toast } from "../shell/Toast.tsx";
 import "../setup/setup.css";
 
 const TAB_LABEL: Record<SetupTab, string> = {
+  hub: "Hub",
   sessions: "Sessions",
   repos: "Repos",
   loops: "Loops",
@@ -37,6 +41,7 @@ const TAB_LABEL: Record<SetupTab, string> = {
 
 /** The approved Setup information architecture. Legacy paths below remain valid deep links. */
 const SECTIONS = [
+  { tab: "hub", label: "Hub" },
   { tab: "accounts", label: "Accounts" },
   { tab: "repos", label: "Repos & seats" },
   { tab: "roles", label: "Roles & guards" },
@@ -182,7 +187,9 @@ export function Setup({ tab }: { tab: SetupTab }) {
   const body =
     // The legacy Sessions deep link keeps its original page. Sidebar routes remain narrowly
     // scoped so changing loop configuration never looks like it also changes source integrations.
-    tab === "sessions" ? (
+    tab === "hub" ? (
+      <HubSettings />
+    ) : tab === "sessions" ? (
       config ? (
         <Sessions config={config} />
       ) : (
@@ -245,6 +252,8 @@ export function Setup({ tab }: { tab: SetupTab }) {
             <CrewPauseControl />
             <UpdateControl />
           </div>
+          <ConfigStatus />
+          {config && <FirstRun config={config} />}
           <div className="sgrid">{body}</div>
         </div>
       </div>

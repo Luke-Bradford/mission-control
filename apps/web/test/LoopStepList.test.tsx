@@ -1,15 +1,16 @@
 import {
   type CrewLoop,
   type LoopTry,
+  type PullRequestView,
   pushChecksText,
   type RunLoop,
   type RunLoopView,
   reviewParkText,
 } from "@mc/core";
-import { fireEvent, render, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { LoopSteps } from "../src/agent/LoopSteps.tsx";
-import { crewRow, MIN, NOW } from "./fixtures.ts";
+import { crewRow, MIN, NOW, run } from "./fixtures.ts";
 
 const SHA = "c74cdfc1234567";
 const BARE = pushChecksText("80001f8abcdef", [{ command: "pnpm -s test", state: "missing" }]);
@@ -42,13 +43,22 @@ const loopOf = (over: Partial<CrewLoop>): CrewLoop => ({
   ...over,
 });
 
-const show = (loop: CrewLoop, tries: LoopTry[], runLoop: Partial<RunLoop>) => {
+const show = (
+  loop: CrewLoop,
+  tries: LoopTry[],
+  runLoop: Partial<RunLoop>,
+  options: { endedAt?: number | null; prs?: PullRequestView[] } = {},
+) => {
   const view = { loop: { phase: loop.phase, ...runLoop }, tries, round: 1 } as RunLoopView;
   return render(
     <LoopSteps
-      row={crewRow({ loop, hudState: "idle" })}
+      row={crewRow({
+        loop,
+        hudState: "idle",
+        run: run({ endedAt: options.endedAt ?? null }),
+      })}
       view={view}
-      prs={[]}
+      prs={options.prs ?? []}
       limits={{ tries: 3, rounds: 3 }}
       now={NOW}
     />,
@@ -59,6 +69,42 @@ const longestLine = (el: HTMLElement) =>
   Math.max(...(el.innerText ?? el.textContent ?? "").split("\n").map((l) => l.length));
 
 describe("Loop steps as a list", () => {
+  it("shows PR controls for an open run with tries, but not after the run ends", () => {
+    const tries = [tryAt("working", 1, "pass"), tryAt("ci", 1, "running")];
+    const open = show(
+      loopOf({ phase: "ci" }),
+      tries,
+      {},
+      {
+        prs: [
+          {
+            repoId: "shop-app",
+            number: 77,
+            title: "Open PR",
+            url: "https://example.test/pull/77",
+            branch: "feature/test",
+            ticket: null,
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: SHA,
+            mergeable: "MERGEABLE",
+          },
+        ],
+      },
+    );
+    expect(screen.getByRole("button", { name: "Hold merge" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pass controller check" })).toBeTruthy();
+    open.unmount();
+    show(loopOf({ phase: "ci" }), tries, {}, { endedAt: NOW });
+    expect(screen.queryByRole("button", { name: "Hold merge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pass controller check" })).toBeNull();
+  });
+
   it("collapses 15 identical refusals into one try line with ×15, and keeps lines short", () => {
     const tries = [
       tryAt("working", 1, "pass"),
@@ -112,7 +158,7 @@ describe("Loop steps as a list", () => {
       tryAt("ci", 1, "fail", { reason: "server-process" }),
       tryAt("ci", 2, "running", { endedAt: null }),
     ];
-    const { container } = show(loopOf({ phase: "ci" }), tries, {});
+    const { container } = show(loopOf({ phase: "ci" }), tries, {}, { endedAt: NOW });
     const steps = container.querySelectorAll<HTMLElement>(".vstep");
     expect(steps[0]?.querySelector(".titer")).toBeNull();
     expect(steps[0]?.querySelector(".vmeta")?.textContent).toBe("1m · 1.0k");
