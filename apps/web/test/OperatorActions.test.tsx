@@ -1,4 +1,4 @@
-import { prListPath } from "@mc/core";
+import { type PaceSettings, prListPath } from "@mc/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RunPrActions } from "../src/agent/RunPrActions.tsx";
@@ -10,13 +10,16 @@ afterEach(() => vi.unstubAllGlobals());
 const SHA = "a".repeat(40);
 const PR = { repoId: "shop-app", number: 7, title: "Hand PR", state: "open", headSha: SHA };
 
-function mount() {
+function mount(
+  pace: PaceSettings = { on: false, until: 0, since: 0, labels: [], maxStarts: 0, note: "" },
+) {
   const fetch = stubFetch({
     "/api/config": {
       repos: [{ id: "shop-app" }],
       operator: { id: "op", timezone: "Europe/Paris" },
     },
     [prListPath("shop-app")]: [PR],
+    "GET /api/settings/pace": pace,
     "POST /api/settings/pace": { ok: true },
     "POST /api/flight/approvals": { ok: true },
     "POST /api/prs/shop-app/7/review-request": { ok: true },
@@ -65,6 +68,7 @@ describe("OperatorActions", () => {
 
   it("refuses a slow pace end in the past, inline, and posts nothing", async () => {
     const fetch = mount();
+    fireEvent.click(screen.getByLabelText("On"));
     fireEvent.change(screen.getByLabelText("Slow pace until"), {
       target: { value: "2020-01-01T09:30" },
     });
@@ -77,6 +81,44 @@ describe("OperatorActions", () => {
       message.id,
     );
     expect(posts(fetch)).toHaveLength(0);
+  });
+
+  it("requires an end while slow pace is on, and posts nothing", async () => {
+    const fetch = mount();
+    fireEvent.click(screen.getByLabelText("On"));
+    fireEvent.click(screen.getByRole("button", { name: "Save slow pace" }));
+    expect(await screen.findByText("Slow pace needs an end date and time.")).toBeTruthy();
+    expect(posts(fetch)).toHaveLength(0);
+  });
+
+  it("turns slow pace off with safe empty values", async () => {
+    const fetch = mount();
+    await screen.findByText(/Time in Europe\/Paris/);
+    fireEvent.click(screen.getByRole("button", { name: "Save slow pace" }));
+    await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+    expect(posts(fetch)[0]).toEqual([
+      "/api/settings/pace",
+      { on: false, until: 0, labels: [], maxStarts: 0, note: "" },
+    ]);
+  });
+
+  it("shows the saved slow pace setting", async () => {
+    mount({
+      on: true,
+      until: Date.UTC(2099, 0, 1, 8, 30),
+      since: 0,
+      labels: ["urgent", "web"],
+      maxStarts: 3,
+      note: "weekend",
+    });
+    await waitFor(() =>
+      expect((screen.getByLabelText("On") as HTMLInputElement).checked).toBe(true),
+    );
+    expect((screen.getByLabelText("Slow pace until") as HTMLInputElement).value).toBe(
+      "2099-01-01T09:30",
+    );
+    expect((screen.getByLabelText("Labels") as HTMLInputElement).value).toBe("urgent, web");
+    expect((screen.getByLabelText("Max starts") as HTMLInputElement).value).toBe("3");
   });
 
   it("names each approval rule in words and posts the typed value", async () => {
@@ -151,6 +193,14 @@ describe("RunPrActions", () => {
       ["/api/runs/r1/merge-hold", { action: "hold", reason: "wait" }],
       ["/api/runs/r1/controller-check", { verdict: "pass", sha: SHA }],
     ]);
+  });
+
+  it("waits to record a controller check until the PR head is known", () => {
+    render(<RunPrActions runId="r1" sha="" />);
+    expect(
+      (screen.getByRole("button", { name: "Pass controller check" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(screen.getByText("The PR head SHA is not known yet.")).toBeTruthy();
   });
 });
 

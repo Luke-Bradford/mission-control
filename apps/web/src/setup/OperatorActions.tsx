@@ -1,9 +1,15 @@
-import { FLIGHT_APPROVAL_RULES, type FlightApprovalRule, type PullRequestView } from "@mc/core";
-import { useState } from "react";
+import {
+  FLIGHT_APPROVAL_RULES,
+  type FlightApprovalRule,
+  type PaceSettings,
+  type PullRequestView,
+} from "@mc/core";
+import { useEffect, useRef, useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
 
 type ActionGroup = "pace" | "approval" | "pr";
+type MessageGroup = ActionGroup | "paceUntil" | "paceMax";
 
 /** A result line inside its own group; `alert` announces a refusal and keeps it next to the button. */
 function GroupMessage({ id, text }: { id: string; text?: string }) {
@@ -17,6 +23,32 @@ function GroupMessage({ id, text }: { id: string; text?: string }) {
       {text}
     </p>
   );
+}
+
+function FieldMessage({ id, text }: { id: string; text?: string }) {
+  if (!text) return null;
+  return (
+    <span id={id} role="alert" className="crit-t s">
+      {text}
+    </span>
+  );
+}
+
+function paceLocalTime(at: number, timeZone: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(at))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
 /** Operator-facing words for each approval rule; the typed value is what the request carries. */
@@ -65,8 +97,8 @@ export function zonedToEpoch(local: string, timeZone: string): number | null {
 /** Operator-only safety controls. The server checks authority and validates every request. */
 export function OperatorActions() {
   // Each action group keeps its own result, beside its own fields and button.
-  const [messages, setMessages] = useState<Partial<Record<ActionGroup, string>>>({});
-  const say = (group: ActionGroup, text: string | null) =>
+  const [messages, setMessages] = useState<Partial<Record<MessageGroup, string>>>({});
+  const say = (group: MessageGroup, text: string | null) =>
     setMessages((all) => ({ ...all, [group]: text ?? undefined }));
   const [pace, setPace] = useState({ on: false, until: "", labels: "", maxStarts: "", note: "" });
   const [approval, setApproval] = useState({
@@ -83,6 +115,19 @@ export function OperatorActions() {
     RESOURCES.config,
   ).data;
   const zone = config?.operator?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const savedPace = useResource<PaceSettings>(RESOURCES.pace).data;
+  const paceLoaded = useRef(false);
+  useEffect(() => {
+    if (!savedPace || !config || paceLoaded.current) return;
+    paceLoaded.current = true;
+    setPace({
+      on: savedPace.on,
+      until: savedPace.until === 0 ? "" : paceLocalTime(savedPace.until, zone),
+      labels: savedPace.labels.join(", "),
+      maxStarts: savedPace.on || savedPace.maxStarts !== 0 ? String(savedPace.maxStarts) : "",
+      note: savedPace.note,
+    });
+  }, [config, savedPace, zone]);
   const prs = useResource<PullRequestView[]>(repoId ? RESOURCES.allPrs(repoId) : null).data;
   const open = (prs ?? []).filter((pr) => pr.state === "open" && pr.headSha !== null);
   const chosen = open.find((pr) => String(pr.number) === prNumber);
@@ -102,8 +147,7 @@ export function OperatorActions() {
     }
   };
   return (
-    <section aria-label="Operator actions">
-      <h3>Operator controls</h3>
+    <section className="operator-actions" aria-label="Operator actions">
       <fieldset className="fgroup">
         <legend>Slow pace</legend>
         <label>
@@ -118,13 +162,14 @@ export function OperatorActions() {
           Until{" "}
           <input
             aria-label="Slow pace until"
-            aria-invalid={messages.pace?.startsWith("Slow pace must") ? true : undefined}
-            aria-describedby={messages.pace ? "pace-message" : undefined}
+            aria-invalid={messages.paceUntil ? true : undefined}
+            aria-describedby={messages.paceUntil ? "pace-until-message" : undefined}
             type="datetime-local"
             value={pace.until}
             onChange={(e) => setPace({ ...pace, until: e.target.value })}
           />{" "}
-          <span className="muted xs">Time in {zone}; empty means no end.</span>
+          <span className="muted xs">Time in {zone}; required when on.</span>
+          <FieldMessage id="pace-until-message" text={messages.paceUntil} />
         </label>
         <label>
           Labels{" "}
@@ -137,9 +182,15 @@ export function OperatorActions() {
           Max starts{" "}
           <input
             type="number"
+            min="0"
+            max="50"
+            step="1"
+            aria-invalid={messages.paceMax ? true : undefined}
+            aria-describedby={messages.paceMax ? "pace-max-message" : undefined}
             value={pace.maxStarts}
             onChange={(e) => setPace({ ...pace, maxStarts: e.target.value })}
           />
+          <FieldMessage id="pace-max-message" text={messages.paceMax} />
         </label>
         <label>
           Note{" "}
@@ -148,19 +199,46 @@ export function OperatorActions() {
         <button
           type="button"
           onClick={() => {
-            const until = pace.until === "" ? null : zonedToEpoch(pace.until, zone);
-            if (pace.until !== "" && (until === null || until <= Date.now())) {
-              say("pace", "Slow pace must end in the future: choose a later date and time.");
+            if (!pace.on) {
+              void post("pace", ACTIONS.pace, {
+                on: false,
+                until: 0,
+                labels: [],
+                maxStarts: 0,
+                note: pace.note,
+              });
               return;
             }
+            const until = zonedToEpoch(pace.until, zone);
+            if (pace.until === "" || until === null || until <= Date.now()) {
+              say(
+                "paceUntil",
+                pace.until === ""
+                  ? "Slow pace needs an end date and time."
+                  : "Slow pace must end in the future: choose a later date and time.",
+              );
+              return;
+            }
+            const maxStarts = Number(pace.maxStarts);
+            if (
+              pace.maxStarts.trim() === "" ||
+              !Number.isInteger(maxStarts) ||
+              maxStarts < 0 ||
+              maxStarts > 50
+            ) {
+              say("paceMax", "Max starts must be a whole number from 0 to 50.");
+              return;
+            }
+            say("paceUntil", null);
+            say("paceMax", null);
             void post("pace", ACTIONS.pace, {
-              on: pace.on,
+              on: true,
               until,
               labels: pace.labels
                 .split(",")
                 .map((x) => x.trim())
                 .filter(Boolean),
-              maxStarts: Number(pace.maxStarts) || null,
+              maxStarts,
               note: pace.note,
             });
           }}

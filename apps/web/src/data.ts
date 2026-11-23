@@ -287,6 +287,7 @@ export const RESOURCES = {
   activity: { path: "/api/activity", topic: "agents" },
   config: { path: "/api/config", topic: "config" },
   hubSettings: { path: "/api/config/settings", topic: "config" },
+  pace: { path: "/api/settings/pace", topic: "settings" },
   // Runs git in the hub's checkout (a fetch at most every 10 minutes), so once per visit.
   version: { path: "/api/version", topic: null },
   boards: (repoId: string): ResourceRef => ({

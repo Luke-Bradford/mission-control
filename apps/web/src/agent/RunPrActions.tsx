@@ -32,19 +32,23 @@ export function RunPrActions({ runId, sha }: { runId: string; sha: string }) {
       </button>
       <button
         type="button"
+        disabled={sha === ""}
+        title={sha === "" ? "The PR head SHA is not known yet." : undefined}
         onClick={() => void post(ACTIONS.runControllerCheck(runId), { verdict: "pass", sha })}
       >
         Pass controller check
       </button>
       <button
         type="button"
-        disabled={!reason}
+        disabled={!reason || sha === ""}
+        title={sha === "" ? "The PR head SHA is not known yet." : undefined}
         onClick={() =>
           void post(ACTIONS.runControllerCheck(runId), { verdict: "fail", sha, note: reason })
         }
       >
         Fail controller check
       </button>
+      {sha === "" && <span className="muted s">The PR head SHA is not known yet.</span>}
       {error && <span role="alert">{error}</span>}
     </div>
   );

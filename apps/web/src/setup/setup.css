@@ -221,6 +221,57 @@
   font: 600 var(--fs-title) / var(--lh-title) var(--display);
 }
 
+.setup-config-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.setup-first-run {
+  display: grid;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel);
+}
+
+.setup-first-run h3,
+.setup-first-run div {
+  margin: 0;
+}
+
+.operator-actions {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.operator-actions .fgroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-4);
+}
+
+.operator-actions .fgroup > p {
+  flex-basis: 100%;
+  margin: 0 0 var(--sp-1);
+}
+
+.operator-actions .fgroup label {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.operator-actions .fgroup button {
+  flex: none;
+}
+
 .display-controls {
   display: flex;
   flex-wrap: wrap;
