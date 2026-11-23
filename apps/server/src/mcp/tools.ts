@@ -2333,7 +2333,15 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             // exit 1 is a conflict: stdout still has the tree, then the conflicted paths. Any other
             // failure (an old git) leaves nothing merged on its own, so the area check stands.
             const merged = await g(
-              ["merge-tree", "--write-tree", "--no-messages", "--name-only", "-z", "HEAD", mergeHead],
+              [
+                "merge-tree",
+                "--write-tree",
+                "--no-messages",
+                "--name-only",
+                "-z",
+                "HEAD",
+                mergeHead,
+              ],
               { timeoutMs: CREW_GIT_SLOW_MS },
             ).catch((e: unknown) =>
               (e as { code?: unknown } | null)?.code === 1
