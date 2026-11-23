@@ -3326,10 +3326,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Operator-only: the hub's own config. A FLIGHT actor is refused by the hook above; the
-      // controller's key reaches the operator's routes, so it is refused here.
+      // Operator-only: the hub's own config. The controller's key and a valid FLIGHT actor both
+      // reach the operator's routes, so both are refused here.
       const operatorOnly = (req: FastifyRequest, reply: FastifyReply, what: string): boolean => {
-        if (!controllerRequests.has(req)) return true;
+        if (!controllerRequests.has(req) && !flightActor(req)) return true;
         reply.code(403).send({ error: what });
         return false;
       };

@@ -443,9 +443,10 @@ function Seats({
   defaultAccount: string;
   request: SeatRequest;
 }) {
-  const changes = useResource<{ sessions: { id: string; seats: SeatInput[] }[] }>(
+  const changesRead = useResource<{ sessions: { id: string; seats: SeatInput[] }[] }>(
     RESOURCES.crewChanges,
-  ).data;
+  );
+  const changes = changesRead.data;
   const wanted = request.edit?.sessionId === session.id ? request.edit.seatId : null;
   const wantedSeat = session.seats.find((item) => item.id === wanted);
   const editSeed = useRef<SeatInput | undefined>(
@@ -550,7 +551,16 @@ function Seats({
           ))}
         </tbody>
       </table>
-      {(adding || editing) && (
+      {(adding || editing) && !changes && (
+        // The config view leaves out each seat's effort; only the crew changes read has it, so
+        // the editor waits for it rather than saving a seat without its effort.
+        <p className="muted s" role="status">
+          {changesRead.error
+            ? `Could not read the seats: ${changesRead.error.message}`
+            : "Loading the seats…"}
+        </p>
+      )}
+      {(adding || editing) && changes && (
         <SeatEditor
           key={editing ?? "new"}
           seat={

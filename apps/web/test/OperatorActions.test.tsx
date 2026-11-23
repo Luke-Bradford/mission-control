@@ -12,7 +12,10 @@ const PR = { repoId: "shop-app", number: 7, title: "Hand PR", state: "open", hea
 
 function mount() {
   const fetch = stubFetch({
-    "/api/config": { repos: [{ id: "shop-app" }] },
+    "/api/config": {
+      repos: [{ id: "shop-app" }],
+      operator: { id: "op", timezone: "Europe/Paris" },
+    },
     [prListPath("shop-app")]: [PR],
     "POST /api/settings/pace": { ok: true },
     "POST /api/flight/approvals": { ok: true },
@@ -38,9 +41,10 @@ async function choosePr() {
 describe("OperatorActions", () => {
   it("saves slow pace with its five fields", async () => {
     const fetch = mount();
+    await screen.findByText(/Time in Europe\/Paris/);
     fireEvent.click(screen.getByLabelText("On"));
     fireEvent.change(screen.getByLabelText("Slow pace until"), {
-      target: { value: "1900000000000" },
+      target: { value: "2099-01-01T09:30" },
     });
     fireEvent.change(screen.getByLabelText("Labels"), { target: { value: "a, b" } });
     fireEvent.change(screen.getByLabelText("Max starts"), { target: { value: "3" } });
@@ -49,8 +53,39 @@ describe("OperatorActions", () => {
     await waitFor(() => expect(posts(fetch)).toHaveLength(1));
     expect(posts(fetch)[0]).toEqual([
       "/api/settings/pace",
-      { on: true, until: 1900000000000, labels: ["a", "b"], maxStarts: 3, note: "weekend" },
+      {
+        on: true,
+        until: Date.UTC(2099, 0, 1, 8, 30),
+        labels: ["a", "b"],
+        maxStarts: 3,
+        note: "weekend",
+      },
     ]);
+  });
+
+  it("refuses a slow pace end in the past, inline, and posts nothing", async () => {
+    const fetch = mount();
+    fireEvent.change(screen.getByLabelText("Slow pace until"), {
+      target: { value: "2020-01-01T09:30" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save slow pace" }));
+    expect(await screen.findByText(/must end in the future/)).toBeTruthy();
+    expect(posts(fetch)).toHaveLength(0);
+  });
+
+  it("names each approval rule in words and posts the typed value", async () => {
+    const fetch = mount();
+    expect(screen.queryByRole("option", { name: "merge-floor" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Rule"), { target: { value: "repo-rules" } });
+    expect(screen.getByRole("option", { name: /^Repo rules/ })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Scope"), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText("Approval until"), {
+      target: { value: "2026-11-23T10:00" },
+    });
+    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "ok" } });
+    fireEvent.click(screen.getByRole("button", { name: "Grant approval" }));
+    await waitFor(() => expect(posts(fetch)).toHaveLength(1));
+    expect(posts(fetch)[0]?.[1]).toMatchObject({ rule: "repo-rules" });
   });
 
   it("grants a FLIGHT approval with an ISO until", async () => {

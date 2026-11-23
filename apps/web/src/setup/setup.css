@@ -855,3 +855,25 @@
   gap: var(--sp-2);
   align-content: start;
 }
+
+/* Hub tab: Operator and Crew first, the detail groups beside and below them. */
+.setup-hub {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.setup-hub .hub-crew {
+  grid-row: span 3;
+}
+
+@media (max-width: 1100px) {
+  .setup-hub {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .setup-hub .hub-crew {
+    grid-row: auto;
+  }
+}

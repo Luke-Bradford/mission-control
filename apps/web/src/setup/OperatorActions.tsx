@@ -1,7 +1,50 @@
-import { FLIGHT_APPROVAL_RULES, type PullRequestView } from "@mc/core";
+import { FLIGHT_APPROVAL_RULES, type FlightApprovalRule, type PullRequestView } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
 import { ACTIONS, RESOURCES, useResource } from "../data.ts";
+
+/** Operator-facing words for each approval rule; the typed value is what the request carries. */
+export const APPROVAL_RULE_LABELS: Record<FlightApprovalRule, string> = {
+  "merge-floor": "Merge floor (a PR that touches CLAUDE.md or .github)",
+  "repo-rules": "Repo rules (one command the guard refused)",
+  "merge-push": "Merge push (one push the guard refused)",
+};
+
+/** Epoch ms of a `YYYY-MM-DDTHH:mm` wall-clock time in an IANA zone; null when it does not parse. */
+export function zonedToEpoch(local: string, timeZone: string): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(local);
+  if (!m) return null;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  const offsetAt = (t: number) => {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        hourCycle: "h23",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+        .formatToParts(new Date(t))
+        .map((p) => [p.type, p.value]),
+    );
+    return (
+      Date.UTC(
+        +parts.year,
+        +parts.month - 1,
+        +parts.day,
+        +parts.hour,
+        +parts.minute,
+        +parts.second,
+      ) -
+      Math.floor(t / 1000) * 1000
+    );
+  };
+  const first = wall - offsetAt(wall);
+  return wall - offsetAt(first);
+}
 
 /** Operator-only safety controls. The server checks authority and validates every request. */
 export function OperatorActions() {
@@ -17,7 +60,10 @@ export function OperatorActions() {
   const [prNumber, setPrNumber] = useState("");
   const [prReason, setPrReason] = useState("");
   const [prNote, setPrNote] = useState("");
-  const config = useResource<{ repos: { id: string }[] }>(RESOURCES.config).data;
+  const config = useResource<{ repos: { id: string }[]; operator?: { timezone: string } }>(
+    RESOURCES.config,
+  ).data;
+  const zone = config?.operator?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const prs = useResource<PullRequestView[]>(repoId ? RESOURCES.allPrs(repoId) : null).data;
   const open = (prs ?? []).filter((pr) => pr.state === "open" && pr.headSha !== null);
   const chosen = open.find((pr) => String(pr.number) === prNumber);
@@ -53,10 +99,11 @@ export function OperatorActions() {
           Until{" "}
           <input
             aria-label="Slow pace until"
-            type="number"
+            type="datetime-local"
             value={pace.until}
             onChange={(e) => setPace({ ...pace, until: e.target.value })}
-          />
+          />{" "}
+          <span className="muted xs">Time in {zone}; empty means no end.</span>
         </label>
         <label>
           Labels{" "}
@@ -79,18 +126,23 @@ export function OperatorActions() {
         </label>
         <button
           type="button"
-          onClick={() =>
+          onClick={() => {
+            const until = pace.until === "" ? null : zonedToEpoch(pace.until, zone);
+            if (pace.until !== "" && (until === null || until <= Date.now())) {
+              setMessage("Slow pace must end in the future: choose a later date and time.");
+              return;
+            }
             void post(ACTIONS.pace, {
               on: pace.on,
-              until: Number(pace.until) || null,
+              until,
               labels: pace.labels
                 .split(",")
                 .map((x) => x.trim())
                 .filter(Boolean),
               maxStarts: Number(pace.maxStarts) || null,
               note: pace.note,
-            })
-          }
+            });
+          }}
         >
           Save slow pace
         </button>
@@ -106,7 +158,9 @@ export function OperatorActions() {
             }
           >
             {FLIGHT_APPROVAL_RULES.map((rule) => (
-              <option key={rule}>{rule}</option>
+              <option key={rule} value={rule}>
+                {APPROVAL_RULE_LABELS[rule]}
+              </option>
             ))}
           </select>
         </label>

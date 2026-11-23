@@ -16,6 +16,19 @@ export const APPLIES_TEXT: Record<SettingApplies, string> = {
   restart: "Applies after a restart",
 };
 
+/** Operator-facing words for each choice value; requests carry the typed value. */
+export const CHOICE_LABELS: Record<string, string> = {
+  off: "Off",
+  auto: "Automatic",
+  between_runs: "Between runs",
+  home: "Home",
+  work: "Work",
+  draft: "Open a draft PR",
+  merge: "Merge when ready",
+  standard: "Standard",
+  superuser: "Superuser",
+};
+
 const def = (
   group: string,
   label: string,

@@ -1,5 +1,6 @@
 import {
   APPLIES_TEXT,
+  CHOICE_LABELS,
   HUB_SETTINGS,
   type HubSettingDef,
   type HubSettingKey,
@@ -15,7 +16,11 @@ type Value = unknown;
 const HUB_KEYS = (Object.keys(HUB_SETTINGS) as HubSettingKey[]).filter(
   (key) => !key.startsWith("repo."),
 );
-const GROUPS = [...new Set(HUB_KEYS.map((key) => HUB_SETTINGS[key].group))];
+/** Operator and Crew answer "how is this hub set up" first; the detail groups follow. */
+const GROUP_ORDER = ["Operator", "Crew", "Polling", "Updates", "Audit", "Machine limits"];
+const GROUPS = [...new Set(HUB_KEYS.map((key) => HUB_SETTINGS[key].group))].sort(
+  (a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b),
+);
 
 /** A map as `Column: state` lines. */
 export const mapToText = (value: Value): string =>
@@ -108,7 +113,7 @@ export function SettingRow({
             <option value="">Not set</option>
             {def.choices?.map((choice) => (
               <option key={choice} value={choice}>
-                {choice}
+                {CHOICE_LABELS[choice] ?? choice}
               </option>
             ))}
           </select>
@@ -154,7 +159,7 @@ export function HubSettings() {
   return (
     <section aria-label="Hub settings" className="setup-hub">
       {GROUPS.map((group) => (
-        <fieldset className="fgroup" key={group}>
+        <fieldset className={`fgroup${group === "Crew" ? " hub-crew" : ""}`} key={group}>
           <legend>{group}</legend>
           {HUB_KEYS.filter((key) => HUB_SETTINGS[key].group === group).map((key) => (
             <SettingRow key={key} settingKey={key} value={values[key]} base={base} />

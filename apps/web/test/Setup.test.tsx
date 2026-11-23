@@ -792,6 +792,56 @@ describe("Setup tabs", () => {
       expect(await screen.findByRole("form", { name: "Edit guido-1" })).toBeTruthy();
     });
 
+    it("?edit= waits for the crew changes, so saving another field keeps the seat's effort", async () => {
+      load({
+        "/api/config": SESSIONS_CFG,
+        "/api/crew/changes": CHANGES,
+        "/api/accounts/models": [],
+        "POST /api/crew/sessions/s1/seats": () => ({
+          status: 200,
+          body: { backup: "b", changes: { ...CHANGES, applied: [] } },
+        }),
+      });
+      const answer = fetchFn.getMockImplementation();
+      if (!answer) throw new Error("no fetch implementation");
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const withEffort = {
+        ...CHANGES,
+        sessions: [{ id: "s1", seats: [{ ...GUIDO_SEAT, effort: "high" }, RETRO_SEAT] }],
+      };
+      fetchFn.mockImplementation(async (input, init) => {
+        if (input !== "/api/crew/changes") return answer(input, init);
+        await gate;
+        return new Response(JSON.stringify(withEffort), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      window.history.replaceState(null, "", "/setup/repos?edit=s1:guido-1");
+      render(<Setup tab="repos" />);
+      expect(await screen.findByText("Loading the seats…")).toBeTruthy();
+      expect(screen.queryByRole("form", { name: "Edit guido-1" })).toBeNull();
+      release();
+      const form = await screen.findByRole("form", { name: "Edit guido-1" });
+      fireEvent.change(within(form).getByLabelText("Area"), { target: { value: "docs/**" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+      await waitFor(() =>
+        expect(
+          fetchFn.mock.calls.some(
+            ([p, i]) => p === "/api/crew/sessions/s1/seats" && i?.method === "POST",
+          ),
+        ).toBe(true),
+      );
+      const call = fetchFn.mock.calls.find(
+        ([p, i]) => p === "/api/crew/sessions/s1/seats" && i?.method === "POST",
+      );
+      const sent = JSON.parse(String(call?.[1]?.body));
+      expect(sent.seats[0]).toMatchObject({ id: "guido-1", effort: "high", area: ["docs/**"] });
+    });
+
     it("Sessions: Add agent and Edit open the Repos & seats editor", async () => {
       const p = await seats();
       fireEvent.click(within(p).getByRole("button", { name: "Add agent" }));

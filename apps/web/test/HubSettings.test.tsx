@@ -46,3 +46,26 @@ it("shows every hub setting with its value and when it applies", async () => {
   expect(screen.getByLabelText("Read deny list")).toHaveProperty("value", "~/.ssh\n~/.aws");
   expect(screen.getByLabelText("Crew lane")).toHaveProperty("value", "work");
 });
+
+it("puts Operator and Crew first and names each choice in words, posting the typed value", async () => {
+  const fetch = stubFetch({
+    "/api/config/settings": { base: "base", values: {}, repos: {} },
+    "POST /api/config/settings": { backup: "b", changes: {} },
+  });
+  render(<HubSettings />);
+  await screen.findByText("Time zone");
+  const legends = [...document.querySelectorAll(".setup-hub legend")].map((l) => l.textContent);
+  expect(legends.slice(0, 2)).toEqual(["Operator", "Crew"]);
+  expect(screen.queryByRole("option", { name: "between_runs" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("CLI updates"), { target: { value: "between_runs" } });
+  expect(screen.getByRole("option", { name: "Between runs" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Save CLI updates" }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const call = fetch.mock.calls.find(
+    ([path, init]) => path === "/api/config/settings" && init?.method === "POST",
+  );
+  expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+    key: "updates.cli",
+    value: "between_runs",
+  });
+});
