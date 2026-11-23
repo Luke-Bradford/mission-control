@@ -74,6 +74,31 @@
 .crew-map-link.warm {
   stroke: var(--warn);
 }
+.crew-map-travel {
+  position: absolute;
+  z-index: 2;
+  width: var(--sp-2);
+  height: var(--sp-2);
+  margin: calc(var(--sp-1) * -1);
+  pointer-events: none;
+  background: var(--seat);
+  border-radius: 50%;
+  box-shadow: 0 0 var(--sp-2) var(--seat);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .crew-map-travel {
+    animation: crew-map-travel 900ms ease-out both;
+  }
+}
+@keyframes crew-map-travel {
+  to {
+    transform: translate(var(--travel-x), var(--travel-y));
+    opacity: 0;
+  }
+}
+.crew-map-stage.paused .crew-map-travel {
+  animation-play-state: paused;
+}
 .crew-map-seat {
   position: absolute;
   z-index: 1;
@@ -100,6 +125,11 @@
   background: transparent;
   border: 1px solid var(--muted);
 }
+.crew-map-seat.held i {
+  background: transparent;
+  border: 1px solid var(--warn);
+  border-radius: 1px;
+}
 .crew-map-seat.owes {
   box-shadow: 0 0 0 2px var(--warn);
 }
@@ -119,6 +149,9 @@
 .crew-map-seat small {
   font-family: var(--mono);
 }
+.crew-map-seat.held span {
+  color: var(--warn);
+}
 .crew-map-seat em {
   color: var(--warn);
   font: var(--fs-micro) / var(--lh-s) var(--mono);
@@ -127,6 +160,19 @@
 .crew-map-seat.flight {
   width: calc(var(--sp-7) * 2 + var(--sp-3));
   background: color-mix(in srgb, var(--void) 78%, var(--accent));
+}
+.crew-map-stage.crowded .crew-map-seat:not(.flight) {
+  width: calc(var(--sp-5) + var(--sp-2));
+  min-height: calc(var(--sp-5) + var(--sp-2));
+  padding: 0;
+}
+.crew-map-stage.crowded .crew-map-seat:not(.flight) :where(b, span, small, em) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .crew-map-side {
   min-height: 0;
