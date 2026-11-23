@@ -39,6 +39,15 @@ export type Waiting = {
   /** The addressee of the oldest unanswered ask: this is the seat that owes the reply. */
   owed?: string;
   question: string | null;
+  /** Unanswered asks still young enough to need an amber reply cue. */
+  young: number;
+  /** Older unanswered asks stay visible as a quiet count. */
+  old: number;
+  /** The recipient of the oldest young ask, if there is one. */
+  youngOwed?: string;
+  /** The sender of the oldest young ask, if there is one. */
+  youngAsker?: string;
+  youngMs?: number;
 };
 
 /** `<1m`, `12m`, `2h 5m`, `3d`: a wait in words, so it is read and not only seen. */

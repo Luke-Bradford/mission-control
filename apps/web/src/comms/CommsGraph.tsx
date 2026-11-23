@@ -3,9 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type CommsView, commsAgentPath, navigate } from "../router.ts";
 import { pairFilter, searchWithFocus } from "./commsFilter.ts";
 import { CAPCOM, useChartData } from "./useChartData.ts";
+import { useReducedMotion } from "./chartTypes.ts";
 
 type Point = { x: number; y: number };
-const DAY = 24 * 60 * 60_000;
 const TRAVEL_LIGHTS = ["first", "second", "third"] as const;
 
 /** A hidden tab must not keep a live visual running. */
@@ -37,26 +37,30 @@ export function CommsGraph({
   const dragStart = useRef<{ id: string; x: number; y: number } | null>(null);
   const dragged = useRef(false);
   const visible = useDocumentVisible();
-  const seats = useMemo(
-    () => chart.seats.filter((seat) => seat.id !== CAPCOM && seat.id !== "crew"),
-    [chart.seats],
-  );
-  const others = seats.filter((seat) => seat.id !== chart.flight);
+  const reducedMotion = useReducedMotion();
+  const seats = useMemo(() => chart.seats.filter((seat) => seat.id !== "crew"), [chart.seats]);
+  const others = seats.filter((seat) => seat.id !== chart.flight && seat.id !== CAPCOM);
+  const crewSeats = seats.filter((seat) => seat.id !== CAPCOM);
   const crowded = others.length > 12;
   const pointFor = (id: string): Point => {
     const pinSet = full ? pins.full : pins.panel;
     if (pinSet[id]) return pinSet[id];
     if (id === chart.flight) return { x: 50, y: 50 };
+    if (id === CAPCOM) return { x: 50, y: 8 };
     const index = others.findIndex((seat) => seat.id === id);
     if (crowded) {
-      // Compact dots retain their own slot; names remain readable in the adjacent seat list.
-      return { x: 14 + (index % 5) * 18, y: 14 + Math.floor(index / 5) * 24 };
+      const rows = Math.ceil(others.length / 2);
+      return {
+        x: index % 2 === 0 ? 12 : 88,
+        y: (Math.floor(index / 2) + 0.5) * (100 / rows),
+      };
     }
     const angle = (index / Math.max(1, others.length)) * Math.PI * 2 - Math.PI / 2;
     return { x: 50 + Math.cos(angle) * 37, y: 50 + Math.sin(angle) * 37 };
   };
   const points = new Map(seats.map((seat) => [seat.id, pointFor(seat.id)]));
-  const youngWaits = chart.edges.filter((edge) => edge.waiting && edge.waiting.ms < DAY);
+  const youngWaits = chart.edges.filter((edge) => (edge.waiting?.young ?? 0) > 0);
+  const oldWaitCount = chart.edges.reduce((count, edge) => count + (edge.waiting?.old ?? 0), 0);
   const drag = (id: string, event: React.PointerEvent<HTMLButtonElement>) => {
     const host = event.currentTarget.closest(".crew-map-stage");
     if (!host) return;
@@ -117,12 +121,13 @@ export function CommsGraph({
                     y1={a.y}
                     x2={b.x}
                     y2={b.y}
-                    className={`crew-map-link ${edge.aToB + edge.bToA > 0 || (edge.waiting && edge.waiting.ms < DAY) ? "warm" : ""}`}
+                    className={`crew-map-link ${edge.aToB + edge.bToA > 0 || (edge.waiting?.young ?? 0) > 0 ? "warm" : ""}`}
                   />
                 ) : null;
               })}
             </svg>
             {visible &&
+              !reducedMotion &&
               chart.flows.list.flatMap((flow) => {
                 const from = points.get(flow.from);
                 const to = points.get(flow.to);
@@ -138,8 +143,8 @@ export function CommsGraph({
                         {
                           left: `${from.x}%`,
                           top: `${from.y}%`,
-                          "--travel-x": `${to.x - from.x}%`,
-                          "--travel-y": `${to.y - from.y}%`,
+                          "--travel-to-x": `${to.x}%`,
+                          "--travel-to-y": `${to.y}%`,
                           "--seat": sender.color,
                           animationDelay: `${index * 120}ms`,
                         } as React.CSSProperties
@@ -153,7 +158,7 @@ export function CommsGraph({
               const row = rows.find((candidate) => candidate.id === seat.id);
               const used = row?.digest?.contextTokens;
               const limit = row?.digest?.contextWindow ?? 150_000;
-              const wait = youngWaits.some((edge) => edge.waiting?.owed === seat.id);
+              const wait = youngWaits.some((edge) => edge.waiting?.youngOwed === seat.id);
               const tool = row?.digest?.liveTool?.name ?? "no tool running";
               return (
                 <button
@@ -195,6 +200,7 @@ export function CommsGraph({
             <section>
               <h3>Waiting on a reply</h3>
               <ul>
+                {chart.waitingNote && <li className="crew-map-wait-note">{chart.waitingNote}</li>}
                 {youngWaits.length ? (
                   youngWaits.map((edge) => (
                     <li key={edge.key}>
@@ -206,26 +212,32 @@ export function CommsGraph({
                               searchWithFocus(
                                 "",
                                 pairFilter(
-                                  edge.waiting?.asker ?? edge.a,
-                                  edge.waiting?.owed ?? edge.b,
+                                  edge.waiting?.youngAsker ?? edge.a,
+                                  edge.waiting?.youngOwed ?? edge.b,
                                 ),
                               ),
                           )
                         }
                       >
-                        {edge.waiting?.asker} → {edge.waiting?.owed}
+                        {edge.waiting?.youngAsker} → {edge.waiting?.youngOwed}
                       </button>
+                      {edge.waiting?.old ? <small>{edge.waiting.old} older</small> : null}
                     </li>
                   ))
-                ) : (
-                  <li>Nobody owes a reply.</li>
+                ) : chart.waitingNote ? null : (
+                  <li>
+                    Nobody owes a reply.
+                    {oldWaitCount
+                      ? ` ${oldWaitCount} older ask${oldWaitCount === 1 ? "" : "s"}.`
+                      : ""}
+                  </li>
                 )}
               </ul>
             </section>
             <section>
               <h3>Seats</h3>
               <ul>
-                {seats.map((seat) =>
+                {crewSeats.map((seat) =>
                   (() => {
                     const row = rows.find((candidate) => candidate.id === seat.id);
                     const used = row?.digest?.contextTokens;

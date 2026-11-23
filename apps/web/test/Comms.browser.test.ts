@@ -329,6 +329,9 @@ describeRendered("The busy living crew map, rendered", () => {
         const seats = [...document.querySelectorAll(".crew-map-seat")].map((seat) =>
           seat.getBoundingClientRect(),
         );
+        const labels = [...document.querySelectorAll(".crew-map-seat b")].map((label) =>
+          label.getBoundingClientRect(),
+        );
         return {
           seats: seats.length,
           allInStage:
@@ -341,11 +344,26 @@ describeRendered("The busy living crew map, rendered", () => {
                 seat.bottom <= stage.bottom,
             ),
           hasList: !!list && list.height > 100,
+          readableLabels: labels.every((label) => label.width > 10 && label.height > 5),
+          collisions: seats.flatMap((seat, index) =>
+            seats
+              .slice(index + 1)
+              .flatMap((other, offset) =>
+                seat.right <= other.left ||
+                other.right <= seat.left ||
+                seat.bottom <= other.top ||
+                other.bottom <= seat.top
+                  ? []
+                  : [[index, index + offset + 1]],
+              ),
+          ),
         };
       }, undefined);
       expect(panel.seats).toBeGreaterThanOrEqual(17);
       expect(panel.allInStage).toBe(true);
       expect(panel.hasList).toBe(true);
+      expect(panel.readableLabels).toBe(true);
+      expect(panel.collisions).toEqual([]);
       await page.screenshot(join(SHOTS, `crew-map-panel-${width}x${height}.png`));
 
       await page.click(".crew-map-head button");

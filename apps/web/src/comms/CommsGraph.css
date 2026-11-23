@@ -92,7 +92,8 @@
 }
 @keyframes crew-map-travel {
   to {
-    transform: translate(var(--travel-x), var(--travel-y));
+    left: var(--travel-to-x);
+    top: var(--travel-to-y);
     opacity: 0;
   }
 }
@@ -166,17 +167,9 @@
   background: color-mix(in srgb, var(--void) 78%, var(--accent));
 }
 .crew-map-stage.crowded .crew-map-seat:not(.flight) {
-  width: calc(var(--sp-5) + var(--sp-2));
-  min-height: calc(var(--sp-5) + var(--sp-2));
-  padding: 0;
-}
-.crew-map-stage.crowded .crew-map-seat:not(.flight) :where(b, span, small, em) {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  width: calc(26% - var(--sp-2));
+  min-height: calc(var(--sp-7) + var(--sp-3));
+  padding: var(--sp-1);
 }
 .crew-map-side {
   min-height: 0;
@@ -227,6 +220,10 @@
 .crew-map-side li button b {
   color: var(--fg);
 }
+.crew-map-wait-note {
+  color: var(--warn);
+  white-space: normal;
+}
 .crew-map-full {
   position: fixed;
   z-index: 20;
@@ -245,6 +242,9 @@
 }
 .crew-map-full .crew-map-seat {
   width: calc(var(--sp-7) * 2 + var(--sp-5));
+}
+.crew-map-full .crew-map-stage.crowded .crew-map-seat:not(.flight) {
+  width: calc(20% - var(--sp-2));
 }
 @media (max-width: 700px) {
   .crew-map-body {

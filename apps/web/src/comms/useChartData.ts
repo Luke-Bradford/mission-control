@@ -53,6 +53,7 @@ export const CAPCOM = "CAPCOM";
 const MC = "MC";
 /** Observed loops share one group. */
 export const LOOPS_GROUP = "LOOPS";
+const DAY = 24 * 60 * 60_000;
 
 export function pair(a: string, b: string): [string, string] {
   return a < b ? [a, b] : [b, a];
@@ -97,7 +98,7 @@ export function groupsFor(rows: readonly CrewRow[], flight: string): RailGroup[]
   });
 }
 
-/** What is waiting, per pair: how many, the longest wait, who asked and the oldest question. */
+/** What is waiting, per pair: young asks need action; older asks stay as a quiet count. */
 export function waitingByPair(
   items: readonly OpenItem[],
   flight: string,
@@ -112,12 +113,19 @@ export function waitingByPair(
     const key = `${a}\0${b}`;
     const before = out.get(key);
     const longest = before === undefined || item.waitedMs > before.ms;
+    const young = item.waitedMs < DAY;
+    const oldestYoung = young && item.waitedMs > (before?.youngMs ?? -1);
     out.set(key, {
       n: (before?.n ?? 0) + 1,
       ms: Math.max(before?.ms ?? 0, item.waitedMs),
       asker: longest ? from : (before?.asker ?? from),
       owed: longest ? to : (before?.owed ?? to),
       question: longest ? (item.question ?? item.text ?? null) : (before?.question ?? null),
+      young: (before?.young ?? 0) + Number(young),
+      old: (before?.old ?? 0) + Number(!young),
+      youngOwed: oldestYoung ? to : before?.youngOwed,
+      youngAsker: oldestYoung ? from : before?.youngAsker,
+      youngMs: oldestYoung ? item.waitedMs : before?.youngMs,
     });
   }
   return out;
