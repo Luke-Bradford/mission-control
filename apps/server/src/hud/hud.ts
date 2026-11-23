@@ -276,9 +276,11 @@ function loopViews(
             ? "error"
             : hud === "running" || hud === "stalled"
               ? "working"
-              : hud === "waiting"
-                ? "waiting-agent"
-                : "idle",
+              : hud === "blocked"
+                ? "waiting-you"
+                : hud === "waiting"
+                  ? "waiting-agent"
+                  : "idle",
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,

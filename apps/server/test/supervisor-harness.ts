@@ -26,6 +26,7 @@ import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import type { ReviewPreviews } from "../src/preview/review.ts";
+import type { CmuxOptions } from "../src/runtime/cmux.ts";
 import { endKeeper, KEEPER_SOCKET } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -338,6 +339,8 @@ function make(
     fake?: string;
     cliCheckTimeoutMs?: number;
     codexCommand?: string;
+    cmuxCommand?: string[];
+    cmuxOptions?: CmuxOptions;
     codexAuthPath?: string;
     worktrees?: string;
     extraArgs?: string[];
@@ -415,6 +418,10 @@ function make(
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
     codexCommand: over.codexCommand,
+    cmuxCommand: over.cmuxCommand,
+    cmuxRetryMs: 1500,
+    cmuxSweepMs: 200,
+    ...(over.cmuxOptions === undefined ? {} : { cmuxOptions: over.cmuxOptions }),
     codexAuthPath,
     commandArgs:
       over.command === undefined
@@ -502,7 +509,7 @@ afterAll(async () => {
   try {
     await expectNoLeftovers(tmpRoot);
   } finally {
-    rmSync(tmpRoot, { recursive: true, force: true });
+    rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -564,7 +571,8 @@ async function noKeepers(): Promise<void> {
 afterEach(async () => {
   await Promise.all(sups.splice(0).map((s) => s.stopAll()));
   await noKeepers();
-  rmSync(dir, { recursive: true, force: true });
+  // A cmux session's launcher may still be writing its run folder as the test ends: retry.
+  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   expect(authReads.splice(0), "tests must never read the operator's Codex home").toEqual([]);
 });
 

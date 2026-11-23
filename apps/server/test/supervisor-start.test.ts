@@ -1160,16 +1160,17 @@ describe("startRun", () => {
     expect(argv).not.toContain("--effort");
   });
 
-  it("passes a template's dollar cap to a Claude run", async () => {
+  it("keeps a template's dollar cap on an interactive Claude run", async () => {
     const profiles = DEFAULT_PROFILES.map((profile) =>
       profile.name === "small-change" ? { ...profile, budgetUsd: 12.5 } : profile,
     );
     const { sup } = make({ profiles: () => profiles });
     sup.start();
-    await sup.startRun("guido-1", 42);
+    const run = await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const argv = recorded()[0].argv as string[];
-    expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("12.5");
+    expect(argv).not.toContain("--max-budget-usd");
+    expect(store.run(run.runId)?.profile?.profile.budgetUsd).toBe(12.5);
   });
 
   it("runs the CLI with a minimal env, with no git identity (the commit tool sets it)", async () => {
@@ -2810,7 +2811,10 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
+    // Claude's Stop hook (the end of each turn) rides beside the guard hooks
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
+    expect(hooks.Stop?.[0]?.hooks[0]?.command).toMatch(/^\/bin\/echo stop >> '.+\/mc-turn-end'$/);
+    expect(hooks.Stop?.[0]?.hooks[0]?.command).not.toContain(tokenOf(runId));
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token

@@ -134,6 +134,13 @@ export interface CrewSession {
    * detached without sending one: a hub that is exiting waits on it, so a Stop is not lost.
    */
   readonly closeSent: Promise<void>;
+  /**
+   * Texts handed to `send` that never reached the CLI (cmux only). The supervisor has already
+   * recorded them as delivered, so a retake replays them into the recovered session.
+   */
+  readonly undelivered?: readonly string[];
+  /** Why a start failed, when the driver knows (a cmux setup refusal); null otherwise. */
+  readonly failure?: string | null;
 }
 
 type Json = Record<string, unknown>;

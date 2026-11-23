@@ -37,13 +37,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   adviceStepOf,
   auditStartRefusedText,
   BLOCKING_SEVERITIES,
   CANNOT_START,
+  CMUX_NEEDS_INPUT_TEXT,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -129,6 +130,7 @@ import {
   seatDef,
   seatInstructionBlock,
   signedOffQaPlan,
+  stopHookCommand,
   type TicketView,
   TOOL_OUTPUT_DIR,
   TRIM_HOOK_TIMEOUT_S,
@@ -145,7 +147,7 @@ import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CliHold } from "../cli/update.ts";
-import { probeClaudeVersion } from "../cli/version.ts";
+import { CLAUDE_COMMAND, probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import { pausedSeat } from "../config/crew-pause.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../config/profiles.ts";
@@ -207,6 +209,7 @@ import {
   textBytes,
   ticketPiece,
 } from "../telemetry/prompt-cost.ts";
+import { sleep } from "../util.ts";
 import {
   AGENTS_MD_HEADING,
   auditBrief,
@@ -252,6 +255,14 @@ import {
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
+import {
+  CMUX_DOWN_TEXT,
+  CMUX_REFUSED_TEXT,
+  type CmuxAgent,
+  type CmuxOptions,
+  createCmux,
+} from "./cmux.ts";
+import { attachCmuxSession, cmuxWorkspaceKey, startCmuxSession } from "./cmux-session.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
@@ -325,6 +336,7 @@ const LAST_TURN_ERROR = "last turn ended in an error";
 const SHUTTING_DOWN = "the server is shutting down";
 const RESUMED = "resumed after a restart; send a message to continue";
 const RESUME_FAILED = "could not resume the session";
+const CMUX_HELD_TEXT = "cmux not answering: the run waits until its workspace can be closed";
 /** How long `stopAll` waits for a Stop's `close` line to reach its keeper's socket. */
 const CLOSE_SENT_WAIT_MS = 1000;
 const RESUME_MODE_CHANGED = "could not resume: the seat's mode changed";
@@ -444,6 +456,14 @@ function addMcTmpExclude(gitCommonDir: string): void {
 export const CREW_ACTION_FAILED = "crew action failed";
 
 /** A refused action, with the HTTP status a route answers it with. */
+/** A start whose session died: cmux's setup refusals are a 409 with their exact text, the rest a 500. */
+function startRefusal(session: { failure?: string | null }, text = CANNOT_START): SupervisorError {
+  const f = session.failure;
+  return f === CMUX_REFUSED_TEXT || f === CMUX_DOWN_TEXT
+    ? new SupervisorError(409, f)
+    : new SupervisorError(500, text);
+}
+
 export class SupervisorError extends Error {
   readonly status: number;
   readonly deadSession: boolean;
@@ -480,6 +500,14 @@ export interface SupervisorDeps {
   command?: string;
   /** Put before the CLI's own arguments. */
   commandArgs?: string[];
+  /** Local cmux command; tests pass a fake executable and its prefix arguments. */
+  cmuxCommand?: string[];
+  /** Wait between tries to close a cmux workspace while cmux is down (2000). */
+  cmuxRetryMs?: number;
+  /** How often a held run retries closing its cmux workspace once cmux answers (30000). */
+  cmuxSweepMs?: number;
+  /** How the cmux wrapper starts cmux and how long it waits (tests only). */
+  cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
   codexCommand?: string;
   /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
@@ -1081,6 +1109,32 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const isCodex = (info: SeatInfo) =>
     config.accounts.find((a) => a.id === info.seat.accountId)?.vendor === "codex";
 
+  /** The text cmux last refused a start with, until it answers again. */
+  let cmuxHold: string | null = null;
+  /**
+   * Before a Claude start makes a run: cmux must answer. A refusal (socket control off, cmux down)
+   * is a 409 with its setup text and leaves the seat idle with that reason, holding no run, so no
+   * failed run or Needs-you flag is made. While held, a start only pings cmux (never opens it).
+   */
+  async function cmuxPreflight(info: SeatInfo): Promise<void> {
+    if (isCodex(info) || (deps.command !== undefined && deps.cmuxCommand === undefined)) return;
+    const cmux = createCmux(
+      deps.cmuxCommand,
+      log,
+      cmuxHold === null ? deps.cmuxOptions : { open: [], waitMs: 0 },
+    );
+    try {
+      await cmux.ensure();
+      cmuxHold = null;
+    } catch (error) {
+      const text = errText(error);
+      if (text !== CMUX_REFUSED_TEXT && text !== CMUX_DOWN_TEXT) return;
+      cmuxHold = text;
+      setSeat(info.seat.id, { state: "idle", reason: text });
+      throw new SupervisorError(409, text);
+    }
+  }
+
   const resumeModel = (info: SeatInfo, run: Run): string => {
     if (run.model !== null) return run.model;
     const vendor = run.vendor ?? "claude";
@@ -1233,6 +1287,101 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * to; one that has gone (or left an exit) has its folder removed first, so the run resumes with
    * `--resume` / `thread/resume` instead of failing as "exited". Never throws.
    */
+  /**
+   * One rule: while a Claude run's cmux workspace is not confirmed closed, the run never ends, its
+   * worktree is never dropped and its seat is never freed. Starting cmux restores the saved agent
+   * without the hub's settings, so the run waits ("cmux not answering") and, once cmux answers, the
+   * workspace is closed first and only then does `then` end or recover the run. Undelivered
+   * prompts stay on the run until then. True when the run is held.
+   */
+  const cmuxHolds = new Map<
+    string,
+    { action: () => void | Promise<void>; done: Promise<void>; settle: (e?: unknown) => void }
+  >();
+  /**
+   * An end requested for a held run (Stop, the engine's end, a supersede) joins the hold: it
+   * replaces the pending action and waits for it, so the run is recorded ended, its seat freed and
+   * its worktree dropped only after the workspace is closed. Null when the run is not held.
+   */
+  function joinCmuxHold(runId: string, then: () => void | Promise<void>): Promise<void> | null {
+    const hold = cmuxHolds.get(runId);
+    if (hold === undefined) return null;
+    hold.action = then;
+    return hold.done;
+  }
+  function holdForCmux(row: SeatSessionRow, then: () => void | Promise<void>): boolean {
+    const runId = row.runId;
+    if (runId === null || store.run(runId)?.endedAt !== null) return false;
+    if (store.run(runId)?.vendor === "codex" || store.getSetting(cmuxWorkspaceKey(runId)) === null)
+      return false;
+    if (cmuxHolds.has(runId)) return true;
+    let settle: (e?: unknown) => void = () => {};
+    const done = new Promise<void>((resolve, reject) => {
+      settle = (e) => (e === undefined ? resolve() : reject(e));
+    });
+    done.catch(() => {});
+    const hold = { action: then, done, settle };
+    cmuxHolds.set(runId, hold);
+    setSeat(row.seatId, { state: "error", reason: CMUX_HELD_TEXT });
+    const tick = async (): Promise<void> => {
+      if (stopping || runGone(runId, row.seatId)) {
+        cmuxHolds.delete(runId);
+        hold.settle();
+        return;
+      }
+      try {
+        // no wake: a cmux the operator quit is left alone until it is running again
+        await createCmux(deps.cmuxCommand, log, deps.cmuxOptions).agents();
+        if (await endAndRemoveKeeper(row.seatId, runId)) {
+          cmuxHolds.delete(runId);
+          try {
+            await hold.action();
+            hold.settle();
+          } catch (e) {
+            hold.settle(e ?? new Error("cmux hold action failed"));
+          }
+          return;
+        }
+      } catch {
+        /* cmux still down: try again */
+      }
+      setTimeout(() => void tick(), deps.cmuxSweepMs ?? 30_000).unref();
+    };
+    setTimeout(() => void tick(), 0).unref();
+    return true;
+  }
+
+  /** Prompts cmux never took, kept per run so they survive a failed close and a seat error. */
+  const undeliveredKey = (runId: string) => `cmux.undelivered:${runId}`;
+  function keepUndelivered(runId: string, texts: readonly string[]): void {
+    if (texts.length === 0) return;
+    const kept = readUndelivered(runId);
+    store.setSetting(undeliveredKey(runId), JSON.stringify([...kept, ...texts]));
+  }
+  function readUndelivered(runId: string): string[] {
+    try {
+      const value: unknown = JSON.parse(store.getSetting(undeliveredKey(runId)) ?? "[]");
+      return Array.isArray(value) ? value.filter((t): t is string => typeof t === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  /** Sends what a lost cmux session never took into the session that now holds the run, in order. */
+  function replayUndelivered(l: Live): void {
+    const texts = readUndelivered(l.run.id);
+    if (texts.length === 0) return;
+    store.deleteSetting(undeliveredKey(l.run.id));
+    for (const text of texts) {
+      try {
+        l.session.send(text);
+        l.inTurn = true;
+      } catch (e) {
+        log(`${l.info.seat.id}: could not replay a prompt into ${l.run.id}: ${errText(e)}`);
+        keepUndelivered(l.run.id, [text]);
+      }
+    }
+  }
+
   async function retake(l: Live): Promise<void> {
     const seatId = l.info.seat.id;
     const runId = l.run.id;
@@ -1241,6 +1390,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (row === null || row.runId !== runId || row.state === "stopped") return;
       if (store.run(runId)?.endedAt !== null) return;
       const dir = crewKeeperDir(deps.dbPath, runId);
+      // Prompts the dead session recorded as delivered but never got into cmux are kept on the run
+      // first, before any cleanup that can fail: whatever recovers the run next replays them.
+      keepUndelivered(runId, l.session.undelivered ?? []);
       // A Codex attach that could not confirm its floor closed its transport, so its keeper may
       // still be finishing while this exit reaches us. End it before its folder can be reused.
       if (l.run.vendor === "codex" && l.keeperPid !== null && pidAlive(l.keeperPid)) {
@@ -1249,8 +1401,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return;
         }
       } else if (readKeeperExit(dir) !== null || !keeperAlive(dir)) {
-        if (!(await endAndRemoveKeeper(seatId, runId))) {
-          failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
+        // A cmux workspace cannot be closed while cmux is down: give it a few tries to answer.
+        let ended = await endAndRemoveKeeper(seatId, runId);
+        for (let n = 0; !ended && l.run.vendor !== "codex" && n < 5; n++) {
+          await sleep(deps.cmuxRetryMs ?? 2000);
+          ended = await endAndRemoveKeeper(seatId, runId);
+        }
+        if (!ended) {
+          const again = () => {
+            const fresh = store.seatSession(seatId);
+            return fresh === null ? undefined : recoverSession(fresh);
+          };
+          if (!holdForCmux(row, again))
+            failResume(row, `${RESUME_FAILED}: could not end the old keeper`);
           return;
         }
       }
@@ -1301,8 +1464,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const failedReview =
       fresh?.reviewId != null && store.review(fresh.reviewId)?.state === "failed";
     const isCheck = checkRuns.has(l.run.id);
+    const cmuxSetup = e.reason === CMUX_REFUSED_TEXT || e.reason === CMUX_DOWN_TEXT;
     if (
       !isCheck &&
+      !cmuxSetup &&
       (l.endedBy === null || parked === "silent" || parked === "budget" || failedReview)
     )
       noteMissingReport(
@@ -1329,6 +1494,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } else if (isCheck) {
       // a check that died is the check's answer, not an error on the seat
       setSeat(seatId, { state: "idle", reason: null, runId: null });
+    } else if (cmuxSetup) {
+      // cmux setup is the operator's to fix, not a failed seat: the start answers 409 and the seat
+      // is left idle, with the exact setup text as its reason, holding no run, session or worktree
+      setSeat(seatId, {
+        state: "idle",
+        reason: e.reason,
+        runId: null,
+        cliSessionId: null,
+        worktree: null,
+      });
     } else {
       // Neither a code nor a signal: the CLI never started (its stderr event says why).
       const how = e.code ?? e.signal;
@@ -1355,11 +1530,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function onEvent(l: Live, e: SessionEvent): void {
     switch (e.kind) {
       case "init":
-        if (l.run.vendor === "codex") {
-          l.run = { ...l.run, sessionId: e.sessionId };
-          store.upsertRun(l.run);
-          setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
-        }
+        l.run = { ...l.run, sessionId: e.sessionId };
+        store.upsertRun(l.run);
+        setSeat(l.info.seat.id, { cliSessionId: e.sessionId });
         break;
       case "turn-refused":
         if (!e.active) {
@@ -1378,6 +1551,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         l.inTurn = true;
         store.setSeatTurnStarted(l.info.seat.id, now());
         if (!l.parkedTurn) setState(l, "running", null);
+        break;
+      case "needs-input":
+        l.inTurn = true;
+        setState(l, "needs-input", CMUX_NEEDS_INPUT_TEXT);
         break;
       case "tool-result":
         if (
@@ -2262,6 +2439,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (repoDocs?.skills !== undefined && repoDocs.skills.skills.length > 0) {
           writeSkillPlugin(skillsDir, info.repo.id, repoDocs.skills.skills);
         }
+        // Claude's Stop hook marks the end of each turn in this file; the cmux driver reads it
+        const stopFile = join(tmp, "mc-turn-end");
         const args = crewCliArgs({
           pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
@@ -2293,29 +2472,67 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               }),
               timeoutS: TRIM_HOOK_TIMEOUT_S,
             },
+            stop: { command: stopHookCommand(stopFile), timeoutS: 5 },
           },
         });
-        session = startSession({
-          command: deps.command,
-          args: [...(deps.commandArgs ?? []), ...args],
-          cwd,
-          transcriptPath: run.transcriptPath,
-          privateEnv,
-          env: crewEnv(
-            info.seat.id,
-            tmpPath,
-            crewProfileOf(info.seat.role, def.loop) === "flight-full",
-            readOnlyReview,
-          ),
-          node: crew?.node ?? DEFAULT_CREW_NODE,
-          entry: join(deps.hubRoot, KEEPER_ENTRY),
-          dir: crewKeeperDir(deps.dbPath, run.id),
-          spawn: keeperSpawn,
-          cliSessionId,
-          log,
-          controlTimeoutMs: deps.controlTimeoutMs,
-          stopGraceMs: deps.stopGraceMs,
-        });
+        const env = crewEnv(
+          info.seat.id,
+          tmpPath,
+          crewProfileOf(info.seat.role, def.loop) === "flight-full",
+          readOnlyReview,
+        );
+        // An injected Claude binary is the legacy deterministic test seam. Production Claude
+        // seats always use cmux; Codex already took its branch above.
+        if (deps.command !== undefined && deps.cmuxCommand === undefined) {
+          session = startSession({
+            command: deps.command,
+            args: [...(deps.commandArgs ?? []), ...args],
+            cwd,
+            transcriptPath: run.transcriptPath,
+            privateEnv,
+            env,
+            node: crew?.node ?? DEFAULT_CREW_NODE,
+            entry: join(deps.hubRoot, KEEPER_ENTRY),
+            dir: crewKeeperDir(deps.dbPath, run.id),
+            spawn: keeperSpawn,
+            cliSessionId,
+            log,
+            controlTimeoutMs: deps.controlTimeoutMs,
+            stopGraceMs: deps.stopGraceMs,
+          });
+        } else {
+          const ref =
+            run.reviewId != null
+              ? `PR ${store.review(run.reviewId)?.prNumber ?? run.reviewId}`
+              : (run.ticket ?? def.loop);
+          session = startCmuxSession({
+            cmux: createCmux(deps.cmuxCommand, log, deps.cmuxOptions),
+            name: `${info.seat.id} · ${ref}`,
+            cwd,
+            // cmux must invoke Claude by its command name so its shim remains in control. A
+            // relative command is useful for a local installation; test binaries are absolute.
+            command:
+              deps.command !== undefined && !isAbsolute(deps.command)
+                ? deps.command
+                : CLAUDE_COMMAND,
+            args,
+            transcriptPath: run.transcriptPath,
+            privateEnv,
+            env: Object.fromEntries(
+              Object.entries(env).filter((e): e is [string, string] => typeof e[1] === "string"),
+            ),
+            dir: crewKeeperDir(deps.dbPath, run.id),
+            stopFile,
+            cliSessionId,
+            messageDir: join(tmp, "mc-messages"),
+            log,
+            onWorkspace: (workspace, pid) => {
+              store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify({ workspace, pid }));
+              const l = live.get(info.seat.id);
+              if (l?.run.id === run.id) l.spawn = `cmux:${workspace}`;
+            },
+          });
+        }
       }
     } catch (e) {
       release();
@@ -2385,6 +2602,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function removeRunFiles(runId: string): void {
     pendingPromptVersions.delete(runId);
+    store.deleteSetting(undeliveredKey(runId));
     void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
@@ -2504,6 +2722,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   /** Removes a run's keeper folder and its cursor. Never throws. */
   function removeKeeper(seatId: string, runId: string): void {
     try {
+      store.deleteSetting(cmuxWorkspaceKey(runId));
       rmSync(crewKeeperDir(deps.dbPath, runId), { recursive: true, force: true });
       store.deleteKeeperCursor(runId);
       if (store.run(runId)?.endedAt != null) removeRunFiles(runId);
@@ -2521,6 +2740,27 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * finds it. True when the keeper is gone. Never throws.
    */
   async function endAndRemoveKeeper(seatId: string, runId: string): Promise<boolean> {
+    const saved = store.getSetting(cmuxWorkspaceKey(runId));
+    if (store.run(runId)?.vendor !== "codex" && saved !== null) {
+      try {
+        const value: unknown = JSON.parse(saved);
+        if (isObj(value) && typeof value.workspace === "string") {
+          const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
+          // cmux may have quit: start it before closing, or the workspace is restored unguarded
+          try {
+            await cmux.ensure();
+            await cmux.close(value.workspace);
+          } catch (e) {
+            if (!/no such|not found|unknown/i.test(errText(e))) throw e;
+          }
+        }
+      } catch (e) {
+        log(`${seatId}: could not close cmux workspace of ${runId}: ${errText(e)}`);
+        return false;
+      }
+      removeKeeper(seatId, runId);
+      return true;
+    }
     const dir = crewKeeperDir(deps.dbPath, runId);
     try {
       if (keeperAlive(dir) && !(await endKeeper(dir, keeperEndWait(), log))) {
@@ -2577,6 +2817,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     };
     live.set(info.seat.id, l);
     l.off = session.on((e) => onEvent(l, e));
+    if (run.vendor !== "codex") replayUndelivered(l);
     return l;
   }
 
@@ -2589,6 +2830,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       exit?: Pick<NonNullable<Run["noReport"]>, "code" | "signal" | "lastStderr"> & { at: number };
     } = {},
   ): void {
+    // a Claude run whose cmux workspace is still open is held, then failed once it is closed
+    if (holdForCmux(row, () => failResume(store.seatSession(row.seatId) ?? row, reason, opts)))
+      return;
     const run = row.runId === null ? null : store.run(row.runId);
     const open = run !== null && run.endedAt === null;
     if (open) {
@@ -3027,6 +3271,98 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
     }
     if (runGone(runId, row.seatId) || stopping) return;
+    // Claude has no keeper. Its workspace is durable across a hub restart, so attach directly to
+    // the saved workspace when cmux still reports the same process. A missing workspace takes the
+    // normal resume path below, which starts a fresh workspace with the hub's settings.
+    if (row.vendor !== "codex" && info && run?.endedAt === null && row.worktree !== null) {
+      try {
+        const saved: unknown = JSON.parse(store.getSetting(cmuxWorkspaceKey(runId)) ?? "null");
+        if (isObj(saved) && typeof saved.workspace === "string") {
+          const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
+          // A workspace saved before Claude registered (pid null) has nothing to attach to; it is
+          // closed below so it cannot register later as an untracked duplicate.
+          const savedPid = typeof saved.pid === "number" ? saved.pid : null;
+          // After a reboot the hub can start before cmux. Never start a new workspace while the
+          // saved one is unknown: cmux would restore the old agent without the hub's settings.
+          const agentsOf = async () => (savedPid === null ? [] : await cmux.agents());
+          let agents: CmuxAgent[];
+          try {
+            agents = await agentsOf();
+          } catch {
+            try {
+              await cmux.ensure();
+              agents = await agentsOf();
+            } catch (error) {
+              log(
+                `${row.seatId}: cmux does not answer, the old workspace is kept: ${errText(error)}`,
+              );
+              // the run waits for cmux and is then recovered, never failed with a workspace open
+              const again = () => {
+                const fresh = store.seatSession(row.seatId);
+                return fresh === null ? undefined : recoverSession(fresh);
+              };
+              if (holdForCmux(row, again)) return;
+              return failResume(row, `${RESUME_FAILED}: cmux is not answering`);
+            }
+          }
+          const record = agents.find(
+            (agent) => agent.workspaceId === saved.workspace && agent.pid === savedPid,
+          );
+          if (record && savedPid !== null) {
+            try {
+              deps.tokens.adopt(
+                row.seatId,
+                runId,
+                readFileSync(crewTokenPath(deps.dbPath, runId), "utf8"),
+              );
+            } catch (error) {
+              log(`${row.seatId}: could not restore the cmux token: ${errText(error)}`);
+            }
+            const session = attachCmuxSession({
+              cmux,
+              workspace: saved.workspace,
+              pid: savedPid,
+              awaiting: row.state !== "idle",
+              savedState: row.state,
+              from: cursor?.spawn === `cmux:${saved.workspace}` ? cursor.line : 0,
+              name: row.seatId,
+              cwd: row.worktree,
+              command: CLAUDE_COMMAND,
+              args: [],
+              env: {},
+              dir,
+              stopFile: join(seatTmp(runId), "mc-turn-end"),
+              transcriptPath: run.transcriptPath,
+              cliSessionId: row.cliSessionId ?? record.sessionId,
+              messageDir: join(seatTmp(runId), "mc-messages"),
+              log,
+              onWorkspace: (workspace, pid) =>
+                store.setSetting(cmuxWorkspaceKey(runId), JSON.stringify({ workspace, pid })),
+            });
+            track(info, run, session, grant(info, run), {
+              spawn: `cmux:${saved.workspace}`,
+              attaching: true,
+              inTurn: false,
+            });
+            return;
+          }
+          // cmux restored the workspace's Claude with a new pid (it has none of the hub's
+          // settings): close it before the resume starts another on the same session. A
+          // workspace that is already gone counts as closed.
+          try {
+            await cmux.ensure();
+            await cmux.close(saved.workspace);
+          } catch (error) {
+            if (!/no such|not found|unknown/i.test(errText(error))) {
+              log(`${row.seatId}: could not close the old cmux workspace: ${errText(error)}`);
+              return failResume(row, `${RESUME_FAILED}: could not end the old workspace`);
+            }
+          }
+        }
+      } catch (error) {
+        log(`${row.seatId}: could not attach cmux workspace: ${errText(error)}`);
+      }
+    }
     const found = await attachSession({
       dir,
       // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
@@ -3639,6 +3975,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // Every way a run starts ends here: the one eligibility check, before a worktree or a claim.
       const card = store.boardItem(info.repo.id, issue) ?? undefined;
       if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
+      await cmuxPreflight(info);
       const rules = await deps.rules(info.repo.id);
       if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
       const profiles = deps.profiles?.() ?? DEFAULT_PROFILES;
@@ -4140,7 +4477,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await session.ready;
         if (!session.alive) {
           await session.close();
-          throw new SupervisorError(500, CANNOT_START);
+          throw startRefusal(session);
         }
         // The CLI prints nothing (not even init) until its first line: the brief goes at once.
         await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
@@ -4210,6 +4547,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     starting.add(seatId);
     let prepared: string | null = null;
     try {
+      await cmuxPreflight(info);
       // No ticket and no branch: a detached checkout of the default branch, for reading only.
       const { checkout, repoDocs, references } = await inClone(info.session.checkout, async () => {
         const c = await prepareDetachedCheckout({
@@ -4358,8 +4696,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await session.ready;
       if (!session.alive) {
         await session.close();
-        throw new SupervisorError(
-          500,
+        throw startRefusal(
+          session,
           check !== undefined && l.lastStderr !== null
             ? `${CANNOT_START}: ${l.lastStderr}`
             : CANNOT_START,
@@ -4601,6 +4939,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
       }
       if (ticket === null) throw new SupervisorError(404, "unknown issue");
+      await cmuxPreflight(info);
       const card = store.boardItem(info.repo.id, issue);
       // FLIGHT's second review of a blocking floor review: the most capable model, and it reads
       // the first review's findings and FLIGHT's reason
@@ -4892,7 +5231,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await session.ready;
       if (!session.alive) {
         await session.close();
-        throw new SupervisorError(500, CANNOT_START);
+        throw startRefusal(session);
       }
       await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
       return { runId };
@@ -4904,6 +5243,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function endRun(seatId: string, opts: { hold?: boolean } = {}): Promise<void> {
     if (transfers.has(seatId)) await transfers.get(seatId);
     const info = need(seatId);
+    const heldRun = store.seatSession(seatId)?.runId;
+    if (heldRun != null && cmuxHolds.has(heldRun)) {
+      const joined = joinCmuxHold(heldRun, () => {
+        // the workspace is closed: the seat leaves its waiting error so the end can finish
+        setSeat(seatId, { state: "idle", reason: null });
+        return endRun(seatId, opts);
+      });
+      if (joined !== null) return joined;
+    }
     // FLIGHT's seat is never dealt a ticket: ending it always benches it, or the watch restarts it
     const hold = opts.hold ?? seatDef(info.seat).loop === "watch";
     const l = live.get(seatId);
@@ -4980,6 +5328,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (!mayAct()) return;
     const run = store.run(runId);
     if (run === null || run.endedAt !== null) return;
+    // a held run (its cmux workspace is not confirmed closed) ends only after the close
+    const joined = joinCmuxHold(runId, () => endRunByEngine(runId, reason));
+    if (joined !== null) return joined;
     const seatId = run.agentId;
     const info = findSeat(seatId);
     const row = store.seatSession(seatId);

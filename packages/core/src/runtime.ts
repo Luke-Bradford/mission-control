@@ -1,6 +1,7 @@
 import type { CrewMode, LoopKind } from "./runtime-model.ts";
 
 export {
+  CMUX_NEEDS_INPUT_TEXT,
   CODEX_SHELL,
   CREW_MODES,
   type CrewMode,
@@ -1069,6 +1070,8 @@ export interface CrewHook {
   timeoutS: number;
   /** The trim hook (#1045): after every tool, a huge result is cut before it enters context. */
   trim?: { command: string; timeoutS: number };
+  /** The Stop hook: Claude's own end-of-turn signal, one marker per turn (`stopHookCommand`). */
+  stop?: { command: string; timeoutS: number };
 }
 
 /** The tools whose Post events the hook sees: only a Bash call can hold the test lock. */
@@ -1079,9 +1082,9 @@ const POST_HOOK_MATCHER = "Bash";
  * (PreToolUse, matcher `*`), after each Bash call ends (PostToolUse, PostToolUseFailure), when
  * a call that holds the test lock releases it.
  */
-function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
+function guardHooks(hook: CrewHook): Record<string, unknown[]> {
   const run = { type: "command", command: hook.command, timeout: hook.timeoutS };
-  const out = {} as Record<GuardHookEvent, unknown[]>;
+  const out = {} as Record<GuardHookEvent, unknown[]> & Record<string, unknown[]>;
   for (const e of GUARD_HOOK_EVENTS) {
     out[e] = [{ matcher: e === "PreToolUse" ? "*" : POST_HOOK_MATCHER, hooks: [run] }];
   }
@@ -1091,6 +1094,10 @@ function guardHooks(hook: CrewHook): Record<GuardHookEvent, unknown[]> {
       hooks: [{ type: "command", command: hook.trim.command, timeout: hook.trim.timeoutS }],
     });
   }
+  if (hook.stop !== undefined)
+    out.Stop = [
+      { hooks: [{ type: "command", command: hook.stop.command, timeout: hook.stop.timeoutS }] },
+    ];
   return out;
 }
 
@@ -1331,7 +1338,18 @@ export function trimHookCommand(i: TrimHookInput): string {
   return `${q(i.node)} --experimental-strip-types ${q(i.entry)} ${q(i.dir)}`;
 }
 
-/** The argv (after `claude`) for one seat's long-lived stream-json process. */
+/**
+ * The Stop hook's command: Claude runs it when a turn ends, and it adds one line to the run's own
+ * marker file, which the cmux driver reads as the end of the turn the hub started.
+ */
+export function stopHookCommand(file: string): string {
+  if (/['\n\r]/.test(file))
+    throw new Error("crew stop hook: the file holds a quote or a line break");
+  if (!file.startsWith("/")) throw new Error("crew stop hook: the file must be absolute");
+  return `/bin/echo stop >> '${file}'`;
+}
+
+/** The argv (after `claude`) for one interactive crew process. */
 export function crewCliArgs(i: CrewCliInput): string[] {
   const base: readonly string[] =
     i.mode === "writer" ? WRITER_TOOLS : i.mode === "scratch" ? SCRATCH_TOOLS : READONLY_TOOLS;
@@ -1357,16 +1375,9 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   const profile = i.profile ?? "standard";
   const args = [
-    "-p",
-    "--input-format",
-    "stream-json",
-    "--output-format",
-    "stream-json",
-    "--verbose",
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
-    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--settings",
@@ -1441,6 +1452,7 @@ export function crewCliArgs(i: CrewCliInput): string[] {
 export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
+  | { kind: "needs-input" }
   /** A rejected request is not evidence that any executing turn has ended. */
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }
