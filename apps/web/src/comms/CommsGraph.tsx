@@ -1,261 +1,62 @@
-import { COMMS_MESSAGE_MAX, COMMS_METRICS, type CommsMetricsView, type CrewRow } from "@mc/core";
-import { useState } from "react";
-import { callSign } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
-import { percent, plural } from "../fmt.ts";
-import { Panel } from "../hud/Panel.tsx";
-import { useMetrics } from "../metrics.ts";
-import { type CommsView, NEEDS_YOU_PATH, navigate } from "../router.ts";
-import { type ChartMode, ChartModeSwitch, CommsRails } from "./CommsRails.tsx";
-import { commsHrefFor, useChartFilter } from "./chartPaths.ts";
-import { useReducedMotion, waitWord } from "./chartTypes.ts";
-import { type ChartFilter, pairFilter } from "./commsFilter.ts";
+import type { CrewRow } from "@mc/core";
+import { useMemo, useState } from "react";
+import { commsAgentPath, navigate, type CommsView } from "../router.ts";
 import { CAPCOM, useChartData } from "./useChartData.ts";
 
-/** The live crew's communication chart, with the traffic and message-length panels beneath it. */
-export function CommsGraph({
-  rows,
-  flightId,
-  view,
-}: {
-  rows: CrewRow[];
-  flightId: string | undefined;
-  view: CommsView;
-}) {
-  void view;
-  const lengthsResource = useResource<CommsMetricsView>(RESOURCES.commsMetrics);
-  const lengths = lengthsResource.data?.p95BySeat;
-  const [mode, setMode] = useState<ChartMode>("all");
-  const reduced = useReducedMotion();
+type Point = { x: number; y: number };
+const DAY = 24 * 60 * 60_000;
+
+/** The living crew map. The chart hook is its live snapshot source. */
+export function CommsGraph({ rows, flightId }: { rows: CrewRow[]; flightId: string | undefined; view: CommsView }) {
   const chart = useChartData(rows, flightId);
-  const { flight, known, edges } = chart;
-  const [filter, setFilter] = useChartFilter(known);
-
-  // A click opens the conversation in the chat and keeps the chart narrowed to match.
-  const pick = (next: ChartFilter) => navigate(commsHrefFor(next, flight));
-  const graphTotal = edges.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
-  const graphLabel = `Comms chart, ${plural(rows.length, "seat")}, ${plural(graphTotal, "message")} in 24h${
-    filter === null ? "" : ", narrowed"
-  }`;
-
-  return (
-    <aside className="comms-right" aria-label="Comms activity">
-      <Panel
-        id="commsGraph"
-        className="comms-graph-panel"
-        title="Comms graph"
-        sub="24h"
-        actions={<ChartModeSwitch mode={mode} onChange={setMode} openCount={chart.openCount} />}
-      >
-        <div className="comms-graph-readout" aria-hidden="true">
-          {chart.streaming && (
-            <span className="live">
-              <i className="comms-live-dot" />
-              Live
-            </span>
-          )}
-          <span>
-            <b>{edges.length}</b> links
-          </span>
-          <span>
-            <b>{graphTotal}</b> msg
-          </span>
-          <span>
-            <b>{chart.groups.length}</b> roles
-          </span>
+  const [full, setFull] = useState(false);
+  const [pins, setPins] = useState<Record<string, Point>>({});
+  const seats = useMemo(() => chart.seats.filter((seat) => seat.id !== CAPCOM && seat.id !== "crew"), [chart.seats]);
+  const others = seats.filter((seat) => seat.id !== chart.flight);
+  const pointFor = (id: string): Point => {
+    if (pins[id]) return pins[id];
+    if (id === chart.flight) return { x: 50, y: 50 };
+    const index = others.findIndex((seat) => seat.id === id);
+    const angle = (index / Math.max(1, others.length)) * Math.PI * 2 - Math.PI / 2;
+    return { x: 50 + Math.cos(angle) * 37, y: 50 + Math.sin(angle) * 37 };
+  };
+  const points = new Map(seats.map((seat) => [seat.id, pointFor(seat.id)]));
+  const youngWaits = chart.edges.filter((edge) => edge.waiting && edge.waiting.ms < DAY);
+  const drag = (id: string, event: React.PointerEvent<HTMLButtonElement>) => {
+    const host = event.currentTarget.closest(".crew-map-stage");
+    if (!host) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const move = (next: PointerEvent) => {
+      const box = host.getBoundingClientRect();
+      setPins((old) => ({ ...old, [id]: { x: Math.max(7, Math.min(93, ((next.clientX - box.left) / box.width) * 100)), y: Math.max(9, Math.min(91, ((next.clientY - box.top) / box.height) * 100)) } }));
+    };
+    event.currentTarget.addEventListener("pointermove", move, { once: true });
+  };
+  return <aside className={`comms-right crew-map-host ${full ? "crew-map-full" : ""}`} aria-label="Comms activity">
+    <section className="crew-map" aria-label="Crew map">
+      <header className="crew-map-head"><h2>Crew map</h2><span role="status">{chart.streaming ? "LIVE" : "CONNECTING"}</span>
+        <button type="button" aria-label={full ? "Close full screen map" : "Open the map full screen"} onClick={() => setFull(!full)}>{full ? "Close" : "Full"}</button>
+      </header>
+      <div className="crew-map-body">
+        <div className="crew-map-stage" role="group" aria-label="FLIGHT at the centre; message links between seats">
+          <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
+            {[24, 37].map((radius) => <circle key={radius} cx="50" cy="50" r={radius} className="crew-map-orbit" />)}
+            {chart.edges.map((edge) => { const a = points.get(edge.a), b = points.get(edge.b); return a && b ? <line key={edge.key} x1={a.x} y1={a.y} x2={b.x} y2={b.y} className={`crew-map-link ${edge.waiting && edge.waiting.ms < DAY ? "warm" : ""}`} /> : null; })}
+          </svg>
+          {seats.map((seat) => {
+            const point = points.get(seat.id) ?? pointFor(seat.id);
+            const row = rows.find((candidate) => candidate.id === seat.id);
+            const used = row?.digest?.contextTokens;
+            const limit = row?.digest?.contextWindow ?? 150_000;
+            const wait = youngWaits.some((edge) => edge.waiting?.owed === seat.id);
+            const tool = row?.digest?.liveTool?.name ?? "no tool running";
+            return <button key={seat.id} type="button" className={`crew-map-seat ${seat.id === chart.flight ? "flight" : ""} ${seat.presence} ${wait ? "owes" : ""}`} style={{ left: `${point.x}%`, top: `${point.y}%`, "--seat": seat.color } as React.CSSProperties} onClick={() => navigate(commsAgentPath(seat.id))} onPointerDown={(event) => drag(seat.id, event)} aria-label={`${seat.name}, ${seat.state ?? seat.presence}, ${used == null ? "context unknown" : `${Math.round(used / 1000)}K of ${Math.round(limit / 1000)}K context`}, ${tool}${wait ? ", owes a reply" : ""}`}>
+              <i aria-hidden="true" /><b>{seat.name}</b><span>{seat.state ?? seat.presence}</span><small>{used == null ? "—" : `${Math.round(used / 1000)}K/${Math.round(limit / 1000)}K`} · {tool}</small>{wait && <em>reply</em>}
+            </button>;
+          })}
         </div>
-        {chart.chartLoading && !chart.hasData ? (
-          <p className="comms-traffic-empty">Loading comms graph…</p>
-        ) : !chart.hasData ? (
-          <p className="comms-traffic-empty" role="alert">
-            Couldn't load comms graph. Retrying.
-          </p>
-        ) : (
-          <>
-            {chart.chartError && (
-              <p className="comms-length-stale" role="status">
-                Stale · couldn't refresh. Retrying.
-              </p>
-            )}
-            <div className="comms-graph-stage">
-              <CommsRails
-                seats={chart.seats}
-                groups={chart.groups}
-                hubIds={chart.hubIds}
-                edges={edges}
-                mode={mode}
-                filter={filter}
-                flows={chart.flows}
-                reduced={reduced}
-                label={graphLabel}
-                full={false}
-                onPickSeat={(id) => pick({ kind: "seat", id })}
-                onPickLink={(a, b) => pick(pairFilter(a, b))}
-                onClear={() => setFilter(null)}
-              />
-            </div>
-            <SignalLists chart={chart} pick={pick} />
-          </>
-        )}
-      </Panel>
-      <Panel
-        id="commsLength"
-        className="comms-length-panel"
-        title={COMMS_METRICS.messageLengthP95.label}
-        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString()} ${COMMS_METRICS.messageLengthP95.unit}`}
-      >
-        {lengths === undefined && lengthsResource.error !== null ? (
-          <p className="comms-traffic-empty" role="alert">
-            Couldn't load message lengths. Retrying.
-          </p>
-        ) : lengths === undefined ? (
-          <p className="comms-traffic-empty">Loading message lengths…</p>
-        ) : (
-          <>
-            {lengthsResource.error !== null && (
-              <p className="comms-length-stale" role="status">
-                <i aria-hidden="true" />
-                Stale · couldn't refresh. Retrying.
-              </p>
-            )}
-            {lengths.length === 0 ? (
-              <p className="comms-traffic-empty">No messages in the last 24h.</p>
-            ) : (
-              <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
-                {[...lengths]
-                  .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
-                  .map(({ seatId, p95, n }) => {
-                    const row = rows.find((r) => r.id === seatId);
-                    const level = lengthLevel(p95);
-                    return (
-                      <li key={seatId} className={level}>
-                        <b>{row === undefined ? seatId : callSign(row)}</b>
-                        <span className="comms-length-value">
-                          {p95 === null ? "—" : Math.round(p95).toLocaleString()}
-                          {level !== "" && (
-                            <em>{level === "over" ? " over limit" : " near limit"}</em>
-                          )}
-                        </span>
-                        <span className="comms-length-n">{n} msg</span>
-                        <span className="comms-watch-bar" aria-hidden="true">
-                          <i
-                            style={{
-                              width: percent(
-                                Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100),
-                                0,
-                              ),
-                            }}
-                          />
-                        </span>
-                      </li>
-                    );
-                  })}
-              </ul>
-            )}
-          </>
-        )}
-      </Panel>
-    </aside>
-  );
-}
-
-/** Near the limit from 80% of it; over once the p95 passes it. */
-const NEAR_LIMIT = 0.8;
-function lengthLevel(p95: number | null): "" | "near" | "over" {
-  if (p95 === null) return "";
-  if (p95 > COMMS_MESSAGE_MAX) return "over";
-  return p95 >= COMMS_MESSAGE_MAX * NEAR_LIMIT ? "near" : "";
-}
-
-/** "Waiting on a reply" and "Just said", shared by the panel and the full-screen chart. */
-export function SignalLists({
-  chart,
-  pick,
-  className = "",
-}: {
-  chart: ReturnType<typeof useChartData>;
-  pick: (filter: ChartFilter) => void;
-  className?: string;
-}) {
-  const nameOf = (id: string) => chart.seats.find((seat) => seat.id === id)?.name ?? id;
-  // What waits on the operator is answered on Needs you, not here: this list holds waits between
-  // agents, and one line says how many wait for the operator, from the figure the header shows.
-  const forYou = Number(useMetrics().readings.needsYou?.value ?? 0);
-  return (
-    <div className={`comms-signal-lists ${className}`.trim()}>
-      {forYou > 0 && (
-        <p className="comms-waiting-you">
-          <a
-            href={NEEDS_YOU_PATH}
-            onClick={(event) => {
-              event.preventDefault();
-              navigate(NEEDS_YOU_PATH);
-            }}
-          >
-            {forYou} waiting for you
-          </a>
-        </p>
-      )}
-      <MessageList
-        title="Waiting on a reply"
-        empty="Nobody owes a reply."
-        note={chart.waitingNote}
-        rows={chart.edges
-          .filter((edge) => edge.waiting && edge.a !== CAPCOM && edge.b !== CAPCOM)
-          .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
-          .map((edge) => ({
-            key: edge.key,
-            label: `${nameOf(edge.waiting?.asker ?? edge.a)} → ${nameOf(edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a))}`,
-            age: edge.waiting?.ms ?? 0,
-            text: edge.waiting?.question ?? "Reply requested",
-            onClick: () => pick(pairFilter(edge.a, edge.b)),
-          }))}
-      />
-      <MessageList
-        title="Just said"
-        empty="No direct messages yet."
-        rows={chart.feed.slice(0, 5).map((message) => ({
-          key: message.id,
-          label: `${nameOf(message.from)} → ${nameOf(message.to)}`,
-          text: message.text.split(/\r?\n/, 1)[0] || "Message",
-          onClick: () => pick(pairFilter(message.from, message.to)),
-        }))}
-      />
-    </div>
-  );
-}
-
-export function MessageList({
-  title,
-  empty,
-  note = null,
-  rows,
-}: {
-  title: string;
-  empty: string;
-  /** Says, in words, that the rows may be missing or out of date. */
-  note?: string | null;
-  rows: readonly { key: string; label: string; text: string; age?: number; onClick: () => void }[];
-}) {
-  return (
-    <section className="comms-signal-list" aria-label={title}>
-      <h3>{title}</h3>
-      {note !== null && <p role="status">{note}</p>}
-      {rows.length === 0 ? (
-        note === null && <p>{empty}</p>
-      ) : (
-        <ul>
-          {rows.map((row) => (
-            <li key={row.key}>
-              <button type="button" onClick={row.onClick}>
-                <b>{row.label}</b>
-                <span>{row.text}</span>
-                {row.age !== undefined && <em>{waitWord(row.age)}</em>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        <div className="crew-map-side"><section><h3>Waiting on a reply</h3><ul>{youngWaits.length ? youngWaits.map((edge) => <li key={edge.key}>{edge.waiting?.asker} → {edge.waiting?.owed}</li>) : <li>Nobody owes a reply.</li>}</ul></section><section><h3>Seats</h3><ul>{seats.map((seat) => <li key={seat.id}>{seat.name} · {seat.state ?? seat.presence}</li>)}</ul></section></div>
+      </div>
     </section>
-  );
+  </aside>;
 }
