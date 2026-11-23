@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -332,6 +333,38 @@ describe("a restart attaches to the workspace", () => {
     );
     expect(closed).toBeGreaterThan(-1);
     expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
+  });
+
+  it("closes the saved workspace once cmux returns after an outage longer than every retry", async () => {
+    const { state, first } = await idleRun();
+    const old = sessions(state)[0]?.workspace_id;
+    await first.sup.stopAll();
+    const value = JSON.parse(readFileSync(state, "utf8"));
+    value.ping = "down";
+    value.sessions_fail = true;
+    value.close_fail = true;
+    writeFileSync(state, JSON.stringify(value));
+    // cmux cannot be started (the open command does nothing): the run fails with the workspace unconfirmed
+    const next = make({
+      cmuxCommand: [process.execPath, fake, state],
+      cmuxOptions: { open: ["/usr/bin/true"], waitMs: 300 },
+    });
+    next.sup.start();
+    await until(() => expect(seatState("guido-1")).toBe("error"));
+    expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
+    // cmux comes back later and restores the agent with a new pid: the hub closes it by itself
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    spawnSync(process.execPath, [opener, state, "restore"]);
+    await vi.waitFor(
+      () =>
+        expect(
+          calls(state).some(
+            (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
+          ),
+        ).toBe(true),
+      { timeout: 10_000, interval: 100 },
+    );
+    expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
   });
 
   it("a saved running row does not start a second turn", async () => {

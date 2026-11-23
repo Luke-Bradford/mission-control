@@ -420,6 +420,7 @@ function make(
     codexCommand: over.codexCommand,
     cmuxCommand: over.cmuxCommand,
     cmuxRetryMs: 1500,
+    cmuxSweepMs: 200,
     ...(over.cmuxOptions === undefined ? {} : { cmuxOptions: over.cmuxOptions }),
     codexAuthPath,
     commandArgs:

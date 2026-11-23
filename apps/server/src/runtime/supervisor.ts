@@ -253,6 +253,7 @@ import {
 import {
   CMUX_DOWN_TEXT,
   CMUX_REFUSED_TEXT,
+  type Cmux,
   type CmuxAgent,
   type CmuxOptions,
   createCmux,
@@ -498,6 +499,8 @@ export interface SupervisorDeps {
   cmuxCommand?: string[];
   /** Wait between tries to close a cmux workspace while cmux is down (2000). */
   cmuxRetryMs?: number;
+  /** How often workspaces that could not be closed are retried once cmux answers (30000). */
+  cmuxSweepMs?: number;
   /** How the cmux wrapper starts cmux and how long it waits (tests only). */
   cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
@@ -1271,6 +1274,56 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * to; one that has gone (or left an exit) has its folder removed first, so the run resumes with
    * `--resume` / `thread/resume` instead of failing as "exited". Never throws.
    */
+  /**
+   * Saved cmux workspaces that could not be closed (cmux was down). Starting cmux restores their
+   * Claude without the hub's settings, so they are closed before any new workspace is made, and
+   * retried on a timer once cmux answers.
+   */
+  const ORPHANS_KEY = "cmux.orphans";
+  function readOrphans(): string[] {
+    try {
+      const value: unknown = JSON.parse(store.getSetting(ORPHANS_KEY) ?? "[]");
+      return Array.isArray(value) ? value.filter((t): t is string => typeof t === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  function addOrphan(workspace: string): void {
+    const kept = readOrphans();
+    if (!kept.includes(workspace))
+      store.setSetting(ORPHANS_KEY, JSON.stringify([...kept, workspace]));
+  }
+  function dropOrphan(workspace: string): void {
+    const rest = readOrphans().filter((w) => w !== workspace);
+    if (rest.length === 0) store.deleteSetting(ORPHANS_KEY);
+    else store.setSetting(ORPHANS_KEY, JSON.stringify(rest));
+  }
+  /** Closes every orphaned workspace; throws when one cannot be closed. */
+  async function sweepOrphans(cmux: Cmux): Promise<void> {
+    for (const workspace of readOrphans()) {
+      try {
+        await cmux.close(workspace);
+      } catch (e) {
+        if (!/no such|not found|unknown/i.test(errText(e))) throw e;
+      }
+      dropOrphan(workspace);
+    }
+  }
+  let orphanTimer: NodeJS.Timeout | undefined;
+  function watchOrphans(): void {
+    if (orphanTimer !== undefined) return;
+    orphanTimer = setInterval(() => {
+      if (stopping || readOrphans().length === 0) return;
+      const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
+      // no wake: only a cmux that is already up is cleaned, and a quit one is left alone
+      void cmux
+        .agents()
+        .then(() => sweepOrphans(cmux))
+        .catch(() => {});
+    }, deps.cmuxSweepMs ?? 30_000);
+    orphanTimer.unref();
+  }
+
   /** Prompts cmux never took, kept per run so they survive a failed close and a seat error. */
   const undeliveredKey = (runId: string) => `cmux.undelivered:${runId}`;
   function keepUndelivered(runId: string, texts: readonly string[]): void {
@@ -2417,8 +2470,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             run.reviewId != null
               ? `PR ${store.review(run.reviewId)?.prNumber ?? run.reviewId}`
               : (run.ticket ?? def.loop);
+          const startCmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
           session = startCmuxSession({
-            cmux: createCmux(deps.cmuxCommand, log, deps.cmuxOptions),
+            cmux: startCmux,
             name: `${info.seat.id} · ${ref}`,
             cwd,
             // cmux must invoke Claude by its command name so its shim remains in control. A
@@ -2437,6 +2491,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
             log,
+            beforeWorkspace: () => sweepOrphans(startCmux),
             onWorkspace: (workspace, pid) => {
               store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify({ workspace, pid }));
               const l = live.get(info.seat.id);
@@ -2658,12 +2713,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (isObj(value) && typeof value.workspace === "string") {
           const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
           // cmux may have quit: start it before closing, or the workspace is restored unguarded
-          await cmux.ensure();
           try {
+            await cmux.ensure();
             await cmux.close(value.workspace);
           } catch (e) {
-            if (!/no such|not found|unknown/i.test(errText(e))) throw e;
+            if (!/no such|not found|unknown/i.test(errText(e))) {
+              addOrphan(value.workspace);
+              throw e;
+            }
           }
+          dropOrphan(value.workspace);
         }
       } catch (e) {
         log(`${seatId}: could not close cmux workspace of ${runId}: ${errText(e)}`);
@@ -3204,6 +3263,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               log(
                 `${row.seatId}: cmux does not answer, the old workspace is kept: ${errText(error)}`,
               );
+              addOrphan(saved.workspace);
               return failResume(row, `${RESUME_FAILED}: cmux is not answering`);
             }
           }
@@ -3256,6 +3316,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           } catch (error) {
             if (!/no such|not found|unknown/i.test(errText(error))) {
               log(`${row.seatId}: could not close the old cmux workspace: ${errText(error)}`);
+              addOrphan(saved.workspace);
               return failResume(row, `${RESUME_FAILED}: could not end the old workspace`);
             }
           }
@@ -5583,6 +5644,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     start() {
       if (!deps.enabled || !crew || started) return;
       started = true;
+      watchOrphans();
       // a crew.node that failed its check at load: crew stays off with the reason, the hub runs on
       if (crew.nodeNote !== undefined) {
         lockNote = crew.nodeNote;

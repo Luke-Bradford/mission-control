@@ -37,6 +37,8 @@ export interface CmuxSessionInput {
   awaiting?: boolean;
   /** The seat's saved state at restart, so the first cmux state is reconciled against it. */
   savedState?: string;
+  /** Runs once cmux is up, before a new workspace is made (closes workspaces left behind). */
+  beforeWorkspace?: () => Promise<void>;
   onWorkspace?: (workspace: string, pid: number | null) => void;
 }
 
@@ -303,6 +305,7 @@ function cmuxSession(
         );
         chmodSync(script, 0o700);
         await i.cmux.ensure();
+        await i.beforeWorkspace?.();
         workspace = await i.cmux.newWorkspace({ name: i.name, cwd: i.cwd, command: script });
         i.onWorkspace?.(workspace, null);
       }
