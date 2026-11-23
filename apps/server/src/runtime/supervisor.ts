@@ -3143,6 +3143,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             });
             return;
           }
+          // cmux restored the workspace's Claude with a new pid (it has none of the hub's
+          // settings): close it before the resume starts another on the same session. A
+          // workspace that is already gone counts as closed.
+          try {
+            await cmux.close(saved.workspace);
+          } catch (error) {
+            if (!/no such|not found|unknown/i.test(errText(error))) {
+              log(`${row.seatId}: could not close the old cmux workspace: ${errText(error)}`);
+              return failResume(row, `${RESUME_FAILED}: could not end the old workspace`);
+            }
+          }
         }
       } catch (error) {
         log(`${row.seatId}: could not attach cmux workspace: ${errText(error)}`);

@@ -220,6 +220,24 @@ describe("a restart attaches to the workspace", () => {
     await until(() => expect(seatState("guido-1")).toBe("running"));
   });
 
+  it("closes a workspace restored with a new pid before it resumes", async () => {
+    const { state, first } = await idleRun();
+    const old = sessions(state)[0]?.workspace_id;
+    await first.sup.stopAll();
+    edit(state, (session) => {
+      session.pid = 2;
+    });
+    const next = make({ cmuxCommand: [process.execPath, fake, state] });
+    next.sup.start();
+    await until(() => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(2));
+    const all = calls(state);
+    const closed = all.findIndex(
+      (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
+    );
+    expect(closed).toBeGreaterThan(-1);
+    expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
+  });
+
   it("a saved running row does not start a second turn", async () => {
     const { state, first } = await idleRun();
     setLifecycle(state, "running");

@@ -42,22 +42,40 @@ export interface CmuxSessionInput {
 
 const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 
-/** The short script keeps the cmux shim at the beginning of PATH and never exposes private env in argv. */
+/**
+ * The short script keeps the cmux shim at the beginning of PATH and never exposes private env in
+ * argv. The CLI starts from a clean environment (`env -i`): only the crew's own variables, the
+ * private ones the env file defines, and the terminal's CMUX_*, TERM, COLORTERM and TERM_PROGRAM,
+ * which cmux's hooks need. The operator's login shell may hold tokens (GH_TOKEN, ANTHROPIC_API_KEY)
+ * that a seat must never see.
+ */
 export function launcherScript(i: {
   command: string;
   args: string[];
   env: Record<string, string>;
+  privateKeys?: string[];
   nodeDir: string;
   envFile: string | null;
 }): string {
   const lines = ["#!/bin/zsh", "set -eu"];
-  for (const [key, value] of Object.entries(i.env))
-    if (key !== "PATH") lines.push(`export ${key}=${shellQuote(value)}`);
   // Quote the fixed directory only: quoting `$PATH` would turn it into literal text and hide
   // cmux's shim, which is what supplies lifecycle hooks and notifications.
-  lines.push(`export PATH=${shellQuote(i.nodeDir)}:$PATH`);
+  lines.push(`mc_path=${shellQuote(i.nodeDir)}:$PATH`);
+  lines.push(
+    "mc_pass=()",
+    `for mc_name in \${(k)parameters[(I)CMUX_*]} TERM COLORTERM TERM_PROGRAM; do`,
+    `  [[ -n "\${(P)mc_name+x}" ]] && mc_pass+=("$mc_name=\${(P)mc_name}")`,
+    "done",
+  );
   if (i.envFile) lines.push(`source ${shellQuote(i.envFile)}`, `rm -f ${shellQuote(i.envFile)}`);
-  lines.push(`exec ${[i.command, ...i.args].map(shellQuote).join(" ")}`);
+  const env = Object.entries(i.env)
+    .filter(([key]) => key !== "PATH")
+    .map(([key, value]) => `${key}=${shellQuote(value)}`);
+  const priv = (i.privateKeys ?? []).map((key) => `${key}="$${key}"`);
+  const assigns = [...env, ...priv, 'PATH="$mc_path"'].join(" ");
+  lines.push(
+    `exec /usr/bin/env -i "\${mc_pass[@]}" ${assigns} ${[i.command, ...i.args].map(shellQuote).join(" ")}`,
+  );
   return `${lines.join("\n")}\n`;
 }
 
@@ -265,6 +283,7 @@ function cmuxSession(
             command: i.command,
             args: i.args,
             env: i.env,
+            privateKeys: Object.keys(i.privateEnv ?? {}),
             nodeDir: dirname(process.execPath),
             envFile,
           }),
