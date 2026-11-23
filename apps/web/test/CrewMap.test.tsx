@@ -21,7 +21,7 @@ it("shows FLIGHT at the centre and a live crew map", async () => {
     />,
   );
   expect(await screen.findByRole("heading", { name: "Crew map" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /FLIGHT.*running/i })).toBeTruthy();
+  expect(document.querySelector(".crew-map-seat.flight[aria-label*='Running']")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Open the map full screen" })).toBeTruthy();
 });
 
