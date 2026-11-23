@@ -76,6 +76,12 @@ export function validateLoop(def: LoopDef): string | null {
     if ((s.runner === "agent" || s.runner === "fresh-agent") && s.report === undefined)
       return refuse(`agent step ${s.id} has no report tool`);
   }
+  // the hub reads a model and effort only for the steps whose seat it starts: plan and build
+  for (const s of def.steps) {
+    if (s.id === "plan" || s.id === "build") continue;
+    if (s.model !== undefined) return refuse(`step ${s.id} takes no model`);
+    if (s.effort !== undefined) return refuse(`step ${s.id} takes no effort`);
+  }
   for (const s of def.steps) {
     if (s.sizes === undefined) continue;
     if (s.id !== "plan") return refuse(`step ${s.id} takes no sizes`);
@@ -171,3 +177,33 @@ export function loopLimits(def: LoopDef): { tries: number; rounds: number } {
   const cap = (id: LoopReturnDef["id"]): number => def.returns.find((r) => r.id === id)?.cap ?? 0;
   return { tries: cap("ci-fail"), rounds: cap("review-changes") };
 }
+
+/** The Sizes that need a plan: the plan step's `sizes`, else `PLAN_SIZES`. */
+export function loopPlanSizes(def: LoopDef | null): readonly string[] {
+  return def?.steps.find((s) => s.id === "plan")?.sizes ?? PLAN_SIZES;
+}
+
+/** The model and effort a loop sets for `step`, each absent when the step leaves it to the seat. */
+export function loopStepSetting(
+  def: LoopDef | null,
+  step: LoopStepId,
+): { model?: string; effort?: string } {
+  const s = def?.steps.find((x) => x.id === step);
+  return {
+    ...(s?.model === undefined ? {} : { model: s.model }),
+    ...(s?.effort === undefined ? {} : { effort: s.effort }),
+  };
+}
+
+/** The CI try cap and review round cap a run of `p` is held to: its loop's, else the profile's own. */
+export function profileLimits(p: Profile): { tries: number; rounds: number } {
+  const loop = loopOf(p);
+  return loop === null ? { tries: p.tries, rounds: p.rounds } : loopLimits(loop);
+}
+
+export const loopStepSettingRefusedText = (
+  step: LoopStepId,
+  loop: string,
+  what: string,
+  reason: string,
+): string => `Not started: step ${step} of the ${loop} loop asks for ${what}, but ${reason}.`;

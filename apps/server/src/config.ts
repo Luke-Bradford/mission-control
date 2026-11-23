@@ -1065,7 +1065,7 @@ function isPromptFile(hubRoot: string, prompt: string, rolesDirReal: string): bo
 }
 
 /** Unknown Claude identifiers remain valid: only a known Codex family/catalog entry is a mismatch. */
-function seatModelProblem(
+export function seatModelProblem(
   seat: CrewSeatConfig,
   loading = false,
   models?: CodexModels,

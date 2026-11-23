@@ -5,6 +5,7 @@ import {
   type LoopDef,
   loopLimits,
   loopOf,
+  loopPlanSizes,
   PLAN_SIZES,
   REVIEW_ROUNDS,
   standardLoop,
@@ -222,6 +223,20 @@ describe("validateLoop refuses", () => {
       },
       "loop feature: step build takes no sizes",
     ],
+    [
+      "a model on the review step",
+      (d) => {
+        step(d, "review").model = "opus";
+      },
+      "loop feature: step review takes no model",
+    ],
+    [
+      "an effort on the ci step",
+      (d) => {
+        step(d, "ci").effort = "high";
+      },
+      "loop feature: step ci takes no effort",
+    ],
   ])("%s", (_name, mutate, text) => {
     const d = feature();
     mutate(d);
@@ -230,5 +245,17 @@ describe("validateLoop refuses", () => {
 
   it("accepts a clean feature loop", () => {
     expect(validateLoop(feature())).toBeNull();
+  });
+});
+
+describe("loopPlanSizes", () => {
+  it("is the plan step's sizes, else PLAN_SIZES", () => {
+    const d = structuredClone(loopNamed("feature"));
+    const plan = d.steps.find((s) => s.id === "plan");
+    if (plan === undefined) throw new Error("plan");
+    plan.sizes = ["L", "XL"];
+    expect(loopPlanSizes(d)).toEqual(["L", "XL"]);
+    expect(loopPlanSizes(loopNamed("small-change"))).toEqual(PLAN_SIZES);
+    expect(loopPlanSizes(null)).toEqual(PLAN_SIZES);
   });
 });
