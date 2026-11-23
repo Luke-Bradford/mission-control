@@ -454,9 +454,10 @@ it("finishes a turn that began and ended between two polls", async () => {
           line({ type: "user", message: { role: "user", content: "wake" } }) +
             line({
               type: "assistant",
+              // the interactive transcript's real shape: no stop reason, even on the final answer
               message: {
                 role: "assistant",
-                stop_reason: "end_turn",
+                stop_reason: null,
                 content: [{ type: "text", text: "done" }],
               },
             }),
@@ -492,7 +493,7 @@ it("does not finish a turn on a tool call while cmux still reads idle", async ()
               type: "assistant",
               message: {
                 role: "assistant",
-                stop_reason: "tool_use",
+                stop_reason: null,
                 content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }],
               },
             }),
@@ -514,7 +515,7 @@ it("does not finish a turn on a tool call while cmux still reads idle", async ()
       type: "assistant",
       message: {
         role: "assistant",
-        stop_reason: "end_turn",
+        stop_reason: null,
         content: [{ type: "text", text: "ok" }],
       },
     }),

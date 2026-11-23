@@ -41,6 +41,11 @@ export interface CmuxSessionInput {
 }
 
 const LIMIT_TEXT = /usage limit|hit your limit|limit reached|rate.?limit/i;
+/** Whether an assistant record holds a tool call. */
+function hasToolUse(data: Record<string, unknown>): boolean {
+  const content = isObj(data.message) ? data.message.content : null;
+  return Array.isArray(content) && content.some((part) => isObj(part) && part.type === "tool_use");
+}
 /** The text of an API-error assistant line. */
 function apiErrorText(data: Record<string, unknown>): string {
   const content = isObj(data.message) ? data.message.content : null;
@@ -195,14 +200,10 @@ function cmuxSession(
           });
         }
         if (isObj(data) && data.type === "assistant") {
-          // only a terminal answer finishes a missed turn: a tool call (`tool_use`) or a streamed
-          // part with no stop reason yet means Claude is still working
-          const stop = isObj(data.message) ? data.message.stop_reason : null;
-          if (
-            expectTurn &&
-            (data.isApiErrorMessage === true || (typeof stop === "string" && stop !== "tool_use"))
-          )
-            answered = true;
+          // The interactive transcript's stop reasons are null, so the latest assistant record
+          // decides: one with a tool call means Claude is still working (its result is pending),
+          // any other answers the prompt. A later record changes the answer again.
+          if (expectTurn) answered = data.isApiErrorMessage === true || !hasToolUse(data);
           if (data.isApiErrorMessage === true) {
             turnError = true;
             const text = apiErrorText(data);
