@@ -43,6 +43,11 @@ const save = () => {
   renameSync(`${statePath}.tmp${process.pid}`, statePath);
 };
 state.calls.push([command, ...args]);
+// `send_fail` / `sessions_fail` make those commands fail, as a cmux that has stopped answering does.
+if ((command === "send" && state.send_fail) || (command === "sessions" && state.sessions_fail)) {
+  process.stderr.write("Error: cmux is not answering\n");
+  process.exit(1);
+}
 if (command === "ping") {
   save();
   if (state.ping === "denied") {

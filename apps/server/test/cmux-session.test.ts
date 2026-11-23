@@ -397,6 +397,38 @@ it("keeps a message queued through repeated send errors until it arrives", async
   await session.close();
 });
 
+it("lists a message cmux never took as undelivered once the session ends", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  let polls = 0;
+  const session = stubSession(
+    dir,
+    stubCmux({
+      send: async () => {
+        throw new Error("socket gone");
+      },
+      agents: async () => {
+        if (++polls === 1)
+          return [
+            {
+              workspaceId: "workspace-1",
+              sessionId: "session-1",
+              pid: 42,
+              lifecycle: "idle",
+              transcriptPath: null,
+            },
+          ];
+        throw new Error("socket gone");
+      },
+    }),
+  );
+  await session.ready;
+  session.send("the prompt");
+  expect(session.undelivered).toEqual(["the prompt"]);
+  await vi.waitFor(() => expect(session.alive).toBe(false), { timeout: 3000 });
+  expect(session.undelivered).toEqual(["the prompt"]);
+});
+
 it("ends a registered seat whose cmux stops answering", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
   dirs.push(dir);

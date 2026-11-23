@@ -1283,7 +1283,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return;
         }
       }
+      // Prompts the old session recorded as delivered but never got into cmux go to the new one.
+      const lost = [...(l.session.undelivered ?? [])];
       await recoverSession(row);
+      const next = live.get(seatId);
+      if (lost.length > 0 && next !== undefined && next !== l && next.run.id === runId) {
+        for (const text of lost) {
+          try {
+            next.session.send(text);
+            next.inTurn = true;
+          } catch (e) {
+            log(`${seatId}: could not replay a prompt into ${runId}: ${errText(e)}`);
+          }
+        }
+      }
     } catch (e) {
       log(`${seatId}: could not take back ${runId}: ${errText(e)}`);
     }

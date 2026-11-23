@@ -118,6 +118,7 @@ function cmuxSession(
   let lifecycle: "idle" | "running" | "needsInput" | null = null;
   let trustSent = false;
   let pollFailures = 0;
+  const undelivered: string[] = [];
   let sendChain = Promise.resolve();
   let attached = attachedWorkspace !== undefined;
   let timer: NodeJS.Timeout | null = null;
@@ -326,6 +327,7 @@ function cmuxSession(
   return {
     send(text) {
       if (!alive) throw new SessionControlError("ended", "session ended");
+      undelivered.push(text);
       const deliver = async () => {
         let failedTries = 0;
         let textIn = false;
@@ -356,7 +358,10 @@ function cmuxSession(
             await sleep(i.pollMs ?? 1000);
             continue;
           }
-          if (sent === "sent") return;
+          if (sent === "sent") {
+            undelivered.splice(undelivered.indexOf(text), 1);
+            return;
+          }
           await sleep(2000);
         }
       };
@@ -405,6 +410,9 @@ function cmuxSession(
       return lines;
     },
     closeSent,
+    get undelivered() {
+      return undelivered;
+    },
     get failure() {
       return failure;
     },

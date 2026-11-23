@@ -58,6 +58,43 @@ it.skipIf(!existsSync("/bin/zsh"))("starts a Claude run in a cmux workspace", as
     } catch {}
 });
 
+it.skipIf(!existsSync("/bin/zsh"))(
+  "a prompt that cmux never took reaches Claude after the poll loss recovery",
+  async () => {
+    const state = join(dir, "fake-cmux.json");
+    writeFileSync(state, JSON.stringify({ sessions: [], calls: [], bridge: true }));
+    const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
+    sup.start();
+    const run = await sup.startRun("guido-1", 42);
+    const copied = () => readFileSync(store.run(run.runId)?.transcriptPath ?? "", "utf8");
+    await until(() => expect(copied()).toContain('"mc_cmux":true'));
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const failing = (on: boolean) => {
+      const value = JSON.parse(readFileSync(state, "utf8"));
+      value.send_fail = on;
+      value.sessions_fail = on;
+      writeFileSync(state, JSON.stringify(value));
+    };
+    failing(true);
+    await sup.message("guido-1", "Please do the exact lost prompt", {
+      interrupt: false,
+      questions: "none",
+    });
+    // cmux keeps refusing the send and then stops answering polls, so the session ends and is retaken
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    failing(false);
+    await vi.waitFor(() => expect(copied()).toContain("Please do the exact lost prompt"), {
+      timeout: 40_000,
+      interval: 100,
+    });
+    for (const session of JSON.parse(readFileSync(state, "utf8")).sessions)
+      try {
+        process.kill(-session.pgid, "SIGTERM");
+      } catch {}
+  },
+  60_000,
+);
+
 it("seat state follows cmux and /clear keeps the run", async () => {
   const state = join(dir, "fake-cmux.json");
   const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
