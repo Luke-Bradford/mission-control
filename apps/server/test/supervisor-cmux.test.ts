@@ -22,10 +22,12 @@ const edit = (state: string, f: (session: Record<string, unknown>) => void) => {
   writeFileSync(state, JSON.stringify(value));
 };
 
-it("starts a Claude run in a cmux workspace", async () => {
+// The launcher is a zsh script for the Mac: the bridged fake runs it for real where zsh exists.
+it.skipIf(!existsSync("/bin/zsh"))("starts a Claude run in a cmux workspace", async () => {
   const state = join(dir, "fake-cmux.json");
   files.push(state);
-  // the bridged fake reads the brief as Claude would and writes a transcript for the turn
+  // the bridged fake runs launch.zsh, which execs the fake Claude; the brief reaches that process
+  // through cmux and its stdout is the transcript, so a launcher that cannot run Claude fails here
   writeFileSync(state, JSON.stringify({ sessions: [], calls: [], bridge: true }));
   const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
   sup.start();
@@ -49,6 +51,11 @@ it("starts a Claude run in a cmux workspace", async () => {
   await until(() => expect(copied()).toContain('"text":"echo: '));
   await until(() => expect(copied()).toContain('"mc_cmux":true'));
   await until(() => expect(seatState("guido-1")).toBe("idle"));
+  expect(copied()).toContain(`"session_id":"${launcher.match(/--session-id' '([^']+)'/)?.[1]}"`);
+  for (const session of JSON.parse(readFileSync(state, "utf8")).sessions)
+    try {
+      process.kill(-session.pgid, "SIGTERM");
+    } catch {}
 });
 
 it("seat state follows cmux and /clear keeps the run", async () => {

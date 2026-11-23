@@ -1,6 +1,6 @@
 // Minimal cmux CLI fixture. State lives in the first argument so each test owns its workspaces.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
@@ -69,22 +69,46 @@ if (command === "new-workspace") {
   const at = (flag) => args[args.indexOf(flag) + 1];
   const workspaceId = randomUUID();
   const sessionId = randomUUID();
-  // The launcher must at least be valid zsh, as cmux would run it.
-  if (
-    state.bridge &&
-    existsSync("/bin/zsh") &&
-    spawnSync("/bin/zsh", ["-n", at("--command")]).status !== 0
-  ) {
-    process.stderr.write("Error: launcher is not valid zsh\n");
-    save();
-    process.exit(1);
+  // With `bridge`, the launcher really runs under zsh: the CLI it execs reads its stdin from a
+  // file that `send` appends to and writes its stream-json stdout to the transcript, as Claude does.
+  const run = state.bridge && existsSync("/bin/zsh");
+  const dir = `${statePath}.ws-${workspaceId}`;
+  const pidFile = `${dir}/pid`;
+  const inFile = `${dir}/in.jsonl`;
+  const outFile = `${statePath}.transcript-${workspaceId}.jsonl`;
+  let pgid = null;
+  if (run) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(inFile, "");
+    writeFileSync(outFile, "");
+    const child = spawn(
+      "/bin/sh",
+      [
+        "-c",
+        'tail -f -n +1 "$1" | /bin/sh -c \'echo $$ > "$1"; exec /bin/zsh "$2"\' sh "$2" "$3" > "$4"',
+        "sh",
+        inFile,
+        pidFile,
+        at("--command"),
+        outFile,
+      ],
+      { detached: true, stdio: "ignore", cwd: at("--cwd") },
+    );
+    child.unref();
+    pgid = child.pid;
+    // a test that ends without closing the workspace leaves nothing running
+    spawn("/bin/sh", ["-c", 'sleep 150; kill -TERM -- -"$1" 2>/dev/null', "sh", String(pgid)], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
   }
   state.sessions.push({
     workspace_id: workspaceId,
     session_id: sessionId,
     agent_lifecycle: "idle",
-    pid: 1,
-    transcript_path: state.bridge ? `${statePath}.transcript-${randomUUID()}.jsonl` : null,
+    pid: run ? null : 1,
+    transcript_path: state.bridge ? outFile : null,
+    ...(run ? { run: true, pgid, pid_file: pidFile, in_file: inFile, sends: 0 } : {}),
     name: at("--name"),
     cwd: at("--cwd"),
     command: at("--command"),
@@ -101,38 +125,42 @@ if (command === "new-workspace") {
 if (command === "sessions") {
   for (const session of state.sessions) {
     session.session_calls = (session.session_calls ?? 0) + 1;
-    // a bridged turn ends a few polls after the message arrived
-    if (session.turn_polls !== undefined && --session.turn_polls <= 0) {
-      session.agent_lifecycle = "idle";
-      delete session.turn_polls;
+    if (session.run) {
+      // the launcher's process registers once it runs; it is running until every message has a result
+      if (session.pid === null && existsSync(session.pid_file)) {
+        const pid = Number(readFileSync(session.pid_file, "utf8").trim());
+        if (pid > 0) session.pid = pid;
+      }
+      const results =
+        readFileSync(session.transcript_path, "utf8").match(/"type":"result"/g)?.length ?? 0;
+      session.agent_lifecycle = results >= session.sends ? "idle" : "running";
     }
   }
   save();
   process.stdout.write(
-    JSON.stringify({ sessions: state.sessions.filter((session) => session.session_calls > 1) }),
+    JSON.stringify({
+      sessions: state.sessions.filter(
+        (session) => session.session_calls > 1 && (!session.run || session.pid !== null),
+      ),
+    }),
   );
   process.exit(0);
 }
 if (command === "send" && state.bridge) {
-  // Stands in for Claude: read the brief the way Claude would, then write its transcript.
+  // Delivers the text the way the terminal would: Claude reads the brief file it points at.
   const text = args.at(-1) ?? "";
   const file = /^Mission Control sent you a message\. Read (.+) and act on it\.$/.exec(text)?.[1];
   const brief = file ? readFileSync(file, "utf8") : text;
   const session = state.sessions.find(
     (s) => s.workspace_id === args[args.indexOf("--workspace") + 1],
   );
-  if (session?.transcript_path) {
-    const line = (value) => `${JSON.stringify(value)}\n`;
+  if (session?.run) {
     appendFileSync(
-      session.transcript_path,
-      line({ type: "user", message: { role: "user", content: brief } }) +
-        line({
-          type: "assistant",
-          message: { role: "assistant", content: [{ type: "text", text: `echo: ${brief}` }] },
-        }),
+      session.in_file,
+      `${JSON.stringify({ type: "user", message: { role: "user", content: brief } })}\n`,
     );
+    session.sends += 1;
     session.agent_lifecycle = "running";
-    session.turn_polls = 2;
   }
   save();
   process.exit(0);
@@ -142,6 +170,11 @@ if (command === "send" || command === "send-key" || command === "read-screen") {
   process.exit(0);
 }
 if (command === "close-workspace") {
+  for (const session of state.sessions)
+    if (session.pgid && session.workspace_id === args[args.indexOf("--workspace") + 1])
+      try {
+        process.kill(-session.pgid, "SIGTERM");
+      } catch {}
   state.sessions = state.sessions.filter(
     (s) => s.workspace_id !== args[args.indexOf("--workspace") + 1],
   );

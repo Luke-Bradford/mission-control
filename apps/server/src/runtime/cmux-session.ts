@@ -42,7 +42,7 @@ export interface CmuxSessionInput {
 
 /** Polls in a row that may fail before a registered seat is given up on. */
 export const POLL_FAILURE_LIMIT = 5;
-/** Tries a message gets before the session ends rather than drop it. */
+/** Failed tries between two log lines while a message keeps being retried. */
 export const SEND_TRIES = 3;
 
 const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
@@ -348,13 +348,13 @@ function cmuxSession(
               await i.cmux.sendKey(workspace, "enter");
             }
           } catch (error) {
-            // A message is never dropped: retry a transient failure, then end the session so the
-            // run is recovered instead of the hub believing the prompt was delivered.
-            if (++failedTries < SEND_TRIES) {
-              await sleep(i.pollMs ?? 1000);
-              continue;
-            }
-            throw error;
+            // The supervisor has already recorded this prompt as delivered, so it is never
+            // dropped: it stays queued and is retried until it arrives or the session ends
+            // (a seat that cmux stops answering for ends through the poll check).
+            if (failedTries++ % SEND_TRIES === 0)
+              i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`);
+            await sleep(i.pollMs ?? 1000);
+            continue;
           }
           if (sent === "sent") return;
           await sleep(2000);
@@ -368,13 +368,9 @@ function cmuxSession(
           await deliver();
         });
       sendChain = next;
-      void next.catch(async (error) => {
-        i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`);
-        if (!alive || detached) return;
-        // Start the recovery in a fresh workspace: this one has lost a message.
-        if (workspace) await i.cmux.close(workspace).catch(() => {});
-        ended("cmux could not deliver a message to Claude", true);
-      });
+      void next.catch((error) =>
+        i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`),
+      );
     },
     control(subtype: ControlSubtype) {
       if (!alive || workspace === null)

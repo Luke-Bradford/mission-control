@@ -375,27 +375,26 @@ it("retries a send error so the first message still arrives", async () => {
   await session.close();
 });
 
-it("ends the session for recovery when a message cannot be delivered", async () => {
+it("keeps a message queued through repeated send errors until it arrives", async () => {
   const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
   dirs.push(dir);
-  const closed: string[] = [];
+  const sent: string[] = [];
+  let failures = 0;
   const session = stubSession(
     dir,
     stubCmux({
-      send: async () => {
-        throw new Error("socket gone");
-      },
-      close: async (workspace) => {
-        closed.push(workspace);
+      send: async (_workspace, text) => {
+        if (++failures <= 5) throw new Error("socket gone");
+        sent.push(text);
+        return "sent";
       },
     }),
   );
-  const events: SessionEvent[] = [];
-  session.on((event) => events.push(event));
   session.send("first");
-  await vi.waitFor(() => expect(session.alive).toBe(false), { timeout: 3000 });
-  expect(closed).toEqual(["workspace-1"]);
-  expect(events).toContainEqual(expect.objectContaining({ kind: "exit", retake: true }));
+  await vi.waitFor(() => expect(sent).toEqual(["first"]), { timeout: 3000 });
+  expect(failures).toBeGreaterThan(5);
+  expect(session.alive).toBe(true);
+  await session.close();
 });
 
 it("ends a registered seat whose cmux stops answering", async () => {
