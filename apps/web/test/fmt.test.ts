@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ago,
   bytes,
+  clockTime,
   cost,
+  dateTime,
   dayLabel,
   dayMonth,
   dur,
@@ -12,8 +14,10 @@ import {
   kTokens,
   mss,
   narrowDay,
+  percent,
   plural,
   rel,
+  setActiveLocale,
   untilLabel,
   wkdTime,
 } from "../src/fmt.ts";
@@ -203,5 +207,24 @@ describe("locale", () => {
   it("groups a count by the locale", () => {
     expect(plural(1234, "file")).toBe("1,234 files");
     expect(plural(1234, "file", undefined, "de-DE")).toBe("1.234 files");
+  });
+});
+
+describe("the operator's locale and zone in every formatter", () => {
+  afterEach(() => setActiveLocale("en-GB"));
+
+  it("writes counts, token sizes and costs in the active locale's digits", () => {
+    setActiveLocale("ar-EG");
+    const digits = /^[^0-9]*$/;
+    expect(plural(12, "file")).toMatch(/^[٠-٩]+ files$/);
+    expect(kTokens(60_100)).toMatch(/[٠-٩]/);
+    expect(cost(1.84)).toMatch(/[٠-٩]/);
+    expect(percent(42)).toMatch(digits);
+  });
+
+  it("shows a full date and time in the given zone and locale", () => {
+    const at = Date.UTC(2026, 9, 17, 12, 0);
+    expect(dateTime(at, "Asia/Tokyo", "en-US")).toBe("10/17/26, 9:00:00 PM");
+    expect(clockTime(at, "Asia/Tokyo", "ar-EG")).toMatch(/[٠-٩]/);
   });
 });

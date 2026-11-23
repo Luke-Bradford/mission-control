@@ -1,6 +1,7 @@
 import { TELEMETRY_RANGES, type Telemetry } from "@mc/core";
 import { useState } from "react";
-import { cost, minutesAgo, percent } from "../fmt.ts";
+import { useLocale, useTz } from "../clock.ts";
+import { cost, dateTime, minutesAgo, percent } from "../fmt.ts";
 import {
   keyStep,
   Legend,
@@ -49,6 +50,8 @@ function CrewStateTimeline({
   to: number;
   annotations: { at: number; label: string }[];
 }) {
+  const tz = useTz();
+  const locale = useLocale();
   const [ref, width] = useChartWidth(560);
   const [local, setLocal] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -219,7 +222,7 @@ function CrewStateTimeline({
         <Tip
           x={x(at)}
           width={width}
-          title={new Date(at).toLocaleString()}
+          title={tz ? dateTime(at, tz, locale) : "—"}
           rows={[
             ...agents.map((agent) => ({ key: agent, name: agent, value: stateAt(agent, at) })),
             ...annotations

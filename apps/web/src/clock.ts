@@ -2,6 +2,7 @@
 import { type ConfigView, DEFAULT_LOCALE } from "@mc/core";
 import { useSyncExternalStore } from "react";
 import { RESOURCES, useResource } from "./data.ts";
+import { setActiveLocale } from "./fmt.ts";
 
 /**
  * A shared clock ticking every `ms`: one timer however many components read it, running only
@@ -66,5 +67,7 @@ export function useTz(): string | null {
 
 /** `config.operator.locale`: the BCP 47 locale of every date and number on the HUD (en-GB by default). */
 export function useLocale(): string {
-  return useResource<ConfigView>(RESOURCES.config).data?.operator?.locale ?? DEFAULT_LOCALE;
+  const locale = useResource<ConfigView>(RESOURCES.config).data?.operator?.locale ?? DEFAULT_LOCALE;
+  setActiveLocale(locale); // the formatters built outside a component read it
+  return locale;
 }
