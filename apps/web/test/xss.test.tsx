@@ -1,5 +1,5 @@
 import type { ConfigView } from "@mc/core";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
 import { ConfigYaml } from "../src/components/config/ConfigYaml.tsx";
