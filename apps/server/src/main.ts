@@ -111,12 +111,14 @@ import {
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
+import { evidenceDemoRender } from "./pr-evidence/demo-render.ts";
 import {
   evidenceSideStarter,
   removeStaleEvidenceWork,
   runEvidenceCommand,
 } from "./pr-evidence/hubs.ts";
 import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
+import { publishEvidenceRelease, removeFinishedEvidenceReleases } from "./pr-evidence/releases.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
@@ -486,17 +488,20 @@ export async function main(): Promise<void> {
               return { stop: async () => await stopPreview(child) };
             },
           }),
-          render: (origin, path, colorScheme, signal, operatorToken) => {
-            const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, {
-              colorScheme,
-              signal,
-              ...(operatorToken === undefined ? {} : { operatorToken }),
+          render: evidenceDemoRender,
+          publish: async ({ pr, sha, images, signal }) => {
+            signal.throwIfAborted();
+            const repo = config.repos.find((r) => r.id === previewRepoId);
+            if (repo === undefined) throw new Error("the hub's repo is not configured");
+            return publishEvidenceRelease({
+              gh,
+              cwd: evidenceCheckout,
+              repo: repo.github,
+              pr,
+              sha,
+              images,
+              scratch: join(dirname(dbPath), "pr-evidence-work", "release"),
             });
-          },
-          renderDemo: (origin, path, viewport, signal) => {
-            const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, { demo: true, viewport, signal });
           },
           log: (line) => log(line),
         })
@@ -1200,10 +1205,26 @@ export async function main(): Promise<void> {
           (mergeSha, running) =>
             hubRoot === null ? Promise.resolve(false) : isAncestor(hubRoot, mergeSha, running),
         );
+        const openPrs = new Set([...store.openPrKeys(), ...notLive]);
+        // The PR's pictures on GitHub go the same way as the ones on disk: once the change is live.
+        const releaseRepo = config.repos.find((r) => r.id === previewRepoId);
+        if (engineOn && prEvidence && releaseRepo && hubRoot) {
+          const removed = await removeFinishedEvidenceReleases({
+            gh,
+            cwd: hubRoot,
+            repo: releaseRepo.github,
+            keep: (pr) => openPrs.has(`${releaseRepo.id}#${pr}`),
+          }).catch((e: unknown) => {
+            log(`evidence releases: ${e instanceof Error ? e.message : String(e)}`);
+            return [];
+          });
+          if (removed.length > 0)
+            log(`evidence releases removed for PR ${removed.map((n) => `#${n}`).join(", ")}`);
+        }
         return sweepDataFolder({
           dataDir,
           now: Date.now,
-          openPrs: new Set([...store.openPrKeys(), ...notLive]),
+          openPrs,
           citedAssets: store.qaAssetIdsOfOpenPrs(notLive),
           keptShots: store.reviewShotIdsOfOpenPrs(notLive),
           keptMaterials: store.attentionMaterialAssetIds(

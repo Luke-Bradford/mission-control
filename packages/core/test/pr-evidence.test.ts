@@ -5,13 +5,13 @@ import {
   EVIDENCE_HEADING,
   EVIDENCE_PAGE_PATHS,
   type EvidenceManifest,
-  evidenceDemoImageName,
-  evidenceDemoMissing,
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
+  evidenceReleaseTag,
   evidenceSectionText,
   evidenceUncataloguedText,
+  evidenceVariants,
   HUD_PAGE_PATHS,
   isEvidenceImageName,
   prEvidenceAffectedPages,
@@ -122,20 +122,38 @@ const manifest = (over: Partial<EvidenceManifest> = {}): EvidenceManifest => ({
 });
 
 describe("evidenceMissing", () => {
-  it("lists every page and scheme without a pair for this head", () => {
+  const light = [{ scheme: "light" as const, width: 1600 }];
+  it("lists every page without a pair for this head, in light at 1600 unless told otherwise", () => {
     expect(evidenceMissing(null, "a".repeat(40), ["board"])).toEqual([
-      { page: "board", scheme: "light" },
-      { page: "board", scheme: "dark" },
+      { page: "board", scheme: "light", width: 1600 },
     ]);
     expect(evidenceMissing(manifest(), "a".repeat(40), ["board"])).toEqual([]);
     expect(evidenceMissing(manifest(), "a".repeat(40), ["board", "map"])).toEqual([
-      { page: "map", scheme: "light" },
-      { page: "map", scheme: "dark" },
+      { page: "map", scheme: "light", width: 1600 },
     ]);
   });
 
   it("does not count pairs captured for an older head", () => {
-    expect(evidenceMissing(manifest(), "c".repeat(40), ["board"])).toHaveLength(2);
+    expect(evidenceMissing(manifest(), "c".repeat(40), ["board"])).toHaveLength(1);
+  });
+
+  it("counts a page found unchanged as answered, and needs every variant of a changed page", () => {
+    const sha = "a".repeat(40);
+    expect(evidenceMissing(manifest({ pairs: [], unchanged: ["board"] }), sha, ["board"])).toEqual(
+      [],
+    );
+    expect(
+      evidenceMissing(manifest({ pairs: [], unchanged: ["board"] }), "c".repeat(40), ["board"]),
+    ).toHaveLength(1);
+    expect(
+      evidenceMissing(
+        manifest({ pairs: manifest().pairs.slice(0, 1) }),
+        sha,
+        ["board"],
+        evidenceVariants(["apps/web/src/theme.css"]),
+      ),
+    ).toEqual([{ page: "board", scheme: "dark", width: 1600 }]);
+    expect(evidenceMissing(null, sha, ["board"], light)).toHaveLength(1);
   });
 
   it("names the missing pages in the refusal", () => {
@@ -146,33 +164,20 @@ describe("evidenceMissing", () => {
   });
 });
 
-describe("Demo renders", () => {
-  const demos = (...widths: number[]) =>
-    widths.map((width) => ({ page: "board" as const, width, height: width === 1920 ? 940 : 1145 }));
-
-  it("lists each page and size with no Demo render for this head", () => {
-    const sha = "a".repeat(40);
-    expect(evidenceDemoMissing(manifest(), sha, ["board"])).toEqual([
-      { page: "board", width: 1920, height: 940 },
-      { page: "board", width: 2560, height: 1145 },
+describe("evidenceVariants", () => {
+  it("is light at 1600 wide unless a changed file is about colour or width", () => {
+    expect(evidenceVariants(["apps/web/src/board/Card.tsx"])).toEqual([
+      { scheme: "light", width: 1600 },
     ]);
-    expect(evidenceDemoMissing(manifest({ demos: demos(1920) }), sha, ["board"])).toEqual([
-      { page: "board", width: 2560, height: 1145 },
+    expect(evidenceVariants(["apps/web/src/theme.ts"]).map((v) => v.scheme)).toEqual([
+      "light",
+      "dark",
     ]);
-    expect(evidenceDemoMissing(manifest({ demos: demos(1920, 2560) }), sha, ["board"])).toEqual([]);
     expect(
-      evidenceDemoMissing(manifest({ demos: demos(1920, 2560) }), "c".repeat(40), ["board"]),
-    ).toHaveLength(2);
-  });
-
-  it("names the Demo image and links it in the PR body next to the live ones", () => {
-    expect(isEvidenceImageName(evidenceDemoImageName("board", 1920))).toBe(true);
-    expect(isEvidenceImageName("board-demo-1000.png")).toBe(false);
-    const text = evidenceSectionText(manifest({ demos: demos(1920, 2560) }), "http://h");
-    expect(text).toContain(`http://h/api/prs/7/evidence/${"a".repeat(40)}/board-demo-1920.png`);
-    expect(text).toContain(`http://h/api/prs/7/evidence/${"a".repeat(40)}/board-demo-2560.png`);
-    expect(text).toContain("board, Demo at its busiest, 2560×1145");
-    expect(text.indexOf("board, light")).toBeLessThan(text.indexOf("board, Demo"));
+      evidenceVariants(["apps/web/src/shell/useViewportWidth.ts"]).map((v) => v.width),
+    ).toEqual([1600, 2560]);
+    // a server file about layout does not widen a web capture
+    expect(evidenceVariants(["apps/server/src/layout.ts"])).toHaveLength(1);
   });
 });
 
@@ -184,6 +189,13 @@ describe("image names", () => {
     expect(isEvidenceImageName("../board-dark-diff.png")).toBe(false);
     expect(isEvidenceImageName("manifest.json")).toBe(false);
     expect(isEvidenceImageName("board-blue-diff.png")).toBe(false);
+  });
+
+  it("names a wide picture with its width", () => {
+    const name = evidenceImageName("board", "light", "before", 2560);
+    expect(name).toBe("board-light-2560-before.png");
+    expect(isEvidenceImageName(name)).toBe(true);
+    expect(isEvidenceImageName("board-light-999-before.png")).toBe(false);
   });
 });
 
@@ -243,13 +255,43 @@ describe("withSection on a staged body ending Part of", () => {
 });
 
 describe("evidenceSectionText", () => {
-  it("links each pair's before, after and diff under the head sha", () => {
+  it("links a changed page's before, after and diff on the hub when nothing is published", () => {
     const text = evidenceSectionText(manifest(), "http://127.0.0.1:7421");
     expect(text.startsWith(EVIDENCE_HEADING)).toBe(true);
     expect(text).toContain(
       `http://127.0.0.1:7421/api/prs/7/evidence/${"a".repeat(40)}/board-light-diff.png`,
     );
     expect(text).toContain("1 region");
+  });
+
+  it("shows only changed pages as before and after release pictures, and names the rest", () => {
+    const text = evidenceSectionText(
+      manifest({
+        published: { baseUrl: `https://github.com/o/r/releases/download/${evidenceReleaseTag(7)}` },
+        unchanged: ["map", "comms"],
+        pairs: [
+          { ...manifest().pairs[0], width: 2560 } as EvidenceManifest["pairs"][number],
+          { ...manifest().pairs[0], page: "board", changedPixels: 0 },
+        ],
+      }),
+      "http://h",
+    );
+    expect(text).toContain(
+      "![before](https://github.com/o/r/releases/download/qa-pr-7/board-light-2560-before.png)",
+    );
+    expect(text).toContain(
+      "![after](https://github.com/o/r/releases/download/qa-pr-7/board-light-2560-after.png)",
+    );
+    expect(text).not.toContain("diff.png");
+    expect(text).not.toContain("http://h");
+    expect(text).toContain("Unchanged: map, comms.");
+    expect(text).not.toContain("board, light:");
+  });
+
+  it("says so when nothing changed", () => {
+    expect(
+      evidenceSectionText(manifest({ pairs: [], unchanged: ["board"] }), "http://h"),
+    ).toContain("No page changed.");
   });
 });
 

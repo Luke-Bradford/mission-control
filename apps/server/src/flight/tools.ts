@@ -3733,7 +3733,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           mainSha: old?.mainSha ?? a.head,
           capturedAt: old?.capturedAt ?? now(),
           pairs: old?.pairs ?? [],
-          ...(old?.demos ? { demos: old.demos } : {}),
+          ...(old?.unchanged ? { unchanged: old.unchanged } : {}),
+          ...(old?.published ? { published: old.published } : {}),
           submitted: [...(old?.submitted ?? []), ...submitted].filter(
             (image, index, all) => all.findIndex((other) => other.name === image.name) === index,
           ),

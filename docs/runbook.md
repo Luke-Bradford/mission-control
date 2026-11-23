@@ -219,7 +219,7 @@ review data includes its PR, head and waiting reason even when the reviewer cann
 The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
 tests. It links the available before/after screenshot manifest for that head, or states that no pairs
 were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
-isolated previews and copied data; it never reconstructs a historical approval. Each affected page is also rendered on the head alone in the web app's Demo mode at 1920×940 and 2560×1145 (the Demo scene at its busiest), stored beside the live pairs and linked in the PR body; a Demo render that fails keeps the PR in draft like a live one. Which pages a web change is photographed on comes from the static imports of the PR head's
+isolated previews and copied data; it never reconstructs a historical approval. Both sides of each pair are rendered in the web app's Demo mode, so a page the change did not touch is identical on both and keeps no pictures. Which pages a web change is photographed on comes from the static imports of the PR head's
 `apps/web/src`: each file in `pages/` is a page (a lazy `import()` of it is the boundary), what
 `main.tsx` and `App.tsx` reach counts for every page, and CSS belongs to the file that imports it.
 A file listed with no photographed pages needs no pairs (for example, one reached only by the unphotographed Ticket page). A file the graph does not list, or a graph that cannot be read, falls back to the folder rule. Graph reads use a temporary archive of the fetched head, share one read per head, retry after failure and are cancelled on shutdown. A reviewer run is
@@ -2611,23 +2611,29 @@ applies only to the repository whose checkout runs the hub, and only on the live
 pages: a page's own directory under `apps/web/src/` or its `pages/` file affects that page;
 `hud.css`, `shell/`, `components/` and any file that cannot be placed affect every page in the nav
 catalogue; test files and paths outside `apps/web` affect none. For each page the hub renders
-1600×1000 in the light and in the dark scheme, on main and on the PR head. Both sides are
+1600×1000 in the light scheme, on main and on the PR head, in the web app's **Demo** mode (simulated
+crew; nothing is read from the hub), so before and after are both Demo data and a page the change
+did not touch diffs to zero. A changed file named for colour (theme, dark, light, colour, tokens,
+palette) adds the dark scheme; one named for size (width, responsive, breakpoint, viewport, layout,
+resize) adds a 2560×1145 viewport. Both sides are
 hubs started as `MC_NO_LOOP_WRITES=1` previews on a free loopback port, each from its own copy of
-one `VACUUM INTO` snapshot of the live database, so they show the same data. Each side is a
+one `VACUUM INTO` snapshot of the live database. Each side is a
 detached worktree with `pnpm install --offline --frozen-lockfile` and a web build, torn down when
 its pages are done. Captures run one at a time; a failed capture is tried again after ten minutes.
 
 **What is stored.** Under `pr-evidence/<repo>/<pr>/<head sha>/` in the data dir (directories
-`0700`, files `0600`): `<page>-<light|dark>-<before|after|diff>.png` and `manifest.json`, which
-lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
+`0700`, files `0600`): `<page>-<light|dark>[-2560]-<before|after|diff>.png` for the pages that changed and `manifest.json`, which
+names the pages that did not change (`unchanged`; they keep no pictures) and lists each pair's changed pixels, changed percent and changed regions (bounding boxes, largest
 first). A pixel counts as changed when its colour differs by more than 24 across the three
 channels; regions group changes on a 16 px grid. The three newest heads of a PR are kept. The
-manifest is written last, so a head with no manifest was never captured. Nothing is uploaded.
+manifest is written last, so a head with no manifest was never captured.
+
+**On GitHub.** The before and after pictures of the changed pages (not the diff) are uploaded with `gh release create` as the files of one prerelease tagged `qa-pr-<n>` at the PR head, replaced for each new head. The PR body then shows them as images from `https://github.com/<repo>/releases/download/qa-pr-<n>/`. Only Demo data is in them (the repo is public). The hub's hourly data-folder sweep deletes the release (and its tag) of every PR that is neither open nor merged-but-not-live yet, with the same rule that removes the pictures on disk. If the upload fails the capture still stands and the PR body links the hub's own copies.
 
 **Where it is read.** `GET /api/prs/<n>/evidence` answers the newest head's manifest (`?sha=` for
 one head, `?repo=` when two repos have the number) and `GET /api/prs/<n>/evidence/<sha>/<name>.png`
 an image. Neither needs the operator token, like the other read routes. The PR body gets a
-`## Screenshot evidence` section with one line per pair and links to its three images; it is
+`## Screenshot evidence` section with one entry per changed page (before and after side by side) and the names of the unchanged ones; it is
 rewritten for each new head and kept when RETRO's Minor findings are posted. RETRO's brief lists
 the pairs and the images are copied into its scratch copy under `.mc-review/evidence/`.
 
@@ -2636,10 +2642,8 @@ the pairs for its current head exist, so the reviewer always has them and a PR a
 draft cannot merge on a new head without them. Each pass that is held records a loop event naming
 the pages still missing; the run is not parked, and moves on at the next pass once the capture
 lands. A capture that fails (or runs past its 15-minute deadline) is retried after ten minutes and
-the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`. A capture stopped by a hub shutdown says so and names no page. The review is held at that point too, not let through: the engine asks for no review, marks nothing ready and merges nothing until the pairs exist, so a capture that keeps failing stops the PR visibly, with that reason in the loop event, instead of reaching RETRO without pictures. A push makes a
+the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme at 1600, head side: <reason>`. A capture stopped by a hub shutdown says so and names no page. The review is held at that point too, not let through: the engine asks for no review, marks nothing ready and merges nothing until the pairs exist, so a capture that keeps failing stops the PR visibly, with that reason in the loop event, instead of reaching RETRO without pictures. A push makes a
 new head, which needs its own pairs.
-
-**Token-guarded pages.** Pages such as Audit read routes that need the operator token, and the renderer is refused the token's bootstrap on purpose. Each side's hub writes its own throwaway token (`operator-token`) beside its database copy, so each side gets a folder of its own under `capture-*`. The capture reads that file and gives it to the render, which adds it as `x-mc-operator` to that hub's `/api/` GET reads only, outside the page. The live hub's token is never used, and the page's script, the images, the manifest, the logs and the PR body never hold it. If a side wrote no token file, its pages render as before and may show the sign-in error.
 
 **After a restart.** A hub that stops in the middle of a capture leaves database copies in `capture-*` folders and side checkouts (with their git worktree registrations) under `pr-evidence-work/` in the data dir. At start the live hub deletes both, runs `git worktree prune` on its checkout, and logs what it removed; nothing else uses that folder. To see what a capture would store without a PR, run `node --experimental-strip-types apps/server/src/pr-evidence/probe.ts http://127.0.0.1:<port> [out dir]` against a preview hub: it saves `<page>-<scheme>.png` for every page.
 

@@ -4,11 +4,14 @@
  */
 import { HUD_PAGE_PATHS } from "./flight.ts";
 
-/** The colour schemes every affected page is photographed in. */
+/** The colour schemes a page can be photographed in; a change is photographed in `light` unless it is about colour. */
 export const EVIDENCE_SCHEMES = ["light", "dark"] as const;
 export type EvidenceScheme = (typeof EVIDENCE_SCHEMES)[number];
-/** The viewport of every evidence screenshot. */
+/** The viewport of an evidence screenshot, unless the change is about width. */
 export const EVIDENCE_VIEWPORT = { width: 1600, height: 1000 } as const;
+/** The second viewport, taken only when the change is about width. */
+export const EVIDENCE_WIDE_VIEWPORT = { width: 2560, height: 1145 } as const;
+export const EVIDENCE_WIDTHS = [EVIDENCE_VIEWPORT.width, EVIDENCE_WIDE_VIEWPORT.width] as const;
 export const EVIDENCE_PAGE_PATHS = {
   ...HUD_PAGE_PATHS,
   setup_repos: "/setup/repos",
@@ -25,11 +28,6 @@ export const EVIDENCE_PAGE_PATHS = {
 } as const;
 export type EvidencePage = keyof typeof EVIDENCE_PAGE_PATHS;
 export const EVIDENCE_PAGES = Object.keys(EVIDENCE_PAGE_PATHS) as EvidencePage[];
-/** The sizes of the head's Demo renders, each page at its busiest. */
-export const EVIDENCE_DEMO_VIEWPORTS = [
-  { width: 1920, height: 940 },
-  { width: 2560, height: 1145 },
-] as const;
 export const EVIDENCE_KINDS = ["before", "after", "diff"] as const;
 export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
 
@@ -46,18 +44,13 @@ export interface EvidenceRegion {
 export interface EvidencePair {
   page: EvidencePage;
   scheme: EvidenceScheme;
+  /** The viewport width; absent means `EVIDENCE_VIEWPORT.width`. */
+  width?: number;
   changedPixels: number;
   /** Of the whole image, 0 to 100. */
   changedPercent: number;
   /** Bounding boxes of the changed areas, largest first. */
   regions: EvidenceRegion[];
-}
-
-/** One Demo render of a page on the head, stored as `evidenceDemoImageName(page, width)`. */
-export interface EvidenceDemo {
-  page: EvidencePage;
-  width: number;
-  height: number;
 }
 
 /** A committed picture FLIGHT supplied for a review the hub cannot render itself. */
@@ -77,9 +70,12 @@ export interface EvidenceManifest {
   /** The main commit the "before" side was built from. */
   mainSha: string;
   capturedAt: number;
+  /** The pairs of the pages that changed; a page that did not change keeps none. */
   pairs: EvidencePair[];
-  /** The head's Demo renders; absent on a capture made before they existed. */
-  demos?: EvidenceDemo[];
+  /** The pages photographed that did not change: nothing is kept for them. */
+  unchanged?: EvidencePage[];
+  /** Where the before and after pictures are published on GitHub (release files), when they were. */
+  published?: { baseUrl: string };
   /** Extra committed pictures, retained only for this exact review head. */
   submitted?: EvidenceSubmission[];
 }
@@ -212,22 +208,60 @@ export function evidenceUncataloguedText(files: readonly string[]): string {
   return `kept in draft: ${files.join(", ")} has no screenshot address, so its evidence cannot show it. Add the page to EVIDENCE_PAGE_PATHS in packages/core/src/pr-evidence.ts (or HUD_PAGE_PATHS in packages/core/src/flight.ts when it is in the nav), in this PR or one before it; a page removed by this PR leaves draft the same way`;
 }
 
-export interface EvidenceGap {
-  page: EvidencePage;
+/** One scheme and width a page is photographed in. */
+export interface EvidenceVariant {
   scheme: EvidenceScheme;
+  width: number;
 }
 
-/** Every page and scheme `pages` needs that `manifest` has no pair for at this head. */
+export interface EvidenceGap extends EvidenceVariant {
+  page: EvidencePage;
+}
+
+/** A change to files named for colour is photographed in both schemes. */
+const THEME_FILE = /(?:theme|dark|light|colou?r|tokens?|palette)/i;
+/** A change to files named for size is photographed at both widths. */
+const WIDTH_FILE = /(?:width|responsive|breakpoint|viewport|layout|resize)/i;
+
+/**
+ * What each changed page is photographed in: light at 1600 wide, plus dark when a changed file is
+ * about colour, plus the wide viewport when one is about width.
+ */
+export function evidenceVariants(paths: readonly string[] = []): EvidenceVariant[] {
+  const names = paths.filter((p) => p.startsWith(WEB_PREFIX)).map((p) => p.split("/").at(-1) ?? "");
+  const schemes = names.some((n) => THEME_FILE.test(n)) ? EVIDENCE_SCHEMES : (["light"] as const);
+  const widths = names.some((n) => WIDTH_FILE.test(n))
+    ? EVIDENCE_WIDTHS
+    : ([EVIDENCE_VIEWPORT.width] as const);
+  return schemes.flatMap((scheme) => widths.map((width) => ({ scheme, width })));
+}
+
+/** The width a pair was taken at. */
+export const evidenceWidthOf = (p: { width?: number }): number =>
+  p.width ?? EVIDENCE_VIEWPORT.width;
+
+/**
+ * Every page and variant `pages` needs that `manifest` has no answer for at this head. A page the
+ * capture found unchanged is answered; so is a page with a pair in every variant.
+ */
 export function evidenceMissing(
   manifest: EvidenceManifest | null,
   sha: string,
   pages: readonly EvidencePage[],
+  variants: readonly EvidenceVariant[] = evidenceVariants(),
 ): EvidenceGap[] {
-  const have = manifest?.sha === sha ? manifest.pairs : [];
+  const have = manifest?.sha === sha ? manifest : null;
   return pages.flatMap((page) =>
-    EVIDENCE_SCHEMES.filter(
-      (scheme) => !have.some((p) => p.page === page && p.scheme === scheme),
-    ).map((scheme) => ({ page, scheme })),
+    have?.unchanged?.includes(page)
+      ? []
+      : variants
+          .filter(
+            (v) =>
+              !have?.pairs.some(
+                (p) => p.page === page && p.scheme === v.scheme && evidenceWidthOf(p) === v.width,
+              ),
+          )
+          .map((v) => ({ page, ...v })),
   );
 }
 
@@ -237,30 +271,18 @@ export function evidenceRefusalText(missing: readonly EvidenceGap[]): string {
   return `kept in draft until its screenshot evidence exists; missing pages: ${pages}`;
 }
 
-/** Every Demo render a head needs for `pages` that `manifest` lacks. */
-export function evidenceDemoMissing(
-  manifest: EvidenceManifest | null,
-  sha: string,
-  pages: readonly EvidencePage[],
-): EvidenceDemo[] {
-  const have = manifest?.sha === sha ? (manifest.demos ?? []) : [];
-  return pages.flatMap((page) =>
-    EVIDENCE_DEMO_VIEWPORTS.filter(
-      (v) => !have.some((d) => d.page === page && d.width === v.width && d.height === v.height),
-    ).map((v) => ({ page, ...v })),
-  );
-}
-
 const IMAGE_NAME = new RegExp(
-  `^(?:${EVIDENCE_PAGES.join("|")})-(?:(?:${EVIDENCE_SCHEMES.join("|")})-(?:${EVIDENCE_KINDS.join("|")})|demo-(?:${EVIDENCE_DEMO_VIEWPORTS.map((v) => v.width).join("|")}))\\.png$`,
+  `^(?:${EVIDENCE_PAGES.join("|")})-(?:${EVIDENCE_SCHEMES.join("|")})-(?:(?:${EVIDENCE_WIDTHS.join("|")})-)?(?:${EVIDENCE_KINDS.join("|")})\\.png$`,
 );
-export const evidenceDemoImageName = (page: EvidencePage, width: number): string =>
-  `${page}-demo-${width}.png`;
 export const evidenceImageName = (
   page: EvidencePage,
   scheme: EvidenceScheme,
   kind: EvidenceKind,
-): string => `${page}-${scheme}-${kind}.png`;
+  width: number = EVIDENCE_VIEWPORT.width,
+): string =>
+  width === EVIDENCE_VIEWPORT.width
+    ? `${page}-${scheme}-${kind}.png`
+    : `${page}-${scheme}-${width}-${kind}.png`;
 /** Whether `name` is one a capture can have stored; anything else is never turned into a path. */
 export const isEvidenceImageName = (name: string): boolean =>
   IMAGE_NAME.test(name) || /^submitted-[a-f0-9]{64}\.png$/.test(name);
@@ -300,25 +322,37 @@ export function withSection(body: string, heading: string, section: string | nul
 
 const regionsText = (n: number): string => (n === 1 ? "1 region" : `${n} regions`);
 
-/** The PR-body section: one line per pair, with links to its before, after and diff images. */
+/** The tag of the GitHub release that holds a PR's before and after pictures. */
+export const EVIDENCE_RELEASE_PREFIX = "qa-pr-";
+export const evidenceReleaseTag = (pr: number): string => `${EVIDENCE_RELEASE_PREFIX}${pr}`;
+
+/**
+ * The PR-body section: one entry per page that changed, with its before and after pictures. The
+ * pictures are Demo data on both sides, so a page that did not change has none and is only named.
+ */
 export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string): string {
+  const where =
+    manifest.published?.baseUrl ?? `${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}`;
   const link = (p: EvidencePair, kind: EvidenceKind): string =>
-    `[${kind}](${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}/${evidenceImageName(p.page, p.scheme, kind)})`;
-  const lines = manifest.pairs.map(
-    (p) =>
-      `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${regionsText(p.regions.length)}`} (${EVIDENCE_KINDS.map((k) => link(p, k)).join(" · ")})`,
-  );
-  const demoLines = (manifest.demos ?? []).map(
-    (d) =>
-      `- ${d.page}, Demo at its busiest, ${d.width}×${d.height} ([demo](${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}/${evidenceDemoImageName(d.page, d.width)}))`,
-  );
+    `${where}/${evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p))}`;
+  const entries = manifest.pairs
+    .filter((p) => p.changedPixels > 0)
+    .map((p) => {
+      const width = evidenceWidthOf(p);
+      const label = `${p.page}, ${p.scheme}${width === EVIDENCE_VIEWPORT.width ? "" : `, ${width} wide`}`;
+      const head = `- ${label}: ${p.changedPercent}% changed, ${regionsText(p.regions.length)}`;
+      return manifest.published
+        ? `${head}\n\n  | before | after |\n  | --- | --- |\n  | ![before](${link(p, "before")}) | ![after](${link(p, "after")}) |`
+        : `${head} ([before](${link(p, "before")}) · [after](${link(p, "after")}) · [diff](${link(p, "diff")}))`;
+    });
+  const same = manifest.unchanged ?? [];
   return [
     EVIDENCE_HEADING,
     "",
-    `Rendered at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, on the same data; the Demo renders are the head alone, in Demo. Links open on the hub that rendered them.`,
+    `Rendered from Demo data on both sides, from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} in light unless the change is about colour or width. Only pages that changed are shown.${manifest.published ? " The pictures are removed once the change is live." : " Links open on the hub that rendered them."}`,
     "",
-    ...lines,
-    ...demoLines,
+    ...(entries.length > 0 ? entries : ["No page changed."]),
+    ...(same.length > 0 ? ["", `Unchanged: ${same.join(", ")}.`] : []),
   ].join("\n");
 }
 

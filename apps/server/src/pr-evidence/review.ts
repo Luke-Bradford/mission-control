@@ -1,7 +1,7 @@
 /** Puts a web PR's screenshot pairs where its reviewer can read them. */
 import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { EVIDENCE_KINDS, type EvidencePair, evidenceImageName } from "@mc/core";
+import { EVIDENCE_KINDS, type EvidencePair, evidenceImageName, evidenceWidthOf } from "@mc/core";
 import type { PrEvidenceStore } from "./store.ts";
 
 /** Where in a review's scratch copy the images go. */
@@ -34,7 +34,7 @@ export async function stageReviewEvidence(
   try {
     for (const p of manifest.pairs) {
       for (const kind of EVIDENCE_KINDS) {
-        const name = evidenceImageName(p.page, p.scheme, kind);
+        const name = evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p));
         const png = store.image(repoId, pr, sha, name);
         if (!png) throw new Error(`screenshot evidence image is missing: ${name}`);
         await writeFile(join(stage, name), png, { flag: "wx", mode: 0o600 });

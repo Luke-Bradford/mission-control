@@ -51,7 +51,8 @@ export async function postPrEvidence(
     throw new Error("the PR closed or its head changed before evidence was posted");
   const body = withSection(pr.body ?? "", EVIDENCE_HEADING, evidenceSectionText(manifest, baseUrl));
   if (body === pr.body) return;
-  // Only the existing PR body is edited; no comment, mention, upload, ready or merge write.
+  // Only the existing PR body is edited here; no comment, mention, ready or merge write. The
+  // pictures themselves were uploaded as release files when the capture finished.
   const edited = await gh(["api", "--method", "PATCH", endpoint, "--input", "-"], {
     cwd,
     input: JSON.stringify({ body }),
