@@ -14,6 +14,7 @@ import {
   runawayWritesReason,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 /** The tools that only read: the breaker never stops these. */
@@ -111,7 +112,7 @@ function readEvents(store: Store): WriteEvent[] {
   const raw = store.getSetting(EVENTS_SETTING);
   if (raw === null) return [];
   try {
-    const v = JSON.parse(raw) as WriteEvent[];
+    const v = parseJson<unknown>(raw, undefined, rethrowJson) as WriteEvent[];
     return Array.isArray(v) ? v : [];
   } catch {
     return [];
@@ -135,7 +136,7 @@ export function runawayTrip(store: Store): FlightRunawayTrip | null {
   const raw = store.getSetting(FLIGHT_RUNAWAY_SETTING);
   if (raw === null) return null;
   try {
-    const v = JSON.parse(raw) as Partial<FlightRunawayTrip>;
+    const v = parseJson<unknown>(raw, undefined, rethrowJson) as Partial<FlightRunawayTrip>;
     if (typeof v.at === "number" && typeof v.reason === "string")
       return { at: v.at, reason: v.reason };
   } catch {

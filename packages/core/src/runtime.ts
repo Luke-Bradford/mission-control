@@ -47,7 +47,7 @@ export type ConfigSeatMode = (typeof CONFIG_SEAT_MODES)[number];
 /** The loops each mode may have. */
 export const MODE_LOOPS: Readonly<Record<CrewMode, readonly LoopKind[]>> = {
   writer: ["build"],
-  "read-only": ["none", "plan", "watch"],
+  "read-only": ["none", "plan", "watch", "audit"],
   scratch: ["review"],
 };
 
@@ -139,7 +139,7 @@ export const MC_TOOL_GRANTS: Readonly<
       MC_TOOL_NAMES.commsSend,
       MC_TOOL_NAMES.commsReact,
     ],
-    grantable: [MC_TOOL_NAMES.reportPlan, ...FLIGHT_TOOLS],
+    grantable: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.reportAudit, ...FLIGHT_TOOLS],
   },
   scratch: {
     base: [
@@ -215,6 +215,19 @@ export const BUILTIN_ROLES: Readonly<Record<string, RoleDef>> = {
     loop: "plan",
     tools: [MC_TOOL_NAMES.reportPlan, MC_TOOL_NAMES.readTicket],
     here: hereOf("FAO"),
+  },
+  AUDIT: {
+    prompt: "roles/AUDIT.md",
+    model: "opus",
+    mode: "read-only",
+    loop: "audit",
+    tools: [
+      MC_TOOL_NAMES.reportAudit,
+      MC_TOOL_NAMES.readTicket,
+      MC_TOOL_NAMES.listTickets,
+      MC_TOOL_NAMES.readPr,
+    ],
+    here: hereOf("AUDIT"),
   },
 };
 

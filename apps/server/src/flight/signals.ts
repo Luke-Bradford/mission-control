@@ -37,6 +37,7 @@ import {
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
+import { parseJson } from "../json.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -84,7 +85,7 @@ export interface LoopHeartbeat {
 /** Settings can be missing or left malformed by an interrupted/older write. */
 function stored<T>(store: Store, key: string, fallback: T): T {
   try {
-    return JSON.parse(store.getSetting(key) ?? "null") ?? fallback;
+    return parseJson(store.getSetting(key), null) ?? fallback;
   } catch {
     return fallback;
   }

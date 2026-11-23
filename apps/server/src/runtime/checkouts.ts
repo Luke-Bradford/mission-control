@@ -36,6 +36,7 @@ import {
   realish,
   SEAT_ID,
 } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import {
   assertSeatGitConfig,
@@ -1004,7 +1005,9 @@ function refuseUnsafeUvRegistries(lock: string, subject: string): void {
         throw refuse(subject, "has unsupported string syntax in uv.lock");
       }
       try {
-        value = raw.startsWith('"') ? JSON.parse(raw) : raw.slice(1, -1);
+        value = raw.startsWith('"')
+          ? String(parseJson<unknown>(raw, undefined, rethrowJson))
+          : raw.slice(1, -1);
       } catch {
         throw refuse(subject, "has unsupported string syntax in uv.lock");
       }
@@ -2421,7 +2424,10 @@ export async function removeSessionCheckout(
     if (!(await lstat(common)).isDirectory() || (await realpath(common)) !== common) {
       return "retained-unproven";
     }
-    const owner = JSON.parse(await readFile(join(common, SESSION_OWNER_FILE), "utf8"));
+    const owner = parseJson<Record<string, unknown>>(
+      await readFile(join(common, SESSION_OWNER_FILE), "utf8"),
+      {},
+    );
     if (
       owner.sessionId !== session.id ||
       owner.token !== proof.token ||

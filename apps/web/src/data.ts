@@ -176,6 +176,8 @@ export const RESOURCES = {
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
   }),
+  /** The AUDIT seat's newest report and when the next is due; Audit's verdict and Do next read it. */
+  auditReport: { path: "/api/audit/report", topic: "agents" },
   /** Spend per merged change, the building share and the open waste alarms; Audit's Do next and How we build read it. */
   waste: { path: "/api/waste", topic: "agents" },
   comms: (agentId: string): ResourceRef => ({
@@ -284,6 +286,8 @@ export const RESOURCES = {
   // Run-derived: refetched when runs change.
   activity: { path: "/api/activity", topic: "agents" },
   config: { path: "/api/config", topic: "config" },
+  hubSettings: { path: "/api/config/settings", topic: "config" },
+  pace: { path: "/api/settings/pace", topic: "settings" },
   // Runs git in the hub's checkout (a fetch at most every 10 minutes), so once per visit.
   version: { path: "/api/version", topic: null },
   boards: (repoId: string): ResourceRef => ({
@@ -399,6 +403,19 @@ export const ACTIONS = {
   sendBackPlan: (repoId: string, issue: number | string) =>
     `/api/plans/${enc(repoId)}/${issue}/send-back`,
   repoSetup: (repoId: string) => `/api/repos/${enc(repoId)}/setup`,
+  hubSettings: "/api/config/settings",
+  removeRepo: (repoId: string) => `/api/repos/${enc(repoId)}`,
+  restartHub: "/api/hub/restart",
+  pace: "/api/settings/pace",
+  flightApprovals: "/api/flight/approvals",
+  prReviewRequest: (repoId: string, number: string | number) =>
+    `/api/prs/${enc(repoId)}/${number}/review-request`,
+  prMergeHold: (repoId: string, number: string | number) =>
+    `/api/prs/${enc(repoId)}/${number}/merge-hold`,
+  prControllerCheck: (repoId: string, number: string | number) =>
+    `/api/prs/${enc(repoId)}/${number}/controller-check`,
+  runMergeHold: (id: string) => `/api/runs/${enc(id)}/merge-hold`,
+  runControllerCheck: (id: string) => `/api/runs/${enc(id)}/controller-check`,
   /** Body `{ base, rules }`; saves the editable repo rules. */
   repoRules: (repoId: string) => `/api/repos/${enc(repoId)}/rules`,
   /** GET answers a BoardSetupStatus (a GitHub read); POST `{}` creates what is missing. */

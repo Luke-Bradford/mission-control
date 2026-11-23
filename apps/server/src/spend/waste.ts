@@ -45,11 +45,21 @@ const runTokens = (r: Run): number =>
   r.tokens === null ? 0 : r.tokens.input + r.tokens.output + r.tokens.cacheCreate;
 
 /** Spend over one window, with each vendor's coverage. A cost is null where no run recorded one. */
-function spendFor(config: CcConfig, store: Store, window: WasteWindow, now: number): WasteSpend {
+function spendFor(
+  config: CcConfig,
+  store: Store,
+  window: WasteWindow,
+  now: number,
+  repoId?: string,
+): WasteSpend {
   const since = now - WASTE_WINDOW_MS[window];
   const agents = agentInfo(config);
-  const runs = store.waste.runsSince(since);
-  const mergedCount = store.waste.mergedBetween(since, now).length;
+  const runs = store.waste
+    .runsSince(since)
+    .filter((r) => repoId === undefined || r.repoId === repoId);
+  const mergedCount = store.waste
+    .mergedBetween(since, now)
+    .filter((m) => repoId === undefined || m.repoId === repoId).length;
   const vendors = new Map<
     string,
     { vendor: string; runs: number; runsWithCost: number; costUsd: number | null; tokens: number }
@@ -95,10 +105,15 @@ function spendFor(config: CcConfig, store: Store, window: WasteWindow, now: numb
 }
 
 /** What GET /waste serves: spend per merged change, the building share, open alarms and each check's record. */
-export function wasteReport(config: CcConfig, store: Store, now: number): WasteReport {
+export function wasteReport(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  repoId?: string,
+): WasteReport {
   return {
     at: now,
-    spend: WASTE_WINDOWS.map((w) => spendFor(config, store, w, now)),
+    spend: WASTE_WINDOWS.map((w) => spendFor(config, store, w, now, repoId)),
     alarms: [],
     checks: [],
     flight: flightActivity(config, store, now),

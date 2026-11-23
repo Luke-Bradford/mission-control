@@ -14,6 +14,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { externalReviewAsked } from "../external-pr-control.ts";
+import { parseJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { postPrEvidence } from "../pr-evidence/sweep.ts";
@@ -23,6 +24,8 @@ import type { Store } from "../store.ts";
 import { externalReviewKey, isExternalReview } from "./external-key.ts";
 
 export { externalReviewKey, isExternalReview } from "./external-key.ts";
+
+const publications = new WeakMap<Store, Map<number, Promise<void>>>();
 
 /** Only fixed, non-sensitive publication failure messages use this class. */
 class ExternalReviewPublicationError extends Error {}
@@ -69,7 +72,7 @@ export async function readExternalSubject(
   const result = await gh(["api", `repos/${repo.github}/pulls/${number}`], { cwd });
   if (result.code !== 0)
     throw new ExternalReviewPublicationError("external review PR could not be read");
-  const value: unknown = JSON.parse(result.stdout);
+  const value: unknown = parseJson<unknown>(result.stdout, null);
   if (value === null || typeof value !== "object") return null;
   const pr = value as {
     number?: unknown;
@@ -188,7 +191,7 @@ export function createExternalReviews(deps: {
     deps.log(`External QA for ${row.repoId}#${pr.number} is not posted to GitHub: ${why}.`);
   }
 
-  async function publish(pr: PullRequestView, row: ReviewRow): Promise<void> {
+  async function publishOne(pr: PullRequestView, row: ReviewRow): Promise<void> {
     if (row.state === "superseded") return;
     const why = notWanted(row);
     if (why !== null) return skipped(pr, row, why);
@@ -271,7 +274,7 @@ export function createExternalReviews(deps: {
       });
       if (existing.code !== 0)
         throw new ExternalReviewPublicationError("external review comments could not be checked");
-      const pages: unknown = JSON.parse(existing.stdout);
+      const pages: unknown = parseJson<unknown>(existing.stdout, null);
       if (!Array.isArray(pages) || !pages.every(Array.isArray))
         throw new ExternalReviewPublicationError("external review comments were unreadable");
       const comments: unknown[] = pages.flat();
@@ -317,6 +320,19 @@ export function createExternalReviews(deps: {
         throw new ExternalReviewPublicationError("external review status could not be posted");
       store.setSetting(statusKey, fingerprint);
     }
+  }
+
+  function publish(pr: PullRequestView, row: ReviewRow): Promise<void> {
+    let inFlight = publications.get(store);
+    if (inFlight === undefined) {
+      inFlight = new Map();
+      publications.set(store, inFlight);
+    }
+    const existing = inFlight.get(row.id);
+    if (existing !== undefined) return existing;
+    const publication = publishOne(pr, row).finally(() => inFlight?.delete(row.id));
+    inFlight.set(row.id, publication);
+    return publication;
   }
 
   return {

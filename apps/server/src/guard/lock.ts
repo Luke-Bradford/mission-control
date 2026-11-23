@@ -13,6 +13,17 @@ export const lockChanged = (bus: ChangeBus) => (): void => {
   for (const t of LOCK_TOPICS) bus.emit(t);
 };
 
+const HOLD_NOT_STORED =
+  "The test lock could not record your hold, so it was not granted. Try the suite again.";
+
+/** The lock could not store a hold, so it was not granted: a hold that is not stored is lost on restart. */
+export class LockStoreError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LockStoreError";
+  }
+}
+
 /** One tool call: the run it belongs to and the model's tool_use id. */
 export interface LockKey {
   runId: string;
@@ -96,7 +107,8 @@ export class TestLock {
 
   /**
    * Resolves true once `key` holds the lock, false after `waitMs` or once `signal` aborts (the
-   * hook hung up). A waiter whose signal has aborted is never granted.
+   * hook hung up). A waiter whose signal has aborted is never granted. Rejects with a
+   * `LockStoreError` when a free lock cannot be granted because its hold could not be stored.
    */
   acquire(
     key: LockKey,
@@ -107,13 +119,15 @@ export class TestLock {
   ): Promise<boolean> {
     if (signal.aborted) return Promise.resolve(false);
     if (this.holder === null) {
-      this.hold(key, seatId, command);
+      if (this.hold(key, seatId, command) === null)
+        return Promise.reject(new LockStoreError(HOLD_NOT_STORED));
       this.onChange();
       return Promise.resolve(true);
     }
     if (this.holder.runId === key.runId) {
+      if (!this.storeAdd(this.holder, key.toolUseId, this.now()))
+        return Promise.reject(new LockStoreError(HOLD_NOT_STORED));
       this.holder.calls.add(key.toolUseId);
-      this.storeAdd(this.holder, key.toolUseId, this.now());
       return Promise.resolve(true);
     }
     return new Promise((resolve) => {
@@ -203,20 +217,28 @@ export class TestLock {
     };
   }
 
-  private hold(key: LockKey, seatId: string, command: string, queuedAt = this.now()): Holder {
-    this.holder = {
+  /** Takes the free lock; null when the hold could not be stored (the lock stays free). */
+  private hold(
+    key: LockKey,
+    seatId: string,
+    command: string,
+    queuedAt = this.now(),
+  ): Holder | null {
+    const holder: Holder = {
       runId: key.runId,
       seatId,
       command,
       since: this.now(),
       calls: new Set([key.toolUseId]),
     };
-    this.storeAdd(this.holder, key.toolUseId, this.holder.since, queuedAt);
-    return this.holder;
+    if (!this.storeAdd(holder, key.toolUseId, holder.since, queuedAt)) return null;
+    this.holder = holder;
+    return holder;
   }
 
-  private storeAdd(h: Holder, toolUseId: string, since: number, queuedAt = since): void {
-    this.store((s) =>
+  /** Stores a hold; false (and logged) when the write failed, so the caller does not grant it. */
+  private storeAdd(h: Holder, toolUseId: string, since: number, queuedAt = since): boolean {
+    return this.store((s) =>
       s.addLockHold({
         runId: h.runId,
         toolUseId,
@@ -228,13 +250,18 @@ export class TestLock {
     );
   }
 
-  /** Runs a store call; the lock never depends on it succeeding. */
-  private store(f: (s: LockHolds) => void): void {
-    if (this.holds === undefined) return;
+  /**
+   * Runs a store call and says whether it worked. A failed release is logged only: the lock is
+   * already free in memory, and a stale stored hold is dropped by the supervisor after a restart.
+   */
+  private store(f: (s: LockHolds) => void): boolean {
+    if (this.holds === undefined) return true;
     try {
       f(this.holds);
+      return true;
     } catch (e) {
       this.log(`test lock: could not store a hold: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
   }
 
@@ -249,15 +276,18 @@ export class TestLock {
         continue;
       }
       const h = this.hold(next.key, next.seatId, next.command, next.since);
+      if (h === null) {
+        next.settle(false);
+        continue;
+      }
       next.settle(true);
       for (const w of this.waiting.filter((x) => x.key.runId === h.runId)) {
         this.waiting.splice(this.waiting.indexOf(w), 1);
-        if (w.signal.aborted) {
+        if (w.signal.aborted || !this.storeAdd(h, w.key.toolUseId, this.now(), w.since)) {
           w.settle(false);
           continue;
         }
         h.calls.add(w.key.toolUseId);
-        this.storeAdd(h, w.key.toolUseId, this.now(), w.since);
         w.settle(true);
       }
       return;

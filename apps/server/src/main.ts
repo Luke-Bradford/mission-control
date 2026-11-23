@@ -36,6 +36,8 @@ import {
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
+import { buildAuditPack } from "./audit/pack.ts";
+import { AUDIT_TICK_MS, auditTick } from "./audit/timer.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
@@ -54,6 +56,7 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./config/crew-pause.ts";
+import { ensureConfigFile, starterLogText } from "./config/hub-settings.ts";
 import { loadProfiles, PROFILES_FILE } from "./config/profiles.ts";
 import {
   ConfigError,
@@ -64,7 +67,14 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
+import { runFirstClean } from "./disk/first-clean.ts";
+import { notLivePrKeys } from "./disk/live.ts";
+import {
+  DISK_CLEAN_SETTING,
+  DISK_SWEEP_EVERY_MS,
+  diskBudgetBytes,
+  sweepDataFolder,
+} from "./disk/sweep.ts";
 import { cachedDiskUse } from "./disk/use.ts";
 import { releaseAtAccountStop } from "./engine/account-release.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
@@ -75,7 +85,7 @@ import { recordingShotSaves, runSilenceCheck } from "./engine/silence.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { flightConflicts } from "./flight/conflicts.ts";
-import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
+import { renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { MergeConflicts } from "./flight/merge-conflicts.ts";
 import { operatorCall } from "./flight/operator-call.ts";
@@ -105,12 +115,18 @@ import {
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { peerIsSeat } from "./peer-process.ts";
 import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
+import { evidenceDemoRender } from "./pr-evidence/demo-render.ts";
 import {
   evidenceSideStarter,
   removeStaleEvidenceWork,
   runEvidenceCommand,
 } from "./pr-evidence/hubs.ts";
 import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
+import {
+  deleteEvidenceRelease,
+  publishEvidenceRelease,
+  sweepEvidenceReleases,
+} from "./pr-evidence/releases.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
@@ -131,6 +147,8 @@ import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
+import { watchPreviewParent } from "./runtime/preview-parent.ts";
+import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
@@ -140,6 +158,7 @@ import { Store } from "./store.ts";
 import { restartFileService } from "./telemetry/file-service-restart.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
+  commitsOf,
   createAutoUpdate,
   createHeldUpdateNote,
   createQuietGate,
@@ -147,6 +166,7 @@ import {
   crewRefusal,
   headSha,
   raiseUpdatePersonNote,
+  UPDATE_EXIT_DELAY_MS,
   UPDATE_LOG,
 } from "./update.ts";
 
@@ -166,6 +186,12 @@ export async function main(): Promise<void> {
   let port: number;
   try {
     port = portFromEnv(process.env.MC_PORT);
+    // A first start has no file: write a starter, so Setup can take the operator from there.
+    if (!isPreview(port, process.env)) {
+      const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+      if (ensureConfigFile(configPath, zone))
+        process.stdout.write(`${starterLogText(configPath)}\n`);
+    }
     config = loadConfig(configPath);
   } catch (e) {
     if (e instanceof ConfigError) {
@@ -397,18 +423,10 @@ export async function main(): Promise<void> {
     };
   })();
   const previewParentPid = process.env.MC_PREVIEW_PARENT_PID;
-  if (preview && previewParentPid !== undefined) {
-    const parentPid = Number(previewParentPid);
-    if (Number.isSafeInteger(parentPid) && parentPid > 1) {
-      setInterval(() => {
-        try {
-          process.kill(parentPid, 0);
-        } catch {
-          process.exit(0);
-        }
-      }, 15_000).unref();
-    }
-  }
+  const previewParentTimer =
+    preview && previewParentPid !== undefined
+      ? watchPreviewParent(Number(previewParentPid))
+      : undefined;
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
@@ -479,17 +497,45 @@ export async function main(): Promise<void> {
               return { stop: async () => await stopPreview(child) };
             },
           }),
-          render: (origin, path, colorScheme, signal, operatorToken) => {
-            const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, {
-              colorScheme,
+          render: evidenceDemoRender,
+          changeText: async ({ sha, mainSha, paths, signal }) => {
+            await runEvidenceCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", sha, mainSha],
+              undefined,
               signal,
-              ...(operatorToken === undefined ? {} : { operatorToken }),
-            });
+            );
+            const diff = await gitOutput(
+              evidenceCheckout,
+              ["diff", "--unified=0", `${mainSha}...${sha}`, "--", ...paths],
+              signal,
+            );
+            return diff
+              .split("\n")
+              .filter((l) => /^[+-](?![+-])/.test(l))
+              .join("\n");
           },
-          renderDemo: (origin, path, viewport, signal) => {
-            const guard = hudRenderRequest(origin);
-            return renderHudInHelper(guard.page(path), guard, { demo: true, viewport, signal });
+          unpublish: async (pr) => {
+            const repo = config.repos.find((r) => r.id === previewRepoId);
+            if (
+              repo !== undefined &&
+              !(await deleteEvidenceRelease(gh, evidenceCheckout, repo.github, pr))
+            )
+              throw new Error(`the release for PR ${pr} could not be deleted`);
+          },
+          publish: async ({ pr, sha, images, signal }) => {
+            signal.throwIfAborted();
+            const repo = config.repos.find((r) => r.id === previewRepoId);
+            if (repo === undefined) throw new Error("the hub's repo is not configured");
+            return publishEvidenceRelease({
+              gh,
+              cwd: evidenceCheckout,
+              repo: repo.github,
+              pr,
+              sha,
+              images,
+              scratch: join(dirname(dbPath), "pr-evidence-work", "release"),
+            });
           },
           log: (line) => log(line),
         })
@@ -565,6 +611,8 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
+    auditPack: (seatId) =>
+      buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
       GH_TOKEN: await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
       MC_HUB: `http://${HOST}:${port}`,
@@ -708,10 +756,11 @@ export async function main(): Promise<void> {
     log: (line) => log(line),
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),
-    onPlanned: (_s, runId) => {
+    onPlanned: (_s, runId) => supervisor.endRunByEngine(runId),
+    onAudited: (_s, runId) => {
       supervisor.endRunByEngine(runId).catch((e: unknown) => {
         log(
-          `mc report_plan: could not end ${runId}: ${e instanceof Error ? e.message : String(e)}`,
+          `mc report_audit: could not end ${runId}: ${e instanceof Error ? e.message : String(e)}`,
         );
       });
     },
@@ -1065,6 +1114,10 @@ export async function main(): Promise<void> {
     // Reads may use the loaded file on any server: a preview shows its rules and cannot save them.
     configReadPath: configPath,
     crewReloader: writableConfigPath === undefined ? undefined : crewReloader,
+    // launchd's KeepAlive starts the hub again; a preview has no supervisor, so it cannot restart
+    restartHub: preview
+      ? undefined
+      : () => void setTimeout(() => void shutdown("restart"), UPDATE_EXIT_DELAY_MS),
     // A preview writes only a config file it was explicitly pointed at, never the live one.
     seatWrites: !preview || process.env.MC_CONFIG !== undefined,
     supervisor,
@@ -1081,6 +1134,16 @@ export async function main(): Promise<void> {
   });
   hubApp = app;
   log = (line) => app.log.warn(line);
+  installHubErrorHandlers(log);
+  const backgroundTimers: NodeJS.Timeout[] = [];
+  const trackTimer = <T extends NodeJS.Timeout>(timer: T): T => {
+    backgroundTimers.push(timer);
+    return timer;
+  };
+  if (previewParentTimer !== undefined) trackTimer(previewParentTimer);
+  app.addHook("onClose", async () => {
+    for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
+  });
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
   app.addHook("onClose", async () => stopDiscovery());
@@ -1139,6 +1202,16 @@ export async function main(): Promise<void> {
   // first look at the seats works; its resumed runs start in the background, so no idle event of
   // theirs is missed.
   engine.start();
+  // The AUDIT seat runs on a timer wherever the engine does: never in a preview.
+  if (engineOn) {
+    const auditPass = () => {
+      auditTick({ config, store, supervisor, now: Date.now(), log: (line) => log(line) }).catch(
+        (e: unknown) => log(`audit: pass failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    };
+    setInterval(auditPass, AUDIT_TICK_MS).unref();
+    setTimeout(auditPass, 30_000).unref();
+  }
   // Github's board topic and a retry tick cover every open hub-repo PR, including ones without
   // a live run. Preview/read-only hubs never capture or edit Github.
   if (engineOn && prEvidence && previewRepoId && hubRoot) {
@@ -1155,7 +1228,7 @@ export async function main(): Promise<void> {
       const unsubscribe = bus.subscribe((topic) => {
         if (topic === "boards") void sweep.tick();
       });
-      const retry = setInterval(() => void sweep.tick(), 60_000);
+      const retry = trackTimer(setInterval(() => void sweep.tick(), 60_000));
       retry.unref();
       void sweep.tick();
       stopEvidenceSweep = () => {
@@ -1174,43 +1247,77 @@ export async function main(): Promise<void> {
       });
     };
     const everyTenMinutes = quietly("local prune", () => tidy.pruneLocal());
-    setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
-    setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
-    setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
+    trackTimer(setInterval(everyTenMinutes, TIDY_EVERY_MS)).unref();
+    trackTimer(setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS)).unref();
   }
   // Local only: pictures, evidence and scratch of finished work are removed from the data folder.
   if (!preview) {
     const dataDir = dirname(dbPath);
     let sweeping = false;
-    const diskSweep = () => {
-      if (sweeping) return;
+    // true when the sweep ran to the end; false when it was skipped or failed
+    const diskSweep = (graceMs?: number): Promise<boolean> => {
+      if (sweeping) return Promise.resolve(false);
       sweeping = true;
-      sweepDataFolder({
-        dataDir,
-        now: Date.now,
-        openPrs: store.openPrKeys(),
-        citedAssets: store.qaAssetIdsOfOpenPrs(),
-        keptShots: store.reviewShotIdsOfOpenPrs(),
-        keptMaterials: store.attentionMaterialAssetIds(
-          new Set(
-            attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
-              (item) => item.key,
+      return (async () => {
+        // a merged PR's pictures stay until the hub runs code that holds its merge commit
+        const notLive = await notLivePrKeys(
+          hubRoot === null ? undefined : previewRepoId,
+          store.mergedPrs(),
+          (await updater?.version().catch(() => null))?.sha || null,
+          (running) => (hubRoot === null ? Promise.resolve(null) : commitsOf(hubRoot, running)),
+        );
+        const openPrs = new Set([...store.openPrKeys(), ...notLive]);
+        // The PR's pictures on GitHub go the same way as the ones on disk: once the change is live.
+        const releaseRepo = config.repos.find((r) => r.id === previewRepoId);
+        await sweepEvidenceReleases(
+          prEvidence && releaseRepo && hubRoot
+            ? { gh, cwd: hubRoot, repoId: releaseRepo.id, github: releaseRepo.github }
+            : null,
+          openPrs,
+          log,
+        );
+        await sweepDataFolder({
+          dataDir,
+          now: Date.now,
+          openPrs,
+          citedAssets: store.qaAssetIdsOfOpenPrs(notLive),
+          keptShots: store.reviewShotIdsOfOpenPrs(notLive),
+          keptMaterials: store.attentionMaterialAssetIds(
+            new Set(
+              attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
+                (item) => item.key,
+              ),
             ),
           ),
-        ),
-        budgetBytes: diskBudgetBytes(process.env),
-        holdings: () => hubDiskUse.read(),
-        log,
-      })
+          budgetBytes: diskBudgetBytes(process.env),
+          holdings: () => hubDiskUse.read(),
+          ...(graceMs === undefined ? {} : { graceMs }),
+          log,
+        });
+        return true;
+      })()
         .catch((e: unknown) => {
           log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+          return false;
         })
         .finally(() => {
           sweeping = false;
         });
     };
-    setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
-    setTimeout(diskSweep, 2 * 60_000).unref();
+    // The first clean after the cap and live-removal rule has no grace period, so what merged PRs
+    // already left behind goes at once; it counts as done only once a sweep has finished.
+    const sweepOrFirstClean = () =>
+      void runFirstClean(
+        {
+          get: () => store.getSetting(DISK_CLEAN_SETTING),
+          set: (v) => store.setSetting(DISK_CLEAN_SETTING, v),
+        },
+        diskSweep,
+        Date.now,
+      );
+    trackTimer(setInterval(sweepOrFirstClean, DISK_SWEEP_EVERY_MS)).unref();
+    trackTimer(setTimeout(sweepOrFirstClean, 2 * 60_000)).unref();
     // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
     if (engineOn) {
       const worktreeTidy = () => {
@@ -1226,8 +1333,8 @@ export async function main(): Promise<void> {
             log(`worktree tidy failed: ${e instanceof Error ? e.message : String(e)}`);
           });
       };
-      setInterval(worktreeTidy, TIDY_EVERY_MS).unref();
-      setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
+      trackTimer(setInterval(worktreeTidy, TIDY_EVERY_MS)).unref();
+      trackTimer(setTimeout(worktreeTidy, TIDY_EVERY_MS)).unref();
     }
   }
   // Local only: Audit checks routine hub activity without GitHub work.
@@ -1238,8 +1345,8 @@ export async function main(): Promise<void> {
       log(`silence check failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  setInterval(silence, 60_000).unref();
-  setTimeout(silence, 60_000).unref();
+  trackTimer(setInterval(silence, 60_000)).unref();
+  trackTimer(setTimeout(silence, 60_000)).unref();
   // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
   const leftovers = () => {
     try {
@@ -1249,8 +1356,8 @@ export async function main(): Promise<void> {
       log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
-  setInterval(leftovers, LEFTOVERS_EVERY_MS).unref();
-  setTimeout(leftovers, 5_000).unref();
+  trackTimer(setInterval(leftovers, LEFTOVERS_EVERY_MS)).unref();
+  trackTimer(setTimeout(leftovers, 5_000)).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

@@ -1,33 +1,39 @@
 import {
+  APPLIES_TEXT,
   BUILTIN_ROLES,
   type ConfigView,
+  errorText,
   GUARD_NOTE,
   GUARD_RULES,
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
   type GuardRule,
+  HARD_RULES_BY,
   LOCK_WAIT_MS,
   type RepoRulesView,
   ROLES,
   type RoleRow,
 } from "@mc/core";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { apiPost } from "../api.ts";
 import { LockLines, useTestLock } from "../components/LockLines.tsx";
 import { useSeatName } from "../crew.ts";
-import { RESOURCES, streamStatus, useResource } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { editSeatPath, setupPath } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { useStore } from "../shell/store.ts";
 import {
   AUTHORITY_NOTE,
-  EDIT_SOON,
   READ_ONLY_RULES,
   REPO_FILE_WINS,
   RULE_GROUPS,
   type RuleKey,
   type RuleSource,
+  ruleBody,
   ruleChips,
+  ruleDraft,
+  ruleValue,
   SOURCE_TEXT,
 } from "./repoRules.ts";
 import { ROLE_HEADINGS } from "./roleHeadings.ts";
@@ -147,7 +153,18 @@ function Chips({ id, values, adds }: { id: string; values: string[]; adds: strin
   );
 }
 
-function RuleRow({ rule, label, view }: { rule: RuleKey; label: string; view: RepoRulesView }) {
+function RuleRow({
+  rule,
+  label,
+  view,
+  repoId,
+}: {
+  rule: RuleKey;
+  label: string;
+  view: RepoRulesView;
+  repoId: string;
+}) {
+  const [editing, setEditing] = useState(false);
   const v = view.rules[rule];
   const readOnly = READ_ONLY_RULES.has(rule);
   const editable = !readOnly && (v.source === "set-here" || v.source === "default");
@@ -166,12 +183,104 @@ function RuleRow({ rule, label, view }: { rule: RuleKey; label: string; view: Re
       </div>
       <div>
         {editable && (
-          <button type="button" disabled title={EDIT_SOON} aria-label={`Edit ${rule}`}>
+          <button
+            type="button"
+            aria-expanded={editing}
+            aria-label={`Edit ${rule}`}
+            onClick={() => setEditing(!editing)}
+          >
             Edit
           </button>
         )}
       </div>
+      {editing && (
+        <RuleEditor rule={rule} view={view} repoId={repoId} onDone={() => setEditing(false)} />
+      )}
     </div>
+  );
+}
+
+/**
+ * One rule as a form: lists one per line, a checkbox, a select, or `label: glob, glob` lines.
+ * Save posts the file digest the rules were read with, so a changed file is refused, not overwritten.
+ */
+function RuleEditor({
+  rule,
+  view,
+  repoId,
+  onDone,
+}: {
+  rule: RuleKey;
+  view: RepoRulesView;
+  repoId: string;
+  onDone: () => void;
+}) {
+  const current: unknown = view.rules[rule].value;
+  const [text, setText] = useState(() => ruleDraft(current));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const id = useId();
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await apiPost(ACTIONS.repoRules(repoId), {
+        base: view.base,
+        rules: ruleBody(rule, ruleValue(rule, current, text)),
+      });
+      setSaved(true);
+      hub.refetch(RESOURCES.repoRules(repoId).path);
+      hub.refetch(RESOURCES.config.path);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  const bool = typeof current === "boolean";
+  return (
+    <fieldset className="rg-edit" aria-label={`Edit ${rule}`}>
+      {bool ? (
+        <label htmlFor={id}>
+          <input
+            id={id}
+            type="checkbox"
+            checked={text === "true"}
+            onChange={(e) => setText(String(e.target.checked))}
+          />{" "}
+          On
+        </label>
+      ) : rule === "hard_rules_by" ? (
+        <select id={id} aria-label={rule} value={text} onChange={(e) => setText(e.target.value)}>
+          {HARD_RULES_BY.map((v) => (
+            <option key={v} value={v}>
+              {v}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <textarea
+          id={id}
+          aria-label={rule}
+          value={text}
+          placeholder={rule === "areas" ? "label: glob, glob" : "One per line"}
+          onChange={(e) => setText(e.target.value)}
+        />
+      )}
+      <button type="button" className="primary sm" disabled={saving} onClick={() => void save()}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+      <button type="button" className="sm" disabled={saving} onClick={onDone}>
+        Cancel
+      </button>
+      {saved && <span role="status">{APPLIES_TEXT.now}</span>}
+      {error && (
+        <span role="alert" className="crit-t">
+          {error}
+        </span>
+      )}
+    </fieldset>
   );
 }
 
@@ -276,6 +385,7 @@ function RepoRules({ config }: { config: ConfigView }) {
                   rule={r.key}
                   label={r.label}
                   view={rules.data as RepoRulesView}
+                  repoId={repoId}
                 />
               ))}
               {g.title === "Checks" && <LockRow />}
@@ -434,7 +544,7 @@ function RolesTable({ config, error }: { config: ConfigView | undefined; error: 
                   <td>{modeText(r.mode)}</td>
                   <td className="rg-mid">
                     {seats ? (
-                      <a href={setupPath("sessions")}>
+                      <a href={setupPath("repos")}>
                         {seats.length} seat{seats.length === 1 ? "" : "s"}
                       </a>
                     ) : (
@@ -464,7 +574,7 @@ function RolesTable({ config, error }: { config: ConfigView | undefined; error: 
                             </span>
                             <a
                               href={editSeatPath(s.sessionId, s.id)}
-                              aria-label={`Edit ${nameOf(s.id)} on Sessions`}
+                              aria-label={`Edit ${nameOf(s.id)} on Repos & seats`}
                             >
                               Edit
                             </a>

@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
   PRIMARY KEY (repo_id, day)
 );
+-- The AUDIT seat's reports: one per run, the verdict and its ranked findings as JSON.
+CREATE TABLE IF NOT EXISTS audit_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, repo_id TEXT NOT NULL, run_id TEXT NOT NULL UNIQUE,
+  at INTEGER NOT NULL, verdict TEXT NOT NULL, findings TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_reports_repo ON audit_reports(repo_id, at);
 CREATE TABLE IF NOT EXISTS prompt_versions (
   hash TEXT PRIMARY KEY, path TEXT NOT NULL, first_seen INTEGER NOT NULL
 );

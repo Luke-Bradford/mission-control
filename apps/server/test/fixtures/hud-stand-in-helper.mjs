@@ -1,6 +1,7 @@
 // A stand-in for the HUD helper process: behaves as the job's `mode` query says.
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 process.once("message", (job) => {
   const url = new URL(job.url);
@@ -13,7 +14,14 @@ process.once("message", (job) => {
       ok: true,
       png: Buffer.from(String(process.env.MC_TEST_SECRET)).toString("base64"),
     });
-  else if (mode === "fail") process.send({ ok: false, error: "render exploded" });
+  else if (mode === "profile") {
+    // Chrome's profile folder, left behind in the helper's TMPDIR as a killed Chrome does
+    const profile = join(process.env.TMPDIR, "playwright_chromiumdev_profile-x");
+    mkdirSync(profile);
+    writeFileSync(join(profile, "Cookies"), "x");
+    writeFileSync(url.searchParams.get("marker"), process.env.TMPDIR);
+    process.send({ ok: true, png: Buffer.from("png").toString("base64") });
+  } else if (mode === "fail") process.send({ ok: false, error: "render exploded" });
   else if (mode === "crash") process.exit(3);
   // "term-hang" and "term-exit": note the SIGTERM in the marker file, then keep running or exit
   else if (mode === "term-hang" || mode === "term-exit") {

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AdoptedLoop } from "../config.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { foldTranscript, type TranscriptFacts } from "../run/streamjson.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_MIN_MS } from "./usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, isObj } from "./usage-common.ts";
@@ -51,8 +52,11 @@ async function readOauthToken(run: ExecFn): Promise<string> {
     throw new Error("keychain: could not read Claude credentials");
   }
   try {
-    const token = (JSON.parse(raw) as { claudeAiOauth?: { accessToken?: unknown } }).claudeAiOauth
-      ?.accessToken;
+    const token = (
+      parseJson<unknown>(raw, undefined, rethrowJson) as {
+        claudeAiOauth?: { accessToken?: unknown };
+      }
+    ).claudeAiOauth?.accessToken;
     if (typeof token === "string" && token !== "") return token;
   } catch {
     // fall through to the fixed message
@@ -260,7 +264,7 @@ export function latestRollout(root = join(homedir(), ".codex", "sessions")): unk
     const lines = text.split("\n").filter((l) => l.includes('"token_count"'));
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
-        const ev: unknown = JSON.parse(lines[i] as string);
+        const ev: unknown = parseJson<unknown>(lines[i] as string, undefined, rethrowJson);
         const rl = isObj(ev) && isObj(ev.payload) ? ev.payload.rate_limits : null;
         if (!isObj(rl)) continue;
         const ts =
@@ -326,7 +330,7 @@ export function appServer(deps: AppServerDeps = {}): Promise<unknown> {
         buf = buf.slice(i + 1);
         let m: unknown;
         try {
-          m = JSON.parse(line);
+          m = parseJson<unknown>(line, undefined, rethrowJson);
         } catch {
           continue;
         }

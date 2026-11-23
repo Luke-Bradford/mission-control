@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   AUDIT_MEASURED_TOOLS,
+  auditStartedKey,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
@@ -237,6 +238,7 @@ const stubSupervisor = (): Supervisor => {
     transferAccount: call("transfer", { outcome: "resumed" as const }),
     startRun: call("start", { runId: "r-1", branch: "feature/5-x" }),
     startWatch: call("startWatch", { runId: "r-3" }),
+    startAudit: call("startAudit", { runId: "r-4" }),
     checkCli: call("checkCli", { kind: "no-seat" as const }),
     startReview: call("startReview", { runId: "r-2" }),
     message: call("message", undefined),
@@ -1885,6 +1887,7 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/models"],
+  ["GET", "/api/audit/report"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
@@ -2043,6 +2046,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["PUT", "/api/accounts/claude-main", { provider: "claude", alertAt: 85, stopAt: 95 }],
   ["DELETE", "/api/accounts/claude-main"],
   ["POST", "/api/config/reload"],
+  ["GET", "/api/config/settings"],
+  ["POST", "/api/config/settings", {}],
+  ["DELETE", "/api/repos/shop-app", {}],
+  ["POST", "/api/hub/restart", {}],
   ["POST", "/api/github/refresh"],
   ["POST", "/api/crew/sessions/:sessionId/seats"],
   ["POST", "/api/crew/sessions"],
@@ -2220,14 +2227,18 @@ describe("repo profiles and the add-repo preview", () => {
 });
 
 describe("account model catalogs", () => {
-  it("does not fabricate Claude choices from configured roles", async () => {
+  it("lists the opus, sonnet and haiku aliases for a Claude account", async () => {
     const r = await get("/api/accounts/models");
     expect(r.statusCode).toBe(200);
+    const efforts = ["low", "medium", "high"];
     expect(
       r
         .json<{ accountId: string; models: unknown[] }[]>()
         .find((x) => x.accountId === "claude-main"),
-    ).toEqual({ accountId: "claude-main", models: [] });
+    ).toEqual({
+      accountId: "claude-main",
+      models: ["opus", "sonnet", "haiku"].map((model) => ({ model, efforts })),
+    });
   });
 
   it("returns the catalog discovered for each Codex binding only", async () => {
@@ -2251,7 +2262,13 @@ describe("account model catalogs", () => {
     await models.ready();
     try {
       expect((await models.inject({ method: "GET", url: "/api/accounts/models" })).json()).toEqual([
-        { accountId: "claude-main", models: [] },
+        {
+          accountId: "claude-main",
+          models: ["opus", "sonnet", "haiku"].map((model) => ({
+            model,
+            efforts: ["low", "medium", "high"],
+          })),
+        },
         { accountId: "codex-main", models: [{ model: "machine-only", efforts: ["low"] }] },
         { accountId: "codex-profile", models: [{ model: "profile-only", efforts: ["high"] }] },
         { accountId: "codex-unavailable", models: [] },
@@ -3247,6 +3264,15 @@ describe("local access", () => {
       }
       if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/config/settings" && method === "POST") {
+        expect(r.statusCode, `${method} ${url}`).toBe(400); // no version or key in the table body
+        continue;
+      }
+      if (url === "/api/hub/restart" || (method === "DELETE" && url === "/api/repos/shop-app")) {
+        // a test server cannot restart itself, and shop-app is in use
+        expect(r.statusCode, `${method} ${url}`).toBe(409);
         continue;
       }
       if (url === "/api/repos/shop-app/rules") {
@@ -6807,6 +6833,47 @@ describe("crew routes", () => {
     ]);
   });
 
+  describe("the AUDIT seat", () => {
+    beforeEach(() => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "audit-1",
+        role: "AUDIT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+    });
+
+    it("starts with {} through startAudit", async () => {
+      const r = await postBody("/api/seats/audit-1/start", {});
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ runId: "r-4" });
+      expect(supervisorCalls).toEqual([["startAudit", "audit-1"]]);
+      expect(store.getSetting(auditStartedKey("audit-1"))).toBe(String(NOW));
+    });
+
+    it("refuses an issue with 400", async () => {
+      const r = await postBody("/api/seats/audit-1/start", { issue: 5 });
+      expect(r.statusCode).toBe(400);
+      expect(supervisorCalls).toEqual([]);
+    });
+
+    it("reports nothing and no due time before the first report, then the saved report", async () => {
+      expect((await get("/api/audit/report")).json()).toEqual({ report: null, nextDueAt: null });
+      store.recordAuditReport({
+        repoId: "shop-app",
+        runId: "audit-1:r",
+        at: 1_000,
+        verdict: "Two seats idle.",
+        findings: [],
+      });
+      const saved = (await get("/api/audit/report")).json();
+      expect(saved.report).toMatchObject({ runId: "audit-1:r", verdict: "Two seats idle." });
+      // A manual first report, before the timer wrote its start: no due time, never 1970.
+      expect(saved.nextDueAt).toBeNull();
+    });
+  });
+
   describe("the watch seat", () => {
     beforeEach(() => {
       config.crew?.sessions[0]?.seats.push({
@@ -9360,7 +9427,9 @@ describe("QA board data", () => {
 });
 
 // Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
-vi.mock("../src/accounts/accounts.ts", () => ({
+vi.mock("../src/accounts/accounts.ts", async (importOriginal) => ({
+  CLAUDE_MODELS: (await importOriginal<typeof import("../src/accounts/accounts.ts")>())
+    .CLAUDE_MODELS,
   readAccountStatus: async (account: { id: string; vendor: string }, now: number) => ({
     accountId: account.id,
     provider: account.vendor,
@@ -10292,6 +10361,13 @@ describe("FLIGHT ledger views", () => {
 });
 
 describe("overview", () => {
+  it("answers when the stored needs history is unreadable", async () => {
+    store.setSetting("overview:needs", "{not json");
+    const res = await get("/api/overview");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().kpis).toBeDefined();
+  });
+
   it("limits the All pipeline to repos with crew sessions", async () => {
     for (const repoId of ["shop-app", "site-builder"])
       store.upsertRun(run({ id: repoId, repoId, ticket: `${repoId}#1`, loop: { ...NEW_LOOP } }));

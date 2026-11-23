@@ -1,4 +1,5 @@
 import { collaborator } from "../flight/collaborators.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { Store } from "../store.ts";
 
@@ -28,7 +29,7 @@ export async function trustedPullRequest(
     user?: { login?: string };
   };
   try {
-    current = JSON.parse(result.stdout);
+    current = parseJson<unknown>(result.stdout, undefined, rethrowJson) as typeof current;
   } catch {
     return false;
   }

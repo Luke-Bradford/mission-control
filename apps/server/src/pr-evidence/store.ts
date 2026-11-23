@@ -11,9 +11,10 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { type EvidenceManifest, isEvidenceImageName } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 
-/** Heads kept per PR; an older head's pairs are removed when a newer one is stored. */
-export const PR_EVIDENCE_KEEP = 3;
+/** Heads kept per PR: the latest only; every older head goes once a newer one is stored. */
+export const PR_EVIDENCE_KEEP = 1;
 const MANIFEST = "manifest.json";
 const SHA = /^[0-9a-f]{40}$/;
 const REPO_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -42,7 +43,11 @@ export function prEvidenceStore(root: string): PrEvidenceStore {
 
   const read = (dir: string): EvidenceManifest | null => {
     try {
-      return JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")) as EvidenceManifest;
+      return parseJson<unknown>(
+        readFileSync(join(dir, MANIFEST), "utf8"),
+        undefined,
+        rethrowJson,
+      ) as EvidenceManifest;
     } catch {
       return null;
     }
@@ -73,7 +78,10 @@ export function prEvidenceStore(root: string): PrEvidenceStore {
       const tmp = join(head, `${MANIFEST}.tmp`);
       writeFileSync(tmp, JSON.stringify(manifest), { mode: 0o600 });
       renameSync(tmp, join(head, MANIFEST));
-      for (const old of heads(dir).slice(PR_EVIDENCE_KEEP))
+      // the head just stored is always kept, whatever the clock says
+      for (const old of heads(dir)
+        .filter((h) => h.sha !== manifest.sha)
+        .slice(PR_EVIDENCE_KEEP - 1))
         rmSync(join(dir, old.sha), { recursive: true, force: true });
     },
     manifest(repoId, pr, sha) {

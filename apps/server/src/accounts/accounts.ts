@@ -3,10 +3,18 @@ import { join } from "node:path";
 import type { CliAccountStatus } from "@mc/core";
 import { isObj } from "../collectors/usage-common.ts";
 import { usageProviderEnv } from "../collectors/usage-sources.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import { CodexModels } from "../runtime/codex-models.ts";
 import { type CliBinding, codexProfile } from "./bindings.ts";
 
 type Account = CliBinding & { id: string };
+/** The aliases a Claude seat can run: Claude exposes no model list, so these are the ones the CLI takes. */
+export const CLAUDE_MODELS: readonly { model: string; efforts: readonly string[] }[] = [
+  { model: "opus", efforts: ["low", "medium", "high"] },
+  { model: "sonnet", efforts: ["low", "medium", "high"] },
+  { model: "haiku", efforts: ["low", "medium", "high"] },
+];
+
 export type AccountModels = {
   accountId: string;
   models: { id: string; efforts: readonly string[] }[];
@@ -125,7 +133,7 @@ function cliStatus(account: Account, timeoutMs: number): Promise<unknown> {
         // Claude can exit nonzero when logged out; only accept its structured status.
         if (error?.killed) return finish(new Error("timeout"));
         try {
-          finish(null, JSON.parse(stdout));
+          finish(null, parseJson<unknown>(stdout, undefined, rethrowJson));
         } catch {
           finish(new Error(error ? "unavailable" : "malformed"));
         }
@@ -147,7 +155,7 @@ function cliStatus(account: Account, timeoutMs: number): Promise<unknown> {
         buffer = buffer.slice(at + 1);
         let message: unknown;
         try {
-          message = JSON.parse(line);
+          message = parseJson<unknown>(line, undefined, rethrowJson);
         } catch {
           return finish(new Error("malformed"));
         }

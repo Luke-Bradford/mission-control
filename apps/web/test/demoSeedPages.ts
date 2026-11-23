@@ -862,6 +862,7 @@ export function demoPageAnswers(
     "/api/audit?range=90d": auditView(),
     "/api/audit?range=365d": auditView(),
     "/api/waste": { at: NOW, spend: [], alarms: [], checks: [], flight: [], counts: null },
+    "/api/audit/report": { report: null, nextDueAt: null },
     ...Object.fromEntries(
       ["1h", "6h", "24h", "7d", "30d"].map((r) => [`/api/telemetry?range=${r}`, telemetry]),
     ),

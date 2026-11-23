@@ -1,7 +1,7 @@
 import {
-  type AccountModelsView,
   type ConfigView,
   errorText,
+  type HubSettingsView,
   type NewRepo,
   PLAN_SIGNOFFS,
   type PlanSignoff,
@@ -9,8 +9,8 @@ import {
   type RepoRulesView,
   type SeatInput,
 } from "@mc/core";
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ApiError, apiPost } from "../api.ts";
+import { useEffect, useId, useRef, useState } from "react";
+import { ApiError, apiDelete, apiPost } from "../api.ts";
 import {
   ErrorSummary,
   FieldError,
@@ -23,10 +23,20 @@ import {
 } from "../components/formSupport.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
+import {
+  ADD_AGENT_PARAM,
+  ADD_REPO_PARAM,
+  addAgentParam,
+  EDIT_SEAT_PARAM,
+  editSeatParam,
+  navigate,
+} from "../router.ts";
 import { useReturnFocus } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { BoardSetup } from "./BoardSetup.tsx";
-import { CALL_SIGN, CALL_SIGN_HINT } from "./Sessions.tsx";
+import { SettingRow } from "./HubSettings.tsx";
+import { inputOf, roleLabel, SeatEditor } from "./SeatEditor.tsx";
+import { CALL_SIGN_HINT } from "./Sessions.tsx";
 
 type Repo = ConfigView["repos"][number];
 type Session = NonNullable<ConfigView["crew"]>["sessions"][number];
@@ -47,7 +57,23 @@ const PLAN_SIGNOFF_LABELS: Record<PlanSignoff, string> = {
 
 /** Configuration only: cards do not make board, queue, or live-seat reads. */
 export function Repos({ config }: { config: ConfigView }) {
-  const [adding, setAdding] = useState<Repo | null | false>(false);
+  // `?addRepo=1` (First run's First repo) and `?add=<session>` / `?edit=<session>:<seat>` (links
+  // from other pages) are read once on mount; each is dropped from the URL after it has been used.
+  const [adding, setAdding] = useState<Repo | null | false>(() =>
+    new URLSearchParams(window.location.search).has(ADD_REPO_PARAM) ? null : false,
+  );
+  const [request] = useState(() => ({
+    add: addAgentParam(window.location.search),
+    edit: editSeatParam(window.location.search),
+  }));
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    for (const key of [ADD_REPO_PARAM, ADD_AGENT_PARAM, EDIT_SEAT_PARAM]) q.delete(key);
+    const { pathname, hash } = window.location;
+    const qs = q.toString();
+    if (qs !== window.location.search.slice(1))
+      navigate(pathname + (qs ? `?${qs}` : "") + hash, { replace: true });
+  }, []);
   return (
     <section className="setup-repos" aria-label="Repos and seats">
       <div className="setup-repos-head">
@@ -69,7 +95,13 @@ export function Repos({ config }: { config: ConfigView }) {
         />
       )}
       {config.repos.map((repo) => (
-        <RepoCard key={repo.id} repo={repo} config={config} onConvert={() => setAdding(repo)} />
+        <RepoCard
+          key={repo.id}
+          repo={repo}
+          config={config}
+          request={request}
+          onConvert={() => setAdding(repo)}
+        />
       ))}
     </section>
   );
@@ -116,23 +148,32 @@ function Chips({
   );
 }
 
+type SeatRequest = {
+  add: string | null;
+  edit: { sessionId: string; seatId: string } | null;
+};
+
 function RepoCard({
   repo,
   config,
+  request,
   onConvert,
 }: {
   repo: Repo;
   config: ConfigView;
+  request: SeatRequest;
   onConvert: () => void;
 }) {
   const session = config.crew?.sessions.find((item) => item.repoId === repo.id);
-  const [open, setOpen] = useState(false);
+  const asked = !!session && (request.add === session.id || request.edit?.sessionId === session.id);
+  const [open, setOpen] = useState(asked);
   const [guidance, setGuidance] = useState<Guidance>(repo.guidance ?? EMPTY_GUIDANCE);
   const [account, setAccount] = useState(repo.defaultAccountId ?? config.accounts[0]?.id ?? "");
   // A closed card is summary-only. Read its editable rules when the operator opens it.
   const rules = useResource<RepoRulesView>(open ? RESOURCES.repoRules(repo.id) : null);
   const [planSignOff, setPlanSignOff] = useState<PlanSignoff>("never");
   const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
   useEffect(() => {
     setPlanSignOff((rules.data?.rules.plan_signoff?.value as PlanSignoff | undefined) ?? "never");
     setGuidance(repo.guidance ?? EMPTY_GUIDANCE);
@@ -164,6 +205,35 @@ function RepoCard({
       setSaving(false);
     }
   };
+  const [closing, setClosing] = useState(false);
+  const closeCrewSession = async (id: string) => {
+    if (!window.confirm(`Close session ${id}? Its seats stop and the checkout is removed.`)) return;
+    setClosing(true);
+    try {
+      await apiPost(ACTIONS.closeSession(id), {});
+      toast(`Session ${id} closed.`);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crewChanges.path);
+    } catch (error) {
+      toast(errorText(error));
+    } finally {
+      setClosing(false);
+    }
+  };
+  const removeRepo = async () => {
+    if (!window.confirm(`Remove ${repo.id}?`)) return;
+    setRemoving(true);
+    try {
+      await apiDelete(ACTIONS.removeRepo(repo.id));
+      toast(`${repo.id} will be removed after restart.`);
+      hub.refetch(RESOURCES.config.path);
+      hub.refetch(RESOURCES.crewChanges.path);
+    } catch (error) {
+      toast(errorText(error));
+    } finally {
+      setRemoving(false);
+    }
+  };
   return (
     <article className="repo-card" aria-label={repo.id}>
       <button
@@ -183,7 +253,12 @@ function RepoCard({
       {open && (
         <>
           {session ? (
-            <Seats session={session} config={config} defaultAccount={account} />
+            <Seats
+              session={session}
+              config={config}
+              defaultAccount={account}
+              request={asked ? request : { add: null, edit: null }}
+            />
           ) : (
             <Observed repo={repo} config={config} onConvert={onConvert} />
           )}
@@ -219,6 +294,7 @@ function RepoCard({
               <input value={session?.checkout ?? ""} readOnly placeholder="Observed repo" />
             </label>
           </div>
+          <RepoSettings repoId={repo.id} />
           <div className="cap repo-guidance-title">Work guidance · guidance, not rules</div>
           <div className="repo-guidance">
             <div>
@@ -281,6 +357,24 @@ function RepoCard({
             <button type="button" className="sm" disabled={saving} onClick={() => void save()}>
               {saving ? "Saving…" : "Save guidance"}
             </button>
+            <button
+              type="button"
+              className="sm warn"
+              disabled={removing}
+              onClick={() => void removeRepo()}
+            >
+              {removing ? "Removing…" : "Remove repo"}
+            </button>
+            {session && (
+              <button
+                type="button"
+                className="sm warn"
+                disabled={closing}
+                onClick={() => void closeCrewSession(session.id)}
+              >
+                {closing ? "Closing…" : "Close session"}
+              </button>
+            )}
           </div>
           <details className="repo-board-configuration">
             <summary>Board configuration</summary>
@@ -289,6 +383,27 @@ function RepoCard({
         </>
       )}
     </article>
+  );
+}
+
+/** The settings only config.yaml held: status map, autonomy and FLIGHT powers, each with when it applies. */
+function RepoSettings({ repoId }: { repoId: string }) {
+  const settings = useResource<HubSettingsView>(RESOURCES.hubSettings).data;
+  if (!settings) return null;
+  const own = settings.repos[repoId] ?? {};
+  return (
+    <fieldset className="fgroup repo-settings">
+      <legend>Repo settings</legend>
+      {(["repo.status_map", "repo.autonomy", "repo.flight_powers"] as const).map((key) => (
+        <SettingRow
+          key={key}
+          settingKey={key}
+          repoId={repoId}
+          value={own[key]}
+          base={settings.base}
+        />
+      ))}
+    </fieldset>
   );
 }
 
@@ -317,348 +432,31 @@ function Observed({
   );
 }
 
-function roleLabel(config: ConfigView, role: string): string {
-  const found = config.crew?.roles?.find((item) => item.name === role);
-  return found?.here ? `${found.here} (${role})` : role;
-}
-const inputOf = (seat: Session["seats"][number]): SeatInput => ({
-  id: seat.id,
-  ...(seat.displayCallSign === null || seat.displayCallSign === undefined
-    ? {}
-    : { displayCallSign: seat.displayCallSign }),
-  ...(seat.focus === null || seat.focus === undefined ? {} : { focus: seat.focus }),
-  role: seat.role,
-  accountId: seat.accountId,
-  model: seat.model,
-  ...(seat.mode === "scratch" ? { mode: "scratch" as const } : {}),
-  area: seat.area,
-});
-/** What the server's schema would refuse, found before sending; the server stays the judge. */
-function seatIssues(
-  form: SeatInput,
-  adding: boolean,
-  taken: string[],
-  ids: Record<"sign" | "role" | "account" | "model", string>,
-  models: "ready" | "loading" | "error" | "none",
-): FieldIssue[] {
-  const found: FieldIssue[] = [];
-  if (adding) {
-    if (!CALL_SIGN.test(form.id))
-      found.push({
-        id: ids.sign,
-        message: `Call sign: ${CALL_SIGN_HINT}, starting with a letter.`,
-      });
-    else if (taken.includes(form.id))
-      found.push({ id: ids.sign, message: "Call sign is already used by a seat in this repo." });
-  }
-  if (!form.role) found.push({ id: ids.role, message: "Role is required." });
-  if (!form.accountId)
-    found.push({ id: ids.account, message: "Account: none is configured; add one in Accounts." });
-  if (!form.model.trim())
-    found.push({
-      // A disabled Model cannot take focus: with no choices the link goes to Account instead.
-      id: models === "ready" ? ids.model : ids.account,
-      message:
-        models === "loading"
-          ? "Model is required. The model list is still loading."
-          : models === "error"
-            ? "Model is required. The model list could not be read: retry it below."
-            : models === "none"
-              ? "Model is required. This account has no discovered models: pick another account."
-              : "Model is required.",
-    });
-  return found;
-}
-
-/**
- * The add and edit seat form. The draft is local: a refused or lost save leaves what was typed and
- * says why here, not only in a toast. `onSave` resolves when the write is done and rejects with
- * the failure; while it is out the fields are held and a second submit is ignored.
- */
-function SeatEditor({
-  seat,
-  missing = false,
-  taken,
-  config,
-  defaultAccount,
-  onCancel,
-  onSave,
-}: {
-  seat?: SeatInput;
-  /** The seat being edited has left config.yaml since the form opened. */
-  missing?: boolean;
-  taken: string[];
-  config: ConfigView;
-  defaultAccount: string;
-  onCancel: () => void;
-  onSave: (seat: SeatInput) => Promise<void>;
-}) {
-  const firstRole = config.crew?.roles?.[0]?.name ?? "";
-  const [form, setForm] = useState<SeatInput>(
-    seat ?? { id: "", role: firstRole, accountId: defaultAccount, model: "", area: [] },
-  );
-  const [saving, setSaving] = useState(false);
-  const [failure, setFailure] = useState<{ text: string; uncertain: boolean } | null>(null);
-  const [attempted, setAttempted] = useState(false);
-  const [focusKey, setFocusKey] = useState(0);
-  const guard = useSubmitGuard();
-  const alive = useRef(true);
-  const formRef = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    alive.current = true;
-    // Opens at its first control, scrolled into view.
-    const first = formRef.current?.querySelector<HTMLElement>(
-      "input:not(:disabled), select:not(:disabled)",
-    );
-    first?.focus();
-    first?.scrollIntoView?.({ block: "nearest" });
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  const base = useId();
-  const ids = {
-    sign: `${base}-sign`,
-    role: `${base}-role`,
-    account: `${base}-account`,
-    model: `${base}-model`,
-    effort: `${base}-effort`,
-  };
-  const catalogRead = useResource<AccountModelsView[]>(RESOURCES.allAccountModels);
-  const catalog = catalogRead.data;
-  const options = catalog?.find((account) => account.accountId === form.accountId)?.models ?? [];
-  // An old seat may have a model that has since left a provider catalog.  Keep it visible while
-  // editing that seat, but never make it a choice for a new one.
-  const models = useMemo(
-    () =>
-      seat && form.model && !options.some((option) => option.model === form.model)
-        ? [{ model: form.model, efforts: [] }, ...options]
-        : options,
-    [seat, form.model, options],
-  );
-  const efforts = options.find((option) => option.model === form.model)?.efforts ?? [];
-  useEffect(() => {
-    if (!seat && form.model === "" && options[0]) setForm({ ...form, model: options[0].model });
-  }, [seat, form, options]);
-  const modelsState: "ready" | "loading" | "error" | "none" =
-    models.length > 0
-      ? "ready"
-      : catalogRead.loading && !catalog
-        ? "loading"
-        : catalogRead.error
-          ? "error"
-          : "none";
-  const noModels =
-    modelsState === "loading"
-      ? "Loading models…"
-      : modelsState === "error"
-        ? "Could not read models"
-        : "No discovered models";
-  const issues = attempted ? seatIssues(form, !seat, taken, ids, modelsState) : [];
-  const signError = issueOf(issues, ids.sign);
-  const roleError = issueOf(issues, ids.role);
-  const accountError = issueOf(issues, ids.account);
-  const modelError = issueOf(issues, ids.model);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!guard.take()) return;
-    setAttempted(true);
-    if (seatIssues(form, !seat, taken, ids, modelsState).length > 0) {
-      guard.release();
-      setFailure(null);
-      setFocusKey((key) => key + 1);
-      return;
-    }
-    setSaving(true);
-    setFailure(null);
-    try {
-      await onSave(form);
-    } catch (cause) {
-      if (alive.current) {
-        setFailure({
-          text: errorText(cause),
-          uncertain: isUncertain(cause instanceof ApiError ? cause.status : undefined),
-        });
-        setFocusKey((key) => key + 1);
-      }
-    } finally {
-      guard.release();
-      if (alive.current) setSaving(false);
-    }
-  };
-  const title =
-    issues.length > 0 ? "Fix before saving" : failure?.uncertain ? "Result unknown" : "Not saved";
-  return (
-    <form
-      ref={formRef}
-      className="fform fform-640"
-      noValidate
-      aria-label={seat ? `Edit ${seat.id}` : "Add seat"}
-      onSubmit={(event) => void submit(event)}
-    >
-      <fieldset className="fgroup">
-        <legend>Seat</legend>
-        <div className="ffield">
-          <label htmlFor={ids.sign}>Call sign</label>
-          <input
-            {...fieldProps(ids.sign, signError, `${ids.sign}-hint`)}
-            value={form.id}
-            disabled={!!seat || saving}
-            onChange={(e) => setForm({ ...form, id: e.target.value })}
-          />
-          <span id={`${ids.sign}-hint`} className="fhint muted xs">
-            {seat
-              ? "A call sign cannot change once the seat exists."
-              : `${CALL_SIGN_HINT}, starting with a letter.`}
-          </span>
-          <FieldError id={ids.sign} error={signError} />
-        </div>
-        <div className="ffield">
-          <label htmlFor={ids.role}>Role</label>
-          <select
-            {...fieldProps(ids.role, roleError)}
-            title={roleLabel(config, form.role)}
-            value={form.role}
-            disabled={saving}
-            onChange={(e) => setForm({ ...form, role: e.target.value })}
-          >
-            {config.crew?.roles?.map((role) => (
-              <option key={role.name} value={role.name}>
-                {roleLabel(config, role.name)}
-              </option>
-            ))}
-          </select>
-          <FieldError id={ids.role} error={roleError} />
-        </div>
-      </fieldset>
-      <fieldset className="fgroup">
-        <legend>Account and model</legend>
-        <div className="fpair">
-          <div className="ffield">
-            <label htmlFor={ids.account}>Account</label>
-            <select
-              {...fieldProps(ids.account, accountError)}
-              title={
-                form.accountId === defaultAccount
-                  ? `${form.accountId} (repo default)`
-                  : form.accountId
-              }
-              value={form.accountId}
-              disabled={saving}
-              onChange={(e) =>
-                setForm({ ...form, accountId: e.target.value, model: "", effort: undefined })
-              }
-            >
-              {config.accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.id === defaultAccount ? `${account.id} (repo default)` : account.id}
-                </option>
-              ))}
-            </select>
-            <FieldError id={ids.account} error={accountError} />
-          </div>
-          <div className="ffield">
-            <label htmlFor={ids.model}>Model</label>
-            <select
-              {...fieldProps(ids.model, modelError)}
-              title={form.model || noModels}
-              value={form.model}
-              onChange={(e) => setForm({ ...form, model: e.target.value, effort: undefined })}
-              disabled={saving || models.length === 0}
-            >
-              <option value="">{noModels}</option>
-              {models.map((model) => (
-                <option key={model.model} value={model.model}>
-                  {model.model}
-                </option>
-              ))}
-            </select>
-            <FieldError id={ids.model} error={modelError} />
-            {modelsState === "error" && catalogRead.error && (
-              <p className="crit-t xs">
-                Could not read the model list: {catalogRead.error.message}{" "}
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => hub.refetch(RESOURCES.allAccountModels.path)}
-                >
-                  Retry
-                </button>
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="fpair">
-          <div className="ffield">
-            <label htmlFor={ids.effort}>Effort</label>
-            <select
-              id={ids.effort}
-              value={form.effort ?? ""}
-              disabled={saving}
-              onChange={(e) => setForm({ ...form, effort: e.target.value || undefined })}
-            >
-              <option value="">CLI default</option>
-              {efforts.map((effort) => (
-                <option key={effort} value={effort}>
-                  {effort}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="ffield">
-            <label className="ffield-check">
-              <input type="checkbox" checked disabled /> Enabled
-            </label>
-          </div>
-        </div>
-      </fieldset>
-      {missing && seat && (
-        <p role="status" className="feffect s">
-          {seat.id} is no longer in config.yaml. Add it back with these values, or cancel.
-        </p>
-      )}
-      <ErrorSummary
-        title={title}
-        issues={issues}
-        message={failure?.text ?? null}
-        focusKey={focusKey}
-      >
-        {failure?.uncertain && issues.length === 0 && <p className="s">{UNCERTAIN_TEXT}</p>}
-      </ErrorSummary>
-      {saving && (
-        <p role="status" className="fstatus s">
-          Saving seat…
-        </p>
-      )}
-      <div className="fact">
-        <button className="primary" type="submit" disabled={saving}>
-          {saving ? "Saving…" : missing ? "Add it back" : "Save seat"}
-        </button>
-        <button type="button" disabled={saving} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </form>
-  );
-}
 function Seats({
   session,
   config,
   defaultAccount,
+  request,
 }: {
   session: Session;
   config: ConfigView;
   defaultAccount: string;
+  request: SeatRequest;
 }) {
-  const changes = useResource<{ sessions: { id: string; seats: SeatInput[] }[] }>(
+  const changesRead = useResource<{ sessions: { id: string; seats: SeatInput[] }[] }>(
     RESOURCES.crewChanges,
-  ).data;
-  const [editing, setEditing] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  );
+  const changes = changesRead.data;
+  const wanted = request.edit?.sessionId === session.id ? request.edit.seatId : null;
+  const wantedSeat = session.seats.find((item) => item.id === wanted);
+  const editSeed = useRef<SeatInput | undefined>(
+    wantedSeat === undefined ? undefined : inputOf(wantedSeat),
+  );
+  const [editing, setEditing] = useState<string | null>(wantedSeat?.id ?? null);
+  const [adding, setAdding] = useState(request.add === session.id);
   // Where focus goes when the form closes: the button that opened it, or the add button if that went.
   const addButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  const editSeed = useRef<SeatInput | undefined>(undefined);
   const restore = useRef(false);
   const closeForm = () => {
     restore.current = true;
@@ -753,7 +551,16 @@ function Seats({
           ))}
         </tbody>
       </table>
-      {(adding || editing) && (
+      {(adding || editing) && !changes && (
+        // The config view leaves out each seat's effort; only the crew changes read has it, so
+        // the editor waits for it rather than saving a seat without its effort.
+        <p className="muted s" role="status">
+          {changesRead.error
+            ? `Could not read the seats: ${changesRead.error.message}`
+            : "Loading the seats…"}
+        </p>
+      )}
+      {(adding || editing) && changes && (
         <SeatEditor
           key={editing ?? "new"}
           seat={

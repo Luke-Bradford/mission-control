@@ -6,6 +6,7 @@ import {
   BLOCKING_SEVERITIES,
   EVIDENCE_KINDS,
   evidenceImageName,
+  evidenceWidthOf,
   FINDING_CATEGORIES,
   FINDING_RESOLUTION_OUTCOMES,
   FINDING_SEVERITIES,
@@ -33,6 +34,7 @@ import { z } from "zod";
 import { parseChecks } from "../collectors/github.ts";
 import type { CcConfig } from "../config.ts";
 import type { HudShotStore } from "../flight/hud-store.ts";
+import { parseJson, rethrowJson } from "../json.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import type { Store } from "../store.ts";
@@ -291,7 +293,7 @@ export function createQaReports(i: {
             review.repoId,
             review.prNumber,
             review.sha,
-            evidenceImageName(pair.page, pair.scheme, kind),
+            evidenceImageName(pair.page, pair.scheme, kind, evidenceWidthOf(pair)),
           );
           if (!png) return null;
           const hash = retain(png, known);
@@ -451,7 +453,7 @@ export function createQaReports(i: {
       );
       if (reply.code !== 0)
         return unavailable("Fresh GitHub CI receipts could not be read at report registration.");
-      const facts = JSON.parse(reply.stdout) as {
+      const facts = parseJson<unknown>(reply.stdout, undefined, rethrowJson) as {
         headRefOid?: unknown;
         statusCheckRollup?: unknown;
       };
@@ -724,7 +726,7 @@ export function createQaReports(i: {
         base?: { repo?: { full_name?: unknown } };
       };
       try {
-        pr = JSON.parse(result.stdout);
+        pr = parseJson<unknown>(result.stdout, undefined, rethrowJson) as typeof pr;
       } catch {
         throw new QaReportError(502, "GitHub returned incomplete PR evidence.");
       }
@@ -804,7 +806,7 @@ export function createQaReports(i: {
           ]);
           if (result.code !== 0 || Buffer.byteLength(result.stdout) > maxBuffer)
             throw imageFailure();
-          const parsed: unknown = JSON.parse(result.stdout);
+          const parsed: unknown = parseJson<unknown>(result.stdout, undefined, rethrowJson);
           if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
             throw imageFailure();
           return parsed as Record<string, unknown>;

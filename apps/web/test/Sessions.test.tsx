@@ -1,13 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Sessions } from "../src/setup/Sessions.tsx";
-import { closeTopOverlay } from "../src/shell/overlays.ts";
 import { getSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { CREW_CONFIG } from "./fixtures.ts";
 
-let lastView: ReturnType<typeof render>;
+let _lastView: ReturnType<typeof render>;
 function mount(routes: Record<string, unknown> = {}) {
   const fetch = stubFetch({
     "/api/config": CREW_CONFIG,
@@ -16,7 +15,7 @@ function mount(routes: Record<string, unknown> = {}) {
     "/api/crew/sessions": [],
     ...routes,
   });
-  lastView = render(
+  _lastView = render(
     <>
       <Sessions config={CREW_CONFIG} />
       <Toast />
@@ -44,7 +43,7 @@ it("adds two sessions for one repo using returned IDs and folders, selecting and
     fireEvent.submit(form);
     await waitFor(() => expect(getSession()).toBe(`harbor-${n}`));
     const panel = await screen.findByRole("region", { name: `s/harbor-${n}` });
-    expect(within(panel).getByRole("form", { name: `Add agent to s/harbor-${n}` })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: "Add agent" })).toBeTruthy();
     expect(within(panel).getByText("harbor/: free")).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Add session" }));
   }
@@ -183,22 +182,8 @@ it("explains an empty repo configuration", () => {
   );
 });
 
-const SEAT = {
-  id: "guido-1",
-  role: "GUIDO",
-  accountId: "claude-main",
-  model: "sonnet",
-  area: ["apps/**"],
-};
-const CHANGES = {
-  sessions: [{ id: "s1", seats: [SEAT] }],
-  pending: [],
-  restartNeeded: [],
-  error: null,
-};
 const posts = (fetch: ReturnType<typeof mount>, path: string) =>
   fetch.mock.calls.filter(([p, i]) => p === path && i?.method === "POST");
-const SEATS = "/api/crew/sessions/s1/seats";
 
 function hold(fetch: ReturnType<typeof mount>, path: string) {
   const real = fetch.getMockImplementation();
@@ -213,187 +198,6 @@ function hold(fetch: ReturnType<typeof mount>, path: string) {
   );
   return (status: number, body: unknown) => release(new Response(JSON.stringify(body), { status }));
 }
-
-describe("agent form: grouping and recoverable input", () => {
-  const seatMount = async (routes: Record<string, unknown> = {}) => {
-    const fetch = mount({ "/api/crew/changes": CHANGES, ...routes });
-    const opener = await screen.findByRole("button", { name: "Add agent" });
-    await waitFor(() => expect((opener as HTMLButtonElement).disabled).toBe(false));
-    opener.focus();
-    fireEvent.click(opener);
-    const form = screen.getByRole("form", { name: "Add agent to s/s1" });
-    return { fetch, opener, form };
-  };
-
-  it("groups identity, model and work area, with the hint after its label", async () => {
-    const { form } = await seatMount();
-    const groups = [...form.querySelectorAll("fieldset > legend")].map((l) => l.textContent);
-    expect(groups).toEqual(["Identity", "Model", "Work area"]);
-    const area = within(form).getByLabelText("Area");
-    const hint = document.getElementById(area.getAttribute("aria-describedby") ?? "");
-    expect(hint?.textContent).toMatch(/click free folder tiles/);
-  });
-
-  it("explains an invalid attempt, links to the field, and sends nothing", async () => {
-    const { fetch, form } = await seatMount({
-      [`POST ${SEATS}`]: () => ({ status: 200, body: {} }),
-    });
-    const sign = within(form).getByLabelText("Call sign");
-    fireEvent.change(sign, { target: { value: "Bad Name" } });
-    const submit = within(form).getByRole("button", { name: "Add agent" });
-    expect((submit as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(submit);
-    const summary = within(form).getByRole("region", { name: "Fix before saving" });
-    expect(document.activeElement).toBe(summary);
-    expect(sign.getAttribute("aria-invalid")).toBe("true");
-    fireEvent.click(within(summary).getByRole("link", { name: /Call sign/ }));
-    expect(document.activeElement).toBe(sign);
-    expect(posts(fetch, SEATS)).toHaveLength(0);
-    fireEvent.change(within(form).getByLabelText("Model"), { target: { value: " " } });
-    fireEvent.click(submit);
-    expect(within(form).getByRole("link", { name: /Model/ })).toBeTruthy();
-  });
-
-  it("does not let a hidden scratch or area field block a read-only role", async () => {
-    const { fetch, form } = await seatMount({
-      [`POST ${SEATS}`]: () => ({ status: 200, body: {} }),
-    });
-    fireEvent.change(within(form).getByLabelText("Area"), { target: { value: "apps/**" } });
-    fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "RETRO" } });
-    expect(within(form).queryByRole("region")).toBeNull();
-    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-    await waitFor(() => expect(posts(fetch, SEATS)).toHaveLength(1));
-    expect(JSON.parse(String(posts(fetch, SEATS)[0]?.[1]?.body)).seats[1]).toEqual({
-      id: "retro-2",
-      role: "RETRO",
-      accountId: "claude-main",
-      model: "opus",
-      area: [],
-    });
-  });
-
-  it("keeps entries and the target after a refusal, a server fault and a dropped connection", async () => {
-    let answer: () => { status: number; body: unknown } = () => ({
-      status: 400,
-      body: { error: "area overlaps guido-1" },
-    });
-    const { fetch, form } = await seatMount({ [`POST ${SEATS}`]: () => answer() });
-    fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: "inco-9" } });
-    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-    const refused = await within(form).findByRole("region", { name: "Not saved" });
-    expect(refused.textContent).toContain("Refused: area overlaps guido-1");
-    expect(document.activeElement).toBe(refused);
-    expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", "inco-9");
-    answer = () => ({ status: 500, body: { error: "disk full" } });
-    const before = fetch.mock.calls.filter(([p]) => p === "/api/config").length;
-    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-    const unknown = await within(form).findByRole("region", { name: "Result unknown" });
-    expect(unknown.textContent).toContain("disk full");
-    expect(unknown.textContent).toMatch(/check it before saving again/);
-    await waitFor(() =>
-      expect(fetch.mock.calls.filter(([p]) => p === "/api/config").length).toBeGreaterThan(before),
-    );
-    const real = fetch.getMockImplementation();
-    fetch.mockImplementation((p, init) =>
-      p === SEATS ? Promise.reject(new TypeError("Failed to fetch")) : (real?.(p, init) as never),
-    );
-    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-    await waitFor(() =>
-      expect(within(form).getByRole("region", { name: "Result unknown" }).textContent).toMatch(
-        /Failed to fetch/,
-      ),
-    );
-    expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBe(form);
-    expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", "inco-9");
-  });
-
-  it("keeps the derived call sign after an unknown outcome so a retry cannot add a second agent", async () => {
-    const { form } = await seatMount({
-      [`POST ${SEATS}`]: () => ({ status: 500, body: { error: "lost" } }),
-    });
-    const first = (within(form).getByLabelText("Call sign") as HTMLInputElement).value;
-    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-    await within(form).findByRole("region", { name: "Result unknown" });
-    const seated = CREW_CONFIG.crew?.sessions[0]?.seats[0];
-    if (!CREW_CONFIG.crew || !seated) throw new Error("no crew");
-    const [session] = CREW_CONFIG.crew.sessions;
-    lastView.rerender(
-      <>
-        <Sessions
-          config={{
-            ...CREW_CONFIG,
-            crew: {
-              ...CREW_CONFIG.crew,
-              sessions: [
-                { ...session, seats: [...(session?.seats ?? []), { ...seated, id: first }] },
-              ],
-            },
-          }}
-        />
-        <Toast />
-      </>,
-    );
-    expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", first);
-  });
-
-  it("does not show an old failure in a newly opened form", async () => {
-    const { form, opener } = await seatMount({
-      [`POST ${SEATS}`]: () => ({ status: 400, body: { error: "old refusal" } }),
-    });
-    fireEvent.click(within(form).getByRole("button", { name: "Add agent" }));
-    await within(form).findByRole("region", { name: "Not saved" });
-    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
-    fireEvent.click(opener);
-    const again = screen.getByRole("form", { name: "Add agent to s/s1" });
-    expect(within(again).queryByRole("region", { name: "Not saved" })).toBeNull();
-  });
-
-  it("keeps the draft when the config refreshes under it", async () => {
-    const { form } = await seatMount();
-    fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: "inco-9" } });
-    fireEvent.change(within(form).getByLabelText("Model"), { target: { value: "opus" } });
-    lastView.rerender(
-      <>
-        <Sessions config={{ ...CREW_CONFIG, repos: [...CREW_CONFIG.repos] }} />
-        <Toast />
-      </>,
-    );
-    expect(within(form).getByLabelText("Call sign")).toHaveProperty("value", "inco-9");
-    expect(within(form).getByLabelText("Model")).toHaveProperty("value", "opus");
-  });
-
-  it("posts once for Enter plus a click and refuses Cancel and Escape while saving", async () => {
-    const { fetch, form } = await seatMount();
-    const release = hold(fetch, SEATS);
-    fireEvent.submit(form);
-    fireEvent.submit(form);
-    expect(posts(fetch, SEATS)).toHaveLength(1);
-    expect(within(form).getByRole("status").textContent).toBe("Adding agent to s/s1…");
-    expect((within(form).getByLabelText("Model") as HTMLInputElement).disabled).toBe(true);
-    expect(
-      (within(form).getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-    fireEvent.keyDown(within(form).getByLabelText("Model"), { key: "Escape" });
-    closeTopOverlay();
-    expect(screen.getByRole("form", { name: "Add agent to s/s1" })).toBe(form);
-    release(500, { error: "late failure" });
-    const summary = await within(form).findByRole("region", { name: "Result unknown" });
-    expect(summary.textContent).toContain("late failure");
-    expect(posts(fetch, SEATS)).toHaveLength(1);
-  });
-
-  it("cancels with no write, returns focus to the opener and never traps Tab", async () => {
-    const { fetch, opener, form } = await seatMount();
-    const cancel = within(form).getByRole("button", { name: "Cancel" });
-    cancel.focus();
-    const tab = fireEvent.keyDown(cancel, { key: "Tab" });
-    expect(tab).toBe(true); // not prevented: the browser moves focus on
-    fireEvent.keyDown(within(form).getByLabelText("Model"), { key: "Escape" });
-    expect(screen.queryByRole("form", { name: "Add agent to s/s1" })).toBeNull();
-    expect(document.activeElement).toBe(opener);
-    expect(posts(fetch, SEATS)).toHaveLength(0);
-  });
-});
 
 describe("session form: grouping and recoverable input", () => {
   const open = () => {
@@ -506,31 +310,5 @@ describe("session form: grouping and recoverable input", () => {
     release(200, { id: "harbor", folders: [] });
     await waitFor(() => expect(screen.queryByRole("form", { name: "Add session" })).toBeNull());
     expect(posts(fetch, SESSIONS)).toHaveLength(1);
-  });
-});
-
-describe("?edit= from Roles & guards", () => {
-  it("opens that seat's edit form once the seats load, and drops the parameter", async () => {
-    window.history.replaceState(null, "", "/setup/sessions?edit=s1:guido-1&keep=1");
-    mount({ "/api/crew/changes": CHANGES });
-    const form = await screen.findByRole("form", { name: "Edit guido-1" });
-    expect((within(form).getByLabelText("Area") as HTMLInputElement).value).toBe("apps/**");
-    await waitFor(() => expect(window.location.search).toBe("?keep=1"));
-  });
-
-  it("opens the configured seat when the changes snapshot lacks it", async () => {
-    window.history.replaceState(null, "", "/setup/sessions?edit=s1:guido-1");
-    mount();
-    const form = await screen.findByRole("form", { name: "Edit guido-1" });
-    expect(form).toBeTruthy();
-    await waitFor(() => expect(window.location.search).toBe(""));
-  });
-
-  it("says so for a seat that is not there, and opens nothing", async () => {
-    window.history.replaceState(null, "", "/setup/sessions?edit=s1:nobody-9");
-    mount({ "/api/crew/changes": CHANGES });
-    await waitFor(() => expect(window.location.search).toBe(""));
-    expect(screen.queryByRole("form", { name: /^Edit / })).toBeNull();
-    expect((await screen.findByRole("alert")).textContent).toContain("nobody-9");
   });
 });

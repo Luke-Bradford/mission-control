@@ -492,3 +492,79 @@ export function groupOveruse(
     .map(([cause, runIds]) => ({ cause, runIds, prevention: overusePrevention(cause) }))
     .sort((a, b) => b.runIds.length - a.runIds.length);
 }
+
+// ---------- the AUDIT seat's report ----------
+
+/** What the auditor looks at; each finding names one. */
+export const AUDIT_REPORT_AREAS = ["flow", "flight", "qa", "prompts", "spend"] as const;
+export type AuditReportArea = (typeof AUDIT_REPORT_AREAS)[number];
+/** Who acts on a finding. */
+export const AUDIT_REPORT_OWNERS = ["flight", "operator"] as const;
+export type AuditReportOwner = (typeof AUDIT_REPORT_OWNERS)[number];
+
+/** The most findings one report holds, and links one finding holds. */
+export const AUDIT_REPORT_FINDINGS_MAX = 10;
+export const AUDIT_REPORT_LINKS_MAX = 5;
+/** The most rows any list in the auditor's pack holds. */
+export const AUDIT_PACK_ROWS_MAX = 20;
+/** The findings FLIGHT's wake carries. */
+export const AUDIT_FLIGHT_TOP = 3;
+/** The auditor's default interval, and the range the setting may take. */
+export const AUDIT_EVERY_HOURS_DEFAULT = 4;
+export const AUDIT_EVERY_HOURS_MIN = 1;
+export const AUDIT_EVERY_HOURS_MAX = 48;
+/** The setting that holds when the AUDIT seat last started (the timer's due check), by seat. */
+export const auditStartedKey = (seatId: string): string => `audit-seat-started:${seatId}`;
+/** The setting that holds the newest report FLIGHT was told about, by repo. */
+export const auditToldKey = (repoId: string): string => `audit-told:${repoId}`;
+
+/** An href a finding may link to: a page of the app or of GitHub. */
+export const auditHrefOk = (href: string): boolean => {
+  if (href.includes("\\")) return false;
+  try {
+    const origin = "https://mission-control.invalid";
+    const url = new URL(href, origin);
+    return (href.startsWith("/") && url.origin === origin) || url.origin === "https://github.com";
+  } catch {
+    return false;
+  }
+};
+
+export interface AuditReportFinding {
+  rank: number;
+  area: AuditReportArea;
+  problem: string;
+  evidence: string;
+  cause: string;
+  links: { label: string; href: string }[];
+  owner: AuditReportOwner;
+}
+
+export interface AuditReport {
+  id: number;
+  repoId: string;
+  runId: string;
+  at: number;
+  verdict: string;
+  findings: AuditReportFinding[];
+}
+
+/** `GET /api/audit/report`: the newest report, and when the next one is due (null: no timer). */
+export interface AuditReportView {
+  report: AuditReport | null;
+  nextDueAt: number | null;
+}
+
+export const MC_AUDIT_NOT_AUDIT = "Not saved: report_audit is for the AUDIT seat's run.";
+export const MC_AUDIT_ALREADY = "Not saved: this run has already saved its report.";
+export const MC_AUDIT_SAVED = "Report saved. Mission Control ends this run now; stop.";
+export const auditTooManyText = (n: number): string =>
+  `Not saved: ${n} findings is over the limit of ${AUDIT_REPORT_FINDINGS_MAX}. Keep the ones that matter most, then call report_audit again.`;
+export const auditBadLinkText = (href: string): string =>
+  `Not saved: the link ${href.slice(0, 80)} must start with / (a page of the app) or https://github.com/. Fix it, then call report_audit again.`;
+export const auditSecretText = (what: string): string =>
+  `Not saved: the report holds a secret (${what}); take it out, then call report_audit again.`;
+export const auditNoteText = (written: string, next: string): string =>
+  `AUDIT's report, written ${written}. Next by ${next}.`;
+export const MC_AUDIT_NO_REPORT =
+  "No AUDIT report yet. Until the first one, these are the hub's own checks.";

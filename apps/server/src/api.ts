@@ -11,10 +11,13 @@ import {
   type AttentionCompactItem,
   type AttentionItem,
   type AttentionMaterialsResponse,
+  type AuditReportView,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
   areaOwnsFolder,
+  auditStartedKey,
+  auditStartRefusedText,
   type ChangedFiles,
   CI_TRIES,
   type CiRunsView,
@@ -82,7 +85,9 @@ import {
   globMatches,
   guardAckKey,
   guardDenyOutput,
+  HUB_SETTING_KEYS,
   HUD_RENDERER_HEADER,
+  type HubSettingKey,
   ISSUE_REQUIRED,
   isOperatorItem,
   itemOwner,
@@ -165,6 +170,7 @@ import Fastify, {
 import { z } from "zod";
 import {
   type AccountModels,
+  CLAUDE_MODELS,
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
@@ -197,6 +203,7 @@ import {
   setAsideQuestions,
 } from "./attention/needs-you-actions.ts";
 import { withRepoWatch } from "./attention/unwatched-repos.ts";
+import { nextAuditDueAt } from "./audit/timer.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -280,6 +287,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./config/crew-pause.ts";
+import { readHubSettings, removeRepo, setHubSetting } from "./config/hub-settings.ts";
 import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
 import { repoRulesView } from "./config/repo-roles-view.ts";
@@ -331,7 +339,7 @@ import {
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
-import type { TestLock } from "./guard/lock.ts";
+import { LockStoreError, type TestLock } from "./guard/lock.ts";
 import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
@@ -354,6 +362,7 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { parseJson, rethrowJson } from "./json.ts";
 import { loopTries } from "./loop/history.ts";
 import { createGh, type GhRunner } from "./mcp/gh.ts";
 import { bearer, type McpCalls, type McTool, registerMcp, UNKNOWN_RUN } from "./mcp/server.ts";
@@ -446,6 +455,7 @@ import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
   createHeldUpdateNote,
+  crewRefusal,
   HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
   HUB_UNSAFE_NEEDS_PERSON,
@@ -619,6 +629,8 @@ export interface AppDeps {
   configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
   crewReloader?: CrewReloader;
+  /** Stops the hub so its supervisor starts it again; absent (a preview): restart answers 409. */
+  restartHub?: () => void;
   /** True when this server may write crew seats to `configPath` (not a preview on the live file). */
   seatWrites?: boolean;
   /** Starts, messages and ends the crew's seats; absent: crew routes answer 409 (disabled). */
@@ -780,6 +792,16 @@ const FlightApprovalBody = z.strictObject({
   scope: z.string().trim().min(1).max(500),
   until: z.iso.datetime({ offset: true }),
   reason: z.string().trim().min(1).max(500),
+});
+export const RESTART_OPERATOR_ONLY = "Only the operator restarts the hub, from its page.";
+export const RESTART_UNAVAILABLE = "This hub cannot restart itself.";
+export const HUB_SETTINGS_OPERATOR_ONLY = "Only the operator changes hub settings.";
+/** `POST /api/config/settings`: one hub setting; `base` is the config.yaml digest the page read. */
+const HubSettingBody = z.strictObject({
+  base: z.string().regex(/^[a-f0-9]{64}$/),
+  key: z.enum(HUB_SETTING_KEYS as [HubSettingKey, ...HubSettingKey[]]),
+  repoId: z.string().min(1).max(100).optional(),
+  value: z.unknown(),
 });
 /** The answer to a seat that calls a route only the operator may. */
 const SEAT_REFUSED = "a seat cannot use the operator's routes";
@@ -989,6 +1011,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     return entry.pending;
   };
   const accountStatuses = new Map<string, { status: CliAccountStatus; expiresAt: number }>();
+  const flightAudits = new Set<string>();
   const accountModels = new Map<string, AccountModels>();
   let localAccountUpdate: Promise<void> | null = null;
   const withAccountUpdate = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -1169,7 +1192,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     const raw = req.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
     if (typeof raw !== "string") return null;
     try {
-      const value = JSON.parse(raw);
+      const value = parseJson<{ seatId?: unknown; runId?: unknown } | undefined>(
+        raw,
+        undefined,
+        rethrowJson,
+      );
       if (typeof value?.seatId !== "string" || typeof value.runId !== "string") return null;
       const seat = configuredAgents(config).find(
         (agent) => agent.kind === "crew" && agent.id === value.seatId,
@@ -1210,6 +1237,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       path === OPERATOR_BOOTSTRAP_PATH ||
       path === "/api/flight/approvals" ||
       path === "/api/flight/runaway/lift" ||
+      path === "/api/hub/restart" ||
+      path === "/api/config/settings" ||
       path.startsWith("/api/attention/")
     )
       return reply.code(403).send({ error: SEAT_REFUSED });
@@ -2593,38 +2622,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.tool_name === "Bash" &&
               typeof command === "string" &&
               flightShellWrite(command) &&
+              !flightAudits.has(auditKey) &&
               store.getSetting(auditKey) === null
             ) {
-              let shown = command;
-              let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
-              for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
-                if (secret !== "") {
-                  shown = shown.split(secret).join("[redacted]");
-                  cwd = cwd.split(secret).join("[redacted]");
+              flightAudits.add(auditKey);
+              try {
+                let shown = command;
+                let cwd = body.data.cwd ?? store.seatSession(who.seatId)?.worktree ?? "unknown";
+                for (const secret of await (deps.knownSecrets?.() ?? Promise.resolve([]))) {
+                  if (secret !== "") {
+                    shown = shown.split(secret).join("[redacted]");
+                    cwd = cwd.split(secret).join("[redacted]");
+                  }
                 }
-              }
-              shown = cleanText(shown, 1500);
-              cwd = cleanText(cwd, 1000);
-              store.addFlightDecision({
-                at: now(),
-                kind: "shell",
-                seatId: who.seatId,
-                targetRunId: who.runId,
-                ref: null,
-                questionId: null,
-                about: shown,
-                decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
-                basis: "The CLI's post-execution hook recorded this result.",
-              });
-              store.setSetting(auditKey, "recorded");
-              if (
-                flightShellBreakerWrite(
-                  command,
-                  flightShellContext(store, who.runId, body.data.cwd),
+                shown = cleanText(shown, 1500);
+                cwd = cleanText(cwd, 1000);
+                store.addFlightDecision({
+                  at: now(),
+                  kind: "shell",
+                  seatId: who.seatId,
+                  targetRunId: who.runId,
+                  ref: null,
+                  questionId: null,
+                  about: shown,
+                  decision: `Shell ${failed ? "failed" : body.data.tool_input?.run_in_background ? "started in background" : "completed"}; exit ${body.data.exit_code ?? "not supplied"}; cwd ${cwd}`,
+                  basis: "The CLI's post-execution hook recorded this result.",
+                });
+                store.setSetting(auditKey, "recorded");
+                if (
+                  flightShellBreakerWrite(
+                    command,
+                    flightShellContext(store, who.runId, body.data.cwd),
+                  )
                 )
-              )
-                noteFlightWrite(store, bus, now(), "shell", { command: shown });
-              bus.emit("flight");
+                  noteFlightWrite(store, bus, now(), "shell", { command: shown });
+                bus.emit("flight");
+              } finally {
+                flightAudits.delete(auditKey);
+              }
             }
             return answer();
           }
@@ -2712,13 +2747,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           };
           res.on("close", onClose);
           try {
-            const granted = await lock.acquire(
-              key,
-              who.seatId,
-              verdict.command,
-              LOCK_WAIT_MS,
-              hungUp.signal,
-            );
+            let granted: boolean;
+            try {
+              granted = await lock.acquire(
+                key,
+                who.seatId,
+                verdict.command,
+                LOCK_WAIT_MS,
+                hungUp.signal,
+              );
+            } catch (e) {
+              if (e instanceof LockStoreError) return answer(e.message);
+              throw e;
+            }
             if (granted && !hungUp.signal.aborted) {
               // `finish` means the answer was handed to the kernel, not that the hook received it.
               // On a real socket this release only catches an async gap between the send and the
@@ -3032,8 +3073,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const catalogFor = deps.codexModelsFor ?? codexModelsFor;
         return config.accounts.map((account) => ({
           accountId: account.id,
-          // Claude currently exposes no model/list equivalent. An empty catalog is more honest
-          // than offering values inferred from roles (which can include Codex-only models).
+          // Claude exposes no model/list equivalent: it gets the fixed aliases the CLI takes.
           models:
             account.vendor === "codex"
               ? catalogFor(account)
@@ -3042,7 +3082,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                     model,
                     efforts: [...efforts],
                   }))
-              : [],
+              : CLAUDE_MODELS.map(({ model, efforts }) => ({ model, efforts: [...efforts] })),
         }));
       });
       // Reader: apps/web/src/setup/Accounts.tsx (Check)
@@ -3339,6 +3379,79 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } catch (e) {
           return rolesError(reply, e);
         }
+      });
+
+      // Operator-only: the hub's own config. The controller's key and a valid FLIGHT actor both
+      // reach the operator's routes, so both are refused here.
+      const operatorOnly = (req: FastifyRequest, reply: FastifyReply, what: string): boolean => {
+        if (!controllerRequests.has(req) && !flightActor(req)) return true;
+        reply.code(403).send({ error: what });
+        return false;
+      };
+
+      // Reader: apps/web/src/setup/HubSettings.tsx
+      api.get("/config/settings", async (_req, reply) => {
+        const readPath = deps.configPath ?? deps.configReadPath;
+        if (!readPath) return reply.code(409).send({ error: CONFIG_FILE_UNAVAILABLE });
+        try {
+          return await readHubSettings(readPath);
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: apps/web/src/setup/HubSettings.tsx
+      api.post("/config/settings", async (req, reply) => {
+        if (!operatorOnly(req, reply, HUB_SETTINGS_OPERATOR_ONLY)) return;
+        const { configPath, crewReloader } = deps;
+        if (!configPath || !crewReloader)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = HubSettingBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setHubSetting(
+            configPath,
+            body.data.base,
+            body.data.key,
+            body.data.value,
+            now(),
+            body.data.repoId,
+          );
+          const changes = await crewReloader.reload();
+          return { backup: basename(result.backup), changes };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: apps/web/src/setup/Repos.tsx (Remove repo)
+      api.delete<{ Params: { repoId: string } }>("/repos/:repoId", async (req, reply) => {
+        if (!operatorOnly(req, reply, HUB_SETTINGS_OPERATOR_ONLY)) return;
+        const { configPath, crewReloader } = deps;
+        if (!configPath || !crewReloader)
+          return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        try {
+          const result = await removeRepo(configPath, req.params.repoId, now());
+          const changes = await crewReloader.reload();
+          return { backup: basename(result.backup), changes };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: apps/web/src/setup/ConfigStatus.tsx (Restart)
+      api.post("/hub/restart", async (req, reply) => {
+        if (!operatorOnly(req, reply, RESTART_OPERATOR_ONLY)) return;
+        if (!NoBody.safeParse(req.body ?? {}).success)
+          return reply.code(400).send({ error: "no fields are taken" });
+        if (!deps.restartHub) return reply.code(409).send({ error: RESTART_UNAVAILABLE });
+        const refusal = deps.supervisor
+          ? crewRefusal(config, deps.supervisor, (id) => store.seatSession(id))
+          : null;
+        if (refusal !== null) return reply.code(409).send({ error: refusal });
+        store.addHubEvent("Restarted by the operator", now());
+        deps.restartHub();
+        return reply.code(202).send({ restarting: true });
       });
 
       // Reader: docs/runbook.md#what-it-observes
@@ -4024,6 +4137,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         await refreshAudit(range, days);
         return auditCache.get(range)?.value;
       });
+      // Reader: apps/web/src/pages/Audit.tsx#Audit (the AUDIT seat's latest report and when the next is due)
+      api.get("/audit/report", async (): Promise<AuditReportView> => {
+        const repoId = flightSeat(config)?.session.repoId ?? config.crew?.sessions[0]?.repoId;
+        return {
+          report: repoId === undefined ? null : store.latestAuditReport(repoId),
+          nextDueAt: repoId === undefined ? null : nextAuditDueAt(config, store, repoId),
+        };
+      });
       // Reader: docs/runbook.md#audit-api (rework and cost by model, and before and after each change)
       api.get<{ Querystring: { range?: string } }>("/audit/models", async (req, reply) => {
         const match = /^(7|30|90|365)d$/.exec(req.query.range ?? "30d");
@@ -4522,6 +4643,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
           started = await sup.startWatch(id, { operator: true });
+        } else if (loop === "audit") {
+          if (b.issue !== undefined) {
+            throw new SupervisorError(400, auditStartRefusedText(seatCallSign(id)));
+          }
+          started = await sup.startAudit(id);
+          store.setSetting(auditStartedKey(id), String(at));
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts
@@ -5017,7 +5144,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             try {
               comments = z
                 .object({ comments: z.array(z.object({ body: z.string() })) })
-                .parse(JSON.parse(latest.stdout)).comments;
+                .parse(parseJson<unknown>(latest.stdout, undefined, rethrowJson)).comments;
             } catch {
               /* A failed read must not turn into a second post. */
             }
@@ -6613,7 +6740,7 @@ export function githubRate(store: Store): GithubRateState {
   const raw = store.getSetting(GITHUB_RATE_SETTING);
   if (raw === null) return { queries: {}, pollCost: null };
   try {
-    return JSON.parse(raw) as GithubRateState;
+    return parseJson<unknown>(raw, undefined, rethrowJson) as GithubRateState;
   } catch {
     return { queries: {}, pollCost: null };
   }
@@ -6641,11 +6768,16 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
     let nextTryAt: number | undefined;
     if (acct.vendor === "claude") {
       try {
-        const backoff = JSON.parse(store.getSetting(USAGE_BACKOFF_SETTING) ?? "null");
+        const backoff = parseJson<{ waitMs?: number; notBefore?: number } | null>(
+          store.getSetting(USAGE_BACKOFF_SETTING),
+          null,
+        );
         if (
           backoff &&
+          typeof backoff.waitMs === "number" &&
           Number.isFinite(backoff.waitMs) &&
           backoff.waitMs > 0 &&
+          typeof backoff.notBefore === "number" &&
           Number.isFinite(backoff.notBefore)
         ) {
           const capped = Math.min(backoff.notBefore, now + USAGE_BACKOFF_CAP_MS);

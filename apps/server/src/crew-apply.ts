@@ -36,6 +36,7 @@ export const areaWaitText = (other: string) =>
   `its area overlaps ${other}'s, which has not changed yet`;
 
 const READ_FAILED = "cannot read config.yaml";
+const LOOP_KINDS_FAILED = "could not record the seats' loop kinds; nothing was changed";
 
 export interface CrewPlan {
   /** Per applied session id: the seats to hold now. */
@@ -206,12 +207,23 @@ export function planCrew(
   return plan;
 }
 
+export const configErrorText = (e: string): string =>
+  `config.yaml does not load: ${e}. The hub runs on the last good copy.`;
+
 const lists = (c: CcConfig["crew"]) => c?.sessions.map((s) => [s.id, s.repoId, s.checkout]);
 
 /** Config keys that differ and only apply after a restart. */
 export function restartNeeded(applied: CcConfig, target: CcConfig): string[] {
   const out: string[] = [];
-  for (const key of ["operator", "accounts", "repos", "loops", "poll"] as const) {
+  for (const key of [
+    "operator",
+    "accounts",
+    "repos",
+    "loops",
+    "poll",
+    "updates",
+    "audit",
+  ] as const) {
     // `flight_powers` reloads live (`settle` copies it), so it never asks for a restart
     const strip = (c: CcConfig) =>
       key === "repos" ? c.repos.map(({ flightPowers: _p, ...rest }) => rest) : c[key];
@@ -288,15 +300,17 @@ export function createCrewReloader(deps: {
    * Records the loop kind of each seat in `cfg` on its runs that lack one, before a reload or a
    * session removal can retire the seat and leave Audit unable to tell what it ran.
    */
-  const recordLoopKinds = (cfg: CcConfig): void => {
+  const recordLoopKinds = (cfg: CcConfig): boolean => {
     try {
       const kinds = new Map<string, LoopKind>();
       for (const session of cfg.crew?.sessions ?? []) {
         for (const s of session.seats) kinds.set(s.id, seatDef(s).loop);
       }
       store.backfillRunLoopKinds(kinds);
+      return true;
     } catch (e) {
       log(`could not record seat loop kinds: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
     }
   };
 
@@ -485,11 +499,14 @@ export function createCrewReloader(deps: {
     try {
       loaded = load(configPath);
     } catch (e) {
-      setError(e instanceof ConfigError ? e.message : READ_FAILED);
+      setError(e instanceof ConfigError ? configErrorText(e.message) : READ_FAILED);
       return { ...status(), applied: [] };
     }
     // the applied config still lists the seats this load may remove
-    recordLoopKinds(config);
+    if (!recordLoopKinds(config)) {
+      setError(LOOP_KINDS_FAILED);
+      return { ...status(), applied: [] };
+    }
     target = loaded;
     setError(null);
     const applied = settle();
@@ -558,7 +575,7 @@ export function createCrewReloader(deps: {
         const active = session.seats.filter((s) => !stopped(s.id)).length;
         if (active) throw new ConfigWriteError("conflict", sessionActiveText(id, active));
         // Removing it synchronously prevents any new supervisor start during the file write.
-        recordLoopKinds(config);
+        if (!recordLoopKinds(config)) throw new ConfigWriteError("write", LOOP_KINDS_FAILED);
         removing = true;
         sessions.splice(index, 1);
         let saved = false;

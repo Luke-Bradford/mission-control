@@ -90,6 +90,7 @@ import {
   wakeFacts,
 } from "../src/flight/state.ts";
 import {
+  ANNOUNCED_MAX,
   createFlightWatch,
   type FlightWatch,
   type FlightWatchDeps,
@@ -228,7 +229,9 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked"> = {}) => {
+const makeWatch = (
+  over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked" | "announcedMax"> = {},
+) => {
   watch = createFlightWatch({
     ...over,
     config,
@@ -1426,6 +1429,50 @@ describe("FLIGHT's brief in the digest", () => {
     expect(emitted).toEqual([]);
   });
 
+  describe("announced missed items", () => {
+    const missedAt = T0;
+    const raiseAll = (count: number, from = 0) => {
+      for (let i = from; i < from + count; i++)
+        raiseBlocked(`blocked:r${i}:0`, { at: missedAt, text: `mc#${i} parked` });
+    };
+
+    it("forgets an item once it is no longer missed, and announces it again if it returns", async () => {
+      liveCrew();
+      nowMs = T0 + MIN;
+      raiseBlocked("blocked:r1:0", { at: missedAt });
+      nowMs = T0 + 40 * MIN;
+      await watch.check();
+      expect(emitted).toContain("attention");
+      emitted.length = 0;
+      await watch.check();
+      expect(emitted).not.toContain("attention"); // already announced
+      store.clearNote("blocked:r1:0", nowMs);
+      await watch.check();
+      raiseBlocked("blocked:r1:0", { at: missedAt });
+      emitted.length = 0;
+      await watch.check();
+      expect(emitted).toContain("attention"); // the set let go of it, so it is announced again
+    });
+
+    it("remembers at most the announced cap: the oldest is announced again", async () => {
+      watch.stop();
+      makeWatch({ announcedMax: 5 });
+      liveCrew();
+      nowMs = T0 + MIN;
+      raiseAll(8);
+      nowMs = T0 + 40 * MIN;
+      await watch.check();
+      expect(emitted).toContain("attention");
+      emitted.length = 0;
+      await watch.check();
+      expect(emitted).toContain("attention"); // the 3 dropped identities are announced again
+    });
+
+    it("has a real cap of 1000", () => {
+      expect(ANNOUNCED_MAX).toBe(1000);
+    });
+  });
+
   it("compares the next wake with the full state read mid-turn, including flips back", async () => {
     liveCrew();
     setNotes(T0);
@@ -2526,6 +2573,27 @@ describe("the FLIGHT watcher", () => {
       expect(endCalls).toEqual(["r-flight"]);
       await watch.check();
       expect(startCalls).toHaveLength(1);
+    });
+
+    it("keeps first-turn context for at most 200 sessions: an older one starts over", async () => {
+      liveCrew();
+      watch.start();
+      const COUNT = 205;
+      for (let i = 0; i < COUNT; i++) {
+        live("flight-1", `r-ctx-${i}`);
+        context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS, `r-ctx-${i}`);
+        await watch.check();
+      }
+      // the newest session's first turn is remembered: growing past the margin hands over
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000, `r-ctx-${COUNT - 1}`);
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+      // the oldest session's was dropped, so this reading becomes its first turn: no handover
+      sendCalls.length = 0;
+      live("flight-1", "r-ctx-0");
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000, "r-ctx-0");
+      await watch.check();
+      expect(sendCalls).toEqual([]);
     });
 
     it("does nothing at the limit or under it", async () => {

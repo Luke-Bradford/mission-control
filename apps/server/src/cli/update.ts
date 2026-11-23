@@ -7,6 +7,7 @@
  */
 import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { parseJson } from "../json.ts";
 import { CLAUDE_COMMAND, parseCliVersion, resolveOnPath } from "./version.ts";
 
 export const CLI_UPDATES = ["off", "between_runs"] as const;
@@ -101,7 +102,8 @@ const firstLine = (text: string): string => {
 
 /** Whether the JSON of `brew outdated --cask --greedy --json=v2 claude-code` lists the cask. */
 function listsCask(json: string): boolean {
-  const parsed = JSON.parse(json) as { casks?: { name?: unknown }[] };
+  const parsed = parseJson<{ casks?: { name?: unknown }[] } | null>(json, null);
+  if (parsed === null) return false;
   return (parsed.casks ?? []).some((c) => c.name === BREW_CASK);
 }
 

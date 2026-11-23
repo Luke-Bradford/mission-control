@@ -7,6 +7,7 @@ import {
   GH_READ_CUT,
   GH_READ_UNTRUSTED,
 } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
 import { cleanText } from "../repo/clean.ts";
 import type { GhRunner } from "./gh.ts";
 
@@ -138,7 +139,7 @@ export async function isolatedGithubRead(
     if (result.code !== 0) {
       log?.(`mc gh_read: gh api failed (${String(result.code)})`);
       try {
-        const body: unknown = JSON.parse(result.stdout);
+        const body: unknown = parseJson<unknown>(result.stdout, undefined, rethrowJson);
         if (
           body !== null &&
           typeof body === "object" &&

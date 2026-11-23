@@ -657,6 +657,20 @@ describe("the reloader", () => {
     });
   });
 
+  it("does not reload, and says why, when the seats' loop kinds cannot be recorded", async () => {
+    const r = make();
+    r.start();
+    vi.spyOn(store, "backfillRunLoopKinds").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+    loaded = config([{ id: "s1", seats: [seat("guido-2")] }]);
+    touch(1);
+    const status = await r.reload();
+    expect(status.applied).toEqual([]);
+    expect(status.error).toContain("loop kinds");
+    r.stop();
+  });
+
   it("an unchanged file is not reloaded", async () => {
     const load = vi.fn(() => structuredClone(applied));
     const r = createCrewReloader({
@@ -677,7 +691,9 @@ describe("the reloader", () => {
     const r = make();
     loaded = new ConfigError("crew.sessions[0]", "boom");
     const out = await r.reload();
-    expect(out.error).toBe("crew.sessions[0]: boom");
+    expect(out.error).toBe(
+      "config.yaml does not load: crew.sessions[0]: boom. The hub runs on the last good copy.",
+    );
     expect(out.applied).toEqual([]);
     expect(seatsOf(applied)).toEqual(["guido-1"]);
     expect(topics).toContain("config");

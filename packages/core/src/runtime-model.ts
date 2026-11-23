@@ -16,9 +16,9 @@ export type CrewMode = (typeof CREW_MODES)[number];
 
 /**
  * What a role's loop does with its seat: builds tickets, reviews PRs, plans tickets, runs the crew
- * (`watch`, started with no ticket) or nothing.
+ * (`watch`, started with no ticket), audits the crew on a timer (`audit`, also no ticket) or nothing.
  */
-export const LOOP_KINDS = ["build", "review", "plan", "watch", "none"] as const;
+export const LOOP_KINDS = ["build", "review", "plan", "watch", "audit", "none"] as const;
 
 export type LoopKind = (typeof LOOP_KINDS)[number];
 
