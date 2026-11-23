@@ -504,6 +504,29 @@ describe("report_audit", () => {
     expect(leaked.isError).toBe(true);
     expect(store.auditReportOfRun(AUDIT_RUN)).toBeNull();
   });
+
+  it.each([
+    ["a generated secret in a link label", `ghp_${"a1B2".repeat(9)}`, "/board"],
+    [
+      "a generated secret in an allowed GitHub URL",
+      "PR",
+      `https://github.com/o/mc/pull/7?token=ghp_${"a1B2".repeat(9)}`,
+    ],
+    ["a known secret in a link label", "known-audit-secret", "/board"],
+    [
+      "a known secret in an allowed GitHub URL",
+      "PR",
+      "https://github.com/o/mc/pull/7?token=known-audit-secret",
+    ],
+  ])("refuses %s", async (_what, label, href) => {
+    const ts = auditTools({ knownSecrets: async () => ["known-audit-secret"] });
+    const out = await call(ts, {
+      verdict: "v",
+      findings: [finding(1, { links: [{ label, href }] })],
+    });
+    expect(out.isError).toBe(true);
+    expect(store.auditReportOfRun(AUDIT_RUN)).toBeNull();
+  });
 });
 
 describe("sync_main", () => {

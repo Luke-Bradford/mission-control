@@ -584,6 +584,17 @@ it("opens on the AUDIT report's verdict with findings ranked, and You filters", 
   expect(problems().map((t) => t?.slice(1))).toEqual(["Problem 2", "Problem 4", "Problem 6"]);
 });
 
+it("keeps saved findings available when the legacy audit request fails", async () => {
+  stubFetch({
+    "/api/config": CONFIG,
+    "/api/waste": WASTE,
+    "/api/audit/report": REPORT,
+  });
+  render(<Audit />);
+  expect(await screen.findByText(REPORT.report.verdict)).toBeTruthy();
+  expect(screen.getByRole("button", { name: /Problem 1$/ })).toBeTruthy();
+});
+
 it("says so when there is no AUDIT report yet", async () => {
   stubFetch({
     "/api/audit?range=30d": AUDIT,

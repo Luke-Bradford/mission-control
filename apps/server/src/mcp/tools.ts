@@ -2975,7 +2975,15 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       for (const l of f.links)
         if (!auditHrefOk(l.href)) return { text: auditBadLinkText(l.href), isError: true };
     const known = await readKnown(deps, "report_audit");
-    const all = [verdict, ...findings.flatMap((f) => [f.problem, f.evidence, f.cause])].join("\n");
+    const all = [
+      verdict,
+      ...findings.flatMap((f) => [
+        f.problem,
+        f.evidence,
+        f.cause,
+        ...f.links.flatMap((l) => [l.label, l.href]),
+      ]),
+    ].join("\n");
     const secret = scanText("report", all, known)[0];
     if (secret !== undefined) {
       store.addGuardHit({

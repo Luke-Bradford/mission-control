@@ -118,7 +118,7 @@ function AuditDashboard() {
         </button>
         <Seg label="Range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
       </div>
-      {audit && !models && (
+      {(audit || report) && !models && (
         <div className="audit-cols">
           <div className="audit-col">
             {report ? (
@@ -137,9 +137,15 @@ function AuditDashboard() {
             <NewOutside />
           </div>
           <div className="audit-col">
-            <HowWeBuild audit={audit} waste={wasteRes.data} wasteError={wasteRes.error} />
-            <WhereFindingsLand audit={audit} />
-            <Past changes={audit.changes} range={range} />
+            {audit ? (
+              <>
+                <HowWeBuild audit={audit} waste={wasteRes.data} wasteError={wasteRes.error} />
+                <WhereFindingsLand audit={audit} />
+                <Past changes={audit.changes} range={range} />
+              </>
+            ) : (
+              <LegacyAuditUnavailable error={res.error} range={range} />
+            )}
           </div>
         </div>
       )}
@@ -153,6 +159,25 @@ function AuditDashboard() {
 }
 
 type WasteState = { kind: "ok" } | { kind: "loading" } | { kind: "error"; message: string };
+
+function LegacyAuditUnavailable({ error, range }: { error: Error | null; range: AuditRange }) {
+  return (
+    <Panel title="Hub checks">
+      <div className="pb">
+        <p>{error ? `Could not load hub checks: ${error.message}.` : "Hub checks are loading."}</p>
+        {error && (
+          <button
+            type="button"
+            className="audit-retry"
+            onClick={() => hub.refetch(RESOURCES.audit(range).path)}
+          >
+            Retry hub checks
+          </button>
+        )}
+      </div>
+    </Panel>
+  );
+}
 
 const wasteNotice = (w: WasteState): string | null =>
   w.kind === "ok"

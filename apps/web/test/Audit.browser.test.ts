@@ -467,4 +467,29 @@ describeRendered("Audit first screen in a browser", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps the saved report findings usable when the legacy audit request fails",
+    async () => {
+      const page = await renderAt({
+        page: "test/auditBarBrowser.html",
+        width: 1920,
+        height: 940,
+        api: {
+          "/api/config": api["/api/config"],
+          "/api/waste": api["/api/waste"],
+          "/api/audit/report": report,
+        },
+      });
+      let text = "";
+      for (let i = 0; i < 100 && !text.includes(report.report.verdict); i++) {
+        text = await page.evaluate(() => document.body.textContent ?? "", null);
+        if (!text.includes(report.report.verdict)) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(text).toContain(report.report.verdict);
+      expect((await page.boxes("tr.rec")).length).toBeGreaterThanOrEqual(5);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });
