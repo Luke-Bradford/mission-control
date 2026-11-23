@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { SessionEvent } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CMUX_DOWN_TEXT, type Cmux } from "../src/runtime/cmux.ts";
 import {
@@ -316,36 +317,26 @@ it("queues messages until Claude is ready and preserves their order after busy",
   await session.close();
 });
 
-it("continues queued delivery after a send error", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
-  dirs.push(dir);
-  const sent: string[] = [];
-  let failed = false;
-  const cmux: Cmux = {
-    ensure: async () => {},
-    newWorkspace: async () => "workspace-1",
-    agents: async () => [
-      {
-        workspaceId: "workspace-1",
-        sessionId: "session-1",
-        pid: 42,
-        lifecycle: "idle",
-        transcriptPath: null,
-      },
-    ],
-    send: async (_workspace, text) => {
-      if (!failed) {
-        failed = true;
-        throw new Error("socket hiccup");
-      }
-      sent.push(text);
-      return "sent";
+const stubCmux = (over: Partial<Cmux>): Cmux => ({
+  ensure: async () => {},
+  newWorkspace: async () => "workspace-1",
+  agents: async () => [
+    {
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      pid: 42,
+      lifecycle: "idle",
+      transcriptPath: null,
     },
-    sendKey: async () => {},
-    readScreen: async () => "",
-    close: async () => {},
-  };
-  const session = startCmuxSession({
+  ],
+  send: async () => "sent",
+  sendKey: async () => {},
+  readScreen: async () => "",
+  close: async () => {},
+  ...over,
+});
+const stubSession = (dir: string, cmux: Cmux) =>
+  startCmuxSession({
     cmux,
     name: "GUIDO · mc#2194",
     cwd: dir,
@@ -358,11 +349,81 @@ it("continues queued delivery after a send error", async () => {
     messageDir: join(dir, "messages"),
     pollMs: 5,
   });
+
+it("retries a send error so the first message still arrives", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const sent: string[] = [];
+  let failed = false;
+  const session = stubSession(
+    dir,
+    stubCmux({
+      send: async (_workspace, text) => {
+        if (!failed) {
+          failed = true;
+          throw new Error("socket hiccup");
+        }
+        sent.push(text);
+        return "sent";
+      },
+    }),
+  );
   session.send("first");
   session.send("second");
-  await vi.waitFor(() => expect(sent).toEqual(["second"]));
+  await vi.waitFor(() => expect(sent).toEqual(["first", "second"]), { timeout: 3000 });
   expect(session.alive).toBe(true);
   await session.close();
+});
+
+it("ends the session for recovery when a message cannot be delivered", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  const closed: string[] = [];
+  const session = stubSession(
+    dir,
+    stubCmux({
+      send: async () => {
+        throw new Error("socket gone");
+      },
+      close: async (workspace) => {
+        closed.push(workspace);
+      },
+    }),
+  );
+  const events: SessionEvent[] = [];
+  session.on((event) => events.push(event));
+  session.send("first");
+  await vi.waitFor(() => expect(session.alive).toBe(false), { timeout: 3000 });
+  expect(closed).toEqual(["workspace-1"]);
+  expect(events).toContainEqual(expect.objectContaining({ kind: "exit", retake: true }));
+});
+
+it("ends a registered seat whose cmux stops answering", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+  dirs.push(dir);
+  let calls = 0;
+  const session = stubSession(
+    dir,
+    stubCmux({
+      agents: async () => {
+        if (++calls === 1)
+          return [
+            {
+              workspaceId: "workspace-1",
+              sessionId: "session-1",
+              pid: 42,
+              lifecycle: "running",
+              transcriptPath: null,
+            },
+          ];
+        throw new Error("socket gone");
+      },
+    }),
+  );
+  const events: SessionEvent[] = [];
+  session.on((event) => events.push(event));
+  await vi.waitFor(() => expect(session.alive).toBe(false), { timeout: 3000 });
+  expect(events).toContainEqual(expect.objectContaining({ kind: "exit", retake: true }));
 });
 
 it("attaches an idle workspace as idle without a synthetic result", async () => {

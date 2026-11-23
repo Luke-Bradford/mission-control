@@ -40,6 +40,11 @@ export interface CmuxSessionInput {
   onWorkspace?: (workspace: string, pid: number | null) => void;
 }
 
+/** Polls in a row that may fail before a registered seat is given up on. */
+export const POLL_FAILURE_LIMIT = 5;
+/** Tries a message gets before the session ends rather than drop it. */
+export const SEND_TRIES = 3;
+
 const shellQuote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 
 /**
@@ -112,6 +117,7 @@ function cmuxSession(
   let sessionId = i.cliSessionId;
   let lifecycle: "idle" | "running" | "needsInput" | null = null;
   let trustSent = false;
+  let pollFailures = 0;
   let sendChain = Promise.resolve();
   let attached = attachedWorkspace !== undefined;
   let timer: NodeJS.Timeout | null = null;
@@ -248,9 +254,14 @@ function cmuxSession(
           emit({ kind: "result", isError: false, stopReason: "end_turn" });
         }
       }
+      pollFailures = 0;
       resolveReady();
     } catch (error) {
       i.log?.(`cmux poll: ${error instanceof Error ? error.message : String(error)}`);
+      // A registered seat whose cmux stopped answering would keep its last state forever: after
+      // a bounded run of failures the session ends so the supervisor recovers or shows the error.
+      if (pid !== undefined && ++pollFailures >= POLL_FAILURE_LIMIT)
+        ended("cmux stopped answering", true);
     }
   };
   const schedulePoll = () => {
@@ -316,6 +327,8 @@ function cmuxSession(
     send(text) {
       if (!alive) throw new SessionControlError("ended", "session ended");
       const deliver = async () => {
+        let failedTries = 0;
+        let textIn = false;
         let body = text;
         if (text.includes("\n")) {
           mkdirSync(i.messageDir, { recursive: true, mode: 0o700 });
@@ -326,11 +339,24 @@ function cmuxSession(
         }
         while (alive && !detached) {
           if (workspace === null) throw new SessionControlError("ended", "session ended");
-          const sent = await i.cmux.send(workspace, body);
-          if (sent === "sent") {
-            await i.cmux.sendKey(workspace, "enter");
-            return;
+          let sent: "sent" | "busy";
+          try {
+            // after the text went in, a retry sends only the Enter, never the text twice
+            sent = textIn ? "sent" : await i.cmux.send(workspace, body);
+            if (sent === "sent") {
+              textIn = true;
+              await i.cmux.sendKey(workspace, "enter");
+            }
+          } catch (error) {
+            // A message is never dropped: retry a transient failure, then end the session so the
+            // run is recovered instead of the hub believing the prompt was delivered.
+            if (++failedTries < SEND_TRIES) {
+              await sleep(i.pollMs ?? 1000);
+              continue;
+            }
+            throw error;
           }
+          if (sent === "sent") return;
           await sleep(2000);
         }
       };
@@ -342,9 +368,13 @@ function cmuxSession(
           await deliver();
         });
       sendChain = next;
-      void next.catch((error) =>
-        i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`),
-      );
+      void next.catch(async (error) => {
+        i.log?.(`cmux send: ${error instanceof Error ? error.message : String(error)}`);
+        if (!alive || detached) return;
+        // Start the recovery in a fresh workspace: this one has lost a message.
+        if (workspace) await i.cmux.close(workspace).catch(() => {});
+        ended("cmux could not deliver a message to Claude", true);
+      });
     },
     control(subtype: ControlSubtype) {
       if (!alive || workspace === null)

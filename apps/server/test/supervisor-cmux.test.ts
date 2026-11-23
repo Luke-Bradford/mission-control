@@ -25,28 +25,30 @@ const edit = (state: string, f: (session: Record<string, unknown>) => void) => {
 it("starts a Claude run in a cmux workspace", async () => {
   const state = join(dir, "fake-cmux.json");
   files.push(state);
+  // the bridged fake reads the brief as Claude would and writes a transcript for the turn
+  writeFileSync(state, JSON.stringify({ sessions: [], calls: [], bridge: true }));
   const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
   sup.start();
-  await sup.startRun("guido-1", 42);
-  await until(() => seatState("guido-1") === "idle");
-  const created = JSON.parse(readFileSync(state, "utf8")).sessions[0];
-  expect(created.cwd).toContain("worktrees");
-  const launcher = readFileSync(created.command, "utf8");
+  const run = await sup.startRun("guido-1", 42);
+  const created = () => JSON.parse(readFileSync(state, "utf8")).sessions[0];
+  await until(() => expect(created()).toBeDefined());
+  expect(created().cwd).toContain("worktrees");
+  const launcher = readFileSync(created().command, "utf8");
   expect(launcher).toContain("--settings");
   expect(launcher).not.toContain("--setting-sources");
   expect(launcher).toContain("--mcp-config");
   expect(launcher).toContain("--strict-mcp-config");
   expect(launcher).toContain("--session-id");
   expect(launcher).not.toContain(" -p ");
-  await until(() =>
-    expect(
-      JSON.parse(readFileSync(state, "utf8")).calls.some((call: string[]) => call[0] === "send"),
-    ).toBe(true),
-  );
-  const sent = JSON.parse(readFileSync(state, "utf8")).calls.find(
-    (call: string[]) => call[0] === "send",
-  );
-  expect(sent.at(-1)).toMatch(/^Mission Control sent you a message\. Read .+ and act on it\.$/);
+  const sent = () =>
+    JSON.parse(readFileSync(state, "utf8")).calls.find((call: string[]) => call[0] === "send");
+  await until(() => expect(sent()).toBeDefined());
+  expect(sent().at(-1)).toMatch(/^Mission Control sent you a message\. Read .+ and act on it\.$/);
+  // the brief reached Claude's transcript, the turn ran, and the seat is idle after the result
+  const copied = () => readFileSync(store.run(run.runId)?.transcriptPath ?? "", "utf8");
+  await until(() => expect(copied()).toContain('"text":"echo: '));
+  await until(() => expect(copied()).toContain('"mc_cmux":true'));
+  await until(() => expect(seatState("guido-1")).toBe("idle"));
 });
 
 it("seat state follows cmux and /clear keeps the run", async () => {
@@ -234,6 +236,21 @@ describe("a restart attaches to the workspace", () => {
     const closed = all.findIndex(
       (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
     );
+    expect(closed).toBeGreaterThan(-1);
+    expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
+  });
+
+  it("closes a workspace saved before Claude registered, then resumes in a new one", async () => {
+    const { state, first, run } = await idleRun();
+    const old = sessions(state)[0]?.workspace_id;
+    await first.sup.stopAll();
+    // the hub went down in the startup window: the setting holds no pid yet
+    store.setSetting(`cmux.workspace:${run.runId}`, JSON.stringify({ workspace: old, pid: null }));
+    const next = make({ cmuxCommand: [process.execPath, fake, state] });
+    next.sup.start();
+    await until(() => expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(2));
+    const all = calls(state);
+    const closed = all.findIndex((c) => c[0] === "close-workspace" && c.includes(old as string));
     expect(closed).toBeGreaterThan(-1);
     expect(closed).toBeLessThan(all.findLastIndex((c) => c[0] === "new-workspace"));
   });

@@ -3126,12 +3126,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (row.vendor !== "codex" && info && run?.endedAt === null && row.worktree !== null) {
       try {
         const saved: unknown = JSON.parse(store.getSetting(cmuxWorkspaceKey(runId)) ?? "null");
-        if (isObj(saved) && typeof saved.workspace === "string" && typeof saved.pid === "number") {
+        if (isObj(saved) && typeof saved.workspace === "string") {
           const cmux = createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
-          const record = (await cmux.agents()).find(
-            (agent) => agent.workspaceId === saved.workspace && agent.pid === saved.pid,
-          );
-          if (record) {
+          // A workspace saved before Claude registered (pid null) has nothing to attach to; it is
+          // closed below so it cannot register later as an untracked duplicate.
+          const savedPid = typeof saved.pid === "number" ? saved.pid : null;
+          const record =
+            savedPid === null
+              ? undefined
+              : (await cmux.agents()).find(
+                  (agent) => agent.workspaceId === saved.workspace && agent.pid === savedPid,
+                );
+          if (record && savedPid !== null) {
             try {
               deps.tokens.adopt(
                 row.seatId,
@@ -3144,7 +3150,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             const session = attachCmuxSession({
               cmux,
               workspace: saved.workspace,
-              pid: saved.pid,
+              pid: savedPid,
               awaiting: row.state !== "idle",
               savedState: row.state,
               from: cursor?.spawn === `cmux:${saved.workspace}` ? cursor.line : 0,
