@@ -1,9 +1,9 @@
 import type { CrewRow } from "@mc/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type CommsView, commsAgentPath, navigate } from "../router.ts";
+import { useReducedMotion } from "./chartTypes.ts";
 import { pairFilter, searchWithFocus } from "./commsFilter.ts";
 import { CAPCOM, useChartData } from "./useChartData.ts";
-import { useReducedMotion } from "./chartTypes.ts";
 
 type Point = { x: number; y: number };
 const TRAVEL_LIGHTS = ["first", "second", "third"] as const;
