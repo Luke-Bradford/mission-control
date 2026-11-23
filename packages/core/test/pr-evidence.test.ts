@@ -185,6 +185,17 @@ describe("evidenceVariants", () => {
     expect(evidenceVariants(css, "+@media (max-width: 900px) {").map((v) => v.width)).toEqual([
       1600, 2560,
     ]);
+    for (const line of [
+      "+  width: 900px;",
+      "-  width: 50%;",
+      "+  inline-size: calc(100% - 2rem);",
+      "+.a { max-width: 40rem }",
+    ])
+      expect(evidenceVariants(css, line).map((v) => v.width)).toEqual([1600, 2560]);
+    // border-width and line-width style names are not a layout width
+    expect(evidenceVariants(css, "+  border-width: 1px;")).toEqual([
+      { scheme: "light", width: 1600 },
+    ]);
     expect(evidenceVariants(css, "+  padding: 4px;")).toEqual([{ scheme: "light", width: 1600 }]);
     // a server file about layout does not widen a web capture
     expect(evidenceVariants(["apps/server/src/layout.ts"])).toHaveLength(1);

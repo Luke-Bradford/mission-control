@@ -79,6 +79,31 @@ export async function publishEvidenceRelease(o: {
 }
 
 /**
+ * The hourly clean of a PR's public pictures: deletes the release of every PR not in `openPrs`
+ * (open, or merged but not live yet). `target` is null where the hub captures nothing (a preview,
+ * or no hub repo), which is the only case that writes nothing; the engine's state is not an input,
+ * since a release outlives whatever the engine was doing when it was made.
+ */
+export async function sweepEvidenceReleases(
+  target: { gh: GhRunner; cwd: string; repoId: string; github: string } | null,
+  openPrs: ReadonlySet<string>,
+  log: (line: string) => void,
+): Promise<void> {
+  if (target === null) return;
+  const removed = await removeFinishedEvidenceReleases({
+    gh: target.gh,
+    cwd: target.cwd,
+    repo: target.github,
+    keep: (pr) => openPrs.has(`${target.repoId}#${pr}`),
+  }).catch((e: unknown) => {
+    log(`evidence releases: ${e instanceof Error ? e.message : String(e)}`);
+    return [];
+  });
+  if (removed.length > 0)
+    log(`evidence releases removed for PR ${removed.map((n) => `#${n}`).join(", ")}`);
+}
+
+/**
  * Deletes the picture releases of PRs `keep` does not hold (finished: live, or closed). Returns the
  * PR numbers removed. A release that cannot be deleted is left for the next run.
  */

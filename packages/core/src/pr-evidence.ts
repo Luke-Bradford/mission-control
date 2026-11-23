@@ -224,10 +224,10 @@ export interface EvidenceGap extends EvidenceVariant {
 const THEME_FILE = /(?:theme|dark|light|colou?r|tokens?|palette)/i;
 const THEME_TEXT =
   /prefers-color-scheme|data-theme|color-scheme|\b(?:dark|light)\b|#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|color-mix)\(|(?:^|[\s;{])(?:background(?:-color)?|color|border(?:-\w+)?-color|fill|stroke)\s*:|--[\w-]*(?:color|bg|fg|surface|ink)/im;
-/** The same for size: file names, or changed lines with a media query, a width or a breakpoint. */
+/** The same for size: file names, or changed lines with a media query, a width declaration or a breakpoint. */
 const WIDTH_FILE = /(?:width|responsive|breakpoint|viewport|layout|resize)/i;
 const WIDTH_TEXT =
-  /@media|@container|\b(?:min|max)-(?:width|inline-size)\b|\bvw\b|\bclamp\(|grid-template-columns|breakpoint/im;
+  /@media|@container|(?:^[+-]?|[\s;{])(?:(?:min|max)-)?(?:width|inline-size)\s*:|\b(?:min|max)-(?:width|inline-size)\b|\bvw\b|\bclamp\(|grid-template-columns|breakpoint/im;
 
 const variantsOf = (
   schemes: readonly EvidenceScheme[],

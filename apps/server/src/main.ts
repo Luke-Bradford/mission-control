@@ -121,7 +121,7 @@ import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import {
   deleteEvidenceRelease,
   publishEvidenceRelease,
-  removeFinishedEvidenceReleases,
+  sweepEvidenceReleases,
 } from "./pr-evidence/releases.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
@@ -1235,19 +1235,13 @@ export async function main(): Promise<void> {
         const openPrs = new Set([...store.openPrKeys(), ...notLive]);
         // The PR's pictures on GitHub go the same way as the ones on disk: once the change is live.
         const releaseRepo = config.repos.find((r) => r.id === previewRepoId);
-        if (prEvidence && releaseRepo && hubRoot) {
-          const removed = await removeFinishedEvidenceReleases({
-            gh,
-            cwd: hubRoot,
-            repo: releaseRepo.github,
-            keep: (pr) => openPrs.has(`${releaseRepo.id}#${pr}`),
-          }).catch((e: unknown) => {
-            log(`evidence releases: ${e instanceof Error ? e.message : String(e)}`);
-            return [];
-          });
-          if (removed.length > 0)
-            log(`evidence releases removed for PR ${removed.map((n) => `#${n}`).join(", ")}`);
-        }
+        await sweepEvidenceReleases(
+          prEvidence && releaseRepo && hubRoot
+            ? { gh, cwd: hubRoot, repoId: releaseRepo.id, github: releaseRepo.github }
+            : null,
+          openPrs,
+          log,
+        );
         return sweepDataFolder({
           dataDir,
           now: Date.now,

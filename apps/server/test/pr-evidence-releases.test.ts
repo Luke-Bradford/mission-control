@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { evidenceDemoRender } from "../src/pr-evidence/demo-render.ts";
 import {
   publishEvidenceRelease,
   removeFinishedEvidenceReleases,
+  sweepEvidenceReleases,
 } from "../src/pr-evidence/releases.ts";
 
 const dirs: string[] = [];
@@ -140,5 +141,49 @@ describe("evidenceDemoRender", () => {
       colorScheme: "dark",
       viewport: { width: 1600, height: 1000 },
     });
+  });
+});
+
+describe("sweepEvidenceReleases", () => {
+  const listing = JSON.stringify([{ tagName: "qa-pr-5" }, { tagName: "qa-pr-6" }]);
+
+  it("deletes the release of a PR that is live, with no engine in the picture", async () => {
+    const { gh, calls } = fakeGh((args) => (args[1] === "list" ? ok(listing) : ok()));
+    const logs: string[] = [];
+    // PR 6 is open or not live yet; PR 5 merged and is live, so it is not in the held set
+    await sweepEvidenceReleases(
+      { gh, cwd: "/repo", repoId: "mc", github: "o/r" },
+      new Set(["mc#6"]),
+      (l) => logs.push(l),
+    );
+    expect(calls.filter((c) => c.args[1] === "delete").map((c) => c.args[2])).toEqual(["qa-pr-5"]);
+    expect(logs.join("\n")).toContain("#5");
+  });
+
+  it("writes nothing where the hub captures nothing (a preview, or no hub repo)", async () => {
+    const { gh, calls } = fakeGh();
+    await sweepEvidenceReleases(null, new Set(), () => {});
+    expect(calls).toEqual([]);
+    void gh;
+  });
+
+  it("logs and carries on when GitHub cannot be read", async () => {
+    const { gh } = fakeGh(() => ({ code: 1, stdout: "", stderr: "" }));
+    const logs: string[] = [];
+    await sweepEvidenceReleases({ gh, cwd: "/repo", repoId: "mc", github: "o/r" }, new Set(), (l) =>
+      logs.push(l),
+    );
+    expect(logs.join("\n")).toContain("could not be listed");
+  });
+
+  it("is called by the hub's disk sweep whatever the engine setting is", () => {
+    const main = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+    const block = main.slice(
+      main.indexOf("const openPrs = new Set("),
+      main.indexOf("return sweepDataFolder({"),
+    );
+    expect(block).toContain("sweepEvidenceReleases(");
+    // the engine's state must not gate the clean: a release outlives the engine being on
+    expect(block).not.toMatch(/engineOn/);
   });
 });
