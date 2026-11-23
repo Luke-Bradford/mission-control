@@ -2,7 +2,7 @@
  * Setup › Hub: reads and writes the hub-wide settings in config.yaml. A write follows `setRoles`:
  * one at a time, against the digest the page read, with a backup and a check that the new file loads.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import {
   HUB_SETTINGS,
@@ -178,6 +178,7 @@ export function removeRepo(
 export function ensureConfigFile(path: string, timezone: string): boolean {
   if (existsSync(path)) return false;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(path), 0o700);
   const text = `# Written on first start; edit it on Setup in the app.\noperator:\n  timezone: ${JSON.stringify(timezone)}\naccounts: []\nrepos: []\nloops: []\npoll:\n  usage_minutes: 30\n  github_seconds: 60\n`;
   try {
     writeFileSync(path, text, { flag: "wx", mode: 0o600 });

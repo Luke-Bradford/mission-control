@@ -1,6 +1,7 @@
 import "./temp-home.ts";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -118,6 +119,17 @@ describe("ensureConfigFile", () => {
     const bytes = readFileSync(fresh);
     expect(ensureConfigFile(fresh, "UTC")).toBe(false);
     expect(readFileSync(fresh)).toEqual(bytes);
+  });
+});
+
+describe("ensureConfigFile in an existing folder", () => {
+  it("closes a world-readable config folder to 0700 and writes the file 0600", () => {
+    const open = join(dir, "open");
+    mkdirSync(open, { mode: 0o755 });
+    chmodSync(open, 0o755);
+    expect(ensureConfigFile(join(open, "config.yaml"), "UTC")).toBe(true);
+    expect(statSync(open).mode & 0o777).toBe(0o700);
+    expect(statSync(join(open, "config.yaml")).mode & 0o777).toBe(0o600);
   });
 });
 

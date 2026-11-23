@@ -122,7 +122,7 @@ describe("hub settings", () => {
     await expect(setHubSetting(noCrew, view.base, "crew.max_seats", 2, NOW)).rejects.toThrow(
       CREW_FIRST_TEXT,
     );
-    await setHubSetting(noCrew, view.base, "crew.worktrees", join(dir, "crew"), NOW);
+    await setHubSetting(noCrew, view.base, "crew.worktrees", "/var/empty/mc-crew-fixture", NOW);
     expect(loadConfig(noCrew).crew?.sessions).toEqual([]);
   });
 
