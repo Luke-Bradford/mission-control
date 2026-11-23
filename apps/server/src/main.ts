@@ -131,6 +131,7 @@ import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
+import { watchPreviewParent } from "./runtime/preview-parent.ts";
 import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -398,18 +399,10 @@ export async function main(): Promise<void> {
     };
   })();
   const previewParentPid = process.env.MC_PREVIEW_PARENT_PID;
-  if (preview && previewParentPid !== undefined) {
-    const parentPid = Number(previewParentPid);
-    if (Number.isSafeInteger(parentPid) && parentPid > 1) {
-      setInterval(() => {
-        try {
-          process.kill(parentPid, 0);
-        } catch {
-          process.exit(0);
-        }
-      }, 15_000).unref();
-    }
-  }
+  const previewParentTimer =
+    preview && previewParentPid !== undefined
+      ? watchPreviewParent(Number(previewParentPid))
+      : undefined;
   // An implicit branch preview reads the live config as its snapshot, but must never write it.
   const writableConfigPath =
     !preview || process.env.MC_CONFIG !== undefined ? configPath : undefined;
@@ -1081,6 +1074,7 @@ export async function main(): Promise<void> {
     backgroundTimers.push(timer);
     return timer;
   };
+  if (previewParentTimer !== undefined) trackTimer(previewParentTimer);
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
   });
