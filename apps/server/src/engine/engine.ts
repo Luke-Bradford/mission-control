@@ -1,7 +1,4 @@
-import {
-  checkBriefDispatch,
-  withoutBriefDispatch,
-} from "../brief/dispatch-context.ts";
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief/dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -179,10 +176,7 @@ import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  storedMachineCapacity,
-} from "../telemetry/machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { wakeDueAsideRun } from "./aside.ts";
 import {
   CI_LOG_UNREADABLE,
@@ -207,8 +201,7 @@ import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 import { overrunText, tickLogOf } from "./ticks.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
-export const TIP_MOVED =
-  "the branch's tip is not the pushed commit, or could not be read";
+export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
 
 /** The jobs an excerpt names, in order, once each: its `[job]` and `[job: tier]` headings. */
 export function ciExcerptJobs(excerpt: string): string[] {
@@ -222,12 +215,7 @@ export function ciExcerptJobs(excerpt: string): string[] {
     // Plain bracketed log tags are not job headings. ciLogBody labels a failure block or tier.
     if (!tier && !/^\s*(?:FAIL\b|×|❯)/.test(lines[i + 1] ?? "")) continue;
     const job = heading.replace(/: (?:console|last lines)$/, "").trim();
-    if (
-      job !== "" &&
-      !/ more failing lines in /.test(job) &&
-      !jobs.includes(job)
-    )
-      jobs.push(job);
+    if (job !== "" && !/ more failing lines in /.test(job) && !jobs.includes(job)) jobs.push(job);
   }
   return jobs;
 }
@@ -236,20 +224,12 @@ export function ciExcerptJobs(excerpt: string): string[] {
  * The Comms copy of the seat's CI message, a notice: one plain line, "CI failed on 341f108 in job
  * web-core.", then the link to the commit's checks. The seat gets the whole excerpt instead.
  */
-export function ciNoticeText(
-  sha: string,
-  excerpt: string,
-  repo: string,
-  again: boolean,
-): string {
+export function ciNoticeText(sha: string, excerpt: string, repo: string, again: boolean): string {
   const jobs = ciExcerptJobs(excerpt);
   const where =
-    jobs.length === 0
-      ? ""
-      : ` in ${jobs.length === 1 ? "job" : "jobs"} ${jobs.join(", ")}`;
+    jobs.length === 0 ? "" : ` in ${jobs.length === 1 ? "job" : "jobs"} ${jobs.join(", ")}`;
   const what = again ? "CI failed again on" : "CI failed on";
-  const link =
-    repo === "" ? "" : ` https://github.com/${repo}/commit/${sha}/checks`;
+  const link = repo === "" ? "" : ` https://github.com/${repo}/commit/${sha}/checks`;
   return `${what} ${sha.slice(0, 7)}${where}.${link}`;
 }
 
@@ -283,10 +263,7 @@ export interface EngineDeps {
   /** `moveCard`, bound to the GitHub client, the store, the config and the poll. */
   board: { move: (m: Move) => Promise<MoveResult> };
   /** Reads a ticket (its body holds an optional `## Controller check`). */
-  fetchTicket: (
-    repo: CcConfig["repos"][number],
-    n: number,
-  ) => Promise<TicketView | null>;
+  fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
   /** Asks for a GitHub poll now (after a merge, so the boards show it before the next one). */
   pollGithub?: () => void;
   /** Screenshot pairs of a web PR: captured for each head, and required before it leaves draft. */
@@ -294,10 +271,7 @@ export interface EngineDeps {
   /** Same-repository controller PRs share the scratch queue, without a fabricated author run. */
   externalReviews?: ExternalReviews;
   /** A repo's board rules (at the gate's main sha, or origin/HEAD); errors are notes in `status()`. */
-  rules: (
-    repoId: RepoId,
-    mainSha?: string,
-  ) => Promise<RepoRules | RepoRulesError>;
+  rules: (repoId: RepoId, mainSha?: string) => Promise<RepoRules | RepoRulesError>;
   /** Rebuilds the writer seats' queues from the board (each tick). */
   refillQueues: () => Promise<void>;
   /** Starts the seat's next queued ticket; it does nothing for a seat that may not take one. */
@@ -341,8 +315,7 @@ export type OperatorRefusal =
 export type MergeHoldBy = "CAPCOM" | "FLIGHT";
 export type MergeHoldResult = { ok: true } | { ok: false; text: string };
 
-export type OperatorResult =
-  { lifted: true } | { lifted: false; reason: OperatorRefusal };
+export type OperatorResult = { lifted: true } | { lifted: false; reason: OperatorRefusal };
 
 const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "engine-off": "the loop engine is off",
@@ -351,12 +324,10 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   held: "the run is held: its seat is stopped or paused, the park is a budget park, a question is overdue, or its account is at its stop",
   "wrong-action": "this action cannot settle this kind of park",
   "not-permitted": "this action is not allowed for the caller",
-  "head-moved":
-    "the pushed head moved or is not the PR's head; refresh and check the head again",
+  "head-moved": "the pushed head moved or is not the PR's head; refresh and check the head again",
   "pr-not-open": "the PR is not open",
   "second-review-done": "a second review was already requested on this head",
-  "no-second-reviewer":
-    "no reviewer on another account than the first review's is available",
+  "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; use second_review or send it for rework",
   "design-failed":
@@ -431,11 +402,7 @@ export interface Engine {
    * until the hold is released; it parks as `merge-hold` when it would otherwise merge. The
    * operator (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
    */
-  holdMerge(
-    runId: string,
-    by: MergeHoldBy,
-    reason: string,
-  ): Promise<MergeHoldResult>;
+  holdMerge(runId: string, by: MergeHoldBy, reason: string): Promise<MergeHoldResult>;
   /** Releases the hold. FLIGHT cannot release one the operator set; the operator can release any. */
   releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
@@ -504,15 +471,10 @@ export function reviewerOf(
     exceptAccount?: string;
   },
 ): CrewSeatConfig | null {
-  const session = (config.crew?.sessions ?? []).find((s) =>
-    s.seats.some((x) => x.id === seatId),
-  );
+  const session = (config.crew?.sessions ?? []).find((s) => s.seats.some((x) => x.id === seatId));
   // An unavailable reviewer is still required; its queued reviews wait for model discovery.
   const seats = (session?.seats ?? []).filter(
-    (x) =>
-      !x.retiring &&
-      seatDef(x).loop === "review" &&
-      x.accountId !== avail?.exceptAccount,
+    (x) => !x.retiring && seatDef(x).loop === "review" && x.accountId !== avail?.exceptAccount,
   );
   const ofRole = seats.filter((x) => x.role === role);
   const pool = ofRole.length > 0 ? ofRole : seats;
@@ -521,9 +483,7 @@ export function reviewerOf(
     (x) => !accountHoldsNewWork(config, avail.store, x.accountId, avail.now),
   );
   const busy = new Set(
-    avail.store
-      .reviewsIn(["starting", "running"])
-      .map((review) => review.seatId),
+    avail.store.reviewsIn(["starting", "running"]).map((review) => review.seatId),
   );
   const others = notStopped.filter((x) => !avail.avoid?.has(x.id));
   const from = others.length > 0 ? others : notStopped;
@@ -549,8 +509,7 @@ function budgetFailedSeats(store: Store, run: Run): Set<string> {
 }
 
 /** The review seat's role the run's profile asks for, if it has a profile. */
-const reviewRoleOf = (run: Run): string | undefined =>
-  run.profile?.profile.reviewer.role;
+const reviewRoleOf = (run: Run): string | undefined => run.profile?.profile.reviewer.role;
 
 const reviewFact = (r: ReviewRow): ReviewFact => ({
   id: r.id,
@@ -573,18 +532,12 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
  */
 export function designFailedIn(
   rows: readonly ReviewRow[],
-  checks: (
-    reviewId: number,
-  ) => readonly Pick<ReviewCheck, "check" | "result">[],
+  checks: (reviewId: number) => readonly Pick<ReviewCheck, "check" | "result">[],
   findings: (reviewId: number) => readonly ReviewFinding[] = () => [],
 ): boolean {
   const picturesOnly = (id: number): boolean => {
-    const blocking = findings(id).filter((f) =>
-      BLOCKING_SEVERITIES.includes(f.severity),
-    );
-    return (
-      blocking.length > 0 && blocking.every((f) => f.category === "evidence")
-    );
+    const blocking = findings(id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity));
+    return blocking.length > 0 && blocking.every((f) => f.category === "evidence");
   };
   const verdicts = rows
     .filter((r) => r.state === "reported")
@@ -603,9 +556,7 @@ const endReason = (run: Run): string => {
     case "engine":
       return "finished";
     case "exit":
-      return run.status === "failed"
-        ? "the process crashed"
-        : "the process exited";
+      return run.status === "failed" ? "the process crashed" : "the process exited";
     default:
       return "ended";
   }
@@ -617,14 +568,12 @@ const TICKET_UNREADABLE = "ticket could not be read: ";
 export function createEngine(deps: EngineDeps): Engine {
   const { config, store, bus, supervisor, publisher } = deps;
   const now = deps.now ?? Date.now;
-  const log =
-    deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
+  const log = deps.log ?? ((line: string) => process.stderr.write(`engine: ${line}\n`));
   /** The run's review seat now: one whose account can start, else the first (see reviewerOf). */
   const reviewerFor = (run: Run): CrewSeatConfig | null => {
     // while FLIGHT's second review of the head is the one wanted, it runs on another account
     const sha = store.runPush(run.id)?.sha;
-    const second =
-      sha === undefined ? undefined : run.loop?.flightSecondReview?.[sha];
+    const second = sha === undefined ? undefined : run.loop?.flightSecondReview?.[sha];
     return reviewerOf(config, run.agentId, reviewRoleOf(run), {
       store,
       now: now(),
@@ -636,13 +585,8 @@ export function createEngine(deps: EngineDeps): Engine {
   };
   /** The input + output tokens a review run on this seat's account may use. */
   const reviewBudgetOf = (seatId: string): number => {
-    const account = config.accounts.find(
-      (a) => a.id === seatConfig(seatId)?.accountId,
-    );
-    return reviewTokenBudgetOf(
-      account?.vendor ?? "claude",
-      account?.reviewTokenBudget,
-    );
+    const account = config.accounts.find((a) => a.id === seatConfig(seatId)?.accountId);
+    return reviewTokenBudgetOf(account?.vendor ?? "claude", account?.reviewTokenBudget);
   };
   const chains = new Map<string, Promise<void>>();
   /** A seat wake reads several tables before it claims its delivery line. */
@@ -692,9 +636,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const cache = tickCache.getStore();
     if (cache === undefined) return null;
     const key =
-      config.crew?.sessions.find((s) =>
-        s.seats.some((x) => x.id === run.agentId),
-      )?.checkout ?? run.repoId;
+      config.crew?.sessions.find((s) => s.seats.some((x) => x.id === run.agentId))?.checkout ??
+      run.repoId;
     let tip = cache.tips.get(key);
     if (tip === undefined) {
       tip = publisher.originTip(run);
@@ -708,15 +651,11 @@ export function createEngine(deps: EngineDeps): Engine {
   const live = () => deps.enabled && started && (deps.crewOn?.() ?? true);
 
   const seatConfig = (seatId: string): CrewSeatConfig | undefined =>
-    (config.crew?.sessions ?? [])
-      .flatMap((s) => s.seats)
-      .find((x) => x.id === seatId);
+    (config.crew?.sessions ?? []).flatMap((s) => s.seats).find((x) => x.id === seatId);
 
   /** Whether the seat is in the config: a seat removed from it leaves its runs alone. */
   const seatKnown = (seatId: string): boolean =>
-    (config.crew?.sessions ?? []).some((s) =>
-      s.seats.some((x) => x.id === seatId),
-    );
+    (config.crew?.sessions ?? []).some((s) => s.seats.some((x) => x.id === seatId));
 
   /** Runs `fn` after everything queued for the run; never rejects. */
   function onChain(runId: string, fn: () => Promise<void>): Promise<void> {
@@ -734,22 +673,15 @@ export function createEngine(deps: EngineDeps): Engine {
   /** A missing CLI leaves the line unclaimed; the next pass sends it after the take-back. */
   async function send(runId: string, key: string, text: string) {
     const seatId = store.run(runId)?.agentId;
-    if (seatId !== undefined && pausedSeat(store, seatId))
-      return "no-session" as const;
+    if (seatId !== undefined && pausedSeat(store, seatId)) return "no-session" as const;
     const sent = await supervisor.send(runId, key, text);
     if (sent === "no-session") {
       const run = store.run(runId);
-      const accountId =
-        run === null ? undefined : seatConfig(run.agentId)?.accountId;
+      const accountId = run === null ? undefined : seatConfig(run.agentId)?.accountId;
       if (
         run?.loop?.phase !== "parked" &&
         (accountId === undefined ||
-          !accountAtStop(
-            config,
-            store,
-            runAccountId(store, runId, accountId),
-            now(),
-          ))
+          !accountAtStop(config, store, runAccountId(store, runId, accountId), now()))
       ) {
         await supervisor.resumeRun(runId);
       }
@@ -774,11 +706,7 @@ export function createEngine(deps: EngineDeps): Engine {
    * again, and the loop parks the run once the window is spent); the seat is never asked to do it,
    * as its guard denies the merge.
    */
-  async function followAdoptedHead(
-    run: Run,
-    loop: RunLoop,
-    at: number,
-  ): Promise<void> {
+  async function followAdoptedHead(run: Run, loop: RunLoop, at: number): Promise<void> {
     const held = loop.branchMoved;
     if (held === undefined) return;
     const worktree = worktreeOf(run, loop);
@@ -814,11 +742,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Like `onChain`, resolving to what `fn` returned (`fallback` when it threw). */
-  function onChainResult<T>(
-    runId: string,
-    fallback: T,
-    fn: () => Promise<T>,
-  ): Promise<T> {
+  function onChainResult<T>(runId: string, fallback: T, fn: () => Promise<T>): Promise<T> {
     let result = fallback;
     return onChain(runId, async () => {
       result = await fn();
@@ -828,10 +752,7 @@ export function createEngine(deps: EngineDeps): Engine {
   /** The run's own worktree: the aside run's, or its seat's while the seat holds it. */
   function worktreeOf(run: Run, loop: RunLoop): string | null {
     const seatRow = supervisor.seat(run.agentId);
-    return (
-      loop.hold?.worktree ??
-      (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null)
-    );
+    return loop.hold?.worktree ?? (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null);
   }
 
   function flightHeld(run: Run, action: "work" | "merge" = "work"): boolean {
@@ -843,17 +764,11 @@ export function createEngine(deps: EngineDeps): Engine {
         .openQuestions()
         .some(
           (q) =>
-            q.runId === run.id &&
-            (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
+            q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
         ) ||
       seat === undefined ||
       (action === "work" &&
-        accountAtStop(
-          config,
-          store,
-          runAccountId(store, run.id, seat.accountId),
-          now(),
-        ))
+        accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now()))
     );
   }
 
@@ -869,12 +784,7 @@ export function createEngine(deps: EngineDeps): Engine {
       pausedSeat(store, run.agentId, run.id) ||
       flightHeld(run) ||
       seat === undefined ||
-      accountAtStop(
-        config,
-        store,
-        runAccountId(store, run.id, seat.accountId),
-        now(),
-      )
+      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
     )
       return false;
     const row = supervisor.seat(run.agentId);
@@ -892,13 +802,9 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** The run's PR: the stored number, else the PR on its branch opened since the run began. */
-  function findPr(
-    run: Run,
-    loop: RunLoop,
-  ): ReturnType<Store["pullRequests"]>[number] | null {
+  function findPr(run: Run, loop: RunLoop): ReturnType<Store["pullRequests"]>[number] | null {
     const prs = prsFor(run.repoId);
-    if (loop.prNumber !== null)
-      return prs.find((p) => p.number === loop.prNumber) ?? null;
+    if (loop.prNumber !== null) return prs.find((p) => p.number === loop.prNumber) ?? null;
     if (run.branch === null) return null;
     return (
       prs
@@ -932,27 +838,21 @@ export function createEngine(deps: EngineDeps): Engine {
         woken,
         flightSeatId:
           // config allows one watcher across every session, so it need not share the run's session
-          config.crew?.sessions
-            .flatMap((s) => s.seats)
-            .find((x) => seatDef(x).loop === "watch")?.id ?? null,
+          config.crew?.sessions.flatMap((s) => s.seats).find((x) => seatDef(x).loop === "watch")
+            ?.id ?? null,
         // the fix line carries the findings' text and wakes the seat itself, so a findings item
         // whose fix line is still unsent is left to it
       }).filter(
         (x) =>
           x.kind !== "findings" ||
-          fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in
-            claimed,
+          fixKey(run.id, epoch, Number(x.key.slice("review:".length))) in claimed,
       );
       if (work.length === 0) return;
       const key = `wake:${run.id}:${work.map((x) => x.key).join("|")}`;
       await send(
         run.id,
         key,
-        pendingWakeText(
-          work,
-          run.ticket ?? "this run",
-          config.operator.timezone,
-        ),
+        pendingWakeText(work, run.ticket ?? "this run", config.operator.timezone),
       );
     } finally {
       waking.delete(runId);
@@ -960,10 +860,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** A green head without any evidence needs one prompt, then operator attention. */
-  async function watchGreenEvidence(
-    run: Run,
-    notes = store.notes(),
-  ): Promise<void> {
+  async function watchGreenEvidence(run: Run, notes = store.notes()): Promise<void> {
     const loop = run.loop;
     if (!loop || run.endedAt !== null) return;
     const prefix = `evidence-remind:${run.id}:`;
@@ -1006,9 +903,7 @@ export function createEngine(deps: EngineDeps): Engine {
       .loopEventsOfRun(run.id)
       .filter((e) => e.text.startsWith(CI_PASSED_EVENT_PREFIX))
       .find((e) => {
-        const sha = e.text
-          .slice(CI_PASSED_EVENT_PREFIX.length)
-          .match(/^[0-9a-f]{7,}/i)?.[0];
+        const sha = e.text.slice(CI_PASSED_EVENT_PREFIX.length).match(/^[0-9a-f]{7,}/i)?.[0];
         return sha !== undefined && head.startsWith(sha);
       })?.at;
     const greenKey = `evidence-green:${run.id}:${head}`;
@@ -1030,10 +925,7 @@ export function createEngine(deps: EngineDeps): Engine {
       );
   }
 
-  async function rulesFor(
-    repoId: RepoId,
-    mainSha?: string,
-  ): Promise<RepoRules | null> {
+  async function rulesFor(repoId: RepoId, mainSha?: string): Promise<RepoRules | null> {
     const r = await deps.rules(repoId, mainSha);
     if (r instanceof Error) {
       ruleNotes.set(repoId, r.message);
@@ -1044,14 +936,8 @@ export function createEngine(deps: EngineDeps): Engine {
     hardRulesSet.set(repoId, r.hardRulesSet);
     // kept for Needs you, which says who a hard-rule flag waits on without reading the rules
     const bySetting = hardRulesBySettingKey(repoId);
-    if (
-      store.getSetting(bySetting) !==
-      hardRulesBy(r, flightPowersOf(config, repoId))
-    ) {
-      store.setSetting(
-        bySetting,
-        hardRulesBy(r, flightPowersOf(config, repoId)),
-      );
+    if (store.getSetting(bySetting) !== hardRulesBy(r, flightPowersOf(config, repoId))) {
+      store.setSetting(bySetting, hardRulesBy(r, flightPowersOf(config, repoId)));
       bus.emit("attention");
     }
     noteHardRules(repoId, r.hardRulesSet);
@@ -1132,10 +1018,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const rows = store.reviewsOfRun(run.id).map((row) => ({
         ...reviewFact(row),
         reportPermalink: store.qaReportForReview(row.id)?.permalink,
-        design:
-          store
-            .reviewChecks(row.id)
-            .find((check) => check.check === "design") ?? null,
+        design: store.reviewChecks(row.id).find((check) => check.check === "design") ?? null,
       }));
       const cur = pushed
         ? reviewFor(
@@ -1184,9 +1067,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // With no CLI, plan between turns; only a due line asks the supervisor to resume.
         inTurn: !current || (facts?.inTurn ?? false),
         lastTurnEndedAt:
-          current && turnEnded !== null && turnEnded >= run.startedAt
-            ? turnEnded
-            : null,
+          current && turnEnded !== null && turnEnded >= run.startedAt ? turnEnded : null,
         resumedAt: current ? (facts?.resumedAt ?? null) : null,
         quietTurns: current ? (row?.quietTurns ?? 0) : 0,
         rateLimitedUntil: current ? (facts?.rateLimitedUntil ?? null) : null,
@@ -1230,25 +1111,21 @@ export function createEngine(deps: EngineDeps): Engine {
               reviewStatus:
                 flightPowersOf(config, run.repoId) === "superuser" &&
                 loop.reviewWaivedSha === pr.headSha &&
-                reviewStatuses.get(run.id) !==
-                  `${pr.headSha}:success:${REVIEW_STATUS_WAIVED}`
+                reviewStatuses.get(run.id) !== `${pr.headSha}:success:${REVIEW_STATUS_WAIVED}`
                   ? "pending"
                   : checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
             },
       ciP90Ms:
-        pr?.ci === "pending" &&
-        verdict.pending.length + verdict.missing.length > 0
+        pr?.ci === "pending" && verdict.pending.length + verdict.missing.length > 0
           ? store.ciCheckP90Ms(run.repoId)
           : {},
       autoMerge:
-        repo?.autonomy === "merge" &&
-        activeAway(store, at, config.operator.timezone) === null,
+        repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
       flightHeld: flightHeld(run, "merge"),
       floorApproved:
-        pr !== null &&
-        mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
+        pr !== null && mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
       card: item === undefined ? null : hudColumnOf(item),
       claimed: store.claimedKeys(run.id),
       openNotes: store.openNoteKeys(run.id),
@@ -1256,17 +1133,12 @@ export function createEngine(deps: EngineDeps): Engine {
       tokens: run.tokens === null ? 0 : run.tokens.input + run.tokens.output,
       budget: config.crew?.runTokenBudget ?? Number.MAX_SAFE_INTEGER,
       costUsd: run.costUsd,
-      budgetUsd:
-        run.vendor === "codex"
-          ? null
-          : (run.profile?.profile.budgetUsd ?? null),
+      budgetUsd: run.vendor === "codex" ? null : (run.profile?.profile.budgetUsd ?? null),
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
       // a question FLIGHT passed to the operator: the run waits off its seat for the answer
-      operatorAsk: store
-        .openQuestions()
-        .some((q) => q.runId === run.id && q.passedAt !== null),
+      operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       ...(run.profile
         ? {
             limits: {
@@ -1308,31 +1180,15 @@ export function createEngine(deps: EngineDeps): Engine {
             to: r.sha,
           }
         : null;
-      if (r.prSame && cur.reviewWaivedSha === r.parent)
-        cur.reviewWaivedSha = r.sha;
+      if (r.prSame && cur.reviewWaivedSha === r.parent) cur.reviewWaivedSha = r.sha;
       store.setRunLoop(run.id, cur);
-      store.addLoopEvent(
-        `${run.id}:update:${r.sha}`,
-        run.id,
-        mergedMainText(mainSha),
-        at,
-      );
+      store.addLoopEvent(`${run.id}:update:${r.sha}`, run.id, mergedMainText(mainSha), at);
       const from = carriedFrom(cur.carry, cur.reviewWaivedSha, r.sha);
       if (
         from !== null &&
-        reviewFor(
-          store.reviewsOfRun(run.id).map(reviewFact),
-          cur.epoch,
-          r.sha,
-          from,
-        ) !== null
+        reviewFor(store.reviewsOfRun(run.id).map(reviewFact), cur.epoch, r.sha, from) !== null
       ) {
-        store.addLoopEvent(
-          `${run.id}:carry:${r.sha}`,
-          run.id,
-          reviewCarriedText(from, r.sha),
-          at,
-        );
+        store.addLoopEvent(`${run.id}:carry:${r.sha}`, run.id, reviewCarriedText(from, r.sha), at);
       }
     } else {
       cur.phase = "working";
@@ -1359,11 +1215,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const sha = store.runPush(run.id)?.sha;
     if (!rules?.hardRulesSet || type === null || !sha) return null;
     const diff = await publisher.awayDiff(run, sha);
-    if (
-      !diff ||
-      !awayDiffSafe(type, diff, rules, seatConfig(run.agentId)?.area ?? [])
-    )
-      return null;
+    if (!diff || !awayDiffSafe(type, diff, rules, seatConfig(run.agentId)?.area ?? [])) return null;
     cur.awayBugDecision =
       type === "bug"
         ? {
@@ -1380,8 +1232,7 @@ export function createEngine(deps: EngineDeps): Engine {
               .map((c) => c.path),
           }
         : null;
-    if (type === "bug" && cur.awayBugDecision?.testPaths.length === 0)
-      return null;
+    if (type === "bug" && cur.awayBugDecision?.testPaths.length === 0) return null;
     if (
       type === "bug" &&
       !store
@@ -1389,19 +1240,15 @@ export function createEngine(deps: EngineDeps): Engine {
         .some(
           (d) =>
             d.kind === "note" &&
-            d.about ===
-              awayBugDecisionAbout(run.ticket ?? "", diff.base, sha) &&
+            d.about === awayBugDecisionAbout(run.ticket ?? "", diff.base, sha) &&
             d.decision === AWAY_BUG_VERIFIED &&
-            (cur.awayBugDecision?.testPaths ?? []).some((path) =>
-              d.basis.includes(path),
-            ),
+            (cur.awayBugDecision?.testPaths ?? []).some((path) => d.basis.includes(path)),
         )
     )
       return null;
     cur.awayBugDecision = null;
     const current = store.run(run.id);
-    if (!current || flightHeld(current) || store.runPush(run.id)?.sha !== sha)
-      return null;
+    if (!current || flightHeld(current) || store.runPush(run.id)?.sha !== sha) return null;
     const snap = snapshot(current, cur, now(), rules.hardRulesSet);
     const latestAway = activeAway(store, now(), config.operator.timezone);
     if (!snap || !latestAway?.may.safePr || !latestAway.may.pickUp) return null;
@@ -1434,9 +1281,7 @@ export function createEngine(deps: EngineDeps): Engine {
       .filter((r) => r.state === "reported")
       .at(-1);
     const findings = review
-      ? store
-          .findingsOf(review.id)
-          .filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
+      ? store.findingsOf(review.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
       : [];
     return review && findings.length > 0
       ? fixText({
@@ -1462,8 +1307,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const repo = config.repos.find((r) => r.id === run.repoId);
     const issue = issueOf(run);
     if (repo === undefined || issue === null) return null;
-    if (cur.controllerCheck?.sha === sha && cur.controllerCheck.pass)
-      return null;
+    if (cur.controllerCheck?.sha === sha && cur.controllerCheck.pass) return null;
     let ticket: TicketView | null = null;
     let why = "";
     try {
@@ -1479,9 +1323,7 @@ export function createEngine(deps: EngineDeps): Engine {
       if (tries.n === 0 || at - tries.at >= ENGINE_TICK_MS / 2) {
         tries.n += 1;
         tries.at = at;
-        log(
-          `${run.id}: could not read the ticket for its controller check: ${why}`,
-        );
+        log(`${run.id}: could not read the ticket for its controller check: ${why}`);
       }
       tries.why = why;
       ticketTries.set(run.id, tries);
@@ -1508,9 +1350,7 @@ export function createEngine(deps: EngineDeps): Engine {
     // Old rows may still contain the former first-100-file snapshot. Until a complete read,
     // photograph the whole HUD so a web file past that boundary cannot bypass the gate.
     const complete =
-      row?.headSha === sha &&
-      row.changedFiles != null &&
-      paths.length === row.changedFiles;
+      row?.headSha === sha && row.changedFiles != null && paths.length === row.changedFiles;
     return {
       repoId: run.repoId,
       pr,
@@ -1518,10 +1358,7 @@ export function createEngine(deps: EngineDeps): Engine {
       paths: complete ? paths : ["apps/web/src/hud.css"],
       onStored: async (m: EvidenceManifest) => {
         const section = evidenceSectionText(m, deps.evidence?.baseUrl ?? "");
-        const r = await publisher.setEvidenceSection(
-          store.run(run.id) ?? run,
-          section,
-        );
+        const r = await publisher.setEvidenceSection(store.run(run.id) ?? run, section);
         if (!r.ok) throw new Error(r.text);
       },
     };
@@ -1532,23 +1369,15 @@ export function createEngine(deps: EngineDeps): Engine {
    * A ticket label or a touched path matches; a diff that cannot be read counts as a match, so the
    * operator decides. Once the operator accepted this head it waits no more.
    */
-  async function uatHold(
-    run: Run,
-    cur: RunLoop,
-    sha: string,
-  ): Promise<string | null> {
+  async function uatHold(run: Run, cur: RunLoop, sha: string): Promise<string | null> {
     if (cur.uat?.sha === sha && cur.uat.accepted) return null;
     const rules = await rulesFor(run.repoId);
     const { labels, paths } = rules?.uat ?? { labels: [], paths: [] };
     if (labels.length === 0 && paths.length === 0) return null;
     const issue = issueOf(run);
-    const card =
-      issue === null
-        ? undefined
-        : (store.boardItem(run.repoId, issue) ?? undefined);
+    const card = issue === null ? undefined : (store.boardItem(run.repoId, issue) ?? undefined);
     // without the ticket's labels the rule cannot be judged: the operator decides
-    if (labels.length > 0 && card === undefined)
-      return "its ticket's labels could not be read";
+    if (labels.length > 0 && card === undefined) return "its ticket's labels could not be read";
     const wanted = new Set(labels.map((l) => l.toLowerCase()));
     const label = card?.labels.find((l) => wanted.has(l.toLowerCase()));
     if (label !== undefined) return `ticket label ${label}`;
@@ -1557,9 +1386,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const touched = await publisher.hardRuleTouches(run, sha, paths);
       return touched.length === 0 ? null : `it changes ${touched[0]}`;
     } catch (e) {
-      log(
-        `${run.id}: could not read the diff for its uat rule: ${(e as Error).message}`,
-      );
+      log(`${run.id}: could not read the diff for its uat rule: ${(e as Error).message}`);
       return "its diff could not be read";
     }
   }
@@ -1603,12 +1430,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const sent = await supervisor.send(run.id, key, text);
     checkBriefDispatch();
     // a paused seat reads it when it resumes: the verdict is recorded all the same
-    if (
-      sent !== "sent" &&
-      sent !== "dup" &&
-      !pausedSeat(store, run.agentId, run.id)
-    )
-      return false;
+    if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId, run.id)) return false;
     const stored = store.addComms(row);
     // delivered by the line above: not again from the inbox
     if (stored !== null && (sent === "sent" || sent === "dup"))
@@ -1620,12 +1442,7 @@ export function createEngine(deps: EngineDeps): Engine {
    * Whether the PR's evidence hold applies to `sha`: a web PR without the pairs of this head. It
    * records why (once per text), asks for the capture, and the caller stops its pass.
    */
-  function evidenceHeld(
-    run: Run,
-    cur: RunLoop,
-    sha: string,
-    at: number,
-  ): boolean {
+  function evidenceHeld(run: Run, cur: RunLoop, sha: string, at: number): boolean {
     if (!deps.evidence || cur.prNumber === null) return false;
     const target = evidenceTarget(run, cur.prNumber, sha);
     const held = deps.evidence.gate(target);
@@ -1669,17 +1486,14 @@ export function createEngine(deps: EngineDeps): Engine {
         cur.lastRefusal = r.text;
         const limit = cur.merging?.done.includes("merge") ? 10 : REFUSAL_TRIES;
         if (step === undefined || cur.transient < limit) {
-          if (step === undefined && cur.transient >= REFUSAL_TRIES)
-            out.again = true;
+          if (step === undefined && cur.transient >= REFUSAL_TRIES) out.again = true;
           // a merge step that did not go through stops the pass: the later steps wait for it
           if (step !== undefined) out.parked = true;
           return;
         }
       }
       const reason =
-        step === undefined
-          ? r.text
-          : mergeStepFailedText(MERGE_STEP_WORDS[step], r.text);
+        step === undefined ? r.text : mergeStepFailedText(MERGE_STEP_WORDS[step], r.text);
       out.parked = true;
       cur.phase = "parked";
       cur.hold = parkHold(
@@ -1725,15 +1539,11 @@ export function createEngine(deps: EngineDeps): Engine {
       store.addLoopEvent(`${run.id}:merge:${step}`, run.id, text, at);
     };
     const mergedSha = (): string =>
-      cur.merging?.sha ??
-      findPr(run, cur)?.headSha ??
-      store.runPush(run.id)?.sha ??
-      "";
+      cur.merging?.sha ?? findPr(run, cur)?.headSha ?? store.runPush(run.id)?.sha ?? "";
     const away = activeAway(store, now(), config.operator.timezone);
     if (away && a.kind === "merge") return;
     if (away && a.kind === "move-card" && !away.may.status) return;
-    const checkedSha =
-      away && a.kind === "mark-ready" ? await safeAwayPr(live(), cur) : null;
+    const checkedSha = away && a.kind === "mark-ready" ? await safeAwayPr(live(), cur) : null;
     if (away && a.kind === "mark-ready" && checkedSha === null) return;
     if (MERGE_STEP_KINDS.has(a.kind) && repo?.autonomy !== "merge") return;
     if (
@@ -1743,12 +1553,7 @@ export function createEngine(deps: EngineDeps): Engine {
     ) {
       const current = store.run(run.id);
       if (current === null || flightHeld(current, "merge")) return;
-      const snap = snapshot(
-        current,
-        cur,
-        now(),
-        hardRulesSet.get(run.repoId) === true,
-      );
+      const snap = snapshot(current, cur, now(), hardRulesSet.get(run.repoId) === true);
       if (snap === null || !gateView(snap, cur).passes) return;
     }
     switch (a.kind) {
@@ -1764,10 +1569,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (sent === "sent") {
             handOff(
               COMMS_MC,
-              commsMirror(
-                text,
-                "Push checks failed; the full command list was sent to the seat.",
-              ),
+              commsMirror(text, "Push checks failed; the full command list was sent to the seat."),
             );
             // running checks makes no commit, so the push clock starts over: a full window from the message
             cur.pushStartedAt = at;
@@ -1779,12 +1581,7 @@ export function createEngine(deps: EngineDeps): Engine {
         lastTransient.delete(run.id);
         const sha = store.runPush(run.id)?.sha;
         if (sha !== undefined) {
-          store.addLoopEvent(
-            `${run.id}:pushed:${sha}`,
-            run.id,
-            `pushed ${sha.slice(0, 7)}`,
-            at,
-          );
+          store.addLoopEvent(`${run.id}:pushed:${sha}`, run.id, `pushed ${sha.slice(0, 7)}`, at);
         }
         out.again = true;
         return;
@@ -1792,14 +1589,9 @@ export function createEngine(deps: EngineDeps): Engine {
       case "open-pr": {
         const ticket = {
           issue,
-          title:
-            run.ticketTitle ?? store.boardItem(run.repoId, issue)?.title ?? "",
+          title: run.ticketTitle ?? store.boardItem(run.repoId, issue)?.title ?? "",
         };
-        const r = await publisher.openPr(
-          run,
-          ticket,
-          store.latestEvidence(run.id)?.note ?? "",
-        );
+        const r = await publisher.openPr(run, ticket, store.latestEvidence(run.id)?.note ?? "");
         if (!r.ok) return refused(r);
         cur.transient = 0;
         cur.lastRefusal = null;
@@ -1813,12 +1605,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         }
         cur.prNumber = r.prNumber;
-        store.addLoopEvent(
-          `${run.id}:pr:${r.prNumber}`,
-          run.id,
-          `PR #${r.prNumber} opened`,
-          at,
-        );
+        store.addLoopEvent(`${run.id}:pr:${r.prNumber}`, run.id, `PR #${r.prNumber} opened`, at);
         return;
       }
       case "send": {
@@ -1850,16 +1637,12 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         if (sent === "sent" && a.key.startsWith("conflict:"))
-          handOff(
-            COMMS_MC,
-            commsMirror(a.text, conflictCommsText(cur.mainMerge?.files ?? [])),
-          );
+          handOff(COMMS_MC, commsMirror(a.text, conflictCommsText(cur.mainMerge?.files ?? [])));
         return;
       }
       case "ci-excerpt": {
         const held = excerpts.get(a.key);
-        const excerpt =
-          held ?? (await publisher.ciExcerpt(repo?.github ?? "", a.sha));
+        const excerpt = held ?? (await publisher.ciExcerpt(repo?.github ?? "", a.sha));
         // only a real excerpt is kept: a failed read or an empty answer is asked for again
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
@@ -1868,10 +1651,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // only a one-line notice of it
         const sent = await send(run.id, a.key, intro + excerpt);
         if (sent === "sent")
-          handOff(
-            COMMS_MC,
-            ciNoticeText(a.sha, excerpt, repo?.github ?? "", a.again === true),
-          );
+          handOff(COMMS_MC, ciNoticeText(a.sha, excerpt, repo?.github ?? "", a.again === true));
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
@@ -1974,10 +1754,7 @@ export function createEngine(deps: EngineDeps): Engine {
       case "take-next": {
         // not while the seat holds another run (a merged PR found after the run was stopped)
         const holds = supervisor.seat(run.agentId)?.runId ?? null;
-        if (
-          !pausedSeat(store, run.agentId, null) &&
-          (holds === null || holds === run.id)
-        )
+        if (!pausedSeat(store, run.agentId, null) && (holds === null || holds === run.id))
           await deps.takeNext(run.agentId);
         return;
       }
@@ -2005,17 +1782,13 @@ export function createEngine(deps: EngineDeps): Engine {
         // across epochs (the granted review is the next round, and a fail past it parks again);
         // every other epoch counts its own
         const settled =
-          cur.flightReworkGrantEpoch !== undefined &&
-          cur.epoch >= cur.flightReworkGrantEpoch;
+          cur.flightReworkGrantEpoch !== undefined && cur.epoch >= cur.flightReworkGrantEpoch;
         const round =
           1 +
           store
             .reviewsOfRun(run.id)
             .filter(
-              (r) =>
-                (settled || r.epoch === cur.epoch) &&
-                r.state === "reported" &&
-                r.blocking > 0,
+              (r) => (settled || r.epoch === cur.epoch) && r.state === "reported" && r.blocking > 0,
             ).length;
         const id = store.requestReview({
           authorRunId: run.id,
@@ -2052,9 +1825,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (not while the run waits for the operator's answer: that wakes it)
-        const asked = store
-          .openQuestions()
-          .find((q) => q.runId === run.id && q.passedAt !== null);
+        const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
         const waitsOnPerson = asked !== undefined;
         const before = cur.hold;
         cur.hold = leaveSeat(
@@ -2100,12 +1871,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const accountId = seatConfig(run.agentId)?.accountId;
         if (
           accountId !== undefined &&
-          accountAtStop(
-            config,
-            store,
-            runAccountId(store, run.id, accountId),
-            at,
-          )
+          accountAtStop(config, store, runAccountId(store, run.id, accountId), at)
         )
           return;
         const oldest = wakeDueAsideRun(store, run.agentId);
@@ -2119,19 +1885,12 @@ export function createEngine(deps: EngineDeps): Engine {
             // a 502 that repeats on one run (its dependencies will not reinstall) is not a busy
             // seat: the next pass still tries again, but FLIGHT is told once
             if (e instanceof SupervisorError && e.status === 502) {
-              const message = Array.from(e.message)
-                .slice(0, STDERR_TEXT_MAX)
-                .join("");
+              const message = Array.from(e.message).slice(0, STDERR_TEXT_MAX).join("");
               const before = wakeRetries.get(run.id);
               const n = before?.message === message ? before.n + 1 : 1;
               wakeRetries.set(run.id, { message, n });
               if (n >= 2)
-                store.addLoopEvent(
-                  wakeStuckKey(run.id),
-                  run.id,
-                  wakeStuckText(message),
-                  at,
-                );
+                store.addLoopEvent(wakeStuckKey(run.id), run.id, wakeStuckText(message), at);
             } else {
               // anything else between two 502s (a busy seat's 409) breaks "twice running"
               wakeRetries.delete(run.id);
@@ -2151,9 +1910,7 @@ export function createEngine(deps: EngineDeps): Engine {
           store.addLoopEvent(
             `${run.id}:wake-failed:${at}`,
             run.id,
-            wakeFailedText(
-              Array.from(message).slice(0, STDERR_TEXT_MAX).join(""),
-            ),
+            wakeFailedText(Array.from(message).slice(0, STDERR_TEXT_MAX).join("")),
             at,
           );
           out.again = true;
@@ -2163,10 +1920,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // a run parked on the operator's question gets one line to carry on with the answer
         // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
         // on the seat as any other)
-        if (
-          cur.hold?.ask !== undefined &&
-          store.question(cur.hold.ask)?.answeredAt != null
-        ) {
+        if (cur.hold?.ask !== undefined && store.question(cur.hold.ask)?.answeredAt != null) {
           cur.pendingLine = {
             key: answerLineKey(run.id, cur.hold.ask),
             text: answeredLineText,
@@ -2174,12 +1928,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         cur.hold = rejoinSeat(cur.hold);
         const call = seatCallSign(run.agentId);
-        store.addLoopEvent(
-          `${run.id}:woken:${at}`,
-          run.id,
-          wokenEventText(call),
-          at,
-        );
+        store.addLoopEvent(`${run.id}:woken:${at}`, run.id, wokenEventText(call), at);
         // the fix line goes now
         out.again = true;
         return;
@@ -2248,12 +1997,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (check.park === undefined) return;
           cur.controllerCheck = { sha: a.sha, from: cur.phase, pass: false };
           cur.phase = "parked";
-          cur.hold = parkHold(
-            cur.hold,
-            CONTROLLER_CHECK_PARK,
-            check.park,
-            false,
-          );
+          cur.hold = parkHold(cur.hold, CONTROLLER_CHECK_PARK, check.park, false);
           store.addLoopEvent(
             `${run.id}:${cur.epoch}:parked:controller-check:${a.sha}`,
             run.id,
@@ -2324,11 +2068,7 @@ export function createEngine(deps: EngineDeps): Engine {
         let failure: string | null = null;
         try {
           const rules = await rulesFor(run.repoId);
-          const r = await publisher.fileMinorFindings(
-            live(),
-            pr ?? 0,
-            rules?.techDebtIssue,
-          );
+          const r = await publisher.fileMinorFindings(live(), pr ?? 0, rules?.techDebtIssue);
           if (r.issueNumber !== undefined) cur.minorIssueNumber = r.issueNumber;
           if (!r.ok) failure = r.text;
           else if (r.issueNumber !== undefined) {
@@ -2406,10 +2146,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (r.transient) {
           // one counted per tick, as for a refused merge step; the step is tried again next tick
           const prev = localTries.get(run.id);
-          const n =
-            prev === undefined
-              ? 1
-              : prev.n + (at - prev.at >= ENGINE_TICK_MS / 2 ? 1 : 0);
+          const n = prev === undefined ? 1 : prev.n + (at - prev.at >= ENGINE_TICK_MS / 2 ? 1 : 0);
           localTries.set(run.id, {
             n,
             at: prev !== undefined && n === prev.n ? prev.at : at,
@@ -2418,11 +2155,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         localTries.delete(run.id);
         // the run is over and merged: this is housekeeping, left to the operator
-        stepDone(
-          "delete-local",
-          mergedSha(),
-          localNotDeletedText(branch, r.text),
-        );
+        stepDone("delete-local", mergedSha(), localNotDeletedText(branch, r.text));
         store.raiseNote({
           key: cleanupBranchNoteKey(run.id),
           kind: "blocked",
@@ -2445,12 +2178,7 @@ export function createEngine(deps: EngineDeps): Engine {
           retro: seatCallSign(reviewer.id),
         });
         const event = (text: string): void => {
-          store.addLoopEvent(
-            reviewEventKey(run.id, row.id, "pr-body"),
-            run.id,
-            text,
-            at,
-          );
+          store.addLoopEvent(reviewEventKey(run.id, row.id, "pr-body"), run.id, text, at);
         };
         if (r.ok) {
           bodyTries.delete(row.id);
@@ -2515,12 +2243,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const mark = `${sha}:${status.state}:${status.description}`;
     if (reviewStatuses.get(run.id) === mark) return;
     try {
-      const r = await publisher.setReviewStatus(
-        run,
-        sha,
-        status.state,
-        status.description,
-      );
+      const r = await publisher.setReviewStatus(run, sha, status.state, status.description);
       if (r.ok) {
         reviewStatuses.set(run.id, mark);
         reviewStatusFailures.delete(run.id);
@@ -2537,8 +2260,7 @@ export function createEngine(deps: EngineDeps): Engine {
     const run = store.run(runId);
     const stored = run?.loop;
     if (run === null || stored === undefined || stored === null) return;
-    if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId, run.id))
-      return;
+    if (!seatKnown(run.agentId) || pausedSeat(store, run.agentId, run.id)) return;
     const at = now();
     const input: RunLoop = { ...stored };
     // a rework grant is used up once a review in its epoch or after passes; a blocking one keeps it
@@ -2547,21 +2269,13 @@ export function createEngine(deps: EngineDeps): Engine {
       grantEpoch !== undefined &&
       store
         .reviewsOfRun(runId)
-        .some(
-          (r) =>
-            r.epoch >= grantEpoch && r.state === "reported" && r.blocking === 0,
-        )
+        .some((r) => r.epoch >= grantEpoch && r.state === "reported" && r.blocking === 0)
     )
       delete input.flightReworkGrantEpoch;
     const pr = findPr(run, input);
     if (pr !== null && input.prNumber === null) input.prNumber = pr.number;
     // a web PR's head needs its screenshot pairs; asking is cheap once they exist
-    if (
-      deps.evidence &&
-      run.endedAt === null &&
-      pr?.state === "open" &&
-      pr.headSha
-    )
+    if (deps.evidence && run.endedAt === null && pr?.state === "open" && pr.headSha)
       void deps.evidence.ensure(evidenceTarget(run, pr.number, pr.headSha));
     if (pr?.state === "merged" && !input.merging?.done.includes("merge")) {
       if (input.merging)
@@ -2576,8 +2290,7 @@ export function createEngine(deps: EngineDeps): Engine {
       activeAway(store, at, config.operator.timezone) &&
       pr?.state === "open" &&
       input.merging?.done.includes("ready") &&
-      (input.merging.sha !== pr.headSha ||
-        input.lastRefusal === READY_UNDO_FAILED)
+      (input.merging.sha !== pr.headSha || input.lastRefusal === READY_UNDO_FAILED)
     ) {
       // A failed rollback must be retried even when the cached PR still says draft.
       if (!pr.isDraft || input.lastRefusal === READY_UNDO_FAILED) {
@@ -2633,10 +2346,7 @@ export function createEngine(deps: EngineDeps): Engine {
       input.flightClearedSha &&
       pushed &&
       input.flightClearedSha !== pushed.sha &&
-      !(
-        input.carry?.from === input.flightClearedSha &&
-        input.carry.to === pushed.sha
-      )
+      !(input.carry?.from === input.flightClearedSha && input.carry.to === pushed.sha)
     )
       input.flightClearedSha = null;
     // in ci, a conflicting PR needs main's sha to merge it in, reviewer or not
@@ -2653,8 +2363,7 @@ export function createEngine(deps: EngineDeps): Engine {
       // Origin's tip is read every pass; cached strays also depend on the seat area.
       const area = [...(seatConfig(run.agentId)?.area ?? [])];
       const known =
-        input.gate?.sha === pushed.sha &&
-        JSON.stringify(input.gate.area) === JSON.stringify(area)
+        input.gate?.sha === pushed.sha && JSON.stringify(input.gate.area) === JSON.stringify(area)
           ? input.gate
           : null;
       if (known === null) input.gate = null;
@@ -2677,8 +2386,7 @@ export function createEngine(deps: EngineDeps): Engine {
       (session) =>
         session.repoId === run.repoId &&
         session.seats.some(
-          (seat) =>
-            crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full",
+          (seat) => crewProfileOf(seat.role, seatDef(seat).loop) === "flight-full",
         ),
     );
     // The full-profile self-approval floor belongs to that runtime, not the global repo defaults.
@@ -2687,23 +2395,15 @@ export function createEngine(deps: EngineDeps): Engine {
         ? null
         : [
             ...new Set([
-              ...effectiveHardRules(
-                rules,
-                flightPowers,
-                ownsHubFiles(config, run.repoId),
-              ),
-              ...(fullFlight
-                ? controllerCheckPathsOf(ownsHubFiles(config, run.repoId))
-                : []),
+              ...effectiveHardRules(rules, flightPowers, ownsHubFiles(config, run.repoId)),
+              ...(fullFlight ? controllerCheckPathsOf(ownsHubFiles(config, run.repoId)) : []),
             ]),
           ];
     const hardRulesHash =
       rules === null
         ? null
         : createHash("sha256")
-            .update(
-              JSON.stringify(fullFlight ? classifiedRules : rules.hardRules),
-            )
+            .update(JSON.stringify(fullFlight ? classifiedRules : rules.hardRules))
             .digest("hex");
     if (
       run.endedAt === null &&
@@ -2715,11 +2415,7 @@ export function createEngine(deps: EngineDeps): Engine {
       input.touches = null; // unreadable rules must not reuse the old clearance
       if (classifiedRules !== null) {
         try {
-          const paths = await publisher.hardRuleTouches(
-            run,
-            pushed.sha,
-            classifiedRules,
-          );
+          const paths = await publisher.hardRuleTouches(run, pushed.sha, classifiedRules);
           input.touches = {
             sha: pushed.sha,
             paths,
@@ -2743,9 +2439,7 @@ export function createEngine(deps: EngineDeps): Engine {
       try {
         await followAdoptedHead(run, input, at);
       } catch (e) {
-        log(
-          `${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        log(`${runId}: moving the worktree failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     const snap = snapshot(run, input, at, mergeAllowed);
@@ -2768,12 +2462,7 @@ export function createEngine(deps: EngineDeps): Engine {
       !store.branchCommits(run.repoId, run.branch ?? "").has(pr.headSha) &&
       (await publisher.isDescendant(run, pushed.sha, pr.headSha)) &&
       // only the operator's own commits are taken into a seat's worktree; anyone else's park as stuck
-      (await publisher.pushesFrom(
-        run,
-        pushed.sha,
-        pr.headSha,
-        config.operator.githubLogins ?? [],
-      ))
+      (await publisher.pushesFrom(run, pushed.sha, pr.headSha, config.operator.githubLogins ?? []))
     ) {
       // the fetch can take a while: a commit or push the seat made meanwhile is not this push,
       // and the snapshot is stale; the next pass reads it again
@@ -2821,17 +2510,12 @@ export function createEngine(deps: EngineDeps): Engine {
     if (cur.pushFor !== stored.pushFor) lastTransient.delete(run.id);
     // a run's held excerpts are for its current failure only, and none once it has ended
     for (const key of [...excerpts.keys()]) {
-      if (
-        !key.startsWith(`ci:${run.id}:`) &&
-        !key.startsWith(`rerun:${run.id}:`)
-      )
-        continue;
+      if (!key.startsWith(`ci:${run.id}:`) && !key.startsWith(`rerun:${run.id}:`)) continue;
       const current =
         key === `ci:${run.id}:${cur.ciFailedSha}` ||
         key === rerunFailedKey(run.id, cur.ciFailedSha ?? "");
       // (in ci, a new report is in flight: the line about the old failure is moot)
-      if (run.endedAt !== null || cur.phase === "ci" || !current)
-        excerpts.delete(key);
+      if (run.endedAt !== null || cur.phase === "ci" || !current) excerpts.delete(key);
     }
     saveLoop(runId, cur, stored, at);
     // The run's card is not the ended run's to move once another run has the ticket.
@@ -2852,9 +2536,7 @@ export function createEngine(deps: EngineDeps): Engine {
       try {
         await act(a, run, cur, planned, out);
       } catch (e) {
-        log(
-          `${runId}: ${a.kind} failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        log(`${runId}: ${a.kind} failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     saveLoop(runId, cur, store.run(runId)?.loop, at);
@@ -2868,9 +2550,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (!live()) return Promise.resolve();
     return onChain(runId, async () => {
       const run = store.run(runId);
-      const done = ticks.step(
-        `reconcile ${run?.repoId} ${runId} ${run?.loop?.phase ?? "no loop"}`,
-      );
+      const done = ticks.step(`reconcile ${run?.repoId} ${runId} ${run?.loop?.phase ?? "no loop"}`);
       try {
         await pass(runId);
       } finally {
@@ -2892,11 +2572,9 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     // (another run has the ticket: the card is that run's now, and nothing here may move it)
     if (loop.phase === "done" || store.hasNewerRunOnTicket(run)) return true;
-    if (!loop.hold?.ended || loop.cardFor !== cardMark("parked", loop.epoch))
-      return false;
+    if (!loop.hold?.ended || loop.cardFor !== cardMark("parked", loop.epoch)) return false;
     return (
-      store.openNoteKeys(run.id).includes(blockedNoteKey(run.id, loop.epoch)) ||
-      blockedGone(run)
+      store.openNoteKeys(run.id).includes(blockedNoteKey(run.id, loop.epoch)) || blockedGone(run)
     );
   }
 
@@ -2914,11 +2592,8 @@ export function createEngine(deps: EngineDeps): Engine {
     const moves = store.boardMovesOfRun(run.id);
     // A card sent to Ready (an ended run with review findings) is on offer to the next seat: the
     // work is not stuck, so the note is not wanted.
-    if (moves.some((m) => m.column === "Ready" && m.state === "done"))
-      return true;
-    const movedThere = moves.some(
-      (m) => m.column === "Blocked" && m.state === "done",
-    );
+    if (moves.some((m) => m.column === "Ready" && m.state === "done")) return true;
+    const movedThere = moves.some((m) => m.column === "Blocked" && m.state === "done");
     return (
       repo?.autonomy === "merge" &&
       movedThere &&
@@ -2930,10 +2605,7 @@ export function createEngine(deps: EngineDeps): Engine {
   /** Whether the run's PR is merged (found on GitHub, or by the merge step). */
   function mergedRun(run: Run): boolean {
     const loop = run.loop ?? NEW_LOOP;
-    return (
-      findPr(run, loop)?.state === "merged" ||
-      (loop.merging?.done ?? []).includes("merge")
-    );
+    return findPr(run, loop)?.state === "merged" || (loop.merging?.done ?? []).includes("merge");
   }
 
   async function sweepNotes(notes = store.notes()): Promise<void> {
@@ -2969,17 +2641,11 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Gives back the takes older than `TAKE_STALE_MS`; `all`: every one (no take is in flight at boot). */
   function untakeStale(all = false): void {
-    for (const row of store.staleTakes(
-      all ? Number.POSITIVE_INFINITY : now() - TAKE_STALE_MS,
-    )) {
+    for (const row of store.staleTakes(all ? Number.POSITIVE_INFINITY : now() - TAKE_STALE_MS)) {
       if (!seatKnown(row.seatId)) continue;
       const runId = supervisor.seat(row.seatId)?.runId ?? null;
       const active = runId === null ? null : store.run(runId);
-      if (
-        active?.ticket === `${row.repoId}#${row.issue}` &&
-        active.endedAt === null
-      )
-        continue;
+      if (active?.ticket === `${row.repoId}#${row.issue}` && active.endedAt === null) continue;
       store.untake(row.seatId, row.repoId, row.issue);
     }
   }
@@ -3007,14 +2673,9 @@ export function createEngine(deps: EngineDeps): Engine {
     const seats = (config.crew?.sessions ?? []).flatMap((s) => s.seats);
     await Promise.all(
       seats
+        .filter((s) => !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build")
         .filter(
-          (s) =>
-            !s.retiring && !seatUnavailable(s) && seatDef(s).loop === "build",
-        )
-        .filter(
-          (s) =>
-            !pausedSeat(store, s.id, null) &&
-            seatMayTake(store, s.id, maxOpenRunsOf(config)),
+          (s) => !pausedSeat(store, s.id, null) && seatMayTake(store, s.id, maxOpenRunsOf(config)),
         )
         .map((s) =>
           deps.takeNext(s.id).catch((e: unknown) => {
@@ -3027,14 +2688,9 @@ export function createEngine(deps: EngineDeps): Engine {
   /** Supersedes a review that is still going or waiting; true when it was. */
   function dropReview(row: ReviewRow): boolean {
     const at = now();
-    const ok = store.setReviewState(
-      row.id,
-      ["queued", "starting", "running"],
-      "superseded",
-      {
-        at,
-      },
-    );
+    const ok = store.setReviewState(row.id, ["queued", "starting", "running"], "superseded", {
+      at,
+    });
     if (ok) {
       store.addLoopEvent(
         reviewEventKey(row.authorRunId, row.id, "dropped"),
@@ -3047,19 +2703,14 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   /** Ends the review's run when it has one that has not ended. */
-  async function endReviewRun(
-    row: ReviewRow,
-    reason?: "superseded",
-  ): Promise<void> {
+  async function endReviewRun(row: ReviewRow, reason?: "superseded"): Promise<void> {
     if (row.runId === null) return;
-    if (store.run(row.runId)?.endedAt === null)
-      await supervisor.endRunByEngine(row.runId, reason);
+    if (store.run(row.runId)?.endedAt === null) await supervisor.endRunByEngine(row.runId, reason);
   }
 
   /** Whether the review's author run is in review on the sha the hub pushed, its PR open at that head. */
   function reviewWanted(row: ReviewRow): boolean {
-    if (isExternalReview(row))
-      return deps.externalReviews?.wanted(row) ?? false;
+    if (isExternalReview(row)) return deps.externalReviews?.wanted(row) ?? false;
     const author = store.run(row.authorRunId);
     const loop = author?.loop;
     if (author === null || loop === undefined || loop === null) return false;
@@ -3073,20 +2724,14 @@ export function createEngine(deps: EngineDeps): Engine {
       (loop.phase === "review" || loop.phase === "ci");
     if (!own && !carried) return false;
     const pr = findPr(author, loop);
-    return (
-      pr !== null &&
-      pr.state === "open" &&
-      (pr.headSha === row.sha || pr.headSha === head)
-    );
+    return pr !== null && pr.state === "open" && (pr.headSha === row.sha || pr.headSha === head);
   }
 
   /** Keeps the running reviews going, ends the finished ones' runs and starts the queued ones. */
   async function superviseReviews(): Promise<void> {
     if (!live()) return;
     // Network reads and screenshot preparation must not hold up existing review supervision.
-    void deps.externalReviews
-      ?.sync()
-      .catch(() => log("External QA queue refresh failed."));
+    void deps.externalReviews?.sync().catch(() => log("External QA queue refresh failed."));
     await supervisor.resumeDeferredRuns?.();
     if (!live()) return;
     // 1. the health of each running review
@@ -3101,10 +2746,7 @@ export function createEngine(deps: EngineDeps): Engine {
       if (
         isExternalReview(row)
           ? !reviewWanted(row)
-          : author === null ||
-            author.endedAt !== null ||
-            phase === "done" ||
-            phase === "parked"
+          : author === null || author.endedAt !== null || phase === "done" || phase === "parked"
       ) {
         dropReview(row);
         await endReviewRun(row, "superseded");
@@ -3135,8 +2777,7 @@ export function createEngine(deps: EngineDeps): Engine {
         run: {
           startedAt: rrun.startedAt,
           ended: rrun.endedAt === null ? null : { reason: endReason(rrun) },
-          tokens:
-            rrun.tokens === null ? 0 : rrun.tokens.input + rrun.tokens.output,
+          tokens: rrun.tokens === null ? 0 : rrun.tokens.input + rrun.tokens.output,
         },
         seat: {
           holdsRun,
@@ -3146,9 +2787,7 @@ export function createEngine(deps: EngineDeps): Engine {
           state: seatRow?.state ?? "stopped",
           inTurn: !holdsRun || (facts?.inTurn ?? false),
           lastTurnEndedAt:
-            holdsRun && turnEnded !== null && turnEnded >= rrun.startedAt
-              ? turnEnded
-              : null,
+            holdsRun && turnEnded !== null && turnEnded >= rrun.startedAt ? turnEnded : null,
           resumedAt: holdsRun ? (facts?.resumedAt ?? null) : null,
           rateLimitedUntil: holdsRun ? (facts?.rateLimitedUntil ?? null) : null,
         },
@@ -3185,11 +2824,7 @@ export function createEngine(deps: EngineDeps): Engine {
     // next pass requests it again for the current one
     for (const row of store.reviewsIn(["queued"])) {
       const author = store.run(row.authorRunId);
-      if (
-        author === null ||
-        store.reviewMoved(row.id) ||
-        row.seatId === reviewerFor(author)?.id
-      )
+      if (author === null || store.reviewMoved(row.id) || row.seatId === reviewerFor(author)?.id)
         continue;
       const at = now();
       if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
@@ -3205,30 +2840,23 @@ export function createEngine(deps: EngineDeps): Engine {
     // 4. each free scratch seat starts its oldest wanted review that can start. One refused for now
     // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
     // Existing reviews continue.
-    const capacityConfig =
-      config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+    const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
     const machine = storedMachineCapacity(store, now(), capacityConfig);
     if (machine.blocked) {
       return;
     }
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
-      .filter(
-        (x) =>
-          !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch",
-      );
+      .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
     for (const seat of scratch) {
       if (pausedSeat(store, seat.id, null)) continue;
       const held = supervisor.seat(seat.id)?.runId ?? null;
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
-      if (!free || supervisor.busy().some((b) => b.seatId === seat.id))
-        continue;
+      if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
-      const queuedHere = store
-        .reviewsIn(["queued"])
-        .filter((r) => r.seatId === seat.id);
+      const queuedHere = store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id);
       for (const row of queuedHere) {
         if (!reviewWanted(row)) {
           dropReview(row);
@@ -3245,10 +2873,7 @@ export function createEngine(deps: EngineDeps): Engine {
           pausedSeat(store, seat.id, null)
         )
           break;
-        if (
-          !store.setReviewState(row.id, ["queued"], "starting", { at: now() })
-        )
-          continue;
+        if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
         let runId: string | null = null;
         try {
           ({ runId } = await supervisor.startReview(seat.id, row.id));
@@ -3264,9 +2889,7 @@ export function createEngine(deps: EngineDeps): Engine {
             void reconcileRun(row.authorRunId);
             continue;
           } else {
-            const failure = Array.from(message)
-              .slice(0, STDERR_TEXT_MAX)
-              .join("");
+            const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
             if (
               store.setReviewState(row.id, ["starting"], "failed", {
                 at: now(),
@@ -3318,14 +2941,11 @@ export function createEngine(deps: EngineDeps): Engine {
     const author = store.run(rv.authorRunId);
     const second = author?.loop?.flightSecondReview?.[rv.sha];
     const row = store.review(rv.id);
-    if (author === null || second === undefined || second.epoch !== rv.epoch)
-      return;
+    if (author === null || second === undefined || second.epoch !== rv.epoch) return;
     if (row?.state !== "reported") return;
     const first = store.review(second.firstReviewId);
     const said = (r: ReviewRow | null): string =>
-      r?.verdict
-        ? `spec ${r.verdict.spec}, quality ${r.verdict.quality}`
-        : "no verdict";
+      r?.verdict ? `spec ${r.verdict.spec}, quality ${r.verdict.quality}` : "no verdict";
     store.addFlightDecision({
       at: now(),
       kind: "settle",
@@ -3345,8 +2965,7 @@ export function createEngine(deps: EngineDeps): Engine {
   }
 
   async function refreshRuleNotes(runs: Run[]): Promise<void> {
-    for (const repoId of new Set(runs.map((r) => r.repoId)))
-      await rulesFor(repoId);
+    for (const repoId of new Set(runs.map((r) => r.repoId))) await rulesFor(repoId);
   }
 
   const engine: Engine = {
@@ -3421,10 +3040,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (steps !== null) log(overrunText(startedAt, steps));
       };
       // work that blocks the event loop starves the timer, so each step also checks the clock
-      const phase = async <T>(
-        label: string,
-        fn: () => Promise<T> | T,
-      ): Promise<T> => {
+      const phase = async <T>(label: string, fn: () => Promise<T> | T): Promise<T> => {
         const done = ticks.step(label);
         try {
           return await fn();
@@ -3473,15 +3089,12 @@ export function createEngine(deps: EngineDeps): Engine {
 
     async reconcileRepo(repoId) {
       if (!live()) return;
-      const runs = loopRuns().filter(
-        (r) => r.repoId === repoId && r.endedAt === null,
-      );
+      const runs = loopRuns().filter((r) => r.repoId === repoId && r.endedAt === null);
       await Promise.all(runs.map((r) => reconcileRun(r.id)));
     },
 
     onOperatorMessage(runId, by = "CAPCOM", opts) {
-      if (!live())
-        return Promise.resolve({ lifted: false, reason: "engine-off" });
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       // a pass that throws before deciding leaves this: the error is logged by the chain
       let result: OperatorResult = { lifted: false, reason: "engine-error" };
       const refuse = (reason: OperatorRefusal): void => {
@@ -3491,49 +3104,30 @@ export function createEngine(deps: EngineDeps): Engine {
         checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
-        if (run === null || loop === undefined || loop === null)
-          return refuse("not-parked");
+        if (run === null || loop === undefined || loop === null) return refuse("not-parked");
         if (pausedSeat(store, run.agentId, run.id)) return refuse("held");
         const kind = loop.hold?.kind;
-        if (
-          run.endedAt !== null ||
-          loop.phase !== "parked" ||
-          !kind ||
-          loop.hold?.ended
-        )
+        if (run.endedAt !== null || loop.phase !== "parked" || !kind || loop.hold?.ended)
           return refuse("not-parked");
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
         if (kind === "budget" && isDollarCapReason(loop.hold?.reason ?? ""))
           return refuse("dollar-cap");
         // only a recorded verdict settles a controller check, for every caller
-        if (kind === CONTROLLER_CHECK_PARK)
-          return refuse("use-controller-check");
+        if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
         // only the release lifts a merge hold; FLIGHT's rework sends the held PR back to its builder
         // and leaves the hold in force
-        if (
-          kind === MERGE_HOLD_PARK &&
-          !(by === "FLIGHT" && opts?.action === "rework")
-        )
+        if (kind === MERGE_HOLD_PARK && !(by === "FLIGHT" && opts?.action === "rework"))
           return refuse("use-merge-hold");
-        if (
-          by === "FLIGHT" &&
-          kind === "review-failed" &&
-          opts?.action !== "rereview"
-        )
+        if (by === "FLIGHT" && kind === "review-failed" && opts?.action !== "rereview")
           return refuse("wrong-action");
-        if (
-          opts?.kinds !== undefined &&
-          (kind === undefined || !opts.kinds.includes(kind))
-        )
+        if (opts?.kinds !== undefined && (kind === undefined || !opts.kinds.includes(kind)))
           return refuse("wrong-action");
         if (by === "FLIGHT" && flightHeld(run)) return refuse("held");
-        let secondOf: { firstReviewId: number; firstAccountId: string } | null =
-          null;
+        let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
-          if (by === "CAPCOM" && opts.action !== "accept")
-            return refuse("not-permitted");
+          if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
           const pr = findPr(run, loop);
           // A push the push gate refused and a person made later is never recorded on a CI step.
           // When the PR's head is the run's newest commit, origin holds exactly what the seat has,
@@ -3545,18 +3139,14 @@ export function createEngine(deps: EngineDeps): Engine {
           }
           const pushed = store.runPush(run.id);
           if (!pushed) return refuse("head-moved");
-          if (opts.action !== "lift" && pr?.state !== "open")
-            return refuse("pr-not-open");
-          if (opts.action !== "lift" && pr?.headSha !== pushed.sha)
-            return refuse("head-moved");
+          if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
+          if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
-            if (kind !== "stuck" && kind !== "gate")
-              return refuse("wrong-action");
+            if (kind !== "stuck" && kind !== "gate") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
             if (
               !head ||
-              (head !== pushed.sha &&
-                !(await publisher.isDescendant(run, pushed.sha, head)))
+              (head !== pushed.sha && !(await publisher.isDescendant(run, pushed.sha, head)))
             )
               return refuse("head-moved");
           } else if (
@@ -3644,8 +3234,7 @@ export function createEngine(deps: EngineDeps): Engine {
           next.budgetExtra += config.crew?.runTokenBudget ?? 0;
         }
         if (kind === "review" || kind === "review-ruling") {
-          const staysInReview =
-            opts?.action === "accept" || opts?.action === "second_review";
+          const staysInReview = opts?.action === "accept" || opts?.action === "second_review";
           next.phase = staysInReview ? "review" : "working";
           if (!staysInReview) {
             next.reviewWaivedSha = null;
@@ -3653,11 +3242,7 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         } else if (kind === "ruling" || kind === "review-failed") {
           next.phase = "review";
-        } else if (
-          head !== null &&
-          pushed?.sha === head &&
-          (pr === null || pr.state === "open")
-        ) {
+        } else if (head !== null && pushed?.sha === head && (pr === null || pr.state === "open")) {
           // re-judged on the next pass (an open PR is read, a missing one is opened again);
           // its clocks run from now
           next.phase = "ci";
@@ -3670,11 +3255,7 @@ export function createEngine(deps: EngineDeps): Engine {
           next.reviewWaivedSha = pushed?.sha ?? null;
           next.flightClearedSha = pushed?.sha ?? null;
           next.phase = "review";
-        } else if (
-          opts?.action === "second_review" &&
-          secondOf !== null &&
-          pushed
-        ) {
+        } else if (opts?.action === "second_review" && secondOf !== null && pushed) {
           next.reviewWaivedSha = null;
           next.flightClearedSha = null;
           next.phase = "review";
@@ -3701,9 +3282,7 @@ export function createEngine(deps: EngineDeps): Engine {
               };
             const findings = reworkFindings(run.id, loop.hold?.reason ?? "");
             const message =
-              opts.note === undefined
-                ? findings
-                : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
+              opts.note === undefined ? findings : `${findings}\n\nFLIGHT fix list: ${opts.note}`;
             // a run set aside is woken first; its seat on another run (a 409) queues the rework
             let queue = false;
             if (next.hold?.worktree) {
@@ -3711,8 +3290,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 await supervisor.wakeRun(run.id);
                 next.hold = rejoinSeat(next.hold);
               } catch (e) {
-                if ((e as { status?: unknown }).status !== 409)
-                  return refuse("rework-undelivered");
+                if ((e as { status?: unknown }).status !== 409) return refuse("rework-undelivered");
                 queue = true;
               }
             }
@@ -3749,8 +3327,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 `${run.id}:flight-rework:${next.epoch}`,
                 message,
               );
-              if (sent !== "sent" && sent !== "dup")
-                return refuse("rework-undelivered");
+              if (sent !== "sent" && sent !== "dup") return refuse("rework-undelivered");
             }
           }
         }
@@ -3758,12 +3335,7 @@ export function createEngine(deps: EngineDeps): Engine {
         checkBriefDispatch();
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
-        store.addLoopEvent(
-          `${run.id}:resumed:${next.epoch}`,
-          run.id,
-          `resumed by ${by}`,
-          at,
-        );
+        store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
         result = { lifted: true };
         await withoutBriefDispatch(() => pass(run.id));
@@ -3775,8 +3347,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (reason: OperatorRefusal): void => {
         result = { lifted: false, reason };
       };
-      if (!live())
-        return Promise.resolve({ lifted: false, reason: "engine-off" });
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
         checkBriefDispatch();
         const run = store.run(runId);
@@ -3799,16 +3370,14 @@ export function createEngine(deps: EngineDeps): Engine {
         )
           return refuse("not-parked");
         // the verdict is for the head the operator looked at
-        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase()))
-          return refuse("head-moved");
+        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase())) return refuse("head-moved");
         const at = now();
         const short = held.sha.slice(0, 7);
         if (verdict === "pass") {
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
           if (pr?.state !== "open") return refuse("pr-not-open");
-          if (pushed?.sha !== held.sha || pr.headSha !== held.sha)
-            return refuse("head-moved");
+          if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
           store.setRunLoop(run.id, {
             ...loop,
             phase: held.from,
@@ -3870,8 +3439,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (reason: OperatorRefusal): void => {
         result = { lifted: false, reason };
       };
-      if (!live())
-        return Promise.resolve({ lifted: false, reason: "engine-off" });
+      if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
         checkBriefDispatch();
         const run = store.run(runId);
@@ -3887,8 +3455,7 @@ export function createEngine(deps: EngineDeps): Engine {
         )
           return refuse("not-parked");
         // the verdict is for the head the operator looked at
-        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase()))
-          return refuse("head-moved");
+        if (sha.length < 7 || !held.sha.startsWith(sha.toLowerCase())) return refuse("head-moved");
         const at = now();
         const short = held.sha.slice(0, 7);
         if (verdict === "accept") {
@@ -3896,8 +3463,7 @@ export function createEngine(deps: EngineDeps): Engine {
           const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
           if (pr?.state !== "open") return refuse("pr-not-open");
-          if (pushed?.sha !== held.sha || pr.headSha !== held.sha)
-            return refuse("head-moved");
+          if (pushed?.sha !== held.sha || pr.headSha !== held.sha) return refuse("head-moved");
           store.setRunLoop(run.id, {
             ...loop,
             phase: held.from,
@@ -3954,103 +3520,83 @@ export function createEngine(deps: EngineDeps): Engine {
 
     holdMerge(runId, by, reason) {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
-      return onChainResult<MergeHoldResult>(
-        runId,
-        refuse("the engine hit an error"),
-        async () => {
-          if (!live()) return refuse("the loop engine is off");
-          checkBriefDispatch();
-          const run = store.run(runId);
-          const loop = run?.loop;
-          if (run === null || !loop || run.endedAt !== null)
-            return refuse("the run is not an active looped run");
-          if (
-            loop.prNumber !== undefined &&
-            findPr(run, loop)?.state === "merged"
-          )
-            return refuse("the run's PR is already merged");
-          if (loop.merging?.done.includes("merge"))
-            return refuse("the run's PR is already merged");
-          if (
-            loop.mergeHold &&
-            loop.mergeHold.by === "CAPCOM" &&
-            by !== "CAPCOM"
-          )
-            return refuse("the operator already holds this run's merge");
-          const at = now();
-          const sha = store.runPush(runId)?.sha;
-          // a run already parked on the hold keeps the phase it left, and its park names the new holder
-          const parkedOnHold =
-            loop.phase === "parked" && loop.hold?.kind === MERGE_HOLD_PARK;
-          const from = loop.mergeHold?.from;
-          store.setRunLoop(runId, {
-            ...loop,
-            mergeHold: {
-              by,
-              reason,
-              at,
-              ...(sha ? { sha } : {}),
-              ...(from ? { from } : {}),
-            },
-            ...(parkedOnHold && loop.hold
-              ? {
-                  hold: { ...loop.hold, reason: mergeHoldParkText(by, reason) },
-                }
-              : {}),
-          });
-          store.addLoopEvent(
-            `${runId}:merge-hold:${at}`,
-            runId,
-            `merge held by ${by}: ${reason}`,
+      return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
+        if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run === null || !loop || run.endedAt !== null)
+          return refuse("the run is not an active looped run");
+        if (loop.prNumber !== undefined && findPr(run, loop)?.state === "merged")
+          return refuse("the run's PR is already merged");
+        if (loop.merging?.done.includes("merge")) return refuse("the run's PR is already merged");
+        if (loop.mergeHold && loop.mergeHold.by === "CAPCOM" && by !== "CAPCOM")
+          return refuse("the operator already holds this run's merge");
+        const at = now();
+        const sha = store.runPush(runId)?.sha;
+        // a run already parked on the hold keeps the phase it left, and its park names the new holder
+        const parkedOnHold = loop.phase === "parked" && loop.hold?.kind === MERGE_HOLD_PARK;
+        const from = loop.mergeHold?.from;
+        store.setRunLoop(runId, {
+          ...loop,
+          mergeHold: {
+            by,
+            reason,
             at,
-          );
-          bus.emit("agents");
-          // a run waiting on FLIGHT's clearance parks on the hold in this pass
-          await withoutBriefDispatch(() => pass(runId));
-          return { ok: true };
-        },
-      );
+            ...(sha ? { sha } : {}),
+            ...(from ? { from } : {}),
+          },
+          ...(parkedOnHold && loop.hold
+            ? {
+                hold: { ...loop.hold, reason: mergeHoldParkText(by, reason) },
+              }
+            : {}),
+        });
+        store.addLoopEvent(
+          `${runId}:merge-hold:${at}`,
+          runId,
+          `merge held by ${by}: ${reason}`,
+          at,
+        );
+        bus.emit("agents");
+        // a run waiting on FLIGHT's clearance parks on the hold in this pass
+        await withoutBriefDispatch(() => pass(runId));
+        return { ok: true };
+      });
     },
 
     releaseMergeHold(runId, by) {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
-      return onChainResult<MergeHoldResult>(
-        runId,
-        refuse("the engine hit an error"),
-        async () => {
-          if (!live()) return refuse("the loop engine is off");
-          checkBriefDispatch();
-          const run = store.run(runId);
-          const loop = run?.loop;
-          const hold = loop?.mergeHold;
-          if (run === null || !loop || !hold)
-            return refuse("the run's merge is not held");
-          if (hold.by === "CAPCOM" && by !== "CAPCOM")
-            return refuse(
-              "the operator set this hold; only the operator can release it",
-            );
-          const at = now();
-          const next: RunLoop = { ...loop, mergeHold: null };
-          if (loop.phase === "parked" && loop.hold?.kind === MERGE_HOLD_PARK) {
-            next.phase = hold.from ?? "ci";
-            next.hold = liftPark(loop.hold);
-            next.unparkedAt = at;
-            next.transient = 0;
-            next.lastRefusal = null;
-          }
-          store.setRunLoop(runId, next);
-          store.addLoopEvent(
-            `${runId}:merge-hold-release:${at}`,
-            runId,
-            `merge hold released by ${by}`,
-            at,
-          );
-          lastTransient.delete(runId);
-          bus.emit("agents");
-          await withoutBriefDispatch(() => pass(runId));
-          return { ok: true };
-        },
-      );
+      return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
+        if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
+        const run = store.run(runId);
+        const loop = run?.loop;
+        const hold = loop?.mergeHold;
+        if (run === null || !loop || !hold) return refuse("the run's merge is not held");
+        if (hold.by === "CAPCOM" && by !== "CAPCOM")
+          return refuse("the operator set this hold; only the operator can release it");
+        const at = now();
+        const next: RunLoop = { ...loop, mergeHold: null };
+        if (loop.phase === "parked" && loop.hold?.kind === MERGE_HOLD_PARK) {
+          next.phase = hold.from ?? "ci";
+          next.hold = liftPark(loop.hold);
+          next.unparkedAt = at;
+          next.transient = 0;
+          next.lastRefusal = null;
+        }
+        store.setRunLoop(runId, next);
+        store.addLoopEvent(
+          `${runId}:merge-hold-release:${at}`,
+          runId,
+          `merge hold released by ${by}`,
+          at,
+        );
+        lastTransient.delete(runId);
+        bus.emit("agents");
+        await withoutBriefDispatch(() => pass(runId));
+        return { ok: true };
+      });
     },
 
     clearFlight(runId, expectedSha) {
@@ -4100,21 +3646,13 @@ export function createEngine(deps: EngineDeps): Engine {
           pausedSeat(store, run.agentId, run.id) ||
           (loop.phase !== "review" &&
             loop.phase !== "ci" &&
-            !(
-              by === "Controller" &&
-              loop.phase === "working" &&
-              loop.hold?.worktree
-            )) ||
+            !(by === "Controller" && loop.phase === "working" && loop.hold?.worktree)) ||
           run.branch === null ||
           flightPowersOf(config, run.repoId) !== "superuser"
         )
           return false;
         const pr = findPr(run, loop);
-        if (
-          pr?.state !== "open" ||
-          pr.headSha !== head ||
-          store.runPush(runId)?.sha === head
-        )
+        if (pr?.state !== "open" || pr.headSha !== head || store.runPush(runId)?.sha === head)
           return false;
         if (by === "Controller") {
           // Recovery changes no checkout and starts no author. Preserve its unpublished work and
@@ -4200,15 +3738,11 @@ export function createEngine(deps: EngineDeps): Engine {
         if (
           pr.ci !== "failing" &&
           !pr.checks?.some(
-            (c) =>
-              c.name !== REVIEW_STATUS_CONTEXT &&
-              c.state === "failing" &&
-              !c.skipped,
+            (c) => c.name !== REVIEW_STATUS_CONTEXT && c.state === "failing" && !c.skipped,
           )
         )
           return no(`No failed check on the PR's head ${sha.slice(0, 7)}.`);
-        const github =
-          config.repos.find((r) => r.id === run.repoId)?.github ?? "";
+        const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const result = await publisher.rerunRuling(github, sha);
         if (!result.ok) return no(result.text);
         return { ok: true, text: `Re-ran failed CI on ${sha.slice(0, 7)}.` };
@@ -4233,44 +3767,30 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         const sha = loop.ciFailedSha;
         const pr = findPr(run, loop);
-        if (
-          sha === null ||
-          store.runPush(run.id)?.sha !== sha ||
-          pr?.state !== "open"
-        ) {
+        if (sha === null || store.runPush(run.id)?.sha !== sha || pr?.state !== "open") {
           return not("the ruled commit is no longer its open PR's head");
         }
         const head = pr.headSha;
-        if (head === null)
-          return not("the ruled commit is no longer its open PR's head");
+        if (head === null) return not("the ruled commit is no longer its open PR's head");
         if (head !== sha) {
           const repo = config.repos.find((r) => r.id === run.repoId);
-          const verdict = ciVerdict(
-            pr.checks ?? [],
-            repo?.requiredChecks ?? [],
-          );
+          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
           const short = head.slice(0, 7);
           const checks = (pr.checks ?? []).filter(
             (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
           );
           const failing = [
             ...new Set(
-              checks
-                .filter((check) => check.state === "failing")
-                .map((check) => check.name),
+              checks.filter((check) => check.state === "failing").map((check) => check.name),
             ),
           ];
           if (failing.length > 0)
-            return not(
-              `checks on the PR's new head ${short} failed: ${failing.join(", ")}`,
-            );
+            return not(`checks on the PR's new head ${short} failed: ${failing.join(", ")}`);
           const pending = [
             ...new Set([
               ...verdict.pending,
               ...verdict.missing,
-              ...checks
-                .filter((check) => check.state === "pending")
-                .map((check) => check.name),
+              ...checks.filter((check) => check.state === "pending").map((check) => check.name),
             ]),
           ];
           if (pending.length > 0 || pr.ci === "pending")
@@ -4325,8 +3845,7 @@ export function createEngine(deps: EngineDeps): Engine {
           await pass(run.id);
           return { kind: "accepted", sha: head };
         }
-        const github =
-          config.repos.find((r) => r.id === run.repoId)?.github ?? "";
+        const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const at = now();
         const rerun = loop.rulingRerun?.sha === sha ? loop.rulingRerun : null;
         if (rerun === null || rerun.outcome !== "pending") {
@@ -4335,10 +3854,7 @@ export function createEngine(deps: EngineDeps): Engine {
           const checks = (pr.checks ?? []).filter(
             (check) => check.name !== REVIEW_STATUS_CONTEXT && !check.skipped,
           );
-          const verdict = ciVerdict(
-            pr.checks ?? [],
-            repo?.requiredChecks ?? [],
-          );
+          const verdict = ciVerdict(pr.checks ?? [], repo?.requiredChecks ?? []);
           const failingNow =
             pr.ci === "failing" ||
             verdict.ci === "failing" ||
@@ -4354,9 +3870,7 @@ export function createEngine(deps: EngineDeps): Engine {
                 ...new Set([
                   ...verdict.pending,
                   ...verdict.missing,
-                  ...checks
-                    .filter((check) => check.state === "pending")
-                    .map((check) => check.name),
+                  ...checks.filter((check) => check.state === "pending").map((check) => check.name),
                 ]),
               ];
               return { kind: "pending", sha, waiting };
@@ -4460,30 +3974,21 @@ export function createEngine(deps: EngineDeps): Engine {
           }
           const loop = run.loop;
           if (loop == null) return refused(MC_SYNC_OFF);
-          if (loop.phase !== "working" || loop.hold?.worktree)
-            return refused(MC_SYNC_NOT_WORKING);
+          if (loop.phase !== "working" || loop.hold?.worktree) return refused(MC_SYNC_NOT_WORKING);
           if (row.worktree === null) return refused(MC_RUN_ENDED);
-          if (
-            loop.mainMerge &&
-            (await publisher.mergeHead(run, row.worktree))
-          ) {
+          if (loop.mainMerge && (await publisher.mergeHead(run, row.worktree))) {
             return { text: writerSyncConflictText(loop.mainMerge.files) };
           }
           const at = now();
           const last = lastSync.get(runId);
           if (last !== undefined && at - last < SYNC_MAIN_GAP_MS) {
-            return refused(
-              syncTooSoonText(
-                Math.ceil((last + SYNC_MAIN_GAP_MS - at) / 60_000),
-              ),
-            );
+            return refused(syncTooSoonText(Math.ceil((last + SYNC_MAIN_GAP_MS - at) / 60_000)));
           }
           const tip = await publisher.mainTip(run);
           if (!tip.ok) return refused(syncFailedText(tip.text));
           const r = await publisher.updateBranch(run, tip.sha, row.worktree);
           if (!r.ok) {
-            if (r.text !== UPDATE_UP_TO_DATE)
-              return refused(syncFailedText(r.text));
+            if (r.text !== UPDATE_UP_TO_DATE) return refused(syncFailedText(r.text));
             return { text: MC_SYNC_UP_TO_DATE };
           }
           if (r.kind === "wait") return refused(MC_SYNC_DIRTY);
@@ -4492,12 +3997,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (!latestLoop) return refused(MC_RUN_ENDED);
           if (r.kind === "merged") {
             store.setRunLoop(runId, { ...latestLoop, mainMerge: null });
-            store.addLoopEvent(
-              `${runId}:update:${r.sha}`,
-              runId,
-              mergedMainText(tip.sha),
-              at,
-            );
+            store.addLoopEvent(`${runId}:update:${r.sha}`, runId, mergedMainText(tip.sha), at);
           } else {
             store.setRunLoop(runId, {
               ...latestLoop,
@@ -4521,9 +4021,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return {
             text:
               r.kind === "merged"
-                ? [syncMergedText(tip.sha, r.sha), r.installNote]
-                    .filter(Boolean)
-                    .join("\n")
+                ? [syncMergedText(tip.sha, r.sha), r.installNote].filter(Boolean).join("\n")
                 : writerSyncConflictText(r.files),
           };
         },
@@ -4535,65 +4033,52 @@ export function createEngine(deps: EngineDeps): Engine {
         kind: "refused",
         text,
       });
-      return onChainResult(
-        runId,
-        refused("the loop engine is off"),
-        async () => {
-          if (!live()) return refused("the loop engine is off");
-          const run = store.run(runId);
-          const loop = run?.loop;
-          if (run == null || loop == null || run.endedAt !== null) {
-            return refused("Mission Control is not driving this run");
-          }
-          if (
-            config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge"
-          ) {
-            return refused("its repo is a draft workspace");
-          }
-          if (loop.phase !== "ci" && loop.phase !== "review") {
-            return refused("the run is not in CI or review");
-          }
-          if (loop.mainMerge)
-            return refused("a merge of main already waits on the seat");
-          const newest = store.newestRunCommit(run.id)?.sha;
-          const pushed = store.runPush(run.id);
-          if (pushed === null || newest !== pushed.sha) {
-            return refused("the branch has unpushed commits");
-          }
-          const tip = pushed.sha;
-          if (tip === undefined)
-            return refused("the branch has no recorded commit");
-          const worktree = worktreeOf(run, loop);
-          if (worktree === null) return refused("the run has no worktree");
-          const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
-          if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) {
-            return refused("its seat is in a turn");
-          }
-          const g = await publisher.gateFacts(run, tip, null);
-          if (!g.ok) return refused(g.text);
-          const mainSha = g.facts.mainSha;
-          if (g.facts.containsMain) return { kind: "current", mainSha };
-          const at = now();
-          const cur: RunLoop = { ...loop };
-          const r = await publisher.updateBranch(
-            { ...run, loop: cur },
-            mainSha,
-            worktree,
-          );
-          if (!r.ok) return refused(r.text);
-          if (r.kind === "wait")
-            return refused("the worktree has uncommitted changes");
-          cur.transient = 0;
-          cur.lastRefusal = null;
-          lastTransient.delete(run.id);
-          branchUpdated(run, cur, mainSha, r, at);
-          bus.emit("agents");
-          await pass(run.id);
-          return r.kind === "merged"
-            ? { kind: "merged", sha: r.sha, mainSha }
-            : { kind: "conflict", files: r.files };
-        },
-      );
+      return onChainResult(runId, refused("the loop engine is off"), async () => {
+        if (!live()) return refused("the loop engine is off");
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (run == null || loop == null || run.endedAt !== null) {
+          return refused("Mission Control is not driving this run");
+        }
+        if (config.repos.find((r) => r.id === run.repoId)?.autonomy !== "merge") {
+          return refused("its repo is a draft workspace");
+        }
+        if (loop.phase !== "ci" && loop.phase !== "review") {
+          return refused("the run is not in CI or review");
+        }
+        if (loop.mainMerge) return refused("a merge of main already waits on the seat");
+        const newest = store.newestRunCommit(run.id)?.sha;
+        const pushed = store.runPush(run.id);
+        if (pushed === null || newest !== pushed.sha) {
+          return refused("the branch has unpushed commits");
+        }
+        const tip = pushed.sha;
+        if (tip === undefined) return refused("the branch has no recorded commit");
+        const worktree = worktreeOf(run, loop);
+        if (worktree === null) return refused("the run has no worktree");
+        const onSeat = supervisor.seat(run.agentId)?.runId === run.id;
+        if (onSeat && supervisor.seatFacts(run.agentId)?.inTurn !== false) {
+          return refused("its seat is in a turn");
+        }
+        const g = await publisher.gateFacts(run, tip, null);
+        if (!g.ok) return refused(g.text);
+        const mainSha = g.facts.mainSha;
+        if (g.facts.containsMain) return { kind: "current", mainSha };
+        const at = now();
+        const cur: RunLoop = { ...loop };
+        const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
+        if (!r.ok) return refused(r.text);
+        if (r.kind === "wait") return refused("the worktree has uncommitted changes");
+        cur.transient = 0;
+        cur.lastRefusal = null;
+        lastTransient.delete(run.id);
+        branchUpdated(run, cur, mainSha, r, at);
+        bus.emit("agents");
+        await pass(run.id);
+        return r.kind === "merged"
+          ? { kind: "merged", sha: r.sha, mainSha }
+          : { kind: "conflict", files: r.files };
+      });
     },
 
     uncommitted(runId) {

@@ -1441,7 +1441,10 @@ describe("Comms seat tools", () => {
       const examples = [...text.matchAll(/`mc comms_send (\{[^`]+\})`/g)];
       expect(examples.length, path).toBeGreaterThan(0);
       for (const [, json] of examples) {
-        const args = JSON.parse(json.replace("<FLIGHT seat id>", "flight-1")) as Record<string, string>;
+        const args = JSON.parse(json.replace("<FLIGHT seat id>", "flight-1")) as Record<
+          string,
+          string
+        >;
         for (const key of exposed.required) expect(args[key], `${path}: ${key}`).toBeDefined();
         expect(exposed.properties.label.enum, path).toContain(args.label);
         expect(args.replyTo, path).toMatch(new RegExp(exposed.properties.replyTo.pattern));
