@@ -26,6 +26,7 @@ export interface Cmux {
 }
 
 const run = promisify(execFile);
+const UUID = /[0-9a-f]{8}-[0-9a-f-]{27,}/i;
 const isDenied = (text: string) => /access denied|not authorised|not authorized/i.test(text);
 
 /** cmux is local-only; all arguments here are hub generated, never operator text. */
@@ -47,6 +48,13 @@ export function createCmux(
       if (isDenied(text)) throw new Error(CMUX_REFUSED_TEXT);
       throw new Error(text.trim() || CMUX_DOWN_TEXT);
     }
+  };
+  const named = async (name: string): Promise<string[]> => {
+    const out = await call(["--id-format", "uuids", "list-workspaces"]);
+    return out.stdout
+      .split("\n")
+      .filter((line) => line.includes(name))
+      .flatMap((line) => UUID.exec(line)?.[0] ?? []);
   };
   const wake = async () => {
     try {
@@ -87,6 +95,9 @@ export function createCmux(
       }
     },
     async newWorkspace(i) {
+      // UUIDs of workspaces with this name before the new one exists: an older one of the same
+      // name (an earlier run's) must never be taken for the new one.
+      const before = await named(i.name);
       const out = await call([
         "new-workspace",
         "--name",
@@ -96,15 +107,17 @@ export function createCmux(
         "--command",
         i.command,
       ]);
-      const uuid = /[0-9a-f]{8}-[0-9a-f-]{27,}/i.exec(out.stdout)?.[0];
+      const uuid = UUID.exec(out.stdout)?.[0];
       if (uuid) return uuid;
-      // cmux 0.65 prints a short reference after creation. Ask the workspace list for UUIDs,
-      // then take the named workspace the caller just made.
-      const workspaces = await call(["--id-format", "uuids", "list-workspaces"]);
-      const named = workspaces.stdout.split("\n").find((line) => line.includes(i.name));
-      const listed = named ? /[0-9a-f]{8}-[0-9a-f-]{27,}/i.exec(named)?.[0] : undefined;
-      if (listed) return listed;
-      throw new Error("cmux did not return a workspace id");
+      // cmux 0.65 prints a short reference after creation: list the workspaces every 0.5 s for up
+      // to 5 s, and take the named UUID that was not there before.
+      const until = Date.now() + 5000;
+      for (;;) {
+        const fresh = (await named(i.name)).find((id) => !before.includes(id));
+        if (fresh) return fresh;
+        if (Date.now() >= until) throw new Error("cmux did not return a workspace id");
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
     },
     async agents() {
       if (Date.now() - agentsAt < 1000) return cachedAgents;

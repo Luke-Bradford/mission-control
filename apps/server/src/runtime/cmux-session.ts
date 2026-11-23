@@ -86,6 +86,7 @@ function cmuxSession(
   let workspace = attachedWorkspace ?? null;
   let pid = attachedPid;
   let alive = true;
+  let failure: string | null = null;
   let detached = false;
   let closing = false;
   let lines = from;
@@ -114,6 +115,7 @@ function cmuxSession(
   const ended = (reason?: string, retake?: true) => {
     if (!alive) return;
     alive = false;
+    failure = reason ?? null;
     if (timer) clearTimeout(timer);
     resolveReady();
     resolveCloseSent();
@@ -358,5 +360,8 @@ function cmuxSession(
       return lines;
     },
     closeSent,
+    get failure() {
+      return failure;
+    },
   };
 }

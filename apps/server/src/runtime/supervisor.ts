@@ -245,7 +245,7 @@ import {
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
-import { createCmux } from "./cmux.ts";
+import { CMUX_DOWN_TEXT, CMUX_REFUSED_TEXT, createCmux } from "./cmux.ts";
 import { attachCmuxSession, cmuxWorkspaceKey, startCmuxSession } from "./cmux-session.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
@@ -439,6 +439,14 @@ function addMcTmpExclude(gitCommonDir: string): void {
 export const CREW_ACTION_FAILED = "crew action failed";
 
 /** A refused action, with the HTTP status a route answers it with. */
+/** A start whose session died: cmux's setup refusals are a 409 with their exact text, the rest a 500. */
+function startRefusal(session: { failure?: string | null }, text = CANNOT_START): SupervisorError {
+  const f = session.failure;
+  return f === CMUX_REFUSED_TEXT || f === CMUX_DOWN_TEXT
+    ? new SupervisorError(409, f)
+    : new SupervisorError(500, text);
+}
+
 export class SupervisorError extends Error {
   readonly status: number;
   readonly deadSession: boolean;
@@ -4181,7 +4189,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await session.ready;
         if (!session.alive) {
           await session.close();
-          throw new SupervisorError(500, CANNOT_START);
+          throw startRefusal(session);
         }
         // The CLI prints nothing (not even init) until its first line: the brief goes at once.
         await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
@@ -4383,8 +4391,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await session.ready;
       if (!session.alive) {
         await session.close();
-        throw new SupervisorError(
-          500,
+        throw startRefusal(
+          session,
           check !== undefined && l.lastStderr !== null
             ? `${CANNOT_START}: ${l.lastStderr}`
             : CANNOT_START,
@@ -4917,7 +4925,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await session.ready;
       if (!session.alive) {
         await session.close();
-        throw new SupervisorError(500, CANNOT_START);
+        throw startRefusal(session);
       }
       await deliverFirstLine(l, brief, () => markInboxRead(seatId, inbox));
       return { runId };

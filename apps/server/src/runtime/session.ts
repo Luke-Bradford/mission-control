@@ -133,6 +133,8 @@ export interface CrewSession {
    * detached without sending one: a hub that is exiting waits on it, so a Stop is not lost.
    */
   readonly closeSent: Promise<void>;
+  /** Why a start failed, when the driver knows (a cmux setup refusal); null otherwise. */
+  readonly failure?: string | null;
 }
 
 type Json = Record<string, unknown>;

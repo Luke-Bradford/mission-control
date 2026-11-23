@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -245,4 +246,17 @@ describe("a restart attaches to the workspace", () => {
     await until(() => expect(copied('"n":"two"')).toBe(1));
     expect(copied('"n":"one"')).toBe(1);
   });
+});
+
+it("a start with cmux's socket refused is a 409 with the setup text and a clean run", async () => {
+  const state = join(dir, "fake-cmux.json");
+  writeFileSync(state, JSON.stringify({ sessions: [], calls: [], ping: "denied" }));
+  const { sup } = make({ cmuxCommand: [process.execPath, fake, state] });
+  sup.start();
+  await expect(sup.startRun("guido-1", 42)).rejects.toMatchObject({
+    status: 409,
+    message: CMUX_REFUSED_TEXT,
+  });
+  expect(calls(state).some((c) => c[0] === "new-workspace")).toBe(false);
+  expect(store.seatSession("guido-1")?.state).toBe("error");
 });

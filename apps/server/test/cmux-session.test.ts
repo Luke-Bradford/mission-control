@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Cmux } from "../src/runtime/cmux.ts";
+import { CMUX_DOWN_TEXT, type Cmux } from "../src/runtime/cmux.ts";
 import {
   attachCmuxSession,
   launcherScript,
@@ -416,5 +416,38 @@ describe("reconciling a saved seat state at attach", () => {
 
   it("does not repeat the turn of a saved running seat", async () => {
     expect(await attachWith("running", "running")).not.toContain("turn-start");
+  });
+});
+
+describe("cmux start failure", () => {
+  it("keeps the setup text on the dead session so the start can refuse with it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmux-session-"));
+    dirs.push(dir);
+    const cmux: Cmux = {
+      ensure: async () => {
+        throw new Error(CMUX_DOWN_TEXT);
+      },
+      newWorkspace: async () => "workspace-1",
+      agents: async () => [],
+      send: async () => "sent",
+      sendKey: async () => {},
+      readScreen: async () => "",
+      close: async () => {},
+    };
+    const session = startCmuxSession({
+      cmux,
+      name: "n",
+      cwd: dir,
+      command: "claude",
+      args: [],
+      env: {},
+      dir: join(dir, "run"),
+      transcriptPath: join(dir, "run.jsonl"),
+      cliSessionId: "s",
+      messageDir: join(dir, "m"),
+    });
+    await session.ready;
+    expect(session.alive).toBe(false);
+    expect(session.failure).toBe(CMUX_DOWN_TEXT);
   });
 });

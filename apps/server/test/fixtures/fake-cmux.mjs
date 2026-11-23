@@ -11,7 +11,10 @@ import {
   writeFileSync,
 } from "node:fs";
 
-const [statePath, command, ...args] = process.argv.slice(2);
+const [statePath, ...rest] = process.argv.slice(2);
+// the global `--id-format <fmt>` flag comes before the command
+if (rest[0] === "--id-format") rest.splice(0, 2);
+const [command, ...args] = rest;
 // Several runs poll at once: take a lock around each read-modify-write so no call is lost.
 const lockPath = `${statePath}.lock`;
 for (;;) {
@@ -38,7 +41,23 @@ const save = () => {
   renameSync(`${statePath}.tmp${process.pid}`, statePath);
 };
 state.calls.push([command, ...args]);
-if (command === "ping") process.exit(0);
+if (command === "ping") {
+  save();
+  if (state.ping === "denied") {
+    process.stderr.write("Error: Access denied\n");
+    process.exit(1);
+  }
+  process.exit(0);
+}
+// A state with `short: true` answers like cmux 0.65: a short reference, UUIDs only in the list.
+// `list_hidden` lists hide the newest workspace for that many calls (a delayed listing).
+if (command === "list-workspaces") {
+  for (const session of state.sessions)
+    if ((session.list_hidden ?? 0) > 0) session.list_hidden -= 1;
+    else process.stdout.write(`  workspace:${session.n} ${session.workspace_id}  ${session.name}\n`);
+  save();
+  process.exit(0);
+}
 if (command === "new-workspace") {
   const at = (flag) => args[args.indexOf(flag) + 1];
   const workspaceId = randomUUID();
@@ -53,9 +72,11 @@ if (command === "new-workspace") {
     cwd: at("--cwd"),
     command: at("--command"),
     session_calls: 0,
+    n: state.sessions.length + 1,
+    list_hidden: state.list_hidden ?? 0,
   });
   save();
-  process.stdout.write(`${workspaceId}\n`);
+  process.stdout.write(state.short ? `OK workspace:${state.sessions.length}\n` : `${workspaceId}\n`);
   process.exit(0);
 }
 if (command === "sessions") {
