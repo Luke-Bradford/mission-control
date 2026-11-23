@@ -376,6 +376,53 @@ describe("a restart attaches to the workspace", () => {
     expect(store.run(run.runId)?.endedAt).toBeNull();
   });
 
+  describe.each([
+    ["the operator's Stop", "operator"],
+    ["the engine's end", "engine"],
+  ])("%s of a held run", (_name, who) => {
+    it("waits for the workspace close before the run ends or the seat is freed", async () => {
+      const { state, first, run } = await idleRun();
+      const old = sessions(state)[0]?.workspace_id;
+      await first.sup.stopAll();
+      const value = JSON.parse(readFileSync(state, "utf8"));
+      value.ping = "down";
+      value.sessions_fail = true;
+      value.close_fail = true;
+      writeFileSync(state, JSON.stringify(value));
+      const next = make({
+        cmuxCommand: [process.execPath, fake, state],
+        cmuxOptions: { open: ["/usr/bin/true"], waitMs: 300 },
+      });
+      next.sup.start();
+      await until(() =>
+        expect(store.seatSession("guido-1")?.reason).toContain("cmux not answering"),
+      );
+      const ending =
+        who === "operator" ? next.sup.endRun("guido-1") : next.sup.endRunByEngine(run.runId);
+      let finished = false;
+      void ending.then(() => {
+        finished = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      // cmux is still down: nothing is recorded, freed or started
+      expect(finished).toBe(false);
+      expect(store.run(run.runId)?.endedAt).toBeNull();
+      expect(store.seatSession("guido-1")?.runId).toBe(run.runId);
+      expect(calls(state).filter((c) => c[0] === "new-workspace")).toHaveLength(1);
+      spawnSync(process.execPath, [opener, state, "restore"]);
+      await ending;
+      const all = calls(state);
+      expect(
+        all.some(
+          (c) => c[0] === "close-workspace" && c.includes(old as string) && c.includes("--force"),
+        ),
+      ).toBe(true);
+      expect(store.run(run.runId)?.endedAt).not.toBeNull();
+      expect(store.seatSession("guido-1")?.runId).toBeNull();
+      expect(all.filter((c) => c[0] === "new-workspace")).toHaveLength(1);
+    });
+  });
+
   it("a saved running row does not start a second turn", async () => {
     const { state, first } = await idleRun();
     setLifecycle(state, "running");

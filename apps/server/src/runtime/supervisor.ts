@@ -1281,18 +1281,39 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * workspace is closed first and only then does `then` end or recover the run. Undelivered
    * prompts stay on the run until then. True when the run is held.
    */
-  const cmuxHolds = new Set<string>();
+  const cmuxHolds = new Map<
+    string,
+    { action: () => void | Promise<void>; done: Promise<void>; settle: (e?: unknown) => void }
+  >();
+  /**
+   * An end requested for a held run (Stop, the engine's end, a supersede) joins the hold: it
+   * replaces the pending action and waits for it, so the run is recorded ended, its seat freed and
+   * its worktree dropped only after the workspace is closed. Null when the run is not held.
+   */
+  function joinCmuxHold(runId: string, then: () => void | Promise<void>): Promise<void> | null {
+    const hold = cmuxHolds.get(runId);
+    if (hold === undefined) return null;
+    hold.action = then;
+    return hold.done;
+  }
   function holdForCmux(row: SeatSessionRow, then: () => void | Promise<void>): boolean {
     const runId = row.runId;
     if (runId === null || store.run(runId)?.endedAt !== null) return false;
     if (store.run(runId)?.vendor === "codex" || store.getSetting(cmuxWorkspaceKey(runId)) === null)
       return false;
     if (cmuxHolds.has(runId)) return true;
-    cmuxHolds.add(runId);
+    let settle: (e?: unknown) => void = () => {};
+    const done = new Promise<void>((resolve, reject) => {
+      settle = (e) => (e === undefined ? resolve() : reject(e));
+    });
+    done.catch(() => {});
+    const hold = { action: then, done, settle };
+    cmuxHolds.set(runId, hold);
     setSeat(row.seatId, { state: "error", reason: CMUX_HELD_TEXT });
     const tick = async (): Promise<void> => {
       if (stopping || runGone(runId, row.seatId)) {
         cmuxHolds.delete(runId);
+        hold.settle();
         return;
       }
       try {
@@ -1300,7 +1321,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         await createCmux(deps.cmuxCommand, log, deps.cmuxOptions).agents();
         if (await endAndRemoveKeeper(row.seatId, runId)) {
           cmuxHolds.delete(runId);
-          await then();
+          try {
+            await hold.action();
+            hold.settle();
+          } catch (e) {
+            hold.settle(e ?? new Error("cmux hold action failed"));
+          }
           return;
         }
       } catch {
@@ -5176,6 +5202,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function endRun(seatId: string, opts: { hold?: boolean } = {}): Promise<void> {
     if (transfers.has(seatId)) await transfers.get(seatId);
     const info = need(seatId);
+    const heldRun = store.seatSession(seatId)?.runId;
+    if (heldRun != null && cmuxHolds.has(heldRun)) {
+      const joined = joinCmuxHold(heldRun, () => {
+        // the workspace is closed: the seat leaves its waiting error so the end can finish
+        setSeat(seatId, { state: "idle", reason: null });
+        return endRun(seatId, opts);
+      });
+      if (joined !== null) return joined;
+    }
     // FLIGHT's seat is never dealt a ticket: ending it always benches it, or the watch restarts it
     const hold = opts.hold ?? seatDef(info.seat).loop === "watch";
     const l = live.get(seatId);
@@ -5252,6 +5287,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (!mayAct()) return;
     const run = store.run(runId);
     if (run === null || run.endedAt !== null) return;
+    // a held run (its cmux workspace is not confirmed closed) ends only after the close
+    const joined = joinCmuxHold(runId, () => endRunByEngine(runId, reason));
+    if (joined !== null) return joined;
     const seatId = run.agentId;
     const info = findSeat(seatId);
     const row = store.seatSession(seatId);
