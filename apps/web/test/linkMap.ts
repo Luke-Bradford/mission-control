@@ -182,6 +182,7 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
         /^\/comms(\/[\w-]+)*\?focus=seat%3A[\w-]+$/,
         "A chart seat narrows the chart to that seat and opens its conversations.",
       ),
+      rule(/, .*context/, /^\/comms\/agents\/[\w-]+$/, "A map seat opens its conversation."),
       rule(
         / → /,
         /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,

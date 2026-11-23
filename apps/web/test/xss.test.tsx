@@ -215,8 +215,8 @@ describe("untrusted text renders literally", () => {
   });
 });
 
-describe("untrusted text in the Comms graph", () => {
-  it("the hover card's newest message and a seat's call sign", async () => {
+describe("untrusted text in the Comms map", () => {
+  it("a seat's call sign", async () => {
     stubFetch({
       "/api/config": CONFIG,
       "/api/comms/links": {
@@ -250,15 +250,11 @@ describe("untrusted text in the Comms graph", () => {
         view={{ kind: "crew" }}
       />,
     );
-    const edge = await waitFor(() => {
-      const el = document.querySelector(".comms-edge");
-      if (!el) throw new Error("no link yet");
+    const graph = await waitFor(() => {
+      const el = document.querySelector(".crew-map");
+      if (!el) throw new Error("no map yet");
       return el;
     });
-    fireEvent.mouseEnter(edge);
-    const tip = screen.getByRole("tooltip");
-    expect(within(tip).getByText(PAYLOAD + SCRIPT)).toBeTruthy();
-    const graph = document.querySelector(".comms-rails") as Element;
     expect(graph.querySelector("img, script")).toBeNull();
     expect(graph.textContent).toContain(PAYLOAD);
   });

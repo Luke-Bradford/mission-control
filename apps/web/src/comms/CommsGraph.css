@@ -5,7 +5,7 @@
 .crew-map {
   display: flex;
   flex-direction: column;
-  min-height: 560px;
+  min-height: calc(var(--sp-7) * 12);
   height: 100%;
   overflow: hidden;
   background: var(--surface);
@@ -16,7 +16,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  min-height: 44px;
+  min-height: calc(var(--sp-5) * 2);
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--line);
 }
@@ -39,17 +39,19 @@
   background: var(--accent-soft);
   border: 1px solid var(--accent);
   border-radius: 3px;
-  font: var(--fs-micro) / 1 var(--mono);
+  font: var(--fs-micro) / var(--lh-s) var(--mono);
 }
 .crew-map-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 148px;
+  grid-template-columns: minmax(0, 1fr) calc(var(--sp-7) * 3);
   flex: 1;
   min-height: 0;
 }
 .crew-map-stage {
   position: relative;
-  min-height: 400px;
+  margin: 0;
+  padding: 0;
+  min-height: calc(var(--sp-7) * 8);
   overflow: hidden;
   background: var(--void);
 }
@@ -75,9 +77,9 @@
 .crew-map-seat {
   position: absolute;
   z-index: 1;
-  width: 92px;
-  min-height: 52px;
-  padding: 4px;
+  width: calc(var(--sp-7) * 2);
+  min-height: calc(var(--sp-7) + var(--sp-1));
+  padding: var(--sp-1);
   transform: translate(-50%, -50%);
   color: var(--fg);
   text-align: center;
@@ -88,9 +90,9 @@
 }
 .crew-map-seat i {
   display: inline-block;
-  width: 7px;
-  height: 7px;
-  margin-right: 4px;
+  width: var(--sp-2);
+  height: var(--sp-2);
+  margin-right: var(--sp-1);
   background: var(--seat);
   border-radius: 50%;
 }
@@ -102,7 +104,7 @@
   box-shadow: 0 0 0 2px var(--warn);
 }
 .crew-map-seat b {
-  font: 600 var(--fs-s) / 16px var(--mono);
+  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
 }
 .crew-map-seat span,
 .crew-map-seat small {
@@ -110,17 +112,20 @@
   overflow: hidden;
   color: var(--fg-2);
   font-size: var(--fs-micro);
-  line-height: 14px;
+  line-height: var(--lh-axis);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.crew-map-seat small {
+  font-family: var(--mono);
+}
 .crew-map-seat em {
   color: var(--warn);
-  font: var(--fs-micro) / 1 var(--mono);
+  font: var(--fs-micro) / var(--lh-s) var(--mono);
   font-style: normal;
 }
 .crew-map-seat.flight {
-  width: 106px;
+  width: calc(var(--sp-7) * 2 + var(--sp-3));
   background: color-mix(in srgb, var(--void) 78%, var(--accent));
 }
 .crew-map-side {
@@ -145,7 +150,7 @@
   overflow: hidden;
   padding: 2px 0;
   color: var(--fg-2);
-  font: var(--fs-micro) / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-s) var(--mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -160,24 +165,24 @@
   min-height: 0;
 }
 .crew-map-full .crew-map-body {
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr) calc(var(--sp-7) * 5 + var(--sp-5));
 }
 .crew-map-full .crew-map-stage {
   min-height: 0;
 }
 .crew-map-full .crew-map-seat {
-  width: 120px;
+  width: calc(var(--sp-7) * 2 + var(--sp-5));
 }
 @media (max-width: 700px) {
   .crew-map-body {
     grid-template-columns: 1fr;
   }
   .crew-map-side {
-    max-height: 140px;
+    max-height: calc(var(--sp-7) * 3);
     border-top: 1px solid var(--line);
     border-left: 0;
   }
   .crew-map-stage {
-    min-height: 440px;
+    min-height: calc(var(--sp-7) * 9);
   }
 }
