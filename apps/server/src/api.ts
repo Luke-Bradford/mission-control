@@ -121,6 +121,7 @@ import {
   type PullRequestView,
   pace5h,
   percentile,
+  profileLimits,
   QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
   type QaFindingsView,
@@ -5869,10 +5870,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           runId: run.id,
           startedAt: run.startedAt,
           endedAt: run.endedAt,
-          limits: {
-            tries: run.profile?.profile.tries ?? CI_TRIES,
-            rounds: run.profile?.profile.rounds ?? REVIEW_ROUNDS,
-          },
+          limits: run.profile
+            ? profileLimits(run.profile.profile)
+            : { tries: CI_TRIES, rounds: REVIEW_ROUNDS },
           ...(history ? { usage: runUsage(store, run, now()) } : {}),
           noReport: run.noReport ?? null,
           loop,
@@ -5887,7 +5887,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ]),
           round: loop
             ? Math.min(
-                run.profile?.profile.rounds ?? REVIEW_ROUNDS,
+                run.profile ? profileLimits(run.profile.profile).rounds : REVIEW_ROUNDS,
                 1 + fixesSent(store.claimedKeys(run.id), run.id, loop.epoch),
               )
             : null,

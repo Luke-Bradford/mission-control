@@ -64,6 +64,7 @@ import {
   OWNER_OPERATOR,
   PR_WAIT_MS,
   type PullRequestView,
+  profileLimits,
   profileStep,
   prYouAction,
   questionText,
@@ -455,14 +456,14 @@ function runTries(store: Store, run: Run, loop: NonNullable<Run["loop"]>): CrewL
   if (loop.phase === "ci")
     return {
       n: loop.ciFails + 1,
-      max: run.profile?.profile.tries ?? CI_TRIES,
+      max: run.profile ? profileLimits(run.profile.profile).tries : CI_TRIES,
       failures: loop.ciFails,
       runs: loopTries(run, store.loopEventsOfRun(run.id), null).filter((t) => t.step === "ci")
         .length,
     };
   if (loop.phase === "review") {
     const sent = fixesSent(store.claimedKeys(run.id), run.id, loop.epoch);
-    const max = run.profile?.profile.rounds ?? REVIEW_ROUNDS;
+    const max = run.profile ? profileLimits(run.profile.profile).rounds : REVIEW_ROUNDS;
     return { n: Math.min(max, 1 + sent), max };
   }
   return null;

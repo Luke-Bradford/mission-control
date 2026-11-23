@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AUDIT_EXPECTED_TOKENS_DEFAULT } from "../src/audit.ts";
+import { DEFAULT_PROFILES, type LoopDef, loopLimits, loopOf, type Profile } from "../src/index.ts";
 import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
@@ -630,6 +631,16 @@ describe("state step", () => {
     });
     s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: CI_TRIES - 2, ciFailedSha: SHA2, rerun });
     expect(reconcile(s).loop.phase).toBe("working");
+  });
+
+  it("feature loop from config equals the old limits", () => {
+    const feature = loopOf(DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile);
+    const limits = loopLimits(feature as LoopDef);
+    const rerun = reran();
+    for (const fails of [CI_TRIES - 2, CI_TRIES - 1]) {
+      const s = inCi({ pr: pr({ ci: "failing" }) }, { ciFails: fails, ciFailedSha: SHA2, rerun });
+      expect(reconcile({ ...s, limits })).toEqual(reconcile(s));
+    }
   });
 
   it("a profile's try limit parks CI on the first real failure at tries 1", () => {
@@ -2328,6 +2339,19 @@ describe("review decisions", () => {
       }),
     });
     expect(sends(r.actions)).toEqual([]);
+  });
+
+  it("feature loop from config equals the old review rounds", () => {
+    const feature = loopOf(DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile);
+    const limits = loopLimits(feature as LoopDef);
+    const blocking = inReview(withReview([fact({ id: 1, blocking: 1 })], [finding]));
+    expect(reconcile({ ...blocking, limits })).toEqual(reconcile(blocking));
+    const third = inReview(
+      withReview([fact({ id: 3, epoch: 0, blocking: 1 })], [finding]),
+      {},
+      { epoch: 0 },
+    );
+    expect(reconcile({ ...third, limits })).toEqual(reconcile(third));
   });
 
   it("a profile's round limit parks review after one blocking review at rounds 1", () => {
