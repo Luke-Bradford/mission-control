@@ -181,6 +181,8 @@ import {
   ledgerPointerText,
   ledgerPointerUnfedText,
   ledgerTitleText,
+  loopOf,
+  loopPlanSizes,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TEXT_MAX,
@@ -216,7 +218,6 @@ import {
   openPrText,
   PASSED_DECISION,
   PLAN_SEND_REFUSED,
-  PLAN_SIZES,
   PRIORITIES,
   PROFILE_NAME,
   PROFILE_PAIR_TEXT,
@@ -1689,7 +1690,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (unclosedMarkdown(body)) return fail(planUnclosedText(ref));
       // the planner is for Size M, L or XL: a ticket with no Size is not one, whatever `needs` says
       if (card.size === null) return fail(startMissingNeedsText(ref, ["size"]));
-      if (!PLAN_SIZES.includes(card.size) && (sent === null || sent.state === "signed-off"))
+      if (
+        !loopPlanSizes(loopOf(chosen.profile)).includes(card.size) &&
+        (sent === null || sent.state === "signed-off")
+      )
         return fail(smallNoPlanText(ref, card.size));
     } else if (
       !carriesOn &&

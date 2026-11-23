@@ -50,7 +50,9 @@ import {
   guardDenyOutput,
   HOOK_RETRY_ENV,
   HUB_DEFAULT_REASON,
+  type LoopDef,
   lockBusyText,
+  loopOf,
   MC_MCP_SERVER,
   MC_TMP_DIR_NAME,
   MC_TOOL_NAMES,
@@ -633,6 +635,76 @@ describe("startRun profiles", () => {
       profile: { name: "bugfix" },
       route: { by: "override", who: "planner", reason: "was a bug" },
     });
+  });
+
+  it("a label picks the loop and an override replaces it", async () => {
+    const { sup } = make({ fetchTicket: async () => ({ ...TICKET, labels: ["docs"] }) });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42, {
+      override: { profile: "research", reason: "no code here", by: "FLIGHT" },
+    });
+    const got = store.run(runId)?.profile;
+    expect(got?.profile.name).toBe("research");
+    expect(loopOf(got?.profile as Profile)?.name).toBe("research");
+    expect(got?.route).toMatchObject({ by: "override", from: "docs" });
+  });
+
+  const withBuild = (set: { model?: string; effort?: string }): Profile => {
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    const base = loopOf(feature) as LoopDef;
+    return {
+      ...feature,
+      loop: { ...base, steps: base.steps.map((s) => (s.id === "build" ? { ...s, ...set } : s)) },
+    };
+  };
+
+  it("a loop's build model and effort are kept on the run", async () => {
+    store.replaceBoard("mc", [boardCard(42, { size: "XS" })]);
+    const profiles = [withBuild({ model: "claude-opus-4-1", effort: "high" })];
+    const { sup } = make({ profiles: () => profiles });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.run(runId)).toMatchObject({ model: "claude-opus-4-1", effort: "high" });
+  });
+
+  it("refuses a start when the loop's model is not one the seat's vendor can use", async () => {
+    const profiles = [withBuild({ model: "gpt-9" })];
+    const claim = vi.fn(async () => {});
+    const { sup } = make({ profiles: () => profiles, claim });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42));
+    expect(e.status).toBe(422);
+    expect(e.message).toBe(
+      'Not started: step build of the feature loop asks for its own model, but model "gpt-9" is not a claude model.',
+    );
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("a read-only seat keeps its own model: the build step's settings are not its own", async () => {
+    const profiles = [withBuild({ model: "gpt-9" })];
+    const { sup } = make({ profiles: () => profiles });
+    sup.start();
+    const { runId } = await sup.startRun("retro", 42);
+    expect(store.run(runId)?.model).toBe("haiku");
+  });
+
+  it("a loop's plan sizes decide which Sizes need no plan", async () => {
+    const feature = DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile;
+    const loop = loopOf(feature) as LoopDef;
+    const profiles: Profile[] = [
+      {
+        ...feature,
+        loop: {
+          ...loop,
+          steps: loop.steps.map((x) => (x.id === "plan" ? { ...x, sizes: ["L", "XL"] } : x)),
+        },
+      },
+    ];
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+    const { sup } = make({ profiles: () => profiles });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    expect(store.run(runId)?.plan).toEqual({ skipped: "Size M" });
   });
 
   it("refuses an unknown profile with 422, before a worktree or claim", async () => {

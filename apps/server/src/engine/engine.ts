@@ -111,6 +111,7 @@ import {
   parkHold,
   pendingSeatWork,
   pendingWakeText,
+  profileLimits,
   REFUSAL_TRIES,
   REVIEW_NOT_WANTED,
   REVIEW_STATUS_CONTEXT,
@@ -1139,14 +1140,7 @@ export function createEngine(deps: EngineDeps): Engine {
       asideOk: reviewer !== null,
       // a question FLIGHT passed to the operator: the run waits off its seat for the answer
       operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
-      ...(run.profile
-        ? {
-            limits: {
-              tries: run.profile.profile.tries,
-              rounds: run.profile.profile.rounds,
-            },
-          }
-        : {}),
+      ...(run.profile ? { limits: profileLimits(run.profile.profile) } : {}),
     };
   }
 

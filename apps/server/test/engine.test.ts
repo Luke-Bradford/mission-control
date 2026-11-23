@@ -70,6 +70,7 @@ import {
   pauseWithout,
   prNamedRefText,
   prNotifyText,
+  loopOf as profileLoopOf,
   prSecretText,
   pushChecksText,
   pushReferenceText,
@@ -2602,6 +2603,27 @@ describe("The operator's message", () => {
     expect(store.run(RUN)?.loop?.hold).toMatchObject({
       kind: "ci",
       reason: "CI failed 1 times; last on aaaaaaa",
+    });
+  });
+
+  it("the engine parks at the snapshot loop's CI cap", async () => {
+    const feature = profileLoopOf(DEFAULT_PROFILES.find((p) => p.name === "feature") as Profile);
+    if (feature === null) throw new Error("no feature loop");
+    giveProfile({
+      tries: 3,
+      loop: {
+        ...feature,
+        returns: feature.returns.map((r) => (r.id === "ci-fail" ? { ...r, cap: 2 } : r)),
+      },
+    });
+    setLoop({ ciFails: 1 });
+    report();
+    await h.engine.reconcileRun(RUN);
+    await failCi();
+    await h.engine.reconcileRun(RUN);
+    expect(store.run(RUN)?.loop?.hold).toMatchObject({
+      kind: "ci",
+      reason: "CI failed 2 times; last on aaaaaaa",
     });
   });
 
