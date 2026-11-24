@@ -16,6 +16,7 @@ import {
   narrowDay,
   percent,
   plural,
+  raisedAt,
   rel,
   setActiveLocale,
   untilLabel,
@@ -220,6 +221,16 @@ describe("the operator's locale and zone in every formatter", () => {
     expect(kTokens(60_100)).toMatch(/[٠-٩]/);
     expect(cost(1.84)).toMatch(/[٠-٩]/);
     expect(percent(42)).toMatch(digits);
+  });
+
+  it("defaults hhmm, wkdTime, dayMonth and raisedAt to the active locale", () => {
+    const at = Date.UTC(2026, 10, 6, 12, 0);
+    setActiveLocale("ar-EG");
+    expect(hhmm(at, "UTC")).toMatch(/[٠-٩]/);
+    expect(wkdTime(at, "UTC")).toMatch(/[٠-٩]/);
+    expect(raisedAt(at, "UTC")).toMatch(/[٠-٩]/);
+    setActiveLocale("en-US");
+    expect(dayMonth(at, "UTC")).toBe("Nov 6");
   });
 
   it("shows a full date and time in the given zone and locale", () => {

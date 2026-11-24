@@ -29,7 +29,7 @@ function format(
   ms: number,
   tz: string,
   opts: Intl.DateTimeFormatOptions,
-  locale: string = DEFAULT_LOCALE,
+  locale: string = activeLocale,
 ): string {
   return zoneFormatter(tz, opts, locale).format(new Date(ms));
 }
@@ -37,15 +37,15 @@ function format(
 const HHMM: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
 
 /** `14:05` */
-export const hhmm = (ms: number, tz: string, locale: string = DEFAULT_LOCALE): string =>
+export const hhmm = (ms: number, tz: string, locale: string = activeLocale): string =>
   format(ms, tz, HHMM, locale);
 
 /** A full date and clock time in `tz`, in the locale's own order. */
-export const dateTime = (ms: number, tz: string, locale: string = DEFAULT_LOCALE): string =>
+export const dateTime = (ms: number, tz: string, locale: string = activeLocale): string =>
   format(ms, tz, { dateStyle: "short", timeStyle: "medium" }, locale);
 
 /** A clock time with seconds in `tz`. */
-export const clockTime = (ms: number, tz: string, locale: string = DEFAULT_LOCALE): string =>
+export const clockTime = (ms: number, tz: string, locale: string = activeLocale): string =>
   format(ms, tz, { timeStyle: "medium" }, locale);
 
 /** `6 Nov` or `Nov 6`: the day and month in the order `locale` writes them (names stay `Mon`). */
@@ -97,14 +97,14 @@ export function wkdTime(ms: number, tz: string): string {
 }
 
 /** `Fri 6 Nov 17:23`: a moment named in full, such as when an item was raised. */
-export function raisedAt(ms: number, tz: string, locale: string = DEFAULT_LOCALE): string {
+export function raisedAt(ms: number, tz: string, locale: string = activeLocale): string {
   const { y, m, d } = localDate(ms, tz);
   const wd = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
   return `${wd} ${dayAndMonth(d, m, locale)} ${hhmm(ms, tz, locale)}`;
 }
 
 /** `18 Oct` */
-export function dayMonth(ms: number, tz: string, locale: string = DEFAULT_LOCALE): string {
+export function dayMonth(ms: number, tz: string, locale: string = activeLocale): string {
   const { m, d } = localDate(ms, tz);
   return dayAndMonth(d, m, locale);
 }
