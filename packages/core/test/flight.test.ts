@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MS,
   type FlightState,
   flightContextText,
+  flightRotationLoopText,
   flightTurnText,
   PLAN_SIZES,
+  runawayNoteText,
+  runawayWaitMs,
   wakeKey,
   wakeKeyPrefix,
   wakeLine,
@@ -109,4 +114,20 @@ it("keeps legacy briefs and drafts valid beside the complete additive response",
   expect(incoming.entries[0]?.outcome).toBe("No action");
   expect(FLIGHT_WATCH_LIMIT).toBe(100);
   expect(FLIGHT_INCOMING_LIMIT).toBe(100);
+});
+
+describe("hub stops that wait for a timer, not a click (#2215)", () => {
+  it("the handover guard's note says when the hub starts FLIGHT again, on both trips", () => {
+    expect(flightRotationLoopText(4, null)).toContain("starts it again in 30 minutes");
+    const again = flightRotationLoopText(4, null, true);
+    expect(again).toContain("waits 6 hours");
+    expect(again).not.toContain("stays stopped");
+  });
+
+  it("the runaway breaker's note says how long the hub waits, doubling to a cap", () => {
+    expect(runawayNoteText("a loop")).toContain("lifts the stop by itself in 2 hours");
+    expect(runawayNoteText("a loop", runawayWaitMs(2))).toContain("in 8 hours");
+    expect(runawayWaitMs(0)).toBe(FLIGHT_RUNAWAY_AUTO_LIFT_MS);
+    expect(runawayWaitMs(10)).toBe(FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS);
+  });
 });

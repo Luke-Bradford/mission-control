@@ -1447,6 +1447,17 @@ function stateStep(s: LoopSnapshot): Step {
   return unchanged(loop);
 }
 
+/**
+ * What a budget park asks of the operator, added to its note (the hold's own reason stays as the
+ * engine matches it). A spend ceiling is the operator's to raise, so the hub never lifts it.
+ */
+export const budgetDecisionText = (hold: RunLoop["hold"]): string => {
+  if (hold?.kind !== "budget") return "";
+  return isDollarCapReason(hold.reason ?? "")
+    ? ". Your decision: this run's dollar cap cannot be raised on the run itself; end the run, or start the ticket again with a higher cap"
+    : ". Your decision: Resume raises the token ceiling by one more budget and the run carries on; leave it parked to stop the spend";
+};
+
 type DesiredNote = { noteKind: LoopNoteKind; text: string };
 
 /** The note keys the loop wants open, with their kind and text. */
@@ -1462,7 +1473,7 @@ function desiredNotes(s: LoopSnapshot, loop: RunLoop): Map<string, DesiredNote> 
   if (loop.phase === "parked") {
     notes.set(blockedNoteKey(runId, loop.epoch), {
       noteKind: "blocked",
-      text: `${ticket.ref} parked: ${loop.hold?.reason ?? "parked"}`,
+      text: `${ticket.ref} parked: ${loop.hold?.reason ?? "parked"}${budgetDecisionText(loop.hold)}`,
     });
   }
   // an ended run keeps only its blocked note: the seat's rate limit belongs to its next run

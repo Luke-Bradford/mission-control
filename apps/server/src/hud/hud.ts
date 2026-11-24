@@ -72,9 +72,9 @@ import {
   REVIEW_ROUNDS,
   type ReviewRow,
   type ReviewState,
-  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
+  runawayTriageDetail,
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
@@ -114,7 +114,7 @@ import {
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
+import { runawayLiftedAt, runawayTrip, runawayWait } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
 import { parseJson, rethrowJson } from "../json.ts";
@@ -991,12 +991,16 @@ export const FLIGHT_ASKED_AGAIN =
 
 /**
  * Hub alerts the entry check passes that need the store to tell (#1543): the runaway breaker, and
- * a run stopped on a budget or account limit, which only the operator can lift. The rest of the
- * alert list is in core (`needsYouAlert`).
+ * a run stopped on a budget, which only the operator can lift. The rest of the alert list is in
+ * core (`needsYouAlert`). None waits for a click the hub can make itself (#2215): the breaker is
+ * lifted by the hub after a wait that grows each time it comes back; a budget park is the one real
+ * decision here (raise a spend ceiling), and its note names that decision (core `budgetDecisionText`).
+ * An "account" hold is still classed with the budget one: nothing in this build creates it, so this
+ * only keeps a hold stored by an older hub as the operator's until its run is resumed or ended.
  */
 export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
-  // hub stops only the operator clears: new runs paused for the machine, the CLI held
+  // hub alerts the hub puts right itself and tells the operator about: machine capacity, the CLI
   if (HUB_STOP_KEYS.some((k) => item.key === k || item.key.startsWith(`${k}:`))) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
@@ -1004,22 +1008,25 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 }
 
 /**
- * Hub alerts that only the operator can act on, by note key or key prefix: machine capacity and a
- * runaway file-change service (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and
- * upgrade (cli-update.ts), the CLI auto-rollback (cli-auto.ts) and a seat's focus import
- * (instructions/notices.ts). Most are stops the operator clears; the file-change alert holds
- * nothing back and clears itself. hud.test.ts pins them to those modules' keys.
+ * Hub alerts that are news about something the hub is putting right, by note key or key prefix:
+ * machine capacity and a runaway file-change service (apps/server/src/telemetry/machine-capacity.ts,
+ * judged again every minute and cleared when the cause passes), the CLI hold and upgrade
+ * (cli/update.ts, retried on a timer), the CLI auto-rollback (cli/auto.ts: the hub rolled back and
+ * keeps the bad version held until a newer one appears; a rollback that failed is retried on each
+ * pass) and a seat's focus import (instructions/notices.ts, retried every
+ * INSTRUCTION_FOCUS_RETRY_MS). None holds the operator's click as its only way out.
+ * hud.test.ts pins them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
   // a runaway fseventsd the hub could not restart, or one that keeps coming back
   // (telemetry/machine-capacity.ts): it holds nothing back and clears itself once a restart works
-  // or the service is small again with no recent run of restarts, but only the operator can
-  // restart it by hand or add the sudoers rule
+  // or the service is small again with no recent run of restarts; the sudoers rule that lets the
+  // hub restart it is the one thing the operator can add
   `${NOTE_KEY}${FILE_SERVICE_RUNAWAY_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
-  // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
+  // a seat's focus could not be imported: imported again on a timer (instructions/notices.ts)
   `${NOTE_KEY}instruction-focus`,
 ] as const;
 
@@ -1113,7 +1120,7 @@ function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTri
       triaging: false,
       live: false,
       cause: "down",
-      detail: RUNAWAY_TRIAGE_DETAIL,
+      detail: runawayTriageDetail(runawayWait(store, tripped.at)),
       since: tripped.at,
       liveSince: 0,
       showsAt: null,

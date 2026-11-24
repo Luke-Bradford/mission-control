@@ -260,6 +260,57 @@ async function claudeCanStart() {
 
 describe("mixed hub startup", () => {
   const preparing = fakeModels();
+
+  it("starts the focus-import retry timer, which retries a failed import until it clears, and stops it at shutdown (#2215)", async () => {
+    const { INSTRUCTION_FOCUS_RETRY_MS } = await import("../src/instructions/notices.ts");
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+    try {
+      boot.models = preparing.deps;
+      boot.expectSupervisorEnabled = false;
+      await (await import("../src/main.ts")).main();
+      const store = boot.deps?.store;
+      if (!store) throw new Error("hub has not started");
+      const key = "instruction-focus:claude";
+      const open = () => store.notes().some((n) => n.key === key);
+      const warn = () =>
+        store.raiseNote({
+          key,
+          kind: "blocked",
+          runId: null,
+          seatId: "claude",
+          repoId: "mission-control",
+          text: "Configured focus could not be imported.",
+          at: Date.now(),
+        });
+      const sync = vi.spyOn(store.instructions, "syncFocus");
+      // the cause is gone and nobody calls the hub: the interval alone retries and clears the note
+      warn();
+      expect(open()).toBe(true);
+      await vi.advanceTimersByTimeAsync(INSTRUCTION_FOCUS_RETRY_MS);
+      expect(sync).toHaveBeenCalled();
+      expect(open()).toBe(false);
+      // shutdown cancels the interval: another period retries nothing
+      const handlers = process
+        .listeners("SIGTERM")
+        .filter((l) => !(signals.get("SIGTERM") ?? []).includes(l));
+      expect(handlers.length).toBeGreaterThan(0);
+      for (const h of handlers) (h as (s: string) => void)("SIGTERM");
+      // the handler does not return its promise; shutdown has ended once it exits
+      for (let i = 0; i < 200 && exit.mock.calls.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      expect(exit).toHaveBeenCalledWith(0);
+      sync.mockClear();
+      warn();
+      await vi.advanceTimersByTimeAsync(2 * INSTRUCTION_FOCUS_RETRY_MS);
+      expect(sync).not.toHaveBeenCalled();
+      expect(open()).toBe(true);
+    } finally {
+      exit.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("starts the live evidence sweep after serving with shutdown hooks registered beforehand", async () => {
     boot.evidenceLive = true;
     boot.models = preparing.deps;
