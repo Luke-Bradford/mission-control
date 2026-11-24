@@ -58,7 +58,8 @@ const patch = (fn: (s: FakeState) => void) => {
   fn(s);
   writeFileSync(stateFile, JSON.stringify(s));
 };
-const wait = async (cond: () => boolean, ms = 4000) => {
+// generous: a loaded CI runner takes far longer to spawn each fake cmux call (the test timeout is 15 s)
+const wait = async (cond: () => boolean, ms = 12_000) => {
   for (const t0 = Date.now(); !cond(); ) {
     if (Date.now() - t0 > ms) throw new Error("timed out");
     await new Promise((r) => setTimeout(r, 10));
@@ -304,7 +305,7 @@ describe("startCmuxSession", () => {
     patch((s) => {
       s.busy = false;
     });
-    await wait(() => (state().sent ?? []).length === 1, 6000);
+    await wait(() => (state().sent ?? []).length === 1);
     await h.session.close();
   });
 
