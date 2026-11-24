@@ -58,6 +58,7 @@ import {
   checkRunningText,
   compactAttentionItem,
   compareDependencyChains,
+  controllerCheckPathsOf,
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
@@ -65,7 +66,6 @@ import {
   ENGINE_TICK_MS,
   type FileDiff,
   FLIGHT_APPROVAL_RULES,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_RUNAWAY_NOTE_KEY,
   fixesSent,
   flightShellBreakerWrite,
@@ -293,18 +293,22 @@ import { createProfile, NewProfileBody, profilesView } from "./config/profiles.t
 import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
 import { repoRulesView } from "./config/repo-roles-view.ts";
 import {
+  adoptHubRepo,
   agentIds,
   type CcConfig,
   configuredAgents,
   crewSeatDef,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
+  defaultCommandsFor,
   flightPowersOf,
+  ownsHubFiles,
   TeamsSelection,
 } from "./config.ts";
 import type { CrewReloader } from "./crew-apply.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
+import { overlayRepoBlock } from "./engine/rule-config.ts";
 import { RepoRulesError, readRepoBlock } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
@@ -392,6 +396,7 @@ import {
   PreviewHubError,
   type PreviewManager,
 } from "./preview/previews.ts";
+import { WEB_AREA_LABEL } from "./preview/review.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
@@ -1568,6 +1573,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   /** The checkout a preview of this repo would run from; the start route and the PR rows both ask. */
   const previewCheckout = (repo: (typeof config.repos)[number]) =>
     config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+  /** The running preview of a PR in any repo; the hub's own repo is keyed without a repo part. */
+  const runningPreview = (repoId: string, pr: number) =>
+    deps.previews?.get(pr, repoId === deps.previewRepoId ? undefined : repoId) ?? null;
   /**
    * What a repo's PR rows say about previews: `previewable` is whether `POST /api/previews` could
    * start one now (a preview hub, this repo, a checkout, an open PR); `preview` is the running one.
@@ -1579,7 +1587,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       previewCheckout(repo) !== undefined;
     return (pr: { number: number; state: string }): PullRequestPreviewFacts => ({
       previewable: supported && pr.state === "open",
-      preview: repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+      preview: runningPreview(repo.id, pr.number),
     });
   };
   const streams = new Set<() => void>();
@@ -3017,8 +3025,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
-          const preview =
-            repo.id === deps.previewRepoId ? deps.previews?.get(pr.number) : undefined;
+          const preview = runningPreview(repo.id, pr.number);
+          const rules = await deps.repoRules?.(repo.id);
+          const configuredWebGlobs =
+            rules === undefined || rules instanceof RepoRulesError
+              ? []
+              : (rules.areas[WEB_AREA_LABEL] ?? []);
+          const webGlobs =
+            configuredWebGlobs.length > 0
+              ? configuredWebGlobs
+              : ownsHubFiles(config, repo.id)
+                ? ["apps/web", "apps/web/**"]
+                : [];
           return prUat({
             store,
             pr,
@@ -3026,6 +3044,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             previewUrl: preview && preview.sha === pr.headSha ? preview.url : null,
             singleRepo: config.repos.length === 1,
             repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+            webChanged: store
+              .prFilePaths(repo.id, pr.number)
+              .some((path) => webGlobs.some((glob) => globMatches(glob, path))),
+            visualEvidenceAvailable:
+              repo.id === deps.previewRepoId && deps.prEvidence !== undefined,
             flightId: flightSeat(config)?.seat.id ?? null,
           });
         },
@@ -3316,6 +3339,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
       };
 
+      const repoBlockOf = async (repo: (typeof config.repos)[number]) => {
+        const checkout = config.crew?.sessions.find(
+          (session) => session.repoId === repo.id,
+        )?.checkout;
+        return checkout === undefined
+          ? null
+          : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+      };
+
       // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
         // A read needs no writable config: a preview shows the rules of the file it loaded.
@@ -3325,18 +3357,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // Every value comes from the same config.yaml bytes the version is taken from, so the
           // page can never save a version it did not show.
           const { base, repo, raw } = await readRepoRolesConfig(configPath, req.params.repoId);
-          const checkout = config.crew?.sessions.find(
-            (session) => session.repoId === repo.id,
-          )?.checkout;
-          const repoFile =
-            checkout === undefined
-              ? null
-              : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+          const repoFile = await repoBlockOf(repo);
           return repoRulesView({
             base,
             repo,
             raw,
             repoFile: repoFile instanceof RepoRulesError ? repoFile.message : repoFile,
+            ownsHub: ownsHubFiles(config, repo.id),
           });
         } catch (e) {
           return rolesError(reply, e);
@@ -3350,12 +3377,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = RepoRolesBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
+          // A one-list edit keeps the other list at what the page showed: this repo's effective default.
+          const { repo: target } = await readRepoRolesConfig(configPath, req.params.repoId);
+          const block = await repoBlockOf(target);
+          const configured = target.rules ?? DEFAULT_REPO_RULES;
+          const checks = (
+            block === null || block instanceof RepoRulesError
+              ? configured
+              : overlayRepoBlock(configured, block)
+          ).checks;
           const result = await setRepoRoles(
             configPath,
             req.params.repoId,
             body.data.base,
             body.data.rules,
             now(),
+            defaultCommandsFor(ownsHubFiles(config, req.params.repoId), checks),
           );
           const live = config.repos.find((repo) => repo.id === req.params.repoId);
           const saved = result.config.repos.find((repo) => repo.id === req.params.repoId);
@@ -3574,8 +3611,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // Disk can include pending crew edits.  Only make this card's setup live here; the
           // reloader owns every crew change so it can drain seats before applying it.
           const index = config.repos.findIndex((repo) => repo.id === body.data.repoId);
-          if (body.data.repo) config.repos.push(onboarded);
-          else if (index >= 0) {
+          if (body.data.repo) {
+            config.repos.push(onboarded);
+            adoptHubRepo(config, onboarded);
+          } else if (index >= 0) {
             const live = config.repos[index];
             if (!live) throw new ConfigWriteError("missing", `unknown repo ${body.data.repoId}`);
             if (body.data.defaultAccountId === null) delete live.defaultAccountId;
@@ -3638,7 +3677,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         // Only this route adds to config.repos, and two concurrent adds of one repo meet in the
         // serialised file check, so the loaded list cannot have gained it during the await.
         const added = result.config.repos.find((r) => r.id === repo.id);
-        if (added) config.repos.push(added);
+        if (added) {
+          config.repos.push(added);
+          adoptHubRepo(config, added);
+        }
         bus.emit("config");
         bus.emit("boards");
         refreshBoards();
@@ -5357,7 +5399,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             flightActor(req) &&
             flightPowersOf(config, run.repoId) !== "superuser" &&
             run.loop.touches?.paths.some((path) =>
-              FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
+              controllerCheckPathsOf(ownsHubFiles(config, run.repoId)).some((pattern) =>
+                globMatches(pattern, path, true),
+              ),
             )
           )
             return reply.code(403).send({

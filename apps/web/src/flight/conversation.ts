@@ -160,10 +160,11 @@ export function messageStateLine(
   message: Pick<CommsMessage, "id" | "deliveredAt">,
   all: readonly Pick<CommsMessage, "replyTo">[],
   timeZone: string,
+  locale?: string,
 ): string {
   if (all.some((m) => m.replyTo === message.id)) return "Answered";
   const at = message.deliveredAt ?? null;
-  return commsStateLine(at === null ? "stored" : "delivered", at, timeZone);
+  return commsStateLine(at === null ? "stored" : "delivered", at, timeZone, locale);
 }
 
 type MessageReceipt = Pick<
@@ -176,6 +177,7 @@ export function withMessageStates(
   rows: readonly DockRow[],
   messages: readonly MessageReceipt[],
   timeZone: string,
+  locale?: string,
 ): DockRow[] {
   const available = messages.filter((m) => m.operator).sort((a, b) => b.at - a.at);
   const used = new Set<string>();
@@ -191,13 +193,13 @@ export function withMessageStates(
       (at === null ? undefined : candidates.find((m) => m.at <= at && m.deliveredAt != null));
     if (!receipt) continue;
     used.add(receipt.id);
-    out[i] = { ...row, line: messageStateLine(receipt, messages, timeZone) };
+    out[i] = { ...row, line: messageStateLine(receipt, messages, timeZone, locale) };
   }
   return out;
 }
 
 /** The line for a send's answer: the state, and a note when the same words went a moment ago. */
-export function sendStateLine(s: CommsSendState, timeZone: string): string {
-  const line = commsStateLine(s.state, s.deliveredAt, timeZone);
+export function sendStateLine(s: CommsSendState, timeZone: string, locale?: string): string {
+  const line = commsStateLine(s.state, s.deliveredAt, timeZone, locale);
   return s.alreadySent ? `${line} · Already sent in the last minute` : line;
 }

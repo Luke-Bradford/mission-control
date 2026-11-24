@@ -1,6 +1,7 @@
 import { COMMS_MESSAGE_MAX, type ConfigView } from "@mc/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { hub, streamStatus } from "../src/data.ts";
 import { FlightThread } from "../src/flight/FlightThread.tsx";
 import { FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
@@ -151,9 +152,112 @@ describe("FlightThread", () => {
         flight: { live: true, since: Date.UTC(2026, 10, 14, 9, 5), runId: "r" },
       },
       "/api/flight": seat(true),
+      "/api/config": CONFIG,
     });
     render(<FlightThread />);
     expect(await screen.findByText("FLIGHT is working… since 09:05")).toBeTruthy();
+  });
+
+  it("shows times in the operator's configured zone, not London's", async () => {
+    stub([msg("comms:1", "hi")], true, undefined, {
+      ...CONFIG,
+      operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" },
+    });
+    const { container } = render(<FlightThread />);
+    await screen.findByText("hi");
+    const expected = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "Asia/Tokyo",
+    }).format(NOW);
+    await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
+  });
+
+  it("shows times in the operator's configured locale", async () => {
+    stub([msg("comms:1", "hi")], true, undefined, {
+      ...CONFIG,
+      operator: { ...CONFIG.operator, timezone: "Asia/Tokyo", locale: "ar-EG" },
+    });
+    const { container } = render(<FlightThread />);
+    await screen.findByText("hi");
+    const expected = new Intl.DateTimeFormat("ar-EG", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "Asia/Tokyo",
+    }).format(NOW);
+    expect(expected).not.toMatch(/[0-9]/);
+    await waitFor(() => expect(container.querySelector("time")?.textContent).toBe(expected));
+  });
+
+  it("writes an earlier day's message date in the operator's locale order", async () => {
+    stubFetch({
+      "/api/comms/crew": {
+        messages: [
+          {
+            ...msg("comms:1", "go", true),
+            to: "crew",
+            label: null,
+            ref: null,
+            ticket: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            pinned: false,
+            state: "stored",
+            deliveredAt: null,
+          },
+        ],
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": seat(true),
+      "/api/config": {
+        ...CONFIG,
+        operator: { ...CONFIG.operator, timezone: "Asia/Tokyo", locale: "en-US" },
+      },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    expect(await screen.findByText("Oct 17 21:00")).toBeTruthy();
+  });
+
+  it("shows the Comms thread's Delivered time in the operator's configured zone, not London's", async () => {
+    stubFetch({
+      "/api/comms/crew": {
+        messages: [
+          {
+            ...msg("comms:1", "go", true),
+            to: "crew",
+            label: null,
+            ref: null,
+            ticket: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            pinned: false,
+            state: "delivered",
+            deliveredAt: NOW,
+          },
+        ],
+      },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "/api/flight": seat(true),
+      "/api/config": { ...CONFIG, operator: { ...CONFIG.operator, timezone: "Asia/Tokyo" } },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "crew" }} row={null} onJumped={() => {}} />);
+    const expected = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "Asia/Tokyo",
+    }).format(NOW);
+    await waitFor(() =>
+      expect(screen.getByTestId("message-state").textContent).toBe(`Delivered ${expected}`),
+    );
   });
 
   it("shows a configured repo's PR link as its text only, naming the host to screen readers", async () => {

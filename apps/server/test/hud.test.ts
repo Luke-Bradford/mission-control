@@ -5,7 +5,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
-  CMUX_NEEDS_INPUT_TEXT,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -1191,16 +1190,6 @@ describe("crew seats in the rows", () => {
     );
     expect(rowOf(c, "RETRO-1")?.accountId).toBe("claude-main");
     expect(rowOf(c, "shop-app-ta")?.accountId).toBe("claude-main");
-  });
-
-  it("shows a cmux needs-input seat as waiting for the operator, with its reason", () => {
-    const c = withCrew();
-    store.upsertRun(crewRun({ endedAt: null, status: "running" }));
-    store.setSeatSession(seat({ state: "needs-input", reason: CMUX_NEEDS_INPUT_TEXT }));
-    expect(agentViews(c, store, NOW).find((a) => a.id === "GUIDO-1")).toMatchObject({
-      state: "waiting-you",
-      note: "Needs your input in cmux",
-    });
   });
 
   it("lists seats after the loops, with role, mode, area, model and session", () => {
@@ -4144,6 +4133,16 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     ask(NOW - DAY);
     expect(aggregate()?.text).toBe(
       "FLIGHT is stopped: 1 waiting since 16 Oct 13:00. Start it to have them triaged.",
+    );
+  });
+
+  it("uses the operator locale for a prior-day not-triaging alert", () => {
+    c = { ...c, operator: { ...c.operator, locale: "en-US" } };
+    flight({ runId: null, state: "stopped" });
+    ask(NOW - DAY);
+
+    expect(aggregate()?.text).toBe(
+      "FLIGHT is stopped: 1 waiting since Oct 16 13:00. Start it to have them triaged.",
     );
   });
 

@@ -1,7 +1,9 @@
 import { errorText, PLAN_NOTE_MAX, type PlansView, type TicketPlan } from "@mc/core";
 import { useState } from "react";
 import { apiPost } from "../api.ts";
+import { useLocale, useTz } from "../clock.ts";
 import { ACTIONS, hub, RESOURCES, streamStatus, useResource } from "../data.ts";
+import { dateTime } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { PlanParts } from "../plans/PlanView.tsx";
@@ -183,6 +185,8 @@ function PlanRow({
 }
 
 function Detail({ plan, repo, enabled }: { plan: TicketPlan; repo: string; enabled: boolean }) {
+  const tz = useTz();
+  const locale = useLocale();
   const history = plan.state === "signed-off";
   return (
     <div className="uat-detail">
@@ -191,8 +195,8 @@ function Detail({ plan, repo, enabled }: { plan: TicketPlan; repo: string; enabl
           {history && (
             <p>
               <Pill tone={statusTone(plan)}>{statusWord(plan)}</Pill>
-              {plan.decidedAt !== null && (
-                <span className="muted"> {new Date(plan.decidedAt).toLocaleString()}</span>
+              {plan.decidedAt !== null && tz && (
+                <span className="muted"> {dateTime(plan.decidedAt, tz, locale)}</span>
               )}
             </p>
           )}

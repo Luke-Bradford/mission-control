@@ -309,12 +309,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     ghost = null;
     log(`flight watch: run #${run.seq}'s CLI session is gone; ending it to start FLIGHT afresh`);
-    const from: HudState =
-      row.state === "starting" || row.state === "needs-input"
-        ? row.state === "needs-input"
-          ? "blocked"
-          : "running"
-        : row.state;
+    const from: HudState = row.state === "starting" ? "running" : row.state;
     try {
       store.addAgentEvent({
         agentId: id,

@@ -125,7 +125,13 @@ describeRendered("Rework labels on cards, rendered", () => {
       });
       await page.evaluate(async () => {
         const end = performance.now() + 5000;
-        while (document.querySelectorAll(".kcard .warn-t").length < 3 && performance.now() < end)
+        // the PR list loads after the board, so wait for its number on the reviewed label too
+        const ready = () =>
+          document.querySelectorAll(".kcard .warn-t").length >= 3 &&
+          [...document.querySelectorAll(".kcard .warn-t")].some((e) =>
+            e.textContent?.includes("PR 1432"),
+          );
+        while (!ready() && performance.now() < end)
           await new Promise((r) => requestAnimationFrame(r));
         await document.fonts.ready;
       }, undefined);

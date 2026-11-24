@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolvePreviewRepo } from "../src/preview/repo.ts";
+import { resolveHubRepo, resolvePreviewRepo } from "../src/preview/repo.ts";
 
 let dir: string;
 let hub: string;
@@ -113,5 +113,23 @@ describe("the repository allowed to run branch previews", () => {
     await expect(
       resolvePreviewRepo(hub, repos, [...sessions(), { repoId: "hub", checkout: foreign }]),
     ).resolves.toBe("hub");
+  });
+});
+
+describe("the configured repository the hub's own code lives in", () => {
+  it("is the configured repo the hub checkout's origin names", async () => {
+    await expect(resolveHubRepo(hub, repos)).resolves.toBe("hub");
+  });
+
+  it("is null when the origin is readable and no configured repo is it", async () => {
+    await expect(
+      resolveHubRepo(hub, [{ id: "other", github: "example/other" }]),
+    ).resolves.toBeNull();
+  });
+
+  it("is unknown when the origin cannot be read", async () => {
+    git(hub, "config", "--unset", "remote.origin.url");
+    await expect(resolveHubRepo(hub, repos)).resolves.toBeUndefined();
+    await expect(resolveHubRepo(null, repos)).resolves.toBeUndefined();
   });
 });

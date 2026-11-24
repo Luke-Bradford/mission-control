@@ -1,108 +1,98 @@
 import { COMMS_MESSAGE_MAX, COMMS_METRICS, type CommsMetricsView, type CrewRow } from "@mc/core";
-import { useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useLocale } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { percent, plural } from "../fmt.ts";
+import { percent } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { useMetrics } from "../metrics.ts";
-import { type CommsView, NEEDS_YOU_PATH, navigate } from "../router.ts";
-import { type ChartMode, ChartModeSwitch, CommsRails } from "./CommsRails.tsx";
-import { commsHrefFor, useChartFilter } from "./chartPaths.ts";
-import { useReducedMotion, waitWord } from "./chartTypes.ts";
-import { type ChartFilter, pairFilter } from "./commsFilter.ts";
-import { CAPCOM, useChartData } from "./useChartData.ts";
+import {
+  type CommsView,
+  commsAgentPath,
+  commsContactPath,
+  commsFlightPath,
+  navigate,
+} from "../router.ts";
+import { type CrewMap, createCrewMap, type MapPins, type MapSelection } from "./crewMap.ts";
+import { CAPCOM, crewMapSnapshot, type FeedMessage, type OpenItem } from "./crewMapSnapshot.ts";
 
-/** The live crew's communication chart, with the traffic and message-length panels beneath it. */
+/** Places the operator kept (Alt-drag), per view size; they outlive the map being remounted. */
+let keptPins: MapPins = {};
+
+/** Where a click on a seat or a link opens: the seat's conversations, or the pair's. */
+export function mapSelectionPath(selection: MapSelection, flightId: string | undefined): string {
+  const open = (id: string) => (id === CAPCOM || id === flightId ? commsFlightPath() : null);
+  if (selection.type === "seat") return open(selection.id) ?? commsAgentPath(selection.id);
+  const [a, b] = [selection.a, selection.b];
+  if (open(a) !== null && open(b) !== null) return commsFlightPath(); // FLIGHT and CAPCOM: the one FLIGHT conversation
+  if (open(a) === null && open(b) === null) return commsContactPath(a, b);
+  return commsAgentPath(open(a) === null ? a : b);
+}
+
+/** The Comms right column: the living crew map, with the message lengths beneath it. */
 export function CommsGraph({
   rows,
   flightId,
-  view,
 }: {
   rows: CrewRow[];
   flightId: string | undefined;
   view: CommsView;
 }) {
-  void view;
+  const locale = useLocale();
+  const feedResource = useResource<{ messages: FeedMessage[] }>(RESOURCES.commsFeed);
+  const openResource = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen);
   const lengthsResource = useResource<CommsMetricsView>(RESOURCES.commsMetrics);
   const lengths = lengthsResource.data?.p95BySeat;
-  const [mode, setMode] = useState<ChartMode>("all");
-  const reduced = useReducedMotion();
-  const chart = useChartData(rows, flightId);
-  const { flight, known, edges } = chart;
-  const [filter, setFilter] = useChartFilter(known);
+  const host = useRef<HTMLDivElement>(null);
+  const map = useRef<CrewMap | null>(null);
+  const flight = useRef(flightId);
+  flight.current = flightId;
 
-  // A click opens the conversation in the chat and keeps the chart narrowed to match.
-  const pick = (next: ChartFilter) => navigate(commsHrefFor(next, flight));
-  const graphTotal = edges.reduce((sum, edge) => sum + edge.aToB + edge.bToA, 0);
-  const graphLabel = `Comms chart, ${plural(rows.length, "seat")}, ${plural(graphTotal, "message")} in 24h${
-    filter === null ? "" : ", narrowed"
-  }`;
+  useEffect(() => {
+    const node = host.current;
+    if (!node) return;
+    const made = createCrewMap(node, {
+      pins: keptPins,
+      onPinsChange: (pins) => {
+        keptPins = pins;
+      },
+      onOpenConversation: (selection) => navigate(mapSelectionPath(selection, flight.current)),
+    });
+    map.current = made;
+    return () => {
+      made.destroy();
+      map.current = null;
+    };
+  }, []);
+
+  const feed = feedResource.data?.messages;
+  const open = openResource.data?.items;
+  const failed = feedResource.error !== null || openResource.error !== null;
+  const snapshot = useMemo(
+    () =>
+      feed === undefined
+        ? null
+        : crewMapSnapshot({
+            rows,
+            flightId,
+            feed,
+            open: open ?? [],
+            now: Date.now(),
+            ok: !failed,
+          }),
+    [rows, flightId, feed, open, failed],
+  );
+  useEffect(() => {
+    if (snapshot) map.current?.update(snapshot);
+  }, [snapshot]);
 
   return (
     <aside className="comms-right" aria-label="Comms activity">
-      <Panel
-        id="commsGraph"
-        className="comms-graph-panel"
-        title="Comms graph"
-        sub="24h"
-        actions={<ChartModeSwitch mode={mode} onChange={setMode} openCount={chart.openCount} />}
-      >
-        <div className="comms-graph-readout" aria-hidden="true">
-          {chart.streaming && (
-            <span className="live">
-              <i className="comms-live-dot" />
-              Live
-            </span>
-          )}
-          <span>
-            <b>{edges.length}</b> links
-          </span>
-          <span>
-            <b>{graphTotal}</b> msg
-          </span>
-          <span>
-            <b>{chart.groups.length}</b> roles
-          </span>
-        </div>
-        {chart.chartLoading && !chart.hasData ? (
-          <p className="comms-traffic-empty">Loading comms graph…</p>
-        ) : !chart.hasData ? (
-          <p className="comms-traffic-empty" role="alert">
-            Couldn't load comms graph. Retrying.
-          </p>
-        ) : (
-          <>
-            {chart.chartError && (
-              <p className="comms-length-stale" role="status">
-                Stale · couldn't refresh. Retrying.
-              </p>
-            )}
-            <div className="comms-graph-stage">
-              <CommsRails
-                seats={chart.seats}
-                groups={chart.groups}
-                hubIds={chart.hubIds}
-                edges={edges}
-                mode={mode}
-                filter={filter}
-                flows={chart.flows}
-                reduced={reduced}
-                label={graphLabel}
-                full={false}
-                onPickSeat={(id) => pick({ kind: "seat", id })}
-                onPickLink={(a, b) => pick(pairFilter(a, b))}
-                onClear={() => setFilter(null)}
-              />
-            </div>
-            <SignalLists chart={chart} pick={pick} />
-          </>
-        )}
-      </Panel>
+      <div className="comms-map panel" ref={host} />
       <Panel
         id="commsLength"
         className="comms-length-panel"
         title={COMMS_METRICS.messageLengthP95.label}
-        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString()} ${COMMS_METRICS.messageLengthP95.unit}`}
+        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString(locale)} ${COMMS_METRICS.messageLengthP95.unit}`}
       >
         {lengths === undefined && lengthsResource.error !== null ? (
           <p className="comms-traffic-empty" role="alert">
@@ -131,7 +121,7 @@ export function CommsGraph({
                       <li key={seatId} className={level}>
                         <b>{row === undefined ? seatId : callSign(row)}</b>
                         <span className="comms-length-value">
-                          {p95 === null ? "—" : Math.round(p95).toLocaleString()}
+                          {p95 === null ? "—" : Math.round(p95).toLocaleString(locale)}
                           {level !== "" && (
                             <em>{level === "over" ? " over limit" : " near limit"}</em>
                           )}
@@ -165,97 +155,4 @@ function lengthLevel(p95: number | null): "" | "near" | "over" {
   if (p95 === null) return "";
   if (p95 > COMMS_MESSAGE_MAX) return "over";
   return p95 >= COMMS_MESSAGE_MAX * NEAR_LIMIT ? "near" : "";
-}
-
-/** "Waiting on a reply" and "Just said", shared by the panel and the full-screen chart. */
-export function SignalLists({
-  chart,
-  pick,
-  className = "",
-}: {
-  chart: ReturnType<typeof useChartData>;
-  pick: (filter: ChartFilter) => void;
-  className?: string;
-}) {
-  const nameOf = (id: string) => chart.seats.find((seat) => seat.id === id)?.name ?? id;
-  // What waits on the operator is answered on Needs you, not here: this list holds waits between
-  // agents, and one line says how many wait for the operator, from the figure the header shows.
-  const forYou = Number(useMetrics().readings.needsYou?.value ?? 0);
-  return (
-    <div className={`comms-signal-lists ${className}`.trim()}>
-      {forYou > 0 && (
-        <p className="comms-waiting-you">
-          <a
-            href={NEEDS_YOU_PATH}
-            onClick={(event) => {
-              event.preventDefault();
-              navigate(NEEDS_YOU_PATH);
-            }}
-          >
-            {forYou} waiting for you
-          </a>
-        </p>
-      )}
-      <MessageList
-        title="Waiting on a reply"
-        empty="Nobody owes a reply."
-        note={chart.waitingNote}
-        rows={chart.edges
-          .filter((edge) => edge.waiting && edge.a !== CAPCOM && edge.b !== CAPCOM)
-          .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
-          .map((edge) => ({
-            key: edge.key,
-            label: `${nameOf(edge.waiting?.asker ?? edge.a)} → ${nameOf(edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a))}`,
-            age: edge.waiting?.ms ?? 0,
-            text: edge.waiting?.question ?? "Reply requested",
-            onClick: () => pick(pairFilter(edge.a, edge.b)),
-          }))}
-      />
-      <MessageList
-        title="Just said"
-        empty="No direct messages yet."
-        rows={chart.feed.slice(0, 5).map((message) => ({
-          key: message.id,
-          label: `${nameOf(message.from)} → ${nameOf(message.to)}`,
-          text: message.text.split(/\r?\n/, 1)[0] || "Message",
-          onClick: () => pick(pairFilter(message.from, message.to)),
-        }))}
-      />
-    </div>
-  );
-}
-
-export function MessageList({
-  title,
-  empty,
-  note = null,
-  rows,
-}: {
-  title: string;
-  empty: string;
-  /** Says, in words, that the rows may be missing or out of date. */
-  note?: string | null;
-  rows: readonly { key: string; label: string; text: string; age?: number; onClick: () => void }[];
-}) {
-  return (
-    <section className="comms-signal-list" aria-label={title}>
-      <h3>{title}</h3>
-      {note !== null && <p role="status">{note}</p>}
-      {rows.length === 0 ? (
-        note === null && <p>{empty}</p>
-      ) : (
-        <ul>
-          {rows.map((row) => (
-            <li key={row.key}>
-              <button type="button" onClick={row.onClick}>
-                <b>{row.label}</b>
-                <span>{row.text}</span>
-                {row.age !== undefined && <em>{waitWord(row.age)}</em>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
 }

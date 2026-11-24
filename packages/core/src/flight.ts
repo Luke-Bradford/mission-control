@@ -1581,7 +1581,7 @@ export function wakeLine(
   preface = "",
 ): string {
   const productPass = s.prs.some((p) => p.state === "merged")
-    ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
+    ? " A merged PR is listed: inspect its paths; where it changes a user interface, render the affected page using the repository's preview and visual-review process, compare it with that repository's design guidance, then file or fold any gap."
     : "";
   const idleReviewFault = reviewFaultStands(s.reviewQueue)
     ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."

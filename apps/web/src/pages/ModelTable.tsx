@@ -8,6 +8,7 @@ import {
   type ModelsView,
 } from "@mc/core";
 import { useEffect, useState } from "react";
+import { useLocale, useTz } from "../clock.ts";
 import { type ResourceRef, useResource } from "../data.ts";
 import { cost, kTokens, percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -182,6 +183,8 @@ function SideCells({ side }: { side: ModelSide }) {
 }
 
 function ChangeTable({ rows }: { rows: ModelChangeRow[] }) {
+  const tz = useTz();
+  const locale = useLocale();
   return (
     <div className={`model-scroll${rows.length > VISIBLE_ROWS ? " scrolls" : ""}`}>
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling table must be reachable by keyboard */}
@@ -209,7 +212,9 @@ function ChangeTable({ rows }: { rows: ModelChangeRow[] }) {
           <tbody>
             {rows.map((r) => (
               <tr key={`${r.at}:${r.seatId}:${r.change}`}>
-                <td>{new Date(r.at).toLocaleDateString("en-GB")}</td>
+                <td>
+                  {tz === null ? "—" : new Date(r.at).toLocaleDateString(locale, { timeZone: tz })}
+                </td>
                 <td>{r.seatId ?? "All seats"}</td>
                 <td title={r.change}>{r.change}</td>
                 <SideCells side={r.before} />

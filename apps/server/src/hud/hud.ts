@@ -26,6 +26,7 @@ import {
   clockHm,
   crewHudState,
   currentReview,
+  DEFAULT_LOCALE,
   type DriverStop,
   driverStopKey,
   type Escalation,
@@ -276,11 +277,9 @@ function loopViews(
             ? "error"
             : hud === "running" || hud === "stalled"
               ? "working"
-              : hud === "blocked"
-                ? "waiting-you"
-                : hud === "waiting"
-                  ? "waiting-agent"
-                  : "idle",
+              : hud === "waiting"
+                ? "waiting-agent"
+                : "idle",
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,
@@ -1184,12 +1183,19 @@ export function flightNotTriagingDueAt(config: CcConfig, store: Store, now: numb
 }
 
 /** "14:05" today, "27 Oct 14:05" before today, in the operator's timezone. */
-export function sinceText(at: number, now: number, timeZone: string): string {
+export function sinceText(
+  at: number,
+  now: number,
+  timeZone: string,
+  locale: string = DEFAULT_LOCALE,
+): string {
   const hm = clockHm(at, timeZone);
   if (at >= startOfLocalDay(now, timeZone)) return hm;
-  const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(
-    at,
-  );
+  const day = new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    timeZone,
+  }).format(at);
   return `${day} ${hm}`;
 }
 
@@ -1773,7 +1779,14 @@ function buildAttentionItems(
   const shown =
     triage === null
       ? checked
-      : withNotTriaging(checked, triage, acks, now, config.operator.timezone);
+      : withNotTriaging(
+          checked,
+          triage,
+          acks,
+          now,
+          config.operator.timezone,
+          config.operator.locale ?? DEFAULT_LOCALE,
+        );
   return includeHeld ? [...shown, ...partition.held] : shown;
 }
 
@@ -1789,6 +1802,7 @@ function withNotTriaging(
   acks: Map<string, number>,
   now: number,
   timeZone: string,
+  locale: string,
 ): AttentionItem[] {
   const members = items
     .filter(
@@ -1819,7 +1833,7 @@ function withNotTriaging(
     text: flightNotTriagingText(
       cause,
       members.length,
-      since === null ? null : sinceText(since, now, timeZone),
+      since === null ? null : sinceText(since, now, timeZone, locale),
       triage.detail,
     ),
     tool: null,

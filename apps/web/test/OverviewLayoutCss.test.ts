@@ -19,7 +19,6 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
     for (const selector of [
       String.raw`\.comms-actions button,\n\.comms-react-set button`,
-      String.raw`\.comms-metric button`,
       String.raw`#agentsList \.need button`,
       String.raw`button\.flight-link`,
       String.raw`\.ph \.act \.ph-link`,
@@ -46,7 +45,6 @@ describe("Overview layout (hud.css)", () => {
       expect(action, selector).toContain("align-items: center");
       expect(action, selector).toContain("min-height: 24px");
     }
-    expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
     expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
 

@@ -1,7 +1,8 @@
 /** The shared clocks (1 s and 5 s) and the operator's timezone. */
-import type { ConfigView } from "@mc/core";
+import { type ConfigView, DEFAULT_LOCALE } from "@mc/core";
 import { useSyncExternalStore } from "react";
 import { RESOURCES, useResource } from "./data.ts";
+import { setActiveLocale } from "./fmt.ts";
 
 /**
  * A shared clock ticking every `ms`: one timer however many components read it, running only
@@ -62,4 +63,11 @@ export function useSecondWhile(ticking: boolean, coarse: number): number {
  */
 export function useTz(): string | null {
   return useResource<ConfigView>(RESOURCES.config).data?.operator?.timezone ?? null;
+}
+
+/** `config.operator.locale`: the BCP 47 locale of every date and number on the HUD (en-GB by default). */
+export function useLocale(): string {
+  const locale = useResource<ConfigView>(RESOURCES.config).data?.operator?.locale ?? DEFAULT_LOCALE;
+  setActiveLocale(locale); // the formatters built outside a component read it
+  return locale;
 }

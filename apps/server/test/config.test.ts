@@ -22,6 +22,7 @@ import {
 } from "@mc/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  adoptHubRepo,
   applySeatAccount,
   type CcConfig,
   ConfigError,
@@ -31,8 +32,10 @@ import {
   DEFAULT_PORT,
   findHubRoot,
   flightPowersOf,
+  fullSuiteProblem,
   isPreview,
   loadConfig,
+  ownsHubFiles,
   parseConfig,
   portFromEnv,
   seatUnavailable,
@@ -1490,6 +1493,13 @@ describe("preview servers and crew", () => {
     expect(isPreview(DEFAULT_PORT, { MC_NO_LOOP_WRITES: "0" })).toBe(false);
   });
 
+  it("the live port is MC_LIVE_PORT when set, and MC_PORT defaults to it", () => {
+    expect(isPreview(7500, { MC_LIVE_PORT: "7500" })).toBe(false);
+    expect(isPreview(DEFAULT_PORT, { MC_LIVE_PORT: "7500" })).toBe(true);
+    expect(portFromEnv(undefined, { MC_LIVE_PORT: "7500" })).toBe(7500);
+    expect(errorOf(() => isPreview(7500, { MC_LIVE_PORT: "80" })).path).toBe("MC_LIVE_PORT");
+  });
+
   it("the live hub runs crew unless MC_NO_CREW=1; a preview only with MC_CREW=1", () => {
     expect(crewAllowed(false, {})).toBe(true);
     expect(crewAllowed(false, { MC_NO_CREW: "1" })).toBe(false);
@@ -1561,16 +1571,20 @@ describe("guard config", () => {
   });
 
   it.each(["rm -rf /", "pnpm -s tests", "pnpm test", "git push"])(
-    "refuses full_suite entry %j that crew seats may not run",
+    "finds full_suite entry %j that crew seats may not run, against the writer commands",
     (cmd) => {
-      const t = text.replace(FULL_SUITE_BLOCK, `full_suite: [${JSON.stringify(cmd)}]`);
-      const e = errorOf(() => parse(t));
-      expect(e.path).toBe("repos[2].full_suite");
-      expect(e.message).toBe(
-        `repos[2].full_suite: ${cmd} is not one of the repo's writer validation commands (commands.writer)`,
+      expect(fullSuiteProblem([cmd], DEFAULT_SEAT_COMMANDS.writer)).toBe(
+        `${cmd} is not one of the repo's writer validation commands`,
       );
     },
   );
+
+  it("loads a full_suite for a repo with no commands, to be checked against its CLAUDE.md checks at launch", () => {
+    const t = text.replace(FULL_SUITE_BLOCK, 'full_suite: ["pytest -q"]');
+    expect(parse(t).repos[2]?.fullSuite).toEqual(["pytest -q"]);
+    expect(fullSuiteProblem(["pytest -q"], ["pytest -q"])).toBeNull();
+    expect(fullSuiteProblem(["pytest -q --lf"], ["pytest -q"])).toBeNull();
+  });
 
   it.each([
     ["v22.5.1", "is Node 22.5.1; 22.6 or later is needed"],
@@ -1720,9 +1734,9 @@ describe("repo commands and protected files", () => {
     expect(e.path).toBe("repos[0].requiredChecks[0]");
   });
 
-  it("a repo with neither key loads with the default commands and no extra protected files", () => {
+  it("a repo with neither key loads with no commands (the hub fills in its own defaults) and no extra protected files", () => {
     const r = parse(text).repos[0];
-    expect(r?.commands).toEqual(DEFAULT_SEAT_COMMANDS);
+    expect(r?.commands).toBeUndefined();
     expect(r?.protectedFiles).toEqual([]);
   });
 
@@ -1974,4 +1988,47 @@ it("rejects an invalid operator timezone at config load", () => {
   const path = tmpConfig((s) => s.replace("timezone: UTC", "timezone: Mars/Olympus"));
   expect(() => loadConfig(path)).toThrow(ConfigError);
   expect(() => loadConfig(path)).toThrow(/timezone/);
+});
+
+describe("ownsHubFiles", () => {
+  it("is true for every repo when the hub's own repo is unknown", () => {
+    expect(ownsHubFiles({}, "a")).toBe(true);
+    expect(ownsHubFiles({}, "b")).toBe(true);
+  });
+
+  it("is true only for the hub's own repo once it is known", () => {
+    expect(ownsHubFiles({ hubRepo: "a" }, "a")).toBe(true);
+    expect(ownsHubFiles({ hubRepo: "a" }, "b")).toBe(false);
+    expect(ownsHubFiles({ hubRepo: null }, "a")).toBe(false);
+  });
+
+  it("is true for the hub's repo when it is onboarded after startup", () => {
+    const config = { hubRepo: null, hubGithub: "o/hub", repos: [] as never[] };
+    adoptHubRepo(config, { id: "other", github: "o/other" });
+    expect(ownsHubFiles(config, "other")).toBe(false);
+    adoptHubRepo(config, { id: "hub", github: "O/Hub" });
+    expect(ownsHubFiles(config, "hub")).toBe(true);
+    expect(ownsHubFiles(config, "other")).toBe(false);
+  });
+});
+
+describe("operator.locale", () => {
+  const withLocale = (tag: string) =>
+    tmpConfig((t) => t.replace("timezone: UTC", `timezone: UTC\n  locale: ${tag}`));
+
+  it("is unset by default and reaches the config view as en-GB", () => {
+    const c = loadConfig(tmpConfig((t) => t));
+    expect(c.operator.locale).toBeUndefined();
+    expect(configView(c).operator.locale).toBe("en-GB");
+  });
+
+  it("loads a set locale into the config and the view", () => {
+    const c = loadConfig(withLocale("en-US"));
+    expect(c.operator.locale).toBe("en-US");
+    expect(configView(c).operator.locale).toBe("en-US");
+  });
+
+  it("refuses a locale that is not a BCP 47 tag", () => {
+    expect(() => loadConfig(withLocale("not_a_locale"))).toThrow(/locale/);
+  });
 });

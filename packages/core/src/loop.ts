@@ -636,6 +636,8 @@ export interface PendingSeatWorkInput {
   events: readonly { key: string; text: string; at: number }[];
   messages: readonly { key: string; from: string; at: number }[];
   woken: readonly string[];
+  /** The seat id FLIGHT's messages come from, as the config names it; null when none is configured. */
+  flightSeatId: string | null;
 }
 
 /**
@@ -674,7 +676,10 @@ export function pendingSeatWork(input: PendingSeatWorkInput): PendingSeatWork[] 
     });
   }
   for (const m of input.messages) {
-    if (m.at >= since && (m.from === "CAPCOM" || m.from === "flight-1"))
+    if (
+      m.at >= since &&
+      (m.from === "CAPCOM" || (input.flightSeatId !== null && m.from === input.flightSeatId))
+    )
       out.push({
         key: `message:${m.key}`,
         kind: "message",

@@ -38,6 +38,7 @@ import {
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
   DEFAULT_REPO_RULES,
+  DEFAULT_SEAT_COMMANDS,
   estimateTokens,
   FLIGHT_FULL_BUILTINS,
   freezeRules,
@@ -1074,7 +1075,8 @@ describe("startRun", () => {
         bodyLength: TICKET.body.length,
         branch: BRANCH,
         area: ["apps/**"],
-        commands: [],
+        // the harness repo sets no commands and is the hub's own, so it gets the pnpm defaults
+        commands: DEFAULT_SEAT_COMMANDS.writer,
         fullSuite: [],
         ...(startedProfile ? { profile: startedProfile } : {}),
         profileNames: DEFAULT_PROFILES.map((p) => p.name),
@@ -1160,17 +1162,16 @@ describe("startRun", () => {
     expect(argv).not.toContain("--effort");
   });
 
-  it("keeps a template's dollar cap on an interactive Claude run", async () => {
+  it("passes a template's dollar cap to a Claude run", async () => {
     const profiles = DEFAULT_PROFILES.map((profile) =>
       profile.name === "small-change" ? { ...profile, budgetUsd: 12.5 } : profile,
     );
     const { sup } = make({ profiles: () => profiles });
     sup.start();
-    const run = await sup.startRun("guido-1", 42);
+    await sup.startRun("guido-1", 42);
     await until(() => expect(recorded().length).toBeGreaterThan(0));
     const argv = recorded()[0].argv as string[];
-    expect(argv).not.toContain("--max-budget-usd");
-    expect(store.run(run.runId)?.profile?.profile.budgetUsd).toBe(12.5);
+    expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("12.5");
   });
 
   it("runs the CLI with a minimal env, with no git identity (the commit tool sets it)", async () => {
@@ -1771,6 +1772,51 @@ describe("startRun", () => {
       "Configured validation commands: `uv run pytest`, `uv run ruff check`. You may also use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`uv run pytest`) takes the test lock",
     );
     expect(brief).not.toContain("pnpm");
+  });
+
+  it("a repo with no commands that is not the hub's gets its CLAUDE.md checks, not pnpm", async () => {
+    const { sup } = make({
+      hubRepo: "hub",
+      rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [], checks: ["pytest -q"] }),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("Configured validation commands: `pytest -q`.");
+    expect(brief).not.toContain("pnpm");
+  });
+
+  const pytestRules = async () =>
+    freezeRules({ ...DEFAULT_REPO_RULES, needs: [], checks: ["pytest -q"] });
+
+  it("a non-hub repo's full_suite entry that is one of its CLAUDE.md checks takes the test lock", async () => {
+    const { sup } = make({
+      hubRepo: "hub",
+      rules: pytestRules,
+      repo: { fullSuite: ["pytest -q"] },
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0] as string).toContain("A whole suite (`pytest -q`) takes the test lock");
+  });
+
+  it("refuses a start whose non-hub repo's full_suite entry is not one of its checks", async () => {
+    const { sup } = make({ hubRepo: "hub", rules: pytestRules, repo: { fullSuite: ["rm -rf /"] } });
+    sup.start();
+    await expect(sup.startRun("guido-1", 42)).rejects.toThrow("writer validation commands");
+  });
+
+  it("the hub's own repo with no commands still gets the pnpm defaults", async () => {
+    const { sup } = make({
+      hubRepo: "mc",
+      rules: async () => freezeRules({ ...DEFAULT_REPO_RULES, needs: [], checks: ["pytest -q"] }),
+    });
+    sup.start();
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0] as string).toContain("`pnpm -s lint`");
   });
 
   it("a planner's brief names the repo's review commands, not the writer's", async () => {
@@ -2811,10 +2857,7 @@ describe("the mc tools and the guard (phase 2b)", () => {
       `'${process.execPath}' --experimental-strip-types '${join(HUB_ROOT, HOOK_ENTRY)}' '${crewTokenPath(dbPath, runId)}' 'http://127.0.0.1:${HUB_PORT}/api/guard/check' || exit 2`,
     );
     const hooks = settingsOf().hooks;
-    // Claude's Stop hook (the end of each turn) rides beside the guard hooks
-    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]);
-    expect(hooks.Stop?.[0]?.hooks[0]?.command).toMatch(/^\/bin\/echo stop >> '.+\/mc-turn-end'$/);
-    expect(hooks.Stop?.[0]?.hooks[0]?.command).not.toContain(tokenOf(runId));
+    expect(Object.keys(hooks)).toEqual(["PreToolUse", "PostToolUse", "PostToolUseFailure"]);
     expect(hooks.PreToolUse?.[0]?.matcher).toBe("*");
     expect(hooks.PostToolUse?.[0]?.matcher).toBe("Bash");
     // the trim hook (#1045): after every tool, never given the token

@@ -51,6 +51,7 @@ import {
   conflictText,
   controllerCheckFailText,
   controllerCheckParkText,
+  controllerCheckPathsOf,
   controllerCheckUnreadableText,
   crewProfileOf,
   deletedLocalText,
@@ -63,7 +64,6 @@ import {
   evidenceNoteKey,
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   fillLoopText,
   fixCommsText,
@@ -163,7 +163,14 @@ import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
-import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
+import {
+  type CcConfig,
+  type CrewSeatConfig,
+  flightPowersOf,
+  ownsHubFiles,
+  seatUnavailable,
+} from "../config.ts";
+import { flightSeat } from "../flight/seat.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -724,7 +731,10 @@ export function createEngine(deps: EngineDeps): Engine {
     loop.pendingLine =
       waiting != null && !(waiting.key in store.claimedKeys(run.id))
         ? { key: waiting.key, text: `${waiting.text}\n\n${notice}` }
-        : { key: `${run.id}:${held.epoch}:branch-moved:${held.sha}`, text: notice };
+        : {
+            key: `${run.id}:${held.epoch}:branch-moved:${held.sha}`,
+            text: notice,
+          };
     store.addLoopEvent(
       `${run.id}:${held.epoch}:moved:${held.sha}`,
       run.id,
@@ -828,6 +838,8 @@ export function createEngine(deps: EngineDeps): Engine {
           .filter((m) => m.to === run.agentId)
           .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
         woken,
+        // the active FLIGHT seat (not a retiring or unavailable one); it need not share the run's session
+        flightSeatId: flightSeat(config)?.seat.id ?? null,
         // the fix line carries the findings' text and wakes the seat itself, so a findings item
         // whose fix line is still unsent is left to it
       }).filter(
@@ -1039,7 +1051,11 @@ export function createEngine(deps: EngineDeps): Engine {
       runId: run.id,
       runStartedAt: run.startedAt,
       loop,
-      ticket: { ref: run.ticket, title: run.ticketTitle ?? item?.title ?? "", issue },
+      ticket: {
+        ref: run.ticket,
+        title: run.ticketTitle ?? item?.title ?? "",
+        issue,
+      },
       now: at,
       tz: config.operator.timezone,
       hubStartedAt: deps.hubStartedAt,
@@ -1152,7 +1168,10 @@ export function createEngine(deps: EngineDeps): Engine {
       cur.pushStartedAt = at;
       // a chain of merges collapses to the sha that was reviewed
       cur.carry = r.prSame
-        ? { from: cur.carry?.to === r.parent ? cur.carry.from : r.parent, to: r.sha }
+        ? {
+            from: cur.carry?.to === r.parent ? cur.carry.from : r.parent,
+            to: r.sha,
+          }
         : null;
       if (r.prSame && cur.reviewWaivedSha === r.parent) cur.reviewWaivedSha = r.sha;
       store.setRunLoop(run.id, cur);
@@ -1691,7 +1710,12 @@ export function createEngine(deps: EngineDeps): Engine {
           cur.cardFor = a.mark ?? cardMark(planned.phase, planned.epoch);
           return;
         }
-        await deps.board.move({ runId: run.id, repoId: run.repoId, issue, column: a.column });
+        await deps.board.move({
+          runId: run.id,
+          repoId: run.repoId,
+          issue,
+          column: a.column,
+        });
         // moved or failed (a failure is its Activity row): not tried again until the phase changes
         cur.cardFor = a.mark ?? cardMark(planned.phase, planned.epoch);
         return;
@@ -1944,7 +1968,10 @@ export function createEngine(deps: EngineDeps): Engine {
           const hold = cur.mergeHold;
           const reason = mergeHoldParkText(hold.by, hold.reason);
           out.parked = true;
-          cur.mergeHold = { ...hold, from: cur.phase === "parked" ? hold.from : cur.phase };
+          cur.mergeHold = {
+            ...hold,
+            from: cur.phase === "parked" ? hold.from : cur.phase,
+          };
           cur.phase = "parked";
           cur.hold = parkHold(cur.hold, MERGE_HOLD_PARK, reason, false);
           store.addLoopEvent(
@@ -2113,7 +2140,10 @@ export function createEngine(deps: EngineDeps): Engine {
           // one counted per tick, as for a refused merge step; the step is tried again next tick
           const prev = localTries.get(run.id);
           const n = prev === undefined ? 1 : prev.n + (at - prev.at >= ENGINE_TICK_MS / 2 ? 1 : 0);
-          localTries.set(run.id, { n, at: prev !== undefined && n === prev.n ? prev.at : at });
+          localTries.set(run.id, {
+            n,
+            at: prev !== undefined && n === prev.n ? prev.at : at,
+          });
           if (n < REFUSAL_TRIES) return;
         }
         localTries.delete(run.id);
@@ -2242,7 +2272,10 @@ export function createEngine(deps: EngineDeps): Engine {
       void deps.evidence.ensure(evidenceTarget(run, pr.number, pr.headSha));
     if (pr?.state === "merged" && !input.merging?.done.includes("merge")) {
       if (input.merging)
-        input.merging = { ...input.merging, done: [...input.merging.done, "merge"] };
+        input.merging = {
+          ...input.merging,
+          done: [...input.merging.done, "merge"],
+        };
       input.transient = 0;
       lastTransient.delete(runId);
     }
@@ -2355,8 +2388,8 @@ export function createEngine(deps: EngineDeps): Engine {
         ? null
         : [
             ...new Set([
-              ...effectiveHardRules(rules, flightPowers),
-              ...(fullFlight ? FLIGHT_CONTROLLER_CHECK_PATHS : []),
+              ...effectiveHardRules(rules, flightPowers, ownsHubFiles(config, run.repoId)),
+              ...(fullFlight ? controllerCheckPathsOf(ownsHubFiles(config, run.repoId)) : []),
             ]),
           ];
     const hardRulesHash =
@@ -2760,7 +2793,12 @@ export function createEngine(deps: EngineDeps): Engine {
         await send(rrun.id, action.key, action.text);
         continue;
       }
-      if (store.setReviewState(row.id, ["running"], "failed", { at, failure: action.reason })) {
+      if (
+        store.setReviewState(row.id, ["running"], "failed", {
+          at,
+          failure: action.reason,
+        })
+      ) {
         store.addLoopEvent(
           reviewEventKey(row.authorRunId, row.id, "failed"),
           row.authorRunId,
@@ -2845,7 +2883,12 @@ export function createEngine(deps: EngineDeps): Engine {
             continue;
           } else {
             const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
-            if (store.setReviewState(row.id, ["starting"], "failed", { at: now(), failure })) {
+            if (
+              store.setReviewState(row.id, ["starting"], "failed", {
+                at: now(),
+                failure,
+              })
+            ) {
               store.addLoopEvent(
                 reviewEventKey(row.authorRunId, row.id, "failed"),
                 row.authorRunId,
@@ -2856,7 +2899,12 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         if (runId !== null) {
-          if (store.setReviewState(row.id, ["starting"], "running", { at: now(), runId })) {
+          if (
+            store.setReviewState(row.id, ["starting"], "running", {
+              at: now(),
+              runId,
+            })
+          ) {
             store.addLoopEvent(
               reviewEventKey(row.authorRunId, row.id, "started"),
               row.authorRunId,
@@ -3111,7 +3159,7 @@ export function createEngine(deps: EngineDeps): Engine {
             // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
             if (!first || first.blocking === 0) return refuse("wrong-action");
             const paths = await publisher.hardRuleTouches(run, pushed.sha, [
-              ...FLIGHT_CONTROLLER_CHECK_PATHS,
+              ...controllerCheckPathsOf(ownsHubFiles(config, run.repoId)),
               ...FLIGHT_FLOOR_PATHS,
             ]);
             if (paths.length === 0) return refuse("wrong-action");
@@ -3133,7 +3181,7 @@ export function createEngine(deps: EngineDeps): Engine {
               .at(-1);
             if (!review || review.blocking > 0) {
               const paths = await publisher.hardRuleTouches(run, pushed.sha, [
-                ...FLIGHT_CONTROLLER_CHECK_PATHS,
+                ...controllerCheckPathsOf(ownsHubFiles(config, run.repoId)),
                 ...FLIGHT_FLOOR_PATHS,
               ]);
               if (paths.length > 0) return refuse("floor-enforced");
@@ -3206,7 +3254,11 @@ export function createEngine(deps: EngineDeps): Engine {
           next.phase = "review";
           next.flightSecondReview = {
             ...loop.flightSecondReview,
-            [pushed.sha]: { epoch: next.epoch, ...secondOf, reason: opts.note ?? "" },
+            [pushed.sha]: {
+              epoch: next.epoch,
+              ...secondOf,
+              reason: opts.note ?? "",
+            },
           };
         } else if (opts?.action === "rereview" || opts?.action === "rework") {
           next.reviewWaivedSha = null;
@@ -3257,7 +3309,10 @@ export function createEngine(deps: EngineDeps): Engine {
               });
               if (stored === null) return refuse("rework-undelivered");
               store.markCommsInboxRead(run.agentId, [stored.id]);
-              next.pendingLine = { key: `${run.id}:flight-rework:${next.epoch}`, text: message };
+              next.pendingLine = {
+                key: `${run.id}:flight-rework:${next.epoch}`,
+                text: message,
+              };
               next.hold = { ...next.hold, wake: true };
             } else {
               const sent = await supervisor.send(
@@ -3477,9 +3532,17 @@ export function createEngine(deps: EngineDeps): Engine {
         const from = loop.mergeHold?.from;
         store.setRunLoop(runId, {
           ...loop,
-          mergeHold: { by, reason, at, ...(sha ? { sha } : {}), ...(from ? { from } : {}) },
+          mergeHold: {
+            by,
+            reason,
+            at,
+            ...(sha ? { sha } : {}),
+            ...(from ? { from } : {}),
+          },
           ...(parkedOnHold && loop.hold
-            ? { hold: { ...loop.hold, reason: mergeHoldParkText(by, reason) } }
+            ? {
+                hold: { ...loop.hold, reason: mergeHoldParkText(by, reason) },
+              }
             : {}),
         });
         store.addLoopEvent(
@@ -3613,7 +3676,13 @@ export function createEngine(deps: EngineDeps): Engine {
           loop = current.loop;
         }
         const at = now();
-        store.addRunCommit({ runId, repoId: run.repoId, branch: run.branch, sha: head, at });
+        store.addRunCommit({
+          runId,
+          repoId: run.repoId,
+          branch: run.branch,
+          sha: head,
+          at,
+        });
         store.setRunPush({ runId, sha: head, at });
         store.setRunLoop(runId, {
           ...loop,
@@ -3953,7 +4022,10 @@ export function createEngine(deps: EngineDeps): Engine {
     },
 
     syncMain(runId) {
-      const refused = (text: string): SyncMainResult => ({ kind: "refused", text });
+      const refused = (text: string): SyncMainResult => ({
+        kind: "refused",
+        text,
+      });
       return onChainResult(runId, refused("the loop engine is off"), async () => {
         if (!live()) return refused("the loop engine is off");
         const run = store.run(runId);

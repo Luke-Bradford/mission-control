@@ -173,19 +173,24 @@ export const LINK_MAP: Record<Page | "ticket", { routes: string[]; rules: LinkRu
       rule(/^Inbox · /, /^\/comms\/agents\/[\w-]+\/inbox$/, "What the agent reads."),
       rule(/^All messages$/, /^\/comms\/agents\/[\w-]+$/, "Everything the agent sent and got."),
       rule(
-        /Narrow the chart to this conversation$/,
-        /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
-        "A chart line narrows the chart to that pair and opens their thread.",
+        /, .*Enter opens its messages\.$/,
+        /^\/comms(\/agents\/[\w-]+)?$/,
+        "A map seat opens its conversation; FLIGHT and CAPCOM open the operator's thread.",
       ),
       rule(
-        /Narrow the chart to [\w#-]+$/,
-        /^\/comms(\/[\w-]+)*\?focus=seat%3A[\w-]+$/,
-        "A chart seat narrows the chart to that seat and opens its conversations.",
+        /^Link [\w-]+ and [\w-]+\./,
+        /^\/comms(\/agents\/[\w-]+(\/contacts\/[\w-]+)?)?$/,
+        "A map link opens that pair's thread.",
+      ),
+      rule(
+        /^[\w-]+, [^,]+(?:, context .*)?$/,
+        /^\/comms(\/agents\/[\w-]+)?$/,
+        "A map seat list entry opens its conversation.",
       ),
       rule(
         / → /,
-        /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
-        "A chart line opens that pair's thread.",
+        /^\/comms(\/agents\/[\w-]+(\/contacts\/[\w-]+)?)?$/,
+        "A waiting or just-said line opens that pair's thread.",
       ),
       rule(
         /^[\w-]+ · \d+ messages?/,
@@ -332,11 +337,10 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/board/Card.tsx":
     "page: the ticket (card, title), Needs you item (You chip), seat (agent tag), trace",
   "src/browserNotifications.ts": "page: the notification's target",
-  "src/comms/CommsGraph.tsx": "page: chart filter, Needs you",
+  "src/comms/CommsGraph.tsx": "page: the conversation a map seat or link opens",
   "src/comms/Conversation.tsx":
     "page: Comms views, the ticket, the operator's own thread with an agent",
   "src/comms/TicketsList.tsx": "page: Comms ticket thread, ticket",
-  "src/comms/chartPaths.ts": "page: chart filter",
   "src/comms/messages.tsx": "page: links inside message text",
   "src/components/ExternalLink.tsx": "external",
   "src/components/NeedButton.tsx": "pane: a need named in text",

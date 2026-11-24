@@ -135,7 +135,8 @@ export interface Metrics {
 
 /** `/api/config`: the loaded config, read-only, never including the password hash. */
 export interface ConfigView {
-  operator: { id: string; timezone: string };
+  /** `locale` is the operator's BCP 47 locale for dates and numbers; the web falls back to en-GB without it. */
+  operator: { id: string; timezone: string; locale?: string };
   /**
    * The GitHub login the hub acts as (the authenticated `gh` user). The server always sets it, null
    * when the read fails; optional only until the web fixtures carry it.
@@ -840,6 +841,10 @@ export interface PrUatView {
   sha?: string | null;
   qaSummary?: string | null;
   files?: string[];
+  /** Whether this head changes a path in the repository's configured web area. */
+  webChanged?: boolean;
+  /** Whether this hub retains before-and-after evidence for this repository. */
+  visualEvidenceAvailable?: boolean;
   tests?: ReportedTest[];
   testsAdded?: { file: string; failedOnBase: boolean }[];
   screenshots?: ReviewShotView[];

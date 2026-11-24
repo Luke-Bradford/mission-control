@@ -20,6 +20,7 @@ const boot = vi.hoisted(() => ({
   hasViewClients: null as (() => boolean) | null,
   serving: false,
   evidenceLive: false,
+  hubOwner: undefined as string | null | undefined,
   discoveryStarted: false,
   expectSupervisorEnabled: true,
   models: {} as ModelDeps,
@@ -113,6 +114,8 @@ vi.mock("../src/preview/repo.ts", async (original) => {
     ...real,
     resolvePreviewRepo: (...args: Parameters<typeof real.resolvePreviewRepo>) =>
       boot.evidenceLive ? Promise.resolve("mission-control") : real.resolvePreviewRepo(...args),
+    resolveHubRepo: (...args: Parameters<typeof real.resolveHubRepo>) =>
+      boot.hubOwner === undefined ? real.resolveHubRepo(...args) : Promise.resolve(boot.hubOwner),
   };
 });
 
@@ -174,6 +177,7 @@ beforeEach(async () => {
   boot.hasViewClients = null;
   boot.serving = false;
   boot.evidenceLive = false;
+  boot.hubOwner = undefined;
   boot.discoveryStarted = false;
   boot.expectSupervisorEnabled = true;
   boot.retryMs = 60_000;
@@ -323,6 +327,20 @@ describe("mixed hub startup", () => {
     expect(boot.deps?.configReadPath).toBe(join(dir, "config.yaml"));
     const read = (await get("/api/repos/mission-control/rules")).json<{ rules: object }>();
     expect(Object.keys(read.rules)).toHaveLength(18);
+  });
+
+  it("treats every configured repo as foreign when the hub's own repo is not configured", async () => {
+    boot.hubOwner = null;
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    const { ownsHubFiles } = await import("../src/config.ts");
+    const config = boot.deps?.config;
+    if (!config) throw new Error("hub has not served");
+    expect(config.hubRepo).toBeNull();
+    expect(config.repos.map((r) => ownsHubFiles(config, r.id))).toEqual(
+      config.repos.map(() => false),
+    );
   });
 
   it("connects stream counts to scheduler client presence", async () => {

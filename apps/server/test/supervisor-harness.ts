@@ -26,7 +26,6 @@ import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import type { ReviewPreviews } from "../src/preview/review.ts";
-import type { CmuxOptions } from "../src/runtime/cmux.ts";
 import { endKeeper, KEEPER_SOCKET } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -339,8 +338,6 @@ function make(
     fake?: string;
     cliCheckTimeoutMs?: number;
     codexCommand?: string;
-    cmuxCommand?: string[];
-    cmuxOptions?: CmuxOptions;
     codexAuthPath?: string;
     worktrees?: string;
     extraArgs?: string[];
@@ -364,6 +361,8 @@ function make(
     autonomy?: "merge" | "draft";
     claim?: SupervisorDeps["claim"];
     repo?: Partial<CcConfig["repos"][number]>;
+    /** The repo the hub's own code lives in; unset: every repo is the hub's. */
+    hubRepo?: string;
     cliHold?: CliHold;
     cliVersion?: SupervisorDeps["cliVersion"];
     rules?: SupervisorDeps["rules"];
@@ -381,6 +380,7 @@ function make(
   const cfg = config();
   if (over.autonomy !== undefined && cfg.repos[0]) cfg.repos[0].autonomy = over.autonomy;
   if (over.repo && cfg.repos[0]) Object.assign(cfg.repos[0], over.repo);
+  if (over.hubRepo !== undefined) cfg.hubRepo = over.hubRepo;
   const guido = cfg.crew?.sessions[0]?.seats.find((s) => s.id === "guido-1");
   if (over.guidoArea !== undefined && guido) guido.area = over.guidoArea;
   if (over.worktrees !== undefined && cfg.crew) cfg.crew.worktrees = over.worktrees;
@@ -418,10 +418,6 @@ function make(
     login: () => (over.login === undefined ? "me" : over.login),
     command: over.command ?? process.execPath,
     codexCommand: over.codexCommand,
-    cmuxCommand: over.cmuxCommand,
-    cmuxRetryMs: 1500,
-    cmuxSweepMs: 200,
-    ...(over.cmuxOptions === undefined ? {} : { cmuxOptions: over.cmuxOptions }),
     codexAuthPath,
     commandArgs:
       over.command === undefined
@@ -509,7 +505,7 @@ afterAll(async () => {
   try {
     await expectNoLeftovers(tmpRoot);
   } finally {
-    rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
 
@@ -571,8 +567,7 @@ async function noKeepers(): Promise<void> {
 afterEach(async () => {
   await Promise.all(sups.splice(0).map((s) => s.stopAll()));
   await noKeepers();
-  // A cmux session's launcher may still be writing its run folder as the test ends: retry.
-  rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  rmSync(dir, { recursive: true, force: true });
   expect(authReads.splice(0), "tests must never read the operator's Codex home").toEqual([]);
 });
 

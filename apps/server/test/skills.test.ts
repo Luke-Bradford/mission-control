@@ -14,7 +14,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { copySkillsToCodexHome, readRepoSkills, writeSkillPlugin } from "../src/runtime/skills.ts";
+import {
+  copySkillsToCodexHome,
+  mergeSkills,
+  readHubSkills,
+  readRepoSkills,
+  sharedSkillsFor,
+  writeSkillPlugin,
+} from "../src/runtime/skills.ts";
 
 describe("the repo's skills reach a seat (#1051)", () => {
   let dir: string;
@@ -57,6 +64,33 @@ describe("the repo's skills reach a seat (#1051)", () => {
     const hud = skills[0];
     expect(hud?.files.map((f) => f.path)).toEqual(["SKILL.md", "notes/rules.md"]);
     expect(hud?.files[0]?.body.toString()).toBe("---\nname: hud-design\n---\nWeb checklist\n");
+  });
+
+  it("gives a seat on another repo the hub's skills, its own repo's skill winning a name", async () => {
+    snapshot();
+    const hub = await readHubSkills(dir);
+    expect(hub.skills.map((s) => s.name)).toEqual(["hud-design", "plain-talk"]);
+    const own = {
+      skills: [{ name: "plain-talk", files: [{ path: "SKILL.md", body: Buffer.from("mine") }] }],
+      refused: ["x: why"],
+    };
+    const merged = mergeSkills(own, hub);
+    expect(merged.skills.map((s) => s.name)).toEqual(["plain-talk", "hud-design"]);
+    expect(merged.skills[0]?.files[0]?.body.toString()).toBe("mine");
+    expect(merged.refused).toEqual(["x: why"]);
+    expect(await readHubSkills(join(dir, "missing"))).toEqual({ skills: [], refused: [] });
+  });
+
+  it("adds the hub's skills only to a repo other than the hub's own, and only when the hub's repo is known", async () => {
+    snapshot();
+    const names = async (hubRepo: string | null | undefined, repoId: string) =>
+      (await sharedSkillsFor(hubRepo, dir, repoId))?.skills.map((s) => s.name);
+    expect(await names("hub", "other")).toEqual(["hud-design", "plain-talk"]);
+    expect(await names("hub", "hub")).toBeUndefined();
+    expect(await names(undefined, "other")).toBeUndefined();
+    // the hub's repo known to be none of the configured ones: every configured repo is another repo
+    expect(await names(null, "other")).toEqual(["hud-design", "plain-talk"]);
+    expect(await sharedSkillsFor("hub", "", "other")).toBeUndefined();
   });
 
   it("has no skills when the repo has none", async () => {

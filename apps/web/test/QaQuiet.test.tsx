@@ -124,6 +124,8 @@ describe("QA page when nothing waits", () => {
       [`/api/qa/uat/mc/3?head=${SHA}`]: {
         ...detail(3, false),
         files: ["apps/server/src/api.ts"],
+        webChanged: false,
+        visualEvidenceAvailable: false,
       },
       [`/api/qa-reports?repoId=mc&prNumber=3&headSha=${SHA}`]: { reports: [] },
     });
@@ -154,7 +156,12 @@ describe("QA page when nothing waits", () => {
 
     resolveDetail?.({
       status: 200,
-      body: { ...detail(3, false), files: ["apps/server/src/api.ts"] },
+      body: {
+        ...detail(3, false),
+        files: ["apps/server/src/api.ts"],
+        webChanged: false,
+        visualEvidenceAvailable: false,
+      },
     });
     await screen.findByText("No page changes");
     expect(

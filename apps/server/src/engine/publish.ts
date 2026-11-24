@@ -44,6 +44,7 @@ import {
   withSection,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
+import { ownsHubFiles } from "../config.ts";
 import { parseJson, rethrowJson } from "../json.ts";
 import {
   COMMIT_ADD_PATHSPEC,
@@ -60,6 +61,7 @@ import {
   seatWroteBody,
   withEngineSection,
 } from "../mcp/tools.ts";
+import { WEB_AREA_LABEL } from "../preview/review.ts";
 import { qaReportGitSummary } from "../qa/reports.ts";
 import { runPathGrants } from "../repo/path-grants.ts";
 import {
@@ -74,7 +76,7 @@ import { crewGit } from "../runtime/git.ts";
 import { originHeads } from "../runtime/origin-heads.ts";
 import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import { onlyHubMerges, yes } from "./hub-merges.ts";
-import { mcSection } from "./rules.ts";
+import { mcSection, RepoRulesError } from "./rules.ts";
 
 /** What a ciExcerpt says when no Actions run failed on the sha. */
 export const NO_FAILED_RUN = "(no failed Actions run to read)";
@@ -112,7 +114,11 @@ export const UPDATE_NO_WORKTREE = "the run's worktree is not a worktree of the s
 export const UPDATE_MERGE_IN_PROGRESS = "a merge is already in progress in the run's worktree";
 export const UPDATE_FAILED = "merging main into the branch failed";
 export const UPDATE_UP_TO_DATE = "the branch already contains main";
-export { gitIdentity, MC_FALLBACK_EMAIL, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
+export {
+  gitIdentity,
+  MC_FALLBACK_EMAIL,
+  MC_MERGE_AUTHOR,
+} from "../runtime/checkouts.ts";
 
 export type PublishResult = { ok: true } | { ok: false; text: string; transient: boolean };
 /** A fast-forward's answer; `installNote` is a refusal or failure of the install that followed it. */
@@ -148,7 +154,14 @@ export type GateResult =
  * changes, so nothing was merged).
  */
 export type UpdateBranchResult =
-  | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean; installNote?: string }
+  | {
+      ok: true;
+      kind: "merged";
+      sha: string;
+      parent: string;
+      prSame: boolean;
+      installNote?: string;
+    }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
   | { ok: false; text: string; transient: boolean };
@@ -417,7 +430,11 @@ type Group = {
   /** Failing lines past FAILING_LINES_MAX, not kept at all. */
   dropped: number;
 };
-type Tier = { name: string; units: (g: Group) => string[][]; shown: string[][][] };
+type Tier = {
+  name: string;
+  units: (g: Group) => string[][];
+  shown: string[][][];
+};
 
 /** What a job's omitted failing lines are told as. */
 const omittedText = (n: number, job: string): string =>
@@ -462,7 +479,13 @@ export function ciLogBody(log: string, max: number): string {
     const job = m === null ? "" : (m[1] ?? "");
     const text = (m === null ? raw : (m[2] ?? "")).trim();
     if (text === "") continue;
-    const g = jobs.get(job) ?? { entries: [], marks: [], noise: [], rest: [], fails: 0 };
+    const g = jobs.get(job) ?? {
+      entries: [],
+      marks: [],
+      noise: [],
+      rest: [],
+      fails: 0,
+    };
     jobs.set(job, g);
     // a FAIL line's error window and a console block end where the job's lines do
     if (job !== lastJob) {
@@ -560,9 +583,21 @@ export function ciLogBody(log: string, max: number): string {
   if (budget < 0) budget = max;
   const tiers: Tier[] = [
     { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
-    { name: "", units: (x) => x.marks.map((l) => [l]), shown: groups.map(() => []) },
-    { name: "console", units: (x) => x.noise.map((l) => [l]), shown: groups.map(() => []) },
-    { name: "last lines", units: (x) => x.rest.map((l) => [l]), shown: groups.map(() => []) },
+    {
+      name: "",
+      units: (x) => x.marks.map((l) => [l]),
+      shown: groups.map(() => []),
+    },
+    {
+      name: "console",
+      units: (x) => x.noise.map((l) => [l]),
+      shown: groups.map(() => []),
+    },
+    {
+      name: "last lines",
+      units: (x) => x.rest.map((l) => [l]),
+      shown: groups.map(() => []),
+    },
   ];
   const take = (t: Tier, gi: number, unit: string[]): boolean => {
     const x = groups[gi] as Group;
@@ -646,12 +681,23 @@ export function runPrBody(
 const mergeQueue = new Map<string, Promise<unknown>>();
 
 type Refusal = { ok: false; text: string; transient: boolean };
-const final = (text: string): Refusal => ({ ok: false, text, transient: false });
-const transient = (text: string): Refusal => ({ ok: false, text, transient: true });
+const final = (text: string): Refusal => ({
+  ok: false,
+  text,
+  transient: false,
+});
+const transient = (text: string): Refusal => ({
+  ok: false,
+  text,
+  transient: true,
+});
 const errText = (e: unknown): string =>
   Array.from(cleanLog(e instanceof Error ? e.message : String(e)).trim())
     .slice(0, STDERR_TEXT_MAX)
     .join("");
+
+const globMatchesAny = (globs: readonly string[], path: string): boolean =>
+  globs.some((g) => globMatches(g, path));
 
 export function createPublisher(deps: McToolsDeps): Publisher {
   const cwd = () => crewDir(deps.dbPath);
@@ -673,7 +719,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return await deps.inClone(checkout, async () => {
         const common = await realpath(join(checkout, ".git"));
         const g: G = (a) =>
-          git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          git(checkout, a, common, {
+            gitDir: common,
+            timeoutMs: CREW_GIT_SLOW_MS,
+          });
         return fn(g, place);
       });
     } catch (e) {
@@ -792,7 +841,15 @@ export function createPublisher(deps: McToolsDeps): Publisher {
   async function openOnBranch(
     repo: string,
     branch: string,
-  ): Promise<{ number: number; createdAt: number; closes: number[]; partOf: number[] }[] | null> {
+  ): Promise<
+    | {
+        number: number;
+        createdAt: number;
+        closes: number[];
+        partOf: number[];
+      }[]
+    | null
+  > {
     const listed = await deps.gh(
       [
         "pr",
@@ -812,7 +869,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return null;
     }
     if (!Array.isArray(parsed)) return null;
-    const out: { number: number; createdAt: number; closes: number[]; partOf: number[] }[] = [];
+    const out: {
+      number: number;
+      createdAt: number;
+      closes: number[];
+      partOf: number[];
+    }[] = [];
     for (const p of parsed) {
       const n = (p as { number?: unknown } | null)?.number;
       const at = Date.parse(String((p as { createdAt?: unknown } | null)?.createdAt));
@@ -853,12 +915,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     const parsed = parseJson<{ jobs?: unknown } | null>(viewed.stdout, null);
     if (!Array.isArray(parsed?.jobs)) return [];
     return parsed.jobs.flatMap((j: unknown) => {
-      const x = j as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+      const x = j as {
+        databaseId?: unknown;
+        name?: unknown;
+        conclusion?: unknown;
+      } | null;
       return x !== null &&
         x.conclusion === "failure" &&
         typeof x.databaseId === "number" &&
         Number.isSafeInteger(x.databaseId)
-        ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "job")).replace(/\t/g, " ") }]
+        ? [
+            {
+              id: x.databaseId,
+              name: cleanLog(String(x.name ?? "job")).replace(/\t/g, " "),
+            },
+          ]
         : [];
     });
   }
@@ -975,7 +1046,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       const own = { repo, issue: ticket.issue, known };
       const heading = `#${ticket.issue}`;
       const withTitle = `${heading} ${ticket.title}`.slice(0, MC_PR_TITLE_MAX);
-      const titled = { title: withTitle, body: runPrBody(ticket, note, null, true) };
+      const titled = {
+        title: withTitle,
+        body: runPrBody(ticket, note, null, true),
+      };
       const flagged =
         prTextProblem(titled.title, { ...own, label: "PR title" }) !== null ||
         prTextProblem(titled.body, { ...own, label: "PR body" }) !== null;
@@ -986,7 +1060,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         // The branch moved past the push (a commit made since): not a refusal. The next pass
         // pushes the new tip and tries again.
         if (made.text === MC_PUSH_FIRST) return { ok: true, prNumber: null, tipMoved: true };
-        return { ok: false, text: made.text, transient: made.text === MC_PR_FAILED };
+        return {
+          ok: false,
+          text: made.text,
+          transient: made.text === MC_PR_FAILED,
+        };
       }
       const url = /\/pull\/(\d+)/.exec(made.text);
       if (url?.[1] !== undefined) return { ok: true, prNumber: Number(url[1]) };
@@ -1014,7 +1092,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           label: "PR title",
           unclosed: false,
         }) !== null ||
-        prTextProblem(runPrBody(ticket, note, null, true), { ...own, unclosed: false }) !== null;
+        prTextProblem(runPrBody(ticket, note, null, true), {
+          ...own,
+          unclosed: false,
+        }) !== null;
       const withTitle = !flagged;
 
       const minors = deps.store.findingsOf(review.id).filter((f) => f.severity === "Minor");
@@ -1044,7 +1125,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           : body,
       );
       if (r.isError === true) {
-        return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
+        return {
+          ok: false,
+          text: r.text,
+          transient: r.text === MC_PR_EDIT_FAILED,
+        };
       }
       return { ok: true };
     },
@@ -1063,7 +1148,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         return withSection(current, EVIDENCE_HEADING, section);
       });
       if (r.isError === true) {
-        return { ok: false, text: r.text, transient: r.text === MC_PR_EDIT_FAILED };
+        return {
+          ok: false,
+          text: r.text,
+          transient: r.text === MC_PR_EDIT_FAILED,
+        };
       }
       return { ok: true };
     },
@@ -1148,7 +1237,13 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             // failed job comes before the attempt it re-runs.
             const jobs = await failedJobs(repo, x.databaseId);
             if (jobs.length > 0) {
-              failed.push({ id: x.databaseId, name, attempt, rerun: false, jobs });
+              failed.push({
+                id: x.databaseId,
+                name,
+                attempt,
+                rerun: false,
+                jobs,
+              });
               continue;
             }
             if (attempt === null || attempt <= 1) continue;
@@ -1168,7 +1263,12 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             if (before.code !== 0) return CI_LOG_UNREADABLE;
             const state: unknown = parseJson<unknown>(before.stdout, undefined, rethrowJson);
             if ((state as { conclusion?: unknown } | null)?.conclusion === "failure") {
-              failed.push({ id: x.databaseId, name, attempt: attempt - 1, rerun: true });
+              failed.push({
+                id: x.databaseId,
+                name,
+                attempt: attempt - 1,
+                rerun: true,
+              });
             }
           }
         }
@@ -1222,12 +1322,21 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           return "running";
         }
         const failed = runs.flatMap((r: unknown) => {
-          const x = r as { databaseId?: unknown; name?: unknown; conclusion?: unknown } | null;
+          const x = r as {
+            databaseId?: unknown;
+            name?: unknown;
+            conclusion?: unknown;
+          } | null;
           return x !== null &&
             needsRerun(x.conclusion) &&
             typeof x.databaseId === "number" &&
             Number.isSafeInteger(x.databaseId)
-            ? [{ id: x.databaseId, name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX) }]
+            ? [
+                {
+                  id: x.databaseId,
+                  name: cleanLog(String(x.name ?? "CI")).slice(0, RUN_NAME_MAX),
+                },
+              ]
             : [];
         });
         const done: { id: number; name: string }[] = [];
@@ -1269,7 +1378,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (!SHA.test(sha)) return final(MERGE_BAD_SHA);
       const listed = await actionsRuns(repo, sha, "databaseId,status,conclusion,attempt");
       if (isRefusal(listed)) return listed;
-      const now = saved.map((s) => ({ s, r: listed.find((r) => r.id === s.id) }));
+      const now = saved.map((s) => ({
+        s,
+        r: listed.find((r) => r.id === s.id),
+      }));
       if (now.some((x) => x.r === undefined)) return transient(RERUN_RUN_MISSING);
       const runs = now.flatMap((x) => (x.r === undefined ? [] : [{ ...x.r, was: x.s.attempt }]));
       if (runs.some((r) => r.attempt <= r.was || r.status !== "completed")) {
@@ -1352,7 +1464,11 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       // the account gh acts as is always the operator's, whatever aliases are configured
       const allowed = [...logins, ...(await ghLogin())].map((l) => l.toLowerCase());
       if (allowed.length === 0) return false;
-      type Push = { before?: unknown; after?: unknown; actor?: { login?: unknown } | null };
+      type Push = {
+        before?: unknown;
+        after?: unknown;
+        actor?: { login?: unknown } | null;
+      };
       const pushes = listed as Push[];
       // Who pushed is GitHub's own record; a commit's committer or author is whatever its maker
       // wrote. The head follows the push only when every push from the run's own to the head was
@@ -1438,7 +1554,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       return deps.inClone(checkout, async () => {
         const common = await realpath(join(checkout, ".git"));
         const g = (a: string[]) =>
-          git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+          git(checkout, a, common, {
+            gitDir: common,
+            timeoutMs: CREW_GIT_SLOW_MS,
+          });
         for (const commit of new Set(
           [sha, mergeCommitSha ?? baseSha].filter((value): value is string => value !== undefined),
         )) {
@@ -1524,6 +1643,18 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             /* an unreadable rules block stays protected */
           }
         }
+        // the repo's own web area; `apps/web/**` is only the default on the repo the hub runs from
+        const configured = await deps.rules?.(run.repoId);
+        const areaGlobs =
+          configured === undefined || configured instanceof RepoRulesError
+            ? []
+            : (configured.areas[WEB_AREA_LABEL] ?? []);
+        const webGlobs =
+          areaGlobs.length > 0
+            ? areaGlobs
+            : ownsHubFiles(deps.config, run.repoId)
+              ? ["apps/web", "apps/web/**"]
+              : [];
         const extra = deps.config.repos.find((r) => r.id === run.repoId)?.protectedFiles ?? [];
         const grants = runPathGrants(deps.store, run.id);
         const strays = names.filter(
@@ -1537,7 +1668,7 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             containsMain,
             hubOnly,
             strays,
-            webChanged: names.some((p) => p === "apps/web" || p.startsWith("apps/web/")),
+            webChanged: names.some((p) => globMatchesAny(webGlobs, p)),
             ...(missionControlChanged === undefined ? {} : { missionControlChanged }),
           },
         };
@@ -1565,7 +1696,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
     },
 
     mainTip(run) {
-      return inGit(run, async (g) => ({ ok: true, sha: (await originNow(g, null)).mainSha }));
+      return inGit(run, async (g) => ({
+        ok: true,
+        sha: (await originNow(g, null)).mainSha,
+      }));
     },
 
     async updateBranch(run, mainSha, worktree) {
@@ -1583,9 +1717,16 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           const gitDir = await adminDirOf(common, worktree);
           if (gitDir === null) return final(UPDATE_NO_WORKTREE);
           const g: G = (a) =>
-            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+            git(checkout, a, common, {
+              gitDir: common,
+              timeoutMs: CREW_GIT_SLOW_MS,
+            });
           const w = (a: string[], env?: NodeJS.ProcessEnv): Promise<string> =>
-            git(worktree, a, common, { gitDir, timeoutMs: CREW_GIT_SLOW_MS, env });
+            git(worktree, a, common, {
+              gitDir,
+              timeoutMs: CREW_GIT_SLOW_MS,
+              env,
+            });
           const unmerged = async (): Promise<string[]> =>
             (await w(["diff", "--name-only", "--diff-filter=U", "-z"]))
               .split("\0")
@@ -1755,14 +1896,22 @@ export function createPublisher(deps: McToolsDeps): Publisher {
           await g(["merge", "--ff-only", "--quiet", sha]);
           // the moved-in commits may change the lockfile: the worktree's install follows them
           const gc: G = (a) =>
-            git(checkout, a, common, { gitDir: common, timeoutMs: CREW_GIT_SLOW_MS });
+            git(checkout, a, common, {
+              gitDir: common,
+              timeoutMs: CREW_GIT_SLOW_MS,
+            });
           let installNote: string | undefined;
           try {
             const { defaultBranch, mainSha } = await originNow(gc, null);
             await fetchMain(gc, defaultBranch, mainSha);
             installNote = await installAfterSync(
               checkout,
-              { path: worktree, gitDir, branch: run.branch, baseSha: mainSha },
+              {
+                path: worktree,
+                gitDir,
+                branch: run.branch,
+                baseSha: mainSha,
+              },
               before,
               deps.config.crew?.worktrees ?? "",
             );
@@ -1998,7 +2147,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             )
           )
             return { ok: true };
-          await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+          await writeFile(file, minorIssueBody(prNumber, findings), {
+            mode: 0o600,
+            flag: "wx",
+          });
           wrote = true;
           return await ghDo(
             [
@@ -2070,7 +2222,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const labels = [
           ...new Set([...(prAreas.length > 0 ? prAreas : areas(ticket?.labels)), "chore"]),
         ];
-        await writeFile(file, minorIssueBody(prNumber, findings), { mode: 0o600, flag: "wx" });
+        await writeFile(file, minorIssueBody(prNumber, findings), {
+          mode: 0o600,
+          flag: "wx",
+        });
         wrote = true;
         run.loop.minorIssueCreation = { prNumber };
         deps.store.setRunLoop(run.id, run.loop);
