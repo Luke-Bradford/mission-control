@@ -503,9 +503,12 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.total).toBe(16);
           expect(r.whole, `${where}: blocker rows wholly in view`).toBeGreaterThanOrEqual(6);
           expect(r.rowHeight, `${where}: compact rows`).toBeLessThanOrEqual(64);
-          expect(r.more, `${where}: the hidden count`).toMatch(
-            new RegExp(`^${r.total - r.whole} more below`),
-          );
+          // Rows that all fit say nothing; otherwise the count of the rest is stated.
+          if (r.whole < r.total)
+            expect(r.more, `${where}: the hidden count`).toMatch(
+              new RegExp(`^${r.total - r.whole} more below`),
+            );
+          else expect(r.more, `${where}: nothing hidden`).toBe("");
           // The longest action wraps to two lines and is cut with an ellipsis, not run off one line.
           expect(r.act.wrap, `${where}: the action wraps`).toBe("normal");
           expect(r.act.height, `${where}: closed action is two lines`).toBeGreaterThan(30);
@@ -598,7 +601,6 @@ describeRendered("FLIGHT page in a browser", () => {
               ).length,
               bandBottom: box(".fp-band")?.bottom ?? 0,
               midTop: box(".fp-mid")?.top ?? 0,
-              decTop: box("#decisionsP")?.top ?? 0,
               whole: whole.length,
               total: rows.length,
               more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
@@ -630,22 +632,20 @@ describeRendered("FLIGHT page in a browser", () => {
             r.midTop,
             `${where}: Doing now and Blockers sit under the status band`,
           ).toBeGreaterThanOrEqual(r.bandBottom);
-          expect(r.decTop, `${where}: Recent decisions sits under them`).toBeGreaterThan(r.midTop);
           // Blockers: some rows wholly in view, the rest counted, columns wide enough to read.
           expect(r.total).toBe(16);
           expect(r.whole, `${where}: blocker rows in view`).toBeGreaterThanOrEqual(2);
-          expect(r.more, `${where}: the hidden count`).toMatch(
-            new RegExp(`^${r.total - r.whole} more below`),
-          );
+          if (r.whole < r.total)
+            expect(r.more, `${where}: the hidden count`).toMatch(
+              new RegExp(`^${r.total - r.whole} more below`),
+            );
+          else expect(r.more, `${where}: nothing hidden`).toBe("");
           for (const w of r.columns)
             expect(w, `${where}: blocker and action columns are readable`).toBeGreaterThanOrEqual(
               120,
             );
           for (const cut of r.owners)
             expect(cut, `${where}: an owner tag is cut`).toBeLessThanOrEqual(0);
-          expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
-            3,
-          );
           for (const clipped of r.panels)
             expect(clipped, `${where}: a panel hides content`).toBe(false);
           // Reach: Tab reaches the first row, and the keyboard opens it to the whole action.
@@ -659,6 +659,25 @@ describeRendered("FLIGHT page in a browser", () => {
             return a ? a.scrollHeight - a.clientHeight : 1;
           }, null);
           expect(open, `${where}: the opened action is whole`).toBeLessThanOrEqual(1);
+          // Recent decisions moved to the Plan tab: it opens there and keeps its rows.
+          await page.evaluate(() => {
+            const plan = [...document.querySelectorAll<HTMLElement>("[role=tab]")].find((t) =>
+              t.textContent?.trim().startsWith("Plan"),
+            );
+            plan?.click();
+          }, null);
+          await page.box("#decisionsP");
+          const dec = await page.evaluate(
+            () => ({
+              rows: document.querySelectorAll("#decisions li").length,
+              clipped: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].some(
+                (p) => p.scrollHeight > p.clientHeight + 1,
+              ),
+            }),
+            null,
+          );
+          expect(dec.rows, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(3);
+          expect(dec.clipped, `${where}: a Plan panel hides content`).toBe(false);
         },
         BROWSER_TEST_TIMEOUT_MS,
       );
