@@ -152,3 +152,46 @@ it("reads 30 days of Audit with thousands of prompt and model changes in under a
   // and still catches a regression to the old read. The one-second product bound is measured on the live hub.
   expect(took).toBeLessThan(3_000);
 }, 60_000);
+
+it("pauses inside the past-changes section: thousands of changes never hold the event loop for the whole of it (#2219)", async () => {
+  const own = new Store(":memory:");
+  const db = (own as unknown as { db: import("node:sqlite").DatabaseSync }).db;
+  db.exec("BEGIN");
+  const run = db.prepare(
+    `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, ticket, transcript_path,
+       model, prompt_hash, cost_usd) VALUES (?, ?, 'repo', ?, ?, ?, 'done', ?, '/x', ?, ?, ?)`,
+  );
+  const runs = 20_000;
+  for (let i = 0; i < runs; i++) {
+    const at = NOW - 100 * DAY + Math.floor((i / runs) * 100 * DAY);
+    // a new prompt on nearly every run, as the live hub has
+    run.run(`r${i}`, `seat-${i % 12}`, i, at, at + 600_000, `repo#${i % 900}`, "m1", `p${i}`, 2);
+  }
+  const pr = db.prepare(
+    "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
+  );
+  for (let i = 0; i < 2_500; i++) {
+    const at = NOW - 100 * DAY + Math.floor((i / 2_500) * 100 * DAY);
+    pr.run("repo", i, at, JSON.stringify({ number: i, ticket: `repo#${i % 900}`, mergedAt: at }));
+  }
+  db.exec("COMMIT");
+  // how long the changes section takes in one go: the stepped read must never hold a turn that long
+  const started = performance.now();
+  const whole = own.audit(NOW - 30 * DAY, NOW, new Map());
+  const sync = performance.now() - started;
+  let longest = 0;
+  let last = performance.now();
+  const timer = setInterval(() => {
+    const t = performance.now();
+    longest = Math.max(longest, t - last);
+    last = t;
+  }, 1);
+  const stepped = await own.auditStepped(NOW - 30 * DAY, NOW, new Map());
+  clearInterval(timer);
+  longest = Math.max(longest, performance.now() - last);
+  own.close();
+  expect(stepped.changes?.length).toBeGreaterThan(5_000);
+  expect(stepped.changes).toEqual(whole.changes);
+  // the section is most of the read; in slices of 50 changes no turn comes near a third of it
+  expect(longest).toBeLessThan(sync / 3);
+}, 60_000);

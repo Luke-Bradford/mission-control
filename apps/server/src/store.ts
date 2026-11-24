@@ -296,6 +296,8 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+/** The audit's past-changes section pauses after this many changes (about 15 ms of work). */
+const AUDIT_CHANGES_STEP = 50;
 /**
  * A run ended this long ago is rarely folded again, so its usage reading is worth keeping. A later
  * fold (the backfill, a day after a run's start) drops the kept reading in `setDigest`.
@@ -2337,7 +2339,9 @@ export class Store {
     };
     const out: Partial<AuditView> = {};
     for (const key of Object.keys(parts) as (keyof AuditView)[]) {
-      (out as Record<string, unknown>)[key] = (parts[key] as () => unknown)();
+      // the changes section is the one long enough to need pauses of its own
+      if (key === "changes") out.changes = yield* this.auditChangesSteps(since, until);
+      else (out as Record<string, unknown>)[key] = (parts[key] as () => unknown)();
       yield;
     }
     return out as AuditView;
@@ -2534,8 +2538,22 @@ export class Store {
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
   }
 
-  /** Each seat's first run on a new prompt or model in range, with metrics either side of it. */
+  /** `auditChangesSteps` run to the end in one go. */
   private auditChanges(since: number, until: number): AuditChange[] {
+    const steps = this.auditChangesSteps(since, until);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+
+  /**
+   * Each seat's first run on a new prompt or model in range, with metrics either side of it.
+   * A month holds thousands of them and each one's metrics scan a week of merges and reviews,
+   * about a second in all, so it pauses every AUDIT_CHANGES_STEP changes: a caller that lets the
+   * event loop run at each pause (`auditStepped`) never holds the hub for the whole of it.
+   */
+  private *auditChangesSteps(since: number, until: number): Generator<void, AuditChange[]> {
     type ChangeRun = {
       agent_id: string;
       started_at: number;
@@ -2587,6 +2605,7 @@ export class Store {
           before: metrics(run.started_at - windowMs, run.started_at - 1),
           after: metrics(run.started_at, run.started_at + windowMs - 1),
         });
+        if (changes.length % AUDIT_CHANGES_STEP === 0) yield;
       }
     }
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
