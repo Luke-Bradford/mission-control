@@ -24,6 +24,7 @@ import {
   CMUX_START_FAILED,
   cmuxMessageText,
   envFileText,
+  isPermissionPrompt,
   launcherScript,
   startCmuxSession,
 } from "../src/runtime/cmux-session.ts";
@@ -440,6 +441,27 @@ describe("startCmuxSession", () => {
     await new Promise((r) => setTimeout(r, 200));
     expect(h.events.some((e) => e.kind === "needs-input")).toBe(false);
     await h.session.close();
+  });
+
+  it("leaves a plain question that starts 'Do you want to proceed' to the operator", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Do you want to proceed with the migration now?\n❯ 1. Yes, migrate\n  2. No, wait";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => h.events.some((e) => e.kind === "needs-input"));
+    expect((state().keys ?? []).some((k) => k.key === "escape")).toBe(false);
+    await h.session.close();
+  });
+
+  it("knows Claude's permission dialog by its fixed options, not by its question alone", () => {
+    const dialog =
+      " Bash command\n\n   rm -rf build\n   Remove the build folder\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for rm commands in /w\n   3. No, and tell Claude what to do differently (esc)";
+    expect(isPermissionPrompt(dialog)).toBe(true);
+    expect(isPermissionPrompt("Do you want to proceed?\n❯ 1. Yes\n  2. No")).toBe(false);
+    expect(isPermissionPrompt("Do you want to proceed with the plan?")).toBe(false);
   });
 
   it("leaves any other dialog to the operator", async () => {

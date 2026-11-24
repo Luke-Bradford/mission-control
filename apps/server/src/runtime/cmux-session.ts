@@ -47,8 +47,18 @@ const QUIET_POLLS = 2;
 const TRUST_PROMPT = /trust (this|the files in this) (folder|directory)|do you trust/i;
 const TRUST_RETRY_MS = 3000;
 /** Claude's tool permission dialog: the hub refuses it, so no seat waits on a person. */
-const PERMISSION_PROMPT =
-  /Do you want to (proceed|make this edit|create|allow|run)|don't ask again|No, and tell Claude/i;
+/**
+ * Claude's tool permission dialog, and only it: its question, its fixed first option and its fixed
+ * refusal option, together. A question of the seat's own that merely starts "Do you want to proceed"
+ * has none of the fixed options, so it stays the operator's.
+ */
+export function isPermissionPrompt(screen: string): boolean {
+  return (
+    /Do you want to (proceed|make this edit|create|allow|run)\b[^\n]*\?/i.test(screen) &&
+    /^\W*1\.\s+Yes\s*$/m.test(screen) &&
+    /\bNo, and tell Claude what to do differently\b/.test(screen)
+  );
+}
 /** A refused prompt still showing at the next poll is not refused again until this has passed. */
 const DENY_RETRY_MS = 2000;
 /** The last of a run's records whose lines the poll reads at once. */
@@ -453,7 +463,7 @@ function createCmuxDriver(
     } catch {
       return false;
     }
-    if (!PERMISSION_PROMPT.test(screen)) return false;
+    if (!isPermissionPrompt(screen)) return false;
     if (Date.now() - deniedAt < DENY_RETRY_MS) return true;
     deniedAt = Date.now();
     try {
