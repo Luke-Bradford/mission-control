@@ -426,6 +426,40 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
     expect(stale).toBeNull();
   });
 
+  it("carries a running preview for a repo other than the hub's", async () => {
+    const other = { ...config.repos[0], id: "other-app", github: "o/other-app" };
+    store.upsertPullRequests("other-app", [pr("other-app", 30)], NOW);
+    const seen: Array<[number, string | undefined]> = [];
+    const app = buildApp({
+      config: { ...config, repos: [config.repos[0], other] },
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      previewRepoId: "shop-app",
+      previews: {
+        get: (n: number, repoId?: string) => {
+          seen.push([n, repoId]);
+          return repoId === "other-app"
+            ? {
+                pr: n,
+                repoId,
+                sha: pr("other-app", 30).headSha,
+                branch: BRANCH,
+                port: 7432,
+                url: "http://127.0.0.1:7432",
+                startedAt: NOW,
+              }
+            : null;
+        },
+      } as never,
+    });
+    await app.ready();
+    const res = await app.inject({ method: "GET", url: "/api/qa/uat/other-app/30" });
+    await app.close();
+    expect((res.json() as PrUatView).tryIt.previewUrl).toBe("http://127.0.0.1:7432");
+    expect(seen).toContainEqual([30, "other-app"]);
+  });
+
   it("checks out the exact displayed commit when the PR has an immutable head", async () => {
     const sha = "a".repeat(40);
     store.upsertPullRequests("shop-app", [{ ...pr("shop-app", 30), headSha: sha }], NOW + 1);

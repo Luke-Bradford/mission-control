@@ -105,6 +105,16 @@ describe("DEFAULT_REPO_RULES", () => {
     expect(controllerCheckPathsOf(true)).toEqual(FLIGHT_CONTROLLER_CHECK_PATHS);
   });
 
+  it("another repo with hard_rules unset gets no catalogue of this repo's files", () => {
+    const unset = { hardRules: DEFAULT_HARD_RULES, hardRulesSet: false };
+    expect(effectiveHardRules(unset, "standard", false)).toEqual([]);
+    expect(effectiveHardRules(unset, "superuser", false)).toEqual([...FLIGHT_FLOOR_PATHS]);
+    expect(
+      effectiveHardRules({ hardRules: ["x/**"], hardRulesSet: true }, "standard", false),
+    ).toEqual(["x/**"]);
+    expect(effectiveHardRules(unset, "standard", true)).toEqual([...DEFAULT_HARD_RULES]);
+  });
+
   it("effectiveHardRules adds the defaults on a superuser repo only", () => {
     const own = { hardRules: ["x/**"] };
     expect(effectiveHardRules(own, "standard")).toEqual(["x/**"]);

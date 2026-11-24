@@ -78,19 +78,21 @@ export const hardRulesUnsetText = (repo: string): string =>
  * lives in) and the repo's rules files, so a repo cannot narrow the floor away.
  */
 export function effectiveHardRules(
-  rules: Pick<RepoRules, "hardRules">,
+  rules: Pick<RepoRules, "hardRules"> & Partial<Pick<RepoRules, "hardRulesSet">>,
   powers: FlightPowers,
   ownsHubFiles = true,
 ): string[] {
+  // Another repo that never set `hard_rules` only carries the unset default, which is this repo's own files.
+  const hardRules = !ownsHubFiles && rules.hardRulesSet === false ? [] : rules.hardRules;
   return powers === "superuser"
     ? [
         ...new Set([
-          ...rules.hardRules,
+          ...hardRules,
           ...(ownsHubFiles ? DEFAULT_HARD_RULES : []),
           ...FLIGHT_FLOOR_PATHS,
         ]),
       ]
-    : rules.hardRules;
+    : hardRules;
 }
 
 export const DEFAULT_REPO_RULES: RepoRules = freezeRules({

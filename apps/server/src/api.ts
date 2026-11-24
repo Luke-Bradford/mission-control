@@ -1572,6 +1572,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   /** The checkout a preview of this repo would run from; the start route and the PR rows both ask. */
   const previewCheckout = (repo: (typeof config.repos)[number]) =>
     config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
+  /** The running preview of a PR in any repo; the hub's own repo is keyed without a repo part. */
+  const runningPreview = (repoId: string, pr: number) =>
+    deps.previews?.get(pr, repoId === deps.previewRepoId ? undefined : repoId) ?? null;
   /**
    * What a repo's PR rows say about previews: `previewable` is whether `POST /api/previews` could
    * start one now (a preview hub, this repo, a checkout, an open PR); `preview` is the running one.
@@ -1583,7 +1586,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       previewCheckout(repo) !== undefined;
     return (pr: { number: number; state: string }): PullRequestPreviewFacts => ({
       previewable: supported && pr.state === "open",
-      preview: repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
+      preview: runningPreview(repo.id, pr.number),
     });
   };
   const streams = new Set<() => void>();
@@ -3021,8 +3024,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? store.pullRequest(repo.id, Number(req.params.number))
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
-          const preview =
-            repo.id === deps.previewRepoId ? deps.previews?.get(pr.number) : undefined;
+          const preview = runningPreview(repo.id, pr.number);
           const rules = await deps.repoRules?.(repo.id);
           const configuredWebGlobs =
             rules === undefined || rules instanceof RepoRulesError
