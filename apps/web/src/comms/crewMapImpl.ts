@@ -83,14 +83,14 @@ const ROLE_WORD = { flight: 'head agent', operator: 'operator', helper: 'outside
 const STATES = new Set(['running', 'idle', 'stopped', 'unknown', 'nodata']);
 // Fixed places. [bearing in degrees clockwise from the top, orbit radius as a share of the outer rim].
 // A seat's slot never depends on how many others there are, so adding a seat moves nobody.
-const ORB = { op: .30, dev: .56, dev2: .745, out: .93 };
+const ORB = { op: .42, dev: .56, dev2: .745, out: .93 };
 const SLOTS = {
   server: [[63, .56], [90, .56], [117, .56], [144, .56], [76.5, .745], [103.5, .745], [130.5, .745], [50, .745], [157, .745]],
   web: [[297, .56], [270, .56], [243, .56], [216, .56], [283.5, .745], [256.5, .745], [229.5, .745], [310, .745], [203, .745]],
   review: [[338, .93], [22, .93], [40, .93], [325, .93], [58, .93]],
   plan: [[180, .93], [200, .93], [160, .93]],
   other: [[140, .93], [220, .93], [125, .93], [235, .93]],
-  operator: [[0, .30], [35, .30], [325, .30]],
+  operator: [[0, .42], [35, .42], [325, .42]],
 };
 const NPT = 40;
 const OVERFLOW_STEP = 15;                // degrees between seats past the end of a role's table; wide enough that two name tags do not meet
@@ -156,9 +156,9 @@ const STYLE = `
 .cm .cm-lab { position: absolute; white-space: nowrap; padding: 1px 4px; border-radius: 2px; background: rgba(4, 6, 12, .66); color: var(--cm-void-ink);
   font: 500 11px/13px var(--cm-mono); letter-spacing: .02em; text-align: left; }
 .cm .cm-lab small { display: none; font: 400 11px/14px var(--cm-mono); color: var(--cm-void-muted); letter-spacing: 0; }
-.cm .cm-lab i { display: none; font: 400 11px/13px var(--cm-mono); font-style: normal; color: var(--cm-void-ink); margin-left: 8px; letter-spacing: 0; }
+.cm .cm-lab i { display: inline; font: 400 11px/13px var(--cm-mono); font-style: normal; color: var(--cm-void-ink); margin-left: 8px; letter-spacing: 0; }
 .cm .cm-seat.cm-is-over .cm-lab i { color: #fff; font-weight: 500; }
-.cm .cm-seat.cm-is-hold .cm-lab small { color: #ff9a9a; }
+.cm .cm-seat.cm-is-hold .cm-lab small { display: block; color: #ff9a9a; }
 .cm .cm-seat.cm-is-stopped .cm-lab, .cm .cm-seat.cm-is-nodata .cm-lab { color: var(--cm-void-muted); }
 .cm .cm-seat:focus-visible .cm-lab { outline: 2px solid #fff; outline-offset: 1px; background: #04060c; }
 .cm .cm-seat[aria-pressed="true"] .cm-lab { background: #fff; color: #04060c; }
@@ -555,6 +555,8 @@ function createCrewMap(container, options) {
     L.s = clamp(L.ry / 150, .9, 2.4); L.fs = L.compact ? 11 : Math.round(clamp(9.5 + L.s * 2, 12, 15)); L.fs2 = Math.max(11, L.fs - 2);
     L.fm = L.compact ? 9 : 14; L.fTop = Math.max(L.fm, L.cy - L.ry - 24); L.fSide = L.compact ? padX - L.fm : 30 + 14 * L.s; L.flowDash = [.1, 11 * Math.min(L.s, 1.5)];
     root.style.setProperty('--cm-lab', L.fs + 'px'); root.style.setProperty('--cm-lab2', L.fs2 + 'px');
+    const short = n => n[0] + n.slice(n.indexOf('-')), shorts = new Map();   // a short name is used only while no other seat shares it
+    for (const p of M.list) if (p.kind === 'seat' && p.name.includes('-')) shorts.set(short(p.name), (shorts.get(short(p.name)) || 0) + 1);
     const nmax = Math.max(12, ...M.list.map(p => p.n)), pv = pins[S.view] || {}, clock = clockNow();   // how long a seat has been in its state is told by the real clock, also while the last hour is catching up
     for (const p of M.list) {
       const q = p.kind === 'helper' ? { x: L.cx - L.rx * (L.compact ? 1 : .98), y: L.cy - L.ry * (L.compact ? .9 : .98) + (p.slot || 0) * 46 * L.s } : polar(p.rho, p.th);
@@ -562,8 +564,8 @@ function createCrewMap(container, options) {
       const pin = pv[p.id]; p.tx = pin ? L.cx + pin[0] * L.rx - p.hx : 0; p.ty = pin ? L.cy + pin[1] * L.ry - p.hy : 0;
       if (!active.has(p)) { p.ox = p.tx; p.oy = p.ty; p.vx = p.vy = 0; }
       p.x = p.hx + p.ox; p.y = p.hy + p.oy;
-      // a crowded small map folds what it can: short names, and no name on a stopped seat (its place and its readout stay)
-      p.disp = L.dense && p.kind === 'seat' && p.name.includes('-') ? p.name[0] + p.name.slice(p.name.indexOf('-')) : p.name; p.nolab = L.dense && p.state === 'stopped';
+      // a crowded small map folds what it can: short names while they stay unique; every seat keeps its name
+      p.disp = L.dense && p.kind === 'seat' && p.name.includes('-') && shorts.get(short(p.name)) === 1 ? short(p.name) : p.name; p.nolab = false;
       p.ctxTxt = ctxShort(p); p.sub = subOf(p, clock);
     }
     for (const l of M.lanes) { l.spoke = l.a.kind === 'flight' || l.b.kind === 'flight'; if (l.spoke) laneGeom(l); }
@@ -642,6 +644,7 @@ function createCrewMap(container, options) {
     return subOf(p, clock);
   }
   const pairWords = pr => pr.lanes.map(l => `${l.a.name} to ${l.b.name}: ${plural(l.n, 'message')}${l.lastAt > 0 ? ', last ' + fmtHM(l.lastAt) : ''}`).join('. ');
+  const labSub = p => L.compact ? p.hold || '' : p.sub;   // the small map's tag carries the name and context; a stuck seat adds its word
   function placeLabels() {
     const W = L.W, H = L.H, fs = L.fs, cw = fs * .6 + .25, cw2 = L.fs2 * .6 + .15, obs = [];
     for (const p of M.list) obs.push({ x0: p.hx - p.rT - 2, y0: p.hy - p.rT - 2, x1: p.hx + p.rT + 2, y1: p.hy + p.rT + 2, own: p });
@@ -652,10 +655,10 @@ function createCrewMap(container, options) {
     const order = [...M.list].sort((a, b) => (a.kind === 'flight' ? -1 : 0) - (b.kind === 'flight' ? -1 : 0) || b.rho - a.rho || a.th - b.th);
     for (const p of order) {
       if (p.nolab) { p.lab = null; continue; }
-      const two = !L.compact && p.sub, seat = p.kind === 'seat' || p.kind === 'flight', l1 = p.disp.length * cw + (!L.compact && p.ctxTxt ? p.ctxTxt.length * cw2 + 10 : 0);
+      const sub = labSub(p), two = !!sub, seat = p.kind === 'seat' || p.kind === 'flight', l1 = p.disp.length * cw + (p.ctxTxt ? p.ctxTxt.length * cw2 + 10 : 0);
       // a working seat keeps room for "· running <tool>", which comes and goes without a new layout
-      const subLen = p.sub.length + (p.state === 'running' && !p.tool ? 14 : 0);
-      const w = Math.max(l1, two ? Math.max(subLen + 1, seat ? 16 : 0) * cw2 : 0) + 9, wNow = Math.max(l1, two ? Math.max(p.sub.length + 1, seat ? 16 : 0) * cw2 : 0) + 9, h = L.compact ? 15 : two ? fs + L.fs2 + 9 : fs + 5;
+      const subLen = sub.length + (!L.compact && p.state === 'running' && !p.tool ? 14 : 0);
+      const w = Math.max(l1, two ? Math.max(subLen + 1, seat && !L.compact ? 16 : 0) * cw2 : 0) + 9, wNow = Math.max(l1, two ? Math.max(sub.length + 1, seat && !L.compact ? 16 : 0) * cw2 : 0) + 9, h = two ? fs + L.fs2 + (L.compact ? 3 : 9) : L.compact ? 15 : fs + 5;
       const g = (seat ? (p.lim ? 12.5 : 8) : 5) * L.s, d = p.rT * .72;   // a seat with a context gauge keeps its name outside the gauge
       const x = p.hx, y = p.hy, r = p.rT;
       const cands = w => ({ E: [x + r + g, y - h / 2], W: [x - r - g - w, y - h / 2], N: [x - w / 2, y - r - g - h], S: [x - w / 2, y + r + g],
@@ -735,7 +738,7 @@ function createCrewMap(container, options) {
       const b = p.btn; if (!b) continue; const lab = b.lastChild, cls = 'cm-seat cm-is-' + p.state + (p.hold ? ' cm-is-hold' : '') + (ctxOver(p) ? ' cm-is-over' : '') + (active.has(p) ? ' cm-is-moving' : '');
       if (b.className !== cls) b.className = cls;
       if (lab.children[0].textContent !== p.ctxTxt) lab.children[0].textContent = p.ctxTxt;
-      if (lab.lastChild.textContent !== p.sub) lab.lastChild.textContent = p.sub;
+      const lsub = labSub(p); if (lab.lastChild.textContent !== lsub) lab.lastChild.textContent = lsub;
       const al = `${p.name}, ${ROLE_WORD[p.role] || 'seat'}, ${stateWords(p, clock)}. ${p.lim ? 'Context ' + ctxWords(p) + '. ' : ''}${plural(p.n, 'message')} in the feed. Enter opens its messages.`;
       if (p.al !== al) { p.al = al; b.setAttribute('aria-label', al); }
     }

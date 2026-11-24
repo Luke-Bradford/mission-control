@@ -293,7 +293,7 @@ it.each([
     map.update(snapshot({ participants: busyCrew(20) }));
     await settle();
     const { labels, dots } = map._probe();
-    expect(labels.length).toBeGreaterThanOrEqual(view === "panel" ? 14 : 22);
+    expect(labels.length).toBe(22);
     for (const [i, a] of labels.entries())
       for (const b of labels.slice(i + 1))
         expect(overlap(a, b), `${a.id} over ${b.id}`).toBe(false);
@@ -325,5 +325,70 @@ it("names the fullest seat in the strip as a button that opens its conversation"
   expect(opened).toEqual([{ type: "seat", id: "guido-1" }]);
   // the hidden tables are visually hidden the way the rest of the app does it
   expect(host.querySelector(".cm-tables")?.classList.contains("sr-only")).toBe(true);
+  map.destroy();
+});
+
+// A normal crew: FLIGHT, CAPCOM and eight seats. Every dot has its own place, in every view.
+it.each([
+  ["panel", 300, 330],
+  ["panel", 360, 356],
+  ["panel", 420, 356],
+  ["full", 1560, 700],
+  ["full", 2200, 905],
+])("gives CAPCOM and every seat its own place, %s %i x %i", async (view, width, height) => {
+  dom.restore();
+  dom = installMapDom({ width, height });
+  const map = createCrewMap(host, { view: view as "panel" | "full" });
+  // CAPCOM and FLIGHT talk the most, so their dots are the biggest
+  const talk = Array.from({ length: 60 }, (_, i) => ({
+    id: `t${i}`,
+    at: NOW - 60_000 - i * 1000,
+    from: i % 2 ? "CAPCOM" : "flight-1",
+    to: i % 2 ? "flight-1" : "CAPCOM",
+    text: "x",
+  }));
+  map.update(snapshot({ participants: busyCrew(8), messages: talk }));
+  await settle();
+  const { dots, labels } = map._probe();
+  expect(dots.map((d) => d.id)).toContain("CAPCOM");
+  // a seat's context ring sits about 12 px outside its dot: two dots keep that apart
+  const ring = 12;
+  for (const [i, a] of dots.entries())
+    for (const b of dots.slice(i + 1))
+      expect(Math.hypot(a.x - b.x, a.y - b.y), `${a.id} on ${b.id}`).toBeGreaterThan(
+        a.r + b.r + ring,
+      );
+  // CAPCOM's name tag is not hidden by a seat either
+  for (const label of labels)
+    for (const dot of dots) {
+      if (dot.id === label.id) continue;
+      const box = { x: dot.x - dot.r, y: dot.y - dot.r, w: dot.r * 2, h: dot.r * 2 };
+      expect(overlap(label, box), `${label.id} over the seat ${dot.id}`).toBe(false);
+    }
+  map.destroy();
+});
+
+it("paints every seat's name on the small map, with its context and a stuck seat's word", async () => {
+  dom.restore();
+  dom = installMapDom({ width: 420, height: 356 });
+  const map = createCrewMap(host);
+  const crew = busyCrew(20);
+  crew.push(seat("guido-30", { state: "idle", hold: "blocked", contextTokens: 30_000 }));
+  map.update(snapshot({ participants: crew }));
+  await settle();
+  const names: string[] = [];
+  for (const node of host.querySelectorAll<HTMLElement>(".cm-seat")) {
+    const tag = node.querySelector<HTMLElement>(".cm-lab");
+    expect(tag?.hidden, `${node.dataset.seat} has no tag`).toBe(false);
+    const text = tag?.firstChild?.nodeValue ?? "";
+    expect(text, `${node.dataset.seat} has no name`).not.toBe("");
+    names.push(text);
+  }
+  // no two seats wear the same short name
+  expect(new Set(names).size).toBe(names.length);
+  // a stopped seat keeps its name too
+  expect(button("seat-3").querySelector(".cm-lab")?.hidden).toBe(false);
+  expect(button("seat-2").querySelector(".cm-lab i")?.textContent).toMatch(/K/);
+  expect(button("guido-30").querySelector(".cm-lab small")?.textContent).toBe("blocked");
   map.destroy();
 });
