@@ -303,19 +303,38 @@ export function runQueries(db: DatabaseSync, statement: (sql: string) => Stateme
       return row.n;
     },
 
-    /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
-    runsForAwayDigest(): Run[] {
-      const rows = db
+    /**
+     * What the away digest reads of the runs: each outstanding run's hold, and the PR head of every
+     * run whose merge steps include `ready`. Only those few fields: thousands of ended runs carry
+     * merge steps, and parsing each whole row cost the digest 20 to 65 ms a call.
+     */
+    awayDigestRuns(): {
+      outstanding: { id: string; ticket: string | null; hold: RunLoop["hold"] | null }[];
+      ready: { repoId: string; prNumber: number; sha: string }[];
+    } {
+      const outstanding = (
+        db
+          .prepare(
+            `SELECT id, ticket, json_extract(loop, '$.hold') AS hold FROM runs
+             WHERE ended_at IS NULL ORDER BY started_at, seq`,
+          )
+          .all() as { id: string; ticket: string | null; hold: string | null }[]
+      ).map((r) => ({
+        id: r.id,
+        ticket: r.ticket,
+        hold: r.hold === null ? null : parseJson<RunLoop["hold"]>(r.hold, null),
+      }));
+      const ready = db
         .prepare(
-          `SELECT * FROM (
-             SELECT * FROM runs WHERE ended_at IS NULL
-             UNION ALL
-             SELECT * FROM runs INDEXED BY runs_merging_started
-               WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
-           ) ORDER BY started_at, seq`,
+          `SELECT repo_id AS repoId, json_extract(loop, '$.prNumber') AS prNumber,
+             json_extract(loop, '$.merging.sha') AS sha
+           FROM runs INDEXED BY runs_merging_started
+           WHERE json_extract(loop, '$.merging') > ''
+             AND EXISTS (SELECT 1 FROM json_each(loop, '$.merging.done') WHERE value = 'ready')
+           ORDER BY started_at, seq`,
         )
-        .all() as Row[];
-      return rows.map(toRun);
+        .all() as { repoId: string; prNumber: number; sha: string }[];
+      return { outstanding, ready };
     },
 
     /**

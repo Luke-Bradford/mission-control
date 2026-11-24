@@ -126,7 +126,8 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   );
   const linked = prs.filter(isLinked);
   const pipelineRepos = new Set(scope.pipelineRepoIds ?? scope.repoIds);
-  const heads = ciHeads(store.ciRuns(since - DAY_MS), repos).filter((h) => h.at <= now);
+  // only heads first seen in the window count below, so only their runs are read
+  const heads = ciHeads(store.ciRunsOfNewHeads(since - DAY_MS), repos).filter((h) => h.at <= now);
   const inDay = heads.filter((h) => h.at >= now - DAY_MS);
   const passed = inDay.filter((h) => h.outcome === "pass").length;
   const failed = inDay.filter((h) => h.outcome === "fail").length;

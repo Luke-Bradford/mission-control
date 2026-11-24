@@ -5,6 +5,13 @@ load; no single response is over 300 KB. `apps/server/test/response-budget.test.
 page's first-load responses from a large fixture and fails above those numbers. It runs with the
 server suite in CI.
 
+The hub answers one request at a time, so a slow one makes every other request wait behind it. To
+time each request a page makes on opening against a copy of a real database, run
+`node --experimental-strip-types apps/server/scripts/first-load-timings.ts --db <db>` from the
+repo root. It copies the database, builds the app in-process with nothing running, and prints
+each GET's time right after a write (as on the live hub, where something is written every second
+or so) and repeated.
+
 A page fetches what it shows, not whole histories. Each list answers with a bounded, summary shape
 and the full row is one request away.
 

@@ -878,9 +878,9 @@ export class Store {
     return this.runQ.ticketsStartedSince(since, seatIds);
   }
 
-  /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
-  runsForAwayDigest(): Run[] {
-    return this.runQ.runsForAwayDigest();
+  /** Outstanding runs' holds and the PR heads marked ready to merge, for the away digest. */
+  awayDigestRuns(): ReturnType<ReturnType<typeof runQueries>["awayDigestRuns"]> {
+    return this.runQ.awayDigestRuns();
   }
 
   /**
@@ -2575,9 +2575,8 @@ export class Store {
       if (before) history.push(before);
     }
     history.sort((a, b) => a.agent_id.localeCompare(b.agent_id) || a.started_at - b.started_at);
-    const changes: AuditChange[] = [];
+    const found: Omit<AuditChange, "before" | "after">[] = [];
     const previous = new Map<string, ChangeRun>();
-    const metrics = this.auditMetricsReader(since - AUDIT_CHANGE_WINDOW_MS, until);
     for (const run of history) {
       const last = previous.get(run.agent_id);
       previous.set(run.agent_id, run);
@@ -2592,18 +2591,17 @@ export class Store {
           run.started_at - since,
           until - run.started_at,
         );
-        changes.push({
-          kind,
-          agentId: run.agent_id,
-          at: run.started_at,
-          from,
-          to,
-          windowMs,
-          before: metrics(run.started_at - windowMs, run.started_at - 1),
-          after: metrics(run.started_at, run.started_at + windowMs - 1),
-        });
-        if (changes.length % AUDIT_CHANGES_STEP === 0) yield;
+        found.push({ kind, agentId: run.agent_id, at: run.started_at, from, to, windowMs });
       }
+    }
+    // every window's metrics in two passes over the merges and reviews, not one slice per window
+    const metrics = this.auditMetricsReader(since - AUDIT_CHANGE_WINDOW_MS, until);
+    const before = metrics.many(found.map((c) => [c.at - c.windowMs, c.at - 1]));
+    const after = metrics.many(found.map((c) => [c.at, c.at + c.windowMs - 1]));
+    const changes: AuditChange[] = [];
+    for (const [i, c] of found.entries()) {
+      changes.push({ ...c, before: before[i] as AuditMetrics, after: after[i] as AuditMetrics });
+      if (changes.length % AUDIT_CHANGES_STEP === 0) yield;
     }
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));
   }
@@ -2725,7 +2723,11 @@ export class Store {
   private auditMetricsReader(
     low: number,
     high: number,
-  ): (from: number, to: number) => AuditMetrics {
+  ): {
+    (from: number, to: number): AuditMetrics;
+    /** The metrics of each window, in the order given, from one pass over the rows. */
+    many(windows: readonly (readonly [number, number])[]): AuditMetrics[];
+  } {
     const merged = (
       this.db
         .prepare(
@@ -2759,7 +2761,7 @@ export class Store {
       }
       return lo;
     };
-    return (from, to) => {
+    const one = (from: number, to: number): AuditMetrics => {
       const prs = merged.slice(lower(merged, from), lower(merged, to + 1));
       const reviewed = reviews.slice(lower(reviews, from), lower(reviews, to + 1));
       const costs = new Set<string>();
@@ -2782,15 +2784,140 @@ export class Store {
         reworkRounds: rework,
       };
     };
+    /**
+     * Thousands of changes each ask for a week's window, about 0.15 ms each one at a time. Taken in
+     * order of their start, windows whose ends also only move forward slide over the rows: each
+     * row enters and leaves once, and the same figures come out. A window that would move an end
+     * back is worked out alone.
+     */
+    const many = (windows: readonly (readonly [number, number])[]): AuditMetrics[] => {
+      const out: AuditMetrics[] = new Array(windows.length);
+      const order = windows
+        .map((w, i) => ({ from: w[0], to: w[1], i }))
+        .sort((a, b) => a.from - b.from || a.to - b.to);
+      // the merges in the window: [mLo, mHi), each ticket with a cost once, its cost in `sorted`
+      let mLo = 0;
+      let mHi = 0;
+      const inWindow = new Map<string, number>();
+      const sorted: number[] = [];
+      const costKey = (m: (typeof merged)[number]): string | null => {
+        const key = `${m.repoId}\0${m.ticket}`;
+        return m.ticket !== null && cost.has(key) ? key : null;
+      };
+      const place = (v: number): number => {
+        let lo = 0;
+        let hi = sorted.length;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if ((sorted[mid] as number) < v) lo = mid + 1;
+          else hi = mid;
+        }
+        return lo;
+      };
+      const addMerge = (m: (typeof merged)[number]) => {
+        const key = costKey(m);
+        if (key === null) return;
+        const n = inWindow.get(key) ?? 0;
+        inWindow.set(key, n + 1);
+        if (n === 0) {
+          const v = cost.get(key) as number;
+          sorted.splice(place(v), 0, v);
+        }
+      };
+      const dropMerge = (m: (typeof merged)[number]) => {
+        const key = costKey(m);
+        if (key === null) return;
+        const n = (inWindow.get(key) as number) - 1;
+        if (n > 0) inWindow.set(key, n);
+        else {
+          inWindow.delete(key);
+          sorted.splice(place(cost.get(key) as number), 1);
+        }
+      };
+      // the reviews in the window: [rLo, rHi), each author run's rounds and its top round
+      let rLo = 0;
+      let rHi = 0;
+      let failed = 0;
+      let rework = 0;
+      const rounds = new Map<string, Map<number, number>>();
+      const top = new Map<string, number>();
+      const setTop = (author: string, t: number | undefined) => {
+        rework -= Math.max(0, (top.get(author) ?? 1) - 1);
+        if (t === undefined) top.delete(author);
+        else {
+          top.set(author, t);
+          rework += Math.max(0, t - 1);
+        }
+      };
+      const addReview = (r: (typeof reviews)[number]) => {
+        if (r.failed) failed++;
+        const counts = rounds.get(r.authorRunId) ?? new Map<number, number>();
+        rounds.set(r.authorRunId, counts);
+        counts.set(r.round, (counts.get(r.round) ?? 0) + 1);
+        const t = top.get(r.authorRunId);
+        if (t === undefined || r.round > t) setTop(r.authorRunId, r.round);
+      };
+      const dropReview = (r: (typeof reviews)[number]) => {
+        if (r.failed) failed--;
+        const counts = rounds.get(r.authorRunId) as Map<number, number>;
+        const n = (counts.get(r.round) as number) - 1;
+        if (n > 0) counts.set(r.round, n);
+        else counts.delete(r.round);
+        if (counts.size === 0) {
+          rounds.delete(r.authorRunId);
+          setTop(r.authorRunId, undefined);
+        } else if (n === 0 && r.round === top.get(r.authorRunId))
+          setTop(r.authorRunId, Math.max(...counts.keys()));
+      };
+      let lastTo = -Infinity;
+      for (const w of order) {
+        if (w.to < lastTo) {
+          out[w.i] = one(w.from, w.to);
+          continue;
+        }
+        lastTo = w.to;
+        for (; mHi < merged.length && (merged[mHi] as { at: number }).at <= w.to; mHi++)
+          addMerge(merged[mHi] as (typeof merged)[number]);
+        for (; mLo < mHi && (merged[mLo] as { at: number }).at < w.from; mLo++)
+          dropMerge(merged[mLo] as (typeof merged)[number]);
+        for (; rHi < reviews.length && (reviews[rHi] as { at: number }).at <= w.to; rHi++)
+          addReview(reviews[rHi] as (typeof reviews)[number]);
+        for (; rLo < rHi && (reviews[rLo] as { at: number }).at < w.from; rLo++)
+          dropReview(reviews[rLo] as (typeof reviews)[number]);
+        const count = rHi - rLo;
+        const mid = sorted.length >> 1;
+        out[w.i] = {
+          merged: mHi - mLo,
+          reviewFailRate: count === 0 ? null : failed / count,
+          medianCostPerMergedTicket:
+            sorted.length === 0
+              ? null
+              : sorted.length % 2 === 1
+                ? (sorted[mid] as number)
+                : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2,
+          reworkRounds: rework,
+        };
+      }
+      return out;
+    };
+    return Object.assign(one, { many });
   }
 
   /**
    * A repo's pull requests, newest first. Reading and parsing every row costs about 20 ms on a
-   * year of history and this has dozens of callers per page, so the parsed list is kept until the
-   * database is next written to (`readVersion`). The rows are frozen: they are shared between callers.
+   * year of history and this has dozens of callers per page, so the parsed list is kept until a
+   * pull_requests row is next written, by any connection (the `table_writes` count its triggers
+   * keep; the hub writes other tables every second or so). The rows are frozen: they are shared
+   * between callers.
    */
   pullRequests(repoId: RepoId): PullRequestView[] {
-    const stamp = this.readVersion();
+    const stamp = String(
+      (
+        this.statement("SELECT n FROM table_writes WHERE name = 'pull_requests'").get() as
+          | { n: number }
+          | undefined
+      )?.n ?? 0,
+    );
     // one stamp for every repo's list: a write drops them all, so a repo that is no longer read
     // does not keep its list for the life of the hub
     if (this.pullRequestsKept.stamp !== stamp) this.pullRequestsKept = { stamp, lists: new Map() };
@@ -2923,10 +3050,11 @@ export class Store {
 
   /** PRs that name this ticket directly or in closingIssues, without decoding unrelated histories. */
   pullRequestsClosingTicket(repoId: RepoId, issue: number): PullRequestView[] {
-    const rows = this.statement(`SELECT * FROM pull_requests WHERE repo_id = ?
-      AND (ticket = ? OR EXISTS (SELECT 1 FROM json_each(closing_issues) WHERE value = ?))
-      ORDER BY number DESC`).all(repoId, `${repoId}#${issue}`, issue) as Row[];
-    return this.pullRequestRows(rows);
+    // from the kept list: the query scanned every row's closing issues, once per Needs-you line
+    const ticket = `${repoId}#${issue}`;
+    return this.pullRequests(repoId).filter(
+      (p) => p.ticket === ticket || (p.closingIssues ?? []).includes(issue),
+    );
   }
 
   /** Every review of a PR, oldest first. */
@@ -5000,6 +5128,11 @@ export class Store {
     return this.commsStore.threadComms(id, after);
   }
 
+  /** The lines of a seat's thread that can raise Needs you (`CommsStore.attentionComms`). */
+  attentionComms(id: string, after = 0): (CommsRow & { id: string })[] {
+    return this.commsStore.attentionComms(id, after);
+  }
+
   /** Prompt metadata remains available even after its body has been read. */
   threadPrompt(id: string): { id: string; at: number } | undefined {
     return this.commsStore.threadPrompt(id);
@@ -5446,6 +5579,22 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM ci_runs WHERE at >= ? ORDER BY at DESC, name, attempt DESC")
       .all(since) as Row[];
+    return rows.map(toCiRun);
+  }
+
+  /**
+   * The check runs read since `since` of every head whose runs read since then were all first seen
+   * since then: what `ciRuns(since)` holds of those heads, without the rest. Each sweep re-reads
+   * every PR's checks, so `ciRuns` of a day holds nearly every check ever read (about 37,000 rows
+   * on the live hub, 30 ms a read) while the heads first seen that day are a few hundred rows.
+   */
+  ciRunsOfNewHeads(since: number): CiRunView[] {
+    const rows = this.statement(
+      `SELECT * FROM ci_runs c INDEXED BY ci_runs_first_seen WHERE c.first_seen_at >= ?1 AND c.at >= ?1
+         AND NOT EXISTS (SELECT 1 FROM ci_runs o INDEXED BY ci_runs_head
+           WHERE o.repo_id = c.repo_id AND o.sha = c.sha AND o.first_seen_at < ?1 AND o.at >= ?1)
+       ORDER BY c.at DESC, c.name, c.attempt DESC`,
+    ).all(since) as Row[];
     return rows.map(toCiRun);
   }
 
