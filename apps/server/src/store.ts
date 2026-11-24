@@ -296,7 +296,7 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
-/** The audit's past-changes section pauses after this many changes (about 15 ms of work). */
+/** The audit's past-changes section pauses after this many changes (about 15 ms on the live hub, 24 November 2026). */
 const AUDIT_CHANGES_STEP = 50;
 /**
  * A run ended this long ago is rarely folded again, so its usage reading is worth keeping. A later
@@ -2166,8 +2166,9 @@ export class Store {
 
   /**
    * Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP.
-   * One section is built per step, and a step is a pause point, so a caller can let the event loop
-   * run between sections (`auditStepped`); `audit` runs them all at once.
+   * Each step is a pause point: one after every section, and more inside a section that is long by
+   * itself (past changes). A caller can let the event loop run at each (`auditStepped`); `audit`
+   * runs them all at once.
    */
   *auditSteps(
     since: number,
@@ -2188,7 +2189,9 @@ export class Store {
     const medianSpend = median(spend.map((r) => r.costUsd));
     let chatterRows: ReturnType<Store["commsChatter"]> | undefined;
     const chatter = () => (chatterRows ??= this.commsChatter(since, until));
-    const parts: { [K in keyof AuditView]: () => AuditView[K] } = {
+    const parts: {
+      [K in keyof AuditView]: () => AuditView[K] | Generator<void, AuditView[K]>;
+    } = {
       range: () => ({ since, until }),
       longRunners: () =>
         (
@@ -2326,7 +2329,7 @@ export class Store {
       findingFiles: () => this.auditFindingFiles(since, until),
       chatter: () => chatter(),
       flakes: () => this.auditFlakes(since, until),
-      changes: () => this.auditChanges(since, until),
+      changes: () => this.auditChangesSteps(since, until),
       tokenOveruse: () => this.auditTokenOveruse(since, until, kinds),
       items: () => this.auditItems(since, until),
       bugEscapes: () => [],
@@ -2339,9 +2342,12 @@ export class Store {
     };
     const out: Partial<AuditView> = {};
     for (const key of Object.keys(parts) as (keyof AuditView)[]) {
-      // the changes section is the one long enough to need pauses of its own
-      if (key === "changes") out.changes = yield* this.auditChangesSteps(since, until);
-      else (out as Record<string, unknown>)[key] = (parts[key] as () => unknown)();
+      // a section long enough to need pauses of its own hands back a generator
+      const built = (parts[key] as () => unknown)();
+      (out as Record<string, unknown>)[key] =
+        typeof (built as Generator | null)?.next === "function"
+          ? yield* built as Generator<void, unknown>
+          : built;
       yield;
     }
     return out as AuditView;
@@ -2356,7 +2362,7 @@ export class Store {
     }
   }
 
-  /** `auditSteps` with the event loop let run between sections, so a long read never freezes the hub. */
+  /** `auditSteps` with the event loop let run at every pause, so a long read never freezes the hub. */
   async auditStepped(...args: Parameters<Store["auditSteps"]>): Promise<AuditView> {
     const steps = this.auditSteps(...args);
     for (;;) {
@@ -2536,15 +2542,6 @@ export class Store {
     return [...byKey]
       .map(([key, v]) => ({ key, ...v }))
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
-  }
-
-  /** `auditChangesSteps` run to the end in one go. */
-  private auditChanges(since: number, until: number): AuditChange[] {
-    const steps = this.auditChangesSteps(since, until);
-    for (;;) {
-      const step = steps.next();
-      if (step.done) return step.value;
-    }
   }
 
   /**

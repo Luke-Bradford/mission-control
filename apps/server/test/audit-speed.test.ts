@@ -153,7 +153,7 @@ it("reads 30 days of Audit with thousands of prompt and model changes in under a
   expect(took).toBeLessThan(3_000);
 }, 60_000);
 
-it("pauses inside the past-changes section: thousands of changes never hold the event loop for the whole of it (#2219)", async () => {
+it("pauses inside the past-changes section, once per 50 changes, and builds the same view (#2219)", async () => {
   const own = new Store(":memory:");
   const db = (own as unknown as { db: import("node:sqlite").DatabaseSync }).db;
   db.exec("BEGIN");
@@ -175,23 +175,22 @@ it("pauses inside the past-changes section: thousands of changes never hold the 
     pr.run("repo", i, at, JSON.stringify({ number: i, ticket: `repo#${i % 900}`, mergedAt: at }));
   }
   db.exec("COMMIT");
-  // how long the changes section takes in one go: the stepped read must never hold a turn that long
-  const started = performance.now();
-  const whole = own.audit(NOW - 30 * DAY, NOW, new Map());
-  const sync = performance.now() - started;
-  let longest = 0;
-  let last = performance.now();
-  const timer = setInterval(() => {
-    const t = performance.now();
-    longest = Math.max(longest, t - last);
-    last = t;
-  }, 1);
-  const stepped = await own.auditStepped(NOW - 30 * DAY, NOW, new Map());
-  clearInterval(timer);
-  longest = Math.max(longest, performance.now() - last);
-  own.close();
-  expect(stepped.changes?.length).toBeGreaterThan(5_000);
-  expect(stepped.changes).toEqual(whole.changes);
-  // the section is most of the read; in slices of 50 changes no turn comes near a third of it
-  expect(longest).toBeLessThan(sync / 3);
+  try {
+    const whole = own.audit(NOW - 30 * DAY, NOW, new Map());
+    // counted, not timed, so load cannot fail it: one pause per section and one per 50 changes
+    const steps = own.auditSteps(NOW - 30 * DAY, NOW, new Map());
+    let pauses = 0;
+    let step = steps.next();
+    while (!step.done) {
+      pauses++;
+      step = steps.next();
+    }
+    const sections = Object.keys(whole).length;
+    expect(whole.changes.length).toBeGreaterThan(5_000);
+    expect(pauses).toBe(sections + Math.floor(whole.changes.length / 50));
+    expect(step.value.changes).toEqual(whole.changes);
+    expect(await own.auditStepped(NOW - 30 * DAY, NOW, new Map())).toEqual(whole);
+  } finally {
+    own.close();
+  }
 }, 60_000);
