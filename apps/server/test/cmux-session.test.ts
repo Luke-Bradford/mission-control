@@ -248,14 +248,9 @@ describe("startCmuxSession", () => {
     patch((s) => {
       s.claudePid = ALIVE;
       s.autoClaude = false;
+      s.screen = "Do you trust the files in this folder?\n 1. Yes, proceed";
     });
     const h = start();
-    await wait(() => state().workspaces?.length === 1);
-    patch((s) => {
-      s.screens = {
-        [s.workspaces[0].id]: "Do you trust the files in this folder?\n 1. Yes, proceed",
-      };
-    });
     await wait(() => (state().keys ?? []).length > 0);
     expect(state().keys[0]).toMatchObject({ key: "enter", force: false });
     await h.session.close();
@@ -554,6 +549,28 @@ describe("a restart reads Claude's transcript from where it left off", () => {
       .map((l) => JSON.parse(l));
     expect(copied.map((l) => l.t)).toEqual(["a", "b", "c", "x", "y", "new"]);
   });
+});
+
+it("a session started with a saved source does not copy what the hub already has", async () => {
+  patch((s) => {
+    s.claudePid = ALIVE;
+  });
+  const sid = "11111111-1111-4111-8111-111111111111";
+  const file = join(root, `${sid}.jsonl`);
+  const old = ["1", "2"].map((t) => JSON.stringify({ type: "assistant", t }));
+  writeFileSync(file, `${old.join("\n")}\n`);
+  const run = join(root, "run.jsonl");
+  writeFileSync(run, `${old.join("\n")}\n`);
+  const h = start({ source: { path: file, lines: 2 } });
+  await h.session.ready;
+  appendFileSync(file, `${JSON.stringify({ type: "assistant", t: "3" })}\n`);
+  await wait(() => readFileSync(run, "utf8").includes('"3"'));
+  const copied = readFileSync(run, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  expect(copied.map((l) => l.t)).toEqual(["1", "2", "3"]);
+  await h.session.close();
 });
 
 it("after /clear to a transcript with as many lines as the old one, the fresh line is copied once", async () => {

@@ -2,6 +2,7 @@
 // The file's state is cmux's: a test sets a session's lifecycle to play the operator and Claude.
 import "./supervisor-harness.ts";
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -169,8 +170,55 @@ describe("a Claude run in cmux", () => {
     expect(store.run(runId)?.endedAt).toBeNull();
   });
 
+  /** The `t` of each line of Claude's own that the run transcript holds. */
+  const copiedTs = (runId: string) =>
+    readFileSync(store.run(runId)?.transcriptPath as string, "utf8")
+      .split("\n")
+      .filter((l) => l.startsWith("{"))
+      .map((l) => JSON.parse(l).t)
+      .filter((t) => t !== undefined);
+  const claudeFile = () => {
+    const rec = cmuxState().sessions[0];
+    return join(dir, `${rec?.session_id}.jsonl`);
+  };
+  const claudeLines = (...ts: string[]) =>
+    appendFileSync(
+      claudeFile(),
+      `${ts.map((t) => JSON.stringify({ type: "assistant", t })).join("\n")}\n`,
+    );
+
+  it("a hub restart with the saved pid dead resumes in a new workspace without copying Claude's transcript again", async () => {
+    const first = await started();
+    claudeLines("1", "2");
+    await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2"]));
+    await first.sup.stopAll();
+    reopenStore();
+    // the process the hub saved is gone
+    store.setSetting(
+      cmuxWorkspaceKey(first.runId),
+      JSON.stringify({
+        ...JSON.parse(store.getSetting(cmuxWorkspaceKey(first.runId)) as string),
+        pid: 2 ** 22 + 99,
+      }),
+    );
+    const second = make({ cmuxState: stateFile() });
+    second.sup.start();
+    await until(() => expect(second.sup.sessionAlive?.("guido-1")).toBe(true));
+    await until(() =>
+      expect(
+        readFileSync(join(crewKeeperDir(dbPath, first.runId), "launch.zsh"), "utf8"),
+      ).toContain("'--resume'"),
+    );
+    await until(() => expect(cmuxState().closed).toHaveLength(1));
+    await until(() => expect(cmuxState().sessions).toHaveLength(1));
+    claudeLines("3");
+    await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2", "3"]));
+  });
+
   it("a restored agent with a new pid is closed and resumed with the hub's command", async () => {
     const { runId } = await started();
+    claudeLines("1", "2");
+    await until(() => expect(copiedTs(runId)).toEqual(["1", "2"]));
     const first = cmuxState().workspaces[0]?.id;
     patch((s) => {
       for (const r of s.sessions) r.pid = process.pid + 1;
@@ -182,6 +230,10 @@ describe("a Claude run in cmux", () => {
     expect(launcher).toContain("'--resume'");
     expect(launcher).toContain("'--settings'");
     expect(store.run(runId)?.endedAt).toBeNull();
+    // Claude keeps writing the same transcript: its earlier lines are not copied again
+    await until(() => expect(store.getSetting(cmuxWorkspaceKey(runId))).not.toBeNull());
+    claudeLines("3");
+    await until(() => expect(copiedTs(runId)).toEqual(["1", "2", "3"]));
   });
 
   it("closes the workspace when the run ends", async () => {

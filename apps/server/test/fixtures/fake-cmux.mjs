@@ -110,7 +110,7 @@ switch (cmd) {
     ok();
     break;
   case "read-screen":
-    ok(state.screens?.[flag("--workspace")] ?? "");
+    ok(state.screens?.[flag("--workspace")] ?? state.screen ?? "");
     break;
   case "close-workspace": {
     if (state.noForce && rest.includes("--force")) fail("unknown flag --force");

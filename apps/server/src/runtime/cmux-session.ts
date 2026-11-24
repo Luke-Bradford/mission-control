@@ -26,6 +26,8 @@ import { type CrewSession, SessionControlError } from "./session.ts";
 
 /** The hub's record of a run's workspace: `{"workspace": uuid, "pid": n | null}`. */
 export const cmuxWorkspaceKey = (runId: string) => `cmux.workspace:${runId}`;
+/** How far the hub has read Claude's transcript for a run, kept after its workspace closes (a resume needs it). */
+export const cmuxSourceKey = (runId: string) => `cmux.source:${runId}`;
 
 export const CMUX_START_FAILED = "cmux did not start Claude";
 export const CMUX_ENDED = "the Claude process in cmux ended";
@@ -117,6 +119,8 @@ export interface CmuxSessionInput {
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
   save?: (state: CmuxSaved | null) => void;
   log?: (m: string) => void;
+  /** A resume: how far Claude's transcript (the same file, `--resume`) was read, so it is not copied again. */
+  source?: { path: string; lines: number } | null;
   /** Default 1000. */
   pollMs?: number;
   /** Default 60000. */
@@ -137,7 +141,7 @@ interface Core {
 function createCmuxDriver(
   i: CmuxSessionInput,
   mode:
-    | { kind: "start" }
+    | { kind: "start"; source: { path: string; lines: number } | null }
     | {
         kind: "attach";
         workspace: string;
@@ -161,7 +165,7 @@ function createCmuxDriver(
   let pending = "";
   let lines = 0;
   /** The source transcript a restart's hub had read, and how far: skipped when that file is met again. */
-  let resumeSource = mode.kind === "attach" ? mode.source : null;
+  let resumeSource = mode.source;
   /** Lines to skip in the source being read: the hub has them already. */
   let skip = 0;
   /** Lines of the source being read that the hub has taken in (copied or skipped), never its own. */
@@ -412,7 +416,8 @@ function createCmuxDriver(
 
   /** Before ready: answer the trust prompt, and wait for Claude's record. */
   async function starting(agents: CmuxAgent[]): Promise<void> {
-    const rec = agents.find((a) => a.sessionId === sessionId);
+    // this workspace's record only: a resume has its session id's earlier record, in a workspace now closed
+    const rec = agents.find((a) => a.sessionId === sessionId && a.workspaceId === workspace);
     if (rec !== undefined) {
       pid = rec.pid;
       readyYet = true;
@@ -556,7 +561,7 @@ function createCmuxDriver(
 
 /** Makes the launcher (and the secret file), opens the workspace, and drives it. Never throws. */
 export function startCmuxSession(i: CmuxSessionInput): CrewSession {
-  const core = createCmuxDriver(i, { kind: "start" });
+  const core = createCmuxDriver(i, { kind: "start", source: i.source ?? null });
   void (async () => {
     try {
       mkdirSync(i.dir, { recursive: true, mode: 0o700 });

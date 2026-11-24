@@ -260,6 +260,7 @@ import { type Cmux, CmuxError, createCmux } from "./cmux.ts";
 import {
   attachCmuxSession,
   type CmuxSaved,
+  cmuxSourceKey,
   cmuxWorkspaceKey,
   startCmuxSession,
 } from "./cmux-session.ts";
@@ -920,6 +921,31 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       return null;
     }
   };
+  const savedSource = (runId: string): { path: string; lines: number } | null => {
+    const v = parseJson<unknown>(store.getSetting(cmuxSourceKey(runId)), null) as {
+      path?: unknown;
+      lines?: unknown;
+    } | null;
+    return typeof v?.path === "string" && typeof v.lines === "number"
+      ? { path: v.path, lines: v.lines }
+      : null;
+  };
+  /**
+   * A driver's word on its run's workspace: kept, or (null) forgotten. How far Claude's transcript was
+   * read outlives the workspace until the run ends: a resume in a new workspace starts from it.
+   */
+  function keepWorkspace(runId: string, state: CmuxSaved | null): void {
+    const prior = savedWorkspace(runId);
+    if (prior !== null) claimedWorkspaces.delete(prior.workspace);
+    if (state === null) {
+      store.deleteSetting(cmuxWorkspaceKey(runId));
+      return;
+    }
+    claimedWorkspaces.add(state.workspace);
+    store.setSetting(cmuxWorkspaceKey(runId), JSON.stringify(state));
+    if (state.source !== undefined)
+      store.setSetting(cmuxSourceKey(runId), JSON.stringify(state.source));
+  }
   /** Closes the cmux workspace a run holds, and forgets it. False when cmux would not close it. */
   async function closeWorkspace(runId: string): Promise<boolean> {
     const saved = savedWorkspace(runId);
@@ -2388,15 +2414,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             cliSessionId,
             messageDir: join(tmp, "mc-messages"),
             taken: () => claimedWorkspaces,
-            save: (saved) => {
-              const prior = savedWorkspace(run.id);
-              if (prior !== null) claimedWorkspaces.delete(prior.workspace);
-              if (saved === null) store.deleteSetting(cmuxWorkspaceKey(run.id));
-              else {
-                claimedWorkspaces.add(saved.workspace);
-                store.setSetting(cmuxWorkspaceKey(run.id), JSON.stringify(saved));
-              }
-            },
+            source: resume ? savedSource(run.id) : null,
+            save: (saved) => keepWorkspace(run.id, saved),
             log,
             ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
             ...(deps.cmuxStartWaitMs === undefined ? {} : { startWaitMs: deps.cmuxStartWaitMs }),
@@ -2487,6 +2506,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function removeRunFiles(runId: string): void {
     pendingPromptVersions.delete(runId);
+    store.deleteSetting(cmuxSourceKey(runId));
     void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
@@ -3270,12 +3290,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       transcriptPath: run.transcriptPath,
       cliSessionId: row.cliSessionId,
       messageDir,
-      save: (state) => {
-        if (state === null) {
-          claimedWorkspaces.delete(saved.workspace);
-          store.deleteSetting(cmuxWorkspaceKey(runId));
-        } else store.setSetting(cmuxWorkspaceKey(runId), JSON.stringify(state));
-      },
+      save: (state) => keepWorkspace(runId, state),
       log,
       ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
       workspace: saved.workspace,
