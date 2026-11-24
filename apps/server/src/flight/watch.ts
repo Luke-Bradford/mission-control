@@ -16,6 +16,7 @@ import {
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_FULL_BUILTINS,
   FLIGHT_GHOST_MS,
+  FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_GUARD_SETTING,
   FLIGHT_HANDOVER_ASK,
@@ -58,6 +59,7 @@ import type { Supervisor } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { wakePieces } from "../telemetry/prompt-cost.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
+import { autoLiftRunaway } from "./runaway.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {
   deliveredFacts,
@@ -191,7 +193,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let lastReason: string | null = null;
   /**
    * The handover guard's cooldown: when the hub starts FLIGHT again after the guard stopped it
-   * (`retryAt`, null when it stays stopped), and when it last did (a trip within an hour of that
+   * (`retryAt`, null when no retry is set), and when it last did (a trip within an hour of that
    * is the second in a row). Stored, so a hub restart keeps both.
    */
   const readGuard = (): { retryAt: number | null; restartedAt: number | null } => {
@@ -364,6 +366,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
 
   async function passOnce(): Promise<void> {
     if (stopped) return;
+    // a tripped runaway breaker waits for nobody: the hub lifts it once its wait has passed
+    autoLiftRunaway(store, bus, now());
     const found = flightSeat(config);
     // with no FLIGHT seat or the watch off, there is no outage of its own to report
     if (!enabled || !supervisor.status().enabled || found === null) {
@@ -458,7 +462,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         const last = row?.runId ?? null;
         const tripped = readGuard();
         const again = tripped.restartedAt !== null && t - tripped.restartedAt < FLIGHT_HOUR_MS;
-        writeGuard({ retryAt: again ? null : t + FLIGHT_GUARD_COOLDOWN_MS, restartedAt: null });
+        writeGuard({
+          retryAt: t + (again ? FLIGHT_GUARD_AGAIN_COOLDOWN_MS : FLIGHT_GUARD_COOLDOWN_MS),
+          restartedAt: null,
+        });
         store.raiseNote({
           key: FLIGHT_NOTE_KEY,
           kind: "blocked",

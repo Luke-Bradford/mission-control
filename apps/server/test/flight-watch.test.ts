@@ -16,6 +16,7 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
@@ -33,6 +34,7 @@ import {
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MS,
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
@@ -2351,7 +2353,7 @@ describe("the FLIGHT watcher", () => {
   it("sends no wake while the runaway breaker is tripped, and lists it in the wake facts", async () => {
     liveCrew();
     ask();
-    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: nowMs, reason: "a loop" }));
     await watch.check();
     expect(sendCalls).toHaveLength(0);
     const state = flightState({ config, store, busy: [], now: nowMs });
@@ -2359,6 +2361,18 @@ describe("the FLIGHT watcher", () => {
     // lifted, the waiting question wakes it
     store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
     await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("lifts the runaway breaker by itself once its wait passes, and the waiting question wakes FLIGHT", async () => {
+    liveCrew();
+    ask();
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: nowMs, reason: "a loop" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    nowMs += FLIGHT_RUNAWAY_AUTO_LIFT_MS;
+    await watch.check();
+    expect(store.getSetting(FLIGHT_RUNAWAY_SETTING)).toBeNull();
     expect(sendCalls).toHaveLength(1);
   });
 
@@ -2706,9 +2720,12 @@ describe("the FLIGHT watcher", () => {
         nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
         await watch.check();
         expect(startCalls).toHaveLength(started);
+        nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
+        await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
       });
 
-      it("stays stopped, and alerts, when it trips a second time in a row", async () => {
+      it("waits the longer cooldown, then restarts on its own, when it trips a second time in a row", async () => {
         liveCrew();
         await tripGuard();
         nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
@@ -2717,10 +2734,15 @@ describe("the FLIGHT watcher", () => {
         const started = startCalls.length;
         expect(notesOpen()).toHaveLength(1);
         expect(notesOpen()[0]?.text).toContain("twice in a row");
+        expect(notesOpen()[0]?.text).toContain("6 hours");
         nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
         await watch.check();
         expect(startCalls).toHaveLength(started);
         expect(notesOpen()).toHaveLength(1);
+        nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
+        await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
       });
     });
 

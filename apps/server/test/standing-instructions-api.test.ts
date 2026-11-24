@@ -354,3 +354,34 @@ it("clears only the focus-import warning when a real capacity failure is resolve
   importInstructionFocus(deps);
   expect(events.filter((topic) => topic === "attention")).toHaveLength(2);
 });
+
+it("retries a failed focus import on the timer's pass and clears its warning once the cause passes, with no operator call", async () => {
+  const { importInstructionFocus, retryInstructionFocus } = await import(
+    "../src/instructions/notices.ts"
+  );
+  const cfg = structuredClone(config);
+  const builder = defined(defined(cfg.crew).sessions[0].seats.find((s) => s.id === "builder"));
+  builder.focus = "label:catalog";
+  let firstId = 0;
+  for (let i = 0; i < 64; i++) {
+    const entry = store.instructions.create(
+      "builder",
+      { kind: "text", text: `Retained rule ${i}` },
+      "operator",
+      NOW,
+    ).entry;
+    if (i === 0) firstId = entry.id;
+  }
+  const deps = { config: cfg, store, bus, now: () => NOW };
+  // nothing is open, so a timer pass does not touch the store
+  retryInstructionFocus(deps);
+  expect(store.notes().map((n) => n.key)).not.toContain("instruction-focus:builder");
+  importInstructionFocus(deps);
+  const warning = store.notes().find((n) => n.key === "instruction-focus:builder");
+  expect(warning?.text).toContain("tries again every 30 minutes");
+  // the cause passes by itself (a rule is revoked elsewhere); the next timer pass clears the warning
+  store.instructions.revoke(firstId, "builder", "operator", NOW + 1);
+  retryInstructionFocus(deps);
+  expect(store.notes().map((n) => n.key)).not.toContain("instruction-focus:builder");
+  expect(store.instructions.focus("builder").effectiveFocus).toBe("label:catalog");
+});

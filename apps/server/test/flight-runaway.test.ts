@@ -4,8 +4,11 @@ import { join } from "node:path";
 import {
   FLIGHT_HOUR_MS,
   FLIGHT_RUNAWAY,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MS,
   FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_RUNAWAY_SETTING,
+  RUNAWAY_AUTO_LIFTED_DECISION,
   RUNAWAY_LIFTED_DECISION,
   runawaySameReason,
   runawayWritesReason,
@@ -13,6 +16,7 @@ import {
 import { beforeEach, describe, expect, it } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import {
+  autoLiftRunaway,
   isReadCall,
   liftRunaway,
   recordWrite,
@@ -223,5 +227,54 @@ describe("the breaker", () => {
     write(5, () => ({ at: NOW + 3 }));
     watchRunaway(store, bus, NOW + 3);
     expect(runawayTrip(store)).not.toBeNull();
+  });
+});
+
+describe("the hub lifts the breaker itself", () => {
+  const trip = (at: number): void => {
+    write(FLIGHT_RUNAWAY.sameActionLimit, () => ({ at }));
+    watchRunaway(store, bus, at);
+  };
+
+  it("lifts after its wait, clears the flag, logs the hub's decision and lets FLIGHT write again", () => {
+    trip(NOW);
+    expect(autoLiftRunaway(store, bus, NOW + FLIGHT_RUNAWAY_AUTO_LIFT_MS - MIN)).toBe(false);
+    expect(runawayTrip(store)).not.toBeNull();
+    expect(autoLiftRunaway(store, bus, NOW + FLIGHT_RUNAWAY_AUTO_LIFT_MS)).toBe(true);
+    expect(runawayTrip(store)).toBeNull();
+    expect(store.notes().filter((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)).toEqual([]);
+    expect(store.flightDecisions(0, 20).map((d) => d.decision)).toContain(
+      RUNAWAY_AUTO_LIFTED_DECISION,
+    );
+    // the history that tripped it does not trip it again
+    watchRunaway(store, bus, NOW + FLIGHT_RUNAWAY_AUTO_LIFT_MS + MIN);
+    expect(runawayTrip(store)).toBeNull();
+  });
+
+  it("does nothing while it is not tripped", () => {
+    expect(autoLiftRunaway(store, bus, NOW)).toBe(false);
+  });
+
+  it("waits twice as long for a loop that came back, up to a day", () => {
+    let at = NOW;
+    let wait = FLIGHT_RUNAWAY_AUTO_LIFT_MS;
+    for (let i = 0; i < 3; i++) {
+      trip(at);
+      expect(store.notes().find((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)?.text).toContain(
+        `in ${wait / 60 / MIN} hours`,
+      );
+      expect(autoLiftRunaway(store, bus, at + wait - MIN)).toBe(false);
+      expect(autoLiftRunaway(store, bus, at + wait)).toBe(true);
+      at += wait + MIN;
+      wait *= 2;
+    }
+    expect(wait).toBeLessThanOrEqual(FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS * 2);
+  });
+
+  it("says how long the hub waits in the flag", () => {
+    trip(NOW);
+    expect(store.notes().find((n) => n.key === FLIGHT_RUNAWAY_NOTE_KEY)?.text).toContain(
+      "lifts the stop by itself in 2 hours",
+    );
   });
 });

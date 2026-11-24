@@ -8,6 +8,8 @@ import type { Store } from "../store.ts";
 
 /** The note key prefix of a seat's failed focus import; hud/hud.ts lists it as a hub stop. */
 export const INSTRUCTION_FOCUS_NOTE_PREFIX = "instruction-focus";
+/** While a focus import warning is open, the hub imports again this often (main.ts runs the timer). */
+export const INSTRUCTION_FOCUS_RETRY_MS = 30 * 60_000;
 
 interface NoticeDeps {
   config: CcConfig;
@@ -102,6 +104,12 @@ export async function announceInstruction(
   return { ...result, delivery };
 }
 
+/** The timer's pass: imports again only while a focus import warning is open. */
+export function retryInstructionFocus(deps: Parameters<typeof importInstructionFocus>[0]): void {
+  if (deps.store.notes().some((n) => n.key.startsWith(`${INSTRUCTION_FOCUS_NOTE_PREFIX}:`)))
+    importInstructionFocus(deps);
+}
+
 /** Config-import warnings describe an active failure, so a successful retry clears only its own note. */
 export function importInstructionFocus(
   deps: Pick<NoticeDeps, "config" | "store" | "bus" | "now"> & { log?: (text: string) => void },
@@ -128,7 +136,7 @@ export function importInstructionFocus(
           runId: null,
           seatId: seat.id,
           repoId: session.repoId,
-          text: "Configured focus could not be imported. Check instruction capacity and the saved focus before starting more work.",
+          text: `Configured focus could not be imported. The hub tries again every ${INSTRUCTION_FOCUS_RETRY_MS / 60_000} minutes and clears this when it works. If the seat is full of retained rules, revoke one you no longer need, or shorten the saved focus: that is the only part that is yours.`,
           at: now(),
         });
         attentionChanged = true;
