@@ -5279,6 +5279,57 @@ it("reopens a legacy digest cache with malformed history while keeping its windo
   store = new Store(join(dir, "mc.sqlite"));
   expect(store.digestContextWindows(["known", "malformed"])).toEqual(new Map([["known", 200000]]));
 });
+it("keeps the parsed pull requests between writes, and every write is seen by the next read (#2219)", () => {
+  const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({
+    repoId: "repo",
+    number,
+    title: "PR",
+    url: "u",
+    branch: `feature/${number}`,
+    ticket: null,
+    state: "open",
+    isDraft: false,
+    review: null,
+    ci: null,
+    createdAt: 1,
+    updatedAt: 1,
+    mergedAt: null,
+    headSha: "head",
+    mergeable: null,
+    ...patch,
+  });
+  store.upsertPullRequests("repo", [pr(1), pr(2)], 1);
+  const first = store.pullRequests("repo");
+  const again = store.pullRequests("repo");
+  // no write in between: the same parsed rows, in a list of the caller's own
+  expect(again).not.toBe(first);
+  expect(again[0]).toBe(first[0]);
+  again.pop();
+  expect(store.pullRequests("repo").map((p) => p.number)).toEqual([2, 1]);
+  // the rows are shared, so they cannot be changed in place
+  expect(() => {
+    (first[0] as PullRequestView).title = "changed";
+  }).toThrow(TypeError);
+
+  // a write through the store
+  store.upsertPullRequests("repo", [pr(2, { title: "Renamed" }), pr(3)], 2);
+  expect(store.pullRequests("repo").map((p) => `${p.number} ${p.title}`)).toEqual([
+    "3 PR",
+    "2 Renamed",
+    "1 PR",
+  ]);
+  // raw SQL on the same connection
+  (store as unknown as { db: { exec(sql: string): void } }).db.exec(
+    "UPDATE pull_requests SET title = 'Raw' WHERE number = 1",
+  );
+  expect(store.pullRequests("repo").find((p) => p.number === 1)?.title).toBe("Raw");
+  store.markPullRequestsStale("repo");
+  store.replacePullRequests("repo", [pr(9)], 3);
+  expect(store.pullRequests("repo").map((p) => p.number)).toEqual([9]);
+  // another repo's list is its own
+  expect(store.pullRequests("other")).toEqual([]);
+});
+
 it("looks up canonical and closingIssues-only ticket links within their repository", () => {
   const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({
     repoId: "repo",

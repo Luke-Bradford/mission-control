@@ -755,27 +755,31 @@ export function telemetry(
 
   // Always the last CYCLE_TIME_DAYS days, whatever the range: the Throughput tab's cycle-time chart
   // and Tickets table draw 14 days of tickets.
-  const tickets: TelemetrySeries["tickets"] = store
+  // each ticket's first merge, from one read of the pull requests per repo (not one per ticket)
+  const firstMerge = new Map<string, number>();
+  const flowTickets = store
     .flowIssues(flowSince)
-    .filter((issue) => issue.doneAt === null || issue.doneAt <= now)
-    .map((issue) => {
-      const ticket = `${issue.repoId}#${issue.number}`;
-      const mergedAt =
-        store
-          .pullRequests(issue.repoId)
-          .filter((pr) => pr.ticket === ticket && pr.mergedAt !== null && pr.mergedAt <= now)
-          .map((pr) => pr.mergedAt as number)
-          .sort((a, b) => a - b)[0] ?? null;
-      return {
-        ticket,
-        title: issue.title ?? store.boardItem(issue.repoId, issue.number)?.title ?? null,
-        size: issue.size,
-        readyAt: issue.startAt,
-        startedAt: store.ticketStartedAt(ticket),
-        mergedAt,
-        doneAt: issue.doneAt,
-      };
-    });
+    .filter((issue) => issue.doneAt === null || issue.doneAt <= now);
+  for (const repoId of new Set(flowTickets.map((issue) => issue.repoId)))
+    for (const pr of store.pullRequests(repoId)) {
+      if (pr.ticket === null || pr.mergedAt === null || pr.mergedAt > now) continue;
+      const key = `${repoId}|${pr.ticket}`;
+      const first = firstMerge.get(key);
+      if (first === undefined || pr.mergedAt < first) firstMerge.set(key, pr.mergedAt);
+    }
+  const tickets: TelemetrySeries["tickets"] = flowTickets.map((issue) => {
+    const ticket = `${issue.repoId}#${issue.number}`;
+    const mergedAt = firstMerge.get(`${issue.repoId}|${ticket}`) ?? null;
+    return {
+      ticket,
+      title: issue.title ?? store.boardItem(issue.repoId, issue.number)?.title ?? null,
+      size: issue.size,
+      readyAt: issue.startAt,
+      startedAt: store.ticketStartedAt(ticket),
+      mergedAt,
+      doneAt: issue.doneAt,
+    };
+  });
   const annotations: TelemetrySeries["annotations"] = [
     ...store
       .hubEvents(since)

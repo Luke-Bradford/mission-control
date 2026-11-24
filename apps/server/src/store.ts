@@ -2725,12 +2725,31 @@ export class Store {
     };
   }
 
+  /**
+   * A repo's pull requests, newest first. Reading and parsing every row costs about 20 ms on a
+   * year of history and this has dozens of callers per page, so the parsed list is kept until the
+   * database is next written to (`readVersion`). The rows are frozen: they are shared between callers.
+   */
   pullRequests(repoId: RepoId): PullRequestView[] {
-    const rows = this.statement(
-      "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
-    ).all(repoId) as Row[];
-    return this.pullRequestRows(rows);
+    const stamp = this.readVersion();
+    const kept = this.pullRequestsKept.get(repoId);
+    if (kept?.stamp === stamp) return [...kept.rows];
+    const rows = this.pullRequestRows(
+      this.statement("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC").all(
+        repoId,
+      ) as Row[],
+    );
+    for (const row of rows) {
+      Object.freeze(row.assignees);
+      Object.freeze(row.checks);
+      Object.freeze(row.closingIssues);
+      Object.freeze(row);
+    }
+    this.pullRequestsKept.set(repoId, { stamp, rows });
+    return [...rows];
   }
+
+  private readonly pullRequestsKept = new Map<RepoId, { stamp: string; rows: PullRequestView[] }>();
 
   /** Branches from durable merged-PR history, retained after the live PR cache drops them. */
   mergedPullRequestBranches(repoId: RepoId): string[] {
