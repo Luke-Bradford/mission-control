@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -55,7 +56,9 @@ const cmuxState = (): FakeCmux => JSON.parse(readFileSync(stateFile(), "utf8"));
 const patch = (fn: (s: FakeCmux) => void) => {
   const s = cmuxState();
   fn(s);
-  writeFileSync(stateFile(), JSON.stringify(s));
+  // whole, then renamed: the fake never reads it half written
+  writeFileSync(`${stateFile()}.t`, JSON.stringify(s));
+  renameSync(`${stateFile()}.t`, stateFile());
 };
 const lifecycle = (l: string) =>
   patch((s) => {
@@ -233,6 +236,30 @@ describe("a Claude run in cmux", () => {
     await until(() => expect(cmuxState().sessions).toHaveLength(1));
     claudeLines("3");
     await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2", "3"]));
+  });
+
+  it("a hub restart with cmux down and the saved pid dead resumes the run on the keeper", async () => {
+    const first = await started();
+    await first.sup.stopAll();
+    reopenStore();
+    store.setSetting(
+      cmuxWorkspaceKey(first.runId),
+      JSON.stringify({
+        ...JSON.parse(store.getSetting(cmuxWorkspaceKey(first.runId)) as string),
+        pid: 2 ** 22 + 99,
+      }),
+    );
+    // cmux is not running after a reboot, and will not start
+    patch((s) => {
+      s.down = true;
+    });
+    const second = make({ cmuxState: stateFile() });
+    second.sup.start();
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    expect(recorded()[0].argv as string[]).toContain("-p");
+    expect(existsSync(join(crewKeeperDir(dbPath, first.runId), "keeper.pid"))).toBe(true);
+    expect(store.run(first.runId)?.endedAt).toBeNull();
+    expect(store.getSetting(cmuxWorkspaceKey(first.runId))).toBeNull();
   });
 
   it("a restored agent with a new pid is closed and resumed with the hub's command", async () => {

@@ -950,7 +950,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (state.source !== undefined)
       store.setSetting(cmuxSourceKey(runId), JSON.stringify(state.source));
   }
-  /** Closes the cmux workspace a run holds, and forgets it. False when cmux would not close it. */
+  /**
+   * Closes the cmux workspace a run holds, and forgets it. False only when its Claude may still be
+   * running and cmux would not close it: with the pid gone (cmux down after a reboot, say), nothing can
+   * still run the session, so the run may resume, on the keeper when cmux stays down.
+   */
   async function closeWorkspace(runId: string): Promise<boolean> {
     const saved = savedWorkspace(runId);
     if (saved === null) return true;
@@ -958,7 +962,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await cmux?.close(saved.workspace);
     } catch (e) {
       log(`could not close the cmux workspace of ${runId}: ${errText(e)}`);
-      return false;
+      if (saved.pid !== null && pidAlive(saved.pid)) return false;
     }
     claimedWorkspaces.delete(saved.workspace);
     store.deleteSetting(cmuxWorkspaceKey(runId));

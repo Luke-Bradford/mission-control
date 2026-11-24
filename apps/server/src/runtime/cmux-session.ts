@@ -98,6 +98,9 @@ export function isPermissionPrompt(screen: string): boolean {
     /\bNo, and tell Claude what to do differently\b/.test(flat)
   );
 }
+/** What the seat is told after the hub refuses a permission prompt, so it does not wait for a person. */
+export const CMUX_TOOL_REFUSED_TEXT =
+  "Mission Control refused that tool call: it is outside this seat's allowed tools. Carry on without it, or report that you are blocked.";
 /** A refused prompt still showing at the next poll is not refused again until this has passed. */
 const DENY_RETRY_MS = 2000;
 /** The last of a run's records whose lines the poll reads at once. */
@@ -125,7 +128,11 @@ export function launcherScript(i: {
     if (k === "PATH" || !ENV_NAME.test(k)) continue;
     lines.push(`export ${k}=${quote(v)}`);
   }
-  lines.push(`export PATH=${quote(i.nodeDir)}":$PATH"`);
+  // cmux's shim folder stays ahead of the node folder, which may hold its own `claude`: the shim
+  // takes itself off PATH before it runs the claude it finds next
+  lines.push(
+    `export PATH="\${CMUX_CLAUDE_WRAPPER_SHIM_ROOT:+$CMUX_CLAUDE_WRAPPER_SHIM_ROOT:}"${quote(i.nodeDir)}":$PATH"`,
+  );
   if (i.envFile !== null) {
     lines.push(`. ${quote(i.envFile)}`, `rm -f ${quote(i.envFile)}`);
   }
@@ -496,8 +503,9 @@ function createCmuxDriver(
   }
 
   /**
-   * True when the open dialog is a tool permission prompt and the hub has refused it (Escape, which
-   * Claude takes as "no"): the seat goes on with its turn. Any other dialog is the operator's.
+   * True when the open dialog is a tool permission prompt and the hub has refused it. Escape makes
+   * Claude stop and wait for the user, so the hub then sends the seat a message (once cmux takes
+   * input) telling it to carry on without the tool. Any other dialog is the operator's.
    */
   async function refusedPrompt(): Promise<boolean> {
     let screen = "";
@@ -515,6 +523,11 @@ function createCmuxDriver(
     } catch (e) {
       log(`${i.name}: could not refuse a permission prompt: ${e instanceof Error ? e.message : e}`);
       return false;
+    }
+    // one word per refusal: a dialog still showing at the next look adds none while one waits
+    if (!queue.includes(CMUX_TOOL_REFUSED_TEXT)) {
+      queue.push(CMUX_TOOL_REFUSED_TEXT);
+      void pump();
     }
     return true;
   }

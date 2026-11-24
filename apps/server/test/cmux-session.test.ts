@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   appendFileSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -25,6 +27,7 @@ import {
   CMUX_PID_FILE,
   CMUX_QUIT_EARLY,
   CMUX_START_FAILED,
+  CMUX_TOOL_REFUSED_TEXT,
   CMUX_TRUST_QUIT,
   cmuxMessageText,
   envFileText,
@@ -61,7 +64,9 @@ const state = (): FakeState => JSON.parse(readFileSync(stateFile, "utf8"));
 const patch = (fn: (s: FakeState) => void) => {
   const s = state();
   fn(s);
-  writeFileSync(stateFile, JSON.stringify(s));
+  // whole, then renamed: the fake never reads it half written
+  writeFileSync(`${stateFile}.t`, JSON.stringify(s));
+  renameSync(`${stateFile}.t`, stateFile);
 };
 // generous: a loaded CI runner takes far longer to spawn each fake cmux call (the test timeout is 15 s)
 const wait = async (cond: () => boolean, ms = 12_000) => {
@@ -92,9 +97,33 @@ describe("launcherScript", () => {
     expect(text).toContain(
       "exec 'claude' '--settings' '{\"a\":\"it'\\''s\"}' '--session-id' 'abc'",
     );
-    expect(text).toContain(`export PATH='/node/bin'":$PATH"`);
+    expect(text).toContain(
+      `export PATH="\${CMUX_CLAUDE_WRAPPER_SHIM_ROOT:+$CMUX_CLAUDE_WRAPPER_SHIM_ROOT:}"'/node/bin'":$PATH"`,
+    );
     expect(text).toContain("export HOME='/h'");
     expect(text).not.toContain("export PATH='/x'");
+  });
+
+  it("keeps cmux's claude shim ahead of a node folder that has its own claude", () => {
+    const shims = join(root, "cmux-cli-shims", "s1");
+    const nodeDir = join(root, "node", "bin");
+    const tool = (folder: string, says: string) => {
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "claude"), `#!/bin/sh\necho ${says}\n`, { mode: 0o755 });
+    };
+    tool(shims, "shim");
+    tool(nodeDir, "node");
+    const script = join(root, "launch.zsh");
+    writeFileSync(
+      script,
+      launcherScript({ command: "claude", args: [], env: {}, nodeDir, envFile: null }),
+      { mode: 0o700 },
+    );
+    const out = execFileSync("/bin/zsh", ["-f", script], {
+      env: { PATH: `${shims}:/usr/bin:/bin`, CMUX_CLAUDE_WRAPPER_SHIM_ROOT: shims },
+      encoding: "utf8",
+    });
+    expect(out.trim()).toBe("shim");
   });
 
   it("sources an env file and removes it before the exec", () => {
@@ -535,6 +564,27 @@ describe("startCmuxSession", () => {
     expect(state().keys.find((k) => k.key === "escape")).toMatchObject({ force: true });
     await new Promise((r) => setTimeout(r, 200));
     expect(h.events.some((e) => e.kind === "needs-input")).toBe(false);
+    await h.session.close();
+  });
+
+  it("after refusing a permission prompt, tells the seat to carry on without the tool", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen =
+        "Bash command\n  rm -rf x\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    // Claude stops and waits: the dialog is gone and the seat is idle
+    patch((s) => {
+      s.screen = "> ";
+      s.sessions[0].lifecycle = "idle";
+    });
+    await wait(() => (state().sent ?? []).some((m) => m.text === CMUX_TOOL_REFUSED_TEXT));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(state().sent.filter((m) => m.text === CMUX_TOOL_REFUSED_TEXT)).toHaveLength(1);
     await h.session.close();
   });
 

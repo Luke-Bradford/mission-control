@@ -25,7 +25,8 @@ Claude in cmux still runs and cmux will not answer, so two CLIs never run one se
 - One workspace per run, named `<seat> · <ticket>` (`PR n` for a review, the role for FLIGHT), opened
   on the run's worktree.
 - It runs `claude` by name from a launcher script in the run's folder, so cmux's shim wraps it with
-  its hooks. The hub's own `--settings`, `--mcp-config`, `--strict-mcp-config`, `--restricted`, tool
+  its hooks. The launcher keeps cmux's shim folder first on PATH, ahead of the hub's node folder
+  (which may hold its own `claude`). The hub's own `--settings`, `--mcp-config`, `--strict-mcp-config`, `--restricted`, tool
   lists and role prompt are kept; your own plugins are not loaded.
 - On a new worktree Claude first asks whether to trust the folder, with the cursor on "No, exit".
   The hub moves the cursor to "Yes, I trust this folder" and presses Enter only once the screen
@@ -41,8 +42,9 @@ Claude in cmux still runs and cmux will not answer, so two CLIs never run one se
   Idle. The run stays open.
 - **`/clear` it.** The run keeps going on the new session id. The seat is not re-briefed.
 - **Permission prompts answer themselves.** A tool outside the seat's allowlist opens Claude's
-  permission dialog; the hub refuses it at once (Escape), as print mode refused the tool, so no seat
-  waits for you on one. The seat carries on with its turn.
+  permission dialog; the hub refuses it at once (Escape), so no seat waits for you on one. Escape
+  makes Claude stop and wait, so the hub then tells the seat that the tool was refused and to carry
+  on without it or report that it is blocked.
 - **Answer it.** Any other dialog (a question for you) shows on the Agents page as Waiting with
   "Needs your input in cmux", and cmux rings.
 - **Close it.** Ends the process; the hub treats it like any other exit.
@@ -69,4 +71,5 @@ closes it and resumes the run with its own command.
 ## After a hub restart
 
 The hub attaches to a run's workspace if its Claude process is still the one it started. Otherwise
-it closes the workspace and resumes the run in a new one.
+it closes the workspace and resumes the run in a new one. If that Claude process is gone and cmux is
+down (after a reboot, say), the hub forgets the workspace and resumes the run on the keeper.

@@ -13,7 +13,7 @@
 // the id after `--session-id` / `--resume` in the launcher it was given, its pid `claudePid`, its
 // transcript in `transcriptDir`).
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -23,8 +23,12 @@ const read = () => JSON.parse(readFileSync(stateAt, "utf8"));
 // Read-only commands write nothing back, so a test's own change to the file is never lost to them
 // (they are polled every second). `calls` lists only the commands that change something.
 const READ_ONLY = new Set(["sessions", "list-workspaces", "read-screen", "ping"]);
+// written whole and renamed into place: a test reading the file never meets it half written
 const save = (s) => {
-  if (!READ_ONLY.has(cmd)) writeFileSync(stateAt, JSON.stringify(s));
+  if (READ_ONLY.has(cmd)) return;
+  const tmp = `${stateAt}.${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(s));
+  renameSync(tmp, stateAt);
 };
 const state = read();
 state.calls ??= [];
