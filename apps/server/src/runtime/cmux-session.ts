@@ -53,10 +53,12 @@ const TRUST_RETRY_MS = 3000;
  * has none of the fixed options, so it stays the operator's.
  */
 export function isPermissionPrompt(screen: string): boolean {
+  // the terminal wraps a long path or command: the question and the refusal may cross lines
+  const flat = screen.replace(/\s+/g, " ");
   return (
-    /Do you want to (proceed|make this edit|create|allow|run)\b[^\n]*\?/i.test(screen) &&
+    /Do you want to (proceed|make this edit|create|allow|run)\b[^?]{0,2000}\?/i.test(flat) &&
     /^\W*1\.\s+Yes\s*$/m.test(screen) &&
-    /\bNo, and tell Claude what to do differently\b/.test(screen)
+    /\bNo, and tell Claude what to do differently\b/.test(flat)
   );
 }
 /** A refused prompt still showing at the next poll is not refused again until this has passed. */
@@ -428,8 +430,8 @@ function createCmuxDriver(
         return;
       }
       // A permission prompt waits on no one: the hub refuses it, as print mode refused the tool.
-      if (seen.lifecycle === "needsInput" && lifecycle !== "needsInput" && (await refusedPrompt()))
-        return;
+      // Every poll that finds it waiting looks again: a dialog not recognised at first is not left.
+      if (seen.lifecycle === "needsInput" && (await refusedPrompt())) return;
       change(seen.lifecycle);
       // A turn that began and ended between two polls shows only in the transcript.
       if (sentAt !== null && lifecycle === "idle") {

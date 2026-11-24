@@ -443,6 +443,39 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
+  it("refuses a permission dialog whose question and refusal wrap over lines", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen =
+        " Edit file\n\n Do you want to make this edit to\n /very/long/path/to/some/deeply/nested/file\n .ts?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session\n   3. No, and tell Claude what to do\n   differently (esc)";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    expect(state().keys.find((k) => k.key === "escape")).toMatchObject({ force: true });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.events.some((e) => e.kind === "needs-input")).toBe(false);
+    await h.session.close();
+  });
+
+  it("looks again on every waiting poll: a dialog that becomes a permission prompt is refused", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Thinking…";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => h.events.some((e) => e.kind === "needs-input"));
+    patch((s) => {
+      s.screen =
+        " Bash command\n   ls\n Do you want to proceed?\n ❯ 1. Yes\n   3. No, and tell Claude what to do differently (esc)";
+    });
+    await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    await h.session.close();
+  });
+
   it("leaves a plain question that starts 'Do you want to proceed' to the operator", async () => {
     patch((s) => {
       s.claudePid = ALIVE;
@@ -462,6 +495,11 @@ describe("startCmuxSession", () => {
     expect(isPermissionPrompt(dialog)).toBe(true);
     expect(isPermissionPrompt("Do you want to proceed?\n❯ 1. Yes\n  2. No")).toBe(false);
     expect(isPermissionPrompt("Do you want to proceed with the plan?")).toBe(false);
+    expect(
+      isPermissionPrompt(
+        " Bash command\n Do you want to\n proceed?\n ❯ 1. Yes\n   3. No, and tell Claude\n   what to do differently (esc)",
+      ),
+    ).toBe(true);
   });
 
   it("leaves any other dialog to the operator", async () => {
