@@ -83,11 +83,13 @@ describe("the repo's skills reach a seat (#1051)", () => {
 
   it("adds the hub's skills only to a repo other than the hub's own, and only when the hub's repo is known", async () => {
     snapshot();
-    const names = async (hubRepo: string | undefined, repoId: string) =>
+    const names = async (hubRepo: string | null | undefined, repoId: string) =>
       (await sharedSkillsFor(hubRepo, dir, repoId))?.skills.map((s) => s.name);
     expect(await names("hub", "other")).toEqual(["hud-design", "plain-talk"]);
     expect(await names("hub", "hub")).toBeUndefined();
     expect(await names(undefined, "other")).toBeUndefined();
+    // the hub's repo known to be none of the configured ones: every configured repo is another repo
+    expect(await names(null, "other")).toEqual(["hud-design", "plain-talk"]);
     expect(await sharedSkillsFor("hub", "", "other")).toBeUndefined();
   });
 

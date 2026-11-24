@@ -1998,6 +1998,7 @@ describe("ownsHubFiles", () => {
   it("is true only for the hub's own repo once it is known", () => {
     expect(ownsHubFiles({ hubRepo: "a" }, "a")).toBe(true);
     expect(ownsHubFiles({ hubRepo: "a" }, "b")).toBe(false);
+    expect(ownsHubFiles({ hubRepo: null }, "a")).toBe(false);
   });
 });
 

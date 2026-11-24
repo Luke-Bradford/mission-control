@@ -2512,6 +2512,49 @@ describe("Setup Roles & guards", () => {
     expect(read.rules["commands.review"]?.value).toEqual(first.rules["commands.review"]?.value);
   });
 
+  describe("a repo that does not hold the hub's files", () => {
+    const foreign = () => {
+      config.hubRepo = "somewhere-else";
+      onDisk("    rules:\n      checks: ['pytest -q']\n");
+    };
+
+    it("shows its checks, not pnpm, as the commands it has not set", async () => {
+      foreign();
+      const read = await view();
+      expect(read.rules["commands.writer"]).toMatchObject({
+        value: ["pytest -q"],
+        source: "default",
+      });
+      expect(read.rules["commands.review"]?.value).toEqual(["pytest -q"]);
+    });
+
+    it("editing the writer list alone keeps its checks as the review list", async () => {
+      foreign();
+      const first = await view();
+      const saved = await postBody("/api/repos/shop-app/rules", {
+        base: first.base,
+        rules: { commands: { writer: ["pytest -q", "ruff check"] } },
+      });
+      expect(saved.statusCode).toBe(200);
+      const read = await view();
+      expect(read.rules["commands.writer"]?.value).toEqual(["pytest -q", "ruff check"]);
+      expect(read.rules["commands.review"]?.value).toEqual(["pytest -q"]);
+    });
+
+    it("editing the review list alone keeps its checks as the writer list", async () => {
+      foreign();
+      const first = await view();
+      const saved = await postBody("/api/repos/shop-app/rules", {
+        base: first.base,
+        rules: { commands: { review: ["pytest -q", "ruff check"] } },
+      });
+      expect(saved.statusCode).toBe(200);
+      const read = await view();
+      expect(read.rules["commands.writer"]?.value).toEqual(["pytest -q"]);
+      expect(read.rules["commands.review"]?.value).toEqual(["pytest -q", "ruff check"]);
+    });
+  });
+
   it("reads the file on disk, not stale loaded rules, so the page saves what it shows", async () => {
     expect(config.repos.find((r) => r.id === "shop-app")?.rules).toBeUndefined();
     onDisk("    rules:\n      pick_from: [Todo]\n");

@@ -135,11 +135,11 @@ export async function readHubSkills(hubRoot: string): Promise<RepoSkills> {
 
 /**
  * The shared skills a start on `repoId` adds: the hub's, for a repo other than the one the hub's own
- * code lives in. None when the hub's repo is unknown, when it is `repoId` itself (it has them), or
+ * code lives in (every repo, when the hub's repo is none of the configured ones). None when the hub's repo is unknown, when it is `repoId` itself (it has them), or
  * when there is no hub checkout.
  */
 export async function sharedSkillsFor(
-  hubRepo: string | undefined,
+  hubRepo: string | null | undefined,
   hubRoot: string,
   repoId: string,
 ): Promise<RepoSkills | undefined> {

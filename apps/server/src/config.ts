@@ -244,8 +244,11 @@ export interface CcConfig {
     reportEveryHours?: number;
   };
   operator: { id: string; timezone: string; locale?: string; githubLogins?: string[] };
-  /** The configured repo the hub's own code lives in, set at startup; unset: unknown, so every repo is treated as it. */
-  hubRepo?: RepoId;
+  /**
+   * The configured repo the hub's own code lives in, set at startup. Unset: unknown, so every repo is
+   * treated as it. `null`: known not to be any configured repo, so none is.
+   */
+  hubRepo?: RepoId | null;
   accounts: {
     id: AccountId;
     vendor: "claude" | "codex";
@@ -336,6 +339,14 @@ function auditThresholdsOf(a: {
 /** Whether the hub's own files (its floor and controller-check paths) are in this repo. */
 export function ownsHubFiles(config: Pick<CcConfig, "hubRepo">, repoId: RepoId): boolean {
   return config.hubRepo === undefined || config.hubRepo === repoId;
+}
+
+/**
+ * The commands a repo with no `commands` of its own gets: the pnpm defaults where the hub's own files
+ * live, else the checks the repo lists (a Python repo's `pytest`, not pnpm).
+ */
+export function defaultCommandsFor(ownsHub: boolean, checks: readonly string[]): SeatCommands {
+  return ownsHub ? defaultSeatCommands() : { writer: [...checks], review: [...checks] };
 }
 
 export function flightPowersOf(config: CcConfig, repoId: RepoId): FlightPowers {

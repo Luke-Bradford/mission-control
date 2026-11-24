@@ -13,7 +13,7 @@ import {
   type RepoRuleView,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
-import { defaultSeatCommands } from "../config.ts";
+import { defaultCommandsFor } from "../config.ts";
 import { overlayRepoBlock, type RepoBlock } from "../engine/rule-config.ts";
 
 type ConfigRepo = CcConfig["repos"][number];
@@ -29,6 +29,8 @@ export function repoRulesView(input: {
   repo: ConfigRepo;
   raw: Record<string, unknown>;
   repoFile: RepoBlock | null | string;
+  /** Whether the hub's own files live in this repo (`ownsHubFiles`); false: its commands default to its checks. */
+  ownsHub: boolean;
 }): RepoRulesView {
   const { repo, raw } = input;
   const block = typeof input.repoFile === "string" ? null : input.repoFile;
@@ -71,7 +73,7 @@ export function repoRulesView(input: {
     ? { value: effective.hardRulesBy, source: "repo-file" }
     : plain(configured.hardRulesBy, set(rawRules.hard_rules_by));
   const commandsSet = set(raw.commands);
-  const commands = repo.commands ?? defaultSeatCommands();
+  const commands = repo.commands ?? defaultCommandsFor(input.ownsHub, effective.checks);
   return {
     base: input.base,
     ...(typeof input.repoFile === "string" ? { repoFileError: input.repoFile } : {}),

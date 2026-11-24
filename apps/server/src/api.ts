@@ -299,6 +299,7 @@ import {
   crewSeatDef,
   crewSeatMode,
   DEFAULT_MAX_SEATS,
+  defaultCommandsFor,
   flightPowersOf,
   ownsHubFiles,
   TeamsSelection,
@@ -306,6 +307,7 @@ import {
 import type { CrewReloader } from "./crew-apply.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
+import { overlayRepoBlock } from "./engine/rule-config.ts";
 import { RepoRulesError, readRepoBlock } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
@@ -3334,6 +3336,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
       };
 
+      const repoBlockOf = async (repo: (typeof config.repos)[number]) => {
+        const checkout = config.crew?.sessions.find(
+          (session) => session.repoId === repo.id,
+        )?.checkout;
+        return checkout === undefined
+          ? null
+          : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+      };
+
       // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
         // A read needs no writable config: a preview shows the rules of the file it loaded.
@@ -3343,18 +3354,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // Every value comes from the same config.yaml bytes the version is taken from, so the
           // page can never save a version it did not show.
           const { base, repo, raw } = await readRepoRolesConfig(configPath, req.params.repoId);
-          const checkout = config.crew?.sessions.find(
-            (session) => session.repoId === repo.id,
-          )?.checkout;
-          const repoFile =
-            checkout === undefined
-              ? null
-              : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+          const repoFile = await repoBlockOf(repo);
           return repoRulesView({
             base,
             repo,
             raw,
             repoFile: repoFile instanceof RepoRulesError ? repoFile.message : repoFile,
+            ownsHub: ownsHubFiles(config, repo.id),
           });
         } catch (e) {
           return rolesError(reply, e);
@@ -3368,12 +3374,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = RepoRolesBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
+          // A one-list edit keeps the other list at what the page showed: this repo's effective default.
+          const { repo: target } = await readRepoRolesConfig(configPath, req.params.repoId);
+          const block = await repoBlockOf(target);
+          const configured = target.rules ?? DEFAULT_REPO_RULES;
+          const checks = (
+            block === null || block instanceof RepoRulesError
+              ? configured
+              : overlayRepoBlock(configured, block)
+          ).checks;
           const result = await setRepoRoles(
             configPath,
             req.params.repoId,
             body.data.base,
             body.data.rules,
             now(),
+            defaultCommandsFor(ownsHubFiles(config, req.params.repoId), checks),
           );
           const live = config.repos.find((repo) => repo.id === req.params.repoId);
           const saved = result.config.repos.find((repo) => repo.id === req.params.repoId);

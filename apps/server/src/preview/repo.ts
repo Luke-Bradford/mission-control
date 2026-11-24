@@ -40,3 +40,18 @@ export async function resolvePreviewRepo(
   }
   return undefined;
 }
+
+/**
+ * The configured repo the hub's own code lives in, from the hub checkout's origin. `null`: the origin
+ * was read and no configured repo is it (every configured repo is a foreign one); `undefined`: it
+ * could not be read, so the hub's repo is unknown.
+ */
+export async function resolveHubRepo(
+  hubRoot: string | null,
+  repos: readonly Pick<CcConfig["repos"][number], "id" | "github">[],
+): Promise<RepoId | null | undefined> {
+  if (hubRoot === null) return undefined;
+  const origin = await originRepo(hubRoot);
+  if (origin === null) return undefined;
+  return repos.find((r) => r.github.toLowerCase() === origin)?.id ?? null;
+}
