@@ -139,8 +139,11 @@ function ticketCounts(): unknown {
 
 /** The last day's messages one by one: each link's recent pair, then the crew channel's. */
 function feed(): unknown {
-  const links = (getState().api["/api/comms/links"] as { links: { from: string; to: string }[] })
-    .links;
+  const links = (
+    getState().api["/api/comms/links"] as {
+      links: { from: string; to: string; lastId?: string; lastAt?: number; lastText?: string }[];
+    }
+  ).links;
   const crew = getState().api["/api/comms/crew"] as {
     messages: { id: string; from: string; to: string; at: number; text: string }[];
   };
@@ -154,6 +157,20 @@ function feed(): unknown {
       text: commsMessage(i + k, now).text,
     })),
   );
+  // A message the scene just sent on a link is a new message in the feed, so the map shows it travel.
+  const latest = links.flatMap((link) =>
+    link.lastId !== undefined && link.lastAt !== undefined
+      ? [
+          {
+            id: link.lastId,
+            from: link.from,
+            to: link.to,
+            at: link.lastAt,
+            text: link.lastText ?? "",
+          },
+        ]
+      : [],
+  );
   const channel = crew.messages.map((m) => ({
     id: m.id,
     from: m.from,
@@ -161,7 +178,7 @@ function feed(): unknown {
     at: m.at,
     text: m.text,
   }));
-  return { messages: [...direct, ...channel].sort((a, b) => b.at - a.at) };
+  return { messages: [...direct, ...latest, ...channel].sort((a, b) => b.at - a.at) };
 }
 
 /** The QA history, narrowed to one repository when the read names one. */

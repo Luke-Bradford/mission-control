@@ -4,9 +4,12 @@ import { App } from "../src/App.tsx";
 import { DEMO_REFUSED, setDemo } from "../src/demo/mode.ts";
 import { getState, playNext } from "../src/demo/simulator.ts";
 import { demoMisses } from "../src/demo/source.ts";
+import { installMapDom } from "./crewMapDom.ts";
 
 /** Beyond each page's first view: every sub-view a person reaches by a click must have its data. */
+const mapDom: { current?: ReturnType<typeof installMapDom> } = {};
 beforeEach(() => {
+  mapDom.current = installMapDom();
   vi.stubGlobal("fetch", vi.fn());
   vi.stubGlobal(
     "EventSource",
@@ -17,7 +20,10 @@ beforeEach(() => {
   );
   setDemo(true);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  mapDom.current?.restore();
+  vi.unstubAllGlobals();
+});
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 400))));
 const at = async (path: string) => {
@@ -103,13 +109,12 @@ const play = (beats: number) => {
 };
 
 describe("Demo pages keep moving where a person looks", () => {
-  it("Comms: the live graph and message-length panels load as counts rise", async () => {
+  it("Comms: the live crew map loads as links rise", async () => {
     const before = JSON.stringify(getState().api["/api/comms/links"] as object);
     play(10);
     expect(JSON.stringify(getState().api["/api/comms/links"])).not.toBe(before);
     await at("/comms");
-    expect(document.body.textContent).toContain("Comms graph");
-    expect(document.body.textContent).not.toContain("Loading message lengths");
+    expect(document.body.textContent).toContain("Crew map");
     clean();
   });
 
@@ -176,11 +181,11 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("Could not read update.log");
   });
 
-  it("Comms opens on the live graph for the 3 messages beside it, and every seat has contacts", async () => {
+  it("Comms opens on the live map and every seat has contacts", async () => {
     await at("/comms");
-    const panel = document.querySelector(".comms-graph-panel") as HTMLElement;
+    const panel = document.querySelector(".cm") as HTMLElement;
     expect(document.body.textContent).not.toContain("No messages in FLIGHT");
-    expect(panel.textContent).toMatch(/\d+\s*msg/);
+    expect(panel.textContent).toContain("Seats");
     const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
       Number.parseInt(e.textContent ?? "", 10),
     );

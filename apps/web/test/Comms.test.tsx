@@ -6,6 +6,7 @@ import { callSign } from "../src/crew.ts";
 import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
+import { installMapDom } from "./crewMapDom.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, CONFIG, crewRow, item, MIN, NOW, seatRow } from "./fixtures.ts";
 
@@ -35,7 +36,9 @@ const toOperator = (id: string, from: string) => ({
   needsReply: true,
 });
 
+const mapDom: { current?: ReturnType<typeof installMapDom> } = {};
 beforeEach(() => {
+  mapDom.current = installMapDom();
   hub.clear();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
@@ -43,6 +46,7 @@ beforeEach(() => {
 afterEach(() => {
   hub.clear();
   vi.useRealTimers();
+  mapDom.current?.restore();
   vi.unstubAllGlobals();
 });
 
@@ -1233,10 +1237,8 @@ describe("Comms routes", () => {
     expect(fetch.mock.calls.some(([path]) => path === "/api/comms/agents/studio-builder")).toBe(
       false,
     );
-    // The loop sits on the graph's loops spoke (#790), but has no conversation of its own.
-    expect(
-      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-rails")),
-    ).toEqual([]);
+    // An observed loop has no conversation of its own, and the crew map draws crew seats only.
+    expect(screen.queryAllByText("studio-builder")).toEqual([]);
   });
 
   it("shows the stored-Comms empty state for crew", async () => {
