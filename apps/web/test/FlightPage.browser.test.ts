@@ -425,12 +425,10 @@ describeRendered("FLIGHT page in a browser", () => {
             else if (state === "running") expect(r.blockers).toMatch(/Nothing is blocking FLIGHT/);
             else expect(r.blockerRows).toBe(1);
             // Recent decisions is on the Plan tab: it lists its rows there, newest first.
-            await page.evaluate(() => {
-              const plan = [...document.querySelectorAll<HTMLElement>("[role=tab]")].find((t) =>
-                t.textContent?.trim().startsWith("Plan"),
-              );
-              plan?.click();
-            }, null);
+            await page.evaluate(
+              () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+              null,
+            );
             await page.box("#decisions li");
             const dec = await page.evaluate(
               () => ({
@@ -670,12 +668,10 @@ describeRendered("FLIGHT page in a browser", () => {
           }, null);
           expect(open, `${where}: the opened action is whole`).toBeLessThanOrEqual(1);
           // Recent decisions moved to the Plan tab: it opens there and keeps its rows.
-          await page.evaluate(() => {
-            const plan = [...document.querySelectorAll<HTMLElement>("[role=tab]")].find((t) =>
-              t.textContent?.trim().startsWith("Plan"),
-            );
-            plan?.click();
-          }, null);
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+            null,
+          );
           await page.box("#decisionsP");
           const dec = await page.evaluate(
             () => ({

@@ -597,6 +597,11 @@
 .fp-tabbody[hidden] {
   display: none;
 }
+/* The Plan tab grows with its content, so Recent decisions has a set height: the newest that fit
+   show, and older ones are in Records. */
+.fp-tabbody .fp-decisions {
+  max-height: calc(var(--sp-6) * 10);
+}
 
 /* The control room: one row per measure. State is a shape and a word as well as a colour. */
 .fp-vitals {
