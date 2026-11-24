@@ -994,7 +994,9 @@ export const FLIGHT_ASKED_AGAIN =
  * a run stopped on a budget, which only the operator can lift. The rest of the alert list is in
  * core (`needsYouAlert`). None waits for a click the hub can make itself (#2215): the breaker is
  * lifted by the hub after a wait that grows each time it comes back; a budget park is the one real
- * decision here (raise a spend ceiling), so it stays until the operator takes it.
+ * decision here (raise a spend ceiling), and its note names that decision (core `budgetDecisionText`).
+ * An "account" hold is still classed with the budget one: nothing in this build creates it, so this
+ * only keeps a hold stored by an older hub as the operator's until its run is resumed or ended.
  */
 export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;

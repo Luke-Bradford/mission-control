@@ -45,6 +45,7 @@ import {
   FLIGHT_ASKED_AGAIN,
   flightNotTriagingDueAt,
   HUB_STOP_KEYS,
+  hubAlert,
   isOperatorCall,
   markHubStarted,
   NO_LOCK,
@@ -4409,6 +4410,37 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       flightTriage: "down",
     });
     expect(aggregate()?.notTriaging?.keys).toContain("esc:shop-app#9");
+  });
+
+  it("still classes a stored account hold as an alert, like a budget park", () => {
+    flight();
+    for (const kind of ["account", "budget", "review"] as const) {
+      store.upsertRun(
+        run({
+          id: `r-${kind}`,
+          agentId: "guido-1",
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            hold: { kind, reason: "x", ended: false, worktree: null, wake: false },
+          } as RunLoop,
+        }),
+      );
+      store.raiseNote({
+        key: `blocked:r-${kind}:0`,
+        kind: "blocked",
+        runId: `r-${kind}`,
+        seatId: null,
+        repoId: "shop-app",
+        text: kind,
+        at: NOW,
+      });
+    }
+    const alert = (kind: string) =>
+      hubAlert({ key: `note:blocked:r-${kind}:0`, kind: "blocked" }, store);
+    expect(alert("account")).toBe(true);
+    expect(alert("budget")).toBe(true);
+    expect(alert("review")).toBe(false);
   });
 
   it("leaves a budget park and held Update raw as alerts; folds a missed error or stuck run (#1543)", () => {

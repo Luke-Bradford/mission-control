@@ -110,6 +110,19 @@ export function retryInstructionFocus(deps: Parameters<typeof importInstructionF
     importInstructionFocus(deps);
 }
 
+/**
+ * The production timer (main.ts starts it, shutdown stops it): every INSTRUCTION_FOCUS_RETRY_MS it
+ * imports again while a focus warning is open. Returns the stop.
+ */
+export function startInstructionFocusRetry(
+  deps: Parameters<typeof importInstructionFocus>[0],
+  everyMs = INSTRUCTION_FOCUS_RETRY_MS,
+): () => void {
+  const timer = setInterval(() => retryInstructionFocus(deps), everyMs);
+  timer.unref();
+  return () => clearInterval(timer);
+}
+
 /** Config-import warnings describe an active failure, so a successful retry clears only its own note. */
 export function importInstructionFocus(
   deps: Pick<NoticeDeps, "config" | "store" | "bus" | "now"> & { log?: (text: string) => void },
