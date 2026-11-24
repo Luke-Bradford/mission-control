@@ -1,6 +1,7 @@
 // @ts-nocheck
 // biome-ignore-all lint: the crew map is the operator's chosen prototype, kept as one framework-free piece
 // biome-ignore-all format: ported from docs/prototype/comms-crew-map-live.html; keep it diffable against that file
+import { percent } from "../fmt.ts";
 /* Crew map: an orbital tracking display of a crew of coding agents. Framework-free, no dependencies.
 
    import { createCrewMap } from './crew-map.js';
@@ -644,9 +645,10 @@ function createCrewMap(container, options) {
     return subOf(p, clock);
   }
   const pairWords = pr => pr.lanes.map(l => `${l.a.name} to ${l.b.name}: ${plural(l.n, 'message')}${l.lastAt > 0 ? ', last ' + fmtHM(l.lastAt) : ''}`).join('. ');
+  const labCtx = p => L.compact && L.dense ? '' : p.ctxTxt;   // a crowded small map keeps the name; the figure is in the Seats list under the same name
   const labSub = p => L.compact ? p.hold || '' : p.sub;   // the small map's tag carries the name and context; a stuck seat adds its word
   function placeLabels() {
-    const W = L.W, H = L.H, fs = L.fs, cw = fs * .6 + .25, cw2 = L.fs2 * .6 + .15, obs = [];
+    const W = L.W, H = L.H, fs = L.fs, cw = fs * (L.compact ? .68 : .6) + .25, cw2 = L.fs2 * .6 + .15, obs = [];
     for (const p of M.list) obs.push({ x0: p.hx - p.rT - 2, y0: p.hy - p.rT - 2, x1: p.hx + p.rT + 2, y1: p.hy + p.rT + 2, own: p });
     const fz = L.compact ? 7 : 12, sx = L.rx + L.fSide;   // frame labels: role names on the four sides
     obs.push({ x0: L.cx - 44, y0: L.fTop - fz, x1: L.cx + 44, y1: L.fTop + fz }, { x0: L.cx - 44, y0: H - L.fm - fz, x1: L.cx + 44, y1: H }, { x0: L.cx - sx - fz, y0: L.cy - 44, x1: L.cx - sx + fz, y1: L.cy + 44 }, { x0: L.cx + sx - fz, y0: L.cy - 44, x1: L.cx + sx + fz, y1: L.cy + 44 });
@@ -655,7 +657,7 @@ function createCrewMap(container, options) {
     const order = [...M.list].sort((a, b) => (a.kind === 'flight' ? -1 : 0) - (b.kind === 'flight' ? -1 : 0) || b.rho - a.rho || a.th - b.th);
     for (const p of order) {
       if (p.nolab) { p.lab = null; continue; }
-      const sub = labSub(p), two = !!sub, seat = p.kind === 'seat' || p.kind === 'flight', l1 = p.disp.length * cw + (p.ctxTxt ? p.ctxTxt.length * cw2 + 10 : 0);
+      const sub = labSub(p), two = !!sub, seat = p.kind === 'seat' || p.kind === 'flight', l1 = p.disp.length * cw + (labCtx(p) ? labCtx(p).length * cw2 + 10 : 0);
       // a working seat keeps room for "· running <tool>", which comes and goes without a new layout
       const subLen = sub.length + (!L.compact && p.state === 'running' && !p.tool ? 14 : 0);
       const w = Math.max(l1, two ? Math.max(subLen + 1, seat && !L.compact ? 16 : 0) * cw2 : 0) + 9, wNow = Math.max(l1, two ? Math.max(sub.length + 1, seat && !L.compact ? 16 : 0) * cw2 : 0) + 9, h = two ? fs + L.fs2 + (L.compact ? 3 : 9) : L.compact ? 15 : fs + 5;
@@ -681,7 +683,7 @@ function createCrewMap(container, options) {
       fit(w, c);
       if (bestBad > 0 && wNow < w) { bestBad = 1e9; fit(wNow, cands(wNow)); }
       // still touching a neighbour: try every direction round the seat, a little further out each time, and keep the cleanest
-      for (let ring = 1; bestBad > 0 && ring <= 4; ring++) for (let k = 0; k < 16 && bestBad > 0; k++) {
+      for (let ring = 1; bestBad > 0 && ring <= 8; ring++) for (let k = 0; k < 16 && bestBad > 0; k++) {
         const ang = k * TAU / 16, cs = Math.cos(ang), sn = Math.sin(ang), dd = r + g + ring * 10 * L.s, cx = x + cs * dd, cy = y + sn * dd;
         const a = (sn < -.35 ? 'N' : sn > .35 ? 'S' : '') + (cs > .35 ? 'E' : cs < -.35 ? 'W' : '') || 'E';
         const x0 = a === 'N' || a === 'S' ? cx - w / 2 : /W/.test(a) ? cx - w : cx, y0 = /N/.test(a) ? cy - h : /S/.test(a) ? cy : cy - h / 2, bad = badAt(x0, y0, w);
@@ -737,7 +739,7 @@ function createCrewMap(container, options) {
       p.sub = subOf(p, clock); p.ctxTxt = ctxShort(p);
       const b = p.btn; if (!b) continue; const lab = b.lastChild, cls = 'cm-seat cm-is-' + p.state + (p.hold ? ' cm-is-hold' : '') + (ctxOver(p) ? ' cm-is-over' : '') + (active.has(p) ? ' cm-is-moving' : '');
       if (b.className !== cls) b.className = cls;
-      if (lab.children[0].textContent !== p.ctxTxt) lab.children[0].textContent = p.ctxTxt;
+      const lctx = labCtx(p); if (lab.children[0].textContent !== lctx) lab.children[0].textContent = lctx;
       const lsub = labSub(p); if (lab.lastChild.textContent !== lsub) lab.lastChild.textContent = lsub;
       const al = `${p.name}, ${ROLE_WORD[p.role] || 'seat'}, ${stateWords(p, clock)}. ${p.lim ? 'Context ' + ctxWords(p) + '. ' : ''}${plural(p.n, 'message')} in the feed. Enter opens its messages.`;
       if (p.al !== al) { p.al = al; b.setAttribute('aria-label', al); }
@@ -1007,7 +1009,7 @@ function createCrewMap(container, options) {
   function halt(v) { if (halted === v) return; halted = v; if (v) { if (raf) cancelAnimationFrame(raf); if (timer) clearTimeout(timer); raf = timer = 0; lastWall = 0; } else { lastWall = 0; wake(); } }
   let visible = !document.hidden, onScreen = true;
   on(document, 'visibilitychange', () => { visible = !document.hidden; halt(!(visible && onScreen)); });
-  const io = new IntersectionObserver(es => { onScreen = es[es.length - 1].isIntersecting; halt(!(visible && onScreen)); }); io.observe(stage);
+  const io = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(es => { onScreen = es[es.length - 1].isIntersecting; halt(!(visible && onScreen)); }); io && io.observe(stage);
   // a slow clock for things that change by the minute or need a tick when no frame is due
   let lastHouse = -1e9, lastStatus = '', lastTag = '', lastChart = -1e9;
   function housekeeping(clock) {
@@ -1130,7 +1132,7 @@ function createCrewMap(container, options) {
     else if (!known) { l1 = `${plural(seats, 'seat')} · this feed does not carry seat state`; l2 = 'Messages only: who wrote to whom, and when.'; }
     else { l1 = `${running} working · ${idle} idle${stopped ? ' · ' + stopped + ' stopped' : ''}${held ? ' · ' + held + ' stuck' : ''} · ${M.waits.length} owe${M.waits.length === 1 ? 's' : ''} a reply` + (big ? ` · ${plural(M.hourN, 'message')} in the last hour` : '');
       l2a = (big ? '' : `${plural(M.hourN, 'message')} last hour`) + (top ? (big ? 'Fullest context: ' : ' · fullest: ') : ''); l2b = top ? `, ${ctxOver(top) ? ctxShort(top) : fmtK(top.ctx) + ' of ' + fmtK(top.lim)}` : ''; l2top = top; l2 = l2a + (top ? top.name : '') + l2b; }
-    if (E.kind === 'replay' && E.fast && E.progress != null) l1 += ` · ${Math.round(E.progress * 100)}% through`;
+    if (E.kind === 'replay' && E.fast && E.progress != null) l1 += ` · ${percent(E.progress * 100)} through`;
     const ck = !E.started ? '' : reduced() || E.fast || E.stale ? (E.fast ? fmtDHM(clock) : fmtHM(clock)) : fmtHMS(clock);
     if (D.clock.textContent !== ck) D.clock.textContent = ck;
     const key = chip + cls + l1 + l2 + (M.readout || press ? 1 : 0);
@@ -1296,7 +1298,7 @@ function createCrewMap(container, options) {
     if (destroyed) return; destroyed = true;
     if (raf) cancelAnimationFrame(raf); if (timer) clearTimeout(timer); if (mvQueued) cancelAnimationFrame(mvQueued); if (onceRaf) cancelAnimationFrame(onceRaf); clearInterval(slow);
     raf = timer = mvQueued = onceRaf = 0;
-    ro.disconnect(); io.disconnect();
+    ro.disconnect(); io && io.disconnect();
     for (const off of offs) off(); offs.length = 0;
     sprites.clear(); sweepCv = null; active.clear(); press = null;
     root.remove(); dropStyle();

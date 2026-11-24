@@ -151,6 +151,6 @@ export function installMapStubs(): void {
     unobserve() {}
     disconnect() {}
   };
-  for (const name of ["ResizeObserver", "IntersectionObserver", "Path2D"] as const)
+  for (const name of ["ResizeObserver", "Path2D"] as const)
     if (!(name in globalThis)) vi.stubGlobal(name, watcher);
 }

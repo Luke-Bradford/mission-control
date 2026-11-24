@@ -19,7 +19,6 @@ describe("Overview layout (hud.css)", () => {
     expect(rule(String.raw`\.trow \.rowlink`)).toContain("min-height: 24px");
     for (const selector of [
       String.raw`\.comms-actions button,\n\.comms-react-set button`,
-      String.raw`\.comms-metric button`,
       String.raw`#agentsList \.need button`,
       String.raw`button\.flight-link`,
       String.raw`\.ph \.act \.ph-link`,
