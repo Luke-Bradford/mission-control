@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createCrewMap, type MapParticipant, type MapSnapshot } from "../src/comms/crewMap.ts";
 import { type DomHarness, installMapDom } from "./crewMapDom.ts";
 
@@ -393,5 +393,62 @@ it("paints every seat's name on the small map, with its context and a stuck seat
     host.querySelector('.cm-roster li button[aria-label^="SEAT-2,"]')?.getAttribute("aria-label"),
   ).toMatch(/context 25K/);
   expect(button("guido-30").querySelector(".cm-lab small")?.textContent).toBe("blocked");
+  map.destroy();
+});
+
+it.each([
+  [400, 340],
+  [380, 300],
+  [420, 260],
+  [360, 356],
+  [440, 400],
+  [380, 240],
+  [340, 200],
+  [400, 280],
+])(
+  "finds every tag a clear place for a crew of fifteen reviewers, small map %i x %i",
+  async (width, height) => {
+    dom.restore();
+    dom = installMapDom({ width, height });
+    const map = createCrewMap(host);
+    const crew: MapParticipant[] = [
+      seat("flight-1", { role: "flight", state: "running" }),
+      { id: "CAPCOM", label: "CAPCOM", role: "operator", kind: "operator", state: "unknown" },
+      seat("guido-1"),
+      ...Array.from({ length: 15 }, (_, i) =>
+        seat(`retro-${i + 1}`, { role: "review", state: i % 2 ? "idle" : "running" }),
+      ),
+    ];
+    map.update(snapshot({ participants: crew }));
+    await settle();
+    expect(map._state().labBad).toEqual([]);
+    const { labels } = map._probe();
+    for (const [i, a] of labels.entries())
+      for (const b of labels.slice(i + 1))
+        expect(overlap(a, b), `${a.id} over ${b.id}`).toBe(false);
+    map.destroy();
+  },
+);
+
+it("lets a tag that the browser painted on top of an earlier one give way", async () => {
+  const spy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const same = this.classList.contains("cm-lab");
+    return {
+      left: 0,
+      top: 0,
+      right: same ? 50 : 0,
+      bottom: same ? 14 : 0,
+      width: same ? 50 : 0,
+      height: 14,
+    } as DOMRect;
+  });
+  const map = createCrewMap(host);
+  map.update(snapshot({ participants: busyCrew(4) }));
+  await settle();
+  const shown = [...host.querySelectorAll<HTMLElement>(".cm-lab")].filter((tag) => !tag.hidden);
+  expect(shown).toHaveLength(1);
+  spy.mockRestore();
   map.destroy();
 });

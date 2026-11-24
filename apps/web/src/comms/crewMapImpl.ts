@@ -158,6 +158,7 @@ const STYLE = `
 .cm .cm-lab { position: absolute; white-space: nowrap; padding: 1px 4px; border-radius: 2px; background: rgba(4, 6, 12, .66); color: var(--cm-void-ink);
   font: 500 11px/13px var(--cm-mono); letter-spacing: .02em; text-align: left; }
 .cm .cm-lab small { display: none; font: 400 11px/14px var(--cm-mono); color: var(--cm-void-muted); letter-spacing: 0; }
+.cm .cm-lab i:empty { display: none; }
 .cm .cm-lab i { display: inline; font: 400 11px/13px var(--cm-mono); font-style: normal; color: var(--cm-void-ink); margin-left: 8px; letter-spacing: 0; }
 .cm .cm-seat.cm-is-over .cm-lab i { color: #fff; font-weight: 500; }
 .cm .cm-seat.cm-is-hold .cm-lab small { display: block; color: #ff9a9a; }
@@ -731,7 +732,16 @@ function createCrewMap(container, options) {
       lab.firstChild.nodeValue = p.disp; lab.style.top = (p.lab.y - p.hy).toFixed(1) + 'px'; lab.style.textAlign = west ? 'right' : mid ? 'center' : 'left';
       lab.style.left = west ? 'auto' : (p.lab.x + (mid ? p.lab.w / 2 : 0) - p.hx).toFixed(1) + 'px'; lab.style.right = west ? (p.hx - p.lab.x - p.lab.w).toFixed(1) + 'px' : 'auto'; lab.style.transform = mid ? 'translateX(-50%)' : 'none';
     }
-    textDirty = true; refreshText();
+    textDirty = true; refreshText(); clearOverlaps();
+  }
+  function clearOverlaps() {   // the placement works from estimated widths; what the browser painted is the last word: a tag that still sits on an earlier one gives way (its seat keeps its dot and its row in the Seats list)
+    const kept = [], order = [...M.list].sort((a, b) => (a.kind === 'flight' ? 0 : 1) - (b.kind === 'flight' ? 0 : 1) || a.rho - b.rho || a.th - b.th);
+    for (const p of order) {
+      const lab = p.btn && p.btn.lastChild; if (!lab || lab.hidden) continue;
+      const r = lab.getBoundingClientRect(); if (!r.width) continue;
+      if (kept.some(o => r.left < o.right - 1 && o.left < r.right - 1 && r.top < o.bottom - 1 && o.top < r.bottom - 1)) { lab.hidden = true; continue; }
+      kept.push(r);
+    }
   }
   function refreshText() {   // names, state lines and the Seats list: only what changed is written
     if (!textDirty) return; textDirty = false;
