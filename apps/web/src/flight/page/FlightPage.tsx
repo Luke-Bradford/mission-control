@@ -91,11 +91,11 @@ export function FlightPage() {
     () =>
       worstFirst(
         computeVitals({
-        now,
-        run,
-        view,
-        summary: summary.data,
-        attention: attention.data,
+          now,
+          run,
+          view,
+          summary: summary.data,
+          attention: attention.data,
           ledger: ledger.data?.entries,
         }),
       ),

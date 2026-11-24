@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { PAGE_TAB_LABEL, PAGE_TABS } from "../src/flight/page/FlightPage.tsx";
+import { FOCUS_LABEL, NOTHING_WRONG } from "../src/flight/page/StatusBand.tsx";
 import {
   band,
   computeVitals,
@@ -13,7 +14,6 @@ import {
   type VitalInputs,
   worstFirst,
 } from "../src/flight/page/vitals.ts";
-import { FOCUS_LABEL, NOTHING_WRONG } from "../src/flight/page/StatusBand.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";

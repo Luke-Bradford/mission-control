@@ -63,14 +63,7 @@ function Focus({ vitals }: { vitals: readonly Vital[] }) {
       definition={
         <>
           {more > 0 && `${more} more bad or on watch. `}
-          <a
-            className="fp-focus-all"
-            href="#roomP"
-            onClick={(e) => {
-              e.preventDefault();
-              document.getElementById("roomP")?.scrollIntoView?.({ block: "start" });
-            }}
-          >
+          <a className="fp-focus-all" href="#roomP">
             All measures
           </a>
         </>

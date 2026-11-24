@@ -126,9 +126,9 @@ describe("the Watching tab's pointers", () => {
     expect(
       within(ticket).getByRole("link", { name: "shop-app #12 on GitHub" }).getAttribute("href"),
     ).toBe("https://github.com/octo-org/shop-app/issues/12");
-    expect(
-      within(pr).getByRole("link", { name: "shop-app PR #40" }).getAttribute("href"),
-    ).toBe("https://github.com/octo-org/shop-app/pull/40");
+    expect(within(pr).getByRole("link", { name: "shop-app PR #40" }).getAttribute("href")).toBe(
+      "https://github.com/octo-org/shop-app/pull/40",
+    );
     // A target with no page says so, as text.
     expect(within(gone).queryByRole("link")).toBeNull();
     expect(gone.textContent).toContain("gone");
