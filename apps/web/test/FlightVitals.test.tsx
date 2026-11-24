@@ -3,13 +3,16 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { PAGE_TAB_LABEL, PAGE_TABS } from "../src/flight/page/FlightPage.tsx";
-import { FOCUS_LABEL, NOTHING_WRONG } from "../src/flight/page/StatusBand.tsx";
+import { FOCUS_LABEL } from "../src/flight/page/StatusBand.tsx";
 import {
   band,
   computeVitals,
+  focusOf,
   LOADING,
   NOT_MEASURED,
+  NOTHING_WRONG,
   UNMEASURED,
+  unknownText,
   type Vital,
   type VitalInputs,
   worstFirst,
@@ -64,6 +67,42 @@ describe("worstFirst", () => {
       v("f", "crit"),
     ]);
     expect(sorted.map((x) => x.id)).toEqual(["d", "f", "c", "a", "e", "b"]);
+  });
+});
+
+describe("focusOf", () => {
+  const v = (id: string, state: Vital["state"], value = "x"): Vital => ({
+    id,
+    label: id,
+    state,
+    value,
+    band: "",
+    source: "",
+    checkedAt: null,
+  });
+
+  it("names the worst bad or watch measure and how many more there are", () => {
+    const f = focusOf([v("a", "crit"), v("b", "warn"), v("c", "none"), v("d", "ok")]);
+    expect(f).toMatchObject({ kind: "flagged", more: 1, unknown: 1 });
+    expect(f.kind === "flagged" && f.worst.id).toBe("a");
+  });
+
+  it("says the measures are being checked while any source is loading", () => {
+    expect(focusOf([v("a", "none", LOADING), v("b", "none", LOADING)])).toEqual({
+      kind: "loading",
+    });
+    expect(focusOf([v("a", "ok"), v("b", "none", LOADING)])).toEqual({ kind: "loading" });
+  });
+
+  it("counts the unknown measures rather than call them clear", () => {
+    expect(focusOf([v("a", "ok"), v("b", "none", "no wakes"), v("c", "none", "none")])).toEqual({
+      kind: "unknown",
+      unknown: 2,
+    });
+  });
+
+  it("is all clear only when every measure is good", () => {
+    expect(focusOf([v("a", "ok"), v("b", "ok")])).toEqual({ kind: "clear" });
   });
 });
 
@@ -236,13 +275,27 @@ describe("the FLIGHT page tabs", () => {
     expect(all.getAttribute("href")).toBe("#roomP");
   });
 
-  it("says nothing is bad or on watch when every measure is good or unknown", async () => {
-    stubFetch(flightPageApi("running"));
+  it("counts unknown measures on the first screen rather than call them clear", async () => {
+    stubFetch(
+      flightPageApi("running", {
+        "/api/flight/ledger?status=open": {
+          session: "s1",
+          entries: [],
+          more: false,
+          nextOffset: null,
+        },
+      }),
+    );
     render(<Flight />);
-    await screen.findByRole("region", { name: /How the operation is faring/ });
+    const room = await screen.findByRole("region", { name: /How the operation is faring/ });
     const band = screen.getByRole("region", { name: "FLIGHT status" });
     const focus = within(band).getByText(FOCUS_LABEL).closest(".fp-stat") as HTMLElement;
-    expect(focus.textContent).toContain(NOTHING_WRONG);
+    // The resources answer one by one; wait until no row says loading.
+    await vi.waitFor(() => expect(room.textContent).not.toContain(LOADING));
+    const unknown = room.querySelectorAll("li.fp-v-none").length;
+    expect(unknown).toBeGreaterThan(0);
+    expect(focus.textContent).toContain(unknownText(unknown));
+    expect(focus.textContent).not.toContain(NOTHING_WRONG);
   });
 
   it("puts Doing now and Blockers above the measures", async () => {

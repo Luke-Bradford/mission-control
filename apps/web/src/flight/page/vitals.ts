@@ -89,6 +89,35 @@ const RANK: Record<VitalState, number> = { crit: 0, warn: 1, ok: 2, none: 3 };
 export const worstFirst = (vitals: readonly Vital[]): Vital[] =>
   [...vitals].sort((a, b) => RANK[a.state] - RANK[b.state]);
 
+/** What Focus now says only when every measure is judged good. */
+export const NOTHING_WRONG = "Nothing is bad or on watch";
+/** What Focus now says while any measure's source has not answered. */
+export const CHECKING = "Checking the measures";
+/** What Focus now says when nothing is flagged but some measures have no figure. */
+export const unknownText = (n: number): string =>
+  `${n} ${n === 1 ? "measure" : "measures"} unknown`;
+
+/** What the first screen leads with: the worst flagged measure, or why there is none. */
+export type Focus =
+  | { kind: "flagged"; worst: Vital; more: number; unknown: number }
+  | { kind: "loading" }
+  | { kind: "unknown"; unknown: number }
+  | { kind: "clear" };
+
+/**
+ * A bad or watch measure comes first, worst first. Otherwise no all-clear is given while a source is
+ * loading, or while any measure has no figure: those are counted, not passed as good.
+ */
+export function focusOf(vitals: readonly Vital[]): Focus {
+  const flagged = worstFirst(vitals.filter((v) => v.state === "crit" || v.state === "warn"));
+  const unknown = vitals.filter((v) => v.state === "none").length;
+  const worst = flagged[0];
+  if (worst) return { kind: "flagged", worst, more: flagged.length - 1, unknown };
+  if (vitals.some((v) => v.state === "none" && v.value === LOADING)) return { kind: "loading" };
+  if (unknown > 0) return { kind: "unknown", unknown };
+  return { kind: "clear" };
+}
+
 /** Picks green, amber or red from two limits: at or under `ok` is green, over `crit` is red. */
 export function band(value: number, ok: number, crit: number): VitalState {
   return value <= ok ? "ok" : value <= crit ? "warn" : "crit";

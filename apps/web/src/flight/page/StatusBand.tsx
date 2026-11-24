@@ -3,7 +3,15 @@ import type { ReactNode } from "react";
 import { useLocale, useTz } from "../../clock.ts";
 import { cost, hhmm, kTokens, rel } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
-import { VITAL_SHAPE, VITAL_WORD, type Vital } from "./vitals.ts";
+import {
+  CHECKING,
+  focusOf,
+  NOTHING_WRONG,
+  unknownText,
+  VITAL_SHAPE,
+  VITAL_WORD,
+  type Vital,
+} from "./vitals.ts";
 
 export const NOT_RECORDED = "Not recorded yet";
 
@@ -50,36 +58,56 @@ function Stat({
 }
 
 export const FOCUS_LABEL = "Focus now";
-export const NOTHING_WRONG = "Nothing is bad or on watch";
 
-/** The worst bad or watch measure and its value, with a way down to every measure. */
+/** A state's shape and word, in its colour. */
+function StateMark({ state }: { state: Vital["state"] }) {
+  return (
+    <span className="fp-vstate">
+      <i className={`fp-shape ${VITAL_SHAPE[state]}`} aria-hidden="true" />
+      {VITAL_WORD[state]}
+    </span>
+  );
+}
+
+/**
+ * The worst bad or watch measure and its value, with a way down to every measure. With none
+ * flagged, it says the measures are being checked, or how many have no figure, and is all clear
+ * only when every measure is good.
+ */
 function Focus({ vitals }: { vitals: readonly Vital[] }) {
-  const flagged = vitals.filter((v) => v.state === "crit" || v.state === "warn");
-  const worst = flagged[0];
-  const more = flagged.length - 1;
+  const f = focusOf(vitals);
+  const notes = [
+    f.kind === "flagged" && f.more > 0 && `${f.more} more bad or on watch.`,
+    f.kind === "flagged" && f.unknown > 0 && `${unknownText(f.unknown)}.`,
+  ].filter(Boolean);
   return (
     <Stat
       label={FOCUS_LABEL}
       definition={
         <>
-          {more > 0 && `${more} more bad or on watch. `}
+          {notes.length > 0 && `${notes.join(" ")} `}
           <a className="fp-focus-all" href="#roomP">
             All measures
           </a>
         </>
       }
     >
-      {worst ? (
-        <span className={`fp-focus fp-v-${worst.state}`}>
-          <span className="fp-vstate">
-            <i className={`fp-shape ${VITAL_SHAPE[worst.state]}`} aria-hidden="true" />
-            {VITAL_WORD[worst.state]}
-          </span>{" "}
-          {worst.label}
-          <small>{worst.value}</small>
+      {f.kind === "flagged" ? (
+        <span className={`fp-focus fp-v-${f.worst.state}`}>
+          <StateMark state={f.worst.state} /> {f.worst.label}
+          <small>{f.worst.value}</small>
+        </span>
+      ) : f.kind === "loading" ? (
+        <span className="fp-muted">{CHECKING}</span>
+      ) : f.kind === "unknown" ? (
+        <span className="fp-focus fp-v-none">
+          <StateMark state="none" /> {unknownText(f.unknown)}
+          <small>none bad or on watch</small>
         </span>
       ) : (
-        <span className="fp-muted">{NOTHING_WRONG}</span>
+        <span className="fp-focus fp-v-ok">
+          <StateMark state="ok" /> {NOTHING_WRONG}
+        </span>
       )}
     </Stat>
   );
