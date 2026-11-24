@@ -81,6 +81,17 @@ export function envFileText(env: Record<string, string>): string {
     .join("\n")}\n`;
 }
 
+/**
+ * What the hub keeps of a run's workspace. `source` is how many lines of Claude's own transcript (this
+ * file only) the hub has taken in: a restart's hub skips exactly those. Lines the hub adds itself (the
+ * result it makes for a turn) are never counted in it.
+ */
+export interface CmuxSaved {
+  workspace: string;
+  pid: number | null;
+  source?: { path: string; lines: number };
+}
+
 export interface CmuxSessionInput {
   cmux: Cmux;
   /** The workspace's title: `<seatId> · <ref>`. */
@@ -104,7 +115,7 @@ export interface CmuxSessionInput {
   /** Workspace ids other runs hold: not this run's. */
   taken?: () => ReadonlySet<string>;
   /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
-  save?: (state: { workspace: string; pid: number | null } | null) => void;
+  save?: (state: CmuxSaved | null) => void;
   log?: (m: string) => void;
   /** Default 1000. */
   pollMs?: number;
@@ -125,7 +136,14 @@ interface Core {
 /** One driver over a workspace: `start` is false for an attach to one already running. */
 function createCmuxDriver(
   i: CmuxSessionInput,
-  mode: { kind: "start" } | { kind: "attach"; workspace: string; pid: number; from: number },
+  mode:
+    | { kind: "start" }
+    | {
+        kind: "attach";
+        workspace: string;
+        pid: number;
+        source: { path: string; lines: number } | null;
+      },
 ): Core {
   const pollMs = i.pollMs ?? POLL_MS;
   const listeners = new Set<(e: SessionEvent) => void>();
@@ -142,8 +160,13 @@ function createCmuxDriver(
   let offset = 0;
   let pending = "";
   let lines = 0;
-  /** Lines to skip: a restart's hub has them already. */
-  let skip = mode.kind === "attach" ? mode.from : 0;
+  /** The source transcript a restart's hub had read, and how far: skipped when that file is met again. */
+  let resumeSource = mode.kind === "attach" ? mode.source : null;
+  /** Lines to skip in the source being read: the hub has them already. */
+  let skip = 0;
+  /** Lines of the source being read that the hub has taken in (copied or skipped), never its own. */
+  let sourceLines = 0;
+  let savedLines = -1;
   let attachedSaid = mode.kind !== "attach";
   let timer: NodeJS.Timeout | undefined;
   let polling = false;
@@ -203,12 +226,31 @@ function createCmuxDriver(
     appendFileSync(i.transcriptPath, `${line}\n`, { mode: 0o600 });
   }
 
+  /** Saves the workspace with how far the source transcript has been read. */
+  function persist(): void {
+    if (source === null || sourceLines === savedLines) return;
+    savedLines = sourceLines;
+    i.save?.({ workspace, pid, source: { path: source, lines: sourceLines } });
+  }
+
+  /** The Claude process is gone: its workspace is closed (if cmux still has it) and forgotten, then the exit. */
+  async function gone(reason: string): Promise<void> {
+    if (workspace !== "") {
+      await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
+    }
+    i.save?.(null);
+    end({ reason });
+  }
+
   /** Takes in the complete lines of the source transcript past where it was read. */
   function copyTranscript(path: string): void {
     if (source !== path) {
       source = path;
       offset = 0;
       pending = "";
+      sourceLines = 0;
+      skip = resumeSource?.path === path ? resumeSource.lines : 0;
+      resumeSource = null;
     }
     let fd: number;
     try {
@@ -242,6 +284,7 @@ function createCmuxDriver(
 
   function take(line: string): void {
     if (line === "") return;
+    sourceLines++;
     if (skip > 0) {
       skip--;
       lines++;
@@ -309,7 +352,7 @@ function createCmuxDriver(
       } catch (e) {
         log(`${i.name}: cmux sessions failed: ${e instanceof Error ? e.message : e}`);
         // the process needs no cmux to be found gone
-        if (readyYet && pid !== null && !pidAlive(pid)) end({ reason: CMUX_ENDED });
+        if (readyYet && pid !== null && !pidAlive(pid)) await gone(CMUX_ENDED);
         return;
       }
       if (finished || detached) return;
@@ -332,10 +375,10 @@ function createCmuxDriver(
         i.save?.(null);
         return end({ retake: true, reason: "cmux restored the agent without the hub's settings" });
       }
-      if (seen === undefined || (pid !== null && !pidAlive(pid)))
-        return end({ reason: CMUX_ENDED });
+      if (seen === undefined || (pid !== null && !pidAlive(pid))) return await gone(CMUX_ENDED);
       grew = false;
       if (seen.transcriptPath !== null) copyTranscript(seen.transcriptPath);
+      persist();
       if (grew) growth++;
       if (!attachedSaid) {
         attachedSaid = true;
@@ -548,15 +591,19 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
   return core.session;
 }
 
-/** Takes over a workspace an earlier hub started; `from` lines of Claude's transcript are known already. */
+/** Takes over a workspace an earlier hub started; `source` is how far it had read Claude's transcript. */
 export function attachCmuxSession(
-  i: CmuxSessionInput & { workspace: string; pid: number; from: number },
+  i: CmuxSessionInput & {
+    workspace: string;
+    pid: number;
+    source: { path: string; lines: number } | null;
+  },
 ): CrewSession {
   const core = createCmuxDriver(i, {
     kind: "attach",
     workspace: i.workspace,
     pid: i.pid,
-    from: i.from,
+    source: i.source,
   });
   setImmediate(() => core.attach());
   return core.session;

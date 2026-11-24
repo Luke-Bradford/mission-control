@@ -257,7 +257,12 @@ import {
   writeCliCheckTask,
 } from "./cli-check.ts";
 import { type Cmux, CmuxError, createCmux } from "./cmux.ts";
-import { attachCmuxSession, cmuxWorkspaceKey, startCmuxSession } from "./cmux-session.ts";
+import {
+  attachCmuxSession,
+  type CmuxSaved,
+  cmuxWorkspaceKey,
+  startCmuxSession,
+} from "./cmux-session.ts";
 import { createCodexApprover } from "./codex-approval.ts";
 import { codexSeatConfig } from "./codex-floor.ts";
 import { attachCodexSession, CODEX_OUTBOX_FILE, startCodexSession } from "./codex-session.ts";
@@ -895,14 +900,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const viaCmux = (run: Pick<Run, "vendor">) => cmux !== null && run.vendor !== "codex";
   /** The workspaces this hub's runs hold: a same-named one is not a new run's. */
   const claimedWorkspaces = new Set<string>();
-  const savedWorkspace = (runId: string): { workspace: string; pid: number | null } | null => {
+  const savedWorkspace = (runId: string): CmuxSaved | null => {
     try {
       const v = parseJson<unknown>(store.getSetting(cmuxWorkspaceKey(runId)), null) as {
         workspace?: unknown;
         pid?: unknown;
+        source?: { path?: unknown; lines?: unknown };
       } | null;
       if (v === null || typeof v.workspace !== "string") return null;
-      return { workspace: v.workspace, pid: typeof v.pid === "number" ? v.pid : null };
+      const src = v.source;
+      return {
+        workspace: v.workspace,
+        pid: typeof v.pid === "number" ? v.pid : null,
+        ...(typeof src?.path === "string" && typeof src.lines === "number"
+          ? { source: { path: src.path, lines: src.lines } }
+          : {}),
+      };
     } catch {
       return null;
     }
@@ -3121,7 +3134,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     if (runGone(runId, row.seatId) || stopping) return;
     const found = viaCmux(row)
-      ? await attachWorkspace(row, runId, cursor)
+      ? await attachWorkspace(row, runId)
       : await attachSession({
           dir,
           // the cursor counts the lines of the keeper it was taken from; any other keeper is read from 0
@@ -3210,7 +3223,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   async function attachWorkspace(
     row: SeatSessionRow,
     runId: string,
-    cursor: KeeperCursor | null,
   ): Promise<
     | {
         kind: "attached";
@@ -3268,7 +3280,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
       workspace: saved.workspace,
       pid: saved.pid,
-      from: cursor?.spawn === runId ? cursor.line : 0,
+      source: saved.source ?? null,
     });
     return {
       kind: "attached",

@@ -410,6 +410,23 @@ describe("startCmuxSession", () => {
       reason: CMUX_ENDED,
       code: null,
     });
+    // nothing of the workspace is left saved or open
+    expect(h.saved.at(-1)).toBeNull();
+    expect(state().closed).toHaveLength(1);
+  });
+
+  it("an operator closing the workspace leaves no saved workspace either", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+    });
+    const h = start();
+    await h.session.ready;
+    patch((s) => {
+      s.workspaces = [];
+      s.sessions = [];
+    });
+    await wait(() => h.events.some((e) => e.kind === "exit"));
+    expect(h.saved.at(-1)).toBeNull();
   });
 
   it("interrupts with escape, forced, and refuses what only print mode has", async () => {
@@ -455,6 +472,90 @@ describe("startCmuxSession", () => {
   });
 });
 
+/** What a restart's hub does: the run transcript so far, the saved source cursor, and a new attach. */
+async function restartAfter(h: Harness, more: unknown[], run: string) {
+  const saved = h.saved.at(-1) as {
+    workspace: string;
+    pid: number;
+    source?: { path: string; lines: number };
+  };
+  h.session.detach();
+  h.claudeLines(...more);
+  const session = attachCmuxSession({
+    cmux: fake(),
+    name: "w",
+    cwd: root,
+    command: "claude",
+    args: [],
+    env: {},
+    dir: join(root, "run"),
+    transcriptPath: run,
+    cliSessionId: h.sessionId,
+    messageDir: join(root, "m"),
+    workspace: saved.workspace,
+    pid: saved.pid,
+    source: saved.source ?? null,
+    pollMs: 20,
+  });
+  const events: SessionEvent[] = [];
+  session.on((e) => events.push(e));
+  await wait(() => events.some((e) => e.kind === "attached"));
+  session.detach();
+}
+
+describe("a restart reads Claude's transcript from where it left off", () => {
+  it("after a completed turn, the result the hub made is not counted: the first new line is copied once", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("running");
+    h.claudeLines({ type: "assistant", t: "a" }, { type: "assistant", t: "b" });
+    await wait(() => h.events.some((e) => e.kind === "turn-start") && h.session.lines === 2);
+    h.setLifecycle("idle");
+    await wait(() => h.events.some((e) => e.kind === "result"));
+    await restartAfter(h, [{ type: "assistant", t: "new" }], h.transcript);
+    const copied = readFileSync(h.transcript, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(copied.map((l) => l.t ?? l.type)).toEqual(["a", "b", "result", "new"]);
+  });
+
+  it("after /clear, the old session's count does not skip the new transcript", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+    });
+    const h = start();
+    await h.session.ready;
+    h.claudeLines(
+      { type: "assistant", t: "a" },
+      { type: "assistant", t: "b" },
+      { type: "assistant", t: "c" },
+    );
+    await wait(() => h.session.lines === 3);
+    const fresh = "44444444-4444-4444-8444-444444444444";
+    const freshFile = join(root, "fresh.jsonl");
+    writeFileSync(freshFile, `${JSON.stringify({ type: "user", t: "x" })}\n`);
+    patch((s) => {
+      s.sessions[0].session_id = fresh;
+      s.sessions[0].transcript_path = freshFile;
+    });
+    await wait(() => h.session.lines === 4);
+    appendFileSync(freshFile, `${JSON.stringify({ type: "assistant", t: "y" })}\n`);
+    await wait(() => h.session.lines === 5);
+    appendFileSync(freshFile, `${JSON.stringify({ type: "assistant", t: "new" })}\n`);
+    const h2 = { ...h, sessionId: fresh, claudeLines: () => {} } as Harness;
+    await restartAfter(h2, [], h.transcript);
+    const copied = readFileSync(h.transcript, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(copied.map((l) => l.t)).toEqual(["a", "b", "c", "x", "y", "new"]);
+  });
+});
+
 describe("attachCmuxSession", () => {
   it("takes up a running workspace: skips the lines it has, says attached with the turn state", async () => {
     const transcriptPath = join(root, "claude.jsonl");
@@ -486,7 +587,7 @@ describe("attachCmuxSession", () => {
       messageDir: join(root, "m"),
       workspace: "ws-1",
       pid: ALIVE,
-      from: 2,
+      source: { path: transcriptPath, lines: 2 },
       pollMs: 20,
     });
     const events: SessionEvent[] = [];

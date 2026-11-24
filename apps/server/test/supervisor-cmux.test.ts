@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { CMUX_NEEDS_INPUT_TEXT } from "@mc/core";
+import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
 import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
@@ -18,6 +18,7 @@ import { cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
+  BRANCH,
   clone,
   dbPath,
   dir,
@@ -27,8 +28,10 @@ import {
   recorded,
   refusal,
   reopenStore,
+  root,
   seatState,
   store,
+  TICKET,
   until,
 } from "./supervisor-harness.ts";
 
@@ -214,6 +217,81 @@ describe("a Claude run in cmux", () => {
     await until(() => expect(seatState("guido-1")).toBe("idle"));
     expect(cmuxState().workspaces).toHaveLength(before);
     expect(store.run(first.runId)?.endedAt).toBeNull();
+  });
+});
+
+/** An author run with a pushed PR head, and a review of it in `starting` (as supervisor-review's). */
+function reviewOfPush() {
+  const seed = join(dir, "seed");
+  git(seed, "checkout", "-q", "-b", "pr");
+  writeFileSync(join(seed, "a.txt"), "a\n");
+  git(seed, "add", "-A");
+  git(seed, "commit", "-qm", "pr change");
+  git(seed, "push", "-q", "origin", "pr");
+  const sha = git(seed, "rev-parse", "HEAD");
+  git(seed, "checkout", "-q", "main");
+  const author: Run = {
+    id: "guido-1:20261020T000000Z",
+    agentId: "guido-1",
+    repoId: "mc",
+    seq: 1,
+    startedAt: 1,
+    endedAt: null,
+    status: "running",
+    sessionId: "s",
+    model: "haiku",
+    branch: BRANCH,
+    ticket: "mc#42",
+    ticketTitle: TICKET.title,
+    costUsd: null,
+    tokens: null,
+    transcriptPath: join(dir, "author.jsonl"),
+    prs: [],
+    summary: null,
+  };
+  store.upsertRun(author);
+  store.setRunPush({ runId: author.id, sha, at: 1 });
+  store.setSeatSession({
+    seatId: "guido-1",
+    runId: author.id,
+    cliSessionId: "c",
+    state: "running",
+    reason: null,
+    worktree: join(root, "mc-crew", "guido-1-42"),
+    updatedAt: 1,
+  });
+  const reviewId = store.requestReview({
+    authorRunId: author.id,
+    repoId: "mc",
+    seatId: "guido-1",
+    prNumber: 9,
+    sha,
+    epoch: 0,
+    attempt: 1,
+    round: 1,
+    at: 1,
+  }) as number;
+  store.setReviewState(reviewId, ["queued"], "starting", { at: 2 });
+  return reviewId;
+}
+
+describe("a review seat in cmux", () => {
+  it("opens one PR workspace on its review worktree and makes no keeper", async () => {
+    const reviewId = reviewOfPush();
+    fakeCmux();
+    const { sup } = make({ cmuxState: stateFile(), scratchRetro: true });
+    sup.start();
+    const { runId } = await sup.startReview("retro", reviewId);
+    await until(() => expect(cmuxState().workspaces).toHaveLength(1));
+    const ws = cmuxState().workspaces[0];
+    expect(ws?.name).toBe("retro · PR 9");
+    expect(realpathSync(ws?.cwd as string)).toBe(
+      realpathSync(store.seatSession("retro")?.worktree as string),
+    );
+    const folder = crewKeeperDir(dbPath, runId);
+    for (const name of ["keeper.pid", "spec.json", "s"])
+      expect(existsSync(join(folder, name)), name).toBe(false);
+    expect(existsSync(join(folder, "launch.zsh"))).toBe(true);
   });
 });
 
