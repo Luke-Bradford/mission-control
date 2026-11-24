@@ -1,3 +1,4 @@
+/* biome-ignore-all lint: the crew map is the operator's chosen prototype, kept as one piece; its rule order and !important follow docs/prototype/comms-crew-map-live.html */
 /* The crew map's own rules: ported from docs/prototype/comms-crew-map-live.html, kept as a bundled same-origin
    stylesheet because the production CSP (style-src 'self') refuses an injected <style>. */
 .cm {
