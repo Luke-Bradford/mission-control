@@ -387,7 +387,7 @@ it("paints every seat's name on the small map, with its context and a stuck seat
   // no two seats wear the same short name
   expect(new Set(names).size).toBe(names.length);
   // a stopped seat keeps its name too
-  expect(button("seat-3").querySelector(".cm-lab")?.hidden).toBe(false);
+  expect(button("seat-3").querySelector<HTMLElement>(".cm-lab")?.hidden).toBe(false);
   expect(button("seat-2").querySelector(".cm-lab i")?.textContent).toMatch(/K/);
   expect(button("guido-30").querySelector(".cm-lab small")?.textContent).toBe("blocked");
   map.destroy();
