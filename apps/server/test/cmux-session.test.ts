@@ -321,8 +321,9 @@ describe("startCmuxSession", () => {
       s.screen = trustScreen("yes");
     });
     await wait(() => state().keys.some((k) => k.key === "enter"));
-    const enter = state().keys.findIndex((k) => k.key === "enter");
-    expect(state().keys.slice(0, enter).every((k) => k.key === "down")).toBe(true);
+    const keys = state().keys;
+    const enter = keys.findIndex((k) => k.key === "enter");
+    expect(keys.slice(0, enter).every((k) => k.key === "down")).toBe(true);
     await h.session.close();
   });
 
