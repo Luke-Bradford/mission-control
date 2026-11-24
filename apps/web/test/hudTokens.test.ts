@@ -10,7 +10,9 @@ import { readStyle } from "./styles.ts";
  */
 
 const SRC = join(import.meta.dirname, "../src");
-const TOKEN_FILES = new Set(["theme.ts"]);
+// The crew map paints a canvas, which cannot read CSS variables, so its palette and the pixel sizes
+// of its drawing live in its own file (ported from docs/prototype/comms-crew-map-live.html).
+const TOKEN_FILES = new Set(["theme.ts", "comms/crewMapImpl.ts"]);
 
 const TYPE_TOKENS = {
   "--fs-title": "20px",

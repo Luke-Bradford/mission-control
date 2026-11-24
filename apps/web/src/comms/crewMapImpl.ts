@@ -313,7 +313,7 @@ function createCrewMap(container, options) {
       <canvas class="cm-fx" role="img" aria-label="Crew map. A tracking display: FLIGHT is the station at the centre, the operator beside it, seats on orbits by role, each with a context gauge. Lights travel along a link when one writes to another. The tables after this picture hold the same facts."></canvas>
       <div class="cm-labels" role="group" aria-label="Seats and links. Arrow keys move, Enter opens the conversation. Seats can also be dragged with a pointer."></div>
       <div class="cm-empty" hidden></div>
-      <div class="cm-alert" role="alert" hidden></div>
+      <div class="cm-alert" hidden></div>
       <div class="cm-tag"></div>
       <div class="cm-progress" hidden><i></i></div>
       <button type="button" class="cm-btn cm-reset" title="Send every kept seat back to its home place" hidden>Reset places</button>
@@ -1140,7 +1140,7 @@ function createCrewMap(container, options) {
     D.key.hidden = !S.key; D.bKey.setAttribute('aria-pressed', String(S.key));
     D.perf.hidden = !O.perf; D.chart.hidden = !O.chart; D.reset.hidden = !Object.keys(pins[S.view] || {}).length;
     stage.classList.toggle('cm-is-stale', E.stale);
-    D.alert.hidden = !E.stale; if (E.stale) { D.alert.textContent = ''; const msg = /[.!?]$/.test(E.error) ? E.error : E.error + '.';
+    D.alert.hidden = !E.stale; if (!E.stale) D.alert.removeAttribute('role'); if (E.stale) { D.alert.setAttribute('role', 'alert'); D.alert.textContent = ''; const msg = /[.!?]$/.test(E.error) ? E.error : E.error + '.';
       D.alert.append(el('b', '', 'NOT UPDATING'), msg + (E.everOk ? ` This is the last picture, from ${fmtHM(E.frozen)}.` : ' No picture has arrived yet.')); }
     const seats = M.list.filter(p => p.kind === 'seat' || p.kind === 'flight');
     const none = E.started && !M.list.length, dark = E.started && seats.length && seats.every(p => p.state === 'stopped') && !M.msgs.length;

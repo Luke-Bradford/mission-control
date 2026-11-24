@@ -7,7 +7,7 @@ import {
 } from "@mc/core";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
@@ -15,6 +15,7 @@ import { Overview } from "../src/pages/Overview.tsx";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { Header } from "../src/shell/Header.tsx";
 import { resetSession, setSession } from "../src/shell/session.ts";
+import { installMapDom } from "./crewMapDom.ts";
 import { stubFetch } from "./fetchStub.ts";
 import {
   CONFIG,
@@ -118,6 +119,10 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
     shows: ["agentsLive"],
   },
 ];
+
+beforeEach(() => {
+  installMapDom();
+});
 
 afterEach(() => {
   window.history.replaceState(null, "", "/");

@@ -33,10 +33,7 @@ const at = async (path: string) => {
 };
 const clean = () => {
   expect(demoMisses()).toEqual([]);
-  // The crew map keeps an empty, hidden alert ready for "the hub is not answering"; only a shown one counts.
-  expect(
-    [...document.querySelectorAll("[role=alert]:not([hidden])")].map((e) => e.textContent),
-  ).toEqual([]);
+  expect([...document.querySelectorAll("[role=alert]")].map((e) => e.textContent)).toEqual([]);
 };
 const clickText = async (name: RegExp) => {
   const target = await waitFor(() => {
