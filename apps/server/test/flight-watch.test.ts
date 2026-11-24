@@ -1782,6 +1782,38 @@ describe("the FLIGHT watcher", () => {
     expect(notesOpen()).toEqual([]);
   });
 
+  it("a hub retry whose session dies again waits another 6 hours (#2215)", async () => {
+    for (let i = 0; i < 4; i++) {
+      await watch.check();
+      noFlight();
+    }
+    expect(startCalls).toHaveLength(3);
+    nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    noFlight();
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS - FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(5);
+    expect(notesOpen()).toHaveLength(1);
+  });
+
+  it("a thrown-start retry that makes a session which dies waits 6 hours next (#2215)", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    startFails = null;
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    noFlight();
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+  });
+
   describe("a FLIGHT run with no live session (#798)", () => {
     const ghostRun = () => {
       live("flight-1", "r-ghost");
