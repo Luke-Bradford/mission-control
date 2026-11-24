@@ -13,7 +13,7 @@ import { DoingNowList, doingLines } from "./DoingNow.tsx";
 import { StandingOrders } from "./StandingOrders.tsx";
 import { StatusBand } from "./StatusBand.tsx";
 import { MemoryTab, PeopleTab, PlanTab, WatchingTab } from "./Tabs.tsx";
-import { computeVitals } from "./vitals.ts";
+import { computeVitals, worstFirst } from "./vitals.ts";
 import "./page.css";
 
 export const NO_DECISIONS = "FLIGHT has not decided anything in the last 24 hours.";
@@ -89,14 +89,16 @@ export function FlightPage() {
   const board = PAGE_PATHS.board;
   const vitals = useMemo(
     () =>
-      computeVitals({
+      worstFirst(
+        computeVitals({
         now,
         run,
         view,
         summary: summary.data,
         attention: attention.data,
-        ledger: ledger.data?.entries,
-      }),
+          ledger: ledger.data?.entries,
+        }),
+      ),
     [now, run, view, summary.data, attention.data, ledger.data],
   );
   return (
@@ -149,7 +151,7 @@ export function FlightPage() {
       >
         {tab === "room" && (
           <>
-            <StatusBand run={run} view={view} now={now} />
+            <StatusBand run={run} view={view} now={now} vitals={vitals} />
             <div className="fp-mid">
               <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
                 <h2 className="fp-head" id="doingH">

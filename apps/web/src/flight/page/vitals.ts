@@ -24,6 +24,14 @@ export const VITAL_WORD: Record<VitalState, string> = {
   none: "Unknown",
 };
 
+/** The shape that goes with each colour, for the same reason. */
+export const VITAL_SHAPE: Record<VitalState, string> = {
+  ok: "circle",
+  warn: "diamond",
+  crit: "square",
+  none: "dash",
+};
+
 /** One measure: its value, the bands it is judged by, and where the figure comes from. */
 export interface Vital {
   id: string;
@@ -74,6 +82,12 @@ export const UNMEASURED: readonly { id: string; label: string; source: string }[
     source: "needs workstreams, which do not exist yet",
   },
 ];
+
+const RANK: Record<VitalState, number> = { crit: 0, warn: 1, ok: 2, none: 3 };
+
+/** Red to green: bad first, then watch, then good, then unknown; each keeps its own order. */
+export const worstFirst = (vitals: readonly Vital[]): Vital[] =>
+  [...vitals].sort((a, b) => RANK[a.state] - RANK[b.state]);
 
 /** Picks green, amber or red from two limits: at or under `ok` is green, over `crit` is red. */
 export function band(value: number, ok: number, crit: number): VitalState {

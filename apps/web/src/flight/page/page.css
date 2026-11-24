@@ -61,7 +61,7 @@
 .fp-band {
   flex: none;
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  grid-template-columns: 1.3fr 1.6fr 1fr 1fr 1fr;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -94,6 +94,22 @@
 .fp-v small {
   font: 400 var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--fg-2);
+}
+/* The worst measure: its word and shape in its colour, then its name, then its value. */
+.fp-focus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--sp-2);
+  font: 600 var(--fs-panel) / var(--lh-title) var(--sans);
+}
+.fp-focus .fp-vstate {
+  align-self: center;
+}
+.fp-focus-all {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--sp-5);
 }
 .fp-v .fp-muted {
   font: 400 var(--fs-panel) / var(--lh-title) var(--sans);

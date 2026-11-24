@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { useLocale, useTz } from "../../clock.ts";
 import { cost, hhmm, kTokens, rel } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
+import { VITAL_SHAPE, VITAL_WORD, type Vital } from "./vitals.ts";
 
 export const NOT_RECORDED = "Not recorded yet";
 
@@ -29,7 +30,7 @@ function Stat({
   children,
 }: {
   label: string;
-  definition: string;
+  definition: ReactNode;
   /** A 0 to 100 reading drawn as a thin bar under the value. */
   meter?: number;
   children: ReactNode;
@@ -48,18 +49,64 @@ function Stat({
   );
 }
 
+export const FOCUS_LABEL = "Focus now";
+export const NOTHING_WRONG = "Nothing is bad or on watch";
+
+/** The worst bad or watch measure and its value, with a way down to every measure. */
+function Focus({ vitals }: { vitals: readonly Vital[] }) {
+  const flagged = vitals.filter((v) => v.state === "crit" || v.state === "warn");
+  const worst = flagged[0];
+  const more = flagged.length - 1;
+  return (
+    <Stat
+      label={FOCUS_LABEL}
+      definition={
+        <>
+          {more > 0 && `${more} more bad or on watch. `}
+          <a
+            className="fp-focus-all"
+            href="#roomP"
+            onClick={(e) => {
+              e.preventDefault();
+              document.getElementById("roomP")?.scrollIntoView?.({ block: "start" });
+            }}
+          >
+            All measures
+          </a>
+        </>
+      }
+    >
+      {worst ? (
+        <span className={`fp-focus fp-v-${worst.state}`}>
+          <span className="fp-vstate">
+            <i className={`fp-shape ${VITAL_SHAPE[worst.state]}`} aria-hidden="true" />
+            {VITAL_WORD[worst.state]}
+          </span>{" "}
+          {worst.label}
+          <small>{worst.value}</small>
+        </span>
+      ) : (
+        <span className="fp-muted">{NOTHING_WRONG}</span>
+      )}
+    </Stat>
+  );
+}
+
 /**
- * Four tiles: FLIGHT running or stopped, cost per hour, sessions per hour and context size. A figure
- * the hub does not serve (null) says so rather than show 0.
+ * Five tiles: FLIGHT running or stopped, the worst measure, cost per hour, sessions per hour and
+ * context size. A figure the hub does not serve (null) says so rather than show 0.
  */
 export function StatusBand({
   run,
   view,
   now,
+  vitals,
 }: {
   run: FlightRun;
   view: FlightView | undefined;
   now: number;
+  /** Every measure, worst first. */
+  vitals: readonly Vital[];
 }) {
   const tz = useTz();
   const locale = useLocale();
@@ -91,6 +138,7 @@ export function StatusBand({
       >
         {state ?? <span className="fp-muted">…</span>}
       </Stat>
+      <Focus vitals={vitals} />
       <Stat
         label="Cost per hour"
         definition="API-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill."

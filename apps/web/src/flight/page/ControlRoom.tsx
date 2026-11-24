@@ -5,23 +5,16 @@ import {
   LOADING,
   NOT_MEASURED,
   UNMEASURED,
+  VITAL_SHAPE,
   VITAL_WORD,
   type Vital,
-  type VitalState,
 } from "./vitals.ts";
 
 /** What the Checked column says for a figure worked out afresh on each load. */
 export const CHECKED_LIVE = "live";
 
-const SHAPE: Record<VitalState, string> = {
-  ok: "circle",
-  warn: "diamond",
-  crit: "square",
-  none: "dash",
-};
-
 /**
- * The control room: one row per measure, with its state (a colour, a word and a shape), the value,
+ * The control room: one row per measure, worst first, with its state (a colour, a word and a shape), the value,
  * the bands it is judged by and when its source last moved. A row with no figure says why (loading,
  * or what its source is missing). Measures the hub has no source for are one line at the foot,
  * opened to name each and what it needs, so they never push the rows that have figures apart.
@@ -52,7 +45,7 @@ export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: nu
         {vitals.map((v) => (
           <li key={v.id} className={`fp-vrow fp-v-${v.state}`} data-vital={v.id}>
             <span className="fp-vstate">
-              <i className={`fp-shape ${SHAPE[v.state]}`} aria-hidden="true" />
+              <i className={`fp-shape ${VITAL_SHAPE[v.state]}`} aria-hidden="true" />
               {VITAL_WORD[v.state]}
             </span>
             <span className="fp-vlabel">

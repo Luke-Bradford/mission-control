@@ -1,9 +1,11 @@
-import type { AttentionItem, FlightLedgerView } from "@mc/core";
+import type { AttentionItem, ConfigView, FlightLedgerView, FlightPointer } from "@mc/core";
 import { useState } from "react";
 import { useNow, useTz } from "../../clock.ts";
+import { ExternalLink } from "../../components/ExternalLink.tsx";
 import { RESOURCES, useResource } from "../../data.ts";
 import { rel } from "../../fmt.ts";
 import { Panel } from "../../hud/Panel.tsx";
+import { followLink } from "../../router.ts";
 import { BriefPanel, WatchList as RevisitTriggers } from "../Brief.tsx";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flightTypes.ts";
 import { WatchListItems } from "../HeldNeeds.tsx";
@@ -11,6 +13,7 @@ import { MemoryPanel } from "../Memory.tsx";
 import { Pending } from "../Pending.tsx";
 import { Summary } from "../Summary.tsx";
 import { changedSomething } from "./decisionEffect.ts";
+import { type PointerLink, pointerLink } from "./pointerLink.ts";
 import { DecisionRows, newestFirst } from "./RecentDecisions.tsx";
 import { ScrollList } from "./ScrollList.tsx";
 import { NOT_MEASURED } from "./vitals.ts";
@@ -57,9 +60,44 @@ export function PlanTab() {
   );
 }
 
-/** The things FLIGHT has pointed at: what each is, what changed and when. */
+/** A pointer's target: its kind, then a link to it in the app and on GitHub where it has one. */
+function PointerTarget({ pointer, config }: { pointer: FlightPointer; config?: ConfigView }) {
+  const link = pointerLink(pointer, config);
+  return (
+    <div>
+      <span className="fp-muted">{link.kind}</span> <PointerLinks link={link} />
+    </div>
+  );
+}
+
+function PointerLinks({ link }: { link: PointerLink }) {
+  if (!link.to && !link.href)
+    return (
+      <>
+        {link.label} <span className="fp-muted">· no page to open</span>
+      </>
+    );
+  return (
+    <span className="rref">
+      {link.to ? (
+        <a href={link.to} onClick={(e) => followLink(e, link.to as string)}>
+          {link.label}
+        </a>
+      ) : (
+        <ExternalLink url={link.href as string}>{link.label}</ExternalLink>
+      )}
+      {link.to && link.href && (
+        // the ↗ is drawn by CSS; its name says where it goes
+        <ExternalLink url={link.href} label={`${link.label} on GitHub`} className="rref-gh" />
+      )}
+    </span>
+  );
+}
+
+/** The things FLIGHT has pointed at: what each is for, what it watches, what changed and when. */
 function PointerList() {
   const ledger = useResource<FlightLedgerView>(RESOURCES.flightLedgerOpen);
+  const config = useResource<ConfigView>(RESOURCES.config).data;
   const now = useNow();
   const tz = useTz();
   if (ledger.data === undefined)
@@ -72,8 +110,8 @@ function PointerList() {
     <ScrollList row=".drow">
       {rows.map(({ entry, pointer }) => (
         <li key={`${entry.key}:${pointer.kind}:${pointer.target}`} className="drow">
-          <strong>{pointer.target}</strong> <span className="fp-muted">({pointer.kind})</span> for{" "}
-          {entry.title}
+          <strong>{entry.title}</strong>
+          <PointerTarget pointer={pointer} config={config} />
           <div className="fp-muted">
             {pointer.changedAt === null || tz === null
               ? "Nothing has changed yet."

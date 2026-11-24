@@ -9,8 +9,11 @@ import {
   LOADING,
   NOT_MEASURED,
   UNMEASURED,
+  type Vital,
   type VitalInputs,
+  worstFirst,
 } from "../src/flight/page/vitals.ts";
+import { FOCUS_LABEL, NOTHING_WRONG } from "../src/flight/page/StatusBand.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
@@ -38,6 +41,29 @@ describe("band", () => {
       "warn",
       "crit",
     ]);
+  });
+});
+
+describe("worstFirst", () => {
+  it("orders bad, then watch, then good, then unknown, keeping order within each", () => {
+    const v = (id: string, state: Vital["state"]): Vital => ({
+      id,
+      label: id,
+      state,
+      value: "",
+      band: "",
+      source: "",
+      checkedAt: null,
+    });
+    const sorted = worstFirst([
+      v("a", "ok"),
+      v("b", "none"),
+      v("c", "warn"),
+      v("d", "crit"),
+      v("e", "ok"),
+      v("f", "crit"),
+    ]);
+    expect(sorted.map((x) => x.id)).toEqual(["d", "f", "c", "a", "e", "b"]);
   });
 });
 
@@ -189,6 +215,34 @@ describe("the FLIGHT page tabs", () => {
     expect(load?.textContent).toContain(UNMEASURED[0]?.source);
     expect(room.textContent).not.toMatch(/no data/i);
     expect(room.querySelectorAll("li[data-vital]").length).toBeGreaterThan(5);
+  });
+
+  it("names the worst measure and its value on the first screen, with a way to the rest", async () => {
+    stubFetch(
+      flightPageApi("running", {
+        "/api/flight/summary": flightSummary({ headlineAgeMin: 400 }),
+      }),
+    );
+    render(<Flight />);
+    const room = await screen.findByRole("region", { name: /How the operation is faring/ });
+    const band = screen.getByRole("region", { name: "FLIGHT status" });
+    const focus = within(band).getByText(FOCUS_LABEL).closest(".fp-stat") as HTMLElement;
+    expect(focus.textContent).toContain("Bad");
+    expect(focus.textContent).toContain("Age of FLIGHT's own note");
+    expect(focus.textContent).toContain("6h 40m");
+    // The worst row leads the list, so the link lands on it.
+    expect(room.querySelector("li[data-vital]")?.getAttribute("data-vital")).toBe("headline");
+    const all = within(focus).getByRole("link", { name: /All measures/ });
+    expect(all.getAttribute("href")).toBe("#roomP");
+  });
+
+  it("says nothing is bad or on watch when every measure is good or unknown", async () => {
+    stubFetch(flightPageApi("running"));
+    render(<Flight />);
+    await screen.findByRole("region", { name: /How the operation is faring/ });
+    const band = screen.getByRole("region", { name: "FLIGHT status" });
+    const focus = within(band).getByText(FOCUS_LABEL).closest(".fp-stat") as HTMLElement;
+    expect(focus.textContent).toContain(NOTHING_WRONG);
   });
 
   it("puts Doing now and Blockers above the measures", async () => {
