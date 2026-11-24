@@ -1,5 +1,6 @@
 import { COMMS_MESSAGE_MAX, COMMS_METRICS, type CommsMetricsView, type CrewRow } from "@mc/core";
 import { useEffect, useMemo, useRef } from "react";
+import { useLocale } from "../clock.ts";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { percent } from "../fmt.ts";
@@ -36,6 +37,7 @@ export function CommsGraph({
   flightId: string | undefined;
   view: CommsView;
 }) {
+  const locale = useLocale();
   const feedResource = useResource<{ messages: FeedMessage[] }>(RESOURCES.commsFeed);
   const openResource = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen);
   const lengthsResource = useResource<CommsMetricsView>(RESOURCES.commsMetrics);
@@ -90,7 +92,7 @@ export function CommsGraph({
         id="commsLength"
         className="comms-length-panel"
         title={COMMS_METRICS.messageLengthP95.label}
-        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString()} ${COMMS_METRICS.messageLengthP95.unit}`}
+        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString(locale)} ${COMMS_METRICS.messageLengthP95.unit}`}
       >
         {lengths === undefined && lengthsResource.error !== null ? (
           <p className="comms-traffic-empty" role="alert">
@@ -119,7 +121,7 @@ export function CommsGraph({
                       <li key={seatId} className={level}>
                         <b>{row === undefined ? seatId : callSign(row)}</b>
                         <span className="comms-length-value">
-                          {p95 === null ? "—" : Math.round(p95).toLocaleString()}
+                          {p95 === null ? "—" : Math.round(p95).toLocaleString(locale)}
                           {level !== "" && (
                             <em>{level === "over" ? " over limit" : " near limit"}</em>
                           )}

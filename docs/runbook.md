@@ -284,8 +284,8 @@ The server never writes a `config.yaml` that is a symbolic link: it refuses the 
 pnpm --filter @mc/server start      # http://127.0.0.1:7420/
 ```
 
-The server binds `127.0.0.1` only, on port 7420; `MC_PORT` (1024–65535) runs a second one beside
-it, e.g. a preview of a branch on a copy of the database and the config. From the branch's checkout:
+The server binds `127.0.0.1` only, on port 7420 (`MC_LIVE_PORT` sets the live port instead);
+`MC_PORT` (1024–65535) runs a second one beside it, e.g. a preview of a branch on a copy of the database and the config. From the branch's checkout:
 
 ```sh
 sqlite3 ~/.local/share/mission-control/mc.sqlite ".backup /tmp/mc-preview.sqlite"
@@ -296,7 +296,7 @@ MC_PORT=7431 MC_DB=/tmp/mc-preview.sqlite MC_CONFIG=/tmp/mc-preview-config.yaml 
 ```
 
 `MC_NO_LOOP_WRITES=1` makes Pause/Resume answer 409 before touching any loop file, so a preview
-never writes into a live loop. A preview (any port but 7420, or `MC_NO_LOOP_WRITES=1`) runs no
+never writes into a live loop. A preview (any port but the live one, 7420 unless `MC_LIVE_PORT` says otherwise, or `MC_NO_LOOP_WRITES=1`) runs no
 crew: it starts and resumes no crew run (its database copy holds the live hub's runs), and crew
 actions answer 409 `crew is disabled on this server`. `MC_NO_CREW=1` in the command says so
 again, and turns crew off on any server; only `MC_CREW=1` lets a preview run crew (it still needs
@@ -1950,8 +1950,11 @@ CI runs and review findings are kept 90 days (`QA_RETENTION_DAYS`).
   round reports nothing to fix, the engine marks the earlier blocking findings it left unnamed
   `fixed`. Minor findings are logged, not resolved.
 - **Review previews and screenshots.** When a PR changes web files (paths under the repo's
-  `area:web` globs, read from `pr_files`) and the repo is the one the hub previews (its own),
-  the review run gets a preview of the PR head: the branch preview (`POST /api/previews`) on a
+  `area:web` globs, read from `pr_files`; `apps/web/**` is only the default on the hub's own repo),
+  the review run gets a preview of the PR head. A repo other than the hub's own is previewed by
+  its configured `run_command`, started in a worktree of the PR head with `PORT` set; with no
+  `run_command` the preview does not start and the brief says why. The hub's own repo runs the
+  branch preview (`POST /api/previews`) on a
   copy of the live data with loop writes off. The preview is pinned to the reviewed commit; an operator preview is reused only for that same head. Browser requests are GET-only, and queued calls recheck the running review and preview instance before returning results. It is built in the background when the review run
   starts, so the review does not wait for it, and the brief says it is starting. The hub touches it
   every minute while the run is open, so the 20-minute idle expiry does not close it, and closes it
@@ -3079,3 +3082,14 @@ The hub removes its own finished work so its data folder stops growing (#1756). 
 - **Crew worktrees.** Every 10 minutes (where the engine runs) the crew tidy looks at runs from the last 30 days. For an ended run, if the branch's PR has merged or closed, or its ticket is Done or closed on GitHub (PR or not), the clean worktree is removed (the branch stays). A run set aside at review (not ended, no seat running it) keeps its worktree but loses `node_modules`, so it stays small; waking it reinstalls them under the clone lock before the CLI launches. Before that reinstall the hub empties the worktree's own `.mc-tmp` (git-ignored test scratch, where a test run can leave symlinks): it unlinks each entry without following links, and unlinks a `.mc-tmp` that is itself a link (its target is never touched). Only a wake does this, never an ordinary checkout reuse. The disk check then walks the whole tree as before and refuses a symlink anywhere an install could follow it. A wake that fails the same way (a 502) twice running on one run, with nothing else between, raises one `wake_stuck` signal. The checks and the removal run under the clone lock, and a worktree a run is starting in (the supervisor marks it from the checkout, or a wake's reinstall, until the seat's session points at it) is never touched. A dirty worktree, a live run's, one a seat still holds and one with a checkout being prepared are left alone. The log line is `worktree tidy: removed N worktree(s), trimmed M node_modules`.
 
 Not built yet: a budget key in `config.yaml`, and the Mac panel's disk view (it reads `/api/disk-use`).
+
+## A second repo
+
+Another configured repo runs from its own config. Its `hard_rules`, `checks`, `commands` and area
+labels decide what merges, what a seat runs and which seat takes a ticket. The hub's own file lists
+(its floor-enforcing and controller-check paths, `DEFAULT_HARD_RULES`) apply only to the repo the hub
+runs from (`hubRepo`, found at startup from the checkout's origin); another repo's floor is its
+`CLAUDE.md` and `.github/**`. A seat on another repo also gets the hub's skills (the repo's own skill
+wins a name clash). Another repo's web PR is previewed by its `run_command`; PR screenshots work only for the hub's own repo. A QA report
+comment and the PR screenshot links posted to GitHub name the hub route in code, not a link, unless the hub has a public address. A repo with no `commands` gets this repo's pnpm defaults only if it is the hub's own repo; any other repo gets the `checks` from its `CLAUDE.md` Mission Control block (writer and review seats alike).
+Times show in `operator.timezone`. `operator.locale` (a BCP 47 tag, default `en-GB`) is read into the config view and used by the core and server formatters; the HUD's clock and date formatters read it too (`useLocale()` in `apps/web/src/clock.ts`), keeping the three-letter month and weekday names. The web-change fact the review and design flow use comes from each repo's own `area:web` globs (`apps/web/**` only for the hub's own repo). A non-hub repo's review preview runs its own `run_command`; PR screenshots stay hub-only.

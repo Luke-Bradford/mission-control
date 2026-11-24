@@ -14,8 +14,16 @@ const itemsUnder = (name: string) => {
 
 it.each(ROLES)("%s points web work at the design system and the HUD checklist", (role) => {
   const text = read(`roles/${role}.md`);
-  expect(text).toContain("docs/design/system.md");
-  expect(text).toContain(".claude/skills/hud-design/SKILL.md");
+  expect(text).toContain("design system");
+  expect(text).toContain("`hud-design` skill");
+});
+
+// A seat on another repo reads these prompts: they name no file of this repo's layout.
+it.each(ROLES)("%s names no file that only this repo has", (role) => {
+  const text = read(`roles/${role}.md`);
+  expect(text).not.toMatch(
+    /docs\/(?:direction|design|runbooks|superpowers)|\.claude\/skills|apps\/(?:web|server)\/|packages\/core\//,
+  );
 });
 
 it.each(ROLES)("every checklist section %s names exists and has items", (role) => {

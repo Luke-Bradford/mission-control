@@ -17,6 +17,7 @@ import {
   type NewRepo,
   ROLE_NAME,
   SESSION_CHECKOUT_STRATEGIES,
+  type SeatCommands,
 } from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
@@ -395,7 +396,6 @@ async function onboard(
             : { needsYouLabels: body.repo.needsYouLabels }),
           fullSuite: [],
           requiredChecks: [],
-          commands: defaultSeatCommands(),
           protectedFiles: [],
           keepBranches: [],
           autonomy: "draft" as const,
@@ -491,8 +491,9 @@ export function setRepoRoles(
   base: string,
   rules: RepoRolesValues,
   now: number,
+  commandDefaults: SeatCommands = defaultSeatCommands(),
 ): Promise<{ config: CcConfig; backup: string }> {
-  const run = queue.then(() => setRoles(path, repoId, base, rules, now));
+  const run = queue.then(() => setRoles(path, repoId, base, rules, now, commandDefaults));
   queue = run.catch(() => undefined);
   return run;
 }
@@ -524,13 +525,18 @@ export async function readRepoRolesConfig(
 
 /**
  * `commands` and `uat` save one leaf at a time: a body naming only `writer` or `labels` keeps the
- * sibling already in the file (or, for `commands`, the default), so the page edits one list.
+ * sibling already in the file (or, for `commands`, the repo's effective defaults), so the page edits one list.
  */
-function leafMerge(key: string, value: unknown, holder: YAMLMap): unknown {
+function leafMerge(
+  key: string,
+  value: unknown,
+  holder: YAMLMap,
+  commandDefaults: SeatCommands,
+): unknown {
   if ((key !== "commands" && key !== "uat") || !isPlainObject(value)) return value;
   const existing = holder.get(key, true);
   const kept = isMap(existing) ? existing.toJSON() : {};
-  const fallback = key === "commands" && !isMap(existing) ? defaultSeatCommands() : kept;
+  const fallback = key === "commands" && !isMap(existing) ? commandDefaults : kept;
   return { ...fallback, ...value };
 }
 
@@ -540,6 +546,7 @@ async function setRoles(
   base: string,
   rules: RepoRolesValues,
   now: number,
+  commandDefaults: SeatCommands,
 ): Promise<{ config: CcConfig; backup: string }> {
   const parsed = RepoRolesBody.safeParse({ base, rules });
   if (!parsed.success)
@@ -569,12 +576,13 @@ async function setRoles(
   ] as const) {
     const value = parsed.data.rules[key];
     if (value !== undefined)
-      configRules.set(key, doc.createNode(leafMerge(key, value, configRules)));
+      configRules.set(key, doc.createNode(leafMerge(key, value, configRules, commandDefaults)));
   }
   repo.set("rules", configRules);
   for (const key of ["protected", "commands", "full_suite", "required_checks"] as const) {
     const value = parsed.data.rules[key];
-    if (value !== undefined) repo.set(key, doc.createNode(leafMerge(key, value, repo)));
+    if (value !== undefined)
+      repo.set(key, doc.createNode(leafMerge(key, value, repo, commandDefaults)));
   }
   const newText = doc.toString({ lineWidth: 0 });
   let next: CcConfig;
@@ -839,7 +847,6 @@ async function add(
     ...(repo.needsYouLabels === undefined ? {} : { needsYouLabels: repo.needsYouLabels }),
     fullSuite: [],
     requiredChecks: [],
-    commands: defaultSeatCommands(),
     protectedFiles: [],
     keepBranches: [],
     autonomy: "draft",

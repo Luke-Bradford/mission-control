@@ -24,3 +24,19 @@ describe("shared helpers", () => {
     expect(core).not.toHaveProperty("LOCK_HISTORY_NOTE");
   });
 });
+
+describe("the operator's locale", () => {
+  const at = Date.UTC(2026, 10, 22, 12, 0);
+  const date = { day: "numeric", month: "numeric", year: "numeric" } as const;
+
+  it("formats in en-GB unless a locale is given, without mixing the two", () => {
+    expect(core.DEFAULT_LOCALE).toBe("en-GB");
+    expect(core.zoneFormatter("UTC", date).format(at)).toBe("22/11/2026");
+    expect(core.zoneFormatter("UTC", date, "en-US").format(at)).toBe("11/22/2026");
+    expect(core.zoneFormatter("UTC", date).format(at)).toBe("22/11/2026");
+  });
+
+  it("names a delivered time in the given locale", () => {
+    expect(core.commsStateLine("delivered", at, "UTC", "en-US")).toMatch(/^Delivered 12:00/);
+  });
+});

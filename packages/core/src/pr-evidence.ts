@@ -344,6 +344,26 @@ export function withSection(body: string, heading: string, section: string | nul
 
 const regionsText = (n: number): string => (n === 1 ? "1 region" : `${n} regions`);
 
+/** Whether GitHub readers can open `baseUrl`: not empty and not a loopback or `.local` address. */
+export function hubReachable(baseUrl: string): boolean {
+  if (baseUrl === "") return false;
+  try {
+    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, "");
+    return !(
+      host === "localhost" ||
+      host === "::1" ||
+      host === "::" ||
+      host === "0.0.0.0" ||
+      host.endsWith(".local") ||
+      /^127\./.test(host) ||
+      /^(?:10|192\.168)\./.test(host) ||
+      /^172\.(?:1[6-9]|2\d|3[01])\./.test(host)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** The tag of the GitHub release that holds a PR's before and after pictures. */
 export const EVIDENCE_RELEASE_PREFIX = "qa-pr-";
 export const evidenceReleaseTag = (pr: number): string => `${EVIDENCE_RELEASE_PREFIX}${pr}`;
@@ -351,25 +371,31 @@ export const evidenceReleaseTag = (pr: number): string => `${EVIDENCE_RELEASE_PR
 /**
  * The PR-body section: one entry per page that changed, with its before and after pictures. The
  * pictures are Demo data on both sides, so a page that did not change has none and is only named.
+ * Unpublished pictures on a hub address GitHub readers cannot open (loopback, private, empty) are
+ * named as their route in code instead of linked.
  */
 export function evidenceSectionText(manifest: EvidenceManifest, baseUrl: string): string {
-  const where =
-    manifest.published?.baseUrl ?? `${baseUrl}/api/prs/${manifest.pr}/evidence/${manifest.sha}`;
-  const link = (p: EvidencePair, kind: EvidenceKind): string =>
-    `${where}/${evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p))}`;
+  const reachable = manifest.published !== undefined || hubReachable(baseUrl);
+  const at = `/api/prs/${manifest.pr}/evidence/${manifest.sha}`;
+  const where = manifest.published?.baseUrl ?? `${baseUrl}${at}`;
+  const file = (p: EvidencePair, kind: EvidenceKind): string =>
+    evidenceImageName(p.page, p.scheme, kind, evidenceWidthOf(p));
+  const link = (p: EvidencePair, kind: EvidenceKind): string => `${where}/${file(p, kind)}`;
+  const ref = (p: EvidencePair, kind: EvidenceKind): string =>
+    reachable ? `[${kind}](${link(p, kind)})` : `${kind} \`${at}/${file(p, kind)}\``;
   const entries = manifest.pairs.map((p) => {
     const width = evidenceWidthOf(p);
     const label = `${p.page}, ${p.scheme}${width === EVIDENCE_VIEWPORT.width ? "" : `, ${width} wide`}`;
     const head = `- ${label}: ${p.changedPixels === 0 ? "no difference above the diff threshold" : `${p.changedPercent}% changed, ${regionsText(p.regions.length)}`}`;
     return manifest.published
       ? `${head}\n\n  | before | after |\n  | --- | --- |\n  | ![before](${link(p, "before")}) | ![after](${link(p, "after")}) |`
-      : `${head} ([before](${link(p, "before")}) · [after](${link(p, "after")}) · [diff](${link(p, "diff")}))`;
+      : `${head} (${EVIDENCE_KINDS.map((k) => ref(p, k)).join(" · ")})`;
   });
   const same = manifest.unchanged ?? [];
   return [
     EVIDENCE_HEADING,
     "",
-    `Rendered from Demo data on both sides, from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} in light unless the change is about colour or width. Only pages that changed are shown.${manifest.published ? " The pictures are removed once the change is live." : " Links open on the hub that rendered them."}`,
+    `Rendered from Demo data on both sides, from ${manifest.sha.slice(0, 7)} against main ${manifest.mainSha.slice(0, 7)}, at ${EVIDENCE_VIEWPORT.width}×${EVIDENCE_VIEWPORT.height} in light unless the change is about colour or width. Only pages that changed are shown.${manifest.published ? " The pictures are removed once the change is live." : reachable ? " Links open on the hub that rendered them." : " The routes are on the hub that rendered them."}`,
     "",
     ...(entries.length > 0 ? entries : ["No page changed."]),
     ...(same.length > 0 ? ["", `Unchanged: ${same.join(", ")}.`] : []),

@@ -1,6 +1,6 @@
 import type { FlightView } from "@mc/core";
 import type { ReactNode } from "react";
-import { useTz } from "../../clock.ts";
+import { useLocale, useTz } from "../../clock.ts";
 import { cost, hhmm, kTokens, rel } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
 
@@ -62,6 +62,7 @@ export function StatusBand({
   now: number;
 }) {
   const tz = useTz();
+  const locale = useLocale();
   const ctx = contextReading(view);
   const last = view?.wake?.lastWakeAt ?? null;
   const lastWake =
@@ -103,7 +104,7 @@ export function StatusBand({
         {sessionsHour === null ? (
           <span className="fp-muted">{NOT_RECORDED}</span>
         ) : (
-          sessionsHour.toLocaleString("en-GB")
+          sessionsHour.toLocaleString(locale)
         )}
       </Stat>
       <Stat

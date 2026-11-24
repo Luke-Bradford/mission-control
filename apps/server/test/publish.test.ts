@@ -18,8 +18,10 @@ import {
   CI_EXCERPT_MAX,
   CI_FAILED_TEXT,
   DEFAULT_AWAY,
+  DEFAULT_REPO_RULES,
   EVIDENCE_HEADING,
   fillLoopText,
+  freezeRules,
   MC_PR_BODY_MAX,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
@@ -2470,6 +2472,43 @@ describe("merge steps", () => {
       expect(await withArea().gateFacts(R, SHA)).toMatchObject({
         ok: true,
         facts: { webChanged: true },
+      });
+    });
+
+    describe("a second repo's web area", () => {
+      const frontend = async (hubRepo: string | undefined, path: string) => {
+        store.addRunCommit({ runId: R.id, repoId: "mc", branch: BRANCH, sha: SHA, at: START });
+        gitAnswers = {
+          "ls-remote": lsRemote(),
+          [HAVE_MAIN]: "",
+          [ANCESTOR]: "",
+          "merge-base": `${BASE}\n`,
+          "rev-list": `${SHA}\n`,
+          diff: `${path}\0`,
+        };
+        const c = config();
+        if (hubRepo !== undefined) c.hubRepo = hubRepo;
+        const seat = c.crew?.sessions[0]?.seats[0];
+        if (seat !== undefined) seat.area = ["frontend/**", "apps/**"];
+        const rules = freezeRules({
+          ...DEFAULT_REPO_RULES,
+          areas: { "area:web": ["frontend/**"] },
+        });
+        return publisher({ config: c, rules: async () => rules }).gateFacts(R, SHA);
+      };
+
+      it("takes the repo's configured web globs as the web change", async () => {
+        expect(await frontend("hub", "frontend/App.tsx")).toMatchObject({
+          ok: true,
+          facts: { webChanged: true },
+        });
+      });
+
+      it("does not take apps/web as a web change on a repo that is not the hub's", async () => {
+        expect(await frontend("hub", "apps/web/x.ts")).toMatchObject({
+          ok: true,
+          facts: { webChanged: false },
+        });
       });
     });
 

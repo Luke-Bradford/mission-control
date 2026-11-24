@@ -50,7 +50,7 @@ import {
   type DoneRange,
   Toolbar,
 } from "../board/Toolbar.tsx";
-import { useNow, useTz } from "../clock.ts";
+import { useLocale, useNow, useTz } from "../clock.ts";
 import { TicketDetail } from "../components/TicketDetail.tsx";
 import { RESOURCES, useResource, useResources } from "../data.ts";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
@@ -131,6 +131,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const config = configRes.data;
   const githubLogin = config?.githubLogin ?? null;
   const tz = useTz();
+  const locale = useLocale();
   const now = useNow();
   const { inView } = useSessionScope();
   const profilesRes = useResource<RepoProfile[]>(RESOURCES.repoProfiles);
@@ -249,7 +250,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const briefText = (mode: "standup" | "weekly"): string => {
     if (tz === null) return "Loading…";
     return mode === "standup"
-      ? standup(inLane, ctx, now, tz)
+      ? standup(inLane, ctx, now, tz, locale)
       : weekly(inLane, ctx, doneDays, now, tz);
   };
 

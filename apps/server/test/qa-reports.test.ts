@@ -11,7 +11,7 @@ import type { CcConfig } from "../src/config.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createQaReports, qaReportMarkdown } from "../src/qa/reports.ts";
+import { createQaReports, qaReportGitIndex, qaReportMarkdown } from "../src/qa/reports.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
@@ -1164,5 +1164,36 @@ describe("QA report API", () => {
     } finally {
       await app.close();
     }
+  });
+});
+
+describe("QA report text posted to GitHub", () => {
+  const report = {
+    id: "qa:1",
+    headSha: SHA,
+    reviewer: { label: "QA" },
+    source: "hub",
+    registeredAt: NOW,
+    completeness: { state: "complete", missing: [] },
+  } as unknown as Parameters<typeof qaReportGitIndex>[0];
+
+  it("carries no link to an address only the operator's machine can open", () => {
+    for (const base of [
+      "",
+      "http://127.0.0.1:7420",
+      "http://localhost:7420",
+      "http://[::1]:7420",
+    ]) {
+      const text = qaReportGitIndex(report, base);
+      expect(text).not.toMatch(/https?:\/\//);
+      expect(text).not.toContain("](");
+      expect(text).toContain("/api/qa-reports/qa:1/markdown");
+    }
+  });
+
+  it("links to a hub address a GitHub reader can reach", () => {
+    expect(qaReportGitIndex(report, "https://hub.example.com")).toContain(
+      "](https://hub.example.com/api/qa-reports/qa:1/markdown)",
+    );
   });
 });

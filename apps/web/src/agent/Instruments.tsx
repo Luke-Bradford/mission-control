@@ -1,6 +1,6 @@
 import type { ConfigView, CrewRow, RunView } from "@mc/core";
 import { type ReactNode, useState } from "react";
-import { useNow, useTz } from "../clock.ts";
+import { useLocale, useNow, useTz } from "../clock.ts";
 import { stepMarks } from "../crew.ts";
 import { RESOURCES, RUNS_LIMIT, useResource } from "../data.ts";
 import { cost, dur, kTokens, percent } from "../fmt.ts";
@@ -197,6 +197,7 @@ function RunFigures({ row }: { row: CrewRow }) {
 
 function AllFigures({ row }: { row: CrewRow }) {
   const tz = useTz();
+  const locale = useLocale();
   const runs = useResource<RunView[]>(RESOURCES.runs(row.id)).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
@@ -208,7 +209,7 @@ function AllFigures({ row }: { row: CrewRow }) {
   const cls = seatClass(row);
   const since =
     a.firstRunAt !== null && tz
-      ? new Date(a.firstRunAt).toLocaleDateString("en-GB", {
+      ? new Date(a.firstRunAt).toLocaleDateString(locale, {
           timeZone: tz,
           day: "numeric",
           month: "short",

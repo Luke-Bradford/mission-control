@@ -2,8 +2,8 @@
 import { Buffer } from "node:buffer";
 import type { RepoRules } from "@mc/core";
 import {
+  controllerCheckPathsOf,
   effectiveHardRules,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   globMatches,
   REVIEW_STATUS_CONTEXT,
@@ -13,7 +13,7 @@ import {
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
 import { parseChecks } from "../collectors/github.ts";
-import { type CcConfig, flightPowersOf } from "../config.ts";
+import { type CcConfig, flightPowersOf, ownsHubFiles } from "../config.ts";
 import { mcSection } from "../engine/rules.ts";
 import {
   externalControlReason,
@@ -222,15 +222,20 @@ export async function mergeExternalPr(i: {
         (await section(facts.baseRefOid, claude.status === "added")) !==
         (await section(sha, claude.status === "removed"));
     }
-    const hard = matches(effectiveHardRules(rules, flightPowersOf(i.config, repo.id)), paths);
+    const hubFiles = ownsHubFiles(i.config, repo.id);
+    const controllerPaths = controllerCheckPathsOf(hubFiles);
+    const hard = matches(
+      effectiveHardRules(rules, flightPowersOf(i.config, repo.id), hubFiles),
+      paths,
+    );
     // the protected paths this PR changes: what FLIGHT's own call covered
     const protectedPaths = [
       ...new Set(
         paths.filter((path) =>
           [
-            ...effectiveHardRules(rules, flightPowersOf(i.config, repo.id)),
+            ...effectiveHardRules(rules, flightPowersOf(i.config, repo.id), hubFiles),
             ...FLIGHT_FLOOR_PATHS.filter((p) => p !== "CLAUDE.md"),
-            ...FLIGHT_CONTROLLER_CHECK_PATHS,
+            ...controllerPaths,
           ].some((pattern) => globMatches(pattern, path, true)),
         ),
       ),
@@ -256,8 +261,8 @@ export async function mergeExternalPr(i: {
       uatAccepted: current?.uatAccepted ?? false,
       controllerRequired:
         tickets.some((ticket) => ticketControllerCheck(ticket) !== null) ||
-        (!superuser && matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths)),
-      protectedController: !superuser && matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
+        (!superuser && matches(controllerPaths, paths)),
+      protectedController: !superuser && matches(controllerPaths, paths),
       controllerPassed: current?.controllerPassed ?? false,
       note: current?.note ?? null,
     };

@@ -8,8 +8,9 @@ import { Roster } from "../agent/Roster.tsx";
 import { RunTracePanel } from "../agent/RunTrace.tsx";
 import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
-import { useTz } from "../clock.ts";
+import { useLocale, useTz } from "../clock.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
+import { clockTime } from "../fmt.ts";
 import { followLink, setupPath, useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
@@ -28,6 +29,7 @@ import "../agent/control.css";
 export function Agent({ id }: { id: string | null }) {
   const crew = useResource<Crew>(RESOURCES.crew);
   const tz = useTz();
+  const locale = useLocale();
   const { inView: matchesSession } = useSessionScope();
   const [selected] = useSelectedAgent();
   const params = new URLSearchParams(useSearch());
@@ -94,7 +96,7 @@ export function Agent({ id }: { id: string | null }) {
       {down && (
         <div className="pb s crit-t control-banner" role="status">
           Hub disconnected.{" "}
-          {lastAge !== null ? `Showing data from ${new Date(lastAge).toLocaleTimeString()}. ` : ""}
+          {lastAge !== null && tz ? `Showing data from ${clockTime(lastAge, tz, locale)}. ` : ""}
           Actions are off until it reconnects.
         </div>
       )}

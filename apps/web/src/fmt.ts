@@ -4,19 +4,59 @@
  * shows its text without the time). A unit is chosen after rounding (99 960 tokens is `100k`,
  * 59.6 s is `1m 00s`).
  */
-import { startOfLocalDay, zoneFormatter } from "@mc/core";
+import { DEFAULT_LOCALE, startOfLocalDay, zoneFormatter } from "@mc/core";
 
 const DAY = 86_400_000;
+
+/**
+ * The operator's locale for the numbers built far from a component (`plural`, `kTokens`, `cost`).
+ * `useLocale()` sets it on every render, so it is the configured locale as soon as the config loads.
+ */
+let activeLocale: string = DEFAULT_LOCALE;
+export const setActiveLocale = (locale: string): void => {
+  activeLocale = locale;
+};
+
+/** A number with `places` decimals (at most, when `trim`), grouped and pointed as the locale writes it. */
+export const fixed = (n: number, places: number, trim = false): string =>
+  n.toLocaleString(activeLocale, {
+    minimumFractionDigits: trim ? 0 : places,
+    maximumFractionDigits: places,
+  });
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
-function format(ms: number, tz: string, opts: Intl.DateTimeFormatOptions): string {
-  return zoneFormatter(tz, opts).format(new Date(ms));
+function format(
+  ms: number,
+  tz: string,
+  opts: Intl.DateTimeFormatOptions,
+  locale: string = activeLocale,
+): string {
+  return zoneFormatter(tz, opts, locale).format(new Date(ms));
 }
 
 const HHMM: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" };
 
 /** `14:05` */
-export const hhmm = (ms: number, tz: string): string => format(ms, tz, HHMM);
+export const hhmm = (ms: number, tz: string, locale: string = activeLocale): string =>
+  format(ms, tz, HHMM, locale);
+
+/** A full date and clock time in `tz`, in the locale's own order. */
+export const dateTime = (ms: number, tz: string, locale: string = activeLocale): string =>
+  format(ms, tz, { dateStyle: "short", timeStyle: "medium" }, locale);
+
+/** A clock time with seconds in `tz`. */
+export const clockTime = (ms: number, tz: string, locale: string = activeLocale): string =>
+  format(ms, tz, { timeStyle: "medium" }, locale);
+
+/** `6 Nov` or `Nov 6`: the day and month in the order `locale` writes them (names stay `Mon`). */
+function dayAndMonth(d: number, m: number, locale: string): string {
+  const order = new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric" })
+    .formatToParts(new Date(0))
+    .filter((p) => p.type === "day" || p.type === "month")
+    .map((p) => p.type);
+  const mon = MONTHS[m - 1];
+  return order[0] === "month" ? `${mon} ${d}` : `${d} ${mon}`;
+}
 
 /**
  * Month and weekday names are fixed three-letter words: ICU's en-GB "short" month for September is
@@ -57,16 +97,16 @@ export function wkdTime(ms: number, tz: string): string {
 }
 
 /** `Fri 6 Nov 17:23`: a moment named in full, such as when an item was raised. */
-export function raisedAt(ms: number, tz: string): string {
+export function raisedAt(ms: number, tz: string, locale: string = activeLocale): string {
   const { y, m, d } = localDate(ms, tz);
   const wd = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-  return `${wd} ${d} ${MONTHS[m - 1]} ${hhmm(ms, tz)}`;
+  return `${wd} ${dayAndMonth(d, m, locale)} ${hhmm(ms, tz, locale)}`;
 }
 
 /** `18 Oct` */
-export function dayMonth(ms: number, tz: string): string {
+export function dayMonth(ms: number, tz: string, locale: string = activeLocale): string {
   const { m, d } = localDate(ms, tz);
-  return `${d} ${MONTHS[m - 1]}`;
+  return dayAndMonth(d, m, locale);
 }
 
 /** The calendar date of `ms` in `tz`, `plusDays` later, as `YYYY-MM-DD` (an `<input type="date">` value). */
@@ -129,47 +169,53 @@ const round = (x: number, places: number): number => {
 /** `512 B`, `3.4 KB`, `12.3 MB`, `1.20 GB`; binary units throughout. */
 export function bytes(n: number): string {
   if (n < 2 ** 10) return `${Math.round(n)} B`;
-  if (n < 2 ** 20) return `${(n / 2 ** 10).toFixed(1)} KB`;
-  if (n < 2 ** 30) return `${(n / 2 ** 20).toFixed(1)} MB`;
-  return `${(n / 2 ** 30).toFixed(2)} GB`;
+  if (n < 2 ** 20) return `${fixed(n / 2 ** 10, 1)} KB`;
+  if (n < 2 ** 30) return `${fixed(n / 2 ** 20, 1)} MB`;
+  return `${fixed(n / 2 ** 30, 2)} GB`;
 }
 
 /** `950`, `60.1k` (one decimal under 100k), `612k`, `1.24M` (two decimals under 10M), `18.4M`. */
 export function kTokens(n: number): string {
   if (Math.round(n) < 1000) return String(Math.round(n));
   const k1 = round(n / 1e3, 1);
-  if (k1 < 100) return `${k1.toFixed(1)}k`;
+  if (k1 < 100) return `${fixed(k1, 1)}k`;
   const k0 = Math.round(n / 1e3);
   if (k0 < 1000) return `${k0}k`;
   const m2 = round(n / 1e6, 2);
-  if (m2 < 10) return `${m2.toFixed(2)}M`;
-  return `${round(n / 1e6, 1).toFixed(1)}M`;
+  if (m2 < 10) return `${fixed(m2, 2)}M`;
+  return `${fixed(round(n / 1e6, 1), 1)}M`;
 }
 
 /** `1 file` / `3 files`: the count with its noun, `-s` unless `many` is given (`fix`, `fixes`). */
-export const plural = (n: number, one: string, many = `${one}s`): string =>
-  `${n.toLocaleString("en-GB")} ${n === 1 ? one : many}`;
+export const plural = (
+  n: number,
+  one: string,
+  many = `${one}s`,
+  locale: string = activeLocale,
+): string => `${n.toLocaleString(locale)} ${n === 1 ? one : many}`;
 
 /** The short form of a commit sha, as the HUD shows it everywhere. */
 export const shortSha = (sha: string): string => sha.slice(0, 7);
 
 /** API-equivalent cost: `~$1.84`, or `—` when no run reported one. */
 export const cost = (usd: number | null | undefined, approx = true): string =>
-  usd == null ? "—" : `${approx ? "~" : ""}$${usd.toFixed(2)}`;
+  usd == null ? "—" : `${approx ? "~" : ""}$${fixed(usd, 2)}`;
 
-const preciseUsd = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumSignificantDigits: 1,
-  maximumSignificantDigits: 3,
-});
+const preciseUsd = (value: number): string =>
+  value.toLocaleString(activeLocale, {
+    style: "currency",
+    currency: "USD",
+    currencyDisplay: "narrowSymbol",
+    minimumSignificantDigits: 1,
+    maximumSignificantDigits: 3,
+  });
 /** Estimated USD/minute: preserve a nonzero sub-cent rate instead of rounding it to$0.00. */
 export const costRate = (value: number | null | undefined): string =>
-  value == null ? "—" : `~${preciseUsd.format(value)}`;
+  value == null ? "—" : `~${preciseUsd(value)}`;
 
 /** A value on a 0–100 scale as a percent: `42%` (rounded to `places`, default whole), `—` for none. */
 export const percent = (value: number | null | undefined, places = 0): string =>
-  value == null ? "—" : `${Number(value.toFixed(places))}%`;
+  value == null ? "—" : `${fixed(Number(value.toFixed(places)), places, true)}%`;
 
 /** `today` / `1 day ago` / `{n} days ago`: counted days, in words (the briefs' form). */
 export const agoWords = (days: number): string =>
@@ -197,7 +243,7 @@ export function elapsed(ms: number | null | undefined): string {
 export function dur(ms: number): string {
   if (ms < 50) return "<0.1s";
   const s1 = round(ms / 1000, 1);
-  if (s1 < 10) return `${s1.toFixed(1)}s`;
+  if (s1 < 10) return `${fixed(s1, 1)}s`;
   const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m ${pad2(s % 60)}s`;
@@ -257,7 +303,7 @@ export function swapOfRam(
   memTotal: number | null | undefined,
 ): string {
   if (used == null) return "—";
-  const gb = `${(used / 2 ** 30).toFixed(1)} GB`;
+  const gb = `${fixed(used / 2 ** 30, 1)} GB`;
   return memTotal != null && memTotal > 0
     ? `${gb} (${Math.round((100 * used) / memTotal)}% of RAM)`
     : gb;

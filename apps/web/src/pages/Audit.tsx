@@ -12,6 +12,7 @@ import {
   type WasteReport,
 } from "@mc/core";
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { useLocale, useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { cost, elapsed, percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -259,18 +260,26 @@ function Verdict({
   );
 }
 
-const whenLabel = (at: number): string =>
-  new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const whenLabel = (at: number, tz: string | null, locale: string): string =>
+  tz === null
+    ? "—"
+    : new Intl.DateTimeFormat(locale, {
+        timeZone: tz,
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(at));
 
 /** The AUDIT seat's verdict, and when it was written and when the next is due. */
 function ReportVerdict({ report, nextDueAt }: { report: AuditReport; nextDueAt: number | null }) {
+  const tz = useTz();
+  const locale = useLocale();
   return (
     <p className="audit-verdict-text">
       <b>{report.verdict}</b>{" "}
       <span className="fg2">
         {auditNoteText(
-          whenLabel(report.at),
-          nextDueAt === null ? "the next timer tick" : whenLabel(nextDueAt),
+          whenLabel(report.at, tz, locale),
+          nextDueAt === null ? "the next timer tick" : whenLabel(nextDueAt, tz, locale),
         )}
       </span>
     </p>
@@ -591,8 +600,8 @@ function mergedBuckets(audit: AuditData): {
   return { buckets, days: size };
 }
 
-const axisDate = (ms: number): string =>
-  new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+const axisDate = (ms: number, locale: string): string =>
+  new Date(ms).toLocaleDateString(locale, { day: "numeric", month: "short", timeZone: "UTC" });
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -610,6 +619,7 @@ function HowWeBuild({
   waste: WasteReport | undefined;
   wasteError: Error | null;
 }) {
+  const locale = useLocale();
   const { buckets, days: bucketDays } = mergedBuckets(audit);
   const max = Math.max(1, ...buckets.map((b) => b.merged));
   const served = audit.mergedPerDay !== undefined;
@@ -711,9 +721,9 @@ function HowWeBuild({
           })}
         </svg>
         <div className="audit-axis">
-          <span>{axisDate(buckets[0]?.start ?? 0)}</span>
+          <span>{axisDate(buckets[0]?.start ?? 0, locale)}</span>
           <span>most {served ? max : "–"} in a bar</span>
-          <span>{axisDate(buckets[buckets.length - 1]?.start ?? 0)}</span>
+          <span>{axisDate(buckets[buckets.length - 1]?.start ?? 0, locale)}</span>
         </div>
       </div>
       <ul className="audit-legend" aria-label="Review rounds, highest reported per merged PR">
@@ -826,6 +836,8 @@ function windowText(ms: number): string {
 }
 
 function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange }) {
+  const tz = useTz();
+  const locale = useLocale();
   const pct = (r: number | null) => percent(r == null ? null : r * 100);
   return (
     <Panel
@@ -849,7 +861,12 @@ function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange })
                 {changes.map((x) => (
                   <tr key={`${x.agentId}:${x.at}:${x.kind}`} className="hrow audit-change">
                     <td className="lab">
-                      <b>{new Date(x.at).toLocaleDateString("en-GB")}</b> ·{" "}
+                      <b>
+                        {tz === null
+                          ? "—"
+                          : new Date(x.at).toLocaleDateString(locale, { timeZone: tz })}
+                      </b>{" "}
+                      {" · "}
                       {x.kind === "prompt" ? "Prompt" : "Model"} change · {x.from ?? "none"} →{" "}
                       {x.to} · {x.agentId}
                     </td>

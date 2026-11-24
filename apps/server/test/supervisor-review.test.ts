@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
+  DEFAULT_SEAT_COMMANDS,
   type EvidencePage,
   HUB_DEFAULT_REASON,
   NEW_LOOP,
@@ -1600,7 +1601,8 @@ describe("startReview", () => {
         diffCut: false,
         since: false,
         touches: [],
-        commands: [],
+        // the harness repo sets no commands and is the hub's own, so it gets the pnpm defaults
+        commands: DEFAULT_SEAT_COMMANDS.review,
         fullSuite: [],
       }),
     );

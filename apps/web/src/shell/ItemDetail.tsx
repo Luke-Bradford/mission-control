@@ -10,7 +10,7 @@ import type {
 } from "@mc/core";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
-import { useNow, useTz } from "../clock.ts";
+import { useLocale, useNow, useTz } from "../clock.ts";
 import {
   answerTarget,
   boundChoice,
@@ -318,6 +318,7 @@ export function ItemDetail({
   detail: ItemDetailState;
   layout: "panel" | "page";
 }) {
+  const locale = useLocale();
   const {
     key,
     k,
@@ -481,7 +482,7 @@ export function ItemDetail({
                     {recorded && (
                       <span className="note" data-testid="choice-line">
                         {" "}
-                        · {choiceLine(recorded, tz ?? "UTC")}
+                        · {choiceLine(recorded, tz ?? "UTC", locale)}
                       </span>
                     )}
                     {!recorded && boundReceipt && (

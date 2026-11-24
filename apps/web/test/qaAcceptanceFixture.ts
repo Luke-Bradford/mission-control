@@ -70,6 +70,8 @@ export function qaAcceptanceFixture(count = 3) {
       qaSummary:
         "The crew table now keeps every cell on one line. Controls stay inside the row at 1366 and 1600 wide. Long titles truncate and retain their full accessible name.",
       files: ["apps/web/src/pages/Overview.tsx", "apps/web/src/overview/crew.css"],
+      webChanged: true,
+      visualEvidenceAvailable: true,
       tests: [
         {
           command: "pnpm test OverviewCrew",
@@ -200,6 +202,10 @@ export function qaReviewQueueFixture() {
 export function qaQuietReviewFixture() {
   const fixture = qaReviewQueueFixture();
   const path = `/api/qa/uat/mission-control/1011?head=${SHA}`;
-  Object.assign(fixture[path], { files: ["apps/server/src/api.ts"] });
+  Object.assign(fixture[path], {
+    files: ["apps/server/src/api.ts"],
+    webChanged: false,
+    visualEvidenceAvailable: false,
+  });
   return fixture;
 }

@@ -584,6 +584,32 @@ it("opens on the AUDIT report's verdict with findings ranked, and You filters", 
   expect(problems().map((t) => t?.slice(1))).toEqual(["Problem 2", "Problem 4", "Problem 6"]);
 });
 
+it("uses the operator's zone at a date boundary for report and model-change dates", async () => {
+  const boundary = Date.UTC(2026, 9, 28, 23, 30);
+  const config = {
+    ...CONFIG,
+    operator: { id: "operator", timezone: "Asia/Tokyo", locale: "en-GB" },
+  } as ConfigView;
+  stubFetch({
+    "/api/config": config,
+    "/api/waste": WASTE,
+    "/api/audit?range=30d": {
+      ...AUDIT,
+      changes: [{ ...AUDIT.changes[0], at: boundary }],
+    } satisfies AuditView,
+    "/api/audit/report": {
+      ...REPORT,
+      report: { ...REPORT.report, at: boundary },
+      nextDueAt: boundary + HOUR,
+    },
+  });
+  render(<Audit />);
+  expect(await screen.findByText(REPORT.report.verdict)).toBeTruthy();
+  expect(screen.getByText(/written 29 Oct 2026, 08:30/)).toBeTruthy();
+  expect(await screen.findByText("What past recommendations achieved")).toBeTruthy();
+  expect(screen.getByText("29/10/2026")).toBeTruthy();
+});
+
 it("keeps saved findings available when the legacy audit request fails", async () => {
   stubFetch({
     "/api/config": CONFIG,

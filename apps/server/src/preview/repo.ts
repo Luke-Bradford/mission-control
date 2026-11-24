@@ -5,7 +5,7 @@ import type { CcConfig, CrewSessionConfig } from "../config.ts";
 
 const READ_ORIGIN_MS = 5_000;
 
-async function originRepo(checkout: string): Promise<string | null> {
+export async function originRepo(checkout: string): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       "git",
@@ -39,4 +39,19 @@ export async function resolvePreviewRepo(
     if (session && (await originRepo(session.checkout)) === hubRepo) return configured.id;
   }
   return undefined;
+}
+
+/**
+ * The configured repo the hub's own code lives in, from the hub checkout's origin. `null`: the origin
+ * was read and no configured repo is it (every configured repo is a foreign one); `undefined`: it
+ * could not be read, so the hub's repo is unknown.
+ */
+export async function resolveHubRepo(
+  hubRoot: string | null,
+  repos: readonly Pick<CcConfig["repos"][number], "id" | "github">[],
+): Promise<RepoId | null | undefined> {
+  if (hubRoot === null) return undefined;
+  const origin = await originRepo(hubRoot);
+  if (origin === null) return undefined;
+  return repos.find((r) => r.github.toLowerCase() === origin)?.id ?? null;
 }

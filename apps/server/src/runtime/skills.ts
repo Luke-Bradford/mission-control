@@ -117,13 +117,60 @@ export function copySkillsToCodexHome(home: string, skills: readonly RepoSkill[]
   writeSkills(join(home, "skills"), skills);
 }
 
-/** What a start reads from the base commit: CLAUDE.md, AGENTS.md and the skills. */
-export async function readRepoDocsAndSkills(checkout: string, baseSha: string): Promise<RepoDocs> {
+/**
+ * The hub's shared skills: those in the hub's own checkout at its HEAD, for a seat on another repo
+ * (`readRepoDocsAndSkills`). Unreadable: none, and the seat starts with its own repo's alone.
+ */
+export async function readHubSkills(hubRoot: string): Promise<RepoSkills> {
+  try {
+    const common = await realpath(join(hubRoot, ".git"));
+    const head = (await crewGitBytes(hubRoot, ["rev-parse", "HEAD"], common, { gitDir: common }))
+      .toString("utf8")
+      .trim();
+    return await readRepoSkills(hubRoot, head);
+  } catch {
+    return { skills: [], refused: [] };
+  }
+}
+
+/**
+ * The shared skills a start on `repoId` adds: the hub's, for a repo other than the one the hub's own
+ * code lives in (every repo, when the hub's repo is none of the configured ones). None when the hub's repo is unknown, when it is `repoId` itself (it has them), or
+ * when there is no hub checkout.
+ */
+export async function sharedSkillsFor(
+  hubRepo: string | null | undefined,
+  hubRoot: string,
+  repoId: string,
+): Promise<RepoSkills | undefined> {
+  if (hubRepo === undefined || hubRepo === repoId || hubRoot === "") return undefined;
+  return await readHubSkills(hubRoot);
+}
+
+/**
+ * What a start reads from the base commit: CLAUDE.md, AGENTS.md and the skills. With `shared` (the
+ * hub's skills, for a seat on another repo) the seat also gets each of those the repo has no skill of
+ * the same name for: the repo's own always wins.
+ */
+export async function readRepoDocsAndSkills(
+  checkout: string,
+  baseSha: string,
+  shared?: RepoSkills,
+): Promise<RepoDocs> {
   const docs = await readRepoDocs(checkout, baseSha);
   // a repo whose skills cannot be read still starts its seat, without them
-  const skills = await readRepoSkills(checkout, baseSha).catch((e) => ({
+  const own = await readRepoSkills(checkout, baseSha).catch((e) => ({
     skills: [],
     refused: [`${SKILLS_DIR}: ${e instanceof Error ? e.message : String(e)}`],
   }));
-  return { ...docs, skills };
+  return { ...docs, skills: shared === undefined ? own : mergeSkills(own, shared) };
+}
+
+/** `own` plus the `shared` skills whose names `own` lacks. */
+export function mergeSkills(own: RepoSkills, shared: RepoSkills): RepoSkills {
+  const have = new Set(own.skills.map((s) => s.name));
+  return {
+    skills: [...own.skills, ...shared.skills.filter((s) => !have.has(s.name))],
+    refused: own.refused,
+  };
 }
