@@ -1,0 +1,563 @@
+/**
+ * The driver for one Claude run as a cmux workspace: an interactive `claude` the operator can see,
+ * type into and clear. The hub starts the workspace (a launcher script, so the seat's own settings and
+ * MCP config are kept), sends messages, and reads the seat's state from `cmux sessions` and its
+ * results from Claude's own transcript, which is copied into the run's transcript as the keeper did.
+ * It speaks the same `CrewSession` the keeper-backed drivers do.
+ */
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
+import { isObj, type SessionEvent } from "@mc/core";
+import { parseJson, rethrowJson } from "../json.ts";
+import { toolResultBytes } from "../telemetry/prompt-cost.ts";
+import { sleep, str } from "../util.ts";
+import type { Cmux, CmuxAgent } from "./cmux.ts";
+import { pidAlive } from "./keeper.ts";
+import { type CrewSession, SessionControlError } from "./session.ts";
+
+/** The hub's record of a run's workspace: `{"workspace": uuid, "pid": n | null}`. */
+export const cmuxWorkspaceKey = (runId: string) => `cmux.workspace:${runId}`;
+
+export const CMUX_START_FAILED = "cmux did not start Claude";
+export const CMUX_ENDED = "the Claude process in cmux ended";
+/** What the seat is told when a message is too long to type: it reads the file. */
+export const cmuxMessageText = (path: string) =>
+  `Mission Control sent you a message. Read ${path} and act on it.`;
+
+const POLL_MS = 1000;
+const START_WAIT_MS = 60_000;
+/** How often a message that met an open dialog is tried again. */
+const BUSY_RETRY_MS = 2000;
+/** A result is made for a turn the poll never saw running once the transcript has been quiet this long. */
+const QUIET_POLLS = 2;
+/** The words of Claude's folder-trust prompt. */
+const TRUST_PROMPT = /trust (this|the files in this) (folder|directory)|do you trust/i;
+const TRUST_RETRY_MS = 3000;
+/** The last of a run's records whose lines the poll reads at once. */
+const READ_CHUNK = 4 * 1024 * 1024;
+
+const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`;
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * The script a workspace runs: the seat's environment (not PATH, which keeps cmux's shim first), then
+ * `claude` by name so cmux's shim wraps it with its hooks. A secret environment file is sourced and
+ * deleted before the exec.
+ */
+export function launcherScript(i: {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  nodeDir: string;
+  envFile: string | null;
+}): string {
+  const lines = ["#!/bin/zsh"];
+  for (const [k, v] of Object.entries(i.env)) {
+    if (k === "PATH" || !ENV_NAME.test(k)) continue;
+    lines.push(`export ${k}=${quote(v)}`);
+  }
+  lines.push(`export PATH=${quote(i.nodeDir)}":$PATH"`);
+  if (i.envFile !== null) {
+    lines.push(`. ${quote(i.envFile)}`, `rm -f ${quote(i.envFile)}`);
+  }
+  lines.push(`exec ${[i.command, ...i.args].map(quote).join(" ")}`, "");
+  return lines.join("\n");
+}
+
+/** The file a secret environment is written to: sourced by the launcher, then gone. */
+export function envFileText(env: Record<string, string>): string {
+  return `${Object.entries(env)
+    .filter(([k]) => ENV_NAME.test(k))
+    .map(([k, v]) => `export ${k}=${quote(v)}`)
+    .join("\n")}\n`;
+}
+
+export interface CmuxSessionInput {
+  cmux: Cmux;
+  /** The workspace's title: `<seatId> · <ref>`. */
+  name: string;
+  cwd: string;
+  /** `claude`, by name; tests give another command. */
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  /** FLIGHT's secrets: a 0600 file the launcher sources and removes. */
+  privateEnv?: Record<string, string>;
+  /** The run's folder (made 0700): the launcher and the env file go here. */
+  dir: string;
+  /** The run's transcript the hub reads: Claude's own lines are copied here. */
+  transcriptPath: string;
+  cliSessionId: string;
+  /** Where long messages are written, for the seat to read. */
+  messageDir: string;
+  /** The node that runs the hub's own tools: its folder goes first on PATH. */
+  nodeDir?: string;
+  /** Workspace ids other runs hold: not this run's. */
+  taken?: () => ReadonlySet<string>;
+  /** Called once the workspace exists and again once Claude's pid is known; and when it is closed (null). */
+  save?: (state: { workspace: string; pid: number | null } | null) => void;
+  log?: (m: string) => void;
+  /** Default 1000. */
+  pollMs?: number;
+  /** Default 60000. */
+  startWaitMs?: number;
+}
+
+interface Core {
+  session: CrewSession;
+  /** The workspace exists: polling begins. */
+  begin(workspace: string): void;
+  /** It could not be made: the session ends with this reason. */
+  fail(reason: string): void;
+  /** An attach: polling begins at once. */
+  attach(): void;
+}
+
+/** One driver over a workspace: `start` is false for an attach to one already running. */
+function createCmuxDriver(
+  i: CmuxSessionInput,
+  mode: { kind: "start" } | { kind: "attach"; workspace: string; pid: number; from: number },
+): Core {
+  const pollMs = i.pollMs ?? POLL_MS;
+  const listeners = new Set<(e: SessionEvent) => void>();
+  let alive = true;
+  let finished = false;
+  let detached = false;
+  let closing = false;
+  let workspace = mode.kind === "attach" ? mode.workspace : "";
+  let pid: number | null = mode.kind === "attach" ? mode.pid : null;
+  let sessionId = i.cliSessionId;
+  let lifecycle: CmuxAgent["lifecycle"] | null = null;
+  /** The transcript being read, how far, and how many of its lines the hub has taken in all. */
+  let source: string | null = null;
+  let offset = 0;
+  let pending = "";
+  let lines = 0;
+  /** Lines to skip: a restart's hub has them already. */
+  let skip = mode.kind === "attach" ? mode.from : 0;
+  let attachedSaid = mode.kind !== "attach";
+  let timer: NodeJS.Timeout | undefined;
+  let polling = false;
+  let sentAt: number | null = null;
+  let grew = false;
+  /** How many polls since the last message sent saw the transcript grow, and how many in a row did not. */
+  let growth = 0;
+  let quiet = 0;
+  let msgN = 0;
+  let trustAt = 0;
+  let readyYet = mode.kind === "attach";
+  // an attach has its own record to wait for: the first poll says `attached`
+  const queue: string[] = [];
+  let pumping = false;
+  const startedAt = Date.now();
+
+  let resolveReady: () => void = () => {};
+  const ready = new Promise<void>((r) => {
+    resolveReady = r;
+  });
+  let resolveExit: (code: number | null) => void = () => {};
+  const exited = new Promise<number | null>((r) => {
+    resolveExit = r;
+  });
+  const closeSent = exited.then(() => {});
+
+  const emit = (e: SessionEvent) => {
+    if (detached) return;
+    for (const fn of [...listeners]) {
+      try {
+        fn(e);
+      } catch {
+        // one broken listener must not stop the others, or the poll
+      }
+    }
+  };
+
+  const log = (m: string) => i.log?.(m);
+
+  function end(info: { reason?: string; retake?: true; code?: number | null }): void {
+    if (finished) return;
+    finished = true;
+    alive = false;
+    if (timer !== undefined) clearTimeout(timer);
+    resolveReady();
+    emit({
+      kind: "exit",
+      code: info.code ?? null,
+      signal: null,
+      ...(info.reason === undefined ? {} : { reason: info.reason }),
+      ...(info.retake ? { retake: true as const } : {}),
+    });
+    resolveExit(info.code ?? null);
+  }
+
+  function appendTranscript(line: string): void {
+    appendFileSync(i.transcriptPath, `${line}\n`, { mode: 0o600 });
+  }
+
+  /** Takes in the complete lines of the source transcript past where it was read. */
+  function copyTranscript(path: string): void {
+    if (source !== path) {
+      source = path;
+      offset = 0;
+      pending = "";
+    }
+    let fd: number;
+    try {
+      fd = openSync(path, "r");
+    } catch {
+      return;
+    }
+    try {
+      const size = fstatSync(fd).size;
+      if (size < offset) {
+        // the file was cut short: read it again from its start
+        offset = 0;
+        pending = "";
+      }
+      while (offset < size) {
+        const buf = Buffer.alloc(Math.min(READ_CHUNK, size - offset));
+        const n = readSync(fd, buf, 0, buf.length, offset);
+        if (n <= 0) break;
+        offset += n;
+        pending += buf.toString("utf8", 0, n);
+        for (let nl = pending.indexOf("\n"); nl >= 0; nl = pending.indexOf("\n")) {
+          const line = pending.slice(0, nl);
+          pending = pending.slice(nl + 1);
+          take(line);
+        }
+      }
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  function take(line: string): void {
+    if (line === "") return;
+    if (skip > 0) {
+      skip--;
+      lines++;
+      return;
+    }
+    appendTranscript(line);
+    lines++;
+    grew = true;
+    emit({ kind: "output", at: Date.now() });
+    if (!line.startsWith("{")) return;
+    let ev: unknown;
+    try {
+      ev = parseJson<unknown>(line, undefined, rethrowJson);
+    } catch {
+      return;
+    }
+    if (isObj(ev) && ev.type === "user" && isObj(ev.message) && Array.isArray(ev.message.content)) {
+      for (const c of ev.message.content) {
+        const id = isObj(c) && c.type === "tool_result" ? str(c.tool_use_id) : null;
+        if (id !== null && isObj(c)) {
+          emit({ kind: "tool-result", toolUseId: id, bytes: toolResultBytes(c.content) });
+        }
+      }
+    }
+  }
+
+  function finishTurn(): void {
+    appendTranscript(
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        stop_reason: "end_turn",
+        mc_cmux: true,
+      }),
+    );
+    lines++;
+    sentAt = null;
+    quiet = 0;
+    emit({ kind: "result", isError: false, stopReason: "end_turn" });
+  }
+
+  function change(next: CmuxAgent["lifecycle"]): void {
+    const prev = lifecycle;
+    lifecycle = next;
+    if (prev === next) return;
+    if (next === "running") {
+      emit({ kind: "turn-start" });
+      sentAt = null;
+      quiet = 0;
+    } else if (next === "needsInput") {
+      emit({ kind: "needs-input" });
+    } else if (prev === "running" || prev === "needsInput") {
+      finishTurn();
+    }
+  }
+
+  async function poll(): Promise<void> {
+    if (finished || detached || polling || workspace === "") return;
+    polling = true;
+    try {
+      let agents: CmuxAgent[];
+      try {
+        agents = await i.cmux.agents();
+      } catch (e) {
+        log(`${i.name}: cmux sessions failed: ${e instanceof Error ? e.message : e}`);
+        // the process needs no cmux to be found gone
+        if (readyYet && pid !== null && !pidAlive(pid)) end({ reason: CMUX_ENDED });
+        return;
+      }
+      if (finished || detached) return;
+      if (!readyYet) return await starting(agents);
+      const here = agents.filter((a) => a.workspaceId === workspace);
+      let seen = here.find((a) => a.sessionId === sessionId);
+      if (seen === undefined) {
+        // /clear: the same process, a new session
+        const fresh = here.filter((a) => pid !== null && a.pid === pid).at(-1);
+        if (fresh !== undefined) {
+          seen = fresh;
+          sessionId = fresh.sessionId;
+          emit({ kind: "init", sessionId, model: null });
+        } else seen = here.at(-1);
+      }
+      if (seen !== undefined && seen.pid !== null && pid !== null && seen.pid !== pid) {
+        // cmux restored the agent without the hub's settings: closed, and resumed with the hub's command
+        log(`${i.name}: cmux restored Claude under a new process; closing it`);
+        await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
+        i.save?.(null);
+        return end({ retake: true, reason: "cmux restored the agent without the hub's settings" });
+      }
+      if (seen === undefined || (pid !== null && !pidAlive(pid)))
+        return end({ reason: CMUX_ENDED });
+      grew = false;
+      if (seen.transcriptPath !== null) copyTranscript(seen.transcriptPath);
+      if (grew) growth++;
+      if (!attachedSaid) {
+        attachedSaid = true;
+        lifecycle = seen.lifecycle;
+        emit({ kind: "attached", awaiting: seen.lifecycle !== "idle" });
+        return;
+      }
+      change(seen.lifecycle);
+      // A turn that began and ended between two polls shows only in the transcript.
+      if (sentAt !== null && lifecycle === "idle") {
+        quiet = grew ? 0 : quiet + 1;
+        if (quiet >= QUIET_POLLS && growth > 0) {
+          emit({ kind: "turn-start" });
+          finishTurn();
+        }
+      }
+    } catch (e) {
+      log(`${i.name}: cmux poll failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      polling = false;
+      schedule();
+    }
+  }
+
+  function schedule(): void {
+    if (finished || detached) return;
+    timer = setTimeout(() => void poll(), pollMs);
+  }
+
+  /** Before ready: answer the trust prompt, and wait for Claude's record. */
+  async function starting(agents: CmuxAgent[]): Promise<void> {
+    const rec = agents.find((a) => a.sessionId === sessionId);
+    if (rec !== undefined) {
+      pid = rec.pid;
+      readyYet = true;
+      lifecycle = rec.lifecycle;
+      i.save?.({ workspace, pid });
+      resolveReady();
+      void pump();
+      return;
+    }
+    if (Date.now() - startedAt >= (i.startWaitMs ?? START_WAIT_MS)) {
+      log(`${i.name}: ${CMUX_START_FAILED}`);
+      await i.cmux.close(workspace).catch(() => {});
+      i.save?.(null);
+      return end({ reason: CMUX_START_FAILED });
+    }
+    if (Date.now() - trustAt >= TRUST_RETRY_MS) {
+      let screen = "";
+      try {
+        screen = await i.cmux.readScreen(workspace);
+      } catch {
+        // not shown yet
+      }
+      if (TRUST_PROMPT.test(screen)) {
+        trustAt = Date.now();
+        await i.cmux.sendKey(workspace, "enter").catch((e) => log(`${i.name}: trust key: ${e}`));
+      }
+    }
+  }
+
+  async function pump(): Promise<void> {
+    if (pumping) return;
+    pumping = true;
+    try {
+      await ready;
+      while (queue.length > 0 && alive && !closing) {
+        const text = queue[0] as string;
+        let outcome: "sent" | "busy" = "busy";
+        try {
+          outcome = await i.cmux.send(workspace, text);
+        } catch (e) {
+          log(`${i.name}: send failed: ${e instanceof Error ? e.message : e}`);
+        }
+        if (outcome === "sent") {
+          queue.shift();
+          sentAt = Date.now();
+          growth = 0;
+          quiet = 0;
+        } else await sleep(BUSY_RETRY_MS);
+      }
+    } finally {
+      pumping = false;
+    }
+  }
+
+  const session: CrewSession = {
+    send(text) {
+      if (!alive || closing) throw new SessionControlError("ended", "session ended");
+      let typed = text;
+      if (text.includes("\n")) {
+        mkdirSync(i.messageDir, { recursive: true, mode: 0o700 });
+        if (msgN === 0) msgN = readdirSync(i.messageDir).length;
+        msgN++;
+        const path = join(i.messageDir, `${msgN}.md`);
+        writeFileSync(path, text, { mode: 0o600 });
+        typed = cmuxMessageText(path);
+      }
+      queue.push(typed);
+      void pump();
+    },
+    control(subtype, opts) {
+      if (!alive || closing)
+        return Promise.reject(new SessionControlError("ended", "session ended"));
+      if (subtype === "interrupt") {
+        return i.cmux.sendKey(workspace, "escape", true).then(
+          () => {
+            opts?.onSuccess?.();
+            return undefined;
+          },
+          (e) =>
+            Promise.reject(
+              new SessionControlError("refused", e instanceof Error ? e.message : String(e)),
+            ),
+        );
+      }
+      return Promise.reject(new SessionControlError("refused", "not available in cmux"));
+    },
+    async close() {
+      if (!finished && !closing) {
+        closing = true;
+        if (workspace !== "") {
+          await i.cmux.close(workspace).catch((e) => log(`${i.name}: close failed: ${e}`));
+        }
+        i.save?.(null);
+        end({});
+      }
+      return exited;
+    },
+    detach() {
+      if (detached) return;
+      detached = true;
+      alive = false;
+      if (timer !== undefined) clearTimeout(timer);
+      listeners.clear();
+      resolveReady();
+      resolveExit(null);
+    },
+    on(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    get pid() {
+      return pid ?? undefined;
+    },
+    get alive() {
+      return alive;
+    },
+    ready,
+    get lines() {
+      return lines;
+    },
+    closeSent,
+  };
+
+  return {
+    session,
+    begin(ws) {
+      workspace = ws;
+      void poll();
+    },
+    fail(reason) {
+      end({ reason });
+    },
+    attach() {
+      resolveReady();
+      void poll();
+    },
+  };
+}
+
+/** Makes the launcher (and the secret file), opens the workspace, and drives it. Never throws. */
+export function startCmuxSession(i: CmuxSessionInput): CrewSession {
+  const core = createCmuxDriver(i, { kind: "start" });
+  void (async () => {
+    try {
+      mkdirSync(i.dir, { recursive: true, mode: 0o700 });
+      const script = join(i.dir, "launch.zsh");
+      let envFile: string | null = null;
+      if (i.privateEnv !== undefined && Object.keys(i.privateEnv).length > 0) {
+        envFile = join(i.dir, "env");
+        writeFileSync(envFile, envFileText(i.privateEnv), { mode: 0o600 });
+      }
+      writeFileSync(
+        script,
+        launcherScript({
+          command: i.command,
+          args: i.args,
+          env: i.env,
+          nodeDir: i.nodeDir ?? dirname(process.execPath),
+          envFile,
+        }),
+        { mode: 0o700 },
+      );
+      const workspace = await i.cmux.newWorkspace({
+        name: i.name,
+        cwd: i.cwd,
+        command: quote(script),
+        ...(i.taken === undefined ? {} : { exclude: i.taken() }),
+      });
+      i.save?.({ workspace, pid: null });
+      core.begin(workspace);
+    } catch (e) {
+      i.log?.(`${i.name}: could not open a cmux workspace: ${e instanceof Error ? e.message : e}`);
+      core.fail(e instanceof Error ? e.message : String(e));
+    }
+  })();
+  return core.session;
+}
+
+/** Takes over a workspace an earlier hub started; `from` lines of Claude's transcript are known already. */
+export function attachCmuxSession(
+  i: CmuxSessionInput & { workspace: string; pid: number; from: number },
+): CrewSession {
+  const core = createCmuxDriver(i, {
+    kind: "attach",
+    workspace: i.workspace,
+    pid: i.pid,
+    from: i.from,
+  });
+  setImmediate(() => core.attach());
+  return core.session;
+}

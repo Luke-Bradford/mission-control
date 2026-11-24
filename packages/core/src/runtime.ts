@@ -1,6 +1,7 @@
 import type { CrewMode, LoopKind } from "./runtime-model.ts";
 
 export {
+  CMUX_NEEDS_INPUT_TEXT,
   CODEX_SHELL,
   CREW_MODES,
   type CrewMode,
@@ -1250,8 +1251,6 @@ export interface CrewCliInput {
   sessionId: string;
   /** Passed as `--effort`; absent or null: the CLI's own default. */
   effort?: CrewEffort | null;
-  /** Per-run Claude spend cap, passed as `--max-budget-usd`; absent: no CLI cap. */
-  maxBudgetUsd?: number | null;
   /** true: reattach to `sessionId` with `--resume`; false: start it with `--session-id`. */
   resume: boolean;
   /**
@@ -1357,16 +1356,9 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   const profile = i.profile ?? "standard";
   const args = [
-    "-p",
-    "--input-format",
-    "stream-json",
-    "--output-format",
-    "stream-json",
-    "--verbose",
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),
-    ...(i.maxBudgetUsd == null ? [] : ["--max-budget-usd", String(i.maxBudgetUsd)]),
     ...CREW_ISOLATION_FLAGS.filter((flag) => profile !== "flight-full" || flag !== "--restricted"),
     ...(i.pluginDir === undefined ? [] : ["--plugin-dir", i.pluginDir]),
     "--settings",
@@ -1441,6 +1433,8 @@ export function crewCliArgs(i: CrewCliInput): string[] {
 export type SessionEvent =
   | { kind: "init"; sessionId: string; model: string | null }
   | { kind: "turn-start" }
+  /** The Claude in cmux waits on the operator: a question or a permission dialog is open. */
+  | { kind: "needs-input" }
   /** A rejected request is not evidence that any executing turn has ended. */
   | { kind: "turn-refused"; active: boolean }
   | { kind: "result"; isError: boolean; stopReason: string | null }

@@ -22,7 +22,18 @@ export const LOOP_KINDS = ["build", "review", "plan", "watch", "audit", "none"] 
 
 export type LoopKind = (typeof LOOP_KINDS)[number];
 
-export const SEAT_STATES = ["idle", "starting", "running", "parked", "stopped", "error"] as const;
+export const SEAT_STATES = [
+  "idle",
+  "starting",
+  "running",
+  "needs-input",
+  "parked",
+  "stopped",
+  "error",
+] as const;
+
+/** The reason a seat shows while its Claude in cmux is waiting on the operator (a question or a permission). */
+export const CMUX_NEEDS_INPUT_TEXT = "Needs your input in cmux";
 
 export type SeatState = (typeof SEAT_STATES)[number];
 
