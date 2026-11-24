@@ -6093,11 +6093,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(403)
               .send({ error: "Only FLIGHT on a superuser repo runs Update.", logged: false });
-          // FLIGHT runs the Update the hub held for a person, not any Update
-          if (!store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY))
-            return reply
-              .code(409)
-              .send({ error: "No Update is held for a person.", logged: false });
+          // A merge can land after the scheduler's last check. Check origin before refusing FLIGHT
+          // for a missing held item, so its first call after that merge can run the Update.
+          if (!store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY)) {
+            try {
+              const version = await updater.check();
+              if (!version.canUpdate) {
+                const error =
+                  version.behind === 0
+                    ? "No Update is waiting for FLIGHT. Run Update again after a new version lands."
+                    : `Update is not ready for FLIGHT: ${version.reason ?? "the hub cannot check main"}. Run Update again after it clears.`;
+                return reply.code(409).send({ error, logged: false });
+              }
+            } catch (e) {
+              captureError(reply, e);
+              if (e instanceof UpdateError)
+                return reply.code(e.status).send({ error: e.message, logged: false });
+              reply.log.warn(
+                { err: e instanceof Error ? e.name : typeof e },
+                "update check failed",
+              );
+              return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+            }
+          }
           // a busy crew: hold new runs and wait for the running turns to end (a quiet gap)
           const busy = () => supervisor?.busy() ?? [];
           if (deps.updateGate === undefined) {

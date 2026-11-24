@@ -63,7 +63,8 @@ let store: Store,
   hold: CliHold,
   supervisorBusy: () => { seatId: string; state: string }[],
   updateError: UpdateError | null,
-  updateOpts: unknown;
+  updateOpts: unknown,
+  updateCheck: { behind: number | null; canUpdate: boolean; reason: string | null };
 const headers = { "content-type": "application/json", [OPERATOR_HEADER]: TOKEN };
 const asFlight = {
   ...headers,
@@ -73,6 +74,10 @@ const build = (powers: "standard" | "superuser", gate = false) => {
   const config = configFor(powers);
   expect(crewProfileOf("FLIGHT", crewSeatDef(config, SEAT).loop)).toBe("flight-full");
   const updater = {
+    check: async () => {
+      calls.push("check");
+      return { sha: "a".repeat(40), checkedAt: NOW, ...updateCheck };
+    },
     update: async (opts?: unknown) => {
       calls.push("update");
       updateOpts = opts;
@@ -102,6 +107,7 @@ beforeEach(() => {
   hold = new CliHold();
   updateError = null;
   updateOpts = undefined;
+  updateCheck = { behind: 0, canUpdate: false, reason: "Up to date with main." };
   busy = [{ seatId: SEAT, state: "running" }];
   supervisorBusy = () => busy;
   store = new Store(":memory:");
@@ -163,14 +169,25 @@ it("refuses FLIGHT's Update on a standard repo", async () => {
   expect(calls).toEqual([]);
 });
 
-it("refuses FLIGHT's Update when none is held for a person", async () => {
+it("runs FLIGHT's Update when a merge landed before the held-Update check", async () => {
+  build("superuser");
+  store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
+  updateCheck = { behind: 1, canUpdate: true, reason: null };
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(200);
+  expect(calls).toEqual(["check", "update"]);
+  expect(updateOpts).toEqual({ refuseUnsafe: true });
+});
+
+it("says FLIGHT should run Update again after a new merge when none is waiting", async () => {
   build("superuser");
   store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
   const r = await update(asFlight);
   expect(r.statusCode).toBe(409);
-  expect(calls).toEqual([]);
-  // the operator's own Update does not need a hold
-  expect((await update(headers)).statusCode).toBe(200);
+  expect(r.json<{ error: string }>().error).toBe(
+    "No Update is waiting for FLIGHT. Run Update again after a new version lands.",
+  );
+  expect(calls).toEqual(["check"]);
 });
 
 it("records an Update FLIGHT ran as FLIGHT's", async () => {

@@ -52,6 +52,8 @@ import type { Store } from "./store.ts";
 export const VERSION_CHECK_MS = 10 * 60_000;
 /** The least time between two fetch attempts for `POST /api/version/check`. */
 export const VERSION_CHECK_FLOOR_MS = 15_000;
+/** How long an automatic hub Update may wait before it checks main again. */
+export const AUTO_UPDATE_INTERVAL_MS = 2 * 60_000;
 /** Every command Update runs (its checks included) is cut off after this. */
 export const UPDATE_STEP_TIMEOUT_MS = 5 * 60_000;
 /** After restart is scheduled, how long before the hub shuts down. */
