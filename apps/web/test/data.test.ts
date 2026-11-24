@@ -352,6 +352,42 @@ describe("startStream", () => {
     expect(fetched(fetchMock)).toHaveLength(3);
   });
 
+  it("a change that arrives while a paced read waits is read, even after a local refetch", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let version = "v0";
+    const fetchMock = vi.fn(async () => Response.json([version]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { path, topic } = RESOURCES.attention;
+    sub(path, topic, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    start();
+    const [es] = FakeEventSource.instances;
+    version = "v1";
+    es?.emit("changed", { data: '{"topic":"attention"}' });
+    await vi.advanceTimersByTimeAsync(1000);
+    hub.refetch(path);
+    await vi.advanceTimersByTimeAsync(500);
+    version = "v2";
+    es?.emit("changed", { data: '{"topic":"attention"}' });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(hub.snapshot(path, topic).data).toEqual(["v2"]);
+  });
+
+  it("a local refetch of a resource on several topics is not held behind a paced stream read", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    sub(RESOURCES.flight.path, RESOURCES.flight.topic, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    start();
+    FakeEventSource.instances[0]?.emit("changed", { data: '{"topic":"flight"}' });
+    await vi.advanceTimersByTimeAsync(10);
+    fetchMock.mockClear();
+    hub.refetchTopic("flight");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetched(fetchMock)).toEqual([RESOURCES.flight.path]);
+  });
+
   it("a queued stream read is dropped when a newer read has started since the event", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
