@@ -393,6 +393,7 @@ import {
   PreviewHubError,
   type PreviewManager,
 } from "./preview/previews.ts";
+import { WEB_AREA_LABEL } from "./preview/review.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
@@ -3020,6 +3021,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
           const preview =
             repo.id === deps.previewRepoId ? deps.previews?.get(pr.number) : undefined;
+          const rules = await deps.repoRules?.(repo.id);
+          const configuredWebGlobs =
+            rules === undefined || rules instanceof RepoRulesError
+              ? []
+              : (rules.areas[WEB_AREA_LABEL] ?? []);
+          const webGlobs =
+            configuredWebGlobs.length > 0
+              ? configuredWebGlobs
+              : ownsHubFiles(config, repo.id)
+                ? ["apps/web", "apps/web/**"]
+                : [];
           return prUat({
             store,
             pr,
@@ -3027,6 +3039,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             previewUrl: preview && preview.sha === pr.headSha ? preview.url : null,
             singleRepo: config.repos.length === 1,
             repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
+            webChanged: store
+              .prFilePaths(repo.id, pr.number)
+              .some((path) => webGlobs.some((glob) => globMatches(glob, path))),
+            visualEvidenceAvailable:
+              repo.id === deps.previewRepoId && deps.prEvidence !== undefined,
             flightId: flightSeat(config)?.seat.id ?? null,
           });
         },

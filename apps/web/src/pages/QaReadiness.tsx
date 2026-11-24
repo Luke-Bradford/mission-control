@@ -327,9 +327,10 @@ function Detail({
   const fullMatches = full.data?.headSha === pr.headSha;
   const data = detailMatches ? detail.data : undefined;
   const fullPr = fullMatches ? full.data : undefined;
-  const pageChanges = data?.files?.some((file) => file.startsWith("apps/web/"));
+  const pageChanges = data?.webChanged;
+  const visualEvidenceAvailable = data?.visualEvidenceAvailable === true;
   const evidence = useResource<EvidenceManifest>(
-    pr.headSha && pageChanges === true
+    pr.headSha && pageChanges === true && visualEvidenceAvailable
       ? {
           path: `/api/prs/${pr.number}/evidence?repo=${enc(pr.repoId)}&sha=${enc(pr.headSha)}`,
           topic: QA_TOPICS,
@@ -411,7 +412,7 @@ function Detail({
         awaiting={awaiting}
         ticket={pr.ticket}
       >
-        {pageChanges === true && (
+        {pageChanges === true && visualEvidenceAvailable && (
           <Pairs
             pr={pr}
             manifest={pairs}
@@ -422,6 +423,9 @@ function Detail({
                 : evidence.error
             }
           />
+        )}
+        {pageChanges === true && !visualEvidenceAvailable && (
+          <p className="uat-queue-none">Screenshot evidence is unavailable for this repository.</p>
         )}
         {pageChanges === false && <p className="uat-queue-none">No page changes</p>}
         <div className="uat-grid-two uat-tests-grid">

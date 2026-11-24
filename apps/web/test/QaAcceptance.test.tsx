@@ -45,6 +45,8 @@ beforeEach(() => {
     repoId: "mc",
     number: 2,
     sha: SHA,
+    webChanged: false,
+    visualEvidenceAvailable: false,
     comms: [],
     rounds: [],
     tryIt: { branch: "feature/2", commands: ["pnpm dev"], previewUrl: null },
@@ -198,7 +200,12 @@ describe("QA acceptance", () => {
     },
   );
   it("distinguishes a failed evidence read from a genuine missing capture and offers retry", async () => {
-    details = { ...details, files: ["apps/web/src/App.tsx"] };
+    details = {
+      ...details,
+      files: ["apps/web/src/App.tsx"],
+      webChanged: true,
+      visualEvidenceAvailable: true,
+    };
     evidenceFails = true;
     await ready();
     expect(await screen.findByText(/Screenshot evidence is unavailable/)).toBeTruthy();
