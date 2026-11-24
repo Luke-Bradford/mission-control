@@ -835,6 +835,22 @@ describe("state step", () => {
     expect(reconcile(inCi({ tokens: 5000 })).loop.phase).toBe("ci");
   });
 
+  it("a budget park's note names the decision: Resume for tokens, a higher cap for dollars", () => {
+    const noteText = (r: ReturnType<typeof reconcile>): string | undefined =>
+      r.actions.find(
+        (a): a is Extract<LoopAction, { kind: "note" }> =>
+          a.kind === "note" && a.noteKind === "blocked",
+      )?.text;
+    const tokens = noteText(reconcile(snap({ tokens: 1001 })));
+    expect(tokens).toContain("parked: used 1001 input + output tokens of a 1000-token budget");
+    expect(tokens).toContain("Your decision: Resume raises the token ceiling");
+    const dollars = noteText(
+      reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } })),
+    );
+    expect(dollars).toContain("parked: used $12.50 of a $12.50 budget");
+    expect(dollars).toContain("Your decision: this run's dollar cap cannot be raised");
+  });
+
   it("parks an ended run when Claude reaches its dollar cap", () => {
     const r = reconcile(snap({ costUsd: 12.5, budgetUsd: 12.5, ended: { reason: "exit" } }));
     expect(r.loop.hold).toMatchObject({

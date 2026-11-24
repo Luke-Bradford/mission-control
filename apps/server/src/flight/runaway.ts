@@ -2,15 +2,19 @@ import { createHash } from "node:crypto";
 import {
   FLIGHT_HOUR_MS,
   FLIGHT_RUNAWAY,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS,
+  FLIGHT_RUNAWAY_AUTO_LIFTS_SETTING,
   FLIGHT_RUNAWAY_LIFTED_SETTING,
   FLIGHT_RUNAWAY_NOTE_KEY,
   FLIGHT_RUNAWAY_SETTING,
   type FlightRunawayTrip,
   MC_TOOL_NAMES,
+  RUNAWAY_AUTO_LIFTED_DECISION,
   RUNAWAY_LIFTED_DECISION,
   runawayNoteText,
   runawaySameReason,
   runawayTrippedDecision,
+  runawayWaitMs,
   runawayWritesReason,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
@@ -188,15 +192,50 @@ export function watchRunaway(store: Store, bus: ChangeBus, now: number): void {
     runId: null,
     seatId: null,
     repoId: null,
-    text: runawayNoteText(reason),
+    text: runawayNoteText(reason, runawayWait(store, now)),
     at: now,
   });
   bus.emit("attention");
   bus.emit("flight");
 }
 
+/** When the hub lifted the breaker in the last day, oldest first. */
+function recentAutoLifts(store: Store, now: number): number[] {
+  try {
+    const v = parseJson<unknown>(
+      store.getSetting(FLIGHT_RUNAWAY_AUTO_LIFTS_SETTING) ?? "[]",
+      undefined,
+      rethrowJson,
+    );
+    return (Array.isArray(v) ? v : []).filter(
+      (n): n is number => typeof n === "number" && n > now - FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** How long a trip at `now` waits before the hub lifts it: longer each time it came back today. */
+export const runawayWait = (store: Store, now: number): number =>
+  runawayWaitMs(recentAutoLifts(store, now).length);
+
+/**
+ * The hub lifts a tripped breaker once its wait has passed (the money guard keeps a cap: the wait
+ * doubles for each auto-lift in the last day, up to a day). True when it lifted.
+ */
+export function autoLiftRunaway(store: Store, bus: ChangeBus, now: number): boolean {
+  const trip = runawayTrip(store);
+  if (trip === null) return false;
+  // a trip's wait is the one in force when it tripped: the lifts before it, not the ones since
+  if (now - trip.at < runawayWait(store, trip.at)) return false;
+  const lifts = recentAutoLifts(store, now);
+  const lifted = liftRunaway(store, bus, now, true);
+  if (lifted) store.setSetting(FLIGHT_RUNAWAY_AUTO_LIFTS_SETTING, JSON.stringify([...lifts, now]));
+  return lifted;
+}
+
 /** The operator lifts the breaker: false when it was not tripped. Logged in Decided without you. */
-export function liftRunaway(store: Store, bus: ChangeBus, now: number): boolean {
+export function liftRunaway(store: Store, bus: ChangeBus, now: number, byHub = false): boolean {
   if (runawayTrip(store) === null) return false;
   store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
   store.setSetting(FLIGHT_RUNAWAY_LIFTED_SETTING, String(now));
@@ -211,8 +250,8 @@ export function liftRunaway(store: Store, bus: ChangeBus, now: number): boolean 
     ref: null,
     questionId: null,
     about: "runaway breaker",
-    decision: RUNAWAY_LIFTED_DECISION,
-    basis: "The operator lifted it.",
+    decision: byHub ? RUNAWAY_AUTO_LIFTED_DECISION : RUNAWAY_LIFTED_DECISION,
+    basis: byHub ? "Its wait passed." : "The operator lifted it.",
   });
   bus.emit("attention");
   bus.emit("flight");

@@ -16,6 +16,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MS,
   FLIGHT_RUNAWAY_LIFTED_SETTING,
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_TRIAGE_WAIT_MS,
@@ -25,10 +26,10 @@ import {
   type Profile,
   type PullRequestView,
   QUEUE_REORDER_ITEM_PREFIX,
-  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
   type RunLoop,
+  runawayTriageDetail,
   type SeatSessionRow,
   type TestLockState,
 } from "@mc/core";
@@ -45,6 +46,7 @@ import {
   FLIGHT_ASKED_AGAIN,
   flightNotTriagingDueAt,
   HUB_STOP_KEYS,
+  hubAlert,
   isOperatorCall,
   markHubStarted,
   NO_LOCK,
@@ -3651,8 +3653,9 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate()).toBeUndefined();
     ask();
     expect(aggregate()?.text).toBe(
-      `FLIGHT is not triaging: 1 waiting since ${aggregate()?.text.match(/since (\d\d:\d\d)/)?.[1]}. ${RUNAWAY_TRIAGE_DETAIL}`,
+      `FLIGHT is not triaging: 1 waiting since ${aggregate()?.text.match(/since (\d\d:\d\d)/)?.[1]}. ${runawayTriageDetail(FLIGHT_RUNAWAY_AUTO_LIFT_MS)}`,
     );
+    expect(aggregate()?.text).toContain("lifts it by itself 2 hours after the trip");
   });
 
   it("starts the triage window after a lift, so items raised during the trip are not missed at once", () => {
@@ -4409,6 +4412,37 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       flightTriage: "down",
     });
     expect(aggregate()?.notTriaging?.keys).toContain("esc:shop-app#9");
+  });
+
+  it("still classes a stored account hold as an alert, like a budget park", () => {
+    flight();
+    for (const kind of ["account", "budget", "review"] as const) {
+      store.upsertRun(
+        run({
+          id: `r-${kind}`,
+          agentId: "guido-1",
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            hold: { kind, reason: "x", ended: false, worktree: null, wake: false },
+          } as RunLoop,
+        }),
+      );
+      store.raiseNote({
+        key: `blocked:r-${kind}:0`,
+        kind: "blocked",
+        runId: `r-${kind}`,
+        seatId: null,
+        repoId: "shop-app",
+        text: kind,
+        at: NOW,
+      });
+    }
+    const alert = (kind: string) =>
+      hubAlert({ key: `note:blocked:r-${kind}:0`, kind: "blocked" }, store);
+    expect(alert("account")).toBe(true);
+    expect(alert("budget")).toBe(true);
+    expect(alert("review")).toBe(false);
   });
 
   it("leaves a budget park and held Update raw as alerts; folds a missed error or stuck run (#1543)", () => {

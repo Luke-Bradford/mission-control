@@ -1,6 +1,7 @@
 import {
   flushInstructionNotices,
   importInstructionFocus as importConfiguredInstructionFocus,
+  startInstructionFocusRetry,
 } from "./instructions/notices.ts";
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
@@ -1135,6 +1136,8 @@ export async function main(): Promise<void> {
   const importInstructionFocus = () =>
     importConfiguredInstructionFocus({ config, store, bus, log });
   importInstructionFocus();
+  // a failed import is tried again on a timer, so its warning clears without anyone at the keyboard
+  const stopFocusRetry = startInstructionFocusRetry({ config, store, bus, log });
   const offInstructionNotices = bus.subscribe((topic) => {
     if (topic === "config") importInstructionFocus();
     if (topic === "config" || topic === "flight")
@@ -1234,6 +1237,7 @@ export async function main(): Promise<void> {
       await previews?.closeAll();
       stopDiscovery();
       crewReloader.stop();
+      stopFocusRetry();
       offInstructionNotices();
       flightWatch.stop();
       engine.stop();

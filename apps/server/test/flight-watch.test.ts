@@ -17,6 +17,7 @@ import {
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_FIRST_CONTEXT_SETTING,
   FLIGHT_GHOST_MS,
+  FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
@@ -36,6 +37,7 @@ import {
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MS,
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
   FLIGHT_SIGNALS_SETTING,
@@ -1701,13 +1703,21 @@ describe("the FLIGHT watcher", () => {
         kind: "blocked",
         seatId: "flight-1",
         repoId: "mc",
-        text: flightStartFailedText("it would not start; the server log has the error"),
+        text: flightStartFailedText(
+          "it would not start; the server log has the error",
+          FLIGHT_GUARD_COOLDOWN_MS,
+        ),
       },
     ]);
-    // the open note holds past the hour, after the start count has expired
-    nowMs += 61 * MIN;
+    // the hub does not wait for the operator: one more start once the cooldown has passed, under
+    // the same note
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS - MIN;
     await watch.check();
     expect(startCalls).toHaveLength(3);
+    nowMs += MIN;
+    await watch.check();
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
     expect(notesOpen()).toHaveLength(1);
     live("flight-1", "r-hand");
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
@@ -1716,8 +1726,92 @@ describe("the FLIGHT watcher", () => {
     // the clear emptied the start count: three more starts before the next note
     noFlight();
     for (let i = 0; i < 3; i++) await watch.check();
-    expect(startCalls).toHaveLength(6);
+    expect(startCalls).toHaveLength(7);
     expect(notesOpen()).toEqual([]);
+  });
+
+  it("a start that threw is retried by the hub after the cap, and FLIGHT runs again with no operator call (#2215)", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toHaveLength(1);
+    startFails = null; // the cause passes
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    live("flight-1", "r-hand");
+    facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(notesOpen()).toEqual([]);
+  });
+
+  it("the operator's Stop holds against the retry", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    store.setSeatSession(row("flight-1", null, "stopped"));
+    nowMs += 2 * FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+  });
+
+  it("a FLIGHT that starts and dies 3 times is started again by the hub after 6 hours, and the note clears once it is live (#2215)", async () => {
+    // every start works, and FLIGHT is gone again by the next check
+    for (let i = 0; i < 4; i++) {
+      await watch.check();
+      noFlight();
+    }
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toMatchObject([
+      {
+        text: flightStartFailedText(
+          "it stopped 3 times in an hour",
+          FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
+        ),
+      },
+    ]);
+    expect(notesOpen()[0]?.text).toContain("6 hours");
+    nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS - MIN;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    nowMs += MIN;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    live("flight-1", "r-hand");
+    facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(notesOpen()).toEqual([]);
+  });
+
+  it("a hub retry whose session dies again waits another 6 hours (#2215)", async () => {
+    for (let i = 0; i < 4; i++) {
+      await watch.check();
+      noFlight();
+    }
+    expect(startCalls).toHaveLength(3);
+    nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    noFlight();
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS - FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(5);
+    expect(notesOpen()).toHaveLength(1);
+  });
+
+  it("a thrown-start retry that makes a session which dies waits 6 hours next (#2215)", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    startFails = null;
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    noFlight();
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
   });
 
   describe("a FLIGHT run with no live session (#798)", () => {
@@ -1819,6 +1913,7 @@ describe("the FLIGHT watcher", () => {
           seatId: "flight-1",
           text: flightStartFailedText(
             "its process is gone and it would not restart; the server log has the error",
+            FLIGHT_GUARD_COOLDOWN_MS,
           ),
         },
       ]);
@@ -1832,7 +1927,12 @@ describe("the FLIGHT watcher", () => {
       alive = null;
       for (let i = 0; i < 4; i++) await watch.check();
       expect(notesOpen()).toMatchObject([
-        { text: flightStartFailedText("it would not start; the server log has the error") },
+        {
+          text: flightStartFailedText(
+            "it would not start; the server log has the error",
+            FLIGHT_GUARD_COOLDOWN_MS,
+          ),
+        },
       ]);
     });
 
@@ -2355,7 +2455,7 @@ describe("the FLIGHT watcher", () => {
   it("sends no wake while the runaway breaker is tripped, and lists it in the wake facts", async () => {
     liveCrew();
     ask();
-    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: 1, reason: "a loop" }));
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: nowMs, reason: "a loop" }));
     await watch.check();
     expect(sendCalls).toHaveLength(0);
     const state = flightState({ config, store, busy: [], now: nowMs });
@@ -2363,6 +2463,18 @@ describe("the FLIGHT watcher", () => {
     // lifted, the waiting question wakes it
     store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
     await watch.check();
+    expect(sendCalls).toHaveLength(1);
+  });
+
+  it("lifts the runaway breaker by itself once its wait passes, and the waiting question wakes FLIGHT", async () => {
+    liveCrew();
+    ask();
+    store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at: nowMs, reason: "a loop" }));
+    await watch.check();
+    expect(sendCalls).toHaveLength(0);
+    nowMs += FLIGHT_RUNAWAY_AUTO_LIFT_MS;
+    await watch.check();
+    expect(store.getSetting(FLIGHT_RUNAWAY_SETTING)).toBeNull();
     expect(sendCalls).toHaveLength(1);
   });
 
@@ -2740,9 +2852,12 @@ describe("the FLIGHT watcher", () => {
         nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
         await watch.check();
         expect(startCalls).toHaveLength(started);
+        nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
+        await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
       });
 
-      it("stays stopped, and alerts, when it trips a second time in a row", async () => {
+      it("waits the longer cooldown, then restarts on its own, when it trips a second time in a row", async () => {
         liveCrew();
         await tripGuard();
         nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
@@ -2751,10 +2866,15 @@ describe("the FLIGHT watcher", () => {
         const started = startCalls.length;
         expect(notesOpen()).toHaveLength(1);
         expect(notesOpen()[0]?.text).toContain("twice in a row");
+        expect(notesOpen()[0]?.text).toContain("6 hours");
         nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
         await watch.check();
         expect(startCalls).toHaveLength(started);
         expect(notesOpen()).toHaveLength(1);
+        nowMs += FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
+        await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
       });
     });
 

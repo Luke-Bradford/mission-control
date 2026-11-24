@@ -1439,8 +1439,13 @@ export const FLIGHT_ROTATIONS_MAX = 4;
 /** After the handover guard stops FLIGHT, the hub starts it again on its own this long after. */
 export const FLIGHT_GUARD_COOLDOWN_MS = 30 * 60_000;
 /**
+ * ...and after a second trip right behind that restart, this long: slower, since each handover
+ * costs a full session start, but still the hub's own retry. The operator's Start is the faster way.
+ */
+export const FLIGHT_GUARD_AGAIN_COOLDOWN_MS = 6 * 60 * 60_000;
+/**
  * The guard's note. The first trip says when FLIGHT comes back on its own; a trip right after that
- * restart stays stopped until the operator starts it.
+ * restart waits longer, and says so.
  */
 export const flightRotationLoopText = (
   n: number,
@@ -1449,7 +1454,7 @@ export const flightRotationLoopText = (
 ): string =>
   `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start. ${
     again
-      ? "It has done this twice in a row, so it stays stopped until you start it. Your messages are kept and reach it when it starts."
+      ? `It has done this twice in a row, so the hub waits ${FLIGHT_GUARD_AGAIN_COOLDOWN_MS / 3_600_000} hours before it starts it again. Starting it yourself brings it back sooner. Your messages are kept and reach it when it starts.`
       : `The hub starts it again in ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes. Your messages are kept until then.`
   }`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
@@ -1546,8 +1551,13 @@ export function flightNotTriagingText(
 }
 export const flightDownText = (reason: string): string =>
   `FLIGHT is down: ${reason}. Nothing is triaging the crew until it is back.`;
-export const flightStartFailedText = (reason: string): string =>
-  `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
+export const flightStartFailedText = (
+  reason: string,
+  retryMs: number = FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
+): string =>
+  `FLIGHT could not be kept running: ${reason}. The hub tries again in ${
+    retryMs >= 2 * 60 * 60_000 ? `${retryMs / 3_600_000} hours` : `${retryMs / 60_000} minutes`
+  } and clears this when FLIGHT is running. Starting it from FLIGHT's dock once that is fixed brings it back sooner.`;
 export const WAKE_ASK =
   "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 
@@ -1752,8 +1762,8 @@ export const FLIGHT_RUNAWAY_NOTE_KEY = "flight-runaway";
 /** The setting that holds when the operator last lifted the breaker (epoch milliseconds). */
 export const FLIGHT_RUNAWAY_LIFTED_SETTING = "flight.runaway-lifted-at";
 /** What the "FLIGHT is not triaging" item says while the breaker is tripped. */
-export const RUNAWAY_TRIAGE_DETAIL =
-  "FLIGHT's runaway breaker is tripped; dismiss its flag to lift it.";
+export const runawayTriageDetail = (waitMs: number): string =>
+  `FLIGHT's runaway breaker is tripped; the hub lifts it by itself ${waitMs / 3_600_000} hours after the trip, or dismiss its flag to lift it sooner.`;
 export interface FlightRunawayTrip {
   at: number;
   reason: string;
@@ -1763,10 +1773,23 @@ export const runawayWritesReason = (n: number): string =>
 export const runawaySameReason = (kind: string, target: string, n: number): string =>
   `${n} "${kind}" calls with ${target.length > 80 ? `${target.slice(0, 80)}…` : target} in the last ${FLIGHT_RUNAWAY.sameActionWindowMs / 60_000} minutes`;
 export const runawayRefusedText = (reason: string): string =>
-  `Not done: the runaway breaker is tripped (${reason}). FLIGHT's writes are stopped until the operator lifts it.`;
-export const runawayNoteText = (reason: string): string =>
-  `FLIGHT's runaway breaker tripped: ${reason}. Its writes are stopped. To lift it: look at what FLIGHT was repeating in Decided without you, fix the cause, then dismiss this item (or POST /api/flight/runaway/lift).`;
+  `Not done: the runaway breaker is tripped (${reason}). FLIGHT's writes are stopped until the hub lifts it after its wait, or the operator lifts it sooner.`;
+/**
+ * The hub lifts a tripped breaker itself after this long, doubled for each time it already did in
+ * the last day and capped at FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS: a loop that comes back waits longer,
+ * but nobody has to be at the keyboard.
+ */
+export const FLIGHT_RUNAWAY_AUTO_LIFT_MS = 2 * 60 * 60_000;
+export const FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS = 24 * 60 * 60_000;
+/** The setting that holds when the hub lifted the breaker in the last day, as a JSON array. */
+export const FLIGHT_RUNAWAY_AUTO_LIFTS_SETTING = "flight.runaway-auto-lifts";
+export const runawayWaitMs = (recentAutoLifts: number): number =>
+  Math.min(FLIGHT_RUNAWAY_AUTO_LIFT_MAX_MS, FLIGHT_RUNAWAY_AUTO_LIFT_MS * 2 ** recentAutoLifts);
+export const runawayNoteText = (reason: string, waitMs = FLIGHT_RUNAWAY_AUTO_LIFT_MS): string =>
+  `FLIGHT's runaway breaker tripped: ${reason}. Its writes are stopped, and the hub lifts the stop by itself in ${waitMs / 3_600_000} hours. To lift it sooner: look at what FLIGHT was repeating in Decided without you, fix the cause, then dismiss this item (or POST /api/flight/runaway/lift).`;
 export const runawayTrippedDecision = (reason: string): string =>
   `Runaway breaker tripped: ${reason}.`;
 export const RUNAWAY_LIFTED_DECISION = "Operator lifted the runaway breaker.";
+export const RUNAWAY_AUTO_LIFTED_DECISION =
+  "The runaway breaker's wait passed, so the hub lifted it. It trips again if FLIGHT repeats itself, and then waits longer.";
 export const RUNAWAY_NOT_TRIPPED = "The runaway breaker is not tripped.";
