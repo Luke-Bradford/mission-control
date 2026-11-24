@@ -109,6 +109,13 @@ export function transcriptFootprint(store: Store): TranscriptFootprint | null {
   let totalBytes = 0;
   let oldestAt: number | null = null;
   const seats = new Map<string, { bytes: number; files: number }>();
+  // one read for every run's seat, not a whole run row per transcript (2,000 of them, 45 ms)
+  let agents: Map<string, string>;
+  try {
+    agents = store.runAgentIds();
+  } catch {
+    agents = new Map(); // the total and oldest still stand; the per-seat split waits for the next read
+  }
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     try {
@@ -117,12 +124,12 @@ export function transcriptFootprint(store: Store): TranscriptFootprint | null {
       const m = TRANSCRIPT.exec(entry.name);
       if (!m) continue;
       oldestAt = oldestAt === null ? st.mtimeMs : Math.min(oldestAt, st.mtimeMs);
-      const run = store.run(m[1] as string);
-      if (!run) continue;
-      const seat = seats.get(run.agentId) ?? { bytes: 0, files: 0 };
+      const agentId = agents.get(m[1] as string);
+      if (agentId === undefined) continue;
+      const seat = seats.get(agentId) ?? { bytes: 0, files: 0 };
       seat.bytes += st.size;
       seat.files++;
-      seats.set(run.agentId, seat);
+      seats.set(agentId, seat);
     } catch {
       // a concurrently removed file is omitted
     }
