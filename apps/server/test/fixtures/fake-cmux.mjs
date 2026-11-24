@@ -1,7 +1,7 @@
 // A stand-in for the `cmux` command. Tests run it as `node fake-cmux.mjs --state <file> <command...>`.
 // All its state lives in the JSON <file>, which a test reads and changes to play cmux and Claude:
 //   workspaces  [{id, name, cwd, command}]      made by `new-workspace`
-//   sessions    [{session_id, lifecycle, pid, workspace_id, transcript_path}]   what `sessions` prints
+//   sessions    [{session_id, lifecycle, pid, workspace_id, transcript_path}]   kept here; `sessions` prints `lifecycle` as real cmux does, under `agent_lifecycle`
 //   sent        [{ws, text, paste}]             every `send`
 //   keys        [{ws, key, force}]              every `send-key`
 //   closed      [ws]                            every `close-workspace`
@@ -103,7 +103,17 @@ switch (cmd) {
     );
     break;
   case "sessions":
-    ok(JSON.stringify({ sessions: state.sessions ?? [] }));
+    // the shape real cmux prints (0.65.2): the state is `agent_lifecycle`, with `runtime_status` beside it
+    ok(
+      JSON.stringify({
+        sessions: (state.sessions ?? []).map(({ lifecycle, ...r }) => ({
+          ...r,
+          agent: "claude",
+          agent_lifecycle: lifecycle,
+          runtime_status: lifecycle,
+        })),
+      }),
+    );
     break;
   case "send": {
     if (state.busy) fail("a question dialog is open; nothing sent");

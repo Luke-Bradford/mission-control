@@ -122,7 +122,17 @@ export function parseAgents(text: string): CmuxAgent[] {
   const out: CmuxAgent[] = [];
   for (const o of rowsOf(text, "sessions")) {
     const sessionId = pick(o, "sessionId", "session_id", "id");
-    const lifecycle = lifecycleOf(pick(o, "lifecycle", "state", "status"));
+    const lifecycle = lifecycleOf(
+      pick(
+        o,
+        "agent_lifecycle",
+        "agentLifecycle",
+        "lifecycle",
+        "runtime_status",
+        "state",
+        "status",
+      ),
+    );
     const workspaceId = pick(o, "workspaceId", "workspace_id", "workspace");
     if (typeof sessionId !== "string" || lifecycle === null || typeof workspaceId !== "string")
       continue;

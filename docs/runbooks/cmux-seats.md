@@ -73,3 +73,18 @@ closes it and resumes the run with its own command.
 The hub attaches to a run's workspace if its Claude process is still the one it started. Otherwise
 it closes the workspace and resumes the run in a new one. If that Claude process is gone and cmux is
 down (after a reboot, say), the hub forgets the workspace and resumes the run on the keeper.
+
+## The live check
+
+The unit tests run against a fake cmux, which cannot show what real cmux and real Claude print. Before
+any change to `apps/server/src/runtime/cmux*.ts` merges, run on the Mac that runs the hub:
+
+```
+cd apps/server && node --experimental-strip-types scripts/cmux-live-check.ts
+```
+
+It opens one workspace on a brand-new folder and passes only if the hub answers Claude's folder-trust
+prompt, sees the session, gets a turn's result, refuses a permission dialog itself and closes the
+workspace. On 24 November 2026 the change had passed nine reviews and failed this four ways: the trust
+menu's cursor opens on "No, exit" and its lines have no numbers; real cmux names a session's state
+`agent_lifecycle`; and Claude 2.1.331's permission dialog ends in a bare "No".

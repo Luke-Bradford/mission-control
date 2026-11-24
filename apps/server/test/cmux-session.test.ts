@@ -265,7 +265,7 @@ const deadPid = () =>
   });
 
 /** Claude's folder-trust prompt as cmux reads it, with the cursor on the option named. */
-const trustScreen = (cursor: "no" | "yes") =>
+const trustScreen = (cursor: "no" | "yes", numbered = false) =>
   [
     "────────────────────────────────────────────────────────────",
     " Accessing workspace:",
@@ -280,8 +280,9 @@ const trustScreen = (cursor: "no" | "yes") =>
     "",
     " Security guide",
     "",
-    `${cursor === "no" ? " ❯" : "  "} 1. No, exit`,
-    `${cursor === "yes" ? " ❯" : "  "} 2. Yes, I trust this folder`,
+    // the real menu (Claude 2.1.330, read off cmux on 24 November 2026) has no numbers; older ones did
+    `${cursor === "no" ? " ❯" : "  "} ${numbered ? "1. " : ""}No, exit`,
+    `${cursor === "yes" ? " ❯" : "  "} ${numbered ? "2. " : ""}Yes, I trust this folder`,
     "",
     " Enter to confirm · Esc to cancel",
   ].join("\n");
@@ -290,6 +291,8 @@ describe("trustMenu", () => {
   it("knows where the cursor is on the trust prompt's menu", () => {
     expect(trustMenu(trustScreen("no"))).toEqual({ onYes: false });
     expect(trustMenu(trustScreen("yes"))).toEqual({ onYes: true });
+    expect(trustMenu(trustScreen("no", true))).toEqual({ onYes: false });
+    expect(trustMenu(trustScreen("yes", true))).toEqual({ onYes: true });
     expect(trustMenu("$ ls\nfile")).toBeNull();
     // the prompt's words with no live menu under them
     expect(trustMenu(" Quick safety check: Is this a project you trust?\n%")).toBeNull();
@@ -639,6 +642,26 @@ describe("startCmuxSession", () => {
       " Bash command\n\n   rm -rf build\n   Remove the build folder\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for rm commands in /w\n   3. No, and tell Claude what to do differently (esc)";
     expect(isPermissionPrompt(dialog)).toBe(true);
     expect(isPermissionPrompt("Do you want to proceed?\n❯ 1. Yes\n  2. No")).toBe(false);
+    // the real dialog of Claude 2.1.331, read off cmux on 24 November 2026: a bare "No"
+    expect(
+      isPermissionPrompt(
+        [
+          " Bash command",
+          "",
+          " touch made-by-trial.txt",
+          " Create empty file made-by-trial.txt",
+          "",
+          " Rule Bash(touch:*) from command line arguments says to ask.",
+          " /permissions to update rules",
+          "",
+          " Do you want to proceed?",
+          " ❯ 1. Yes",
+          "   2. No",
+          "",
+          " Esc to cancel · Tab to amend",
+        ].join("\n"),
+      ),
+    ).toBe(true);
     expect(isPermissionPrompt("Do you want to proceed with the plan?")).toBe(false);
     expect(
       isPermissionPrompt(

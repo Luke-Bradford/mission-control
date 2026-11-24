@@ -49,7 +49,7 @@ const QUIET_POLLS = 2;
 const TRUST_PROMPT =
   /trust (this|the files in this) (folder|directory)|do you trust|Quick safety check|Accessing workspace:/i;
 /** One option of a dialog's menu, the cursor's marked: `❯ 1. No, exit`. */
-const MENU_OPTION = /^\s*([❯›>])?\s*\d+\.\s+(\S.*?)\s*$/;
+const MENU_OPTION = /^\s*([❯›>])?\s*(?:\d+\.\s+)?((?:Yes|No)\b.*?)\s*$/i;
 /** What Claude prints when it quits at the trust prompt: the start has failed, and no key may follow. */
 const TRUST_REFUSED = /folder isn't trusted/i;
 export const CMUX_TRUST_QUIT = "Claude quit at its folder-trust prompt";
@@ -95,7 +95,14 @@ export function isPermissionPrompt(screen: string): boolean {
   return (
     /Do you want to (proceed|make this edit|create|allow|run)\b[^?]{0,2000}\?/i.test(flat) &&
     /^\W*1\.\s+Yes\s*$/m.test(screen) &&
-    /\bNo, and tell Claude what to do differently\b/.test(flat)
+    // the refusal reads "No, and tell Claude what to do differently" on older Claude; from 2.1.331
+    // it is a bare "No" under a tool's header, with "Tab to amend" in the footer. A bare Yes/No with
+    // neither is some other question, and that one is the operator's.
+    (/\bNo, and tell Claude what to do differently\b/.test(flat) ||
+      (/^\W*\d+\.\s+No\s*$/m.test(screen) &&
+        /\bTab to amend\b|^\W*(Bash command|Edit file|Create file|Write file|Read file|Fetch)\b/m.test(
+          screen,
+        )))
   );
 }
 /** What the seat is told after the hub refuses a permission prompt, so it does not wait for a person. */
