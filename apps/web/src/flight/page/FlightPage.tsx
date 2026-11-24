@@ -13,7 +13,7 @@ import { DoingNowList, doingLines } from "./DoingNow.tsx";
 import { StandingOrders } from "./StandingOrders.tsx";
 import { StatusBand } from "./StatusBand.tsx";
 import { MemoryTab, PeopleTab, PlanTab, WatchingTab } from "./Tabs.tsx";
-import { computeVitals, unmeasuredVitals } from "./vitals.ts";
+import { computeVitals } from "./vitals.ts";
 import "./page.css";
 
 export const NO_DECISIONS = "FLIGHT has not decided anything in the last 24 hours.";
@@ -65,8 +65,8 @@ function moveTab(
 }
 
 /**
- * The FLIGHT page: first how the operation is faring (the control room: one row per measure, red to
- * green), then FLIGHT's plan, what it watches, its memory and the people it works with. Only the open
+ * The FLIGHT page: first what FLIGHT is doing and what blocks it, then how the operation is faring
+ * (one row per measure, red to green), then FLIGHT's plan, what it watches, its memory and the people it works with. Only the open
  * tab is mounted, so a hidden tab fetches nothing.
  */
 export function FlightPage() {
@@ -88,8 +88,8 @@ export function FlightPage() {
   const blockers = buildBlockers(attention.data, view, run, now);
   const board = PAGE_PATHS.board;
   const vitals = useMemo(
-    () => [
-      ...computeVitals({
+    () =>
+      computeVitals({
         now,
         run,
         view,
@@ -97,8 +97,6 @@ export function FlightPage() {
         attention: attention.data,
         ledger: ledger.data?.entries,
       }),
-      ...unmeasuredVitals(),
-    ],
     [now, run, view, summary.data, attention.data, ledger.data],
   );
   return (
@@ -152,7 +150,6 @@ export function FlightPage() {
         {tab === "room" && (
           <>
             <StatusBand run={run} view={view} now={now} />
-            <ControlRoom vitals={vitals} now={now} />
             <div className="fp-mid">
               <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
                 <h2 className="fp-head" id="doingH">
@@ -182,6 +179,7 @@ export function FlightPage() {
                 )}
               </section>
             </div>
+            <ControlRoom vitals={vitals} now={now} />
           </>
         )}
         {tab === "plan" && <PlanTab />}

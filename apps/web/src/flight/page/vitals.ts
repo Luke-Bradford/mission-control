@@ -3,15 +3,17 @@ import {
   type FlightLedgerEntry,
   type FlightSummaryView,
   type FlightView,
-  isOperatorItem,
+  needsYouItems,
 } from "@mc/core";
 import { elapsed, percent } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
 
 /** What a vital with no source today shows in place of a figure. */
 export const NOT_MEASURED = "not measured yet";
+/** What a vital shows while its source has not answered. */
+export const LOADING = "loading";
 
-/** green, amber, red, or none: the hub has nothing to measure it with. */
+/** green, amber, red, or none: there is no figure to judge (loading, empty or not measured). */
 export type VitalState = "ok" | "warn" | "crit" | "none";
 
 /** The word that goes with each colour, so colour is never the only sign. */
@@ -19,7 +21,7 @@ export const VITAL_WORD: Record<VitalState, string> = {
   ok: "Good",
   warn: "Watch",
   crit: "Bad",
-  none: "No data",
+  none: "Unknown",
 };
 
 /** One measure: its value, the bands it is judged by, and where the figure comes from. */
@@ -27,7 +29,7 @@ export interface Vital {
   id: string;
   label: string;
   state: VitalState;
-  /** The figure in words; NOT_MEASURED when `state` is none. */
+  /** The figure in words; when `state` is none, why there is no figure (LOADING, NOT_MEASURED or what is missing). */
   value: string;
   /** Where green ends and red starts, in words. These are draft bands, until a week of data agrees them. */
   band: string;
@@ -78,11 +80,17 @@ export function band(value: number, ok: number, crit: number): VitalState {
   return value <= ok ? "ok" : value <= crit ? "warn" : "crit";
 }
 
-const noData = (id: string, label: string, bandText: string, source: string): Vital => ({
+const noData = (
+  id: string,
+  label: string,
+  bandText: string,
+  source: string,
+  value: string,
+): Vital => ({
   id,
   label,
   state: "none",
-  value: NOT_MEASURED,
+  value,
   band: bandText,
   source,
   checkedAt: null,
@@ -121,6 +129,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
           "FLIGHT is running",
           "Running is good; held is watch; stopped is bad",
           SRC_FLIGHT,
+          LOADING,
         )
       : {
           id: "running",
@@ -133,11 +142,18 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
         },
   );
 
+  const noWakes = view === undefined ? LOADING : "no wakes in the last 24 hours";
   const perHour = view?.wakeHistory?.perHour.map((h) => h.n) ?? [];
   const wakeMedian = median(perHour);
   out.push(
     wakeMedian === null
-      ? noData("wakes", "Wakes an hour", "Good up to 6, bad over 12", "wake history, last 24 hours")
+      ? noData(
+          "wakes",
+          "Wakes an hour",
+          "Good up to 6, bad over 12",
+          "wake history, last 24 hours",
+          noWakes,
+        )
       : {
           id: "wakes",
           label: "Wakes an hour",
@@ -157,6 +173,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
           "Wakes that led to nothing",
           "Good up to 25%, bad over 50%",
           "wake history, last 24 hours",
+          noWakes,
         )
       : {
           id: "idle",
@@ -178,7 +195,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
     const source = "wake waits, median of the latest day with one";
     out.push(
       ms === null
-        ? noData(id, label, bandText, source)
+        ? noData(id, label, bandText, source, view === undefined ? LOADING : "no wait recorded yet")
         : {
             id,
             label,
@@ -199,6 +216,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
           "FLIGHT's share of crew cost",
           "Good up to 20%, bad over 35%",
           "cost, last 7 days",
+          view === undefined ? LOADING : "no cost recorded this week",
         )
       : {
           id: "cost",
@@ -218,10 +236,12 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
         "Asks waiting on the operator",
         "Good: none; bad: oldest over 4 hours",
         "Needs you",
+        LOADING,
       ),
     );
   } else {
-    const asks = attention.filter(isOperatorItem);
+    // The one Needs you set: answered items and repeated keys are not waiting.
+    const asks = needsYouItems(attention);
     const oldest = asks.reduce((m, a) => Math.max(m, a.at > 0 ? now - a.at : 0), 0);
     out.push({
       id: "asks",
@@ -242,6 +262,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
         "Tickets waiting on other work",
         "Good: none; bad: longest over 12 hours",
         "ticket waits",
+        LOADING,
       ),
     );
   } else {
@@ -265,6 +286,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
           "Age of FLIGHT's own note",
           "Good up to 1 hour, bad over 6 hours",
           "FLIGHT's headline",
+          summary === undefined ? LOADING : "FLIGHT has not written one",
         )
       : {
           id: "headline",
@@ -285,6 +307,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
         "Moved things FLIGHT has not read",
         "Good up to 30 minutes unread, bad over 4 hours",
         "FLIGHT's pointers",
+        ledger === undefined ? LOADING : "FLIGHT points at nothing",
       ),
     );
   } else {
@@ -305,24 +328,7 @@ export function computeVitals(inputs: VitalInputs): Vital[] {
     });
   }
 
-  const fails = summary?.metrics.ciFailures ?? null;
-  out.push(
-    fails === null
-      ? noData("ci-failures", "CI failures", "Good up to 3 a day, bad over 10", "CI runs, last day")
-      : {
-          id: "ci-failures",
-          label: "CI failures",
-          state: band(fails, 3, 10),
-          value: `${fails} in the last day`,
-          band: "Good up to 3 a day, bad over 10",
-          source: "CI runs, last day",
-          checkedAt: summary?.metrics.since ?? null,
-        },
-  );
+  // CI failures has its home on Records (What FLIGHT did), so it is not repeated here.
 
   return out;
 }
-
-/** Unmeasured rows in the same shape, for the table. */
-export const unmeasuredVitals = (): Vital[] =>
-  UNMEASURED.map((u) => noData(u.id, u.label, "Not set until there is data", u.source));

@@ -1,6 +1,13 @@
 import { useTz } from "../../clock.ts";
 import { rel } from "../../fmt.ts";
-import { NOT_MEASURED, VITAL_WORD, type Vital, type VitalState } from "./vitals.ts";
+import {
+  LOADING,
+  NOT_MEASURED,
+  UNMEASURED,
+  VITAL_WORD,
+  type Vital,
+  type VitalState,
+} from "./vitals.ts";
 
 /** What the Checked column says for a figure worked out afresh on each load. */
 export const CHECKED_LIVE = "live";
@@ -14,8 +21,9 @@ const SHAPE: Record<VitalState, string> = {
 
 /**
  * The control room: one row per measure, with its state (a colour, a word and a shape), the value,
- * the bands it is judged by and when its source last moved. A measure the hub cannot compute yet
- * says "not measured yet" rather than show a made-up figure.
+ * the bands it is judged by and when its source last moved. A row with no figure says why (loading,
+ * or what its source is missing). Measures the hub has no source for are one line at the foot,
+ * opened to name each and what it needs, so they never push the rows that have figures apart.
  */
 export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: number }) {
   const tz = useTz();
@@ -26,8 +34,8 @@ export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: nu
       <h2 className="fp-head" id="roomH">
         How the operation is faring
         <span className="fp-sub">
-          {counts.crit} bad · {counts.warn} watch · {counts.ok} good · {counts.none} not measured
-          yet
+          {counts.crit} bad · {counts.warn} watch · {counts.ok} good
+          {counts.none > 0 && ` · ${counts.none} unknown`}
         </span>
       </h2>
       <ul className="fp-vitals">
@@ -44,10 +52,15 @@ export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: nu
               <i className={`fp-shape ${SHAPE[v.state]}`} aria-hidden="true" />
               {VITAL_WORD[v.state]}
             </span>
-            <span className="fp-vlabel" title={`From ${v.source}`}>
+            <span className="fp-vlabel">
               {v.label}
+              <span className="fp-vsource">from {v.source}</span>
             </span>
-            <span className={v.value === NOT_MEASURED ? "fp-vvalue fp-muted" : "fp-vvalue"}>
+            <span
+              className={
+                v.value === NOT_MEASURED || v.value === LOADING ? "fp-vvalue fp-muted" : "fp-vvalue"
+              }
+            >
               {v.value}
             </span>
             <span className="fp-vband">{v.band}</span>
@@ -61,6 +74,17 @@ export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: nu
           </li>
         ))}
       </ul>
+      <details className="fp-unmeasured">
+        <summary>{`${UNMEASURED.length} measures ${NOT_MEASURED}`}</summary>
+        <ul>
+          {UNMEASURED.map((u) => (
+            <li key={u.id} data-vital={u.id}>
+              <span className="fp-vlabel">{u.label}</span>
+              <span className="fp-muted">: {u.source}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
       <p className="fp-note fp-bandnote">
         Good and bad limits are drafts until a week of real figures settles them with the operator.
       </p>

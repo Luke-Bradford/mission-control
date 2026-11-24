@@ -4,8 +4,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { item, NOW, REPOS } from "./fixtures.ts";
+import { item, MIN, NOW, REPOS } from "./fixtures.ts";
 import { flightPageApi, type PageState } from "./flightPageFixtures.ts";
+import { ledgerEntry } from "./flightSummaryFixture.ts";
 
 const { renderAt } = browserSession();
 
@@ -447,6 +448,94 @@ describeRendered("FLIGHT page in a browser", () => {
           BROWSER_TEST_TIMEOUT_MS,
         );
       }
+    }
+  }
+
+  // Plan and Watching grow with their content: a panel body is never squeezed to nothing, and a long
+  // list scrolls inside a set height with a count of what is below, so the page does not run on.
+  for (const [width, height] of SIZES) {
+    for (const count of [0, 50]) {
+      const where = `${width}x${height}, ${count} pointers`;
+      it(
+        `keeps Plan and Watching bodies readable and the pointer list bounded at ${where}`,
+        async () => {
+          const long =
+            "a pointer whose entry title runs long enough to wrap across the row ".repeat(3);
+          const entries = Array.from({ length: count }, (_, i) =>
+            ledgerEntry({
+              key: `watch:${i}`,
+              title: `${long}(${i})`,
+              pointers: [
+                {
+                  kind: "pr",
+                  target: `shop-app#${100 + i}`,
+                  changedAt: NOW - i * 7 * MIN,
+                  change: "CI went green",
+                  readAt: null,
+                },
+              ],
+            }),
+          );
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: "?view=page&theme=dark",
+            colorScheme: "dark",
+            api: flightPageApi("running", {
+              "/api/flight/ledger?status=open": {
+                session: "s1",
+                entries,
+                more: false,
+                nextOffset: null,
+              },
+            }),
+          });
+          await page.box("#fp-tab-plan");
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+            null,
+          );
+          await page.box("#ledgerP");
+          const queue = await page.evaluate(
+            () =>
+              document.querySelector<HTMLElement>("#ledgerP .flight-panel-scroll")?.clientHeight,
+            null,
+          );
+          expect(queue, `${where}: the queue body has height`).toBeGreaterThan(0);
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-watching")?.click(),
+            null,
+          );
+          await page.box("#pointersP");
+          if (count > 0) await page.box("#pointersP .drow");
+          const r = await page.evaluate(() => {
+            const body = document.querySelector<HTMLElement>("#pointersP .fp-slbody");
+            return {
+              triggers:
+                document.querySelector<HTMLElement>("#watchP .flight-panel-scroll")?.clientHeight ??
+                0,
+              listHeight: body?.clientHeight ?? 0,
+              scrolls: body ? body.scrollHeight > body.clientHeight + 1 : false,
+              more: document.querySelector("#pointersP .fp-more")?.textContent ?? "",
+              note: document.querySelector("#pointersP .fp-note")?.textContent ?? "",
+              sideScroll:
+                document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          }, null);
+          expect(r.triggers, `${where}: Revisit triggers has height`).toBeGreaterThan(0);
+          expect(r.sideScroll, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
+          if (count === 0) {
+            expect(r.note).toBe("FLIGHT has not pointed at anything yet.");
+          } else {
+            expect(r.listHeight, `${where}: the list shows rows`).toBeGreaterThan(80);
+            expect(r.listHeight, `${where}: the list is bounded`).toBeLessThanOrEqual(height);
+            expect(r.scrolls, `${where}: the list scrolls inside`).toBe(true);
+            expect(r.more, `${where}: the rest is counted`).toMatch(/more below/);
+          }
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
     }
   }
 

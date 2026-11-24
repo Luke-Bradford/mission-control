@@ -6,14 +6,14 @@ import { PAGE_TAB_LABEL, PAGE_TABS } from "../src/flight/page/FlightPage.tsx";
 import {
   band,
   computeVitals,
+  LOADING,
   NOT_MEASURED,
   UNMEASURED,
-  unmeasuredVitals,
   type VitalInputs,
 } from "../src/flight/page/vitals.ts";
 import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { HOUR, item, MIN, NOW } from "./fixtures.ts";
+import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
 import { flightPageApi } from "./flightPageFixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
 
@@ -42,9 +42,24 @@ describe("band", () => {
 });
 
 describe("computeVitals", () => {
-  it("says not measured yet for every vital the hub has no data for", () => {
+  it("says loading for every vital while its source has not answered", () => {
     const vitals = computeVitals({ ...empty, run: { kind: "loading" } });
-    expect(vitals.every((v) => v.state === "none" && v.value === NOT_MEASURED)).toBe(true);
+    expect(vitals.every((v) => v.state === "none" && v.value === LOADING)).toBe(true);
+  });
+
+  it("says what is missing when a source has answered with nothing", () => {
+    const vitals = computeVitals({
+      ...empty,
+      view: view({ wakeHistory: { since: 0, total: 0, idle: 0, byReason: [], perHour: [] } }),
+      summary: flightSummary({ headlineAgeMin: null }),
+      ledger: [],
+    });
+    const value = (id: string) => vitals.find((v) => v.id === id)?.value;
+    expect(value("wakes")).toBe("no wakes in the last 24 hours");
+    expect(value("headline")).toBe("FLIGHT has not written one");
+    expect(value("pointers")).toBe("FLIGHT points at nothing");
+    for (const v of vitals.filter((x) => x.state === "none"))
+      expect(v.value).not.toMatch(/no data/i);
   });
 
   it("computes wakes an hour as the median of the last day's hours", () => {
@@ -69,7 +84,7 @@ describe("computeVitals", () => {
     expect(idle(1, 10)?.state).toBe("ok");
     expect(idle(4, 10)?.state).toBe("warn");
     expect(idle(6, 10)?.state).toBe("crit");
-    expect(idle(0, 0)?.value).toBe(NOT_MEASURED);
+    expect(idle(0, 0)?.value).toBe("no wakes in the last 24 hours");
   });
 
   it("reads asks waiting on the operator with the oldest wait", () => {
@@ -80,6 +95,30 @@ describe("computeVitals", () => {
     expect(asks([])).toMatchObject({ state: "ok", value: "none" });
     expect(asks([NOW - 10 * MIN])).toMatchObject({ state: "ok", value: "1, oldest 10m" });
     expect(asks([NOW - 5 * HOUR, NOW - MIN])?.state).toBe("crit");
+  });
+
+  it("counts asks as Needs you does: answered items and repeated keys are not waiting", () => {
+    const answered = item({
+      key: "q:old",
+      at: NOW - 100 * 24 * HOUR,
+      acked: true,
+      brief: brief({
+        choice: {
+          epoch: "e",
+          requestId: "r",
+          optionId: "o",
+          at: NOW - HOUR,
+          state: "applied",
+          text: "Use port 5174.",
+          actor: { operator: true },
+        },
+      }),
+    });
+    const twice = item({ key: "q:same", at: NOW - 10 * MIN });
+    const asks = computeVitals({ ...empty, attention: [answered] }).find((v) => v.id === "asks");
+    expect(asks).toMatchObject({ state: "ok", value: "none" });
+    const dup = computeVitals({ ...empty, attention: [twice, twice] }).find((v) => v.id === "asks");
+    expect(dup).toMatchObject({ state: "ok", value: "1, oldest 10m" });
   });
 
   it("counts a pointer as unread only when it moved after FLIGHT last read it", () => {
@@ -99,12 +138,7 @@ describe("computeVitals", () => {
       state: "crit",
       value: "1, oldest 5h 0m",
     });
-    expect(read([])).toMatchObject({ state: "none", value: NOT_MEASURED });
-  });
-
-  it("lists the vitals the hub cannot measure yet as not measured", () => {
-    expect(unmeasuredVitals().map((v) => v.id)).toEqual(UNMEASURED.map((u) => u.id));
-    expect(unmeasuredVitals().every((v) => v.value === NOT_MEASURED)).toBe(true);
+    expect(read([])).toMatchObject({ state: "none", value: "FLIGHT points at nothing" });
   });
 });
 
@@ -139,12 +173,37 @@ describe("the FLIGHT page tabs", () => {
     const note = room.querySelector('[data-vital="headline"]');
     expect(note?.textContent).toContain("Bad");
     expect(note?.textContent).toContain("Age of FLIGHT's own note");
-    const load = within(room as HTMLElement)
+    // Measures with no source yet are one line, opened to name each and say what it needs.
+    const unmeasured = room.querySelector(".fp-unmeasured");
+    expect(unmeasured?.querySelector("summary")?.textContent).toBe(
+      `${UNMEASURED.length} measures ${NOT_MEASURED}`,
+    );
+    const load = within(unmeasured as HTMLElement)
       .getByText("Load balance across the crew")
       .closest("li");
-    expect(load?.textContent).toContain(NOT_MEASURED);
-    expect(load?.textContent).toContain("No data");
-    expect(room.querySelectorAll("[data-vital]").length).toBeGreaterThan(UNMEASURED.length);
+    expect(load?.textContent).toContain(UNMEASURED[0]?.source);
+    expect(room.textContent).not.toMatch(/no data/i);
+    expect(room.querySelectorAll("li[data-vital]").length).toBeGreaterThan(5);
+  });
+
+  it("puts Doing now and Blockers above the measures", async () => {
+    stubFetch(flightPageApi("blocked"));
+    render(<Flight />);
+    const room = await screen.findByRole("region", { name: /How the operation is faring/ });
+    const blockers = document.getElementById("blockersP");
+    const doing = document.getElementById("doingP");
+    for (const panel of [doing, blockers])
+      expect(
+        panel && panel.compareDocumentPosition(room) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+  });
+
+  it("leaves CI failures to Records, its one home", async () => {
+    stubFetch(flightPageApi("blocked"));
+    render(<Flight />);
+    const room = await screen.findByRole("region", { name: /How the operation is faring/ });
+    expect(room.querySelector('[data-vital="ci-failures"]')).toBeNull();
+    expect(room.textContent).not.toContain("CI failures");
   });
 
   it("shows a measure on the control room and on no other tab", async () => {
