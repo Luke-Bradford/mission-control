@@ -296,6 +296,13 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+/**
+ * A run ended this long ago is rarely folded again, so its usage reading is worth keeping. A later
+ * fold (the backfill, a day after a run's start) drops the kept reading in `setDigest`.
+ */
+const FINANCIAL_USAGE_SETTLED_MS = 60 * 60_000;
+/** About twice the runs in FLIGHT's 14-day cost window; a run outside it is never read again. */
+const FINANCIAL_USAGE_KEPT_MAX = 4_000;
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
 
@@ -1013,7 +1020,17 @@ export class Store {
         }),
       );
     const byId = new Map(runs.map((r) => [r.id, r]));
-    const ids = [...byId.keys()];
+    // A run that ended a while ago keeps its usage reading until its digest is next written:
+    // pulling `attemptUsage` out of every digest in the window costs 55 to 60 ms a call on 1,700
+    // runs. `untilMs` is taken as now, which is how the one caller passes it.
+    const settled = (r: FinancialRun): boolean =>
+      r.endedAt !== null && r.endedAt < untilMs - FINANCIAL_USAGE_SETTLED_MS;
+    const ids: string[] = [];
+    for (const run of runs) {
+      const kept = settled(run) ? this.financialUsageKept.get(run.id) : undefined;
+      if (kept === undefined) ids.push(run.id);
+      else run.attemptUsage = kept.map((u) => ({ ...u }));
+    }
     for (let i = 0; i < ids.length; i += DIGEST_BATCH) {
       const batch = ids.slice(i, i + DIGEST_BATCH);
       const rows = this.statement(
@@ -1028,7 +1045,29 @@ export class Store {
           run.attemptUsage.push({ at: u.at, tokens: u.tokens });
       }
     }
+    for (const id of ids) {
+      const run = byId.get(id);
+      // an empty reading may be a digest not folded yet: only a reading with usage is kept
+      if (run !== undefined && settled(run) && run.attemptUsage.length > 0)
+        this.financialUsageKept.set(
+          id,
+          run.attemptUsage.map((u) => ({ ...u })),
+        );
+    }
     return runs;
+  }
+
+  private readonly financialUsageKept = new BoundedMap<string, FinancialRun["attemptUsage"]>(
+    FINANCIAL_USAGE_KEPT_MAX,
+  );
+
+  /** Each run's agent, in one read: for callers that match many files or rows to their seat. */
+  runAgentIds(): Map<string, string> {
+    return new Map(
+      (
+        this.statement("SELECT id, agent_id FROM runs").all() as { id: string; agent_id: string }[]
+      ).map((r) => [r.id, r.agent_id]),
+    );
   }
 
   /**
@@ -1085,6 +1124,8 @@ export class Store {
          ON CONFLICT(run_id) DO UPDATE SET digest = excluded.digest`,
       )
       .run(runId, JSON.stringify(d));
+    // every digest write comes through here, so a kept usage reading always equals a fresh one
+    this.financialUsageKept.delete(runId);
   }
 
   digest(runId: string): RunDigest | null {
@@ -1129,6 +1170,7 @@ export class Store {
     this.db
       .prepare("DELETE FROM run_digests WHERE run_id IN (SELECT id FROM runs WHERE started_at < ?)")
       .run(olderThan);
+    this.financialUsageKept.clear();
   }
 
   /** Records a state change; a second change of one agent in the same millisecond is dropped. */
@@ -1396,6 +1438,7 @@ export class Store {
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
+              for (const id of values) this.financialUsageKept.delete(id);
             }
           }
           this.db

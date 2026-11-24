@@ -19,7 +19,8 @@ const UNATTRIBUTED = "unattributed";
 /**
  * The stored history the cost and wait figures read, taken once: the runs of `agentIds` overlapping
  * [since, now] with their attempt usage, and the wake records from `since`. A request builds one
- * and passes it to both figures; nothing is kept past the request.
+ * and passes it to both figures. The store keeps the usage of long-ended runs between requests
+ * and drops a kept reading when that run's digest is written.
  */
 export interface FlightFinancialFacts {
   since: number;
