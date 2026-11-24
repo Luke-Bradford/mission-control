@@ -27,6 +27,11 @@ Claude in cmux still runs and cmux will not answer, so two CLIs never run one se
 - It runs `claude` by name from a launcher script in the run's folder, so cmux's shim wraps it with
   its hooks. The hub's own `--settings`, `--mcp-config`, `--strict-mcp-config`, `--restricted`, tool
   lists and role prompt are kept; your own plugins are not loaded.
+- On a new worktree Claude first asks whether to trust the folder, with the cursor on "No, exit".
+  The hub moves the cursor to "Yes, I trust this folder" and presses Enter only once the screen
+  shows it there. If Claude quits before it starts (at that prompt or otherwise), the hub sends no
+  more keys, closes the workspace and the start fails with `Claude quit at its folder-trust prompt`
+  or `Claude quit before it started`.
 - The hub sends the first brief and later messages as text. A long one is written to a file under
   the seat's temp root and the seat is told to read it.
 

@@ -12,7 +12,9 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  readFileSync,
   readSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -44,8 +46,43 @@ const BUSY_RETRY_MS = 2000;
 /** A result is made for a turn the poll never saw running once the transcript has been quiet this long. */
 const QUIET_POLLS = 2;
 /** The words of Claude's folder-trust prompt. */
-const TRUST_PROMPT = /trust (this|the files in this) (folder|directory)|do you trust/i;
-const TRUST_RETRY_MS = 3000;
+const TRUST_PROMPT =
+  /trust (this|the files in this) (folder|directory)|do you trust|Quick safety check|Accessing workspace:/i;
+/** One option of a dialog's menu, the cursor's marked: `❯ 1. No, exit`. */
+const MENU_OPTION = /^\s*([❯›>])?\s*\d+\.\s+(\S.*?)\s*$/;
+/** What Claude prints when it quits at the trust prompt: the start has failed, and no key may follow. */
+const TRUST_REFUSED = /folder isn't trusted/i;
+export const CMUX_TRUST_QUIT = "Claude quit at its folder-trust prompt";
+export const CMUX_QUIT_EARLY = "Claude quit before it started";
+/** The file in the run's folder the launcher writes Claude's pid to. */
+export const CMUX_PID_FILE = "claude.pid";
+/** Keys to the trust prompt go one a poll at most: each after a fresh read of the screen. */
+const TRUST_KEY_GAP_MS = 500;
+
+/**
+ * The trust prompt's menu, read from the screen below the prompt's last words: whether the cursor is
+ * on the "Yes" option. Null when no live menu with a cursor and a "Yes" option shows.
+ */
+export function trustMenu(screen: string): { onYes: boolean } | null {
+  const rows = screen.split("\n");
+  let from = -1;
+  rows.forEach((r, n) => {
+    // the "Yes, I trust this folder" option has the prompt's words too: the menu follows the prompt
+    if (TRUST_PROMPT.test(r) && !MENU_OPTION.test(r)) from = n;
+  });
+  if (from < 0) return null;
+  let cursor: string | null = null;
+  let yes = false;
+  for (const r of rows.slice(from)) {
+    const m = MENU_OPTION.exec(r);
+    if (m === null) continue;
+    const text = m[2] as string;
+    if (/^Yes\b/i.test(text)) yes = true;
+    if (m[1] !== undefined) cursor = text;
+  }
+  if (cursor === null || !yes) return null;
+  return { onYes: /^Yes\b/i.test(cursor) };
+}
 /** Claude's tool permission dialog: the hub refuses it, so no seat waits on a person. */
 /**
  * Claude's tool permission dialog, and only it: its question, its fixed first option and its fixed
@@ -80,6 +117,8 @@ export function launcherScript(i: {
   env: Record<string, string>;
   nodeDir: string;
   envFile: string | null;
+  /** Where the launcher writes its own pid, which the exec makes Claude's: the hub sees Claude quit before its record. */
+  pidFile?: string | null;
 }): string {
   const lines = ["#!/bin/zsh"];
   for (const [k, v] of Object.entries(i.env)) {
@@ -90,6 +129,7 @@ export function launcherScript(i: {
   if (i.envFile !== null) {
     lines.push(`. ${quote(i.envFile)}`, `rm -f ${quote(i.envFile)}`);
   }
+  if (i.pidFile != null) lines.push(`echo $$ > ${quote(i.pidFile)}`);
   lines.push(`exec ${[i.command, ...i.args].map(quote).join(" ")}`, "");
   return lines.join("\n");
 }
@@ -205,6 +245,7 @@ function createCmuxDriver(
   let quiet = 0;
   let msgN = 0;
   let trustAt = 0;
+  let trustSeen = false;
   let readyYet = mode.kind === "attach";
   // an attach has its own record to wait for: the first poll says `attached`
   const queue: string[] = [];
@@ -497,17 +538,38 @@ function createCmuxDriver(
       i.save?.(null);
       return end({ reason: CMUX_START_FAILED });
     }
-    if (Date.now() - trustAt >= TRUST_RETRY_MS) {
-      let screen = "";
-      try {
-        screen = await i.cmux.readScreen(workspace);
-      } catch {
-        // not shown yet
-      }
-      if (TRUST_PROMPT.test(screen)) {
-        trustAt = Date.now();
-        await i.cmux.sendKey(workspace, "enter").catch((e) => log(`${i.name}: trust key: ${e}`));
-      }
+    // Claude has quit before its record: no key goes to the shell left behind
+    const launched = launcherPid();
+    let screen = "";
+    try {
+      screen = await i.cmux.readScreen(workspace);
+    } catch {
+      // not shown yet
+    }
+    if ((launched !== null && !pidAlive(launched)) || TRUST_REFUSED.test(screen)) {
+      const reason = trustSeen || TRUST_REFUSED.test(screen) ? CMUX_TRUST_QUIT : CMUX_QUIT_EARLY;
+      log(`${i.name}: ${reason}`);
+      await i.cmux.close(workspace).catch(() => {});
+      i.save?.(null);
+      return end({ reason });
+    }
+    if (launched === null || Date.now() - trustAt < TRUST_KEY_GAP_MS) return;
+    const menu = trustMenu(screen);
+    if (menu === null) return;
+    trustSeen = true;
+    trustAt = Date.now();
+    // the cursor opens on "No, exit": it is moved, and Enter waits for a screen that shows it on "Yes"
+    const key = menu.onYes ? "enter" : "down";
+    await i.cmux.sendKey(workspace, key).catch((e) => log(`${i.name}: trust key: ${e}`));
+  }
+
+  /** The pid the launcher wrote (Claude's, after its exec); null before it has run. */
+  function launcherPid(): number | null {
+    try {
+      const n = Number.parseInt(readFileSync(join(i.dir, CMUX_PID_FILE), "utf8"), 10);
+      return Number.isInteger(n) && n > 0 ? n : null;
+    } catch {
+      return null;
     }
   }
 
@@ -641,6 +703,8 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
         envFile = join(i.dir, "env");
         writeFileSync(envFile, envFileText(i.privateEnv), { mode: 0o600 });
       }
+      const pidFile = join(i.dir, CMUX_PID_FILE);
+      rmSync(pidFile, { force: true });
       writeFileSync(
         script,
         launcherScript({
@@ -649,6 +713,7 @@ export function startCmuxSession(i: CmuxSessionInput): CrewSession {
           env: i.env,
           nodeDir: i.nodeDir ?? dirname(process.execPath),
           envFile,
+          pidFile,
         }),
         { mode: 0o700 },
       );

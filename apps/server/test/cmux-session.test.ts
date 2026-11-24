@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
   mkdtempSync,
@@ -21,12 +22,16 @@ import {
 import {
   attachCmuxSession,
   CMUX_ENDED,
+  CMUX_PID_FILE,
+  CMUX_QUIT_EARLY,
   CMUX_START_FAILED,
+  CMUX_TRUST_QUIT,
   cmuxMessageText,
   envFileText,
   isPermissionPrompt,
   launcherScript,
   startCmuxSession,
+  trustMenu,
 } from "../src/runtime/cmux-session.ts";
 import type { CrewSession } from "../src/runtime/session.ts";
 
@@ -223,6 +228,58 @@ function start(overrides: Partial<Parameters<typeof startCmuxSession>[0]> = {}):
 // the fake's Claude process is the vitest worker: alive for the whole test
 const ALIVE = process.pid;
 
+/** A pid that has ended: a child that exited at once. */
+const deadPid = () =>
+  new Promise<number>((resolve) => {
+    const c = spawn(process.execPath, ["-e", ""]);
+    c.on("exit", () => resolve(c.pid as number));
+  });
+
+/** Claude's folder-trust prompt as cmux reads it, with the cursor on the option named. */
+const trustScreen = (cursor: "no" | "yes") =>
+  [
+    "────────────────────────────────────────────────────────────",
+    " Accessing workspace:",
+    "",
+    " /Users/someone/Dev/mc-crew/worktrees/mission-control/writer-1-2194",
+    "",
+    " Quick safety check: Is this a project you created or one you trust? (Like your own code, a",
+    " well-known open source project, or work from your team). If not, take a moment to review",
+    " what's in this folder first.",
+    "",
+    " Claude Code'll be able to read, edit, and execute files here.",
+    "",
+    " Security guide",
+    "",
+    `${cursor === "no" ? " ❯" : "  "} 1. No, exit`,
+    `${cursor === "yes" ? " ❯" : "  "} 2. Yes, I trust this folder`,
+    "",
+    " Enter to confirm · Esc to cancel",
+  ].join("\n");
+
+describe("trustMenu", () => {
+  it("knows where the cursor is on the trust prompt's menu", () => {
+    expect(trustMenu(trustScreen("no"))).toEqual({ onYes: false });
+    expect(trustMenu(trustScreen("yes"))).toEqual({ onYes: true });
+    expect(trustMenu("$ ls\nfile")).toBeNull();
+    // the prompt's words with no live menu under them
+    expect(trustMenu(" Quick safety check: Is this a project you trust?\n%")).toBeNull();
+  });
+
+  it("the launcher writes its pid, which its exec makes Claude's", () => {
+    const text = launcherScript({
+      command: "claude",
+      args: [],
+      env: {},
+      nodeDir: "/n",
+      envFile: null,
+      pidFile: "/run/claude.pid",
+    });
+    expect(text).toContain("echo $$ > '/run/claude.pid'");
+    expect(text.indexOf("exec ")).toBeGreaterThan(text.indexOf("echo $$"));
+  });
+});
+
 describe("startCmuxSession", () => {
   it("opens a workspace on the cwd with a private launcher and goes ready", async () => {
     patch((s) => {
@@ -246,16 +303,52 @@ describe("startCmuxSession", () => {
     await h.session.close();
   });
 
-  it("answers the folder-trust prompt", async () => {
+  it("answers the folder-trust prompt: the cursor moved to Yes, and Enter only there", async () => {
     patch((s) => {
       s.claudePid = ALIVE;
       s.autoClaude = false;
-      s.screen = "Do you trust the files in this folder?\n 1. Yes, proceed";
+      s.screen = trustScreen("no");
     });
     const h = start();
+    // the launcher's pid: Claude, at its prompt
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${ALIVE}\n`);
     await wait(() => (state().keys ?? []).length > 0);
-    expect(state().keys[0]).toMatchObject({ key: "enter", force: false });
+    expect(state().keys[0]).toMatchObject({ key: "down", force: false });
+    // the cursor still shows on "No, exit": no Enter
+    await new Promise((r) => setTimeout(r, 200));
+    expect(state().keys.some((k) => k.key === "enter")).toBe(false);
+    patch((s) => {
+      s.screen = trustScreen("yes");
+    });
+    await wait(() => state().keys.some((k) => k.key === "enter"));
+    const enter = state().keys.findIndex((k) => k.key === "enter");
+    expect(state().keys.slice(0, enter).every((k) => k.key === "down")).toBe(true);
     await h.session.close();
+  });
+
+  it("sends no key once Claude has quit at the trust prompt, and fails the start", async () => {
+    patch((s) => {
+      s.autoClaude = false;
+      s.screen = `${trustScreen("no")}\nClaude Code didn't start because this folder isn't trusted.\n%`;
+    });
+    const h = start();
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${await deadPid()}\n`);
+    await wait(() => h.events.some((e) => e.kind === "exit"));
+    expect(h.events.find((e) => e.kind === "exit")).toMatchObject({ reason: CMUX_TRUST_QUIT });
+    expect(state().closed).toHaveLength(1);
+    expect(state().keys ?? []).toEqual([]);
+    expect(h.session.alive).toBe(false);
+  });
+
+  it("fails the start when Claude's process is gone before its record", async () => {
+    patch((s) => {
+      s.autoClaude = false;
+    });
+    const h = start();
+    writeFileSync(join(root, "run", CMUX_PID_FILE), `${await deadPid()}\n`);
+    await wait(() => h.events.some((e) => e.kind === "exit"));
+    expect(h.events.find((e) => e.kind === "exit")).toMatchObject({ reason: CMUX_QUIT_EARLY });
+    expect(state().keys ?? []).toEqual([]);
   });
 
   it("ends with a reason when Claude never shows", async () => {
