@@ -1050,10 +1050,15 @@ export const FLIGHT_IDLE_MS = 10 * 60_000;
 /** While a free build seat has open tickets near it and nothing starts, the hub logs one line per period this long. */
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 /**
- * While the crew still idles on open tickets, FLIGHT is told again once per period this long. One
- * wake per spell left the crew idle for 10 hours on 24 November 2026 with nothing to end it.
+ * While the crew still idles on open tickets, FLIGHT is told again this long after it was last
+ * told, then after twice as long each time, up to FLIGHT_IDLE_SEAT_AGAIN_MAX_MS. One wake per
+ * spell left the crew idle for 10 hours on 24 November 2026 with nothing to end it.
  */
 export const FLIGHT_IDLE_SEAT_AGAIN_MS = 2 * 60 * 60_000;
+export const FLIGHT_IDLE_SEAT_AGAIN_MAX_MS = 8 * 60 * 60_000;
+/** How long after FLIGHT was last told of an idle crew it is told again, by how often it has been. */
+export const idleAgainGap = (repeats: number): number =>
+  Math.min(FLIGHT_IDLE_SEAT_AGAIN_MS * 2 ** Math.max(0, repeats), FLIGHT_IDLE_SEAT_AGAIN_MAX_MS);
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
@@ -1309,6 +1314,10 @@ export interface FlightIdleSeats {
   ready: string[];
   /** Idle-spell keys that have already been delivered successfully. */
   delivered: string[];
+  /** When FLIGHT is next told again of a crew still idle; null until a wake has shown it. */
+  againAt: number | null;
+  /** The fact that tells FLIGHT again, once `againAt` has come; null before. */
+  again: string | null;
   /** Every open ticket near an idle seat, uncapped for the idle wake. */
   tickets: { ref: string; title: string; untrustedAuthor: boolean }[];
 }

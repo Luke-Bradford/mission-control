@@ -534,7 +534,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
-        markIdleSeatsShown(store, state);
+        markIdleSeatsShown(store, state, t);
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);
@@ -602,9 +602,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         runId?: unknown;
         tokens?: unknown;
       } | null;
-      const known = kept?.runId === runId && typeof kept.tokens === "number";
-      firstContext.set(runId, known ? (kept.tokens as number) : context);
-      if (!known)
+      // another run's reading is never this run's: a fresh session above the line must not
+      // inherit a low baseline and hand over at once (the 7 November loop)
+      const stored =
+        kept?.runId === runId && typeof kept.tokens === "number" && Number.isFinite(kept.tokens)
+          ? kept.tokens
+          : null;
+      firstContext.set(runId, stored ?? context);
+      if (stored === null)
         store.setSetting(FLIGHT_FIRST_CONTEXT_SETTING, JSON.stringify({ runId, tokens: context }));
     }
     const grown = context === null ? 0 : context - (firstContext.get(runId) ?? context);
@@ -686,7 +691,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
-        markIdleSeatsShown(store, state);
+        markIdleSeatsShown(store, state, t);
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);

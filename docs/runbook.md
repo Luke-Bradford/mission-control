@@ -1324,7 +1324,7 @@ stopped seat, a red main, a hub error, a PR awaiting FLIGHT, a blocker). A chang
 plan of FLIGHT's own falling due, the daily retrospective and an arrival from another team wake it too,
 each at most once a day. The hub does the rest with its own timers and no FLIGHT tokens: CI state and PR
 flow (the engine tick), idle seats (the engine gives a free seat its next ticket; a seat idle over 30
-minutes writes a hub log line), and disk (the disk sweep). A free seat, a Ready ticket, a PR's CI turning
+minutes writes a hub log line and is one wake fact for its spell, see below), and disk (the disk sweep). A free seat, a Ready ticket, a PR's CI turning
 green, a review queued or finished, a merge and a PR ready to merge are in `flight_state` for the
 next wake and wake nobody.
 
@@ -1339,7 +1339,8 @@ build seat, open tickets near its area (all open tickets, not only the 30 the di
 or none or several, which need triage). A ticket with no
 board status counts as work to triage. Each seat is timed on its own. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
-line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`. An idle seat does not wake FLIGHT.
+line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`. A seat whose account is at its stop line can start nothing and is not counted.
+Each spell wakes FLIGHT once, when it has lasted 30 minutes (fact `idle`). While any seat still idles, the hub tells FLIGHT again (fact `idleAgain`): 2 hours after a wake last showed it the idle seats, then 4 hours, then every 8 (`FLIGHT_IDLE_SEAT_AGAIN_MS`, `FLIGHT_IDLE_SEAT_AGAIN_MAX_MS`). Any wake that shows the idle seats restarts that wait. The time of the next one is FLIGHT's `nextWakeAt`. The count starts over when no seat idles.
 A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
 security exceptions go to the operator, parked with a brief.
 
@@ -2737,7 +2738,7 @@ A seat is never the one that waits. Each engine cycle (`engine/account-release.t
 
 ## FLIGHT's fresh session
 
-FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
+FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first. The context must also have grown by `FLIGHT_CONTEXT_GROWTH_TOKENS` (50K) since the run's first reading, so a session that starts above the line is not handed over at once. The first reading is stored in the `flight.first-context` setting, so a hub restart keeps it.
 
 - **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
