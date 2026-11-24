@@ -452,3 +452,12 @@ it("lets a tag that the browser painted on top of an earlier one give way", asyn
   spy.mockRestore();
   map.destroy();
 });
+
+it("injects no <style> element: the production CSP allows only the bundled stylesheet", async () => {
+  const map = createCrewMap(host);
+  map.update(snapshot());
+  await settle();
+  expect(document.head.querySelector("style[data-cm]")).toBeNull();
+  expect(host.querySelector("style")).toBeNull();
+  map.destroy();
+});

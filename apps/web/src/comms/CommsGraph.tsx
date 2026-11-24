@@ -22,6 +22,7 @@ export function mapSelectionPath(selection: MapSelection, flightId: string | und
   const open = (id: string) => (id === CAPCOM || id === flightId ? commsFlightPath() : null);
   if (selection.type === "seat") return open(selection.id) ?? commsAgentPath(selection.id);
   const [a, b] = [selection.a, selection.b];
+  if (open(a) !== null && open(b) !== null) return commsFlightPath(); // FLIGHT and CAPCOM: the one FLIGHT conversation
   if (open(a) === null && open(b) === null) return commsContactPath(a, b);
   return commsAgentPath(open(a) === null ? a : b);
 }

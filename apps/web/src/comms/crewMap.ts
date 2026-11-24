@@ -1,3 +1,4 @@
+import "./crewMap.css";
 import { createCrewMapImpl } from "./crewMapImpl.ts";
 
 /** What the map reads: one picture of the crew at `now`. Shape from docs/prototype/comms-crew-map-live.html. */

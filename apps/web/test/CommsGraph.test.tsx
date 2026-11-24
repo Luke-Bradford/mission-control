@@ -99,4 +99,9 @@ it("treats seat and operator selections as the right conversations", () => {
   expect(mapSelectionPath({ type: "link", a: "flight-1", b: "guido-2" }, "flight-1")).toBe(
     "/comms/agents/guido-2",
   );
+  expect(mapSelectionPath({ type: "link", a: "guido-2", b: "flight-1" }, "flight-1")).toBe(
+    "/comms/agents/guido-2",
+  );
+  expect(mapSelectionPath({ type: "link", a: "flight-1", b: "CAPCOM" }, "flight-1")).toBe("/comms");
+  expect(mapSelectionPath({ type: "link", a: "CAPCOM", b: "flight-1" }, "flight-1")).toBe("/comms");
 });
