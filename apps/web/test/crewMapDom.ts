@@ -136,3 +136,21 @@ export function installMapDom(size = { width: 360, height: 356 }): DomHarness {
     },
   };
 }
+
+/**
+ * The least the map needs to mount without crashing in a page test that does not look at it: a
+ * canvas that takes every call and observers that never fire. The map then draws nothing.
+ */
+export function installMapStubs(): void {
+  if (!vi.isMockFunction(HTMLCanvasElement.prototype.getContext))
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(
+      () => quietContext() as never,
+    );
+  const watcher = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  for (const name of ["ResizeObserver", "IntersectionObserver", "Path2D"] as const)
+    if (!(name in globalThis)) vi.stubGlobal(name, watcher);
+}

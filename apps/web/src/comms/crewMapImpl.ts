@@ -175,6 +175,8 @@ const STYLE = `
 .cm .cm-strip { flex: none; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 8px; padding: 4px 12px; min-height: 41px; background: var(--cm-void-2); border-top: 1px solid var(--cm-void-line); color: var(--cm-void-ink); font: 11px/16px var(--cm-mono); }
 .cm .cm-strip b { font-weight: 500; }
 .cm .cm-strip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cm .cm-strip button.cm-name { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.cm .cm-strip button.cm-name:focus-visible { outline: 2px solid var(--cm-accent); outline-offset: 1px; }
 .cm .cm-l2 { grid-column: 1 / 3; color: var(--cm-void-muted); }
 .cm .cm-strip.cm-is-detail .cm-l1 { color: #fff; font-weight: 500; }
 .cm .cm-key { flex: none; background: var(--cm-void-2); border-top: 1px solid var(--cm-void-line); padding: 8px 12px; font: 12px/16px var(--cm-sans); color: var(--cm-void-ink); display: grid; grid-template-columns: 1fr; gap: 4px; }
@@ -320,7 +322,7 @@ function createCrewMap(container, options) {
       <div class="cm-ticker"></div>
       <button type="button" class="cm-btn cm-exit">Exit ambient (Esc)</button>
       <div class="cm-perf" hidden></div>
-      <div class="cm-sr cm-tables"></div>
+      <div class="cm-sr cm-tables sr-only"></div>
     </div>
     <div class="cm-strip"><b class="cm-clock"></b><span class="cm-l1"></span><span class="cm-l2"></span></div>
     <section class="cm-chart" aria-label="The last 60 minutes">
@@ -1118,19 +1120,19 @@ function createCrewMap(container, options) {
     for (const p of M.list) { if (p.kind !== 'seat' && p.kind !== 'flight') continue; seats++; if (p.hold) held++; if (p.state === 'running') running++; else if (p.state === 'idle') idle++; else if (p.state === 'stopped') stopped++; if (p.state !== 'unknown' && p.state !== 'nodata') known++; if (p.lim && (!top || p.ctx / p.lim > top.ctx / top.lim)) top = p; }
     const word = KIND_WORD[E.kind] || (E.started ? 'LIVE' : 'WAITING');
     const chip = !E.started && !E.stale ? 'WAITING FOR DATA' : E.stale ? word + ' · NOT UPDATING' : E.mode === 'catchup' ? word + ' · CATCHING UP' : word, cls = E.stale || !E.started ? 'cm-is-off' : 'cm-is-' + (E.kind || 'live');
-    let l1, l2 = '';
+    let l1, l2 = '', l2a = '', l2b = '', l2top = null;
     if (E.stale) { l1 = E.everOk ? `not updating · last picture ${fmtHM(E.frozen)}` : 'not updating · no picture yet'; l2 = E.error; }
     else if (!E.started) { l1 = 'no crew data yet'; }
     else if (E.mode === 'catchup') { l1 = 'catching up on the last hour'; }
     else if (!known) { l1 = `${plural(seats, 'seat')} · this feed does not carry seat state`; l2 = 'Messages only: who wrote to whom, and when.'; }
     else { l1 = `${running} working · ${idle} idle${stopped ? ' · ' + stopped + ' stopped' : ''}${held ? ' · ' + held + ' stuck' : ''} · ${M.waits.length} owe${M.waits.length === 1 ? 's' : ''} a reply` + (big ? ` · ${plural(M.hourN, 'message')} in the last hour` : '');
-      l2 = (big ? '' : `${plural(M.hourN, 'message')} last hour`) + (top ? (big ? 'Fullest context: ' : ' · fullest: ') + `${top.name}, ${ctxOver(top) ? ctxShort(top) : fmtK(top.ctx) + ' of ' + fmtK(top.lim)}` : ''); }
+      l2a = (big ? '' : `${plural(M.hourN, 'message')} last hour`) + (top ? (big ? 'Fullest context: ' : ' · fullest: ') : ''); l2b = top ? `, ${ctxOver(top) ? ctxShort(top) : fmtK(top.ctx) + ' of ' + fmtK(top.lim)}` : ''; l2top = top; l2 = l2a + (top ? top.name : '') + l2b; }
     if (E.kind === 'replay' && E.fast && E.progress != null) l1 += ` · ${Math.round(E.progress * 100)}% through`;
     const ck = !E.started ? '' : reduced() || E.fast || E.stale ? (E.fast ? fmtDHM(clock) : fmtHM(clock)) : fmtHMS(clock);
     if (D.clock.textContent !== ck) D.clock.textContent = ck;
     const key = chip + cls + l1 + l2 + (M.readout || press ? 1 : 0);
     if (key !== lastStatus) { lastStatus = key; D.status.className = 'cm-status ' + cls; D.status.textContent = ''; D.status.append(el('i'), chip);
-      if (!M.readout && !(press && press.started)) { D.l1.textContent = l1; D.l2.textContent = l2; D.strip.classList.remove('cm-is-detail'); } }
+      if (!M.readout && !(press && press.started)) { D.l1.textContent = l1; D.l2.textContent = ''; if (l2top) { const nb = el('button', 'cm-name', l2top.name); nb.type = 'button'; nb.dataset.seat = l2top.id; D.l2.append(l2a, nb, l2b); } else D.l2.append(l2); D.strip.classList.remove('cm-is-detail'); } }
     const tag = word + '|' + E.label;
     if (tag !== lastTag) { lastTag = tag; D.tag.textContent = ''; if (E.started || E.stale) { D.tag.append(el('b', '', word)); if (E.label) D.tag.append(el('i', '', ' · '), E.label); D.tag.title = word + (E.label ? ' · ' + E.label : ''); } }
     const pr = E.progress != null && E.fast; if (D.progress.hidden === pr) D.progress.hidden = !pr; if (pr) D.progress.firstChild.style.width = (100 * E.progress).toFixed(1) + '%';
@@ -1244,6 +1246,7 @@ function createCrewMap(container, options) {
   on(stage, 'dblclick', e => { const sb = e.target.closest('.cm-seat'), p = sb && M.parts.get(sb.dataset.seat); if (!p || !(pins[S.view] || {})[p.id]) return; setPin(p, false); p.tx = p.ty = 0; p.mover = true; activate(p); showTip(p); });
   on(D.roster, 'pointerover', e => { const b = e.target.closest('[data-seat]'); hot(b ? M.parts.get(b.dataset.seat) || null : null, null); });
   on(D.roster, 'pointerleave', () => hot(null, null));
+  on(D.strip, 'click', e => { const b = e.target.closest('button[data-seat]'); if (b) userSel(b.dataset.seat); });
   on(D.side, 'click', e => { const b = e.target.closest('[data-pair], [data-seat]'); if (b) userSel(b.dataset.pair || b.dataset.seat); });
   on(labels, 'focusin', e => { const b = e.target; if (!b.matches(':focus-visible')) return; hot(M.hotSeat, M.hotPair, b.dataset.seat ? M.parts.get(b.dataset.seat) || null : M.pair.get(b.dataset.pair) || null); });
   on(labels, 'focusout', () => hot(M.hotSeat, M.hotPair, null));

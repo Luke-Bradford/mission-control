@@ -306,3 +306,24 @@ it.each([
     map.destroy();
   },
 );
+
+it("names the fullest seat in the strip as a button that opens its conversation", async () => {
+  const opened: unknown[] = [];
+  const map = createCrewMap(host, { onOpenConversation: (selection) => opened.push(selection) });
+  map.update(
+    snapshot({
+      participants: [
+        seat("flight-1", { role: "flight", state: "running", contextTokens: 10_000 }),
+        seat("guido-1", { state: "running", contextTokens: 120_000 }),
+      ],
+    }),
+  );
+  await settle();
+  const name = host.querySelector<HTMLButtonElement>(".cm-strip button.cm-name");
+  expect(name?.textContent).toBe("GUIDO-1");
+  name?.click();
+  expect(opened).toEqual([{ type: "seat", id: "guido-1" }]);
+  // the hidden tables are visually hidden the way the rest of the app does it
+  expect(host.querySelector(".cm-tables")?.classList.contains("sr-only")).toBe(true);
+  map.destroy();
+});
