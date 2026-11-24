@@ -200,7 +200,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   interface Guard {
     retryAt: number | null;
     restartedAt: number | null;
-    /** The `retryAt` was booked because a start threw and made no session: free to try again. */
+    /** The `retryAt` is a start-failed retry: the note stays open while the hub tries again. */
     startFailed?: boolean;
   }
   const readGuard = (): Guard => {
@@ -220,7 +220,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
   };
   const writeGuard = (g: Guard): void => store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
-  /** The last start threw and made no session; only such a start is retried by the hub. */
+  /** The last start threw and made no session: it is retried sooner than a run that died. */
   let lastStartThrew = false;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
@@ -499,21 +499,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       }
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating && !retrying) {
         clearDown(t);
-        // only a start that threw is free to try again; runs that started and died were each paid
-        const hubRetries = lastStartThrew;
+        // a start that threw costs nothing, so it is tried again soon; runs that started and died
+        // were each a paid session, so they wait longer
+        const wait = lastStartThrew ? FLIGHT_GUARD_COOLDOWN_MS : FLIGHT_GUARD_AGAIN_COOLDOWN_MS;
         store.raiseNote({
           key: FLIGHT_NOTE_KEY,
           kind: "blocked",
           runId: null,
           seatId: id,
           repoId: found.session.repoId,
-          text: flightStartFailedText(lastReason ?? "it stopped 3 times in an hour", hubRetries),
+          text: flightStartFailedText(lastReason ?? "it stopped 3 times in an hour", wait),
           at: t,
         });
         writeGuard({
-          retryAt: hubRetries ? t + FLIGHT_GUARD_COOLDOWN_MS : null,
+          retryAt: t + wait,
           restartedAt: readGuard().restartedAt,
-          startFailed: hubRetries,
+          startFailed: true,
         });
         processGone = false; // said once, in this note
         bus.emit("attention");
@@ -555,8 +556,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         clearDown(t);
         processGone = false;
         lastStartThrew = false;
-        // a session was made: if it dies, that is a paid start, not a free retry
-        if (retrying) writeGuard({ retryAt: null, restartedAt: guard.restartedAt });
+        // a session was made: if it dies, that is a paid start, so the next retry waits longer
+        if (retrying)
+          writeGuard({
+            retryAt: t + FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
+            restartedAt: guard.restartedAt,
+            startFailed: true,
+          });
         store.setSetting(
           FLIGHT_RUN_TOOLS_SETTING,
           JSON.stringify({ runId, tools: flightToolsDigest() }),
