@@ -10,7 +10,9 @@ time each request a page makes on opening against a copy of a real database, run
 `node --experimental-strip-types apps/server/scripts/first-load-timings.ts --db <db>` from the
 repo root. It copies the database, builds the app in-process with nothing running, and prints
 each GET's time right after a write (as on the live hub, where something is written every second
-or so) and repeated.
+or so) and repeated. A request that answers an error or times out is listed as failed, and the run
+exits 1, as it does when a request takes 300 ms or more. Without `--config` it lists the routes
+that read config.yaml itself as not timed.
 
 A page fetches what it shows, not whole histories. Each list answers with a bounded, summary shape
 and the full row is one request away.
