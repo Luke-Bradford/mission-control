@@ -128,9 +128,7 @@ export function parseAgents(text: string): CmuxAgent[] {
         "agent_lifecycle",
         "agentLifecycle",
         "lifecycle",
-        "runtime_status",
-        "state",
-        "status",
+        // `runtime_status` is another thing (a record can be needsInput with it idle): never read here
       ),
     );
     const workspaceId = pick(o, "workspaceId", "workspace_id", "workspace");

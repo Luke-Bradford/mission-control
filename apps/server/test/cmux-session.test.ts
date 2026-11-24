@@ -289,10 +289,23 @@ const trustScreen = (cursor: "no" | "yes", numbered = false) =>
 
 describe("trustMenu", () => {
   it("knows where the cursor is on the trust prompt's menu", () => {
-    expect(trustMenu(trustScreen("no"))).toEqual({ onYes: false });
-    expect(trustMenu(trustScreen("yes"))).toEqual({ onYes: true });
-    expect(trustMenu(trustScreen("no", true))).toEqual({ onYes: false });
-    expect(trustMenu(trustScreen("yes", true))).toEqual({ onYes: true });
+    expect(trustMenu(trustScreen("no"))).toEqual({ onYes: false, toYes: "down" });
+    expect(trustMenu(trustScreen("yes"))).toEqual({ onYes: true, toYes: "down" });
+    expect(trustMenu(trustScreen("no", true))).toEqual({ onYes: false, toYes: "down" });
+    expect(trustMenu(trustScreen("yes", true))).toEqual({ onYes: true, toYes: "down" });
+    // "Yes" above "No": the cursor goes up to it
+    expect(
+      trustMenu(
+        " Do you trust the files in this folder?\n   Yes, I trust this folder\n ❯ No, exit\n",
+      ),
+    ).toEqual({ onYes: false, toYes: "up" });
+    // trust words in a redrawn conversation, with a stray reply after them, are not the menu
+    expect(trustMenu(" do you trust me?\n> Yes, of course\n\n❯ \n")).toBeNull();
+    expect(
+      trustMenu(
+        " Do you trust this folder?\n ❯ No, exit\n   Yes, I trust this folder\n\n⏺ later text\n",
+      ),
+    ).toBeNull();
     expect(trustMenu("$ ls\nfile")).toBeNull();
     // the prompt's words with no live menu under them
     expect(trustMenu(" Quick safety check: Is this a project you trust?\n%")).toBeNull();
@@ -642,6 +655,36 @@ describe("startCmuxSession", () => {
       " Bash command\n\n   rm -rf build\n   Remove the build folder\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again for rm commands in /w\n   3. No, and tell Claude what to do differently (esc)";
     expect(isPermissionPrompt(dialog)).toBe(true);
     expect(isPermissionPrompt("Do you want to proceed?\n❯ 1. Yes\n  2. No")).toBe(false);
+    // a question of the seat's own under a rule, with a tool's name in the conversation above it
+    expect(
+      isPermissionPrompt(
+        [
+          "⏺ Fetch(https://example.invalid/page)",
+          "  ⎿  Received 2 KB",
+          "- Edit file a.ts next",
+          "────────────────────────────────────────────────────────────",
+          " Do you want to proceed with the deploy to production?",
+          " ❯ 1. Yes",
+          "   2. No",
+        ].join("\n"),
+      ),
+    ).toBe(false);
+    // the other file dialogs of 2.1.331, and a "No" first
+    for (const [title, verb] of [
+      ["Overwrite file", "overwrite"],
+      ["Write file", "write to"],
+      ["Create file", "create"],
+    ])
+      expect(
+        isPermissionPrompt(
+          `────────────────────────────────────────\n ${title}\n a.ts\n Do you want to ${verb} a.ts?\n ❯ 1. Yes\n   2. Yes, allow all edits during this session\n   3. No\n Esc to cancel · Tab to amend`,
+        ),
+      ).toBe(true);
+    expect(
+      isPermissionPrompt(
+        "────────────────────────────────────────\n Tool use\n mc - push()\n Do you want to proceed?\n ❯ 1. No\n   2. Yes\n Esc to cancel",
+      ),
+    ).toBe(true);
     // the real dialog of Claude 2.1.331, read off cmux on 24 November 2026: a bare "No"
     expect(
       isPermissionPrompt(

@@ -48,22 +48,28 @@ const QUIET_POLLS = 2;
 /** The words of Claude's folder-trust prompt. */
 const TRUST_PROMPT =
   /trust (this|the files in this) (folder|directory)|do you trust|Quick safety check|Accessing workspace:/i;
-/** One option of a dialog's menu, the cursor's marked: `❯ 1. No, exit`. */
-const MENU_OPTION = /^\s*([❯›>])?\s*(?:\d+\.\s+)?((?:Yes|No)\b.*?)\s*$/i;
+/** One option of the trust menu, the cursor's marked: `❯ No, exit` (older Claude numbered them: `❯ 1. No, exit`). */
+const MENU_OPTION = /^\s*([❯›>])?\s*(?:\d+\.\s+)?((?:Yes|No)\b.*?)\s*$/;
+/** The line under the trust menu. */
+const MENU_FOOTER = /Enter to confirm|Esc to cancel/;
 /** What Claude prints when it quits at the trust prompt: the start has failed, and no key may follow. */
 const TRUST_REFUSED = /folder isn't trusted/i;
 export const CMUX_TRUST_QUIT = "Claude quit at its folder-trust prompt";
 export const CMUX_QUIT_EARLY = "Claude quit before it started";
+export const CMUX_TRUST_STUCK =
+  "Claude waited at its folder-trust prompt and the hub could not answer it";
 /** The file in the run's folder the launcher writes Claude's pid to. */
 export const CMUX_PID_FILE = "claude.pid";
 /** Keys to the trust prompt go one a poll at most: each after a fresh read of the screen. */
 const TRUST_KEY_GAP_MS = 500;
 
 /**
- * The trust prompt's menu, read from the screen below the prompt's last words: whether the cursor is
- * on the "Yes" option. Null when no live menu with a cursor and a "Yes" option shows.
+ * The trust prompt's live menu: whether the cursor is on its "Yes" option, and which way "Yes" lies.
+ * It is the menu only when it closes the screen: under the prompt's words, option lines next to
+ * each other with one cursor, then nothing but blank lines and the footer. Words about trust in a
+ * redrawn conversation, with a "Yes" or "No" line somewhere after them, are not it. Null otherwise.
  */
-export function trustMenu(screen: string): { onYes: boolean } | null {
+export function trustMenu(screen: string): { onYes: boolean; toYes: "up" | "down" } | null {
   const rows = screen.split("\n");
   let from = -1;
   rows.forEach((r, n) => {
@@ -71,43 +77,59 @@ export function trustMenu(screen: string): { onYes: boolean } | null {
     if (TRUST_PROMPT.test(r) && !MENU_OPTION.test(r)) from = n;
   });
   if (from < 0) return null;
-  let cursor: string | null = null;
-  let yes = false;
-  for (const r of rows.slice(from)) {
-    const m = MENU_OPTION.exec(r);
-    if (m === null) continue;
-    const text = m[2] as string;
-    if (/^Yes\b/i.test(text)) yes = true;
-    if (m[1] !== undefined) cursor = text;
+  const options: { n: number; text: string; cursor: boolean }[] = [];
+  for (let n = from + 1; n < rows.length; n++) {
+    const m = MENU_OPTION.exec(rows[n] as string);
+    if (m !== null) options.push({ n, text: m[2] as string, cursor: m[1] !== undefined });
   }
-  if (cursor === null || !yes) return null;
-  return { onYes: /^Yes\b/i.test(cursor) };
+  const first = options[0];
+  const last = options.at(-1);
+  if (first === undefined || last === undefined || options.length < 2) return null;
+  // next to each other, and nothing after them but blank lines and the footer
+  if (last.n - first.n !== options.length - 1) return null;
+  if (rows.slice(last.n + 1).some((r) => r.trim() !== "" && !MENU_FOOTER.test(r))) return null;
+  const at = options.findIndex((o) => o.cursor);
+  const yes = options.findIndex((o) => /^Yes\b/.test(o.text));
+  if (at < 0 || yes < 0 || options.filter((o) => o.cursor).length !== 1) return null;
+  return { onYes: at === yes, toYes: yes < at ? "up" : "down" };
 }
-/** Claude's tool permission dialog: the hub refuses it, so no seat waits on a person. */
+/** The title Claude gives a tool's permission dialog (2.1.331): one per kind of tool. */
+const PERMISSION_TITLE =
+  /^\W*(Bash command|Edit file|Overwrite file|Create file|Write file|Read file|Fetch|Tool use)\b/m;
+/** A horizontal rule: Claude draws one above the dialog it has open. */
+const RULE = /^\s*[─━]{20,}\s*$/;
+
 /**
- * Claude's tool permission dialog, and only it: its question, its fixed first option and its fixed
- * refusal option, together. A question of the seat's own that merely starts "Do you want to proceed"
- * has none of the fixed options, so it stays the operator's.
+ * Claude's tool permission dialog, and only it. The hub refuses it, so no seat waits on a person.
+ * Only the open dialog is read (the lines under the last rule on the screen), so a tool's name in
+ * the conversation above cannot make a question of the seat's own look like one. In that block it
+ * needs the question, a "Yes" and a "No" option, and one mark of a tool dialog: its title, the
+ * "Tab to amend" footer (2.1.331, where the refusal is a bare "No"), or the older refusal "No, and
+ * tell Claude what to do differently". A bare Yes/No with no such mark stays the operator's.
  */
 export function isPermissionPrompt(screen: string): boolean {
+  const rows = screen.split("\n");
+  let from = 0;
+  rows.forEach((r, n) => {
+    if (RULE.test(r)) from = n + 1;
+  });
+  const block = rows.slice(from).join("\n");
   // the terminal wraps a long path or command: the question and the refusal may cross lines
-  const flat = screen.replace(/\s+/g, " ");
+  const flat = block.replace(/\s+/g, " ");
   return (
-    /Do you want to (proceed|make this edit|create|allow|run)\b[^?]{0,2000}\?/i.test(flat) &&
-    /^\W*1\.\s+Yes\s*$/m.test(screen) &&
-    // the refusal reads "No, and tell Claude what to do differently" on older Claude; from 2.1.331
-    // it is a bare "No" under a tool's header, with "Tab to amend" in the footer. A bare Yes/No with
-    // neither is some other question, and that one is the operator's.
-    (/\bNo, and tell Claude what to do differently\b/.test(flat) ||
-      (/^\W*\d+\.\s+No\s*$/m.test(screen) &&
-        /\bTab to amend\b|^\W*(Bash command|Edit file|Create file|Write file|Read file|Fetch)\b/m.test(
-          screen,
-        )))
+    /Do you want to [^?]{1,2000}\?/i.test(flat) &&
+    /^\W*\d+\.\s+Yes\b/m.test(block) &&
+    /^\W*\d+\.\s+No\b/m.test(block) &&
+    (PERMISSION_TITLE.test(block) ||
+      /\bTab to amend\b/.test(block) ||
+      /\bNo, and tell Claude what to do differently\b/.test(flat))
   );
 }
 /** What the seat is told after the hub refuses a permission prompt, so it does not wait for a person. */
 export const CMUX_TOOL_REFUSED_TEXT =
   "Mission Control refused that tool call: it is outside this seat's allowed tools. Carry on without it, or report that you are blocked.";
+/** How long after a refusal cmux may still say needsInput before that is taken as the operator's. */
+const REFUSED_SETTLE_MS = 6000;
 /** A refused prompt still showing at the next poll is not refused again until this has passed. */
 const DENY_RETRY_MS = 2000;
 /** The last of a run's records whose lines the poll reads at once. */
@@ -260,6 +282,8 @@ function createCmuxDriver(
   let msgN = 0;
   let trustAt = 0;
   let trustSeen = false;
+  /** The screen as last read while starting, for the reason a start that ran out of time gives. */
+  let lastScreen = "";
   let readyYet = mode.kind === "attach";
   // an attach has its own record to wait for: the first poll says `attached`
   const queue: string[] = [];
@@ -487,6 +511,13 @@ function createCmuxDriver(
       // A permission prompt waits on no one: the hub refuses it, as print mode refused the tool.
       // Every poll that finds it waiting looks again: a dialog not recognised at first is not left.
       if (seen.lifecycle === "needsInput" && (await refusedPrompt())) return;
+      // Real cmux stays on needsInput for a moment after the hub's Escape, until the seat takes the
+      // hub's word about the refusal: that wait is the hub's own, not one for the operator.
+      if (
+        seen.lifecycle === "needsInput" &&
+        (queue.includes(CMUX_TOOL_REFUSED_TEXT) || Date.now() - deniedAt < REFUSED_SETTLE_MS)
+      )
+        return;
       change(seen.lifecycle);
       // A turn that began and ended between two polls shows only in the transcript.
       if (sentAt !== null && lifecycle === "idle") {
@@ -553,16 +584,22 @@ function createCmuxDriver(
       return;
     }
     if (Date.now() - startedAt >= (i.startWaitMs ?? START_WAIT_MS)) {
-      log(`${i.name}: ${CMUX_START_FAILED}`);
+      // a trust prompt the hub could not read is named, with what it showed, not passed off as no start
+      const stuck = TRUST_PROMPT.test(lastScreen);
+      const reason = stuck ? CMUX_TRUST_STUCK : CMUX_START_FAILED;
+      log(
+        `${i.name}: ${reason}${stuck ? `: ${lastScreen.trim().split("\n").slice(-6).join(" | ")}` : ""}`,
+      );
       await i.cmux.close(workspace).catch(() => {});
       i.save?.(null);
-      return end({ reason: CMUX_START_FAILED });
+      return end({ reason });
     }
     // Claude has quit before its record: no key goes to the shell left behind
     const launched = launcherPid();
     let screen = "";
     try {
       screen = await i.cmux.readScreen(workspace);
+      lastScreen = screen;
     } catch {
       // not shown yet
     }
@@ -579,7 +616,7 @@ function createCmuxDriver(
     trustSeen = true;
     trustAt = Date.now();
     // the cursor opens on "No, exit": it is moved, and Enter waits for a screen that shows it on "Yes"
-    const key = menu.onYes ? "enter" : "down";
+    const key = menu.onYes ? "enter" : menu.toYes;
     await i.cmux.sendKey(workspace, key).catch((e) => log(`${i.name}: trust key: ${e}`));
   }
 

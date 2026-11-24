@@ -76,15 +76,17 @@ down (after a reboot, say), the hub forgets the workspace and resumes the run on
 
 ## The live check
 
-The unit tests run against a fake cmux, which cannot show what real cmux and real Claude print. Before
-any change to `apps/server/src/runtime/cmux*.ts` merges, run on the Mac that runs the hub:
+The unit tests run against a fake cmux and screens typed into the tests, which cannot show what real
+cmux and real Claude print. Before any change to `apps/server/src/runtime/cmux*.ts` merges, run on
+the Mac that runs the hub, with the hub's own node (the launcher puts that node's folder on PATH, so
+the `claude` beside it is the one checked):
 
 ```
-cd apps/server && node --experimental-strip-types scripts/cmux-live-check.ts
+cd apps/server && ~/.local/mc-node/<version>/bin/node --experimental-strip-types test/live/cmux-live-check.ts
 ```
 
-It opens one workspace on a brand-new folder and passes only if the hub answers Claude's folder-trust
-prompt, sees the session, gets a turn's result, refuses a permission dialog itself and closes the
-workspace. On 24 November 2026 the change had passed nine reviews and failed this four ways: the trust
-menu's cursor opens on "No, exit" and its lines have no numbers; real cmux names a session's state
-`agent_lifecycle`; and Claude 2.1.331's permission dialog ends in a bare "No".
+It opens one workspace on a brand-new folder, started with a seat's isolation flags and a short tool
+list. It passes only if the hub moves the folder-trust cursor to "Yes" and confirms, sees the
+session, gets a turn's result, refuses a permission dialog itself and tells the seat why, never shows
+the seat as waiting on a person, and closes the workspace. No seat can run it: its sandbox has no
+cmux. Whoever merges a cmux change runs it.

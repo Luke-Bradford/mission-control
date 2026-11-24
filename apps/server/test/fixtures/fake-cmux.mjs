@@ -110,7 +110,8 @@ switch (cmd) {
           ...r,
           agent: "claude",
           agent_lifecycle: lifecycle,
-          runtime_status: lifecycle,
+          // real cmux does not mirror the two: a record can be needsInput here and idle there
+          runtime_status: "idle",
         })),
       }),
     );
