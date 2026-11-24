@@ -1323,8 +1323,8 @@ FLIGHT is woken for three things only: an operator message (`operator`, `owed`),
 stopped seat, a red main, a hub error, a PR awaiting FLIGHT, a blocker). A change to the instructions, a
 plan of FLIGHT's own falling due, the daily retrospective and an arrival from another team wake it too,
 each at most once a day. The hub does the rest with its own timers and no FLIGHT tokens: CI state and PR
-flow (the engine tick), idle seats (the engine gives a free seat its next ticket; a seat idle over 30
-minutes writes a hub log line and is one wake fact for its spell, see below), and disk (the disk sweep). A free seat, a Ready ticket, a PR's CI turning
+flow (the engine tick), free seats (the engine gives a free seat its next ticket), and disk (the disk sweep).
+A build seat that stays idle with tickets open does wake FLIGHT: once per spell, then again while the crew still idles (see below). A free seat, a Ready ticket, a PR's CI turning
 green, a review queued or finished, a merge and a PR ready to merge are in `flight_state` for the
 next wake and wake nobody.
 
@@ -1339,8 +1339,7 @@ build seat, open tickets near its area (all open tickets, not only the 30 the di
 or none or several, which need triage). A ticket with no
 board status counts as work to triage. Each seat is timed on its own. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
-line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`. A seat whose account is at its stop line can start nothing and is not counted.
-Each spell wakes FLIGHT once, when it has lasted 30 minutes (fact `idle`). While any seat still idles, the hub tells FLIGHT again (fact `idleAgain`): 2 hours after a wake last showed it the idle seats, then 4 hours, then every 8 (`FLIGHT_IDLE_SEAT_AGAIN_MS`, `FLIGHT_IDLE_SEAT_AGAIN_MAX_MS`). Any wake that shows the idle seats restarts that wait. The time of the next one is FLIGHT's `nextWakeAt`. The count starts over when no seat idles.
+line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`. Each spell wakes FLIGHT once, when it has lasted 30 minutes (fact `idle`). While any seat still idles, the hub tells FLIGHT again (fact `idleAgain`): 2 hours after a wake last showed it the idle seats, then 4 hours, then every 8 (`FLIGHT_IDLE_SEAT_AGAIN_MS`, `FLIGHT_IDLE_SEAT_AGAIN_MAX_MS`). Any wake that shows the idle seats restarts that wait, and a seat's new spell puts it back to 2 hours. A seat whose account is at its stop line does not ask again. Until the repeat is due, its time is FLIGHT's `nextWakeAt`. The count starts over when no seat idles.
 A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
 security exceptions go to the operator, parked with a brief.
 

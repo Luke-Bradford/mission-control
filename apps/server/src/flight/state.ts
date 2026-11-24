@@ -412,8 +412,9 @@ export function nextWakeAt(
   const times: number[] = [];
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   if (batchAt !== undefined) times.push(batchAt);
-  const againAt = s.wake?.idle?.againAt ?? null;
-  if (againAt !== null) times.push(againAt);
+  // once the repeat is due it waits only for the gap (`batchAt`), which is the time to show
+  const idle = s.wake?.idle;
+  if (idle?.againAt != null && idle.again === null) times.push(idle.againAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
 
@@ -852,9 +853,8 @@ function idleSeats(
     return label.length !== 1 || areaLabelsFor(rules, seat.area).includes(label[0] ?? "");
   };
   const seats = i.seats
-    // a seat whose account is at its stop line can start nothing: it is not idle with work
-    .filter((x) => x.loop === "build" && x.free && !x.atStop)
-    .map((x) => ({ id: x.id, near: open.filter((t) => near(x, t)) }))
+    .filter((x) => x.loop === "build" && x.free)
+    .map((x) => ({ id: x.id, atStop: x.atStop, near: open.filter((t) => near(x, t)) }))
     .filter((x) => x.near.length > 0);
   if (seats.length === 0) return undefined;
   const tickets = [...new Map(seats.flatMap((x) => x.near).map((t) => [t.ref, t])).values()];
@@ -866,15 +866,18 @@ function idleSeats(
     })
     .sort((a, b) => a.id.localeCompare(b.id));
   // told again by the time since FLIGHT was last told, not by a seat's spell: a seat that starts
-  // work, a wake for another reason and a late delivery all leave one clock, not several
+  // work, a wake for another reason and a late delivery all leave one clock, not several.
+  // A seat whose account is at its stop line can start nothing, so it does not ask again.
+  const atStop = new Set(seats.filter((x) => x.atStop).map((x) => x.id));
+  const told = stored.told;
   const againAt =
-    stored.told !== null && timed.some((x) => x.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
-      ? stored.told.at + idleAgainGap(stored.told.repeats)
+    told !== null && timed.some((x) => x.ms >= FLIGHT_IDLE_SEAT_WAKE_MS && !atStop.has(x.id))
+      ? told.at + idleAgainGap(told.repeats)
       : null;
   return {
     seats: timed,
     againAt,
-    again: againAt !== null && i.now >= againAt ? `again:${stored.told?.at}` : null,
+    again: told !== null && againAt !== null && i.now >= againAt ? `again:${told.at}` : null,
     open: tickets.map((t) => t.ref).sort(),
     untriaged: tickets
       .filter((t) => t.noStatus === true)
@@ -900,32 +903,35 @@ export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: n
   const delivered = before.delivered.filter((key) =>
     Object.entries(after).some(([id, since]) => key === `${id}:${since}`),
   );
+  // a spell delivered before the hub kept `told` (a record from an older hub) starts its wait now
+  const told = before.told ?? (delivered.length > 0 ? { at: now, repeats: 0 } : null);
   if (
     JSON.stringify(before.seats) === JSON.stringify(after) &&
-    before.delivered.length === delivered.length
+    before.delivered.length === delivered.length &&
+    before.told === told
   )
     return;
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
     // `told` lasts while any seat idles and goes when none does: the next spell starts over
-    Object.keys(after).length === 0
-      ? ""
-      : JSON.stringify({ seats: after, delivered, told: before.told }),
+    Object.keys(after).length === 0 ? "" : JSON.stringify({ seats: after, delivered, told }),
   );
 }
 
 /**
  * Marks successful idle-seat delivery durably, so a hub restart does not re-wake the same spell.
  * Any delivered wake that showed a seat idle past 30 minutes restarts the wait before FLIGHT is
- * told again; only a wake the repeat itself was due for makes the next wait longer.
+ * told again; only a wake the repeat itself was due for makes the next wait longer, and a spell
+ * shown for the first time puts it back to the shortest.
  */
 export function markIdleSeatsShown(store: Store, s: Pick<FlightState, "wake">, now: number): void {
   const state = readIdleState(store);
   const delivered = new Set(state.delivered);
   const long = (s.wake?.idle?.seats ?? []).filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS);
   if (long.length === 0) return;
+  const fresh = long.some((seat) => !delivered.has(idleKey(seat)));
   for (const seat of long) delivered.add(idleKey(seat));
-  const repeats = (state.told?.repeats ?? 0) + (s.wake?.idle?.again != null ? 1 : 0);
+  const repeats = fresh ? 0 : (state.told?.repeats ?? 0) + (s.wake?.idle?.again != null ? 1 : 0);
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
     JSON.stringify({
@@ -936,6 +942,7 @@ export function markIdleSeatsShown(store: Store, s: Pick<FlightState, "wake">, n
   );
 }
 
+/** The log line for the seats idle past a 30-minute period: each one's time, and why nothing started. */
 export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seats"]): string {
   const why =
     idle.ready.length > 0 ? `Ready ${idle.ready.join(", ")} not started` : "no Ready ticket fits";
