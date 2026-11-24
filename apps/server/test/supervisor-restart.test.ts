@@ -1075,10 +1075,14 @@ describe("read-only checkout upgrades at restart", () => {
     if (!keeper) await noKeepers();
     const path = join(root, "mc-crew", "retro-42");
     git(path, "checkout", "-q", "-b", "unexpected");
+    const tip = git(path, "rev-parse", "HEAD");
     make().sup.start();
     await until(() => expect(store.run(runId)?.status).toBe("failed"));
     expect(store.seatSession("retro")?.reason).toBe("could not resume: checkout missing");
-    expect(git(path, "symbolic-ref", "HEAD")).toBe("refs/heads/unexpected");
+    // The failed run's worktree is removed after the failure is recorded, not before: reading it
+    // here raced that removal (git ENOENT on the gone folder). Wait for it, then check the clone.
+    await untilGone(path);
+    expect(git(clone, "rev-parse", "refs/heads/unexpected")).toBe(tip);
   });
 
   it("refuses a redirected legacy checkout before attaching its keeper", async () => {
@@ -1302,6 +1306,11 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
     await until(() => expect(starts()).toHaveLength(2));
     expect(seen.some((e) => e.kind === "run-ended")).toBe(false);
+    // Kill the resumed keeper only once the hub holds it. A keeper killed between the hub's
+    // connect and its hello is noticed only when the 5 s hello wait runs out, as long as `until`.
+    // The seat turns running only from the CLI's own output, which comes through the link.
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
     kill(); // the resumed keeper goes the same way
     await until(() => expect(seen.filter((e) => e.kind === "run-ended")).toHaveLength(1));
     expect(store.run(runId)).toMatchObject({ status: "failed" });
