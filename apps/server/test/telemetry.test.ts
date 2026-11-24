@@ -764,7 +764,15 @@ describe("capacity", () => {
     );
     store.replacePullRequests(
       "shop-app",
-      [{ ...pr(10, since - 2 * HOUR), ticket: "shop-app#43" }],
+      [
+        { ...pr(10, since - 2 * HOUR), ticket: "shop-app#43" },
+        // a later merge on the same ticket, a future one, another ticket's and one with no ticket:
+        // the ticket's merge is its first that has happened
+        { ...pr(11, since - HOUR), ticket: "shop-app#43" },
+        { ...pr(12, NOW + HOUR), ticket: "shop-app#43" },
+        { ...pr(13, since - 5 * HOUR), ticket: "shop-app#7" },
+        pr(14, since - 5 * HOUR),
+      ],
       NOW,
     );
     store.addHubEvent("Updated to inside (manual)", NOW - HOUR);

@@ -14,6 +14,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_FIRST_CONTEXT_SETTING,
   FLIGHT_FULL_BUILTINS,
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_AGAIN_COOLDOWN_MS,
@@ -540,7 +541,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
-        markIdleSeatsShown(store, state);
+        markIdleSeatsShown(store, state, t);
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);
@@ -602,7 +603,22 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     // past the context limit: one handover wake, then the fresh session once that turn has ended
     const context = store.digest(runId)?.contextTokens ?? null;
-    if (context !== null && !firstContext.has(runId)) firstContext.set(runId, context);
+    if (context !== null && !firstContext.has(runId)) {
+      // a hub restart empties the map: the stored reading is still this run's first turn
+      const kept = parseJson(store.getSetting(FLIGHT_FIRST_CONTEXT_SETTING), null) as {
+        runId?: unknown;
+        tokens?: unknown;
+      } | null;
+      // another run's reading is never this run's: a fresh session above the line must not
+      // inherit a low baseline and hand over at once (the 7 November loop)
+      const stored =
+        kept?.runId === runId && typeof kept.tokens === "number" && Number.isFinite(kept.tokens)
+          ? kept.tokens
+          : null;
+      firstContext.set(runId, stored ?? context);
+      if (stored === null)
+        store.setSetting(FLIGHT_FIRST_CONTEXT_SETTING, JSON.stringify({ runId, tokens: context }));
+    }
     const grown = context === null ? 0 : context - (firstContext.get(runId) ?? context);
     if (
       context !== null &&
@@ -682,7 +698,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);
         markItemsShown(store, state);
-        markIdleSeatsShown(store, state);
+        markIdleSeatsShown(store, state, t);
         markRetrospectiveShown(store, state);
         markAuditShown(store, state);
         markPointersShown(store, config, state, t);

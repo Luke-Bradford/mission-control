@@ -101,6 +101,8 @@ export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
 /** The setting that keeps which tool set FLIGHT's live run was started with. */
 export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
+/** The setting that keeps the live run's context at its first turn, so a hub restart does not lose it. */
+export const FLIGHT_FIRST_CONTEXT_SETTING = "flight.first-context";
 
 export interface FlightDecision {
   orderId?: number;
@@ -1047,6 +1049,17 @@ export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
 /** While a free build seat has open tickets near it and nothing starts, the hub logs one line per period this long. */
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
+/**
+ * While the crew still idles on open tickets, FLIGHT is told again this long after it was last
+ * told, then after twice as long each time, up to FLIGHT_IDLE_SEAT_AGAIN_MAX_MS. One wake per
+ * spell left the crew idle for 10 hours on 24 November 2026 with nothing to end it.
+ */
+export const FLIGHT_IDLE_SEAT_AGAIN_MS = 2 * 60 * 60_000;
+/** The longest wait between two such repeats. */
+export const FLIGHT_IDLE_SEAT_AGAIN_MAX_MS = 8 * 60 * 60_000;
+/** How long after FLIGHT was last told of an idle crew it is told again, by how often it has been. */
+export const idleAgainGap = (repeats: number): number =>
+  Math.min(FLIGHT_IDLE_SEAT_AGAIN_MS * 2 ** Math.max(0, repeats), FLIGHT_IDLE_SEAT_AGAIN_MAX_MS);
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
@@ -1302,6 +1315,10 @@ export interface FlightIdleSeats {
   ready: string[];
   /** Idle-spell keys that have already been delivered successfully. */
   delivered: string[];
+  /** When FLIGHT is next told again of a crew still idle; null until a wake has shown it. */
+  againAt: number | null;
+  /** The fact that tells FLIGHT again, once `againAt` has come; null before. */
+  again: string | null;
   /** Every open ticket near an idle seat, uncapped for the idle wake. */
   tickets: { ref: string; title: string; untrustedAuthor: boolean }[];
 }
@@ -1317,6 +1334,9 @@ export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["se
 /** What the wake says on every wake while the operator's messages are owed an answer. */
 export const owedAsk = (ids: readonly string[]): string =>
   `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
+/** Added when the wake is the repeat (`idleAgain`): the crew was idle when FLIGHT was last told, and still is. */
+export const IDLE_SEAT_AGAIN_ASK =
+  "You were told of this idle crew before and it still idles: this wake is the hub's repeat. If something you handed over or waited on has not moved, pick it up now.";
 /** The sentence FLIGHT is told when seats idle with tickets open: follow the working list; an idle seat is allowed. */
 export const IDLE_SEAT_ASK =
   "A free seat has stood idle while tickets are open. Start the next ticket the repo's pinned working list allows for that seat (in a repo with no working list, the board's next complete ticket), or triage the tickets with no board status. If nothing may start, leave the seat idle and do nothing more: do not promote work the working list sets aside, file a ticket or log a wait to keep it busy. A wait on a person is never the reason a seat idles: only money, direction, irreversible actions and security exceptions go to the operator, each parked with a brief.";
@@ -1591,7 +1611,10 @@ export function wakeLine(
   const idleReviewFault = reviewFaultStands(s.reviewQueue)
     ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
     : "";
-  const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
+  const idleSeats =
+    idleLong(s.wake?.idle).length > 0
+      ? ` ${IDLE_SEAT_ASK}${s.wake?.idle?.again != null ? ` ${IDLE_SEAT_AGAIN_ASK}` : ""}`
+      : "";
   const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${owed}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
