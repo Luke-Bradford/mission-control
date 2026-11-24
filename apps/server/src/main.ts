@@ -133,7 +133,7 @@ import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-e
 import { appPreviewPaths, startAppPreview } from "./preview/app.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
-import { resolveHubRepo, resolvePreviewRepo } from "./preview/repo.ts";
+import { originRepo, resolveHubRepo, resolvePreviewRepo } from "./preview/repo.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { trustedPullRequest } from "./preview/trust.ts";
 import { createQaReports } from "./qa/reports.ts";
@@ -235,6 +235,8 @@ export async function main(): Promise<void> {
   );
   const hubRepo = previewRepoId ?? (await resolveHubRepo(hubRoot, config.repos));
   if (hubRepo !== undefined) config.hubRepo = hubRepo;
+  const hubGithub = hubRoot === null ? null : await originRepo(hubRoot);
+  if (hubGithub !== null) config.hubGithub = hubGithub;
   // Read at call time: `gh` is built below, and a build only starts once the hub is serving.
   const trustedHead = async (pr: number, sha?: string, repoId?: string): Promise<boolean> => {
     const github = config.repos.find((r) => r.id === (repoId ?? previewRepoId))?.github;

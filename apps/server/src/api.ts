@@ -293,6 +293,7 @@ import { createProfile, NewProfileBody, profilesView } from "./config/profiles.t
 import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
 import { repoRulesView } from "./config/repo-roles-view.ts";
 import {
+  adoptHubRepo,
   agentIds,
   type CcConfig,
   configuredAgents,
@@ -3610,8 +3611,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // Disk can include pending crew edits.  Only make this card's setup live here; the
           // reloader owns every crew change so it can drain seats before applying it.
           const index = config.repos.findIndex((repo) => repo.id === body.data.repoId);
-          if (body.data.repo) config.repos.push(onboarded);
-          else if (index >= 0) {
+          if (body.data.repo) {
+            config.repos.push(onboarded);
+            adoptHubRepo(config, onboarded);
+          } else if (index >= 0) {
             const live = config.repos[index];
             if (!live) throw new ConfigWriteError("missing", `unknown repo ${body.data.repoId}`);
             if (body.data.defaultAccountId === null) delete live.defaultAccountId;
@@ -3674,7 +3677,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         // Only this route adds to config.repos, and two concurrent adds of one repo meet in the
         // serialised file check, so the loaded list cannot have gained it during the await.
         const added = result.config.repos.find((r) => r.id === repo.id);
-        if (added) config.repos.push(added);
+        if (added) {
+          config.repos.push(added);
+          adoptHubRepo(config, added);
+        }
         bus.emit("config");
         bus.emit("boards");
         refreshBoards();

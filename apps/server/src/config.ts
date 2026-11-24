@@ -249,6 +249,8 @@ export interface CcConfig {
    * treated as it. `null`: known not to be any configured repo, so none is.
    */
   hubRepo?: RepoId | null;
+  /** The hub checkout's origin (`owner/name`, lower case), when it could be read: lets a repo onboarded later claim `hubRepo`. */
+  hubGithub?: string;
   accounts: {
     id: AccountId;
     vendor: "claude" | "codex";
@@ -334,6 +336,15 @@ function auditThresholdsOf(a: {
     ...(a.notice_repeats === undefined ? {} : { noticeRepeats: a.notice_repeats }),
   };
   return Object.keys(t).length === 0 ? {} : { thresholds: t };
+}
+
+/** After a repo is added: when the hub's origin is known and no repo was it at startup, the added one may be. */
+export function adoptHubRepo(
+  config: Pick<CcConfig, "hubRepo" | "hubGithub" | "repos">,
+  repo: Pick<CcConfig["repos"][number], "id" | "github">,
+): void {
+  if (config.hubRepo === null && config.hubGithub === repo.github.toLowerCase())
+    config.hubRepo = repo.id;
 }
 
 /** Whether the hub's own files (its floor and controller-check paths) are in this repo. */

@@ -5,7 +5,7 @@ import type { CcConfig, CrewSessionConfig } from "../config.ts";
 
 const READ_ORIGIN_MS = 5_000;
 
-async function originRepo(checkout: string): Promise<string | null> {
+export async function originRepo(checkout: string): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       "git",

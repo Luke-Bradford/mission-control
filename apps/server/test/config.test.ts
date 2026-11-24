@@ -22,6 +22,7 @@ import {
 } from "@mc/core";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  adoptHubRepo,
   applySeatAccount,
   type CcConfig,
   ConfigError,
@@ -1999,6 +2000,15 @@ describe("ownsHubFiles", () => {
     expect(ownsHubFiles({ hubRepo: "a" }, "a")).toBe(true);
     expect(ownsHubFiles({ hubRepo: "a" }, "b")).toBe(false);
     expect(ownsHubFiles({ hubRepo: null }, "a")).toBe(false);
+  });
+
+  it("is true for the hub's repo when it is onboarded after startup", () => {
+    const config = { hubRepo: null, hubGithub: "o/hub", repos: [] as never[] };
+    adoptHubRepo(config, { id: "other", github: "o/other" });
+    expect(ownsHubFiles(config, "other")).toBe(false);
+    adoptHubRepo(config, { id: "hub", github: "O/Hub" });
+    expect(ownsHubFiles(config, "hub")).toBe(true);
+    expect(ownsHubFiles(config, "other")).toBe(false);
   });
 });
 
