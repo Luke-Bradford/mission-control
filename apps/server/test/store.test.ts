@@ -13,6 +13,7 @@ import type {
   GuardRule,
   LoopKind,
   MachineSample,
+  PrCheck,
   Profile,
   PullRequestView,
   ReviewFinding,
@@ -5279,7 +5280,7 @@ it("reopens a legacy digest cache with malformed history while keeping its windo
   store = new Store(join(dir, "mc.sqlite"));
   expect(store.digestContextWindows(["known", "malformed"])).toEqual(new Map([["known", 200000]]));
 });
-it("keeps the parsed pull requests between writes, and every write is seen by the next read (#2219)", () => {
+describe("the parsed pull requests are kept between writes (#2219)", () => {
   const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({
     repoId: "repo",
     number,
@@ -5296,38 +5297,83 @@ it("keeps the parsed pull requests between writes, and every write is seen by th
     mergedAt: null,
     headSha: "head",
     mergeable: null,
+    checks: [
+      { name: "ci", kind: "check", state: "pending", conclusion: "pending", attempt: 1, url: "u" },
+    ],
     ...patch,
   });
-  store.upsertPullRequests("repo", [pr(1), pr(2)], 1);
-  const first = store.pullRequests("repo");
-  const again = store.pullRequests("repo");
-  // no write in between: the same parsed rows, in a list of the caller's own
-  expect(again).not.toBe(first);
-  expect(again[0]).toBe(first[0]);
-  again.pop();
-  expect(store.pullRequests("repo").map((p) => p.number)).toEqual([2, 1]);
-  // the rows are shared, so they cannot be changed in place
-  expect(() => {
-    (first[0] as PullRequestView).title = "changed";
-  }).toThrow(TypeError);
+  const raw = () => (store as unknown as { db: { exec(sql: string): void } }).db;
+  const titles = (repoId = "repo") =>
+    store.pullRequests(repoId).map((p) => `${p.number} ${p.title}`);
 
-  // a write through the store
-  store.upsertPullRequests("repo", [pr(2, { title: "Renamed" }), pr(3)], 2);
-  expect(store.pullRequests("repo").map((p) => `${p.number} ${p.title}`)).toEqual([
-    "3 PR",
-    "2 Renamed",
-    "1 PR",
-  ]);
-  // raw SQL on the same connection
-  (store as unknown as { db: { exec(sql: string): void } }).db.exec(
-    "UPDATE pull_requests SET title = 'Raw' WHERE number = 1",
-  );
-  expect(store.pullRequests("repo").find((p) => p.number === 1)?.title).toBe("Raw");
-  store.markPullRequestsStale("repo");
-  store.replacePullRequests("repo", [pr(9)], 3);
-  expect(store.pullRequests("repo").map((p) => p.number)).toEqual([9]);
-  // another repo's list is its own
-  expect(store.pullRequests("other")).toEqual([]);
+  it("hands out the same rows until a write, in a list of the caller's own, and they cannot be changed", () => {
+    store.upsertPullRequests("repo", [pr(1), pr(2)], 1);
+    const first = store.pullRequests("repo");
+    const again = store.pullRequests("repo");
+    expect(again).not.toBe(first);
+    expect(again[0]).toBe(first[0]);
+    again.pop();
+    expect(titles()).toEqual(["2 PR", "1 PR"]);
+    const row = first[0] as PullRequestView;
+    expect(() => {
+      row.title = "changed";
+    }).toThrow(TypeError);
+    expect(() => row.checks?.push({ ...(row.checks[0] as PrCheck) })).toThrow(TypeError);
+    expect(() => {
+      (row.checks?.[0] as PrCheck).state = "passing";
+    }).toThrow(TypeError);
+    expect(() => row.assignees?.push("someone")).toThrow(TypeError);
+    expect(() => row.closingIssues?.push(1)).toThrow(TypeError);
+  });
+
+  it("shows each kind of write to the next read", () => {
+    store.upsertPullRequests("repo", [pr(1), pr(2)], 1);
+    store.upsertPullRequests("other", [pr(5, { repoId: "other" })], 1);
+    expect(titles()).toEqual(["2 PR", "1 PR"]);
+    expect(titles("other")).toEqual(["5 PR"]);
+
+    store.upsertPullRequests("repo", [pr(2, { title: "Renamed" }), pr(3)], 2);
+    expect(titles()).toEqual(["3 PR", "2 Renamed", "1 PR"]);
+    // the other repo's list is its own, and is still right
+    expect(titles("other")).toEqual(["5 PR"]);
+
+    raw().exec("UPDATE pull_requests SET title = 'Raw' WHERE repo_id = 'repo' AND number = 1");
+    expect(titles()).toEqual(["3 PR", "2 Renamed", "1 Raw"]);
+
+    store.replacePullRequests("repo", [pr(9)], 3);
+    expect(titles()).toEqual(["9 PR"]);
+
+    // a write by another connection to the same file
+    const second = new Store(join(dir, "mc.sqlite"));
+    second.upsertPullRequests("repo", [pr(9, { title: "From elsewhere" })], 4);
+    second.close();
+    expect(titles()).toEqual(["9 From elsewhere"]);
+  });
+
+  it("keeps the list through a status that only repeats, and drops it when that write fails after a real one", () => {
+    store.upsertPullRequests("repo", [pr(1)], 1);
+    store.setStatus("pulls", true, null);
+    const kept = store.pullRequests("repo")[0];
+    store.setStatus("pulls", true, null);
+    expect(store.pullRequests("repo")[0]).toBe(kept);
+
+    // one real change, then a repeated status whose write throws: the version must not move back
+    raw().exec("UPDATE pull_requests SET title = 'New' WHERE number = 1");
+    raw().exec(
+      "CREATE TRIGGER fail_status BEFORE UPDATE ON collector_status BEGIN SELECT RAISE(ABORT, 'no'); END",
+    );
+    expect(() => store.setStatus("pulls", true, null)).toThrow();
+    expect(titles()).toEqual(["1 New"]);
+  });
+
+  it("does not keep rows read inside a transaction that is then rolled back", () => {
+    store.upsertPullRequests("repo", [pr(1)], 1);
+    raw().exec("BEGIN");
+    raw().exec("UPDATE pull_requests SET title = 'Uncommitted' WHERE number = 1");
+    expect(titles()).toEqual(["1 Uncommitted"]);
+    raw().exec("ROLLBACK");
+    expect(titles()).toEqual(["1 PR"]);
+  });
 });
 
 it("looks up canonical and closingIssues-only ticket links within their repository", () => {

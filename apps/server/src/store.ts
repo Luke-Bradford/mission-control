@@ -2732,24 +2732,32 @@ export class Store {
    */
   pullRequests(repoId: RepoId): PullRequestView[] {
     const stamp = this.readVersion();
-    const kept = this.pullRequestsKept.get(repoId);
-    if (kept?.stamp === stamp) return [...kept.rows];
+    // one stamp for every repo's list: a write drops them all, so a repo that is no longer read
+    // does not keep its list for the life of the hub
+    if (this.pullRequestsKept.stamp !== stamp) this.pullRequestsKept = { stamp, lists: new Map() };
+    const kept = this.pullRequestsKept.lists.get(repoId);
+    if (kept !== undefined) return [...kept];
     const rows = this.pullRequestRows(
       this.statement("SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC").all(
         repoId,
       ) as Row[],
     );
     for (const row of rows) {
+      if (Array.isArray(row.checks)) for (const check of row.checks) Object.freeze(check);
       Object.freeze(row.assignees);
       Object.freeze(row.checks);
       Object.freeze(row.closingIssues);
       Object.freeze(row);
     }
-    this.pullRequestsKept.set(repoId, { stamp, rows });
+    // inside a transaction the rows may yet be rolled back, and a rollback does not move the stamp
+    if (!this.rawDb.isTransaction) this.pullRequestsKept.lists.set(repoId, rows);
     return [...rows];
   }
 
-  private readonly pullRequestsKept = new Map<RepoId, { stamp: string; rows: PullRequestView[] }>();
+  private pullRequestsKept: { stamp: string; lists: Map<RepoId, PullRequestView[]> } = {
+    stamp: "",
+    lists: new Map(),
+  };
 
   /** Branches from durable merged-PR history, retained after the live PR cache drops them. */
   mergedPullRequestBranches(repoId: RepoId): string[] {
@@ -3631,8 +3639,7 @@ export class Store {
     const kept = this.db
       .prepare("SELECT ok, error FROM collector_status WHERE collector = ?")
       .get(collector) as { ok: number; error: string | null } | undefined;
-    if (kept !== undefined && kept.ok === (ok ? 1 : 0) && kept.error === error)
-      this.timestampOnlyWrites++;
+    const timeOnly = kept !== undefined && kept.ok === (ok ? 1 : 0) && kept.error === error;
     this.db
       .prepare(
         `INSERT INTO collector_status (collector, ok, error, at, last_ok_at, failing_since)
@@ -3643,6 +3650,9 @@ export class Store {
              ELSE COALESCE(collector_status.failing_since, excluded.at) END`,
       )
       .run(collector, ok ? 1 : 0, error, at, ok ? at : null, ok ? null : at);
+    // counted only once the write has happened: a write that throws changed nothing, and counting
+    // it would move `readVersion` back onto a value an earlier state already had
+    if (timeOnly) this.timestampOnlyWrites++;
   }
 
   status(): HealthRow[] {

@@ -2326,13 +2326,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (id !== undefined) asks.add(id);
         }
         // pins and reactions are read once for the list, not once per mention
-        const rows = store.commsMentions(COMMS_CAPCOM);
-        const messages = storedCommsMessages(rows);
         return {
-          mentions: rows.map((row, i) => ({
-            message: messages[i],
-            seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-            needsReply: asks.has(row.id),
+          mentions: storedCommsMessages(store.commsMentions(COMMS_CAPCOM)).map((message) => ({
+            message,
+            seen: store.commsMentionSeen(COMMS_CAPCOM, message.id),
+            needsReply: asks.has(message.id),
           })),
         };
       });
