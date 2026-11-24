@@ -545,11 +545,20 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(o.cut, `${where}: the owner tag "${o.text}" is cut`).toBeLessThanOrEqual(0);
           }
           expect(r.owners.map((o) => o.text)).toContain("#1572");
-          expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
-            3,
-          );
+          expect(r.decisions, `${where}: Recent decisions is on the Plan tab`).toBe(0);
           for (const p of r.panels)
             expect(p.clipped, `${where}: ${p.id} hides content`).toBe(false);
+          // On the Plan tab, Recent decisions keeps its rows.
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+            null,
+          );
+          await page.box("#decisions li");
+          const planRows = await page.evaluate(
+            () => document.querySelectorAll("#decisions li").length,
+            null,
+          );
+          expect(planRows, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(3);
         },
         BROWSER_TEST_TIMEOUT_MS,
       );
