@@ -692,12 +692,15 @@
   padding: var(--sp-2) var(--sp-4);
   border-top: 1px solid var(--line);
 }
-.fp-unmeasured summary {
+.fp-unmeasured-toggle {
   min-height: var(--sp-5);
-  display: flex;
-  align-items: center;
-  cursor: pointer;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--fg-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .fp-unmeasured ul {
   list-style: none;

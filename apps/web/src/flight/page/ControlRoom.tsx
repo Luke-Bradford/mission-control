@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTz } from "../../clock.ts";
 import { rel } from "../../fmt.ts";
 import {
@@ -27,6 +28,8 @@ const SHAPE: Record<VitalState, string> = {
  */
 export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: number }) {
   const tz = useTz();
+  // The list is rendered only when open: a closed <details> still lays its rows out past the panel.
+  const [unmeasuredOpen, setUnmeasuredOpen] = useState(false);
   const counts = { ok: 0, warn: 0, crit: 0, none: 0 };
   for (const v of vitals) counts[v.state]++;
   return (
@@ -74,17 +77,27 @@ export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: nu
           </li>
         ))}
       </ul>
-      <details className="fp-unmeasured">
-        <summary>{`${UNMEASURED.length} measures ${NOT_MEASURED}`}</summary>
-        <ul>
-          {UNMEASURED.map((u) => (
-            <li key={u.id} data-vital={u.id}>
-              <span className="fp-vlabel">{u.label}</span>
-              <span className="fp-muted">: {u.source}</span>
-            </li>
-          ))}
-        </ul>
-      </details>
+      <div className="fp-unmeasured">
+        <button
+          type="button"
+          className="fp-unmeasured-toggle"
+          aria-expanded={unmeasuredOpen}
+          aria-controls="fp-unmeasured-list"
+          onClick={() => setUnmeasuredOpen(!unmeasuredOpen)}
+        >
+          {`${UNMEASURED.length} measures ${NOT_MEASURED}`}
+        </button>
+        {unmeasuredOpen && (
+          <ul id="fp-unmeasured-list">
+            {UNMEASURED.map((u) => (
+              <li key={u.id} data-vital={u.id}>
+                <span className="fp-vlabel">{u.label}</span>
+                <span className="fp-muted">: {u.source}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <p className="fp-note fp-bandnote">
         Good and bad limits are drafts until a week of real figures settles them with the operator.
       </p>

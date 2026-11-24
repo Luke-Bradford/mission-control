@@ -175,9 +175,14 @@ describe("the FLIGHT page tabs", () => {
     expect(note?.textContent).toContain("Age of FLIGHT's own note");
     // Measures with no source yet are one line, opened to name each and say what it needs.
     const unmeasured = room.querySelector(".fp-unmeasured");
-    expect(unmeasured?.querySelector("summary")?.textContent).toBe(
-      `${UNMEASURED.length} measures ${NOT_MEASURED}`,
-    );
+    const toggle = within(unmeasured as HTMLElement).getByRole("button", {
+      name: `${UNMEASURED.length} measures ${NOT_MEASURED}`,
+    });
+    // Closed, the list is not in the page at all; opened, it names each measure.
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(unmeasured?.querySelector("li")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     const load = within(unmeasured as HTMLElement)
       .getByText("Load balance across the crew")
       .closest("li");
