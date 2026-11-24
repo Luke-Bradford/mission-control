@@ -16,6 +16,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_KEY,
   FLIGHT_OFF_GRACE_MS,
+  FLIGHT_RUNAWAY_AUTO_LIFT_MS,
   FLIGHT_RUNAWAY_LIFTED_SETTING,
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_TRIAGE_WAIT_MS,
@@ -25,10 +26,10 @@ import {
   type Profile,
   type PullRequestView,
   QUEUE_REORDER_ITEM_PREFIX,
-  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
   type RunLoop,
+  runawayTriageDetail,
   type SeatSessionRow,
   type TestLockState,
 } from "@mc/core";
@@ -3652,8 +3653,9 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate()).toBeUndefined();
     ask();
     expect(aggregate()?.text).toBe(
-      `FLIGHT is not triaging: 1 waiting since ${aggregate()?.text.match(/since (\d\d:\d\d)/)?.[1]}. ${RUNAWAY_TRIAGE_DETAIL}`,
+      `FLIGHT is not triaging: 1 waiting since ${aggregate()?.text.match(/since (\d\d:\d\d)/)?.[1]}. ${runawayTriageDetail(FLIGHT_RUNAWAY_AUTO_LIFT_MS)}`,
     );
+    expect(aggregate()?.text).toContain("lifts it by itself 2 hours after the trip");
   });
 
   it("starts the triage window after a lift, so items raised during the trip are not missed at once", () => {

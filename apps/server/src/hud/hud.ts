@@ -72,9 +72,9 @@ import {
   REVIEW_ROUNDS,
   type ReviewRow,
   type ReviewState,
-  RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
+  runawayTriageDetail,
   type SeatSessionRow,
   STALL_TEXT,
   seatCallSign,
@@ -114,7 +114,7 @@ import {
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
+import { runawayLiftedAt, runawayTrip, runawayWait } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
 import { parseJson, rethrowJson } from "../json.ts";
@@ -1120,7 +1120,7 @@ function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTri
       triaging: false,
       live: false,
       cause: "down",
-      detail: RUNAWAY_TRIAGE_DETAIL,
+      detail: runawayTriageDetail(runawayWait(store, tripped.at)),
       since: tripped.at,
       liveSince: 0,
       showsAt: null,
