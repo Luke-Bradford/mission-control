@@ -424,6 +424,63 @@ describe("startCmuxSession", () => {
     expect(h.saved.at(-1)).toBeNull();
   });
 
+  it("refuses a tool permission prompt itself, so the seat never waits on a person for one", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen =
+        "Bash command\n  rm -rf x\nDo you want to proceed?\n❯ 1. Yes\n  2. No, and tell Claude what to do differently (esc)";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("running");
+    await wait(() => h.events.some((e) => e.kind === "turn-start"));
+    h.setLifecycle("needsInput");
+    await wait(() => (state().keys ?? []).some((k) => k.key === "escape"));
+    expect(state().keys.find((k) => k.key === "escape")).toMatchObject({ force: true });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(h.events.some((e) => e.kind === "needs-input")).toBe(false);
+    await h.session.close();
+  });
+
+  it("leaves any other dialog to the operator", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+      s.screen = "Which approach do you want?\n❯ 1. A\n  2. B";
+    });
+    const h = start();
+    await h.session.ready;
+    h.setLifecycle("needsInput");
+    await wait(() => h.events.some((e) => e.kind === "needs-input"));
+    expect((state().keys ?? []).some((k) => k.key === "escape")).toBe(false);
+    await h.session.close();
+  });
+
+  it("answers the context use from Claude's last top-level reply", async () => {
+    patch((s) => {
+      s.claudePid = ALIVE;
+    });
+    const h = start();
+    await h.session.ready;
+    await expect(h.session.control("get_context_usage")).rejects.toMatchObject({ kind: "refused" });
+    const usage = (input: number, sidechain = false) => ({
+      type: "assistant",
+      ...(sidechain ? { isSidechain: true } : {}),
+      message: {
+        usage: {
+          input_tokens: input,
+          cache_read_input_tokens: 100,
+          cache_creation_input_tokens: 10,
+        },
+      },
+    });
+    h.claudeLines(usage(5), usage(99_999, true));
+    await wait(() => h.session.lines === 2);
+    await expect(h.session.control("get_context_usage")).resolves.toMatchObject({
+      totalTokens: 115,
+    });
+    await h.session.close();
+  });
+
   it("interrupts with escape, forced, and refuses what only print mode has", async () => {
     patch((s) => {
       s.claudePid = ALIVE;

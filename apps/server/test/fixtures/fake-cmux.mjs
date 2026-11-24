@@ -20,7 +20,12 @@ const argv = process.argv.slice(2);
 const stateAt = argv[argv.indexOf("--state") + 1];
 let args = argv.slice(argv.indexOf("--state") + 2);
 const read = () => JSON.parse(readFileSync(stateAt, "utf8"));
-const save = (s) => writeFileSync(stateAt, JSON.stringify(s));
+// Read-only commands write nothing back, so a test's own change to the file is never lost to them
+// (they are polled every second). `calls` lists only the commands that change something.
+const READ_ONLY = new Set(["sessions", "list-workspaces", "read-screen", "ping"]);
+const save = (s) => {
+  if (!READ_ONLY.has(cmd)) writeFileSync(stateAt, JSON.stringify(s));
+};
 const state = read();
 state.calls ??= [];
 state.calls.push(args);

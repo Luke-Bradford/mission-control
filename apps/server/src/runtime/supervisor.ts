@@ -256,10 +256,11 @@ import {
   judgeCliCheck,
   writeCliCheckTask,
 } from "./cli-check.ts";
-import { type Cmux, CmuxError, createCmux } from "./cmux.ts";
+import { type Cmux, CmuxError, type CmuxOptions, createCmux } from "./cmux.ts";
 import {
   attachCmuxSession,
   type CmuxSaved,
+  cmuxKeeperKey,
   cmuxSourceKey,
   cmuxWorkspaceKey,
   startCmuxSession,
@@ -502,6 +503,8 @@ export interface SupervisorDeps {
   /** How often a cmux run is polled, and how long it may take to show Claude (default 1 s, 60 s). */
   cmuxPollMs?: number;
   cmuxStartWaitMs?: number;
+  /** How cmux is started when it is not running (tests give a stand-in and a short wait). */
+  cmuxOptions?: CmuxOptions;
   /** Default "codex"; its version and app-server are run through the same binary. */
   codexCommand?: string;
   /** Defaults to ~/.codex/auth.json; tests supply an isolated fake login. */
@@ -896,9 +899,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((msg: string) => process.stderr.write(`crew: ${msg}\n`));
   const cmux: Cmux | null =
-    deps.cmuxCommand === undefined ? null : createCmux(deps.cmuxCommand, log);
+    deps.cmuxCommand === undefined ? null : createCmux(deps.cmuxCommand, log, deps.cmuxOptions);
   /** A Claude run lives in a cmux workspace, not under a keeper. */
-  const viaCmux = (run: Pick<Run, "vendor">) => cmux !== null && run.vendor !== "codex";
+  const viaCmux = (run: Pick<Run, "id" | "vendor">) =>
+    cmux !== null && run.vendor !== "codex" && store.getSetting(cmuxKeeperKey(run.id)) === null;
   /** The workspaces this hub's runs hold: a same-named one is not a new run's. */
   const claimedWorkspaces = new Set<string>();
   const savedWorkspace = (runId: string): CmuxSaved | null => {
@@ -1975,18 +1979,33 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (stopping) throw new Error(SHUTTING_DOWN);
       store.setRunCliVersionIfLive(run.id, cliVersion);
     }
+    let inCmux = false;
     if (cmux !== null && run.vendor !== "codex") {
-      // cmux refusing the hub, or not starting, is a refused start like any other (409)
       try {
         await cmux.ensure();
+        inCmux = true;
       } catch (e) {
-        if (e instanceof CmuxError) throw new SupervisorError(409, e.message, { cause: e });
-        throw e;
+        if (!(e instanceof CmuxError)) throw e;
+        // No seat may wait on cmux, FLIGHT least of all: the run starts on the keeper instead.
+        log(`${info.seat.id}: ${e.message}; starting on the keeper instead`);
       }
       if (stopping) throw new Error(SHUTTING_DOWN);
-      // a resume starts a new workspace: the old one (its Claude gone, or about to be replaced) closes
-      if (!(await closeWorkspace(run.id)))
-        throw new SupervisorError(409, "could not close the run's earlier cmux workspace");
+      if (inCmux) {
+        // a resume starts a new workspace: the old one (its Claude gone, or about to be replaced) closes
+        if (!(await closeWorkspace(run.id)))
+          throw new SupervisorError(409, "could not close the run's earlier cmux workspace");
+        store.deleteSetting(cmuxKeeperKey(run.id));
+      } else {
+        const old = savedWorkspace(run.id);
+        // two CLIs must never run one session: cmux's may still run though cmux will not answer
+        if (old?.pid != null && pidAlive(old.pid))
+          throw new SupervisorError(
+            409,
+            "the run's Claude in cmux still runs and cmux will not answer",
+          );
+        store.deleteSetting(cmuxWorkspaceKey(run.id));
+        store.setSetting(cmuxKeeperKey(run.id), "1");
+      }
     }
     while (accountUpdate !== null) await accountUpdate;
     if (stopping) throw new Error(SHUTTING_DOWN);
@@ -2025,6 +2044,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       keepPrompt,
       beforeSpawn,
       privateEnv,
+      inCmux,
     );
   }
 
@@ -2039,6 +2059,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     keepPrompt = false,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
     privateEnv?: Record<string, string>,
+    /** A Claude run in a cmux workspace; false: on the keeper (`claude -p`). */
+    inCmux = false,
   ): Live {
     const pause = pausedSeat(store, info.seat.id, run.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
@@ -2144,7 +2166,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     beforeSpawn?.(system);
     // a cmux run's cursor counts the lines of the run's own workspace, so the run id stands for it
-    const keeperSpawn = viaCmux(run) ? run.id : randomUUID();
+    const keeperSpawn = inCmux ? run.id : randomUUID();
     const release = grant(info, run);
     // A resume's earlier token (its process gone) is dropped before the new one is issued.
     deps.tokens.revoke(run.id);
@@ -2355,6 +2377,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           writeSkillPlugin(skillsDir, info.repo.id, repoDocs.skills.skills);
         }
         const args = crewCliArgs({
+          print: !inCmux,
           pluginDir: existsSync(join(skillsDir, ".claude-plugin")) ? skillsDir : undefined,
           commands: info.repo.commands,
           protectedFiles: info.repo.protectedFiles,
@@ -2392,7 +2415,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           crewProfileOf(info.seat.role, def.loop) === "flight-full",
           readOnlyReview,
         );
-        if (cmux !== null) {
+        if (inCmux && cmux !== null) {
           const ref =
             run.reviewId != null
               ? `PR ${store.review(run.reviewId)?.prNumber ?? "?"}`
@@ -2507,6 +2530,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function removeRunFiles(runId: string): void {
     pendingPromptVersions.delete(runId);
     store.deleteSetting(cmuxSourceKey(runId));
+    store.deleteSetting(cmuxKeeperKey(runId));
     void deps.reviewPreviews?.close(runId);
     try {
       if (keeperAlive(crewKeeperDir(deps.dbPath, runId))) return;
@@ -3153,7 +3177,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
     }
     if (runGone(runId, row.seatId) || stopping) return;
-    const found = viaCmux(row)
+    const found = viaCmux({ id: runId, vendor: row.vendor })
       ? await attachWorkspace(row, runId)
       : await attachSession({
           dir,

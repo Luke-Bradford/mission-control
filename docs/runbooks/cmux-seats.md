@@ -12,11 +12,13 @@ cmux must let Mission Control control it. In `~/.config/cmux/cmux.json` (this Ma
 { "automation": { "socketControlMode": "automation" } }
 ```
 
-Without it every Claude start is refused with: `cmux refuses Mission Control: set "automation":
-{ "socketControlMode": "automation" } in ~/.config/cmux/cmux.json`. If cmux is not running, the hub
-opens it (in the background) and waits up to 10 s; if it still is not up the start says
-`cmux is not running and could not be started`. FLIGHT is a Claude seat, so with cmux down no Claude
-seat starts, FLIGHT included.
+If cmux is not running, the hub opens it (in the background) and waits up to 10 s. When cmux refuses
+the hub (the setting is missing) or will not start, no seat waits on it: the run starts on the old
+keeper (`claude -p`) instead, FLIGHT included, and the hub logs why
+(`cmux refuses Mission Control: set "automation": { "socketControlMode": "automation" } in
+~/.config/cmux/cmux.json`, or `cmux is not running and could not be started`). That run stays on the
+keeper until it ends; the next start tries cmux again. A start is refused only when a run's earlier
+Claude in cmux still runs and cmux will not answer, so two CLIs never run one session.
 
 ## What each run is
 
@@ -33,9 +35,11 @@ seat starts, FLIGHT included.
 - **Read it** and **type into it.** What you type is a turn of its own; the seat shows Running, then
   Idle. The run stays open.
 - **`/clear` it.** The run keeps going on the new session id. The seat is not re-briefed.
-- **Answer it.** When the seat asks a question or a permission, the Agents page shows Waiting with
-  "Needs your input in cmux" and cmux rings. A tool outside the seat's allowlist now asks you
-  instead of being refused.
+- **Permission prompts answer themselves.** A tool outside the seat's allowlist opens Claude's
+  permission dialog; the hub refuses it at once (Escape), as print mode refused the tool, so no seat
+  waits for you on one. The seat carries on with its turn.
+- **Answer it.** Any other dialog (a question for you) shows on the Agents page as Waiting with
+  "Needs your input in cmux", and cmux rings.
 - **Close it.** Ends the process; the hub treats it like any other exit.
 
 Do not restart the agent from cmux's own restore: a restored agent has no hub settings, so the hub
@@ -52,7 +56,9 @@ closes it and resumes the run with its own command.
 ## Limits
 
 - No per-run dollar cap: `--max-budget-usd` is print mode only. Token counts are still read.
-- Context usage and the usage control are not available; the seat's context figure stays unknown.
+- The seat's context use is read from Claude's own transcript (input, cache read and cache written
+  of its last top-level reply), so FLIGHT's fresh session past its context limit still happens. The
+  usage control (`get_usage`) is not available.
 - Stop, Interrupt and Resume work: Interrupt sends Escape into the workspace.
 
 ## After a hub restart

@@ -1251,6 +1251,8 @@ export interface CrewCliInput {
   sessionId: string;
   /** Passed as `--effort`; absent or null: the CLI's own default. */
   effort?: CrewEffort | null;
+  /** Print mode (`claude -p`, stream-json both ways) for a keeper; absent: interactive, as in cmux. */
+  print?: boolean;
   /** true: reattach to `sessionId` with `--resume`; false: start it with `--session-id`. */
   resume: boolean;
   /**
@@ -1356,6 +1358,9 @@ export function crewCliArgs(i: CrewCliInput): string[] {
   allowed.push(...new Set([...granted, ...runTools].map((t) => `mcp__${MC_MCP_SERVER}__${t}`)));
   const profile = i.profile ?? "standard";
   const args = [
+    ...(i.print
+      ? ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+      : []),
     "--model",
     i.model,
     ...(i.effort ? ["--effort", i.effort] : []),

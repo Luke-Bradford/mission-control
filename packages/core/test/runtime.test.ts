@@ -250,6 +250,19 @@ describe("crewCliArgs", () => {
     expect(crewCliArgs({ ...base, effort: null })).not.toContain("--effort");
   });
 
+  it("starts in print mode for a keeper when asked", () => {
+    const a = crewCliArgs({ ...base, print: true });
+    expect(a.slice(0, 6)).toEqual([
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ]);
+    expect(a).not.toContain("--max-budget-usd");
+  });
+
   it("resumes with --resume instead of --session-id", () => {
     const a = crewCliArgs({ ...base, resume: true });
     expect(a[a.indexOf("--resume") + 1]).toBe(base.sessionId);

@@ -28,6 +28,8 @@ import { type CrewSession, SessionControlError } from "./session.ts";
 export const cmuxWorkspaceKey = (runId: string) => `cmux.workspace:${runId}`;
 /** How far the hub has read Claude's transcript for a run, kept after its workspace closes (a resume needs it). */
 export const cmuxSourceKey = (runId: string) => `cmux.source:${runId}`;
+/** Set while a Claude run is on the keeper because cmux was down or refused the hub at its start. */
+export const cmuxKeeperKey = (runId: string) => `cmux.keeper:${runId}`;
 
 export const CMUX_START_FAILED = "cmux did not start Claude";
 export const CMUX_ENDED = "the Claude process in cmux ended";
@@ -44,6 +46,11 @@ const QUIET_POLLS = 2;
 /** The words of Claude's folder-trust prompt. */
 const TRUST_PROMPT = /trust (this|the files in this) (folder|directory)|do you trust/i;
 const TRUST_RETRY_MS = 3000;
+/** Claude's tool permission dialog: the hub refuses it, so no seat waits on a person. */
+const PERMISSION_PROMPT =
+  /Do you want to (proceed|make this edit|create|allow|run)|don't ask again|No, and tell Claude/i;
+/** A refused prompt still showing at the next poll is not refused again until this has passed. */
+const DENY_RETRY_MS = 2000;
 /** The last of a run's records whose lines the poll reads at once. */
 const READ_CHUNK = 4 * 1024 * 1024;
 
@@ -171,6 +178,10 @@ function createCmuxDriver(
   /** Lines of the source being read that the hub has taken in (copied or skipped), never its own. */
   let sourceLines = 0;
   let savedLines = -1;
+  /** Tokens in Claude's context at its last reply; null until one is read. */
+  let contextTokens: number | null = null;
+  /** When the hub last refused a permission prompt: once per prompt, not once per poll. */
+  let deniedAt = 0;
   let savedPath: string | null = null;
   let attachedSaid = mode.kind !== "attach";
   let timer: NodeJS.Timeout | undefined;
@@ -288,9 +299,30 @@ function createCmuxDriver(
     }
   }
 
+  /** The context Claude's last top-level reply used: input, cache read and cache written. */
+  function noteUsage(ev: unknown): void {
+    if (!isObj(ev) || ev.type !== "assistant" || ev.isSidechain === true) return;
+    if (ev.parent_tool_use_id !== undefined && ev.parent_tool_use_id !== null) return;
+    const u = isObj(ev.message) && isObj(ev.message.usage) ? ev.message.usage : null;
+    if (u === null) return;
+    const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
+    contextTokens =
+      n(u.input_tokens) + n(u.cache_read_input_tokens) + n(u.cache_creation_input_tokens);
+  }
+
   function take(line: string): void {
     if (line === "") return;
     sourceLines++;
+    let ev: unknown = null;
+    if (line.startsWith("{")) {
+      try {
+        ev = parseJson<unknown>(line, undefined, rethrowJson);
+      } catch {
+        ev = null;
+      }
+    }
+    // a line the hub already has still says how full the context is
+    noteUsage(ev);
     if (skip > 0) {
       skip--;
       lines++;
@@ -300,13 +332,6 @@ function createCmuxDriver(
     lines++;
     grew = true;
     emit({ kind: "output", at: Date.now() });
-    if (!line.startsWith("{")) return;
-    let ev: unknown;
-    try {
-      ev = parseJson<unknown>(line, undefined, rethrowJson);
-    } catch {
-      return;
-    }
     if (isObj(ev) && ev.type === "user" && isObj(ev.message) && Array.isArray(ev.message.content)) {
       for (const c of ev.message.content) {
         const id = isObj(c) && c.type === "tool_result" ? str(c.tool_use_id) : null;
@@ -392,6 +417,9 @@ function createCmuxDriver(
         emit({ kind: "attached", awaiting: seen.lifecycle !== "idle" });
         return;
       }
+      // A permission prompt waits on no one: the hub refuses it, as print mode refused the tool.
+      if (seen.lifecycle === "needsInput" && lifecycle !== "needsInput" && (await refusedPrompt()))
+        return;
       change(seen.lifecycle);
       // A turn that began and ended between two polls shows only in the transcript.
       if (sentAt !== null && lifecycle === "idle") {
@@ -412,6 +440,30 @@ function createCmuxDriver(
   function schedule(): void {
     if (finished || detached) return;
     timer = setTimeout(() => void poll(), pollMs);
+  }
+
+  /**
+   * True when the open dialog is a tool permission prompt and the hub has refused it (Escape, which
+   * Claude takes as "no"): the seat goes on with its turn. Any other dialog is the operator's.
+   */
+  async function refusedPrompt(): Promise<boolean> {
+    let screen = "";
+    try {
+      screen = await i.cmux.readScreen(workspace);
+    } catch {
+      return false;
+    }
+    if (!PERMISSION_PROMPT.test(screen)) return false;
+    if (Date.now() - deniedAt < DENY_RETRY_MS) return true;
+    deniedAt = Date.now();
+    try {
+      await i.cmux.sendKey(workspace, "escape", true);
+      log(`${i.name}: refused a permission prompt the seat's allowlist does not cover`);
+    } catch (e) {
+      log(`${i.name}: could not refuse a permission prompt: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+    return true;
   }
 
   /** Before ready: answer the trust prompt, and wait for Claude's record. */
@@ -501,6 +553,12 @@ function createCmuxDriver(
               new SessionControlError("refused", e instanceof Error ? e.message : String(e)),
             ),
         );
+      }
+      if (subtype === "get_context_usage") {
+        // the shape the CLI's own answer has: the hub reads only the total
+        return contextTokens === null
+          ? Promise.reject(new SessionControlError("refused", "no reply read yet"))
+          : Promise.resolve({ categories: [], totalTokens: contextTokens, maxTokens: null });
       }
       return Promise.reject(new SessionControlError("refused", "not available in cmux"));
     },

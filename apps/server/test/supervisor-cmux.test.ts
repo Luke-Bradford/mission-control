@@ -14,8 +14,7 @@ import { join } from "node:path";
 import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
-import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
-import { cmuxSourceKey, cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
+import { cmuxKeeperKey, cmuxSourceKey, cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -27,7 +26,6 @@ import {
   HUB_ROLES,
   make,
   recorded,
-  refusal,
   reopenStore,
   root,
   seatState,
@@ -267,14 +265,52 @@ describe("a Claude run in cmux", () => {
     expect(store.run(runId)?.endedAt).not.toBeNull();
   });
 
-  it("refuses the start with cmux's own words when it refuses the hub", async () => {
-    fakeCmux({ denied: true });
-    const { sup } = make({ cmuxState: stateFile() });
+  it.each([
+    ["refuses the hub", { denied: true }],
+    ["is down", { down: true }],
+  ])("starts FLIGHT on the keeper when cmux %s", async (_what, over) => {
+    direction();
+    fakeCmux(over);
+    const { sup, log } = make({ cmuxState: stateFile(), extraSeat: flight });
     sup.start();
-    const e = await refusal(sup.startRun("guido-1", 42));
-    expect([e.status, e.message]).toEqual([409, CMUX_REFUSED_TEXT]);
-    expect(store.seatSession("guido-1")?.runId ?? null).toBeNull();
+    const { runId } = await sup.startWatch(flight.id);
+    await until(() => expect(recorded().length).toBeGreaterThan(0));
+    const argv = recorded()[0].argv as string[];
+    expect(argv).toContain("-p");
+    expect(argv).toContain("--settings");
+    expect(existsSync(join(crewKeeperDir(dbPath, runId), "keeper.pid"))).toBe(true);
     expect(cmuxState().workspaces ?? []).toEqual([]);
+    expect(store.getSetting(cmuxKeeperKey(runId))).toBe("1");
+    expect(log.mock.calls.some(([m]) => String(m).includes("starting on the keeper instead"))).toBe(
+      true,
+    );
+  });
+
+  it("reads the seat's context use from Claude's transcript", async () => {
+    const { sup, runId } = await started();
+    lifecycle("running");
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    appendFileSync(
+      claudeFile(),
+      `${JSON.stringify({
+        type: "assistant",
+        message: {
+          id: "m1",
+          model: "claude-opus-5-5",
+          content: [{ type: "text", text: "hi" }],
+          usage: {
+            input_tokens: 1000,
+            output_tokens: 50,
+            cache_read_input_tokens: 140_000,
+            cache_creation_input_tokens: 12_000,
+          },
+        },
+      })}\n`,
+    );
+    await until(() => expect(store.digest(runId)?.contextTokens).toBe(153_000));
+    lifecycle("idle");
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect((await sup.contextUsage("guido-1"))?.total).toBe(153_000);
   });
 
   it("takes a run back after a hub restart by attaching to its workspace", async () => {
