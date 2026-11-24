@@ -1703,13 +1703,18 @@ describe("the FLIGHT watcher", () => {
         kind: "blocked",
         seatId: "flight-1",
         repoId: "mc",
-        text: flightStartFailedText("it would not start; the server log has the error"),
+        text: flightStartFailedText("it would not start; the server log has the error", true),
       },
     ]);
-    // the open note holds past the hour, after the start count has expired
-    nowMs += 61 * MIN;
+    // the hub does not wait for the operator: one more start once the cooldown has passed, under
+    // the same note
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS - MIN;
     await watch.check();
     expect(startCalls).toHaveLength(3);
+    nowMs += MIN;
+    await watch.check();
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
     expect(notesOpen()).toHaveLength(1);
     live("flight-1", "r-hand");
     facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
@@ -1718,8 +1723,41 @@ describe("the FLIGHT watcher", () => {
     // the clear emptied the start count: three more starts before the next note
     noFlight();
     for (let i = 0; i < 3; i++) await watch.check();
-    expect(startCalls).toHaveLength(6);
+    expect(startCalls).toHaveLength(7);
     expect(notesOpen()).toEqual([]);
+  });
+
+  it("a start that threw is retried by the hub after the cap, and FLIGHT runs again with no operator call (#2215)", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    expect(startCalls).toHaveLength(3);
+    expect(notesOpen()).toHaveLength(1);
+    startFails = null; // the cause passes
+    nowMs += FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    live("flight-1", "r-hand");
+    facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+    await watch.check();
+    expect(notesOpen()).toEqual([]);
+  });
+
+  it("the operator's Stop holds against the retry, and a FLIGHT that started and died is not retried", async () => {
+    startFails = "boom";
+    for (let i = 0; i < 4; i++) await watch.check();
+    store.setSeatSession(row("flight-1", null, "stopped"));
+    nowMs += 2 * FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(3);
+    // a retry that makes a session ends the retries: if it dies, its note says to start it by hand
+    store.setSeatSession(row("flight-1", null, "idle"));
+    startFails = null;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
+    noFlight();
+    nowMs += 2 * FLIGHT_GUARD_COOLDOWN_MS;
+    await watch.check();
+    expect(startCalls).toHaveLength(4);
   });
 
   describe("a FLIGHT run with no live session (#798)", () => {
@@ -1821,6 +1859,7 @@ describe("the FLIGHT watcher", () => {
           seatId: "flight-1",
           text: flightStartFailedText(
             "its process is gone and it would not restart; the server log has the error",
+            true,
           ),
         },
       ]);
@@ -1834,7 +1873,7 @@ describe("the FLIGHT watcher", () => {
       alive = null;
       for (let i = 0; i < 4; i++) await watch.check();
       expect(notesOpen()).toMatchObject([
-        { text: flightStartFailedText("it would not start; the server log has the error") },
+        { text: flightStartFailedText("it would not start; the server log has the error", true) },
       ]);
     });
 
