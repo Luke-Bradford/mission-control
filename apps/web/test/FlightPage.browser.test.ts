@@ -411,6 +411,7 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(r.tiny, `${where}: no text under 11 px`).toEqual([]);
             expect(r.labels).toEqual([
               "FLIGHT",
+              "Focus now",
               "Cost per hour",
               "Sessions per hour",
               "Context size",
