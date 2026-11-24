@@ -1081,6 +1081,30 @@ describe("idle-seat wakes", () => {
     ]);
   });
 
+  it("wakes from the active FLIGHT seat, not a retiring watch seat listed before it", async () => {
+    const seats = config.crew?.sessions[0]?.seats;
+    if (!seats) throw new Error("no crew");
+    for (const id of ["flight-old", "flight-new"])
+      seats.push({
+        id,
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+        ...(id === "flight-old" ? { retiring: true } : {}),
+      });
+    setLoop({ phase: "working", hold: null, prNumber: 12 });
+    store.setSeatTurnStarted(SEAT, clock);
+    clock += MIN;
+    const at = clock + 1;
+    store.addComms({ at, from: "flight-new", to: SEAT, ticket: null, text: "handed over" });
+    clock += 2;
+    await h.engine.tick();
+    expect(sentKeys().filter((key) => key.startsWith(`wake:${RUN}:`))).toEqual([
+      `wake:${RUN}:message:${at}:flight-new`,
+    ]);
+  });
+
   it.each([
     ["the FLIGHT session first", true],
     ["the run's session first", false],

@@ -170,6 +170,7 @@ import {
   ownsHubFiles,
   seatUnavailable,
 } from "../config.ts";
+import { flightSeat } from "../flight/seat.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -837,10 +838,8 @@ export function createEngine(deps: EngineDeps): Engine {
           .filter((m) => m.to === run.agentId)
           .map((m) => ({ key: `${m.at}:${m.from}`, from: m.from, at: m.at })),
         woken,
-        flightSeatId:
-          // config allows one watcher across every session, so it need not share the run's session
-          config.crew?.sessions.flatMap((s) => s.seats).find((x) => seatDef(x).loop === "watch")
-            ?.id ?? null,
+        // the active FLIGHT seat (not a retiring or unavailable one); it need not share the run's session
+        flightSeatId: flightSeat(config)?.seat.id ?? null,
         // the fix line carries the findings' text and wakes the seat itself, so a findings item
         // whose fix line is still unsent is left to it
       }).filter(
