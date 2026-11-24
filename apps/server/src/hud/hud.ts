@@ -1779,7 +1779,14 @@ function buildAttentionItems(
   const shown =
     triage === null
       ? checked
-      : withNotTriaging(checked, triage, acks, now, config.operator.timezone);
+      : withNotTriaging(
+          checked,
+          triage,
+          acks,
+          now,
+          config.operator.timezone,
+          config.operator.locale ?? DEFAULT_LOCALE,
+        );
   return includeHeld ? [...shown, ...partition.held] : shown;
 }
 
@@ -1795,6 +1802,7 @@ function withNotTriaging(
   acks: Map<string, number>,
   now: number,
   timeZone: string,
+  locale: string,
 ): AttentionItem[] {
   const members = items
     .filter(
@@ -1825,7 +1833,7 @@ function withNotTriaging(
     text: flightNotTriagingText(
       cause,
       members.length,
-      since === null ? null : sinceText(since, now, timeZone),
+      since === null ? null : sinceText(since, now, timeZone, locale),
       triage.detail,
     ),
     tool: null,

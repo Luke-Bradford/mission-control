@@ -4136,6 +4136,16 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     );
   });
 
+  it("uses the operator locale for a prior-day not-triaging alert", () => {
+    c = { ...c, operator: { ...c.operator, locale: "en-US" } };
+    flight({ runId: null, state: "stopped" });
+    ask(NOW - DAY);
+
+    expect(aggregate()?.text).toBe(
+      "FLIGHT is stopped: 1 waiting since Oct 16 13:00. Start it to have them triaged.",
+    );
+  });
+
   it("counts only the hub's alerts among items like the 7 November ones, with FLIGHT live (#1543)", () => {
     flight();
     // a watched loop's 115-day-old issue, never briefed
