@@ -226,7 +226,9 @@ describe("QA acceptance", () => {
       visualEvidenceAvailable: false,
     };
     await ready();
-    expect(await screen.findByText("Screenshot evidence is unavailable for this repository.")).toBeTruthy();
+    expect(
+      await screen.findByText("Screenshot evidence is unavailable for this repository."),
+    ).toBeTruthy();
     expect(screen.queryByText("No page changes")).toBeNull();
     expect(
       fetcher.mock.calls.some(([path]) => path === `/api/prs/2/evidence?repo=mc&sha=${SHA}`),

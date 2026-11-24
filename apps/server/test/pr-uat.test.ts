@@ -272,10 +272,7 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
       config: {
         ...config,
         hubRepo: "hub",
-        repos: [
-          ...config.repos,
-          { ...config.repos[0], id: "hub", github: "o/hub", project: 3 },
-        ],
+        repos: [...config.repos, { ...config.repos[0], id: "hub", github: "o/hub", project: 3 }],
       },
       store,
       bus: new ChangeBus(),
