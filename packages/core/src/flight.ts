@@ -101,6 +101,8 @@ export type FlightDecisionKind = (typeof FLIGHT_DECISION_KINDS)[number];
 
 /** The setting that keeps which tool set FLIGHT's live run was started with. */
 export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
+/** The setting that keeps the live run's context at its first turn, so a hub restart does not lose it. */
+export const FLIGHT_FIRST_CONTEXT_SETTING = "flight.first-context";
 
 export interface FlightDecision {
   orderId?: number;
@@ -1047,6 +1049,11 @@ export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
 /** While a free build seat has open tickets near it and nothing starts, the hub logs one line per period this long. */
 export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
+/**
+ * While the crew still idles on open tickets, FLIGHT is told again once per period this long. One
+ * wake per spell left the crew idle for 10 hours on 24 November 2026 with nothing to end it.
+ */
+export const FLIGHT_IDLE_SEAT_AGAIN_MS = 2 * 60 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
 export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */

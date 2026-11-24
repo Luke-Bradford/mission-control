@@ -22,6 +22,7 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_SEAT_AGAIN_MS,
   FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_LOOPS_SETTING,
   FLIGHT_MAIN_SETTING,
@@ -2594,6 +2595,21 @@ describe("the FLIGHT watcher", () => {
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000, "r-ctx-0");
       await watch.check();
       expect(sendCalls).toEqual([]);
+    });
+
+    it("keeps the first-turn context across a hub restart, so the handover still comes (24 November)", async () => {
+      liveCrew();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
+
+      // the hub restarts (FLIGHT's own Update): the new watcher has an empty map
+      watch.stop();
+      makeWatch();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
     });
 
     it("does nothing at the limit or under it", async () => {
@@ -5426,7 +5442,8 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       expect(sendCalls[0]?.text).toContain("Ticket 2");
       expect(sendCalls[0]?.text).toContain("Ticket 3");
 
-      nowMs += 5 * HOUR;
+      // the same spell says nothing more until it has lasted FLIGHT_IDLE_SEAT_AGAIN_MS
+      nowMs = T0 + FLIGHT_IDLE_SEAT_AGAIN_MS - 40 * MIN;
       await watch.check();
       expect(sendCalls).toHaveLength(1);
       expect(logged.some((l) => l.includes("seat idle"))).toBe(true);
@@ -5441,6 +5458,35 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
       await watch.check();
       expect(sendCalls).toHaveLength(2);
+    });
+
+    it("tells FLIGHT again once per FLIGHT_IDLE_SEAT_AGAIN_MS while the crew still idles (24 November: 10 idle hours)", async () => {
+      await watch.check();
+      nowMs = T0 + FLIGHT_IDLE_SEAT_WAKE_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      nowMs = T0 + FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      expect(sendCalls[1]?.text).toContain("guido-1");
+      expect(sendCalls[1]?.text).toContain("Ticket 1");
+      // one wake for the period, however often the hub looks
+      nowMs += 30 * MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+
+      nowMs = T0 + 2 * FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(3);
+
+      // a hub restart inside a period does not repeat its wake
+      watch.stop();
+      makeWatch({ log: (line: string) => void logged.push(line) });
+      await watch.check();
+      nowMs += FLIGHT_BATCH_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(3);
     });
 
     it("waits the normal gap before waking FLIGHT for an idle spell", async () => {

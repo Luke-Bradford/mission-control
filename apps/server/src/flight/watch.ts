@@ -14,6 +14,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_FIRST_CONTEXT_SETTING,
   FLIGHT_FULL_BUILTINS,
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
@@ -595,7 +596,17 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     // past the context limit: one handover wake, then the fresh session once that turn has ended
     const context = store.digest(runId)?.contextTokens ?? null;
-    if (context !== null && !firstContext.has(runId)) firstContext.set(runId, context);
+    if (context !== null && !firstContext.has(runId)) {
+      // a hub restart empties the map: the stored reading is still this run's first turn
+      const kept = parseJson(store.getSetting(FLIGHT_FIRST_CONTEXT_SETTING), null) as {
+        runId?: unknown;
+        tokens?: unknown;
+      } | null;
+      const known = kept?.runId === runId && typeof kept.tokens === "number";
+      firstContext.set(runId, known ? (kept.tokens as number) : context);
+      if (!known)
+        store.setSetting(FLIGHT_FIRST_CONTEXT_SETTING, JSON.stringify({ runId, tokens: context }));
+    }
     const grown = context === null ? 0 : context - (firstContext.get(runId) ?? context);
     if (
       context !== null &&

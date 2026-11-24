@@ -21,6 +21,7 @@ import {
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
+  FLIGHT_IDLE_SEAT_AGAIN_MS,
   FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
@@ -819,6 +820,16 @@ const readIdleState = (store: Store): { seats: Record<string, number>; delivered
 const idleKey = (seat: { id: string; since: number }): string => `${seat.id}:${seat.since}`;
 
 /**
+ * The fact that tells FLIGHT again about a crew still idle: the longest spell, once per
+ * FLIGHT_IDLE_SEAT_AGAIN_MS. One seat carries it, so five idle seats are one wake, not five.
+ */
+const idleAgainKey = (idle: FlightIdleSeats | undefined): string | null => {
+  const longest = [...(idle?.seats ?? [])].sort((a, b) => a.since - b.since)[0];
+  const period = longest === undefined ? 0 : Math.floor(longest.ms / FLIGHT_IDLE_SEAT_AGAIN_MS);
+  return longest === undefined || period < 1 ? null : `${idleKey(longest)}:${period}`;
+};
+
+/**
  * The free build seats that have open tickets near their area (Backlog, Refinement or Ready), read from the board with no FLIGHT tokens. A ticket is near a
  * seat when its one area label is the seat's, or it has none or several (it needs triage). Each
  * seat's spell is timed on its own.
@@ -872,7 +883,9 @@ export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: n
     (s.wake?.idle?.seats ?? []).map((x) => [x.id, before.seats[x.id] ?? now]),
   );
   const delivered = before.delivered.filter((key) =>
-    Object.entries(after).some(([id, since]) => key === `${id}:${since}`),
+    Object.entries(after).some(
+      ([id, since]) => key === `${id}:${since}` || key.startsWith(`${id}:${since}:`),
+    ),
   );
   if (
     JSON.stringify(before.seats) === JSON.stringify(after) &&
@@ -892,6 +905,8 @@ export function markIdleSeatsShown(store: Store, s: Pick<FlightState, "wake">): 
   for (const seat of s.wake?.idle?.seats ?? []) {
     if (seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS) delivered.add(idleKey(seat));
   }
+  const again = idleAgainKey(s.wake?.idle);
+  if (again !== null) delivered.add(again);
   if (delivered.size === state.delivered.length) return;
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
@@ -1689,13 +1704,17 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
  * seats are the hub's own timers and show in the digest, never here.
  */
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
-  // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
-  // tickets; keeping this to the seat and spell start avoids re-waking as the board changes.
+  // One stable fact per idle spell, once it has lasted 30 minutes, and one more per
+  // FLIGHT_IDLE_SEAT_AGAIN_MS while the crew still idles. The digest carries the open tickets;
+  // keeping this to the seat, spell start and period avoids re-waking as the board changes.
   const delivered = new Set(s.wake?.idle?.delivered ?? []);
-  const idle = (s.wake?.idle?.seats ?? [])
-    .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
-    .filter((seat) => !delivered.has(idleKey(seat)))
-    .map(idleKey);
+  const again = idleAgainKey(s.wake?.idle);
+  const idle = [
+    ...(s.wake?.idle?.seats ?? [])
+      .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
+      .map(idleKey),
+    ...(again === null ? [] : [again]),
+  ].filter((key) => !delivered.has(key));
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
