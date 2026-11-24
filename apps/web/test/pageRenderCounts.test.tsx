@@ -10,6 +10,7 @@ import "../src/pages/Flight.tsx";
 import "../src/pages/Overview.tsx";
 import "../src/pages/Setup.tsx";
 import "../src/pages/Telemetry.tsx";
+import { installMapDom } from "./crewMapDom.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CONFIG, REPOS, seatRow } from "./fixtures.ts";
 
@@ -94,6 +95,7 @@ async function commitsOverMinute(
 
 describe("page-root render counts", () => {
   beforeEach(() => {
+    installMapDom();
     vi.stubGlobal("EventSource", Stream);
     stubFetch({ "/api/repos": REPOS, "/api/config": CONFIG });
   });

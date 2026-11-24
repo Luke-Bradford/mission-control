@@ -7,6 +7,7 @@ import { resetSelection } from "../src/shell/selection.ts";
 import { resetSession } from "../src/shell/session.ts";
 import { clearToast } from "../src/shell/Toast.tsx";
 import { resetTheme } from "../src/theme.ts";
+import { installMapStubs } from "./crewMapDom.ts";
 
 /** In-memory Web Storage for tests. */
 function memoryStorage(): Storage {
@@ -28,6 +29,8 @@ function memoryStorage(): Storage {
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   vi.stubGlobal("sessionStorage", memoryStorage());
+  // every page test that mounts Comms gets the map's canvas and observers; the map tests install their own
+  if (typeof window !== "undefined") installMapStubs();
 });
 
 // Vitest globals are off, so Testing Library cannot register its own cleanup.
