@@ -1,25 +1,32 @@
-import type { CrewRow } from "@mc/core";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { type CommsView, commsAgentPath, navigate } from "../router.ts";
-import { useReducedMotion } from "./chartTypes.ts";
-import { pairFilter, searchWithFocus } from "./commsFilter.ts";
-import { CAPCOM, useChartData } from "./useChartData.ts";
+import { COMMS_MESSAGE_MAX, COMMS_METRICS, type CommsMetricsView, type CrewRow } from "@mc/core";
+import { useEffect, useMemo, useRef } from "react";
+import { callSign } from "../crew.ts";
+import { RESOURCES, useResource } from "../data.ts";
+import { percent } from "../fmt.ts";
+import { Panel } from "../hud/Panel.tsx";
+import {
+  type CommsView,
+  commsAgentPath,
+  commsContactPath,
+  commsFlightPath,
+  navigate,
+} from "../router.ts";
+import { type CrewMap, createCrewMap, type MapPins, type MapSelection } from "./crewMap.ts";
+import { CAPCOM, crewMapSnapshot, type FeedMessage, type OpenItem } from "./crewMapSnapshot.ts";
 
-type Point = { x: number; y: number };
-const TRAVEL_LIGHTS = ["first", "second", "third"] as const;
+/** Places the operator kept (Alt-drag), per view size; they outlive the map being remounted. */
+let keptPins: MapPins = {};
 
-/** A hidden tab must not keep a live visual running. */
-function useDocumentVisible() {
-  const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
-  useEffect(() => {
-    const change = () => setVisible(document.visibilityState !== "hidden");
-    document.addEventListener("visibilitychange", change);
-    return () => document.removeEventListener("visibilitychange", change);
-  }, []);
-  return visible;
+/** Where a click on a seat or a link opens: the seat's conversations, or the pair's. */
+export function mapSelectionPath(selection: MapSelection, flightId: string | undefined): string {
+  const open = (id: string) => (id === CAPCOM || id === flightId ? commsFlightPath() : null);
+  if (selection.type === "seat") return open(selection.id) ?? commsAgentPath(selection.id);
+  const [a, b] = [selection.a, selection.b];
+  if (open(a) === null && open(b) === null) return commsContactPath(a, b);
+  return commsAgentPath(open(a) === null ? a : b);
 }
 
-/** The living crew map. The chart hook is its live snapshot source. */
+/** The Comms right column: the living crew map, with the message lengths beneath it. */
 export function CommsGraph({
   rows,
   flightId,
@@ -28,247 +35,121 @@ export function CommsGraph({
   flightId: string | undefined;
   view: CommsView;
 }) {
-  const chart = useChartData(rows, flightId);
-  const [full, setFull] = useState(false);
-  const [pins, setPins] = useState<{ panel: Record<string, Point>; full: Record<string, Point> }>({
-    panel: {},
-    full: {},
-  });
-  const dragStart = useRef<{ id: string; x: number; y: number } | null>(null);
-  const dragged = useRef(false);
-  const visible = useDocumentVisible();
-  const reducedMotion = useReducedMotion();
-  const seats = useMemo(() => chart.seats.filter((seat) => seat.id !== "crew"), [chart.seats]);
-  const others = seats.filter((seat) => seat.id !== chart.flight && seat.id !== CAPCOM);
-  const crewSeats = seats.filter((seat) => seat.id !== CAPCOM);
-  const crowded = others.length > 12;
-  const pointFor = (id: string): Point => {
-    const pinSet = full ? pins.full : pins.panel;
-    if (pinSet[id]) return pinSet[id];
-    if (id === chart.flight) return { x: 50, y: 50 };
-    if (id === CAPCOM) return crowded ? { x: 50, y: 8 } : { x: 25, y: 20 };
-    const index = others.findIndex((seat) => seat.id === id);
-    if (crowded) {
-      const rows = Math.ceil(others.length / 2);
-      return {
-        x: index % 2 === 0 ? 12 : 88,
-        y: (Math.floor(index / 2) + 0.5) * (100 / rows),
-      };
-    }
-    const angle = (index / Math.max(1, others.length)) * Math.PI * 2 - Math.PI / 2;
-    return { x: 50 + Math.cos(angle) * 37, y: 50 + Math.sin(angle) * 37 };
-  };
-  const points = new Map(seats.map((seat) => [seat.id, pointFor(seat.id)]));
-  const youngWaits = chart.edges.filter((edge) => (edge.waiting?.young ?? 0) > 0);
-  const oldWaitCount = chart.edges.reduce((count, edge) => count + (edge.waiting?.old ?? 0), 0);
-  const drag = (id: string, event: React.PointerEvent<HTMLButtonElement>) => {
-    const host = event.currentTarget.closest(".crew-map-stage");
-    if (!host) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragged.current = false;
-    dragStart.current = { id, x: event.clientX, y: event.clientY };
-  };
-  const move = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const active = dragStart.current;
-    const host = event.currentTarget.closest(".crew-map-stage");
-    if (!active || !host) return;
-    if (Math.abs(active.x - event.clientX) + Math.abs(active.y - event.clientY) > 4)
-      dragged.current = true;
-    const box = host.getBoundingClientRect();
-    const pin: Point = {
-      x: Math.max(7, Math.min(93, ((event.clientX - box.left) / box.width) * 100)),
-      y: Math.max(9, Math.min(91, ((event.clientY - box.top) / box.height) * 100)),
+  const feedResource = useResource<{ messages: FeedMessage[] }>(RESOURCES.commsFeed);
+  const openResource = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen);
+  const lengthsResource = useResource<CommsMetricsView>(RESOURCES.commsMetrics);
+  const lengths = lengthsResource.data?.p95BySeat;
+  const host = useRef<HTMLDivElement>(null);
+  const map = useRef<CrewMap | null>(null);
+  const flight = useRef(flightId);
+  flight.current = flightId;
+
+  useEffect(() => {
+    const node = host.current;
+    if (!node) return;
+    const made = createCrewMap(node, {
+      pins: keptPins,
+      onPinsChange: (pins) => {
+        keptPins = pins;
+      },
+      onOpenConversation: (selection) => navigate(mapSelectionPath(selection, flight.current)),
+    });
+    map.current = made;
+    return () => {
+      made.destroy();
+      map.current = null;
     };
-    setPins((old) =>
-      full
-        ? { ...old, full: { ...old.full, [active.id]: pin } }
-        : { ...old, panel: { ...old.panel, [active.id]: pin } },
-    );
-  };
+  }, []);
+
+  const feed = feedResource.data?.messages;
+  const open = openResource.data?.items;
+  const failed = feedResource.error !== null || openResource.error !== null;
+  const snapshot = useMemo(
+    () =>
+      feed === undefined
+        ? null
+        : crewMapSnapshot({
+            rows,
+            flightId,
+            feed,
+            open: open ?? [],
+            now: Date.now(),
+            ok: !failed,
+          }),
+    [rows, flightId, feed, open, failed],
+  );
+  useEffect(() => {
+    if (snapshot) map.current?.update(snapshot);
+  }, [snapshot]);
+
   return (
-    <aside
-      className={`comms-right crew-map-host ${full ? "crew-map-full" : ""}`}
-      aria-label="Comms activity"
-    >
-      <section className="crew-map" aria-label="Crew map">
-        <header className="crew-map-head">
-          <h2>Crew map</h2>
-          <span role="status">{chart.streaming ? "LIVE" : "CONNECTING"}</span>
-          <button
-            type="button"
-            aria-label={full ? "Close full screen map" : "Open the map full screen"}
-            onClick={() => setFull(!full)}
-          >
-            {full ? "Close" : "Full"}
-          </button>
-        </header>
-        <div className="crew-map-body">
-          <fieldset
-            className={`crew-map-stage ${crowded ? "crowded" : ""} ${visible ? "" : "paused"}`}
-            aria-label="FLIGHT at the centre; message links between seats"
-          >
-            <svg aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
-              {[24, 37].map((radius) => (
-                <circle key={radius} cx="50" cy="50" r={radius} className="crew-map-orbit" />
-              ))}
-              {chart.edges.map((edge) => {
-                const a = points.get(edge.a),
-                  b = points.get(edge.b);
-                return a && b ? (
-                  <line
-                    key={edge.key}
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    className={`crew-map-link ${edge.aToB + edge.bToA > 0 || (edge.waiting?.young ?? 0) > 0 ? "warm" : ""}`}
-                  />
-                ) : null;
-              })}
-            </svg>
-            {visible &&
-              !reducedMotion &&
-              chart.flows.list.flatMap((flow) => {
-                const from = points.get(flow.from);
-                const to = points.get(flow.to);
-                const sender = seats.find((seat) => seat.id === flow.from);
-                if (!from || !to || !sender) return [];
-                return TRAVEL_LIGHTS.slice(0, Math.min(flow.n, TRAVEL_LIGHTS.length)).map(
-                  (light, index) => (
-                    <i
-                      aria-hidden="true"
-                      className="crew-map-travel"
-                      key={`${chart.flows.generation}-${flow.from}-${flow.to}-${light}`}
-                      style={
-                        {
-                          left: `${from.x}%`,
-                          top: `${from.y}%`,
-                          "--travel-to-x": `${to.x}%`,
-                          "--travel-to-y": `${to.y}%`,
-                          "--seat": sender.color,
-                          animationDelay: `${index * 120}ms`,
-                        } as React.CSSProperties
-                      }
-                    />
-                  ),
-                );
-              })}
-            {seats.map((seat) => {
-              const point = points.get(seat.id) ?? pointFor(seat.id);
-              const row = rows.find((candidate) => candidate.id === seat.id);
-              const used = row?.digest?.contextTokens;
-              const limit = row?.digest?.contextWindow ?? 150_000;
-              const wait = youngWaits.some((edge) => edge.waiting?.youngOwedIds.includes(seat.id));
-              const tool = row?.digest?.liveTool?.name ?? "no tool running";
-              return (
-                <button
-                  key={seat.id}
-                  type="button"
-                  className={`crew-map-seat ${seat.id === chart.flight ? "flight" : ""} ${seat.presence} ${row?.hudState === "blocked" || row?.hudState === "stalled" || row?.hudState === "error" ? "held" : ""} ${wait ? "owes" : ""}`}
-                  style={
-                    {
-                      left: `${point.x}%`,
-                      top: `${point.y}%`,
-                      "--seat": seat.color,
-                    } as React.CSSProperties
-                  }
-                  onClick={() => {
-                    if (!dragged.current) navigate(commsAgentPath(seat.id));
-                  }}
-                  onPointerDown={(event) => drag(seat.id, event)}
-                  onPointerMove={move}
-                  onPointerUp={() => {
-                    dragStart.current = null;
-                  }}
-                  aria-label={`${seat.name}, ${seat.state ?? seat.presence}, ${used == null ? "context unknown" : `${Math.round(used / 1000)}K of ${Math.round(limit / 1000)}K context`}, ${tool}${wait ? ", owes a reply" : ""}`}
-                >
-                  <i aria-hidden="true" />
-                  <b>{seat.name}</b>
-                  <span>{seat.state ?? seat.presence}</span>
-                  <small>
-                    {used == null
-                      ? "—"
-                      : `${Math.round(used / 1000)}K/${Math.round(limit / 1000)}K`}{" "}
-                    · {tool}
-                  </small>
-                  {wait && <em>reply</em>}
-                </button>
-              );
-            })}
-          </fieldset>
-          <div className="crew-map-side">
-            <section>
-              <h3>Waiting on a reply</h3>
-              <ul>
-                {chart.waitingNote && <li className="crew-map-wait-note">{chart.waitingNote}</li>}
-                {youngWaits.length ? (
-                  youngWaits.map((edge) => (
-                    <li key={edge.key}>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          navigate(
-                            window.location.pathname +
-                              searchWithFocus(
-                                "",
-                                pairFilter(
-                                  edge.waiting?.youngAsker ?? edge.a,
-                                  edge.waiting?.youngOwed ?? edge.b,
-                                ),
-                              ),
-                          )
-                        }
-                      >
-                        {edge.waiting?.youngAsker} → {edge.waiting?.youngOwed}
-                      </button>
-                      {edge.waiting?.old ? <small>{edge.waiting.old} older</small> : null}
-                    </li>
-                  ))
-                ) : chart.waitingNote ? null : (
-                  <li>
-                    Nobody owes a reply.
-                    {oldWaitCount
-                      ? ` ${oldWaitCount} older ask${oldWaitCount === 1 ? "" : "s"}.`
-                      : ""}
-                  </li>
-                )}
-              </ul>
-            </section>
-            <section>
-              <h3>Seats</h3>
-              <ul>
-                {crewSeats.map((seat) =>
-                  (() => {
-                    const row = rows.find((candidate) => candidate.id === seat.id);
-                    const used = row?.digest?.contextTokens;
-                    const limit = row?.digest?.contextWindow ?? 150_000;
-                    const tool = row?.digest?.liveTool?.name ?? "no tool running";
-                    const context =
-                      used == null
-                        ? "context unknown"
-                        : `${Math.round(used / 1000)}K of ${Math.round(limit / 1000)}K context`;
+    <aside className="comms-right" aria-label="Comms activity">
+      <div className="comms-map panel" ref={host} />
+      <Panel
+        id="commsLength"
+        className="comms-length-panel"
+        title={COMMS_METRICS.messageLengthP95.label}
+        sub={`per sender · ${COMMS_METRICS.messageLengthP95.window} · limit ${COMMS_MESSAGE_MAX.toLocaleString()} ${COMMS_METRICS.messageLengthP95.unit}`}
+      >
+        {lengths === undefined && lengthsResource.error !== null ? (
+          <p className="comms-traffic-empty" role="alert">
+            Couldn't load message lengths. Retrying.
+          </p>
+        ) : lengths === undefined ? (
+          <p className="comms-traffic-empty">Loading message lengths…</p>
+        ) : (
+          <>
+            {lengthsResource.error !== null && (
+              <p className="comms-length-stale" role="status">
+                <i aria-hidden="true" />
+                Stale · couldn't refresh. Retrying.
+              </p>
+            )}
+            {lengths.length === 0 ? (
+              <p className="comms-traffic-empty">No messages in the last 24h.</p>
+            ) : (
+              <ul className="comms-length-list" title={COMMS_METRICS.messageLengthP95.definition}>
+                {[...lengths]
+                  .sort((a, b) => (b.p95 ?? -1) - (a.p95 ?? -1))
+                  .map(({ seatId, p95, n }) => {
+                    const row = rows.find((r) => r.id === seatId);
+                    const level = lengthLevel(p95);
                     return (
-                      <li key={seat.id}>
-                        <button
-                          type="button"
-                          aria-label={`${seat.name}, ${seat.state ?? seat.presence}, ${context}, ${tool}`}
-                          onClick={() => navigate(commsAgentPath(seat.id))}
-                        >
-                          <b>
-                            {seat.name} · {seat.state ?? seat.presence}
-                          </b>
-                          <small>{context}</small>
-                          <small>{tool}</small>
-                        </button>
+                      <li key={seatId} className={level}>
+                        <b>{row === undefined ? seatId : callSign(row)}</b>
+                        <span className="comms-length-value">
+                          {p95 === null ? "—" : Math.round(p95).toLocaleString()}
+                          {level !== "" && (
+                            <em>{level === "over" ? " over limit" : " near limit"}</em>
+                          )}
+                        </span>
+                        <span className="comms-length-n">{n} msg</span>
+                        <span className="comms-watch-bar" aria-hidden="true">
+                          <i
+                            style={{
+                              width: percent(
+                                Math.min(100, ((p95 ?? 0) / COMMS_MESSAGE_MAX) * 100),
+                                0,
+                              ),
+                            }}
+                          />
+                        </span>
                       </li>
                     );
-                  })(),
-                )}
+                  })}
               </ul>
-            </section>
-          </div>
-        </div>
-      </section>
+            )}
+          </>
+        )}
+      </Panel>
     </aside>
   );
+}
+
+/** Near the limit from 80% of it; over once the p95 passes it. */
+const NEAR_LIMIT = 0.8;
+function lengthLevel(p95: number | null): "" | "near" | "over" {
+  if (p95 === null) return "";
+  if (p95 > COMMS_MESSAGE_MAX) return "over";
+  return p95 >= COMMS_MESSAGE_MAX * NEAR_LIMIT ? "near" : "";
 }

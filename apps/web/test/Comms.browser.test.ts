@@ -48,6 +48,8 @@ const api = {
   "/api/comms/flight": { messages: [] },
   "/api/comms/mentions": { mentions: [] },
   "/api/comms/pins": { messages: [] },
+  "/api/comms/feed": { messages: [] },
+  "/api/comms/open": { items: [] },
   "/api/comms/agents/shop-app-ta?summary=1": { contacts: [], unread: 0 },
 };
 
@@ -301,9 +303,10 @@ describeRendered("The busy living crew map, rendered", () => {
     [1920, 940],
     [2560, 1145],
   ])(
-    "keeps a busy crew readable in the panel and full map at %ix%i",
+    "keeps a busy crew readable in the panel and the full map at %ix%i",
     async (width, height) => {
       mkdirSync(SHOTS, { recursive: true });
+      const now = Date.now();
       const page = await renderAt({
         page: "test/commsBrowser.html",
         width,
@@ -311,66 +314,83 @@ describeRendered("The busy living crew map, rendered", () => {
         search: "?at=/comms",
         api: {
           ...flightApi,
-          "/api/comms/links": {
-            links: SEATS.slice(0, 8).map((id, index) => ({
+          "/api/comms/open": { items: [] },
+          "/api/comms/feed": {
+            messages: SEATS.slice(0, 8).map((id, index) => ({
+              id: `comms:${index + 1}`,
               from: id,
               to: "flight-1",
-              count: index + 1,
+              at: now - (index + 1) * 60_000,
+              text: `Update ${index + 1}`,
             })),
           },
-          "/api/comms/open": { items: [] },
-          "/api/comms/feed": { messages: flightPage.messages },
         },
       });
-      await page.box(".crew-map-seat.flight");
-      const panel = await page.evaluate(() => {
-        const stage = document.querySelector(".crew-map-stage")?.getBoundingClientRect();
-        const list = document.querySelector(".crew-map-side")?.getBoundingClientRect();
-        const seats = [...document.querySelectorAll(".crew-map-seat")].map((seat) =>
-          seat.getBoundingClientRect(),
-        );
-        const labels = [...document.querySelectorAll(".crew-map-seat b")].map((label) =>
-          label.getBoundingClientRect(),
-        );
-        return {
-          seats: seats.length,
-          allInStage:
-            !!stage &&
-            seats.every(
-              (seat) =>
-                seat.left >= stage.left &&
-                seat.right <= stage.right &&
-                seat.top >= stage.top &&
-                seat.bottom <= stage.bottom,
-            ),
-          hasList: !!list && list.height > 100,
-          readableLabels: labels.every((label) => label.width > 10 && label.height > 5),
-          collisions: seats.flatMap((seat, index) =>
-            seats
-              .slice(index + 1)
-              .flatMap((other, offset) =>
-                seat.right <= other.left ||
-                other.right <= seat.left ||
-                seat.bottom <= other.top ||
-                other.bottom <= seat.top
-                  ? []
-                  : [[index, index + offset + 1]],
-              ),
-          ),
-        };
-      }, undefined);
-      expect(panel.seats).toBeGreaterThanOrEqual(17);
-      expect(panel.allInStage).toBe(true);
-      expect(panel.hasList).toBe(true);
-      expect(panel.readableLabels).toBe(true);
+      await page.box(".cm-seat[data-seat='flight-1']");
+      // What a person can read: every drawn tag has its seat's name painted, and none sits on another.
+      const read = () =>
+        page.evaluate(() => {
+          const tags = [...document.querySelectorAll<HTMLElement>(".cm-seat")]
+            .map((seat) => ({
+              id: seat.dataset.seat ?? "",
+              lab: seat.querySelector<HTMLElement>(".cm-lab"),
+            }))
+            .filter((t) => t.lab && !t.lab.hidden)
+            .map((t) => {
+              const box = (t.lab as HTMLElement).getBoundingClientRect();
+              const name = (t.lab as HTMLElement).firstChild?.textContent ?? "";
+              return {
+                id: t.id,
+                name,
+                x: box.x,
+                y: box.y,
+                right: box.right,
+                bottom: box.bottom,
+                fontPx: Number.parseFloat(getComputedStyle(t.lab as HTMLElement).fontSize),
+                seen: Number(getComputedStyle(t.lab as HTMLElement).opacity) > 0.5,
+              };
+            });
+          const collisions = tags.flatMap((a, i) =>
+            tags
+              .slice(i + 1)
+              .filter(
+                (b) =>
+                  a.x < b.right - 1 &&
+                  b.x < a.right - 1 &&
+                  a.y < b.bottom - 1 &&
+                  b.y < a.bottom - 1,
+              )
+              .map((b) => `${a.id} over ${b.id}`),
+          );
+          const stage = document.querySelector(".cm-stage")?.getBoundingClientRect();
+          const outside = tags.filter(
+            (t) =>
+              !stage || t.x < stage.left - 1 || t.right > stage.right + 1 || t.y < stage.top - 1,
+          );
+          const roster = [...document.querySelectorAll(".cm-roster li")].length;
+          return { tags, collisions, outside: outside.map((t) => t.id), roster };
+        }, undefined);
+
+      const panel = await read();
+      // 17 seats and the operator: every seat is listed, and each drawn tag is painted and in the stage
+      expect(panel.roster).toBe(17);
+      expect(panel.tags.length).toBeGreaterThanOrEqual(12);
+      expect(panel.tags.every((t) => t.name.length > 0 && t.fontPx >= 11 && t.seen)).toBe(true);
       expect(panel.collisions).toEqual([]);
+      expect(panel.outside).toEqual([]);
+      const column = await page.box(".comms-right");
+      const map = await page.box(".comms-map");
+      expect(map.x).toBeGreaterThanOrEqual(column.x - 0.5);
+      expect(map.x + map.width).toBeLessThanOrEqual(column.x + column.width + 0.5);
+      // the seat list can be reached: scrolled to, not cut short
+      expect((await page.reachable(".cm-roster li button", ".cm-side")).every(Boolean)).toBe(true);
       await page.screenshot(join(SHOTS, `crew-map-panel-${width}x${height}.png`));
 
-      await page.click(".crew-map-head button");
-      await page.box(".crew-map-full");
+      await page.click(".cm-b-full");
+      await page.box(".cm.cm-is-full");
       const full = await page.evaluate(() => {
-        const host = document.querySelector(".crew-map-full")?.getBoundingClientRect();
-        const stage = document.querySelector(".crew-map-stage")?.getBoundingClientRect();
+        const host = document.querySelector(".cm.cm-is-full")?.getBoundingClientRect();
+        const stage = document.querySelector(".cm-stage")?.getBoundingClientRect();
         return {
           fillsWindow:
             !!host && host.width === window.innerWidth && host.height === window.innerHeight,
@@ -379,6 +399,10 @@ describeRendered("The busy living crew map, rendered", () => {
       }, undefined);
       expect(full.fillsWindow).toBe(true);
       expect(full.stageArea).toBeGreaterThan(width * height * 0.4);
+      const wide = await read();
+      expect(wide.tags.length).toBeGreaterThanOrEqual(17);
+      expect(wide.tags.every((t) => t.name.length > 0 && t.fontPx >= 11 && t.seen)).toBe(true);
+      expect(wide.collisions).toEqual([]);
       await page.screenshot(join(SHOTS, `crew-map-full-${width}x${height}.png`));
       await page.close();
     },

@@ -1,6 +1,7 @@
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { installMapDom } from "./crewMapDom.ts";
 import { type Click, crawlRoute, STAYS } from "./linkCrawl.tsx";
 import { EVERYWHERE, LINK_MAP, type LinkRule, NAVIGATING_FILES } from "./linkMap.ts";
 
@@ -9,7 +10,9 @@ import { EVERYWHERE, LINK_MAP, type LinkRule, NAVIGATING_FILES } from "./linkMap
  * and an anchor the map does not know fails too. The map is `linkMap.ts`; a button that navigates is
  * listed there as well.
  */
+const mapDom: { current?: ReturnType<typeof installMapDom> } = {};
 beforeEach(() => {
+  mapDom.current = installMapDom();
   vi.stubGlobal("fetch", vi.fn());
   vi.stubGlobal(
     "EventSource",
@@ -19,7 +22,10 @@ beforeEach(() => {
     },
   );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  mapDom.current?.restore();
+  vi.unstubAllGlobals();
+});
 
 type Map = Record<string, { routes: string[]; rules: LinkRule[] }>;
 
@@ -112,9 +118,11 @@ it("the crawl clicks the Comms map's seats", {
   timeout: 300_000,
 }, async () => {
   const comms = await crawlRoute("/comms");
-  const seats = comms.filter((c) => /context/.test(c.text));
+  const seats = comms.filter((c) => /Enter opens its messages/.test(c.text));
   expect(seats.length).toBeGreaterThan(0);
-  for (const c of seats) expect(c.target, c.text).toMatch(/^\/comms\/agents\//);
+  // FLIGHT and CAPCOM open the thread this page already shows, so they stay.
+  for (const c of seats) expect(c.target, c.text).toMatch(/^(stays|\/comms(\/agents\/[\w-]+)?)$/);
+  expect(seats.some((c) => /^\/comms\/agents\//.test(c.target))).toBe(true);
 });
 
 it("every page, in Demo, goes where the map says", { timeout: 1_800_000 }, async () => {

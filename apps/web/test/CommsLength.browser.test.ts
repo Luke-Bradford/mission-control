@@ -17,22 +17,19 @@ describeRendered("The Comms right column with a living crew map in a browser", (
           height: 1000,
           colorScheme,
           api: {
-            "/api/comms/links": { links: [] },
             "/api/comms/open": { items: [] },
             "/api/comms/feed": { messages: [] },
           },
         });
-        await page.box(".crew-map");
+        await page.box(".cm");
         await expect
-          .poll(() =>
-            page.evaluate(() => document.querySelectorAll(".crew-map-seat").length, undefined),
-          )
+          .poll(() => page.evaluate(() => document.querySelectorAll(".cm-seat").length, undefined))
           .toBe(4);
         const clear = await page.evaluate(() => {
-          const panel = document.querySelector(".crew-map");
+          const panel = document.querySelector(".cm");
           if (!panel) return false;
           const box = panel.getBoundingClientRect();
-          return [...panel.querySelectorAll(".crew-map-seat")].every((seat) => {
+          return [...panel.querySelectorAll(".cm-seat")].every((seat) => {
             const node = seat.getBoundingClientRect();
             return (
               node.left >= box.left &&
@@ -43,9 +40,10 @@ describeRendered("The Comms right column with a living crew map in a browser", (
           });
         }, null);
         expect(clear, `${colorScheme}: map content overflows its panel`).toBe(true);
-        expect((await page.reachable(".crew-map-seat")).every(Boolean)).toBe(true);
-        expect((await page.reachable(".crew-map-side li button")).every(Boolean)).toBe(true);
-        expect((await page.unclipped(".crew-map")).every(Boolean)).toBe(true);
+        expect((await page.reachable(".cm-roster li button", ".cm-side")).every(Boolean)).toBe(
+          true,
+        );
+        expect((await page.unclipped(".cm")).every(Boolean)).toBe(true);
         await page.close();
       }
     },

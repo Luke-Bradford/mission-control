@@ -1,261 +1,116 @@
 .comms-right {
-  min-width: 0;
-  min-height: 0;
-}
-.crew-map {
   display: flex;
   flex-direction: column;
-  min-height: calc(var(--sp-7) * 12);
-  height: 100%;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
+  min-width: 0;
+  min-height: 0;
+  gap: var(--sp-3);
 }
-.crew-map-head {
+/* The map brings its own header, stage and lists; this is only its frame in the column. */
+.comms-map {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  /* The stage, the lists and a scrollable seat list: the whole map, not a cut-off one. */
+  height: 780px;
+  padding: 0;
+  overflow: hidden;
+}
+.comms-map .cm-side section {
+  flex-shrink: 0;
+}
+@media (max-height: 899px) {
+  .comms-map {
+    height: 680px;
+  }
+}
+.comms-watch-bar {
+  display: block;
+  height: 3px;
+  background: var(--line);
+}
+.comms-watch-bar i {
+  display: block;
+  height: 100%;
+  background: var(--warn);
+}
+.comms-length-stale i {
+  width: 6px;
+  height: 6px;
+  background: var(--warn);
+  transform: rotate(45deg);
+}
+.comms-traffic-empty {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+/* Message length p95: one row per sender, a bar against the limit; near and over are marked. */
+.comms-length-panel {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.comms-length-list {
+  max-height: calc(6 * 35px);
+  overflow-y: auto;
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  list-style: none;
+}
+.comms-length-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.comms-length-value {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.comms-length-value em {
+  font-style: normal;
+}
+.comms-length-n {
+  min-width: 6ch;
+  color: var(--muted);
+  font-family: var(--mono);
+  text-align: right;
+}
+.comms-length-list .comms-watch-bar {
+  grid-column: 1 / -1;
+}
+.comms-length-list .comms-watch-bar i {
+  background: var(--muted);
+}
+.comms-length-list li.near .comms-length-value {
+  color: var(--warn);
+}
+.comms-length-list li.near .comms-watch-bar i {
+  background: var(--warn);
+}
+.comms-length-list li.over .comms-length-value {
+  color: var(--crit);
+}
+.comms-length-list li.over .comms-watch-bar i {
+  background: var(--crit);
+}
+.comms-length-stale {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  min-height: calc(var(--sp-5) * 2);
-  padding: var(--sp-2) var(--sp-3);
-  border-bottom: 1px solid var(--line);
-}
-.crew-map-head h2,
-.crew-map-side h3 {
   margin: 0;
-  font: 600 var(--fs-s) / var(--lh) var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.crew-map-head span {
-  flex: 1;
-  color: var(--ok);
-  font: var(--fs-micro) / var(--lh) var(--mono);
-}
-.crew-map-head button {
-  min-height: 26px;
-  padding: 0 var(--sp-2);
-  color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: 3px;
-  font: var(--fs-micro) / var(--lh-s) var(--mono);
-}
-.crew-map-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) calc(var(--sp-7) * 3);
-  flex: 1;
-  min-height: 0;
-}
-.crew-map-stage {
-  position: relative;
-  margin: 0;
-  padding: 0;
-  min-height: calc(var(--sp-7) * 8);
-  overflow: hidden;
-  background: var(--void);
-}
-.crew-map-stage > svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.crew-map-orbit {
-  fill: none;
-  stroke: var(--void-line);
-  vector-effect: non-scaling-stroke;
-}
-.crew-map-link {
-  stroke: var(--line-2);
-  stroke-width: 0.45;
-  vector-effect: non-scaling-stroke;
-}
-.crew-map-link.warm {
-  stroke: var(--warn);
-}
-.crew-map-travel {
-  position: absolute;
-  z-index: 2;
-  width: var(--sp-2);
-  height: var(--sp-2);
-  margin: calc(var(--sp-1) * -1);
-  pointer-events: none;
-  background: var(--seat);
-  border-radius: 50%;
-  box-shadow: 0 0 var(--sp-2) var(--seat);
-}
-@media (prefers-reduced-motion: no-preference) {
-  .crew-map-travel {
-    animation: crew-map-travel 900ms ease-out both;
-  }
-}
-@keyframes crew-map-travel {
-  to {
-    left: var(--travel-to-x);
-    top: var(--travel-to-y);
-    opacity: 0;
-  }
-}
-.crew-map-stage.paused .crew-map-travel {
-  animation-play-state: paused;
-}
-.crew-map-seat {
-  position: absolute;
-  z-index: 1;
-  width: calc(var(--sp-7) * 2);
-  min-height: calc(var(--sp-7) + var(--sp-1));
-  padding: var(--sp-1);
-  transform: translate(-50%, -50%);
-  color: var(--void-ink);
-  text-align: center;
-  background: color-mix(in srgb, var(--void) 88%, var(--seat));
-  border: 1px solid var(--seat);
-  border-radius: 3px;
-  cursor: grab;
-}
-.crew-map-seat i {
-  display: inline-block;
-  width: var(--sp-2);
-  height: var(--sp-2);
-  margin-right: var(--sp-1);
-  background: var(--seat);
-  border-radius: 50%;
-}
-.crew-map-seat.stopped i {
-  background: transparent;
-  border: 1px solid var(--muted);
-}
-.crew-map-seat.held i {
-  background: transparent;
-  border: 1px solid var(--warn);
-  border-radius: 1px;
-}
-.crew-map-seat.owes {
-  box-shadow: 0 0 0 2px var(--warn);
-}
-.crew-map-seat b {
-  display: block;
-  overflow: hidden;
-  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.crew-map-seat span,
-.crew-map-seat small {
-  display: block;
-  overflow: hidden;
-  color: var(--void-muted);
-  font-size: var(--fs-micro);
-  line-height: var(--lh-s);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.crew-map-seat small {
-  font-family: var(--mono);
-}
-.crew-map-seat.held span {
+  padding: var(--sp-2) var(--sp-3) 0;
   color: var(--warn);
-}
-.crew-map-seat em {
-  color: var(--warn);
-  font: var(--fs-micro) / var(--lh-s) var(--mono);
-  font-style: normal;
-}
-.crew-map-seat.flight {
-  width: calc(var(--sp-7) * 2 + var(--sp-3));
-  background: color-mix(in srgb, var(--void) 78%, var(--accent));
-}
-.crew-map-stage.crowded .crew-map-seat:not(.flight) {
-  width: calc(26% - var(--sp-2));
-  min-height: calc(var(--sp-7) + var(--sp-3));
-  padding: var(--sp-1);
-}
-.crew-map-side {
-  min-height: 0;
-  overflow-y: auto;
-  border-left: 1px solid var(--line);
-}
-.comms-metric button {
-  font-family: var(--mono);
   font-size: var(--fs-s);
-  line-height: var(--lh-s);
 }
-.crew-map-side section {
-  padding: var(--sp-2);
-  border-bottom: 1px solid var(--line);
-}
-.crew-map-side h3 {
-  color: var(--muted);
-  font-size: var(--fs-micro);
-}
-.crew-map-side ul {
-  margin: var(--sp-1) 0 0;
-  padding: 0;
-  list-style: none;
-}
-.crew-map-side li {
-  overflow: hidden;
-  padding: var(--sp-1) 0;
-  color: var(--fg-2);
-  font: var(--fs-micro) / var(--lh-s) var(--mono);
-}
-.crew-map-side li button {
-  width: 100%;
-  min-height: 40px;
-  padding: 0;
-  overflow: hidden;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  background: transparent;
-  border: 0;
-}
-.crew-map-side li button :where(b, small) {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.crew-map-side li button b {
-  color: var(--fg);
-}
-.crew-map-wait-note {
-  color: var(--warn);
-  white-space: normal;
-}
-.crew-map-full {
-  position: fixed;
-  z-index: 20;
-  inset: 0;
-  padding: var(--sp-3);
-  background: var(--bg);
-}
-.crew-map-full .crew-map {
-  min-height: 0;
-}
-.crew-map-full .crew-map-body {
-  grid-template-columns: minmax(0, 1fr) calc(var(--sp-7) * 5 + var(--sp-5));
-}
-.crew-map-full .crew-map-stage {
-  min-height: 0;
-}
-.crew-map-full .crew-map-seat {
-  width: calc(var(--sp-7) * 2 + var(--sp-5));
-}
-.crew-map-full .crew-map-stage.crowded .crew-map-seat:not(.flight) {
-  width: calc(20% - var(--sp-2));
-}
-@media (max-width: 700px) {
-  .crew-map-body {
-    grid-template-columns: 1fr;
-  }
-  .crew-map-side {
-    max-height: calc(var(--sp-7) * 3);
-    border-top: 1px solid var(--line);
-    border-left: 0;
-  }
-  .crew-map-stage {
-    min-height: calc(var(--sp-7) * 9);
-  }
+
+/* Full screen covers the page, its top bar and FLIGHT's dock too. */
+.comms-map .cm.cm-is-full {
+  z-index: 30;
 }

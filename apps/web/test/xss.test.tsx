@@ -1,6 +1,6 @@
 import type { ConfigView } from "@mc/core";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { CommsGraph } from "../src/comms/CommsGraph.tsx";
 import { ConfigYaml } from "../src/components/config/ConfigYaml.tsx";
 import { TicketDetail } from "../src/components/TicketDetail.tsx";
@@ -10,6 +10,7 @@ import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
 import { agentView } from "./agentV2Fixture.ts";
+import { installMapDom } from "./crewMapDom.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { boardItem, CONFIG, crewRow, escalation, item, NOW, REPOS, run } from "./fixtures.ts";
 
@@ -219,21 +220,28 @@ describe("untrusted text in the Comms map", () => {
   it("a seat's call sign", async () => {
     stubFetch({
       "/api/config": CONFIG,
-      "/api/comms/links": {
-        links: [
+      "/api/comms/feed": {
+        messages: [
+          { id: "comms:1", from: "guido-1", to: "retro-1", at: NOW, text: PAYLOAD + SCRIPT },
+        ],
+      },
+      "/api/comms/open": {
+        items: [
           {
+            id: "comms:1",
+            label: "question",
             from: "guido-1",
             to: "retro-1",
-            count: 1,
-            lastId: "comms:1",
-            lastAt: NOW,
-            lastText: PAYLOAD + SCRIPT,
+            ticket: null,
+            waitedMs: 60_000,
+            question: PAYLOAD + SCRIPT,
           },
         ],
       },
-      "/api/comms/traffic": { hours: [] },
-      "/api/comms/chatter": { pairs: [] },
+      "/api/comms/metrics": { from: 0, to: 1, p95BySeat: [] },
     });
+    const dom = installMapDom();
+    onTestFinished(() => dom.restore());
     const seat = (id: string, index: number) =>
       crewRow({
         id,
@@ -251,8 +259,8 @@ describe("untrusted text in the Comms map", () => {
       />,
     );
     const graph = await waitFor(() => {
-      const el = document.querySelector(".crew-map");
-      if (!el) throw new Error("no map yet");
+      const el = document.querySelector(".cm");
+      if (!el?.textContent?.includes(PAYLOAD)) throw new Error("no map yet");
       return el;
     });
     expect(graph.querySelector("img, script")).toBeNull();

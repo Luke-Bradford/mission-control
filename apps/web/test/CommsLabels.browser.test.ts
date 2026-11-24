@@ -30,7 +30,8 @@ const api = {
   "/api/comms/mentions": { mentions: [] },
   "/api/comms/pins": { messages: [] },
   "/api/comms/read": { ok: true },
-  "/api/comms/links": { links: [] },
+  "/api/comms/feed": { messages: [] },
+  "/api/comms/open": { items: [] },
   "/api/comms/chatter": { pairs: [] },
   "/api/comms/traffic": { hours: [] },
   "/api/comms/metrics": { p95BySeat: [], bySeat: [] },
@@ -52,34 +53,26 @@ describeRendered("Comms role labels", () => {
           colorScheme: theme,
           api,
         });
-        await page.box(".crew-map-seat");
+        await page.box(".cm-seat");
+        // the name tags are placed once the map has its size; wait until both RETRO tags are painted and still
         await page.evaluate(
           () =>
             new Promise<void>((resolve, reject) => {
               const started = performance.now();
-              let last = "",
-                stable = 0;
+              let last = "";
+              let stable = 0;
+              const tag = (id: string) =>
+                document.querySelector<HTMLElement>(`.cm-seat[data-seat="${id}"] .cm-lab`);
               const wait = () => {
-                const nodes = [...document.querySelectorAll<HTMLElement>(".crew-map-seat")].filter(
-                  (e) =>
-                    ["RETRO-1", "RETRO-CX"].includes(
-                      e.querySelector("b")?.textContent?.toUpperCase() ?? "",
-                    ),
-                );
-                const visible =
-                  nodes.length === 2 &&
-                  nodes.every((e) => {
-                    const label = e.querySelector("b");
-                    if (!label) return false;
-                    const box = label.getBoundingClientRect();
-                    return (
-                      box.width > 10 &&
-                      box.height > 5 &&
-                      Number(getComputedStyle(e).opacity) > 0.1 &&
-                      Number(getComputedStyle(label).opacity) > 0.1
-                    );
-                  });
-                const positions = nodes.map((e) => `${e.style.left}|${e.style.top}`).join("|");
+                const nodes = ["retro-1", "retro-cx"].map(tag);
+                const visible = nodes.every((e) => {
+                  if (!e || e.hidden) return false;
+                  const box = e.getBoundingClientRect();
+                  return (
+                    box.width > 10 && box.height > 5 && Number(getComputedStyle(e).opacity) > 0.1
+                  );
+                });
+                const positions = nodes.map((e) => e?.style.top ?? "").join("|");
                 stable = visible && positions === last ? stable + 1 : 0;
                 last = positions;
                 if (stable >= 5) return resolve();
@@ -92,13 +85,12 @@ describeRendered("Comms role labels", () => {
           null,
         );
         const labels = await page.evaluate(() => {
-          const nodes = [...document.querySelectorAll(".crew-map-seat b")].filter((e) =>
-            ["RETRO-1", "RETRO-CX"].includes(e.textContent?.toUpperCase() ?? ""),
-          );
-          return nodes.map((e) => {
+          return ["retro-1", "retro-cx"].map((id) => {
+            const e = document.querySelector<HTMLElement>(`.cm-seat[data-seat="${id}"] .cm-lab`);
+            if (!e) throw Error(`no tag for ${id}`);
             const r = e.getBoundingClientRect();
             return {
-              text: e.textContent,
+              text: e.firstChild?.textContent ?? "",
               size: parseFloat(getComputedStyle(e).fontSize),
               x: r.x,
               y: r.y,

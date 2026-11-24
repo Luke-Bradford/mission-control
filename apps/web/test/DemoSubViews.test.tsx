@@ -4,9 +4,12 @@ import { App } from "../src/App.tsx";
 import { DEMO_REFUSED, setDemo } from "../src/demo/mode.ts";
 import { getState, playNext } from "../src/demo/simulator.ts";
 import { demoMisses } from "../src/demo/source.ts";
+import { installMapDom } from "./crewMapDom.ts";
 
 /** Beyond each page's first view: every sub-view a person reaches by a click must have its data. */
+const mapDom: { current?: ReturnType<typeof installMapDom> } = {};
 beforeEach(() => {
+  mapDom.current = installMapDom();
   vi.stubGlobal("fetch", vi.fn());
   vi.stubGlobal(
     "EventSource",
@@ -17,7 +20,10 @@ beforeEach(() => {
   );
   setDemo(true);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  mapDom.current?.restore();
+  vi.unstubAllGlobals();
+});
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 400))));
 const at = async (path: string) => {
@@ -27,7 +33,10 @@ const at = async (path: string) => {
 };
 const clean = () => {
   expect(demoMisses()).toEqual([]);
-  expect([...document.querySelectorAll("[role=alert]")].map((e) => e.textContent)).toEqual([]);
+  // The crew map keeps an empty, hidden alert ready for "the hub is not answering"; only a shown one counts.
+  expect(
+    [...document.querySelectorAll("[role=alert]:not([hidden])")].map((e) => e.textContent),
+  ).toEqual([]);
 };
 const clickText = async (name: RegExp) => {
   const target = await waitFor(() => {
@@ -177,7 +186,7 @@ describe("Demo findings from round 3", () => {
 
   it("Comms opens on the live map and every seat has contacts", async () => {
     await at("/comms");
-    const panel = document.querySelector(".crew-map") as HTMLElement;
+    const panel = document.querySelector(".cm") as HTMLElement;
     expect(document.body.textContent).not.toContain("No messages in FLIGHT");
     expect(panel.textContent).toContain("Seats");
     const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
