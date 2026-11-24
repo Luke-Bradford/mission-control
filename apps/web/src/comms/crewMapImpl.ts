@@ -2,6 +2,7 @@
 // biome-ignore-all lint: the crew map is the operator's chosen prototype, kept as one framework-free piece
 // biome-ignore-all format: ported from docs/prototype/comms-crew-map-live.html; keep it diffable against that file
 import { percent } from "../fmt.ts";
+
 /* Crew map: an orbital tracking display of a crew of coding agents. Framework-free, no dependencies.
 
    import { createCrewMap } from './crew-map.js';

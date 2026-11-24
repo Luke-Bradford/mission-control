@@ -389,7 +389,9 @@ it("paints every seat's name on the small map, with its context and a stuck seat
   // a stopped seat keeps its name too
   expect(button("seat-3").querySelector<HTMLElement>(".cm-lab")?.hidden).toBe(false);
   // a crowded map keeps the name on the tag and the figure in the Seats list, under the same name
-  expect(host.querySelector('.cm-roster li button[aria-label^="SEAT-2,"]')?.getAttribute("aria-label")).toMatch(/context 25K/);
+  expect(
+    host.querySelector('.cm-roster li button[aria-label^="SEAT-2,"]')?.getAttribute("aria-label"),
+  ).toMatch(/context 25K/);
   expect(button("guido-30").querySelector(".cm-lab small")?.textContent).toBe("blocked");
   map.destroy();
 });
