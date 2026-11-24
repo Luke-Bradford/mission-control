@@ -296,9 +296,13 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
-/** A run ended this long ago is past its last fold: its digest's usage no longer changes. */
+/**
+ * A run ended this long ago is rarely folded again, so its usage reading is worth keeping. A later
+ * fold (the backfill, a day after a run's start) drops the kept reading in `setDigest`.
+ */
 const FINANCIAL_USAGE_SETTLED_MS = 60 * 60_000;
-const FINANCIAL_USAGE_KEPT_MAX = 20_000;
+/** About twice the runs in FLIGHT's 14-day cost window; a run outside it is never read again. */
+const FINANCIAL_USAGE_KEPT_MAX = 4_000;
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
 
@@ -1016,8 +1020,9 @@ export class Store {
         }),
       );
     const byId = new Map(runs.map((r) => [r.id, r]));
-    // A run that ended a while ago has its final digest: its usage is read once and kept. Pulling
-    // `attemptUsage` out of seven days of digests cost about 100 ms on every FLIGHT state request.
+    // A run that ended a while ago keeps its usage reading until its digest is next written:
+    // pulling `attemptUsage` out of every digest in the window costs 55 to 60 ms a call on 1,700
+    // runs. `untilMs` is taken as now, which is how the one caller passes it.
     const settled = (r: FinancialRun): boolean =>
       r.endedAt !== null && r.endedAt < untilMs - FINANCIAL_USAGE_SETTLED_MS;
     const ids: string[] = [];
@@ -1119,6 +1124,8 @@ export class Store {
          ON CONFLICT(run_id) DO UPDATE SET digest = excluded.digest`,
       )
       .run(runId, JSON.stringify(d));
+    // every digest write comes through here, so a kept usage reading always equals a fresh one
+    this.financialUsageKept.delete(runId);
   }
 
   digest(runId: string): RunDigest | null {
@@ -1163,6 +1170,7 @@ export class Store {
     this.db
       .prepare("DELETE FROM run_digests WHERE run_id IN (SELECT id FROM runs WHERE started_at < ?)")
       .run(olderThan);
+    this.financialUsageKept.clear();
   }
 
   /** Records a state change; a second change of one agent in the same millisecond is dropped. */
@@ -1430,6 +1438,7 @@ export class Store {
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
+              for (const id of values) this.financialUsageKept.delete(id);
             }
           }
           this.db

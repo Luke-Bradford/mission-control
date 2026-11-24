@@ -109,8 +109,13 @@ export function transcriptFootprint(store: Store): TranscriptFootprint | null {
   let totalBytes = 0;
   let oldestAt: number | null = null;
   const seats = new Map<string, { bytes: number; files: number }>();
-  // one read for every run's seat: a row per file took about 450 ms on 6,400 transcripts
-  const agents = store.runAgentIds();
+  // one read for every run's seat, not a whole run row per transcript (2,000 of them, 45 ms)
+  let agents: Map<string, string>;
+  try {
+    agents = store.runAgentIds();
+  } catch {
+    agents = new Map(); // the total and oldest still stand; the per-seat split waits for the next read
+  }
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     try {
