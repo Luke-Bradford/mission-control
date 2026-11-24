@@ -15,6 +15,7 @@ import {
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
+  FLIGHT_FIRST_CONTEXT_SETTING,
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_HANDOVER_ASK,
@@ -22,6 +23,8 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
+  FLIGHT_IDLE_SEAT_AGAIN_MAX_MS,
+  FLIGHT_IDLE_SEAT_AGAIN_MS,
   FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_LOOPS_SETTING,
   FLIGHT_MAIN_SETTING,
@@ -47,6 +50,7 @@ import {
   flightStartFailedText,
   GITHUB_RATE_SETTING,
   handoverKey,
+  IDLE_SEAT_AGAIN_ASK,
   idleLong,
   NEW_LOOP,
   PACE_SETTING,
@@ -2594,6 +2598,36 @@ describe("the FLIGHT watcher", () => {
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000, "r-ctx-0");
       await watch.check();
       expect(sendCalls).toEqual([]);
+    });
+
+    it("keeps the first-turn context across a hub restart, so the handover still comes (24 November)", async () => {
+      liveCrew();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
+
+      // the hub restarts (FLIGHT's own Update): the new watcher has an empty map
+      watch.stop();
+      makeWatch();
+      watch.start();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+    });
+
+    it("never takes another run's stored first turn as this run's (#7 November loop)", async () => {
+      liveCrew();
+      watch.start();
+      store.setSetting(
+        FLIGHT_FIRST_CONTEXT_SETTING,
+        JSON.stringify({ runId: "r-old", tokens: 100_000 }),
+      );
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 7000);
+      await watch.check();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 8000);
+      await watch.check();
+      expect(sendCalls).toEqual([]);
+      expect(endCalls).toEqual([]);
     });
 
     it("does nothing at the limit or under it", async () => {
@@ -5279,10 +5313,45 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(idleFact(T0)).toEqual([]);
     expect(idleFact(T0 + GAP - 1)).toEqual([]);
     expect(idleFact(T0 + GAP)).toEqual([`guido-1:${T0}`]);
-    // later periods of the same spell are the same fact: nothing wakes FLIGHT again
+    // later periods of the same spell are the same fact; a crew still idle is told again by `idleAgain`
     expect(idleFact(T0 + GAP + FLIGHT_IDLE_SEAT_WAKE_MS - 1)).toEqual([`guido-1:${T0}`]);
     expect(idleFact(T0 + GAP + FLIGHT_IDLE_SEAT_WAKE_MS)).toEqual([`guido-1:${T0}`]);
     expect(idleFact(T0 + 5 * HOUR)).toEqual([`guido-1:${T0}`]);
+  });
+
+  it("a seat whose account is at its stop line does not ask FLIGHT again: nothing can start on it", () => {
+    const told = { at: T0 + GAP, repeats: 0 };
+    tick(T0);
+    store.setSetting(
+      "flight.idle-seat",
+      JSON.stringify({ seats: { "guido-1": T0 }, delivered: [`guido-1:${T0}`], told }),
+    );
+    const due = T0 + GAP + FLIGHT_IDLE_SEAT_AGAIN_MS;
+    expect(read(due).wake?.idle).toMatchObject({ againAt: due, again: `again:${told.at}` });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: due - 1000,
+      pct: 95,
+      resetAt: due + 10 * HOUR,
+      source: "test",
+    });
+    // still listed as idle, with its spell kept, but no repeat
+    expect(read(due).wake?.idle).toMatchObject({ againAt: null, again: null });
+    expect(idleFact(due)).toEqual([`guido-1:${T0}`]);
+  });
+
+  it("starts the wait for a spell an older hub delivered, so the repeat comes after an Update", () => {
+    tick(T0);
+    store.setSetting(
+      "flight.idle-seat",
+      JSON.stringify({ seats: { "guido-1": T0 }, delivered: [`guido-1:${T0}`] }),
+    );
+    const at = T0 + 10 * HOUR;
+    expect(read(at).wake?.idle?.againAt).toBeNull();
+    tick(at);
+    expect(read(at).wake?.idle).toMatchObject({ againAt: at + FLIGHT_IDLE_SEAT_AGAIN_MS });
+    expect(read(at + FLIGHT_IDLE_SEAT_AGAIN_MS).wake?.idle?.again).toBe(`again:${at}`);
   });
 
   it("under a slow pace a seat the pace holds is no fit and wakes no one; a ticket it names is", () => {
@@ -5409,6 +5478,8 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
 
   describe("the watcher", () => {
     let logged: string[];
+    /** When the first idle wake reaches FLIGHT: the spell's first 30 minutes are over. */
+    const T1 = T0 + FLIGHT_IDLE_SEAT_WAKE_MS;
     beforeEach(() => {
       logged = [];
       watch.stop();
@@ -5416,9 +5487,9 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       flightOnly();
     });
 
-    it("wakes once per idle spell with the idle seat and open tickets", async () => {
+    it("wakes once per idle spell with the idle seat and open tickets, and shows when it tells FLIGHT again", async () => {
       await watch.check();
-      nowMs = T0 + FLIGHT_IDLE_SEAT_WAKE_MS;
+      nowMs = T1;
       await watch.check();
       expect(sendCalls).toHaveLength(1);
       expect(sendCalls[0]?.text).toContain("guido-1");
@@ -5426,11 +5497,14 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       expect(sendCalls[0]?.text).toContain("Ticket 2");
       expect(sendCalls[0]?.text).toContain("Ticket 3");
 
-      nowMs += 5 * HOUR;
+      // the same spell says nothing more until FLIGHT_IDLE_SEAT_AGAIN_MS after FLIGHT was told
+      nowMs = T1 + FLIGHT_IDLE_SEAT_AGAIN_MS - 40 * MIN;
       await watch.check();
       expect(sendCalls).toHaveLength(1);
       expect(logged.some((l) => l.includes("seat idle"))).toBe(true);
-      expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBeNull();
+      expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBe(
+        T1 + FLIGHT_IDLE_SEAT_AGAIN_MS,
+      );
 
       live("guido-1", "r-guido");
       await watch.check();
@@ -5441,6 +5515,140 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
       await watch.check();
       expect(sendCalls).toHaveLength(2);
+    });
+
+    it("tells FLIGHT again of a crew still idle after 2 hours, then 4, then every 8 (24 November: 10 idle hours)", async () => {
+      // other reasons (the daily retrospective) wake FLIGHT over these hours too: count the repeat's own
+      const again = () => sendCalls.filter((c) => c.text.includes("idleAgain (1)"));
+      const told = () =>
+        (JSON.parse(store.getSetting("flight.idle-seat") ?? "{}") as { told: { at: number } }).told
+          .at;
+      await watch.check();
+      nowMs = T1;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      nowMs = T1 + FLIGHT_IDLE_SEAT_AGAIN_MS - MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+      nowMs += MIN;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      expect(sendCalls[1]?.text).toContain("idleAgain (1)");
+      expect(sendCalls[1]?.text).toContain("2 seats idle, longest 150 min");
+      expect(sendCalls[1]?.text).toContain("A free seat has stood idle while tickets are open");
+      expect(sendCalls[1]?.text).toContain(IDLE_SEAT_AGAIN_ASK);
+      expect(sendCalls[0]?.text).not.toContain(IDLE_SEAT_AGAIN_ASK);
+
+      // the wait doubles: nothing two hours later, one wake four hours later
+      nowMs += FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      nowMs += FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(again()).toHaveLength(2);
+
+      // then eight hours after it was last told, and it stays at eight
+      for (const n of [3, 4]) {
+        nowMs = told() + FLIGHT_IDLE_SEAT_AGAIN_MAX_MS - MIN;
+        await watch.check();
+        expect(again()).toHaveLength(n - 1);
+        nowMs = told() + FLIGHT_IDLE_SEAT_AGAIN_MAX_MS;
+        await watch.check();
+        expect(again()).toHaveLength(n);
+      }
+
+      // a hub restart does not repeat the wake, and the stored record has not grown
+      watch.stop();
+      makeWatch({ log: (line: string) => void logged.push(line) });
+      await watch.check();
+      nowMs += FLIGHT_BATCH_MS;
+      await watch.check();
+      expect(again()).toHaveLength(4);
+      expect(JSON.parse(store.getSetting("flight.idle-seat") ?? "{}").delivered).toHaveLength(2);
+    });
+
+    it("puts the wait back to two hours when a seat's new spell is shown", async () => {
+      const told = () =>
+        (
+          JSON.parse(store.getSetting("flight.idle-seat") ?? "{}") as {
+            told: { at: number; repeats: number };
+          }
+        ).told;
+      await watch.check();
+      nowMs = T1;
+      await watch.check();
+      nowMs = T1 + FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(told().repeats).toBe(1);
+      // the repeat is delivered: the next one is four hours on, not "now"
+      await watch.check();
+      expect(flightView(config, store, nowMs, () => true).wake?.nextWakeAt).toBe(
+        nowMs + 2 * FLIGHT_IDLE_SEAT_AGAIN_MS,
+      );
+
+      // one seat works for a minute, then idles again: its new spell is a new stall
+      live("guido-1", "r-guido");
+      await watch.check();
+      nowMs += MIN;
+      store.upsertRun(run("r-guido", "guido-1", { endedAt: nowMs, status: "ok" }));
+      store.setSeatSession(row("guido-1", null));
+      await watch.check();
+      nowMs += FLIGHT_IDLE_SEAT_WAKE_MS;
+      await watch.check();
+      expect(sendCalls.at(-1)?.text).toContain("idle (");
+      expect(told()).toEqual({ at: nowMs, repeats: 0 });
+    });
+
+    it("does not bring the repeat forward when the longest-idle seat starts work", async () => {
+      await watch.check();
+      nowMs = T1;
+      await watch.check();
+      nowMs = T1 + FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+
+      // FLIGHT starts one seat; the other still idles
+      live("guido-1", "r-guido");
+      nowMs += FLIGHT_BATCH_MS;
+      await watch.check();
+      nowMs += FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      nowMs = T1 + 3 * FLIGHT_IDLE_SEAT_AGAIN_MS;
+      await watch.check();
+      expect(sendCalls).toHaveLength(3);
+    });
+
+    it("counts the wait from any wake that showed the idle crew, not only its own", async () => {
+      await watch.check();
+      nowMs = T1;
+      await watch.check();
+      expect(sendCalls).toHaveLength(1);
+
+      // a question wakes FLIGHT five minutes before the repeat is due; that wake names the idle seats
+      nowMs = T1 + FLIGHT_IDLE_SEAT_AGAIN_MS - 5 * MIN;
+      ask("guido-1", "r-guido", nowMs);
+      await watch.check();
+      expect(sendCalls).toHaveLength(2);
+      expect(sendCalls[1]?.text).toContain("idle");
+
+      // the repeat is not due two hours after the first idle wake: the later wake restarted the wait
+      const again = () => sendCalls.filter((c) => c.text.includes("idleAgain"));
+      const told = () =>
+        (JSON.parse(store.getSetting("flight.idle-seat") ?? "{}") as { told: { at: number } }).told
+          .at;
+      nowMs += FLIGHT_BATCH_MS + 5 * MIN;
+      await watch.check();
+      expect(again()).toEqual([]);
+      const last = told();
+      expect(last).toBeGreaterThan(T1);
+      nowMs = last + FLIGHT_IDLE_SEAT_AGAIN_MS - MIN;
+      await watch.check();
+      expect(again()).toEqual([]);
+      nowMs += MIN;
+      await watch.check();
+      expect(again()).toHaveLength(1);
     });
 
     it("waits the normal gap before waking FLIGHT for an idle spell", async () => {
