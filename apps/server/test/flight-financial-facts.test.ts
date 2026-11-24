@@ -188,6 +188,26 @@ describe("the figures read the narrow facts once", () => {
     expect(view.wakeWaits).toEqual(flightWakeWaits(store, NOW, "flight-1", "mc"));
   });
 
+  it("keeps the usage of a run that ended over an hour ago, and still sees a first digest that comes late (#2219)", () => {
+    const ended = { startedAt: NOW - 300 * MIN, endedAt: NOW - 180 * MIN, costUsd: 3 };
+    store.upsertRun(run("f-old", "flight-1", ended));
+    store.upsertRun(run("f-late", "flight-1", ended));
+    usage("f-old", [[NOW - 240 * MIN, 50]]);
+    const read = () =>
+      Object.fromEntries(
+        store
+          .financialRuns(NOW - DAY, NOW + 1, new Set(["flight-1"]))
+          .map((r) => [r.id, r.attemptUsage]),
+      );
+    expect(read()).toEqual({ "f-old": [{ at: NOW - 240 * MIN, tokens: 50 }], "f-late": [] });
+    // an empty reading is not kept: the digest may not have been folded yet
+    usage("f-late", [[NOW - 200 * MIN, 70]]);
+    expect(read()["f-late"]).toEqual([{ at: NOW - 200 * MIN, tokens: 70 }]);
+    // each caller gets a list of its own
+    read()["f-old"]?.push({ at: 1, tokens: 1 });
+    expect(read()["f-old"]).toHaveLength(1);
+  });
+
   it("shows a changed run, digest or wake on the next request in the same second", () => {
     seed();
     const before = flightView(config, store, NOW);

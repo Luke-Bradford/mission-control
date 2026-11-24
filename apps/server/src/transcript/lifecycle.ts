@@ -109,6 +109,8 @@ export function transcriptFootprint(store: Store): TranscriptFootprint | null {
   let totalBytes = 0;
   let oldestAt: number | null = null;
   const seats = new Map<string, { bytes: number; files: number }>();
+  // one read for every run's seat: a row per file took about 450 ms on 6,400 transcripts
+  const agents = store.runAgentIds();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     try {
@@ -117,12 +119,12 @@ export function transcriptFootprint(store: Store): TranscriptFootprint | null {
       const m = TRANSCRIPT.exec(entry.name);
       if (!m) continue;
       oldestAt = oldestAt === null ? st.mtimeMs : Math.min(oldestAt, st.mtimeMs);
-      const run = store.run(m[1] as string);
-      if (!run) continue;
-      const seat = seats.get(run.agentId) ?? { bytes: 0, files: 0 };
+      const agentId = agents.get(m[1] as string);
+      if (agentId === undefined) continue;
+      const seat = seats.get(agentId) ?? { bytes: 0, files: 0 };
       seat.bytes += st.size;
       seat.files++;
-      seats.set(run.agentId, seat);
+      seats.set(agentId, seat);
     } catch {
       // a concurrently removed file is omitted
     }

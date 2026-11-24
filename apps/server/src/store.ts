@@ -296,6 +296,9 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+/** A run ended this long ago is past its last fold: its digest's usage no longer changes. */
+const FINANCIAL_USAGE_SETTLED_MS = 60 * 60_000;
+const FINANCIAL_USAGE_KEPT_MAX = 20_000;
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
 
@@ -1013,7 +1016,16 @@ export class Store {
         }),
       );
     const byId = new Map(runs.map((r) => [r.id, r]));
-    const ids = [...byId.keys()];
+    // A run that ended a while ago has its final digest: its usage is read once and kept. Pulling
+    // `attemptUsage` out of seven days of digests cost about 100 ms on every FLIGHT state request.
+    const settled = (r: FinancialRun): boolean =>
+      r.endedAt !== null && r.endedAt < untilMs - FINANCIAL_USAGE_SETTLED_MS;
+    const ids: string[] = [];
+    for (const run of runs) {
+      const kept = settled(run) ? this.financialUsageKept.get(run.id) : undefined;
+      if (kept === undefined) ids.push(run.id);
+      else run.attemptUsage = kept.map((u) => ({ ...u }));
+    }
     for (let i = 0; i < ids.length; i += DIGEST_BATCH) {
       const batch = ids.slice(i, i + DIGEST_BATCH);
       const rows = this.statement(
@@ -1028,7 +1040,29 @@ export class Store {
           run.attemptUsage.push({ at: u.at, tokens: u.tokens });
       }
     }
+    for (const id of ids) {
+      const run = byId.get(id);
+      // an empty reading may be a digest not folded yet: only a reading with usage is kept
+      if (run !== undefined && settled(run) && run.attemptUsage.length > 0)
+        this.financialUsageKept.set(
+          id,
+          run.attemptUsage.map((u) => ({ ...u })),
+        );
+    }
     return runs;
+  }
+
+  private readonly financialUsageKept = new BoundedMap<string, FinancialRun["attemptUsage"]>(
+    FINANCIAL_USAGE_KEPT_MAX,
+  );
+
+  /** Each run's agent, in one read: for callers that match many files or rows to their seat. */
+  runAgentIds(): Map<string, string> {
+    return new Map(
+      (
+        this.statement("SELECT id, agent_id FROM runs").all() as { id: string; agent_id: string }[]
+      ).map((r) => [r.id, r.agent_id]),
+    );
   }
 
   /**
