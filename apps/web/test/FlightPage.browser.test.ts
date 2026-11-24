@@ -335,7 +335,7 @@ describeRendered("FLIGHT page in a browser", () => {
               colorScheme: theme,
               api: flightPageApi(state),
             });
-            await page.box("#decisions li");
+            await page.box("#blockers");
             expect(page.errors()).toEqual([]);
             const r = await page.evaluate(() => {
               const doc = document.documentElement;
@@ -353,9 +353,6 @@ describeRendered("FLIGHT page in a browser", () => {
                   };
                 },
               );
-              const list = document.getElementById("decisions") as HTMLElement;
-              const rows = [...list.children];
-              const lastRow = rows.at(-1)?.getBoundingClientRect();
               const small = [...document.querySelectorAll<HTMLElement>("a, button, select, input")]
                 .filter(visible)
                 .filter((el) => {
@@ -381,16 +378,11 @@ describeRendered("FLIGHT page in a browser", () => {
                 doing: document.querySelectorAll("#doing li").length,
                 blockerRows: document.querySelectorAll("#blockers .fp-brow").length,
                 blockers: text("#blockers"),
-                decisions: rows.length,
-                decSub: text("#decH .fp-sub"),
-                decGap: list.getBoundingClientRect().bottom - (lastRow?.bottom ?? 0),
-                decRowH: lastRow?.height ?? 0,
-                decTop:
-                  (rows[0]?.getBoundingClientRect().top ?? 0) - list.getBoundingClientRect().top,
                 tables: document.querySelectorAll("main table").length,
                 board: document
                   .querySelector<HTMLAnchorElement>("a.fp-board")
                   ?.getAttribute("href"),
+                decisionsHere: document.getElementById("decisions") !== null,
                 status: text(".fp-band"),
                 theme: doc.dataset.theme,
               };
@@ -427,14 +419,32 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(r.theme).toBe(theme);
             expect(r.doing, `${where}: Doing now has 1 to 5 lines`).toBeGreaterThan(0);
             expect(r.doing).toBeLessThanOrEqual(5);
-            expect(r.decisions).toBeGreaterThanOrEqual(width >= 2560 ? 12 : 8);
-            expect(r.decSub).toBe(`last ${r.decisions} · newest first`);
-            expect(r.decTop, `${where}: rows start at the top`).toBe(0);
-            expect(r.decGap, `${where}: blank under decisions`).toBeLessThan(r.decRowH);
+            expect(r.decisionsHere, `${where}: Recent decisions is on the Plan tab`).toBe(false);
             expect(r.status).toMatch(state === "stopped" ? /Stopped/ : /Running/);
             if (state === "blocked") expect(r.blockerRows).toBe(3);
             else if (state === "running") expect(r.blockers).toMatch(/Nothing is blocking FLIGHT/);
             else expect(r.blockerRows).toBe(1);
+            // Recent decisions is on the Plan tab: it lists its rows there, newest first.
+            await page.evaluate(() => {
+              const plan = [...document.querySelectorAll<HTMLElement>("[role=tab]")].find((t) =>
+                t.textContent?.trim().startsWith("Plan"),
+              );
+              plan?.click();
+            }, null);
+            await page.box("#decisions li");
+            const dec = await page.evaluate(
+              () => ({
+                rows: document.querySelectorAll("#decisions li").length,
+                sub: document.querySelector("#decH .fp-sub")?.textContent ?? "",
+                clipped: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].some(
+                  (p) => p.scrollHeight > p.clientHeight + 1,
+                ),
+              }),
+              null,
+            );
+            expect(dec.rows, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(3);
+            expect(dec.sub).toBe(`last ${dec.rows} · newest first`);
+            expect(dec.clipped, `${where}: a Plan panel hides content`).toBe(false);
           },
           BROWSER_TEST_TIMEOUT_MS,
         );
