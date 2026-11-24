@@ -7,6 +7,7 @@ import {
   CHECKING,
   focusOf,
   NOTHING_WRONG,
+  UNMEASURED,
   unknownText,
   VITAL_SHAPE,
   VITAL_WORD,
@@ -75,7 +76,7 @@ function StateMark({ state }: { state: Vital["state"] }) {
  * only when every measure is good.
  */
 function Focus({ vitals }: { vitals: readonly Vital[] }) {
-  const f = focusOf(vitals);
+  const f = focusOf(vitals, UNMEASURED.length);
   const notes = [
     f.kind === "flagged" && f.more > 0 && `${f.more} more bad or on watch.`,
     f.kind === "flagged" && f.unknown > 0 && `${unknownText(f.unknown)}.`,

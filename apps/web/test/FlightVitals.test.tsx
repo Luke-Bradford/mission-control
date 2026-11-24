@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { PAGE_TAB_LABEL, PAGE_TABS } from "../src/flight/page/FlightPage.tsx";
-import { FOCUS_LABEL } from "../src/flight/page/StatusBand.tsx";
+import { FOCUS_LABEL, StatusBand } from "../src/flight/page/StatusBand.tsx";
 import {
   band,
   computeVitals,
@@ -103,6 +103,32 @@ describe("focusOf", () => {
 
   it("is all clear only when every measure is good", () => {
     expect(focusOf([v("a", "ok"), v("b", "ok")])).toEqual({ kind: "clear" });
+  });
+
+  it("counts measures with no source as unknown, with or without a flagged one", () => {
+    expect(focusOf([v("a", "ok")], 4)).toEqual({ kind: "unknown", unknown: 4 });
+    expect(focusOf([v("a", "warn"), v("b", "none", "none")], 4)).toMatchObject({
+      kind: "flagged",
+      unknown: 5,
+    });
+  });
+
+  it("shows the measures with no source as unknown when every computed one is good", () => {
+    render(
+      <StatusBand
+        run={run}
+        view={undefined}
+        now={NOW}
+        vitals={[v("a", "ok"), v("b", "ok"), v("c", "ok")]}
+      />,
+    );
+    const band = screen.getByRole("region", { name: "FLIGHT status" });
+    const focus = within(band).getByText(FOCUS_LABEL).closest(".fp-stat") as HTMLElement;
+    expect(UNMEASURED).toHaveLength(4);
+    expect(focus.textContent).toContain("4 measures unknown");
+    expect(focus.querySelector(".fp-v-none .fp-shape.dash")).not.toBeNull();
+    expect(focus.textContent).not.toContain(NOTHING_WRONG);
+    cleanup();
   });
 });
 
@@ -294,7 +320,7 @@ describe("the FLIGHT page tabs", () => {
     await vi.waitFor(() => expect(room.textContent).not.toContain(LOADING));
     const unknown = room.querySelectorAll("li.fp-v-none").length;
     expect(unknown).toBeGreaterThan(0);
-    expect(focus.textContent).toContain(unknownText(unknown));
+    expect(focus.textContent).toContain(unknownText(unknown + UNMEASURED.length));
     expect(focus.textContent).not.toContain(NOTHING_WRONG);
   });
 

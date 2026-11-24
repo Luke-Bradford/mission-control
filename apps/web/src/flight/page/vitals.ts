@@ -108,9 +108,10 @@ export type Focus =
  * A bad or watch measure comes first, worst first. Otherwise no all-clear is given while a source is
  * loading, or while any measure has no figure: those are counted, not passed as good.
  */
-export function focusOf(vitals: readonly Vital[]): Focus {
+export function focusOf(vitals: readonly Vital[], unmeasured = 0): Focus {
   const flagged = worstFirst(vitals.filter((v) => v.state === "crit" || v.state === "warn"));
-  const unknown = vitals.filter((v) => v.state === "none").length;
+  // A measure with no source yet (UNMEASURED) is unknown too.
+  const unknown = vitals.filter((v) => v.state === "none").length + unmeasured;
   const worst = flagged[0];
   if (worst) return { kind: "flagged", worst, more: flagged.length - 1, unknown };
   if (vitals.some((v) => v.state === "none" && v.value === LOADING)) return { kind: "loading" };
