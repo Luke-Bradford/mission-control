@@ -1,7 +1,7 @@
 import { crewProfileOf, OPERATOR_HEADER } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { buildApp } from "../src/api.ts";
+import { buildApp, CHECK_FAILED } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { CliHold } from "../src/cli/update.ts";
 import { type CcConfig, crewSeatDef } from "../src/config.ts";
@@ -10,13 +10,18 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import {
+  CREW_STATE_UNREADABLE,
   createQuietGate,
   HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
   HUB_UNSAFE_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
   HUB_UPDATE_PERSON_KEY,
+  NOT_ON_MAIN,
+  originUnreachable,
+  UNCOMMITTED_CHANGES,
   UPDATE_HOLD_OWNER,
+  UPDATE_RUNNING,
   UpdateError,
   type Updater,
 } from "../src/update.ts";
@@ -25,7 +30,7 @@ const NOW = Date.UTC(2026, 10, 7, 12),
   SEAT = "flight-1",
   RUN = "flight-run",
   TOKEN = "fictional-operator-key";
-const configFor = (powers: "standard" | "superuser"): CcConfig => ({
+const configFor = (powers: "standard" | "superuser", hub: "off" | "auto" = "auto"): CcConfig => ({
   operator: { id: "operator", timezone: "UTC" },
   accounts: [{ id: "claude", vendor: "claude", alertAt: 85, stopAt: 95 }],
   repos: [
@@ -40,6 +45,7 @@ const configFor = (powers: "standard" | "superuser"): CcConfig => ({
   ],
   loops: [],
   poll: { usageMinutes: 30, githubSeconds: 60 },
+  updates: { hub, cli: "off" },
   crew: {
     maxSeats: 2,
     worktrees: "/fixture/worktrees",
@@ -63,6 +69,7 @@ let store: Store,
   hold: CliHold,
   supervisorBusy: () => { seatId: string; state: string }[],
   updateError: UpdateError | null,
+  updateCheckError: Error | null,
   updateOpts: unknown,
   updateCheck: { behind: number | null; canUpdate: boolean; reason: string | null };
 const headers = { "content-type": "application/json", [OPERATOR_HEADER]: TOKEN };
@@ -70,12 +77,13 @@ const asFlight = {
   ...headers,
   [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: SEAT, runId: RUN }),
 };
-const build = (powers: "standard" | "superuser", gate = false) => {
-  const config = configFor(powers);
+const build = (powers: "standard" | "superuser", gate = false, hub: "off" | "auto" = "auto") => {
+  const config = configFor(powers, hub);
   expect(crewProfileOf("FLIGHT", crewSeatDef(config, SEAT).loop)).toBe("flight-full");
   const updater = {
     check: async () => {
       calls.push("check");
+      if (updateCheckError !== null) throw updateCheckError;
       return { sha: "a".repeat(40), checkedAt: NOW, ...updateCheck };
     },
     update: async (opts?: unknown) => {
@@ -106,6 +114,7 @@ beforeEach(() => {
   calls = [];
   hold = new CliHold();
   updateError = null;
+  updateCheckError = null;
   updateOpts = undefined;
   updateCheck = { behind: 0, canUpdate: false, reason: "Up to date with main." };
   busy = [{ seatId: SEAT, state: "running" }];
@@ -166,6 +175,19 @@ it("refuses FLIGHT's Update on a standard repo", async () => {
   build("standard");
   const r = await update(asFlight);
   expect(r.statusCode).toBe(403);
+  expect(r.json<{ error: string }>().error).toBe(
+    "Only FLIGHT on a superuser repo runs Update; the operator runs Update.",
+  );
+  expect(calls).toEqual([]);
+});
+
+it("refuses FLIGHT's Update when hub updates are off", async () => {
+  build("superuser", false, "off");
+  store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
+  updateCheck = { behind: 1, canUpdate: true, reason: null };
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(409);
+  expect(r.json<{ error: string }>().error).toBe("Hub updates are off: the operator runs Update.");
   expect(calls).toEqual([]);
 });
 
@@ -186,6 +208,55 @@ it("says FLIGHT should run Update again after a new merge when none is waiting",
   expect(r.statusCode).toBe(409);
   expect(r.json<{ error: string }>().error).toBe(
     "No Update is waiting for FLIGHT. Run Update again after a new version lands.",
+  );
+  expect(calls).toEqual(["check"]);
+});
+
+it.each([
+  [UPDATE_RUNNING, "The hub is running this Update now; FLIGHT has nothing to run."],
+  [
+    NOT_ON_MAIN,
+    "not on main: a person must fix the hub's checkout; the operator runs this Update.",
+  ],
+  [
+    UNCOMMITTED_CHANGES,
+    "the checkout has uncommitted changes: a person must fix the hub's checkout; the operator runs this Update.",
+  ],
+  [
+    CREW_STATE_UNREADABLE,
+    "The hub could not read the crew's state. FLIGHT runs Update again in a few minutes.",
+  ],
+  ["GUIDO-1 is starting", "GUIDO-1 is starting: run Update again in a minute."],
+])("says who runs a fresh-check refusal: %s", async (reason, error) => {
+  build("superuser");
+  store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
+  updateCheck = { behind: 2, canUpdate: false, reason };
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(409);
+  expect(r.json<{ error: string }>().error).toBe(error);
+  expect(calls).toEqual(["check"]);
+});
+
+it("says when FLIGHT retries if origin cannot be reached", async () => {
+  build("superuser");
+  store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
+  updateCheckError = new UpdateError(502, originUnreachable(NOW), { checkedAt: NOW });
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(502);
+  expect(r.json<{ error: string }>().error).toBe(
+    `${originUnreachable(NOW)} The hub checks main again in a few minutes; FLIGHT runs Update again then.`,
+  );
+  expect(calls).toEqual(["check"]);
+});
+
+it("says when FLIGHT retries if the fresh check fails unexpectedly", async () => {
+  build("superuser");
+  store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
+  updateCheckError = new Error("boom");
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(500);
+  expect(r.json<{ error: string }>().error).toBe(
+    `${CHECK_FAILED}; the hub checks main again in a few minutes. FLIGHT runs Update again then.`,
   );
   expect(calls).toEqual(["check"]);
 });
