@@ -15,7 +15,7 @@ import { CMUX_NEEDS_INPUT_TEXT, type Run } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { agentViews } from "../src/hud/hud.ts";
 import { CMUX_REFUSED_TEXT } from "../src/runtime/cmux.ts";
-import { cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
+import { cmuxSourceKey, cmuxWorkspaceKey } from "../src/runtime/cmux-session.ts";
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -186,6 +186,28 @@ describe("a Claude run in cmux", () => {
       claudeFile(),
       `${ts.map((t) => JSON.stringify({ type: "assistant", t })).join("\n")}\n`,
     );
+
+  it("a restart attaches from the durable source cursor when the workspace setting has none", async () => {
+    const first = await started();
+    claudeLines("1", "2");
+    await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2"]));
+    expect(store.getSetting(cmuxSourceKey(first.runId))).not.toBeNull();
+    await first.sup.stopAll();
+    reopenStore();
+    // a resume that saved only {workspace, pid} before the hub went down
+    const saved = JSON.parse(store.getSetting(cmuxWorkspaceKey(first.runId)) as string);
+    store.setSetting(
+      cmuxWorkspaceKey(first.runId),
+      JSON.stringify({ workspace: saved.workspace, pid: saved.pid }),
+    );
+    const second = make({ cmuxState: stateFile() });
+    second.sup.start();
+    await until(() => expect(second.sup.sessionAlive?.("guido-1")).toBe(true));
+    claudeLines("3");
+    await until(() => expect(copiedTs(first.runId)).toEqual(["1", "2", "3"]));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(copiedTs(first.runId)).toEqual(["1", "2", "3"]);
+  });
 
   it("a hub restart with the saved pid dead resumes in a new workspace without copying Claude's transcript again", async () => {
     const first = await started();

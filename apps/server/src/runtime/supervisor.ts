@@ -3295,7 +3295,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       ...(deps.cmuxPollMs === undefined ? {} : { pollMs: deps.cmuxPollMs }),
       workspace: saved.workspace,
       pid: saved.pid,
-      source: saved.source ?? null,
+      // the durable cursor outlives the workspace setting, which a fresh resume has not yet given one
+      source: savedSource(runId) ?? saved.source ?? null,
     });
     return {
       kind: "attached",
