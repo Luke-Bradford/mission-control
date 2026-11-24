@@ -556,6 +556,35 @@ describe("a restart reads Claude's transcript from where it left off", () => {
   });
 });
 
+it("after /clear to a transcript with as many lines as the old one, the fresh line is copied once", async () => {
+  patch((s) => {
+    s.claudePid = ALIVE;
+  });
+  const h = start();
+  await h.session.ready;
+  h.claudeLines({ type: "assistant", t: "old" });
+  await wait(() => h.session.lines === 1);
+  const freshFile = join(root, "fresh2.jsonl");
+  writeFileSync(freshFile, `${JSON.stringify({ type: "user", t: "fresh" })}\n`);
+  patch((s) => {
+    s.sessions[0].session_id = "55555555-5555-4555-8555-555555555555";
+    s.sessions[0].transcript_path = freshFile;
+  });
+  await wait(() => h.session.lines === 2);
+  await new Promise((r) => setTimeout(r, 100));
+  const h2 = {
+    ...h,
+    sessionId: "55555555-5555-4555-8555-555555555555",
+    claudeLines: () => {},
+  } as Harness;
+  await restartAfter(h2, [], h.transcript);
+  const copied = readFileSync(h.transcript, "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  expect(copied.map((l) => l.t)).toEqual(["old", "fresh"]);
+});
+
 describe("attachCmuxSession", () => {
   it("takes up a running workspace: skips the lines it has, says attached with the turn state", async () => {
     const transcriptPath = join(root, "claude.jsonl");

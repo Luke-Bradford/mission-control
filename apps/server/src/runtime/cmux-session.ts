@@ -167,6 +167,7 @@ function createCmuxDriver(
   /** Lines of the source being read that the hub has taken in (copied or skipped), never its own. */
   let sourceLines = 0;
   let savedLines = -1;
+  let savedPath: string | null = null;
   let attachedSaid = mode.kind !== "attach";
   let timer: NodeJS.Timeout | undefined;
   let polling = false;
@@ -228,7 +229,8 @@ function createCmuxDriver(
 
   /** Saves the workspace with how far the source transcript has been read. */
   function persist(): void {
-    if (source === null || sourceLines === savedLines) return;
+    if (source === null || (source === savedPath && sourceLines === savedLines)) return;
+    savedPath = source;
     savedLines = sourceLines;
     i.save?.({ workspace, pid, source: { path: source, lines: sourceLines } });
   }
