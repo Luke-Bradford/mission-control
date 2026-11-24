@@ -296,6 +296,15 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+/** The audit's past-changes section pauses after this many changes (about 15 ms on the live hub, 24 November 2026). */
+const AUDIT_CHANGES_STEP = 50;
+/**
+ * A run ended this long ago is rarely folded again, so its usage reading is worth keeping. A later
+ * fold (the backfill, a day after a run's start) drops the kept reading in `setDigest`.
+ */
+const FINANCIAL_USAGE_SETTLED_MS = 60 * 60_000;
+/** About twice the runs in FLIGHT's 14-day cost window; a run outside it is never read again. */
+const FINANCIAL_USAGE_KEPT_MAX = 4_000;
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
 
@@ -1013,7 +1022,17 @@ export class Store {
         }),
       );
     const byId = new Map(runs.map((r) => [r.id, r]));
-    const ids = [...byId.keys()];
+    // A run that ended a while ago keeps its usage reading until its digest is next written:
+    // pulling `attemptUsage` out of every digest in the window costs 55 to 60 ms a call on 1,700
+    // runs. `untilMs` is taken as now, which is how the one caller passes it.
+    const settled = (r: FinancialRun): boolean =>
+      r.endedAt !== null && r.endedAt < untilMs - FINANCIAL_USAGE_SETTLED_MS;
+    const ids: string[] = [];
+    for (const run of runs) {
+      const kept = settled(run) ? this.financialUsageKept.get(run.id) : undefined;
+      if (kept === undefined) ids.push(run.id);
+      else run.attemptUsage = kept.map((u) => ({ ...u }));
+    }
     for (let i = 0; i < ids.length; i += DIGEST_BATCH) {
       const batch = ids.slice(i, i + DIGEST_BATCH);
       const rows = this.statement(
@@ -1028,7 +1047,29 @@ export class Store {
           run.attemptUsage.push({ at: u.at, tokens: u.tokens });
       }
     }
+    for (const id of ids) {
+      const run = byId.get(id);
+      // an empty reading may be a digest not folded yet: only a reading with usage is kept
+      if (run !== undefined && settled(run) && run.attemptUsage.length > 0)
+        this.financialUsageKept.set(
+          id,
+          run.attemptUsage.map((u) => ({ ...u })),
+        );
+    }
     return runs;
+  }
+
+  private readonly financialUsageKept = new BoundedMap<string, FinancialRun["attemptUsage"]>(
+    FINANCIAL_USAGE_KEPT_MAX,
+  );
+
+  /** Each run's agent, in one read: for callers that match many files or rows to their seat. */
+  runAgentIds(): Map<string, string> {
+    return new Map(
+      (
+        this.statement("SELECT id, agent_id FROM runs").all() as { id: string; agent_id: string }[]
+      ).map((r) => [r.id, r.agent_id]),
+    );
   }
 
   /**
@@ -1085,6 +1126,8 @@ export class Store {
          ON CONFLICT(run_id) DO UPDATE SET digest = excluded.digest`,
       )
       .run(runId, JSON.stringify(d));
+    // every digest write comes through here, so a kept usage reading always equals a fresh one
+    this.financialUsageKept.delete(runId);
   }
 
   digest(runId: string): RunDigest | null {
@@ -1129,6 +1172,7 @@ export class Store {
     this.db
       .prepare("DELETE FROM run_digests WHERE run_id IN (SELECT id FROM runs WHERE started_at < ?)")
       .run(olderThan);
+    this.financialUsageKept.clear();
   }
 
   /** Records a state change; a second change of one agent in the same millisecond is dropped. */
@@ -1396,6 +1440,7 @@ export class Store {
                 this.db
                   .prepare(`DELETE FROM ${child} WHERE run_id IN (${runMarks})`)
                   .run(...values);
+              for (const id of values) this.financialUsageKept.delete(id);
             }
           }
           this.db
@@ -2121,8 +2166,9 @@ export class Store {
 
   /**
    * Range-bounded, durable audit aggregates.  Inputs are timestamps already validated at HTTP.
-   * One section is built per step, and a step is a pause point, so a caller can let the event loop
-   * run between sections (`auditStepped`); `audit` runs them all at once.
+   * Each step is a pause point: one after every section, and more inside a section that is long by
+   * itself (past changes). A caller can let the event loop run at each (`auditStepped`); `audit`
+   * runs them all at once.
    */
   *auditSteps(
     since: number,
@@ -2143,7 +2189,9 @@ export class Store {
     const medianSpend = median(spend.map((r) => r.costUsd));
     let chatterRows: ReturnType<Store["commsChatter"]> | undefined;
     const chatter = () => (chatterRows ??= this.commsChatter(since, until));
-    const parts: { [K in keyof AuditView]: () => AuditView[K] } = {
+    const parts: {
+      [K in keyof AuditView]: () => AuditView[K] | Generator<void, AuditView[K]>;
+    } = {
       range: () => ({ since, until }),
       longRunners: () =>
         (
@@ -2281,7 +2329,7 @@ export class Store {
       findingFiles: () => this.auditFindingFiles(since, until),
       chatter: () => chatter(),
       flakes: () => this.auditFlakes(since, until),
-      changes: () => this.auditChanges(since, until),
+      changes: () => this.auditChangesSteps(since, until),
       tokenOveruse: () => this.auditTokenOveruse(since, until, kinds),
       items: () => this.auditItems(since, until),
       bugEscapes: () => [],
@@ -2294,7 +2342,12 @@ export class Store {
     };
     const out: Partial<AuditView> = {};
     for (const key of Object.keys(parts) as (keyof AuditView)[]) {
-      (out as Record<string, unknown>)[key] = (parts[key] as () => unknown)();
+      // a section long enough to need pauses of its own hands back a generator
+      const built = (parts[key] as () => unknown)();
+      (out as Record<string, unknown>)[key] =
+        typeof (built as Generator | null)?.next === "function"
+          ? yield* built as Generator<void, unknown>
+          : built;
       yield;
     }
     return out as AuditView;
@@ -2309,7 +2362,7 @@ export class Store {
     }
   }
 
-  /** `auditSteps` with the event loop let run between sections, so a long read never freezes the hub. */
+  /** `auditSteps` with the event loop let run at every pause, so a long read never freezes the hub. */
   async auditStepped(...args: Parameters<Store["auditSteps"]>): Promise<AuditView> {
     const steps = this.auditSteps(...args);
     for (;;) {
@@ -2491,8 +2544,13 @@ export class Store {
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
   }
 
-  /** Each seat's first run on a new prompt or model in range, with metrics either side of it. */
-  private auditChanges(since: number, until: number): AuditChange[] {
+  /**
+   * Each seat's first run on a new prompt or model in range, with metrics either side of it.
+   * A month holds thousands of them and each one's metrics scan a week of merges and reviews,
+   * about a second in all, so it pauses every AUDIT_CHANGES_STEP changes: a caller that lets the
+   * event loop run at each pause (`auditStepped`) never holds the hub for the whole of it.
+   */
+  private *auditChangesSteps(since: number, until: number): Generator<void, AuditChange[]> {
     type ChangeRun = {
       agent_id: string;
       started_at: number;
@@ -2544,6 +2602,7 @@ export class Store {
           before: metrics(run.started_at - windowMs, run.started_at - 1),
           after: metrics(run.started_at, run.started_at + windowMs - 1),
         });
+        if (changes.length % AUDIT_CHANGES_STEP === 0) yield;
       }
     }
     return changes.sort((a, b) => a.at - b.at || a.agentId.localeCompare(b.agentId));

@@ -188,6 +188,64 @@ describe("the figures read the narrow facts once", () => {
     expect(view.wakeWaits).toEqual(flightWakeWaits(store, NOW, "flight-1", "mc"));
   });
 
+  describe("the usage of long-ended runs is kept between reads (#2219)", () => {
+    const read = () =>
+      Object.fromEntries(
+        store
+          .financialRuns(NOW - DAY, NOW + 1, new Set(["flight-1"]))
+          .map((r) => [r.id, r.attemptUsage]),
+      );
+    /** Rewrites a digest behind the store's back: only a read that goes to the table sees it. */
+    const rawUsage = (runId: string, tokens: number) =>
+      (store as unknown as { db: { prepare(sql: string): { run(...a: unknown[]): void } } }).db
+        .prepare(
+          "UPDATE run_digests SET digest = json_set(digest, '$.attemptUsage[0].tokens', ?) WHERE run_id = ?",
+        )
+        .run(tokens, runId);
+    const ended = (min: number) => ({
+      startedAt: NOW - 300 * MIN,
+      endedAt: NOW - min * MIN,
+      costUsd: 3,
+    });
+
+    it("reads a run ended over an hour ago once, and a run ended inside the hour every time", () => {
+      store.upsertRun(run("f-old", "flight-1", ended(61)));
+      store.upsertRun(run("f-new", "flight-1", ended(59)));
+      usage("f-old", [[NOW - 240 * MIN, 50]]);
+      usage("f-new", [[NOW - 240 * MIN, 50]]);
+      expect(read()).toEqual({
+        "f-old": [{ at: NOW - 240 * MIN, tokens: 50 }],
+        "f-new": [{ at: NOW - 240 * MIN, tokens: 50 }],
+      });
+      rawUsage("f-old", 99);
+      rawUsage("f-new", 99);
+      expect(read()["f-old"]).toEqual([{ at: NOW - 240 * MIN, tokens: 50 }]);
+      expect(read()["f-new"]).toEqual([{ at: NOW - 240 * MIN, tokens: 99 }]);
+    });
+
+    it("drops the kept reading when the run's digest is written, so a later fold is seen", () => {
+      store.upsertRun(run("f-old", "flight-1", ended(180)));
+      usage("f-old", [[NOW - 240 * MIN, 50]]);
+      expect(read()["f-old"]).toEqual([{ at: NOW - 240 * MIN, tokens: 50 }]);
+      usage("f-old", [
+        [NOW - 240 * MIN, 50],
+        [NOW - 200 * MIN, 70],
+      ]);
+      expect(read()["f-old"]).toHaveLength(2);
+      store.pruneDigests(NOW);
+      expect(read()["f-old"]).toEqual([]);
+    });
+
+    it("does not keep an empty reading, and gives each caller a list of its own", () => {
+      store.upsertRun(run("f-late", "flight-1", ended(180)));
+      expect(read()["f-late"]).toEqual([]);
+      usage("f-late", [[NOW - 200 * MIN, 70]]);
+      expect(read()["f-late"]).toEqual([{ at: NOW - 200 * MIN, tokens: 70 }]);
+      read()["f-late"]?.push({ at: 1, tokens: 1 });
+      expect(read()["f-late"]).toHaveLength(1);
+    });
+  });
+
   it("shows a changed run, digest or wake on the next request in the same second", () => {
     seed();
     const before = flightView(config, store, NOW);

@@ -152,3 +152,45 @@ it("reads 30 days of Audit with thousands of prompt and model changes in under a
   // and still catches a regression to the old read. The one-second product bound is measured on the live hub.
   expect(took).toBeLessThan(3_000);
 }, 60_000);
+
+it("pauses inside the past-changes section, once per 50 changes, and builds the same view (#2219)", async () => {
+  const own = new Store(":memory:");
+  const db = (own as unknown as { db: import("node:sqlite").DatabaseSync }).db;
+  db.exec("BEGIN");
+  const run = db.prepare(
+    `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, ticket, transcript_path,
+       model, prompt_hash, cost_usd) VALUES (?, ?, 'repo', ?, ?, ?, 'done', ?, '/x', ?, ?, ?)`,
+  );
+  const runs = 20_000;
+  for (let i = 0; i < runs; i++) {
+    const at = NOW - 100 * DAY + Math.floor((i / runs) * 100 * DAY);
+    // a new prompt on nearly every run, as the live hub has
+    run.run(`r${i}`, `seat-${i % 12}`, i, at, at + 600_000, `repo#${i % 900}`, "m1", `p${i}`, 2);
+  }
+  const pr = db.prepare(
+    "INSERT INTO pr_history (repo_id, number, merged_at, record) VALUES (?, ?, ?, ?)",
+  );
+  for (let i = 0; i < 2_500; i++) {
+    const at = NOW - 100 * DAY + Math.floor((i / 2_500) * 100 * DAY);
+    pr.run("repo", i, at, JSON.stringify({ number: i, ticket: `repo#${i % 900}`, mergedAt: at }));
+  }
+  db.exec("COMMIT");
+  try {
+    const whole = own.audit(NOW - 30 * DAY, NOW, new Map());
+    // counted, not timed, so load cannot fail it: one pause per section and one per 50 changes
+    const steps = own.auditSteps(NOW - 30 * DAY, NOW, new Map());
+    let pauses = 0;
+    let step = steps.next();
+    while (!step.done) {
+      pauses++;
+      step = steps.next();
+    }
+    const sections = Object.keys(whole).length;
+    expect(whole.changes.length).toBeGreaterThan(5_000);
+    expect(pauses).toBe(sections + Math.floor(whole.changes.length / 50));
+    expect(step.value.changes).toEqual(whole.changes);
+    expect(await own.auditStepped(NOW - 30 * DAY, NOW, new Map())).toEqual(whole);
+  } finally {
+    own.close();
+  }
+}, 60_000);
