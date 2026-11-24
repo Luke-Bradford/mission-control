@@ -25,7 +25,7 @@ describeRendered("FLIGHT page in a browser", () => {
         page: "test/agentV2Browser.html",
         width: 1280,
         height: 800,
-        search: `?dock=folded&at=${encodeURIComponent("/flight")}`,
+        search: `?dock=folded&at=${encodeURIComponent("/flight#decisionsP")}`,
         api,
       });
       await main.box("#decisions li");
@@ -116,7 +116,7 @@ describeRendered("FLIGHT page in a browser", () => {
             page: "test/flightBrowser.html",
             width,
             height,
-            search: `?view=page&theme=${theme}`,
+            search: `?view=page&theme=${theme}&at=${encodeURIComponent("/flight#heldWatchP")}`,
             colorScheme: theme,
             api: flightPageApi("running", {
               "/api/attention/held": [
@@ -189,7 +189,6 @@ describeRendered("FLIGHT page in a browser", () => {
               clipped: panel ? panel.scrollHeight > panel.clientHeight + 1 : true,
               end: end ? { w: end.width, h: end.height } : null,
               text: panel?.textContent ?? "",
-              decisions: document.querySelectorAll("#decisions li").length,
             };
           }, null);
           const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
@@ -202,7 +201,6 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.end?.h).toBeGreaterThanOrEqual(24);
           expect(r.text).toContain("Review only: no new builds");
           expect(r.text).toContain("Ends: not set");
-          expect(r.decisions).toBeGreaterThanOrEqual(3);
           await page.close();
         },
         BROWSER_TEST_TIMEOUT_MS,

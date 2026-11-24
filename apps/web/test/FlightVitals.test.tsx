@@ -1,0 +1,170 @@
+import type { FlightView } from "@mc/core";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hub } from "../src/data.ts";
+import { PAGE_TAB_LABEL, PAGE_TABS } from "../src/flight/page/FlightPage.tsx";
+import {
+  band,
+  computeVitals,
+  NOT_MEASURED,
+  UNMEASURED,
+  unmeasuredVitals,
+  type VitalInputs,
+} from "../src/flight/page/vitals.ts";
+import { Flight } from "../src/pages/Flight.tsx";
+import { stubFetch } from "./fetchStub.ts";
+import { HOUR, item, MIN, NOW } from "./fixtures.ts";
+import { flightPageApi } from "./flightPageFixtures.ts";
+import { flightSummary } from "./flightSummaryFixture.ts";
+
+const run = { kind: "running", why: "working" } as const;
+const empty: VitalInputs = {
+  now: NOW,
+  run,
+  view: undefined,
+  summary: undefined,
+  attention: undefined,
+  ledger: undefined,
+};
+const hours = (ns: number[]) =>
+  ns.map((n, i) => ({ at: NOW - (ns.length - i) * HOUR, n, byReason: {} }));
+const view = (over: Partial<FlightView>): FlightView => ({ seat: null, decisions: [], ...over });
+
+describe("band", () => {
+  it("is good at or under the first limit, bad over the second, watch between", () => {
+    expect([band(6, 6, 12), band(7, 6, 12), band(12, 6, 12), band(13, 6, 12)]).toEqual([
+      "ok",
+      "warn",
+      "warn",
+      "crit",
+    ]);
+  });
+});
+
+describe("computeVitals", () => {
+  it("says not measured yet for every vital the hub has no data for", () => {
+    const vitals = computeVitals({ ...empty, run: { kind: "loading" } });
+    expect(vitals.every((v) => v.state === "none" && v.value === NOT_MEASURED)).toBe(true);
+  });
+
+  it("computes wakes an hour as the median of the last day's hours", () => {
+    const wakes = (ns: number[]) =>
+      computeVitals({
+        ...empty,
+        view: view({
+          wakeHistory: { since: 0, total: 0, idle: 0, byReason: [], perHour: hours(ns) },
+        }),
+      }).find((v) => v.id === "wakes");
+    expect(wakes([2, 3, 4])).toMatchObject({ state: "ok", value: "3 (median, last 24 hours)" });
+    expect(wakes([8, 9, 30])?.state).toBe("warn");
+    expect(wakes([14, 15, 16, 2])?.state).toBe("crit");
+  });
+
+  it("judges idle wakes by their share", () => {
+    const idle = (n: number, total: number) =>
+      computeVitals({
+        ...empty,
+        view: view({ wakeHistory: { since: 0, total, idle: n, byReason: [], perHour: [] } }),
+      }).find((v) => v.id === "idle");
+    expect(idle(1, 10)?.state).toBe("ok");
+    expect(idle(4, 10)?.state).toBe("warn");
+    expect(idle(6, 10)?.state).toBe("crit");
+    expect(idle(0, 0)?.value).toBe(NOT_MEASURED);
+  });
+
+  it("reads asks waiting on the operator with the oldest wait", () => {
+    const asks = (at: number[]) =>
+      computeVitals({ ...empty, attention: at.map((a, i) => item({ key: `q:${i}`, at: a })) }).find(
+        (v) => v.id === "asks",
+      );
+    expect(asks([])).toMatchObject({ state: "ok", value: "none" });
+    expect(asks([NOW - 10 * MIN])).toMatchObject({ state: "ok", value: "1, oldest 10m" });
+    expect(asks([NOW - 5 * HOUR, NOW - MIN])?.state).toBe("crit");
+  });
+
+  it("counts a pointer as unread only when it moved after FLIGHT last read it", () => {
+    const ptr = (changedAt: number | null, readAt: number | null) => ({
+      kind: "pr" as const,
+      target: "mc#1",
+      changedAt,
+      change: null,
+      readAt,
+    });
+    const entry = (pointers: ReturnType<typeof ptr>[]) =>
+      ({ key: "k", pointers }) as unknown as NonNullable<VitalInputs["ledger"]>[number];
+    const read = (pointers: ReturnType<typeof ptr>[]) =>
+      computeVitals({ ...empty, ledger: [entry(pointers)] }).find((v) => v.id === "pointers");
+    expect(read([ptr(NOW - HOUR, NOW - MIN)])).toMatchObject({ state: "ok", value: "none" });
+    expect(read([ptr(NOW - 5 * HOUR, null)])).toMatchObject({
+      state: "crit",
+      value: "1, oldest 5h 0m",
+    });
+    expect(read([])).toMatchObject({ state: "none", value: NOT_MEASURED });
+  });
+
+  it("lists the vitals the hub cannot measure yet as not measured", () => {
+    expect(unmeasuredVitals().map((v) => v.id)).toEqual(UNMEASURED.map((u) => u.id));
+    expect(unmeasuredVitals().every((v) => v.value === NOT_MEASURED)).toBe(true);
+  });
+});
+
+describe("the FLIGHT page tabs", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    window.history.replaceState(null, "", "/flight");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    hub.clear();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("opens on the control room: a row per measure with a word as well as a colour", async () => {
+    stubFetch(
+      flightPageApi("running", {
+        "/api/flight/summary": flightSummary({ headlineAgeMin: 400 }),
+      }),
+    );
+    render(<Flight />);
+    const room = await screen.findByRole("region", { name: /How the operation is faring/ });
+    expect(screen.getAllByRole("tab").map((t) => t.textContent?.replace(/^\d+/, ""))).toEqual(
+      PAGE_TABS.map((t) => PAGE_TAB_LABEL[t]),
+    );
+    expect(screen.getByRole("tab", { name: /Control room/ }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    const note = room.querySelector('[data-vital="headline"]');
+    expect(note?.textContent).toContain("Bad");
+    expect(note?.textContent).toContain("Age of FLIGHT's own note");
+    const load = within(room as HTMLElement)
+      .getByText("Load balance across the crew")
+      .closest("li");
+    expect(load?.textContent).toContain(NOT_MEASURED);
+    expect(load?.textContent).toContain("No data");
+    expect(room.querySelectorAll("[data-vital]").length).toBeGreaterThan(UNMEASURED.length);
+  });
+
+  it("shows a measure on the control room and on no other tab", async () => {
+    stubFetch(flightPageApi("blocked"));
+    render(<Flight />);
+    const room = await screen.findByRole("region", { name: /How the operation is faring/ });
+    const labels = [...room.querySelectorAll(".fp-vlabel")].map((e) => e.textContent ?? "");
+    expect(labels.length).toBeGreaterThan(8);
+    for (const tab of ["Plan", "Watching", "Memory", "People"]) {
+      fireEvent.click(screen.getByRole("tab", { name: new RegExp(tab) }));
+      await screen.findByRole("tabpanel");
+      const text = screen.getByRole("tabpanel").textContent ?? "";
+      for (const label of labels) expect(text).not.toContain(label);
+    }
+  });
+
+  it("says People is not measured yet", async () => {
+    stubFetch(flightPageApi("running"));
+    render(<Flight />);
+    fireEvent.click(await screen.findByRole("tab", { name: /People/ }));
+    expect((await screen.findByRole("tabpanel")).textContent).toContain(NOT_MEASURED);
+  });
+});

@@ -180,7 +180,7 @@
   flex: 0 1 auto;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 4fr);
+  grid-template-columns: minmax(0, 4fr) minmax(0, 9fr);
   /* The row holding Doing now and Blockers keeps its heading, column head, two blocker rows and the
      "more below" foot whatever the Watch list below it asks for. */
   grid-template-rows: minmax(
@@ -578,4 +578,91 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+}
+
+/* The tabs of the FLIGHT page reuse the tabbed workspace's tab strip (flight.css). */
+.fp-tabbody {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.fp-tabbody[hidden] {
+  display: none;
+}
+
+/* The control room: one row per measure. State is a shape and a word as well as a colour. */
+.fp-vitals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+}
+.fp-vrow {
+  display: grid;
+  grid-template-columns: 8ch minmax(0, 3fr) minmax(0, 3fr) minmax(0, 4fr) 10ch;
+  gap: var(--sp-3);
+  align-items: center;
+  min-height: var(--fp-row);
+  padding: var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.fp-vcols {
+  min-height: var(--sp-5);
+  color: var(--muted);
+  font: 400 var(--fs-s) / var(--lh-s) var(--mono);
+  text-transform: uppercase;
+}
+.fp-vstate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-weight: 600;
+}
+.fp-v-ok .fp-vstate {
+  color: var(--ok);
+}
+.fp-v-warn .fp-vstate {
+  color: var(--warn);
+}
+.fp-v-crit .fp-vstate {
+  color: var(--crit);
+}
+.fp-v-none .fp-vstate {
+  color: var(--muted);
+}
+.fp-shape {
+  flex: none;
+  width: calc(var(--sp-2) + var(--r-s));
+  height: calc(var(--sp-2) + var(--r-s));
+  background: currentColor;
+}
+.fp-shape.circle {
+  border-radius: 50%;
+}
+.fp-shape.diamond {
+  transform: rotate(45deg) scale(0.85);
+}
+.fp-shape.square {
+  border-radius: var(--r-s);
+}
+.fp-shape.dash {
+  height: var(--r-s);
+}
+.fp-vvalue {
+  font-weight: 600;
+}
+.fp-vband,
+.fp-vchecked {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.fp-bandnote {
+  padding-block: var(--sp-2);
+}
+.fp-people-list {
+  margin: 0;
+  padding: var(--sp-4);
 }

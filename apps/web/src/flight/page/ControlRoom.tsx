@@ -1,0 +1,69 @@
+import { useTz } from "../../clock.ts";
+import { rel } from "../../fmt.ts";
+import { NOT_MEASURED, VITAL_WORD, type Vital, type VitalState } from "./vitals.ts";
+
+/** What the Checked column says for a figure worked out afresh on each load. */
+export const CHECKED_LIVE = "live";
+
+const SHAPE: Record<VitalState, string> = {
+  ok: "circle",
+  warn: "diamond",
+  crit: "square",
+  none: "dash",
+};
+
+/**
+ * The control room: one row per measure, with its state (a colour, a word and a shape), the value,
+ * the bands it is judged by and when its source last moved. A measure the hub cannot compute yet
+ * says "not measured yet" rather than show a made-up figure.
+ */
+export function ControlRoom({ vitals, now }: { vitals: readonly Vital[]; now: number }) {
+  const tz = useTz();
+  const counts = { ok: 0, warn: 0, crit: 0, none: 0 };
+  for (const v of vitals) counts[v.state]++;
+  return (
+    <section className="fp-panel fp-room" id="roomP" aria-labelledby="roomH">
+      <h2 className="fp-head" id="roomH">
+        How the operation is faring
+        <span className="fp-sub">
+          {counts.crit} bad · {counts.warn} watch · {counts.ok} good · {counts.none} not measured
+          yet
+        </span>
+      </h2>
+      <ul className="fp-vitals">
+        <li className="fp-vrow fp-vcols" aria-hidden="true">
+          <span>State</span>
+          <span>Measure</span>
+          <span>Now</span>
+          <span>Good and bad</span>
+          <span>Checked</span>
+        </li>
+        {vitals.map((v) => (
+          <li key={v.id} className={`fp-vrow fp-v-${v.state}`} data-vital={v.id}>
+            <span className="fp-vstate">
+              <i className={`fp-shape ${SHAPE[v.state]}`} aria-hidden="true" />
+              {VITAL_WORD[v.state]}
+            </span>
+            <span className="fp-vlabel" title={`From ${v.source}`}>
+              {v.label}
+            </span>
+            <span className={v.value === NOT_MEASURED ? "fp-vvalue fp-muted" : "fp-vvalue"}>
+              {v.value}
+            </span>
+            <span className="fp-vband">{v.band}</span>
+            <span className="fp-vchecked">
+              {v.state === "none"
+                ? "—"
+                : v.checkedAt !== null && tz !== null
+                  ? rel(v.checkedAt, now, tz)
+                  : CHECKED_LIVE}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="fp-note fp-bandnote">
+        Good and bad limits are drafts until a week of real figures settles them with the operator.
+      </p>
+    </section>
+  );
+}

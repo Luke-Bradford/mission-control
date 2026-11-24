@@ -110,6 +110,7 @@ describe("Recent decisions", () => {
       },
     });
     render(<Flight />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Plan/ }));
     await screen.findAllByText(/which port should the preview use/);
     expect(document.querySelector("#decisions")?.textContent).not.toContain("No open item");
   });
