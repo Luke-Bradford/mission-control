@@ -243,7 +243,14 @@ export interface CcConfig {
     /** Hours between the AUDIT seat's runs; unset: AUDIT_EVERY_HOURS_DEFAULT. */
     reportEveryHours?: number;
   };
-  operator: { id: string; timezone: string; githubLogins?: string[] };
+  operator: { id: string; timezone: string; locale?: string; githubLogins?: string[] };
+  /**
+   * The configured repo the hub's own code lives in, set at startup. Unset: unknown, so every repo is
+   * treated as it. `null`: known not to be any configured repo, so none is.
+   */
+  hubRepo?: RepoId | null;
+  /** The hub checkout's origin (`owner/name`, lower case), when it could be read: lets a repo onboarded later claim `hubRepo`. */
+  hubGithub?: string;
   accounts: {
     id: AccountId;
     vendor: "claude" | "codex";
@@ -331,6 +338,28 @@ function auditThresholdsOf(a: {
   return Object.keys(t).length === 0 ? {} : { thresholds: t };
 }
 
+/** After a repo is added: when the hub's origin is known and no repo was it at startup, the added one may be. */
+export function adoptHubRepo(
+  config: Pick<CcConfig, "hubRepo" | "hubGithub" | "repos">,
+  repo: Pick<CcConfig["repos"][number], "id" | "github">,
+): void {
+  if (config.hubRepo === null && config.hubGithub === repo.github.toLowerCase())
+    config.hubRepo = repo.id;
+}
+
+/** Whether the hub's own files (its floor and controller-check paths) are in this repo. */
+export function ownsHubFiles(config: Pick<CcConfig, "hubRepo">, repoId: RepoId): boolean {
+  return config.hubRepo === undefined || config.hubRepo === repoId;
+}
+
+/**
+ * The commands a repo with no `commands` of its own gets: the pnpm defaults where the hub's own files
+ * live, else the checks the repo lists (a Python repo's `pytest`, not pnpm).
+ */
+export function defaultCommandsFor(ownsHub: boolean, checks: readonly string[]): SeatCommands {
+  return ownsHub ? defaultSeatCommands() : { writer: [...checks], review: [...checks] };
+}
+
 export function flightPowersOf(config: CcConfig, repoId: RepoId): FlightPowers {
   return config.repos.find((r) => r.id === repoId)?.flightPowers ?? "standard";
 }
@@ -386,9 +415,16 @@ export const DEFAULT_OPERATOR_ID = "operator";
 /** The hub's port; `MC_PORT` overrides it (e.g. a second, preview server beside the live one). */
 export const DEFAULT_PORT = 7420;
 
-/** A preview server beside the live hub: any port but DEFAULT_PORT, or `MC_NO_LOOP_WRITES=1`. */
+/** The live hub's port: `MC_LIVE_PORT` when set (1024–65535), else DEFAULT_PORT. */
+export function livePortFromEnv(env: NodeJS.ProcessEnv): number {
+  return env.MC_LIVE_PORT === undefined || env.MC_LIVE_PORT === ""
+    ? DEFAULT_PORT
+    : parsePort("MC_LIVE_PORT", env.MC_LIVE_PORT);
+}
+
+/** A preview server beside the live hub: any port but the live one, or `MC_NO_LOOP_WRITES=1`. */
 export function isPreview(port: number, env: NodeJS.ProcessEnv): boolean {
-  return port !== DEFAULT_PORT || env.MC_NO_LOOP_WRITES === "1";
+  return port !== livePortFromEnv(env) || env.MC_NO_LOOP_WRITES === "1";
 }
 
 /**
@@ -428,17 +464,24 @@ export function crewSeatGrants(config: CcConfig, seatId: string): McToolName[] {
   return [...crewSeatDef(config, seatId).mcTools];
 }
 
-/** `MC_PORT` as a port: unset or empty → DEFAULT_PORT; else a plain integer 1024–65535. */
-export function portFromEnv(raw: string | undefined): number {
-  if (raw === undefined || raw === "") return DEFAULT_PORT;
+function parsePort(name: string, raw: string): number {
   const n = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!(n >= 1024 && n <= 65535)) {
     throw new ConfigError(
-      "MC_PORT",
+      name,
       `must be an integer from 1024 to 65535, got ${JSON.stringify(raw)}`,
     );
   }
   return n;
+}
+
+/**
+ * `MC_PORT` as a port: unset or empty → the live port (`MC_LIVE_PORT`, default DEFAULT_PORT);
+ * else a plain integer 1024–65535.
+ */
+export function portFromEnv(raw: string | undefined, env: NodeJS.ProcessEnv = {}): number {
+  if (raw === undefined || raw === "") return livePortFromEnv(env);
+  return parsePort("MC_PORT", raw);
 }
 
 /** A board column; also validates `POST /api/repos` status maps. */
@@ -457,7 +500,7 @@ export const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 /** A launchd job label: it goes into a `launchctl print gui/<uid>/<label>` argument. */
 const LAUNCHD_LABEL = /^[A-Za-z0-9._-]+$/;
 const nonEmpty = z.string().min(1);
-/** The default seat commands as fresh arrays: what a repo with no `commands` loads with. */
+/** The default seat commands as fresh arrays: what the hub's own repo uses when it sets no `commands`. */
 export const defaultSeatCommands = (): SeatCommands => ({
   writer: [...DEFAULT_SEAT_COMMANDS.writer],
   review: [...DEFAULT_SEAT_COMMANDS.review],
@@ -529,6 +572,15 @@ const fileSchema = z
             return false;
           }
         }, "must be a valid IANA timezone"),
+        locale: nonEmpty
+          .refine((tag) => {
+            try {
+              return Intl.getCanonicalLocales(tag).length === 1;
+            } catch {
+              return false;
+            }
+          }, "must be a valid BCP 47 locale such as en-GB or en-US")
+          .optional(),
       }),
     ),
     accounts: z.array(
@@ -742,6 +794,7 @@ const fileSchema = z
           ? {}
           : { githubLogins: f.operator.github_logins }),
         timezone: f.operator.timezone,
+        ...(f.operator.locale === undefined ? {} : { locale: f.operator.locale }),
       },
       accounts: f.accounts.map((a) => ({
         id: a.id,
@@ -762,7 +815,7 @@ const fileSchema = z
         fullSuite: r.full_suite,
         ...(r.run_command === undefined ? {} : { runCommand: r.run_command }),
         requiredChecks: r.required_checks,
-        commands: r.commands ?? defaultSeatCommands(),
+        ...(r.commands === undefined ? {} : { commands: r.commands }),
         protectedFiles: r.protected,
         keepBranches: r.keep_branches,
         ...(r.rules === undefined ? {} : { rules: resolveRepoRules(r.rules) }),
@@ -1404,6 +1457,21 @@ function isExecutableFile(p: string): boolean {
 const writerOf = (r: { commands?: { writer: readonly string[] } }): readonly string[] =>
   r.commands?.writer ?? DEFAULT_SEAT_COMMANDS.writer;
 
+/**
+ * Why a repo's `full_suite` does not fit its effective writer commands, or null. Config loading
+ * leaves a repo with no `commands` unchecked; this runs once the effective list is known.
+ */
+export function fullSuiteProblem(
+  fullSuite: readonly string[],
+  writer: readonly string[],
+): string | null {
+  for (const cmd of fullSuite) {
+    if (!isValidationCommand(writer, cmd))
+      return `${cmd} is not one of the repo's writer validation commands`;
+  }
+  return null;
+}
+
 /** Whether `cmd` is one of the repo's writer validation commands or extends one (a word prefix). */
 function isValidationCommand(writer: readonly string[], cmd: string): boolean {
   return writer.some((p) => cmd === p || cmd.startsWith(`${p} `));
@@ -1499,6 +1567,9 @@ export function parseConfig(
   // full_suite names which validation commands take the test lock; it is not an allowlist (seats
   // run ordinary commands in their sandbox), so each entry must be a writer validation command.
   cfg.repos.forEach((r, i) => {
+    // a repo with no `commands` has no writer list yet: the hub's own repo uses the pnpm defaults,
+    // any other the checks in its CLAUDE.md block, which load later; `fullSuiteProblem` checks it
+    // then, so only the pnpm lock rule below runs here
     for (const cmd of r.fullSuite ?? []) {
       // a shorter writer command also runs the suite: it must be a full_suite entry itself
       const shorter = writerOf(r).find(
@@ -1510,7 +1581,7 @@ export function parseConfig(
           `"${cmd}" extends the writer command "${shorter}", which also runs the suite: list "${shorter}" in full_suite too, or name "${cmd}" as the writer command instead`,
         );
       }
-      if (!isValidationCommand(writerOf(r), cmd)) {
+      if (r.commands !== undefined && !isValidationCommand(writerOf(r), cmd)) {
         throw new ConfigError(
           `repos[${i}].full_suite`,
           `${cmd} is not one of the repo's writer validation commands (commands.writer)`,

@@ -1,9 +1,10 @@
-import type {
-  AttentionItem,
-  BriefChoiceReceipt,
-  BriefOption,
-  ChoiceReceipt,
-  CrewRow,
+import {
+  type AttentionItem,
+  type BriefChoiceReceipt,
+  type BriefOption,
+  type ChoiceReceipt,
+  type CrewRow,
+  DEFAULT_LOCALE,
 } from "@mc/core";
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
@@ -169,10 +170,14 @@ export async function sendBoundChoice(
 }
 
 /** The line under a recorded choice: where it went and whether the recipient has it yet. */
-export function choiceLine(r: ChoiceReceipt, timeZone: string): string {
+export function choiceLine(
+  r: ChoiceReceipt,
+  timeZone: string,
+  locale: string = DEFAULT_LOCALE,
+): string {
   const where = r.target === "flight-for-next-run" ? "FLIGHT, for the next run" : r.to;
   if (r.deliveredAt === null) return `Recorded. Stored for ${where}.`;
-  const time = new Intl.DateTimeFormat("en-GB", {
+  const time = new Intl.DateTimeFormat(locale, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,

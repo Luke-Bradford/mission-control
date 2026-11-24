@@ -116,6 +116,7 @@ import {
   retiringText,
   reviewDepth,
   reworkFirstText,
+  type SeatCommands,
   type SeatSessionRow,
   type SeatState,
   START_NO_RULES,
@@ -155,8 +156,11 @@ import {
   type CrewSeatConfig,
   type CrewSessionConfig,
   crewOwnFolders,
+  defaultSeatCommands,
+  fullSuiteProblem,
   gitCommonDir,
   isInside,
+  ownsHubFiles,
   realish,
   seatModelProblem,
   seatUnavailable,
@@ -289,7 +293,12 @@ import {
   type SessionEvent,
   startSession,
 } from "./session.ts";
-import { copySkillsToCodexHome, readRepoDocsAndSkills, writeSkillPlugin } from "./skills.ts";
+import {
+  copySkillsToCodexHome,
+  readRepoDocsAndSkills,
+  sharedSkillsFor,
+  writeSkillPlugin,
+} from "./skills.ts";
 import { seatToolchainDirs } from "./toolchain.ts";
 
 /** Short spelling for Claude's 44-byte temp-path budget, including its claude-<uid> suffix. */
@@ -1641,6 +1650,25 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /** A start's docs and skills; a seat on a repo other than the hub's own also gets the hub's skills. */
+  const readDocs = async (checkout: string, baseSha: string, repoId: RepoId): Promise<RepoDocs> =>
+    readRepoDocsAndSkills(
+      checkout,
+      baseSha,
+      await sharedSkillsFor(deps.config.hubRepo, deps.hubRoot, repoId),
+    );
+  /**
+   * The commands a seat on `repo` may run: the repo's own `commands`; else this repo's pnpm
+   * defaults where the hub's own files live; else the checks its CLAUDE.md Mission Control block
+   * lists (a Python repo's `pytest`, not pnpm).
+   */
+  const commandsOf = async (repo: SeatInfo["repo"]): Promise<SeatCommands> => {
+    if (repo.commands !== undefined) return repo.commands;
+    if (ownsHubFiles(deps.config, repo.id)) return defaultSeatCommands();
+    const rules = await deps.rules(repo.id);
+    const checks = rules instanceof Error ? [] : [...rules.checks];
+    return { writer: checks, review: checks };
+  };
   const rolesDir = (): string => deps.rolesDir ?? join(deps.hubRoot, "roles");
 
   const pendingPromptVersions = new Map<
@@ -1829,10 +1857,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     stage?: { cli: boolean },
   ): Promise<Live> {
     const binding = transferState(run.id);
-    const info =
+    const seated =
       binding === null
         ? configured
         : { ...configured, seat: seatForAccount(configured.seat, binding.target) };
+    const commands = await commandsOf(seated.repo);
+    const suiteProblem = fullSuiteProblem(seated.repo.fullSuite ?? [], commands.writer);
+    if (suiteProblem !== null && seated.repo.commands === undefined)
+      throw new SupervisorError(409, `repos[].full_suite: ${suiteProblem}`);
+    const info = { ...seated, repo: { ...seated.repo, commands } };
     if (runBindingProblem(run, info.seat.accountId))
       throw new SupervisorError(
         409,
@@ -3641,6 +3674,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (card === undefined) throw new SupervisorError(422, notOnBoardText(ref));
       const rules = await deps.rules(info.repo.id);
       if (rules instanceof RepoRulesError) throw new SupervisorError(502, START_NO_RULES);
+      const commands = await commandsOf(info.repo);
       const profiles = deps.profiles?.() ?? DEFAULT_PROFILES;
       const chosen = chooseRunProfile(
         profiles,
@@ -3780,7 +3814,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         return {
           checkout: c,
-          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
+          repoDocs: await readDocs(info.session.checkout, c.baseSha, info.repo.id),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -4061,10 +4095,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           branch: readOnly && checkout.branch === "" ? NO_BRANCH_YET : checkout.branch,
           area: info.seat.area,
           granted: grants,
-          commands:
-            def.mode === "writer"
-              ? (info.repo.commands?.writer ?? [])
-              : (info.repo.commands?.review ?? []),
+          commands: def.mode === "writer" ? (commands.writer ?? []) : (commands.review ?? []),
           fullSuite: info.repo.fullSuite ?? [],
           leftoverChanges: checkout.leftoverChanges,
           ...(run.profile ? { profile: run.profile } : {}),
@@ -4221,7 +4252,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         });
         return {
           checkout: c,
-          repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
+          repoDocs: await readDocs(info.session.checkout, c.baseSha, info.repo.id),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
       });
@@ -4686,7 +4717,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               screenshots,
               signedPlan,
               planMockupFiles,
-              repoDocs: await readRepoDocsAndSkills(checkout, s.baseSha),
+              repoDocs: await readDocs(checkout, s.baseSha, info.repo.id),
               references: await repoReferenceIndex(checkout, s.baseSha),
             };
           } catch (e) {
@@ -4807,7 +4838,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
         ...(scratch.installNote === undefined ? {} : { installNote: scratch.installNote }),
-        commands: info.repo.commands?.review ?? [],
+        commands: (await commandsOf(info.repo)).review,
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),
         ...(second === null

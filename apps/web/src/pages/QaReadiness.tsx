@@ -11,11 +11,11 @@ import {
 } from "@mc/core";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, apiPost, apiReviewImage } from "../api.ts";
-import { useNow } from "../clock.ts";
+import { useLocale, useNow, useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
-import { elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
+import { dateTime, elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { chainFor, FreesLine, UnblocksMark } from "../qa/frees.tsx";
@@ -246,6 +246,8 @@ function QueueGroup({
   chains: readonly DependencyChain[];
   waiting?: boolean;
 }) {
+  const tz = useTz();
+  const locale = useLocale();
   return (
     <section className="uat-queue-group">
       <header>
@@ -270,8 +272,8 @@ function QueueGroup({
               <span
                 className="uat-age"
                 title={
-                  p.uat?.since
-                    ? `Waiting since ${new Date(p.uat.since).toLocaleString()}`
+                  p.uat?.since && tz
+                    ? `Waiting since ${dateTime(p.uat.since, tz, locale)}`
                     : undefined
                 }
               >
@@ -325,9 +327,10 @@ function Detail({
   const fullMatches = full.data?.headSha === pr.headSha;
   const data = detailMatches ? detail.data : undefined;
   const fullPr = fullMatches ? full.data : undefined;
-  const pageChanges = data?.files?.some((file) => file.startsWith("apps/web/"));
+  const pageChanges = data?.webChanged;
+  const visualEvidenceAvailable = data?.visualEvidenceAvailable === true;
   const evidence = useResource<EvidenceManifest>(
-    pr.headSha && pageChanges === true
+    pr.headSha && pageChanges === true && visualEvidenceAvailable
       ? {
           path: `/api/prs/${pr.number}/evidence?repo=${enc(pr.repoId)}&sha=${enc(pr.headSha)}`,
           topic: QA_TOPICS,
@@ -409,7 +412,7 @@ function Detail({
         awaiting={awaiting}
         ticket={pr.ticket}
       >
-        {pageChanges === true && (
+        {pageChanges === true && visualEvidenceAvailable && (
           <Pairs
             pr={pr}
             manifest={pairs}
@@ -420,6 +423,9 @@ function Detail({
                 : evidence.error
             }
           />
+        )}
+        {pageChanges === true && !visualEvidenceAvailable && (
+          <p className="uat-queue-none">Screenshot evidence is unavailable for this repository.</p>
         )}
         {pageChanges === false && <p className="uat-queue-none">No page changes</p>}
         <div className="uat-grid-two uat-tests-grid">

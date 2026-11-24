@@ -30,6 +30,8 @@ export interface PreviewProcess {
 }
 
 export interface PreviewStart {
+  /** The repo the PR belongs to; absent means the hub's own repo. */
+  repoId?: string;
   pr: number;
   branch: string;
   checkout: string;
@@ -40,6 +42,8 @@ export interface PreviewStart {
 }
 
 export interface PreviewView {
+  /** The repo the PR belongs to; absent for the hub's own repo. */
+  repoId?: string;
   pr: number;
   branch: string;
   port: number;
@@ -64,11 +68,13 @@ interface PendingPreview {
 
 export interface PreviewManagerDeps {
   now?: () => number;
+  /** The hub's own repo: a preview with no `repoId`, or this one, is the same preview. */
+  hubRepoId?: string;
   /** Whether another local listener owns this candidate port. */
   exists(port: number): boolean | Promise<boolean>;
   capacity(): { blocked: boolean; reason: string | null };
   /** Whether this PR head is from the crew or a collaborator; an untrusted head is never built. */
-  trusted(input: { pr: number; sha?: string }): Promise<boolean>;
+  trusted(input: { pr: number; sha?: string; repoId?: string }): Promise<boolean>;
   /** Creates its private DB, worktree and child before returning the live child handle. */
   start(
     input: PreviewStart & { port: number; token: string; signal: AbortSignal },
@@ -80,15 +86,20 @@ export interface PreviewManagerDeps {
 /** Owns the bounded, idle-expiring set of branch preview processes. */
 export class PreviewManager {
   private readonly now: () => number;
-  private readonly previews = new Map<number, Preview>();
+  private readonly previews = new Map<string, Preview>();
   /** Starts reserve a PR and port before asynchronous checkout preparation begins. */
-  private readonly pending = new Map<number, PendingPreview>();
+  private readonly pending = new Map<string, PendingPreview>();
   private reservations: Promise<void> = Promise.resolve();
   private readonly deps: PreviewManagerDeps;
 
   constructor(deps: PreviewManagerDeps) {
     this.deps = deps;
     this.now = deps.now ?? Date.now;
+  }
+
+  /** A preview's identity: the repo and PR number (the hub's own repo has an empty repo part). */
+  private key(pr: number, repoId?: string): string {
+    return `${repoId === undefined || repoId === this.deps.hubRepoId ? "" : repoId}#${pr}`;
   }
 
   list(): PreviewView[] {
@@ -105,8 +116,9 @@ export class PreviewManager {
       );
   }
 
-  get(pr: number): PreviewView | null {
-    return this.list().find((preview) => preview.pr === pr) ?? null;
+  get(pr: number, repoId?: string): PreviewView | null {
+    const key = this.key(pr, repoId);
+    return this.list().find((preview) => this.key(preview.pr, preview.repoId) === key) ?? null;
   }
 
   async start(input: PreviewStart): Promise<PreviewView> {
@@ -115,11 +127,13 @@ export class PreviewManager {
     if (
       !(await this.deps.trusted({
         pr: input.pr,
+        ...(input.repoId === undefined ? {} : { repoId: input.repoId }),
         ...(input.sha === undefined ? {} : { sha: input.sha }),
       }))
     )
       throw new PreviewHubError("untrusted", UNTRUSTED_PR);
-    const pending = await this.reserve(input.pr);
+    const id = this.key(input.pr, input.repoId);
+    const pending = await this.reserve(id);
     const abort = () => pending.controller.abort();
     input.signal?.addEventListener("abort", abort, { once: true });
     if (input.signal?.aborted) abort();
@@ -139,7 +153,7 @@ export class PreviewManager {
         pending.controller.signal.throwIfAborted();
       }
     } catch (e) {
-      this.release(input.pr);
+      this.release(id);
       throw e;
     } finally {
       clearTimeout(timeout);
@@ -148,6 +162,9 @@ export class PreviewManager {
     // The idle lifetime starts once the URL can actually be used, not while checkout/build runs.
     const startedAt = this.now();
     const preview: Preview = {
+      ...(input.repoId === undefined || input.repoId === this.deps.hubRepoId
+        ? {}
+        : { repoId: input.repoId }),
       pr: input.pr,
       branch: input.branch,
       port,
@@ -160,8 +177,8 @@ export class PreviewManager {
       dbPath: child.dbPath ?? "",
       process: child,
     };
-    this.previews.set(input.pr, preview);
-    this.release(input.pr);
+    this.previews.set(id, preview);
+    this.release(id);
     const {
       dbPath: _dbPath,
       process: _process,
@@ -172,16 +189,16 @@ export class PreviewManager {
     return view;
   }
 
-  touch(pr: number): boolean {
-    const preview = this.previews.get(pr);
+  touch(pr: number, repoId?: string): boolean {
+    const preview = this.previews.get(this.key(pr, repoId));
     if (!preview) return false;
     preview.lastRequestAt = this.now();
     return true;
   }
 
   /** The child proves it owns this preview with its per-preview activity token. */
-  activity(pr: number, token: string): boolean {
-    const preview = this.previews.get(pr);
+  activity(pr: number, token: string, repoId?: string): boolean {
+    const preview = this.previews.get(this.key(pr, repoId));
     if (!preview || preview.token !== token) return false;
     preview.lastRequestAt = this.now();
     return true;
@@ -192,18 +209,22 @@ export class PreviewManager {
     await Promise.all(
       [...this.previews.values()]
         .filter((preview) => preview.lastRequestAt < cutoff)
-        .map((preview) => this.close(preview.pr)),
+        .map((preview) => this.close(preview.pr, preview.repoId)),
     );
   }
 
-  async close(pr: number): Promise<boolean> {
+  async close(pr: number, repoId?: string): Promise<boolean> {
+    return await this.closeKey(this.key(pr, repoId));
+  }
+
+  private async closeKey(pr: string): Promise<boolean> {
     const pending = this.pending.get(pr);
     if (pending) {
       pending.controller.abort();
       await pending.done;
       // start() may have published the child between its dependency resolving and our abort.
       // In that case this close still owns the requested teardown.
-      if (this.previews.has(pr)) await this.close(pr);
+      if (this.previews.has(pr)) await this.closeKey(pr);
       return true;
     }
     const preview = this.previews.get(pr);
@@ -218,7 +239,7 @@ export class PreviewManager {
     const pending = [...this.pending.values()];
     for (const preview of pending) preview.controller.abort();
     await Promise.all(pending.map((preview) => preview.done));
-    await Promise.all([...this.previews.keys()].map((pr) => this.close(pr)));
+    await Promise.all([...this.previews.keys()].map((id) => this.closeKey(id)));
   }
 
   private portInUse(port: number): boolean {
@@ -228,7 +249,7 @@ export class PreviewManager {
     );
   }
 
-  private async reserve(pr: number): Promise<PendingPreview> {
+  private async reserve(pr: string): Promise<PendingPreview> {
     let release: () => void = () => {};
     const previous = this.reservations;
     this.reservations = new Promise<void>((resolve) => (release = resolve));
@@ -260,7 +281,7 @@ export class PreviewManager {
     }
   }
 
-  private release(pr: number): void {
+  private release(pr: string): void {
     const pending = this.pending.get(pr);
     this.pending.delete(pr);
     pending?.resolve();

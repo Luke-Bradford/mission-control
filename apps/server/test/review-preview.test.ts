@@ -112,6 +112,7 @@ describe("createReviewPreviews", () => {
   it("immediate review cancellation does not close an operator-owned preview", async () => {
     const stop = vi.fn();
     const manager = new PreviewManager({
+      hubRepoId: "mc",
       trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
@@ -135,6 +136,7 @@ describe("createReviewPreviews", () => {
   it("cancels only its own pending build", async () => {
     let signal: AbortSignal | undefined;
     const manager = new PreviewManager({
+      hubRepoId: "mc",
       trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),
@@ -192,7 +194,7 @@ describe("createReviewPreviews", () => {
     await m.previews.close("retro:1");
     await m.previews.close("retro:1");
     expect(m.close).toHaveBeenCalledTimes(1);
-    expect(m.close).toHaveBeenCalledWith(9);
+    expect(m.close).toHaveBeenCalledWith(9, "mc");
     expect(m.previews.origin("retro:1")).toBeNull();
   });
 
@@ -223,6 +225,7 @@ describe("createReviewPreviews", () => {
   it("keeps the preview alive past the manager's idle expiry while the run is open", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
     const manager = new PreviewManager({
+      hubRepoId: "mc",
       trusted: async () => true,
       exists: () => false,
       capacity: () => ({ blocked: false, reason: null }),

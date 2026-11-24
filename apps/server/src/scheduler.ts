@@ -5,6 +5,7 @@ import {
   type AgentId,
   BACKFILL_COLLECTOR,
   type CrewRow,
+  DEFAULT_LOCALE,
   ENGINE_TICK_MS,
   FLIGHT_LOOPS_SETTING,
   flowCollector,
@@ -1038,13 +1039,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     const latest = readings.sort((a, b) => b.at - a.at)[0];
     const reading = readings.find((r) => r.window === "7d") ?? latest;
     const at = now();
-    const date = new Intl.DateTimeFormat("en-GB", {
+    const date = new Intl.DateTimeFormat(config.operator.locale ?? DEFAULT_LOCALE, {
       day: "2-digit",
       month: "short",
       year: "numeric",
       timeZone: config.operator.timezone,
     });
-    const time = new Intl.DateTimeFormat("en-GB", {
+    const time = new Intl.DateTimeFormat(config.operator.locale ?? DEFAULT_LOCALE, {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,
@@ -1116,7 +1117,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const noteSlowed = () => {
     const latest = rates.latest();
     if (githubBackoff === 1 || !latest) return;
-    const reset = new Intl.DateTimeFormat("en-GB", {
+    const reset = new Intl.DateTimeFormat(config.operator.locale ?? DEFAULT_LOCALE, {
       hour: "2-digit",
       minute: "2-digit",
       hour12: false,

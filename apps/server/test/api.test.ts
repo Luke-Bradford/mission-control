@@ -48,7 +48,6 @@ import {
   type CrewSessionFolders,
   DEFAULT_AWAY,
   DEFAULT_PROFILES,
-  DEFAULT_SEAT_COMMANDS,
   type Escalation,
   type FileDiff,
   FLIGHT_HEADLINE,
@@ -2311,7 +2310,6 @@ describe("add a repo (POST /api/repos)", () => {
       needsYouLabels: ["needs-human"],
       fullSuite: [],
       requiredChecks: [],
-      commands: DEFAULT_SEAT_COMMANDS,
       protectedFiles: [],
       keepBranches: [],
       autonomy: "draft",
@@ -2512,6 +2510,49 @@ describe("Setup Roles & guards", () => {
     expect(read.rules["uat.paths"]).toMatchObject({ value: [], source: "default" });
     expect(read.rules["commands.writer"]?.value).toEqual(["pnpm -s test"]);
     expect(read.rules["commands.review"]?.value).toEqual(first.rules["commands.review"]?.value);
+  });
+
+  describe("a repo that does not hold the hub's files", () => {
+    const foreign = () => {
+      config.hubRepo = "somewhere-else";
+      onDisk("    rules:\n      checks: ['pytest -q']\n");
+    };
+
+    it("shows its checks, not pnpm, as the commands it has not set", async () => {
+      foreign();
+      const read = await view();
+      expect(read.rules["commands.writer"]).toMatchObject({
+        value: ["pytest -q"],
+        source: "default",
+      });
+      expect(read.rules["commands.review"]?.value).toEqual(["pytest -q"]);
+    });
+
+    it("editing the writer list alone keeps its checks as the review list", async () => {
+      foreign();
+      const first = await view();
+      const saved = await postBody("/api/repos/shop-app/rules", {
+        base: first.base,
+        rules: { commands: { writer: ["pytest -q", "ruff check"] } },
+      });
+      expect(saved.statusCode).toBe(200);
+      const read = await view();
+      expect(read.rules["commands.writer"]?.value).toEqual(["pytest -q", "ruff check"]);
+      expect(read.rules["commands.review"]?.value).toEqual(["pytest -q"]);
+    });
+
+    it("editing the review list alone keeps its checks as the writer list", async () => {
+      foreign();
+      const first = await view();
+      const saved = await postBody("/api/repos/shop-app/rules", {
+        base: first.base,
+        rules: { commands: { review: ["pytest -q", "ruff check"] } },
+      });
+      expect(saved.statusCode).toBe(200);
+      const read = await view();
+      expect(read.rules["commands.writer"]?.value).toEqual(["pytest -q"]);
+      expect(read.rules["commands.review"]?.value).toEqual(["pytest -q", "ruff check"]);
+    });
   });
 
   it("reads the file on disk, not stale loaded rules, so the page saves what it shows", async () => {
@@ -5868,7 +5909,7 @@ describe("config", () => {
     const r = await get("/api/config");
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual({
-      operator: { id: "operator", timezone: "Europe/London" },
+      operator: { id: "operator", timezone: "Europe/London", locale: "en-GB" },
       githubLogin: "octo-op",
       accounts: [
         {

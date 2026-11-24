@@ -19,7 +19,7 @@ import {
 } from "@mc/core";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
-import { useTz } from "../clock.ts";
+import { useLocale, useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { useSeatName } from "../crew.ts";
@@ -63,11 +63,12 @@ const MENTIONS_MIN_PX = 120;
 /** A message's time; one from an earlier day carries its date, so old traffic never reads as today's. */
 function useMessageTime(): (at: number | null) => string {
   const tz = useTz();
+  const locale = useLocale();
   return (at) => {
     if (!tz || at === null) return "—";
     return ago(at, Date.now(), tz) === "today"
-      ? hhmm(at, tz)
-      : `${dayMonth(at, tz)} ${hhmm(at, tz)}`;
+      ? hhmm(at, tz, locale)
+      : `${dayMonth(at, tz, locale)} ${hhmm(at, tz, locale)}`;
   };
 }
 
@@ -306,6 +307,7 @@ function MessagePane({
 }) {
   const time = useMessageTime();
   const tz = useTz();
+  const locale = useLocale();
   const box = useRef<HTMLDivElement>(null);
   const followsLatest = useRef(true);
   useLayoutEffect(() => {
@@ -431,8 +433,8 @@ function MessagePane({
                     : message.state === "stored"
                       ? "Stored"
                       : message.state === "delivered"
-                        ? `Delivered ${message.deliveredAt == null ? "—" : hhmm(message.deliveredAt, "Europe/London")}`
-                        : messageStateLine(message, [...lookupMessages, ...messages], tz)}
+                        ? `Delivered ${message.deliveredAt == null ? "—" : hhmm(message.deliveredAt, tz, locale)}`
+                        : messageStateLine(message, [...lookupMessages, ...messages], tz, locale)}
                 </div>
               )}
               {message.reactions.length > 0 && (
@@ -485,6 +487,7 @@ function Composer({
   const [error, setError] = useState<string | null>(null);
   const [sentLine, setSentLine] = useState<string | null>(null);
   const tz = useTz();
+  const locale = useLocale();
   // A reply to a message from a run that has ended goes elsewhere: say so before it is sent.
   const routeRef = reply ? RESOURCES.replyRoute(reply.id) : null;
   const routeResource = useResource<CommsReplyRoute>(routeRef);
@@ -512,7 +515,9 @@ function Composer({
         setText("");
         setError(null);
         setSentLine(
-          result?.state !== undefined && tz ? sendStateLine(result as CommsSendState, tz) : null,
+          result?.state !== undefined && tz
+            ? sendStateLine(result as CommsSendState, tz, locale)
+            : null,
         );
         onCancelReply();
         hub.refetchTopic("agents");
@@ -692,6 +697,7 @@ function StoredContacts({
 }) {
   const active = view.kind === "contact" ? view.contactId : null;
   const seatName = useSeatName();
+  const locale = useLocale();
   return (
     <aside className="comms-contacts" aria-label={`${agentId}'s contacts`}>
       <button
@@ -716,7 +722,7 @@ function StoredContacts({
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
           {contact.id === COMMS_CAPCOM ? "You" : seatName(contact.id)} ·{" "}
-          {plural(contact.count, "message")}
+          {plural(contact.count, "message", undefined, locale)}
           <small>
             {/* only what is addressed to the operator is "unread"; other counts are messages */}
             {contact.id === COMMS_CAPCOM && contact.unread > 0 ? `${contact.unread} unread · ` : ""}

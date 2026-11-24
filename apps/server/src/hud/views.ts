@@ -16,6 +16,7 @@ import {
   type ConfigView,
   type CrewEvent,
   cutAtWord,
+  DEFAULT_LOCALE,
   type Metrics,
   type MetricsDay,
   modeOfSeat,
@@ -437,7 +438,11 @@ export function configView(
   githubLogin: string | null = null,
 ): ConfigView {
   return {
-    operator: { id: config.operator.id, timezone: config.operator.timezone },
+    operator: {
+      id: config.operator.id,
+      timezone: config.operator.timezone,
+      locale: config.operator.locale ?? DEFAULT_LOCALE,
+    },
     githubLogin,
     accounts: config.accounts.map((a) => ({
       id: a.id,

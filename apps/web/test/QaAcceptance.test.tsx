@@ -45,6 +45,8 @@ beforeEach(() => {
     repoId: "mc",
     number: 2,
     sha: SHA,
+    webChanged: false,
+    visualEvidenceAvailable: false,
     comms: [],
     rounds: [],
     tryIt: { branch: "feature/2", commands: ["pnpm dev"], previewUrl: null },
@@ -198,7 +200,12 @@ describe("QA acceptance", () => {
     },
   );
   it("distinguishes a failed evidence read from a genuine missing capture and offers retry", async () => {
-    details = { ...details, files: ["apps/web/src/App.tsx"] };
+    details = {
+      ...details,
+      files: ["apps/web/src/App.tsx"],
+      webChanged: true,
+      visualEvidenceAvailable: true,
+    };
     evidenceFails = true;
     await ready();
     expect(await screen.findByText(/Screenshot evidence is unavailable/)).toBeTruthy();
@@ -217,6 +224,22 @@ describe("QA acceptance", () => {
     await ready();
     await screen.findByText("No page changes");
     expect(screen.queryByText(/No before\/after pairs have been captured/)).toBeNull();
+  });
+  it("keeps non-hub web changes distinct from unavailable screenshot evidence", async () => {
+    details = {
+      ...details,
+      files: ["frontend/Cart.tsx"],
+      webChanged: true,
+      visualEvidenceAvailable: false,
+    };
+    await ready();
+    expect(
+      await screen.findByText("Screenshot evidence is unavailable for this repository."),
+    ).toBeTruthy();
+    expect(screen.queryByText("No page changes")).toBeNull();
+    expect(
+      fetcher.mock.calls.some(([path]) => path === `/api/prs/2/evidence?repo=mc&sha=${SHA}`),
+    ).toBe(false);
   });
   it("shows the server's stale-head refusal", async () => {
     refuse = true;

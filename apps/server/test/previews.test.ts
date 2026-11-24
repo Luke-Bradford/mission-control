@@ -37,6 +37,39 @@ describe("PreviewManager", () => {
     }
   });
 
+  it("runs the same PR number of two repos at once and closes them independently", async () => {
+    const stopped: string[] = [];
+    const manager = new PreviewManager({
+      hubRepoId: "hub",
+      trusted: async () => true,
+      exists: () => false,
+      capacity: () => ({ blocked: false, reason: null }),
+      start: async ({ repoId }) => ({ stop: () => void stopped.push(repoId ?? "hub") }),
+      remove: async () => {},
+    });
+    const base = { pr: 7, branch: "feature/7", checkout: "/repo" };
+    const alpha = await manager.start({ ...base, repoId: "alpha" });
+    const beta = await manager.start({ ...base, repoId: "beta" });
+    expect(alpha.port).not.toBe(beta.port);
+    expect(manager.get(7, "alpha")).toMatchObject({ repoId: "alpha", port: alpha.port });
+    expect(manager.get(7, "beta")).toMatchObject({ repoId: "beta", port: beta.port });
+    // the hub's repo is the default for a call with no repo
+    expect(manager.get(7, "hub")).toBeNull();
+    expect(manager.touch(7)).toBe(false);
+    expect(await manager.close(7, "alpha")).toBe(true);
+    expect(stopped).toEqual(["alpha"]);
+    expect(manager.get(7, "alpha")).toBeNull();
+    const hub = await manager.start(base);
+    expect(manager.get(7, "hub")?.port).toBe(hub.port);
+    await expect(manager.start({ ...base, repoId: "hub" })).rejects.toMatchObject({
+      code: "already-running",
+    });
+    expect(manager.get(7, "beta")?.port).toBe(beta.port);
+    expect(manager.touch(7, "beta")).toBe(true);
+    expect(manager.touch(7, "alpha")).toBe(false);
+    await manager.closeAll();
+  });
+
   it("rejects a head that is not an immutable commit before starting a process", async () => {
     const start = vi.fn(async () => ({ stop: () => {} }));
     const manager = new PreviewManager({

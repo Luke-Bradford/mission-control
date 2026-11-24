@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   areaLabelsFor,
   claimedText,
+  controllerCheckPathsOf,
   DEFAULT_HARD_RULES,
   DEFAULT_REPO_RULES,
   dependsOn,
@@ -93,6 +94,25 @@ describe("DEFAULT_REPO_RULES", () => {
     }
     expect(FLIGHT_CONTROLLER_CHECK_PATHS).toContain("roles/FLIGHT.md");
     expect(FLIGHT_CONTROLLER_CHECK_PATHS).toContain(".claude/skills/flight-ops/**");
+  });
+
+  it("another repo gets the rules files only, not this repo's own file lists", () => {
+    expect(effectiveHardRules({ hardRules: ["x/**"] }, "superuser", false)).toEqual([
+      "x/**",
+      ...FLIGHT_FLOOR_PATHS,
+    ]);
+    expect(controllerCheckPathsOf(false)).toEqual(FLIGHT_FLOOR_PATHS);
+    expect(controllerCheckPathsOf(true)).toEqual(FLIGHT_CONTROLLER_CHECK_PATHS);
+  });
+
+  it("another repo with hard_rules unset gets no catalogue of this repo's files", () => {
+    const unset = { hardRules: DEFAULT_HARD_RULES, hardRulesSet: false };
+    expect(effectiveHardRules(unset, "standard", false)).toEqual([]);
+    expect(effectiveHardRules(unset, "superuser", false)).toEqual([...FLIGHT_FLOOR_PATHS]);
+    expect(
+      effectiveHardRules({ hardRules: ["x/**"], hardRulesSet: true }, "standard", false),
+    ).toEqual(["x/**"]);
+    expect(effectiveHardRules(unset, "standard", true)).toEqual([...DEFAULT_HARD_RULES]);
   });
 
   it("effectiveHardRules adds the defaults on a superuser repo only", () => {

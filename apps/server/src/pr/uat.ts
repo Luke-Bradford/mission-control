@@ -55,6 +55,10 @@ export interface PrUatInput {
   singleRepo: boolean;
   /** The repo of the seat that sent a message, else null. */
   repoOfSender: (from: string) => string | null;
+  /** Whether the PR changes a path in this repository's configured web area. */
+  webChanged?: boolean;
+  /** Whether this hub retains before-and-after evidence for the repository. */
+  visualEvidenceAvailable?: boolean;
   flightId?: string | null;
 }
 
@@ -153,6 +157,8 @@ export function prUat(input: PrUatInput): PrUatView {
     sha: pr.headSha,
     qaSummary: currentReview?.summary ?? null,
     files: store.prFilePaths(pr.repoId, pr.number),
+    webChanged: input.webChanged,
+    visualEvidenceAvailable: input.visualEvidenceAvailable,
     tests:
       report?.tests ??
       (currentReview

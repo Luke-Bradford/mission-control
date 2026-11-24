@@ -16,7 +16,7 @@ it("keeps plan sizes within the ticket sizes", () => {
   expect(PLAN_SIZES).toEqual(["M", "L", "XL"]);
 });
 
-it("adds one product-pass instruction when a wake carries newly merged PRs", () => {
+it("keeps merged-PR product-pass guidance repository-neutral", () => {
   const state = {
     seats: [],
     prs: [{ state: "merged" }, { state: "merged" }],
@@ -28,7 +28,9 @@ it("adds one product-pass instruction when a wake carries newly merged PRs", () 
   } as unknown as FlightState;
   const line = wakeLine(state, state, ["prs (2)"]);
   expect(line.match(/A merged PR is listed/g)).toHaveLength(1);
-  expect(line).toContain("if it touches apps/web, render the affected HUD page");
+  expect(line).toContain("where it changes a user interface, render the affected page");
+  expect(line).not.toContain("apps/web");
+  expect(line).not.toContain("HUD");
 });
 
 describe("flight turn texts", () => {

@@ -13,6 +13,7 @@ import {
 import { chooseSeat } from "./agent/chooseSeat.ts";
 import { stepRoster } from "./agent/roster.ts";
 import { useNeedsCount } from "./attention.ts";
+import { useLocale } from "./clock.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import { FLIGHT_THREAD_INPUT } from "./flight/FlightThread.tsx";
@@ -131,6 +132,7 @@ function Shell({
   const demo = useDemo();
   useDemoLinkGuard(demo);
   useHudReady();
+  useLocale(); // sets the locale the number formatters read
   const path = usePath();
   const search = useSearch();
   // Read once: a popped-out window stays one when its picker moves to another agent.

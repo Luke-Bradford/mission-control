@@ -1,4 +1,10 @@
-import { type BoardItem, type CrewRow, type PullRequestView, startOfLocalDay } from "@mc/core";
+import {
+  type BoardItem,
+  type CrewRow,
+  DEFAULT_LOCALE,
+  type PullRequestView,
+  startOfLocalDay,
+} from "@mc/core";
 import { type NeedsYou, prAction } from "../attention.ts";
 import { loopStepLabel } from "../crew.ts";
 import { agoWords } from "../fmt.ts";
@@ -34,8 +40,8 @@ function prWait(i: BoardItem, ctx: BriefCtx): string | null {
 }
 
 /** `Saturday 17 October`, built from parts so ICU's comma never appears. */
-function longDate(ms: number, tz: string): string {
-  const f = new Intl.DateTimeFormat("en-GB", {
+function longDate(ms: number, tz: string, locale: string): string {
+  const f = new Intl.DateTimeFormat(locale, {
     timeZone: tz,
     weekday: "long",
     day: "numeric",
@@ -79,7 +85,13 @@ const blockedBy = (i: BoardItem): string => {
 const join = (parts: string[]): string => parts.filter(Boolean).join("\n\n");
 
 /** Plain text for Teams or email: no agent ids anywhere. */
-export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: string): string {
+export function standup(
+  items: BoardItem[],
+  ctx: BriefCtx,
+  now: number,
+  tz: string,
+  locale: string = DEFAULT_LOCALE,
+): string {
   const mine = (i: BoardItem) => needsMe(i, ctx.needsYou, ctx.crew);
   const today = startOfLocalDay(now, tz);
   const done = column(items, "Done").filter((i) => daysAgo(i.updatedAt, now, tz, today) <= 1);
@@ -96,7 +108,7 @@ export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: stri
     items.filter((i) => mine(i) && !blocked.includes(i) && !heldBack.includes(i)),
   );
   return join([
-    `Standup, ${longDate(now, tz)} (${ctx.laneName})`,
+    `Standup, ${longDate(now, tz, locale)} (${ctx.laneName})`,
     section("Since yesterday", [...done, ...column(items, "Ready for QA")], ctx, (i) =>
       cardColumn(i) === "Done" ? outcome(i, ctx) : "merged, with QA",
     ),

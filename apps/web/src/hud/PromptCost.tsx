@@ -1,4 +1,5 @@
 import { PROMPT_SECTIONS, type PromptSection, type PromptWakeCost } from "@mc/core";
+import { useLocale } from "../clock.ts";
 import "./PromptCost.css";
 
 export const NO_SECTION_DATA = "No section data for this run";
@@ -12,9 +13,6 @@ export const PROMPT_SECTION_LABEL: Record<PromptSection, string> = {
   digest: "Wake digest",
   tool_results: "Tool results",
 };
-
-/** One token count with thousands separators. */
-const count = (n: number): string => n.toLocaleString("en-GB");
 
 export const promptTotal = (cost: PromptWakeCost): number =>
   cost.sections.reduce((sum, s) => sum + s.tokens, 0);
@@ -31,6 +29,8 @@ export function PromptCostBar({
   cost: PromptWakeCost;
   empty?: string;
 }) {
+  const locale = useLocale();
+  const count = (n: number): string => n.toLocaleString(locale);
   const total = promptTotal(cost);
   if (total === 0) return <p className="pb note">{empty}</p>;
   const tokens = (section: PromptSection): number =>
