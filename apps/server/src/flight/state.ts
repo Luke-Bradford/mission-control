@@ -67,6 +67,7 @@ import {
   type FlightWakeStatus,
   flightContextText,
   hudColumnOf,
+  idleAgainGap,
   inLane,
   LANE_LABEL_PREFIX,
   OWNER_FLIGHT,
@@ -399,8 +400,9 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 }
 
 /**
- * The next wake the state schedules: a planned entry's time, or the end of the gap while a
- * failure waits for it (`batchAt`). Nothing re-wakes FLIGHT on a timer for pending work.
+ * The next wake the state schedules: a planned entry's time, the end of the gap while a failure
+ * waits for it (`batchAt`), or the time FLIGHT is told again of a crew still idle. Nothing else
+ * re-wakes FLIGHT on a timer for pending work.
  */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState,
@@ -410,6 +412,9 @@ export function nextWakeAt(
   const times: number[] = [];
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   if (batchAt !== undefined) times.push(batchAt);
+  // once the repeat is due it waits only for the gap (`batchAt`), which is the time to show
+  const idle = s.wake?.idle;
+  if (idle?.againAt != null && idle.again === null) times.push(idle.againAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
 
@@ -795,13 +800,25 @@ function wakeInputs(i: {
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
 export const FLIGHT_IDLE_SEAT_SETTING = "flight.idle-seat";
 
-const readIdleState = (store: Store): { seats: Record<string, number>; delivered: string[] } => {
+/** When a wake last showed FLIGHT the idle crew, and how often it has been told again since. */
+type IdleTold = { at: number; repeats: number };
+
+const readIdleState = (
+  store: Store,
+): { seats: Record<string, number>; delivered: string[]; told: IdleTold | null } => {
   try {
     const v = parseJson(store.getSetting(FLIGHT_IDLE_SEAT_SETTING), null) as {
       seats?: Record<string, unknown>;
       delivered?: unknown;
+      told?: { at?: unknown; repeats?: unknown } | null;
     } | null;
+    const at = v?.told?.at;
+    const repeats = v?.told?.repeats;
     return {
+      told:
+        typeof at === "number" && typeof repeats === "number" && repeats >= 0
+          ? { at, repeats }
+          : null,
       seats: Object.fromEntries(
         Object.entries(v?.seats ?? {}).filter(
           (e): e is [string, number] => typeof e[1] === "number",
@@ -812,7 +829,7 @@ const readIdleState = (store: Store): { seats: Record<string, number>; delivered
         : [],
     };
   } catch {
-    return { seats: {}, delivered: [] };
+    return { seats: {}, delivered: [], told: null };
   }
 };
 
@@ -837,18 +854,30 @@ function idleSeats(
   };
   const seats = i.seats
     .filter((x) => x.loop === "build" && x.free)
-    .map((x) => ({ id: x.id, near: open.filter((t) => near(x, t)) }))
+    .map((x) => ({ id: x.id, atStop: x.atStop, near: open.filter((t) => near(x, t)) }))
     .filter((x) => x.near.length > 0);
   if (seats.length === 0) return undefined;
   const tickets = [...new Map(seats.flatMap((x) => x.near).map((t) => [t.ref, t])).values()];
   const stored = readIdleState(i.store);
+  const timed = seats
+    .map((x) => {
+      const since = stored.seats[x.id] ?? i.now;
+      return { id: x.id, since, ms: Math.max(0, i.now - since) };
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+  // told again by the time since FLIGHT was last told, not by a seat's spell: a seat that starts
+  // work, a wake for another reason and a late delivery all leave one clock, not several.
+  // A seat whose account is at its stop line can start nothing, so it does not ask again.
+  const atStop = new Set(seats.filter((x) => x.atStop).map((x) => x.id));
+  const told = stored.told;
+  const againAt =
+    told !== null && timed.some((x) => x.ms >= FLIGHT_IDLE_SEAT_WAKE_MS && !atStop.has(x.id))
+      ? told.at + idleAgainGap(told.repeats)
+      : null;
   return {
-    seats: seats
-      .map((x) => {
-        const since = stored.seats[x.id] ?? i.now;
-        return { id: x.id, since, ms: Math.max(0, i.now - since) };
-      })
-      .sort((a, b) => a.id.localeCompare(b.id)),
+    seats: timed,
+    againAt,
+    again: told !== null && againAt !== null && i.now >= againAt ? `again:${told.at}` : null,
     open: tickets.map((t) => t.ref).sort(),
     untriaged: tickets
       .filter((t) => t.noStatus === true)
@@ -874,28 +903,42 @@ export function trackIdleSeat(store: Store, s: Pick<FlightState, "wake">, now: n
   const delivered = before.delivered.filter((key) =>
     Object.entries(after).some(([id, since]) => key === `${id}:${since}`),
   );
+  // a spell delivered before the hub kept `told` (a record from an older hub) starts its wait now
+  const told = before.told ?? (delivered.length > 0 ? { at: now, repeats: 0 } : null);
   if (
     JSON.stringify(before.seats) === JSON.stringify(after) &&
-    before.delivered.length === delivered.length
+    before.delivered.length === delivered.length &&
+    before.told === told
   )
     return;
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
-    Object.keys(after).length === 0 ? "" : JSON.stringify({ seats: after, delivered }),
+    // `told` lasts while any seat idles and goes when none does: the next spell starts over
+    Object.keys(after).length === 0 ? "" : JSON.stringify({ seats: after, delivered, told }),
   );
 }
 
-/** Marks successful idle-seat delivery durably, so a hub restart does not re-wake the same spell. */
-export function markIdleSeatsShown(store: Store, s: Pick<FlightState, "wake">): void {
+/**
+ * Marks successful idle-seat delivery durably, so a hub restart does not re-wake the same spell.
+ * Any delivered wake that showed a seat idle past 30 minutes restarts the wait before FLIGHT is
+ * told again; only a wake the repeat itself was due for makes the next wait longer, and a spell
+ * shown for the first time puts it back to the shortest.
+ */
+export function markIdleSeatsShown(store: Store, s: Pick<FlightState, "wake">, now: number): void {
   const state = readIdleState(store);
   const delivered = new Set(state.delivered);
-  for (const seat of s.wake?.idle?.seats ?? []) {
-    if (seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS) delivered.add(idleKey(seat));
-  }
-  if (delivered.size === state.delivered.length) return;
+  const long = (s.wake?.idle?.seats ?? []).filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS);
+  if (long.length === 0) return;
+  const fresh = long.some((seat) => !delivered.has(idleKey(seat)));
+  for (const seat of long) delivered.add(idleKey(seat));
+  const repeats = fresh ? 0 : (state.told?.repeats ?? 0) + (s.wake?.idle?.again != null ? 1 : 0);
   store.setSetting(
     FLIGHT_IDLE_SEAT_SETTING,
-    JSON.stringify({ seats: state.seats, delivered: [...delivered].sort() }),
+    JSON.stringify({
+      seats: state.seats,
+      delivered: [...delivered].sort(),
+      told: { at: now, repeats },
+    }),
   );
 }
 
@@ -1691,11 +1734,13 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
   // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
   // tickets; keeping this to the seat and spell start avoids re-waking as the board changes.
+  // A crew still idle is its own fact (`idleAgain`), so the wake history can count what it costs.
   const delivered = new Set(s.wake?.idle?.delivered ?? []);
   const idle = (s.wake?.idle?.seats ?? [])
     .filter((seat) => seat.ms >= FLIGHT_IDLE_SEAT_WAKE_MS)
     .filter((seat) => !delivered.has(idleKey(seat)))
     .map(idleKey);
+  const idleAgain = s.wake?.idle?.again ?? null;
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
@@ -1735,6 +1780,7 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     // read and not answered: owed until FLIGHT replies to it
     owed: s.wake?.owed ?? [],
     ...(idle.length === 0 ? {} : { idle }),
+    ...(idleAgain === null ? {} : { idleAgain: [idleAgain] }),
     // blockers and messages; a PR's own steps are the hub's
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
