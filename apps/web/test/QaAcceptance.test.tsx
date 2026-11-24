@@ -218,6 +218,20 @@ describe("QA acceptance", () => {
     await screen.findByText("No page changes");
     expect(screen.queryByText(/No before\/after pairs have been captured/)).toBeNull();
   });
+  it("keeps non-hub web changes distinct from unavailable screenshot evidence", async () => {
+    details = {
+      ...details,
+      files: ["frontend/Cart.tsx"],
+      webChanged: true,
+      visualEvidenceAvailable: false,
+    };
+    await ready();
+    expect(await screen.findByText("Screenshot evidence is unavailable for this repository.")).toBeTruthy();
+    expect(screen.queryByText("No page changes")).toBeNull();
+    expect(
+      fetcher.mock.calls.some(([path]) => path === `/api/prs/2/evidence?repo=mc&sha=${SHA}`),
+    ).toBe(false);
+  });
   it("shows the server's stale-head refusal", async () => {
     refuse = true;
     await ready();

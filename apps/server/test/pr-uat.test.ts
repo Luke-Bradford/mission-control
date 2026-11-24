@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   COMMS_CAPCOM,
+  DEFAULT_REPO_RULES,
   NEW_LOOP,
   type PrUatView,
   type PullRequestView,
@@ -259,6 +260,38 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
       commands: [`git fetch origin ${BRANCH} && git switch ${BRANCH}`, "pnpm dev"],
       previewUrl: null,
     });
+  });
+
+  it("uses a non-hub repository's configured web area for the QA page-change fact", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...pr("shop-app", 60), files: [{ path: "frontend/Cart.tsx", changeType: "modified" }] }],
+      NOW,
+    );
+    const nonHub = buildApp({
+      config: {
+        ...config,
+        hubRepo: "hub",
+        repos: [
+          ...config.repos,
+          { ...config.repos[0], id: "hub", github: "o/hub", project: 3 },
+        ],
+      },
+      store,
+      bus: new ChangeBus(),
+      now: () => NOW,
+      previewRepoId: "hub",
+      repoRules: async () => ({
+        ...DEFAULT_REPO_RULES,
+        areas: { "area:web": ["frontend/**"] },
+      }),
+    });
+    await nonHub.ready();
+    const body = (
+      await nonHub.inject({ method: "GET", url: "/api/qa/uat/shop-app/60" })
+    ).json() as PrUatView;
+    await nonHub.close();
+    expect(body).toMatchObject({ webChanged: true, visualEvidenceAvailable: false });
   });
 
   it("keeps a round open when RETRO held its blocking finding", async () => {

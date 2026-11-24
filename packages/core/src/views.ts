@@ -841,6 +841,10 @@ export interface PrUatView {
   sha?: string | null;
   qaSummary?: string | null;
   files?: string[];
+  /** Whether this head changes a path in the repository's configured web area. */
+  webChanged?: boolean;
+  /** Whether this hub retains before-and-after evidence for this repository. */
+  visualEvidenceAvailable?: boolean;
   tests?: ReportedTest[];
   testsAdded?: { file: string; failedOnBase: boolean }[];
   screenshots?: ReviewShotView[];
