@@ -504,6 +504,8 @@ interface Entry {
   activityTimer?: ReturnType<typeof setTimeout>;
   /** When the last fetch started: the stream's `agents` events are paced from it. */
   fetchedAt?: number;
+  /** The start sequence of the last fetch: a queued stream read skips if one started since. */
+  startedSeq?: number;
   /** When the data currently in the snapshot finished loading successfully. */
   completedAt?: number;
   /** The start sequence of the newest answer kept: an older request must not replace it. */
@@ -514,8 +516,11 @@ interface Entry {
   settledListeners: Set<() => void>;
 }
 
-/** The least time between stream-driven reads of one resource on `agents` events. */
-const AGENTS_PACE_MS = 6000;
+/**
+ * The least time between stream-driven reads of one resource, whatever the topic: a page opening
+ * on a busy hub asks for each URL once in its first six seconds (#2229).
+ */
+const STREAM_PACE_MS = 6000;
 /** Background history and pause audits change with seat output, but not on every running turn. */
 const BACKGROUND_AGENTS_PACE_MS = 30_000;
 /** Keep a completed response through a brief unmount/remount caused by a page layout update. */
@@ -631,6 +636,7 @@ class Hub {
     const seq = ++this.seq;
     e.inflight = true;
     e.fetchedAt = Date.now();
+    e.startedSeq = seq;
     // A refresh with usable data is not a loading transition. Besides avoiding a visual flash,
     // this lets identical responses retain their complete snapshot identity.
     if (e.snap.data === undefined && !e.snap.loading) this.set(e, { ...e.snap, loading: true });
@@ -768,12 +774,11 @@ class Hub {
 
   /**
    * Refetch only what is on screen and belongs to the changed topic. `paced` is for the stream's
-   * events: an `agents` event arrives about once a second while a seat runs, so each resource is
-   * read at most once per AGENTS_PACE_MS for them. A local call (after the operator's own send)
-   * is never paced.
+   * events: on a busy hub any topic changes every second or so, and the hub answers one request at
+   * a time, so each resource is read at most once per STREAM_PACE_MS for them; the last change is
+   * read when the pace allows. A local call (after the operator's own send) is never paced.
    */
   refetchTopic(topic: Topic, { paced = false }: { paced?: boolean } = {}): void {
-    const pace = paced && topic === "agents";
     for (const e of this.entries.values()) {
       // The server filters watch rows using both the lock and crew state. Refetch
       // the brief when either changes, including rows omitted from its last response.
@@ -801,21 +806,24 @@ class Hub {
         summaryChanged;
       if (!matches) continue;
       if (e.listeners.size === 0) continue;
-      if (pace || Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
+      if (paced || Array.isArray(e.topic) || (summaryChanged && topic === "agents")) {
         if (!e.queued) {
           e.queued = true;
           const paceMs =
-            e.path === RESOURCES.overviewTimeline.path || e.path === RESOURCES.crewPause.path
+            topic === "agents" &&
+            (e.path === RESOURCES.overviewTimeline.path || e.path === RESOURCES.crewPause.path)
               ? BACKGROUND_AGENTS_PACE_MS
-              : AGENTS_PACE_MS;
-          const wait = pace
+              : STREAM_PACE_MS;
+          const wait = paced
             ? Math.max(0, (e.fetchedAt ?? 0) + paceMs - Date.now())
             : summaryChanged && topic === "agents"
               ? 100
               : 0;
+          // A read that starts after this event (a page opening anew) already carries the change.
+          const changedAt = this.seq;
           setTimeout(() => {
             e.queued = false;
-            if (e.listeners.size) void this.fetch(e);
+            if (e.listeners.size && (e.startedSeq ?? 0) <= changedAt) void this.fetch(e);
           }, wait);
         }
       } else void this.fetch(e);
@@ -838,6 +846,7 @@ class Hub {
       e.inflight = false;
       e.again = false;
       e.fullAgain = false;
+      e.queued = false;
       e.activityFullAt = undefined;
       e.completedAt = undefined;
       e.generation++;
@@ -856,6 +865,7 @@ class Hub {
       e.inflight = false;
       e.again = false;
       e.fullAgain = false;
+      e.queued = false;
       e.activityFullAt = undefined;
       e.completedAt = undefined;
       clearTimeout(e.activityTimer);
