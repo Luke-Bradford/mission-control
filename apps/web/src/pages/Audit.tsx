@@ -12,7 +12,7 @@ import {
   type WasteReport,
 } from "@mc/core";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useLocale } from "../clock.ts";
+import { useLocale, useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { cost, elapsed, percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -260,18 +260,26 @@ function Verdict({
   );
 }
 
-const whenLabel = (at: number): string =>
-  new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+const whenLabel = (at: number, tz: string | null, locale: string): string =>
+  tz === null
+    ? "—"
+    : new Intl.DateTimeFormat(locale, {
+        timeZone: tz,
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(new Date(at));
 
 /** The AUDIT seat's verdict, and when it was written and when the next is due. */
 function ReportVerdict({ report, nextDueAt }: { report: AuditReport; nextDueAt: number | null }) {
+  const tz = useTz();
+  const locale = useLocale();
   return (
     <p className="audit-verdict-text">
       <b>{report.verdict}</b>{" "}
       <span className="fg2">
         {auditNoteText(
-          whenLabel(report.at),
-          nextDueAt === null ? "the next timer tick" : whenLabel(nextDueAt),
+          whenLabel(report.at, tz, locale),
+          nextDueAt === null ? "the next timer tick" : whenLabel(nextDueAt, tz, locale),
         )}
       </span>
     </p>
@@ -828,6 +836,7 @@ function windowText(ms: number): string {
 }
 
 function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange }) {
+  const tz = useTz();
   const locale = useLocale();
   const pct = (r: number | null) => percent(r == null ? null : r * 100);
   return (
@@ -852,7 +861,12 @@ function Past({ changes, range }: { changes: AuditChange[]; range: AuditRange })
                 {changes.map((x) => (
                   <tr key={`${x.agentId}:${x.at}:${x.kind}`} className="hrow audit-change">
                     <td className="lab">
-                      <b>{new Date(x.at).toLocaleDateString(locale)}</b> ·{" "}
+                      <b>
+                        {tz === null
+                          ? "—"
+                          : new Date(x.at).toLocaleDateString(locale, { timeZone: tz })}
+                      </b>{" "}
+                      {" · "}
                       {x.kind === "prompt" ? "Prompt" : "Model"} change · {x.from ?? "none"} →{" "}
                       {x.to} · {x.agentId}
                     </td>
