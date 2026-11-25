@@ -55,7 +55,9 @@ describeRendered("Setup Accounts usage layout, rendered", () => {
           expect(within(meters[index], cell), `meter ${index} in its cell`).toBe(true);
         }
         for (const [index, forecast] of forecasts.entries()) {
-          expect(within(forecast, cells[index * 2 + 1]), `forecast ${index} in its cell`).toBe(true);
+          expect(within(forecast, cells[index * 2 + 1]), `forecast ${index} in its cell`).toBe(
+            true,
+          );
         }
       } finally {
         await page.close();

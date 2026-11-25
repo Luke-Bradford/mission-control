@@ -1130,6 +1130,17 @@ describe("FLIGHT page", () => {
       expect((await strip()).textContent).not.toContain("stale");
     });
 
+    it("does not call a headline exactly an hour old stale", async () => {
+      stubFetch({
+        "/api/flight": flightView(),
+        "/api/flight/summary": flightSummary({ headlineAgeMin: 60 }),
+        "/api/config": CONFIG,
+      });
+      render(<FlightTabs />);
+      await waitFor(async () => expect((await strip()).textContent).toContain("1h 00m old"));
+      expect((await strip()).textContent).not.toContain("stale");
+    });
+
     it("shows Running with FLIGHT's state in words, and a dash for the wake times", async () => {
       stubFetch({ "/api/flight": flightView(), "/api/config": CONFIG });
       render(<FlightTabs />);

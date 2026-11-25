@@ -1219,9 +1219,9 @@ describe("Setup › Repos & seats cards", () => {
     await act(async () => {
       answer({ status: 200, body: repoRules("every") });
     });
-    expect(
-      ((await within(card).findByLabelText("Plan sign-off")) as HTMLSelectElement).value,
-    ).toBe("every");
+    expect(((await within(card).findByLabelText("Plan sign-off")) as HTMLSelectElement).value).toBe(
+      "every",
+    );
     expect(account.value).toBe("codex-main");
   });
 

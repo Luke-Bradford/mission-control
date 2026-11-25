@@ -407,12 +407,7 @@ function Detail({
           </ExternalLink>
         </div>
       </Panel>
-      <CurrentQaReport
-        repo={pr.repoId}
-        pr={pr.number}
-        head={pr.headSha}
-        awaiting={awaiting}
-      >
+      <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha} awaiting={awaiting}>
         {pageChanges === true && visualEvidenceAvailable && (
           <Pairs
             pr={pr}

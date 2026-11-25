@@ -56,10 +56,8 @@ it("words each release condition", () => {
   const at = Date.UTC(2026, 10, 25, 14, 30);
   expect(holdConditionText({ kind: "date", at }, "Europe/London")).toBe("until 25 Nov 14:30");
   expect(holdConditionText({ kind: "date", at }, "America/New_York")).toBe("until 25 Nov 09:30");
-  expect(
-    holdConditionText({ kind: "ci", pr: "shop-app#12", state: "passing" }, null),
-  ).toBe("until shop-app#12 CI is passing");
-  expect(holdConditionText({ kind: "item", key: "q1" }, null)).toBe(
-    "until another item resolves",
+  expect(holdConditionText({ kind: "ci", pr: "shop-app#12", state: "passing" }, null)).toBe(
+    "until shop-app#12 CI is passing",
   );
+  expect(holdConditionText({ kind: "item", key: "q1" }, null)).toBe("until another item resolves");
 });
