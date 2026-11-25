@@ -125,26 +125,29 @@ function position(
 }
 
 /**
- * Direct PR/branch bindings outrank ticket fallback. Review runs never author a PR. A run that only
- * lists the PR among those it touched (FLIGHT's own session lists every PR it acted on) is its
- * author only when no run carried the PR or its branch: else FLIGHT's ended session, started after
- * the seat's run, would be read as the PR's last run and the PR as owned by nobody.
+ * Direct PR/branch bindings outrank ticket fallback. Review runs never author a PR. FLIGHT's watch
+ * session lists the PRs it published to, and a new one starts several times a day: counted with
+ * the rest, it would be the PR's latest-started run, and once it ended a PR a seat's run still
+ * holds would read as owned by nobody. So a watch session is a PR's run only when no other run is.
  */
 function authors(pr: PullRequestView, runs: Run[]): Run[] {
-  const carried = runs.filter((r) => r.loop?.prNumber === pr.number || r.branch === pr.branch);
-  const direct = carried.length
-    ? carried
-    : runs.filter((r) => r.prs.some((p) => p.number === pr.number));
+  const direct = (r: Run): boolean =>
+    r.loop?.prNumber === pr.number ||
+    r.prs.some((p) => p.number === pr.number) ||
+    r.branch === pr.branch;
+  const others = runs.filter((r) => r.loopKind !== "watch");
+  const bound = others.filter(direct);
+  const byTicket = bound.length
+    ? bound
+    : others.filter(
+        (r) =>
+          pr.ticket !== null &&
+          r.ticket === pr.ticket &&
+          r.loop?.prNumber == null &&
+          r.prs.length === 0,
+      );
   return (
-    direct.length
-      ? direct
-      : runs.filter(
-          (r) =>
-            pr.ticket !== null &&
-            r.ticket === pr.ticket &&
-            r.loop?.prNumber == null &&
-            r.prs.length === 0,
-        )
+    byTicket.length ? byTicket : runs.filter((r) => r.loopKind === "watch" && direct(r))
   ).sort((a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id));
 }
 

@@ -749,6 +749,7 @@ describe("FLIGHT's evidence", () => {
       );
       store.upsertRun(
         run("r-flight-old", "flight-1", {
+          loopKind: "watch",
           startedAt: T0 + MIN,
           endedAt: T0 + 10 * MIN,
           status: "ok",
