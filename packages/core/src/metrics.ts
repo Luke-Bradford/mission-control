@@ -61,12 +61,11 @@ const CREW_AGENTS = "Scope: crew seats and FLIGHT under the header's session fil
 const ALL_AGENTS =
   "Scope: crew seats, FLIGHT and observed loops under the header's session filter.";
 
-/**
- * A crew seat parked by a rate limit resumes on its own, so it is not blocked. The supervisor
- * writes this reason (apps/server/src/runtime/supervisor.ts, a hard-rule file, hence no shared
- * constant there).
- */
-const RATE_LIMIT_PARK = /^rate[ -]limited\b/i;
+/** The prefix for a crew seat parked by a rate limit. */
+export const RATE_LIMIT_PARK_PREFIX = "rate limited";
+
+const rateLimitParked = (reason: string | null | undefined): boolean =>
+  reason?.toLowerCase().replaceAll("-", " ").startsWith(RATE_LIMIT_PARK_PREFIX) ?? false;
 
 export const METRICS: Readonly<Record<MetricId, MetricDef>> = {
   inProgress: {
@@ -220,8 +219,8 @@ const openLoopPark = (row: MetricRow): boolean =>
 
 /** Parked by a rate limit: it resumes on its own. */
 const rateLimited = (row: MetricRow): boolean =>
-  (row.hudState === "parked" && RATE_LIMIT_PARK.test(row.note ?? "")) ||
-  (openLoopPark(row) && RATE_LIMIT_PARK.test(row.loop?.hold?.reason ?? ""));
+  (row.hudState === "parked" && rateLimitParked(row.note)) ||
+  (openLoopPark(row) && rateLimitParked(row.loop?.hold?.reason));
 
 export const isAgentWorking = (row: MetricRow): boolean => row.hudState === "running";
 

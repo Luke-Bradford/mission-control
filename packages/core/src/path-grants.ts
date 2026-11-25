@@ -49,9 +49,8 @@ export function pathsNeedingGrant(
 
 /**
  * Whether every path `entry` can match lies in `area`. A plain file is matched as `pathInArea` does.
- * A glob counts as inside only when some area glob provably covers it segment by segment (a glob
- * also covers what lies under a folder it matches, as `globMatches` does); anything else is kept
- * for the grant checks.
+ * A glob counts as inside only when some area glob provably covers it segment by segment; anything
+ * else is kept for the grant checks.
  */
 function entryInArea(area: readonly string[], entry: string): boolean {
   if (!entry.includes("*")) return pathInArea(area, entry);

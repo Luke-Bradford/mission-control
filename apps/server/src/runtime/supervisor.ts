@@ -106,6 +106,7 @@ import {
   pathsNeedingGrant,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
+  RATE_LIMIT_PARK_PREFIX,
   type RepoId,
   type RepoRules,
   ROLE_PROMPT_DIR,
@@ -1086,7 +1087,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const transfers = new Map<string, Promise<AccountTransferResult>>();
   const profilePolicyKey = (runId: string) => `account-profile-denies:${runId}`;
   const credentialPolicyKey = (runId: string) => `flight-credential-revision:${runId}`;
-  const flightProfileKey = (runId: string) => `flight-runtime-profile:${runId}`;
+  const runtimeProfileKey = (runId: string) => `runtime-profile:${runId}`;
   // Change it when FLIGHT's launch arguments change: a surviving keeper keeps the ones it started with.
   const FLIGHT_RUNTIME_PROFILE = "controller-v3";
   const credentialRevision = (env: Record<string, string> | undefined): string =>
@@ -1108,7 +1109,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const startingTickets = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
-  /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
   const deferredRecoveries = new Set<string>();
@@ -1518,7 +1518,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (e.ok !== undefined) {
           void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);
         }
-        // a result replayed at an attach was counted by the keeper that first saw it
+        // A replayed result was counted before this attach, so do not count it twice.
         if (
           e.bytes !== undefined &&
           e.bytes > 0 &&
@@ -1570,7 +1570,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           l.parkedTurn = true;
           l.rateLimitedUntil = e.resetsAt;
           const until = e.resetsAt === null ? "—" : clockHm(e.resetsAt, config.operator.timezone);
-          setState(l, "parked", `rate limited until ${until}`);
+          setState(l, "parked", `${RATE_LIMIT_PARK_PREFIX} until ${until}`);
         }
         break;
       case "output":
@@ -2073,7 +2073,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       run.reviewId != null && store.review(run.reviewId)?.installNote !== undefined;
     const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
     const upgradeFlight =
-      fullAccess && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
+      fullAccess && store.getSetting(runtimeProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
     const model =
       resume || keepPrompt
         ? resumeModel(info, run)
@@ -2472,7 +2472,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     store.setSetting(profilePolicyKey(run.id), JSON.stringify(profileDenies()));
     if (privateEnv !== undefined)
       store.setSetting(credentialPolicyKey(run.id), credentialRevision(privateEnv));
-    if (fullAccess) store.setSetting(flightProfileKey(run.id), FLIGHT_RUNTIME_PROFILE);
+    store.setSetting(runtimeProfileKey(run.id), fullAccess ? FLIGHT_RUNTIME_PROFILE : "seat-v1");
     const l = track(info, run, session, release, {
       spawn: keeperSpawn,
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
@@ -3038,7 +3038,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             credentialRevision(await deps.flightEnvironment());
         if (
           credentialsChanged ||
-          (flight && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE) ||
+          store.getSetting(runtimeProfileKey(run.id)) !== (flight ? FLIGHT_RUNTIME_PROFILE : "seat-v1") ||
           profileDenies().some((profile) => !denied.includes(profile))
         ) {
           if (!(await endProcess(dir, run.id, keeperEndWait()))) return;
@@ -5243,7 +5243,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!(await endAndRemoveKeeper(seatId, runId))) {
         try {
           store.raiseNote({
-            key: `cleanup:${runId}`,
+            key: `keeper-cleanup:${runId}`,
             kind: "blocked",
             runId,
             seatId,
@@ -5276,7 +5276,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       log(`${seatId}: could not remove ${worktree}: ${errText(e)}`);
       try {
         store.raiseNote({
-          key: `cleanup:${runId}`,
+          key: `worktree-cleanup:${runId}`,
           kind: "blocked",
           runId,
           seatId,

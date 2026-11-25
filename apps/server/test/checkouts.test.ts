@@ -2308,7 +2308,7 @@ describe("a checkout's private pnpm store", () => {
     mkdirSync(outside);
     writeFileSync(join(outside, "keep"), "x\n");
     symlinkSync(outside, storeOf(join(dirname(wtPath()), "linked-3")));
-    await sweepPnpmStores([dirname(wtPath())]);
+    expect(await sweepPnpmStores([dirname(wtPath())])).toBe(1);
     expect(existsSync(storeOf(gone))).toBe(false);
     expect(existsSync(storeOf(wtPath()))).toBe(true);
     expect(existsSync(sharedPnpmStore())).toBe(true);
