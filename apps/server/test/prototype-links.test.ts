@@ -57,4 +57,23 @@ describe("repository prototype links", () => {
       "## Prototype\n\n[copy](docs/prototype/hud.html)\n\n## Notes\n\nhttps://example.com/x";
     expect(prototypeLinkProblem(body, "o/mc")).toBeNull();
   });
+
+  it("keeps a prototype heading open across a prototype subheading", () => {
+    const body =
+      "## Prototype\n\n### Mockup notes\n\n### Links\n\n[copy](https://private.example/hud.html)";
+    expect(prototypeLinkProblem(body, "o/mc")).toBe(PRIVATE_PROTOTYPE_TEXT);
+  });
+
+  it("reads no heading inside a fenced block", () => {
+    const body = "## Prototype\n\n```sh\n# run it\n```\n\n[copy](https://private.example/hud.html)";
+    expect(prototypeLinkProblem(body, "o/mc")).toBe(PRIVATE_PROTOTYPE_TEXT);
+    const closed =
+      "## Prototype\n\n[copy](docs/prototype/hud.html)\n\n## Notes\n\n```\n## Mockup\n```\n\nhttps://example.com/x";
+    expect(prototypeLinkProblem(closed, "o/mc")).toBeNull();
+  });
+
+  it("does not close a fence on a line with text after the marker", () => {
+    const body = "## Notes\n\n```md\n```js\n## Prototype\n```\n\nhttps://example.com/x";
+    expect(prototypeLinkProblem(body, "o/mc")).toBeNull();
+  });
 });

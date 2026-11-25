@@ -884,6 +884,13 @@ describe("collectGithub board fields", () => {
             extra: { body: "Broke after #7, in `src/a.ts`." },
           }),
           item(2, "Todo", { extra: { body: "Mentions #7 but is no bug." } }),
+          // a PR named by its URL counts; another repo's PR URL does not
+          item(3, "Todo", {
+            labels: ["bug"],
+            extra: {
+              body: "Since https://github.com/octo-org/shop-app/pull/9, not https://github.com/x/y/pull/8",
+            },
+          }),
         ]),
       ],
       prPages: [
@@ -905,6 +912,7 @@ describe("collectGithub board fields", () => {
     expect(store.board("shop-app").map((i) => i.defectRefs)).toEqual([
       { prs: [7], shas: [], paths: ["src/a.ts"] },
       undefined,
+      { prs: [9], shas: [], paths: [] },
     ]);
     expect(store.qaFlow(0).testsPerPr).toMatchObject([{ prNumber: 7, added: 1, changed: 0 }]);
   });
@@ -1821,6 +1829,8 @@ describe("collectGithub pull requests", () => {
     await collectGithub(repo, store, gql, NOW);
     const q = calls.find((c) => c.q.includes("pullRequests("))?.q ?? "";
     expect(q).toContain("contexts(first: 50)");
+    // the old limit of 10 is gone from every contexts read
+    expect(q).not.toContain("contexts(first: 10)");
     expect(q).toContain("runAttempt");
   });
 
@@ -2004,6 +2014,7 @@ describe("sweepPullRequests", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.q).toContain("defaultBranchRef");
     expect(calls[0]?.q).toContain("contexts(first: 50)");
+    expect(calls[0]?.q).not.toContain("contexts(first: 10)");
     expect(JSON.parse(store.getSetting(`${FLIGHT_MAIN_SETTING}:${repo.id}`) ?? "null")).toEqual({
       sha: "main-sha",
       ci: "failing",

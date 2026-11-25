@@ -21,17 +21,20 @@ describe("CI", () => {
     // every sharded job lists as many shards as its command divides by, so no test file is skipped
     const shards = (job: string) => {
       const from = workflow.indexOf(`\n  ${job}:\n`) + 1;
-      // this job's lines only: up to the next job heading, so a missing value is not read from a later job
-      const next = workflow.slice(from + 1).search(/\n {2}[a-z-]+:\n/);
+      // this job's lines only: up to the next job heading (a job id may hold digits and _), so a
+      // missing value is not read from a later job
+      const next = workflow.slice(from + 1).search(/\n {2}[\w-]+:\n/);
       const body = next < 0 ? workflow.slice(from) : workflow.slice(from, from + 1 + next);
       const list = /shard: \[([\d, ]+)\]/.exec(body)?.[1].split(",").map(Number) ?? [];
       const of = Number(/--shard=\$\{\{ matrix\.shard \}\}\/(\d+)/.exec(body)?.[1]);
-      return { list, of };
+      return { list, of, body };
     };
     for (const job of ["server", "server-process", "web-core"]) {
-      const { list, of } = shards(job);
+      const { list, of, body } = shards(job);
       expect(list, job).toEqual(Array.from({ length: of }, (_, i) => i + 1));
       expect(of, job).toBeGreaterThan(1);
+      // one failing shard must not cancel the others: each shard's failures are its own
+      expect(body, job).toMatch(/\n {6}fail-fast: false\n/);
     }
     expect(workflow).toContain("ci-vitest.ts --project server --shard=");
     expect(workflow).toContain("ci-vitest.ts --project server-process --shard=");

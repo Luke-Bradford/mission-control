@@ -29,6 +29,24 @@ describe("nodeFirstPath", () => {
   });
 });
 
+describe("a Claude seat's command", () => {
+  it("resolves node to the hub's folder when another node comes first on the inherited PATH", () => {
+    const root = mkdtempSync(join(tmpdir(), "mc-node-first-"));
+    made.push(root);
+    const other = join(root, "other");
+    mkdirSync(other);
+    const fake = join(other, "node");
+    writeFileSync(fake, "#!/bin/sh\necho fake\n");
+    chmodSync(fake, 0o755);
+    // the PATH a Claude seat's env carries, as crewEnv builds it, run by a plain shell
+    const out = execFileSync("/bin/sh", ["-c", "command -v node"], {
+      env: { PATH: nodeFirstPath(process.execPath, `${other}:/usr/bin:/bin`) },
+      encoding: "utf8",
+    }).trim();
+    expect(dirname(out)).toBe(dirname(process.execPath));
+  });
+});
+
 describe("a login zsh with the seat's ZDOTDIR", () => {
   it.skipIf(!existsSync(CODEX_SHELL))(
     "resolves node to the hub's folder even after /etc/zprofile reorders PATH",

@@ -1227,12 +1227,13 @@ describe("scheduler", () => {
           });
 
           it("builds no crew view on later ticks for an agent no longer in config", async () => {
+            // its last state is a timed one, which would force a read for a configured seat
             await quietCalls(() =>
               store.addAgentEvent({
                 agentId: "gone-loop",
                 at: 1,
                 from: "idle",
-                to: "error",
+                to: "running",
                 text: "x",
               }),
             );

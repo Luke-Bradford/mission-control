@@ -7,10 +7,16 @@ type Report = { kind: string; status?: number; lines?: string[] };
 
 const CHILD = fileURLToPath(new URL("./process-errors-child.ts", import.meta.url));
 
+/** How long one report may take: under the server project's 15 s test timeout, so a stall names its report. */
+const REPORT_WAIT_MS = 10_000;
+
 /** The next message of `kind` the child sends, or a failure if it exits or stalls first. */
 const next = (child: ChildProcess, kind: string): Promise<Report> =>
   new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`no "${kind}" report from the child`)), 20_000);
+    const timer = setTimeout(
+      () => reject(new Error(`no "${kind}" report from the child`)),
+      REPORT_WAIT_MS,
+    );
     const onMessage = (m: Report) => {
       if (m.kind !== kind) return;
       clearTimeout(timer);
