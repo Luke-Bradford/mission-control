@@ -320,6 +320,49 @@ describe("sessions view", () => {
     expect(fake.state().sent ?? []).toEqual([]);
   });
 
+  it("a stopped-app notice that fails is sent on the next read, once", async () => {
+    let answers = true;
+    let failNext = false;
+    const fake = fakeCmux(dir, {
+      ...threeSessions(),
+      statuses: { [PRICING]: { app: "http://127.0.0.1:5173" } },
+    });
+    const flaky = new Proxy(fake.cmux, {
+      get(target, key, receiver) {
+        const v = Reflect.get(target, key, receiver) as (...a: unknown[]) => Promise<unknown>;
+        if (key !== "agentMessage") return v;
+        return async (...a: unknown[]) => {
+          if (failNext) {
+            failNext = false;
+            throw new Error("cmux agent message failed");
+          }
+          return v.apply(target, a);
+        };
+      },
+    });
+    const { sessions } = setup(
+      { ...threeSessions(), statuses: { [PRICING]: { app: "http://127.0.0.1:5173" } } },
+      { cmux: flaky, probe: async () => answers },
+    );
+    await sessions.view();
+    answers = false;
+    failNext = true;
+    for (let i = 0; i < 3; i++) {
+      nowMs += 10_000;
+      await sessions.view();
+    }
+    expect(fake.state().messages?.map((m) => m.text)).toEqual([
+      "Your app at http://127.0.0.1:5173 has stopped answering.",
+    ]);
+    answers = true;
+    nowMs += 10_000;
+    await sessions.view();
+    expect(fake.state().messages?.map((m) => m.text)).toEqual([
+      "Your app at http://127.0.0.1:5173 has stopped answering.",
+      "Your app at http://127.0.0.1:5173 answers again.",
+    ]);
+  });
+
   it("never tells a plain shell about its app: nothing is written where no agent reads", async () => {
     let answers = true;
     const { fake, sessions } = setup(

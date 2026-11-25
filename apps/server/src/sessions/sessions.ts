@@ -267,8 +267,14 @@ export function createSessions(deps: SessionsDeps): SessionsService {
   const projects = resolve(deps.projectsDir ?? join(homedir(), ".claude", "projects"));
   /** Each workspace's state and when this hub first saw it in that state. */
   const seen = new Map<string, { state: CmuxSessionState; since: number }>();
-  /** Each workspace's app as last read, and whether the session was told it stopped. */
-  const apps = new Map<string, { url: string; answers: boolean | null; told: boolean }>();
+  /**
+   * Each workspace's app as last read, whether the session was told it stopped, and whether a stop
+   * seen is still owed a notice (the message failed): it is tried again on each read until it goes.
+   */
+  const apps = new Map<
+    string,
+    { url: string; answers: boolean | null; told: boolean; owed: boolean }
+  >();
   /** Reads take turns at telling apps, and a read older than one already handled is skipped. */
   let appsTurn: Promise<void> = Promise.resolve();
   let appsAt = Number.NEGATIVE_INFINITY;
@@ -380,7 +386,9 @@ export function createSessions(deps: SessionsDeps): SessionsService {
       }
       // a probe cut off by the deadline tells nothing: what was known stays
       if (answers === null && prev?.url === url) continue;
-      let told = prev?.url === url ? prev.told : false;
+      const same = prev?.url === url;
+      let told = same ? prev.told : false;
+      let owed = same ? prev.owed : false;
       const say = async (text: string, event: string) => {
         // a plain shell has no agent to read it: nothing is ever written there
         if (row.state === "no-agent") return false;
@@ -393,14 +401,21 @@ export function createSessions(deps: SessionsDeps): SessionsService {
           return false;
         }
       };
-      if (prev?.url === url && prev.answers === true && answers === false && !told)
+      if (same && answers === false && !told && (prev.answers === true || owed)) {
         told = await say(
           `Your app at ${url} has stopped answering.`,
           `its app at ${url} stopped answering`,
         );
-      else if (told && answers === true)
-        told = !(await say(`Your app at ${url} answers again.`, `its app at ${url} answers again`));
-      apps.set(row.id, { url, answers, told });
+        owed = !told;
+      } else if (answers === true) {
+        owed = false;
+        if (told)
+          told = !(await say(
+            `Your app at ${url} answers again.`,
+            `its app at ${url} answers again`,
+          ));
+      }
+      apps.set(row.id, { url, answers, told, owed });
     }
     for (const id of apps.keys()) if (!rows.some((r) => r.id === id)) apps.delete(id);
   }
