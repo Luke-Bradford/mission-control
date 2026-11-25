@@ -75,7 +75,8 @@ describe("machineCapacity", () => {
     const criticallySwapped = sample({
       memTotalBytes: 18.4 * gb,
       swapUsedBytes: 17.5 * gb,
-      swapTotalBytes: 18.4 * gb,
+      // a roomy swap file: only the RAM rule can block
+      swapTotalBytes: 40 * gb,
       memoryPressureFreePct: 50,
     });
     expect(machineCapacity([criticallySwapped], NOW)).toMatchObject({

@@ -408,6 +408,14 @@ describe("state step", () => {
           pushed: { sha: SHA, at: 1 },
         },
         { pr: pr({ headSha: SHA2, ci: "passing" as const, state: "closed" as const }) },
+        // a newer local commit not pushed yet: the green head is not the seat's latest
+        { pr: pr({ headSha: SHA2, ci: "passing" as const }), headCommit: "ccccccc3333" },
+        // a pushed head the PR does not show yet: its green checks are an older head's
+        {
+          pr: pr({ headSha: SHA2, ci: "passing" as const }),
+          headCommit: "ccccccc3333",
+          pushed: { sha: "ccccccc3333", at: NOW - 1000 },
+        },
       ] as Partial<LoopSnapshot>[]) {
         const stays = reconcile(snap({ ...newer, ...over }, parked));
         expect(stays.loop.phase).toBe("parked");
@@ -3208,7 +3216,7 @@ describe("merge workspace", () => {
   it("records HUD design checks without making them a merge gate", () => {
     const result = reconcile(
       merge(
-        { review: rows({ design: { result: "fail", note: "overflow at 1366px" } as never }) },
+        { review: rows({ design: { result: "fail", note: "overflow at 1366px" } }) },
         { gate: gateOf({ webChanged: true }) },
       ),
     );

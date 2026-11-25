@@ -1608,6 +1608,10 @@ describe("startReview", () => {
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     expect(fs.denyRead).toContain(join(root, "mc-crew", "guido-1-42"));
+    // the review's launch is wake 0 of its prompt record, by section
+    await until(() => expect(store.promptWakes(runId).map((w) => w.wake)).toEqual([0]));
+    const names = store.promptWakes(runId)[0]?.sections.map((x) => x.section) ?? [];
+    for (const name of ["role", "orders"]) expect(names).toContain(name);
   });
 
   describe("a PR that changes package.json", () => {

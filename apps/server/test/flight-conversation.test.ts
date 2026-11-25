@@ -171,6 +171,65 @@ it("reports the current live FLIGHT run with its start time", async () => {
 
   expect((await page()).flight).toEqual({ live: true, since: startedAt, runId: "live-flight-run" });
 });
+it("reports FLIGHT not live when its run row is open but its session is gone", async () => {
+  const transcriptPath = join(dir, "ghost-flight-run.jsonl");
+  writeFileSync(transcriptPath, "");
+  store.upsertRun({
+    id: "ghost-flight-run",
+    agentId: FLIGHT,
+    repoId: "repo",
+    seq: 1,
+    startedAt: AT - 60_000,
+    endedAt: null,
+    status: "running",
+    sessionId: "cli",
+    model: "x",
+    branch: null,
+    ticket: null,
+    costUsd: null,
+    tokens: null,
+    transcriptPath,
+    prs: [],
+    summary: null,
+  });
+  store.setSeatSession({
+    seatId: FLIGHT,
+    runId: "ghost-flight-run",
+    cliSessionId: "cli",
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: AT,
+    vendor: "claude",
+  });
+  const asked: string[] = [];
+  const supervisor = {
+    sessionAlive: (id: string) => {
+      asked.push(id);
+      return false;
+    },
+  } as unknown as NonNullable<Parameters<typeof buildApp>[0]["supervisor"]>;
+  const gone = buildApp({
+    config,
+    store,
+    bus: new ChangeBus(),
+    now: () => AT + 100_000,
+    operatorToken: "fixture",
+    supervisor,
+  });
+  try {
+    const response = await gone.inject("/api/comms/flight");
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().flight).toEqual({
+      live: false,
+      since: null,
+      runId: "ghost-flight-run",
+    });
+    expect(asked).toContain(FLIGHT);
+  } finally {
+    await gone.close();
+  }
+});
 it("reports a stopped FLIGHT run without a start time", async () => {
   store.setSeatSession({
     seatId: FLIGHT,

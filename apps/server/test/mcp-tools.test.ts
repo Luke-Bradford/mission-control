@@ -5397,6 +5397,16 @@ describe("report_findings", () => {
     );
   });
 
+  it("keeps a reviewer's decimal test duration as it is", async () => {
+    const tests = [
+      { command: "pnpm -s vitest run a.test.ts", passed: 1, failed: 0, skipped: 0, duration: 12.4 },
+    ];
+    expect(await report(args({ tests }))).toEqual({
+      text: expect.stringContaining(FINDINGS_RECORDED),
+    });
+    expect(store.reviewTests(reviewId)).toMatchObject([{ duration: 12.4 }]);
+  });
+
   it("validates structured report fields and only accepts prior-round resolutions", async () => {
     expect((await report(args({ checked: [{ check: "nope", result: "pass" }] }))).isError).toBe(
       true,

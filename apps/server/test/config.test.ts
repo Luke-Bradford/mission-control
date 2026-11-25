@@ -39,6 +39,7 @@ import {
   parseConfig,
   portFromEnv,
   seatUnavailable,
+  writableConfigPath,
 } from "../src/config.ts";
 import { configView } from "../src/hud/views.ts";
 import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
@@ -1498,6 +1499,12 @@ describe("preview servers and crew", () => {
     expect(isPreview(DEFAULT_PORT, { MC_LIVE_PORT: "7500" })).toBe(true);
     expect(portFromEnv(undefined, { MC_LIVE_PORT: "7500" })).toBe(7500);
     expect(errorOf(() => isPreview(7500, { MC_LIVE_PORT: "80" })).path).toBe("MC_LIVE_PORT");
+  });
+
+  it("an implicit preview never writes the live config; one given its own MC_CONFIG may", () => {
+    expect(writableConfigPath("/live.yaml", false, {})).toBe("/live.yaml");
+    expect(writableConfigPath("/live.yaml", true, {})).toBeUndefined();
+    expect(writableConfigPath("/copy.yaml", true, { MC_CONFIG: "/copy.yaml" })).toBe("/copy.yaml");
   });
 
   it("the live hub runs crew unless MC_NO_CREW=1; a preview only with MC_CREW=1", () => {

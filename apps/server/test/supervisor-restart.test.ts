@@ -2031,6 +2031,41 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(lock.state().holder).toBeNull());
   });
 
+  it("a tool result replayed at an attach is not counted again", async () => {
+    const first = make();
+    first.sup.start();
+    const { runId } = await first.sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const toolBytes = () =>
+      store
+        .promptWakes(runId)
+        .flatMap((w) => w.sections)
+        .filter((x) => x.section === "tool_results")
+        .reduce((n, x) => n + x.bytes, 0);
+    // the call ends (its result counted live), and the turn is still open at the restart
+    await first.sup.message("guido-1", "TOOLGAP", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    await first.sup.message("guido-1", "cue", { interrupt: false });
+    await until(() => expect(toolBytes()).toBeGreaterThan(0));
+    const counted = toolBytes();
+    await first.sup.stopAll();
+    // as if the hub had died before it stored the lines: the tool result is replayed
+    const cursor = store.keeperCursor(runId);
+    if (cursor === null) throw new Error("missing keeper cursor");
+    store.setKeeperCursor({ ...cursor, line: 0 });
+    const { sup } = make();
+    sup.start();
+    await until(() => {
+      expect(store.keeperCursor(runId)?.line).toBeGreaterThanOrEqual(cursor.line);
+      expect(sup.seatFacts("guido-1")).toMatchObject({ inTurn: true });
+    });
+    expect(toolBytes()).toBe(counted);
+    // the last cue ends the turn
+    await sup.message("guido-1", "cue", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(toolBytes()).toBe(counted);
+  });
+
   it("stopAll sends a Stop's close that is still waiting on its interrupt", async () => {
     const first = make({ controlTimeoutMs: 20_000 });
     first.sup.start();
@@ -2168,26 +2203,32 @@ describe("a seat keeps running through a restart", () => {
       .mockImplementation(async (d, ...rest) =>
         d === dir0 && left-- > 0 ? false : real(d, ...rest),
       );
-    const hub = watchMake();
-    const profile = join(dir, "alt-codex");
-    mkdirSync(profile, { recursive: true });
-    writeFileSync(
-      join(profile, "auth.json"),
-      JSON.stringify({ tokens: { account_id: "acct-alt" } }),
-      { mode: 0o600 },
-    );
-    hub.cfg.accounts.push({
-      id: "codex-alt",
-      vendor: "codex",
-      cliProfile: profile,
-      alertAt: 80,
-      stopAt: 95,
-    });
-    hub.sup.start();
-    await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(false));
-    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
-    expect(pidAlive(keeperPid)).toBe(true);
-    return { runId, dir0, keeperPid, cliPid, end, real, hub };
+    // the callers restore the spy in their own finally; until this returns, restore it here
+    try {
+      const hub = watchMake();
+      const profile = join(dir, "alt-codex");
+      mkdirSync(profile, { recursive: true });
+      writeFileSync(
+        join(profile, "auth.json"),
+        JSON.stringify({ tokens: { account_id: "acct-alt" } }),
+        { mode: 0o600 },
+      );
+      hub.cfg.accounts.push({
+        id: "codex-alt",
+        vendor: "codex",
+        cliProfile: profile,
+        alertAt: 80,
+        stopAt: 95,
+      });
+      hub.sup.start();
+      await until(() => expect(hub.sup.sessionAlive?.("flight-1")).toBe(false));
+      expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+      expect(pidAlive(keeperPid)).toBe(true);
+      return { runId, dir0, keeperPid, cliPid, end, real, hub };
+    } catch (err) {
+      end.mockRestore();
+      throw err;
+    }
   }
 
   it("the watch ends a run a take-back left with no session, and its keeper, then starts FLIGHT (#798)", async () => {
