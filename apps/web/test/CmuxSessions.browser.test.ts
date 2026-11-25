@@ -275,6 +275,80 @@ describeRendered("Sessions page in the app, beside the FLIGHT dock", () => {
       BROWSER_TEST_TIMEOUT_MS,
     );
 
+  const LONG_FOLDER = `/Users/op/Dev/${"client-projects/".repeat(10)}storefront-checkout`;
+  const LONG_REPO = `storefront-${"checkout-".repeat(8)}service`;
+  const LONG_URL = `http://localhost:5173/${"basket/receipts/".repeat(10)}preview`;
+  for (const scheme of ["light", "dark"] as const)
+    it(
+      `reads a long folder, repo and app address in full from the keyboard at 1280×800 in ${scheme}`,
+      async () => {
+        const base = view(6);
+        const sessions: CmuxSessionsView = base.ok
+          ? {
+              ...base,
+              sessions: base.sessions.map((s, i) =>
+                i === 1
+                  ? {
+                      ...s,
+                      folder: LONG_FOLDER,
+                      repo: LONG_REPO,
+                      app: { url: LONG_URL, answers: true },
+                    }
+                  : s,
+              ),
+            }
+          : base;
+        const page = await open(1280, 800, scheme, sessions);
+        const cells = () =>
+          page.evaluate(() => {
+            const row = document.querySelectorAll<HTMLElement>("tr.sess-row")[1] as HTMLElement;
+            const scroll = document.querySelector<HTMLElement>(".sess-scroll") as HTMLElement;
+            const folder = row.querySelector<HTMLElement>(".sess-folder") as HTMLElement;
+            const link = row.querySelector<HTMLElement>(".sess-applink") as HTMLElement;
+            const clipped = (el: HTMLElement) => {
+              const c = (el.closest("td") as HTMLElement).getBoundingClientRect();
+              const b = el.getBoundingClientRect();
+              return (
+                el.scrollWidth > el.clientWidth ||
+                el.scrollHeight > el.clientHeight + 1 ||
+                b.right > c.right + 0.5 ||
+                b.bottom > c.bottom + 0.5 ||
+                b.bottom > scroll.getBoundingClientRect().bottom
+              );
+            };
+            return {
+              focused: document.activeElement === row || row.contains(document.activeElement),
+              folderText: folder.textContent,
+              linkText: link.textContent,
+              folderClipped: clipped(folder),
+              linkClipped: clipped(link),
+              answerClipped: clipped(row.querySelector<HTMLElement>(".sess-ans") as HTMLElement),
+            };
+          }, undefined);
+        try {
+          const before = await cells();
+          // Cut short until the row has focus.
+          expect(before.folderClipped).toBe(true);
+          expect(before.linkClipped).toBe(true);
+          let m = before;
+          for (let i = 0; i < 80 && !m.focused; i++) {
+            await page.press("Tab");
+            m = await cells();
+          }
+          expect(m.focused).toBe(true);
+          await capture(page, `sessions-1280x800-${scheme}-long-folder-app-focused`);
+          expect(m.folderText).toBe(`${LONG_FOLDER.replace("/Users/op", "~")} · ${LONG_REPO}`);
+          expect(m.linkText).toBe(LONG_URL.replace("http://", ""));
+          expect(m.folderClipped).toBe(false);
+          expect(m.linkClipped).toBe(false);
+          expect(m.answerClipped).toBe(false);
+        } finally {
+          await page.close();
+        }
+      },
+      BROWSER_TEST_TIMEOUT_MS,
+    );
+
   for (const n of [0, 1, 50])
     it(
       `shows ${n} sessions at 1920×940 without page scroll`,

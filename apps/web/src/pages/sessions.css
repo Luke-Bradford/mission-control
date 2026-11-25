@@ -347,14 +347,21 @@ button.sess-inbox[aria-expanded="true"] {
   outline-offset: -2px;
 }
 
-/* Keyboard reaches the full name, last line and status: a focused row unwraps them. The name
-   wraps beside or over its tags, which never shrink. */
+/* Keyboard reaches every cut-short value: a focused row unwraps the name, folder and repo, last
+   line, status and app address. The name wraps beside or over its tags, which never shrink; the
+   address wraps above its answer word. Paths and addresses have no spaces, so they break anywhere. */
 .sess-row:focus-within .sess-last,
 .sess-row:focus-within .sess-status {
   white-space: normal;
 }
 
-.sess-row:focus-within .sess-name {
+.sess-row:focus-within .sess-name,
+.sess-row:focus-within .sess-folder,
+.sess-row:focus-within .sess-applink {
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.sess-row:focus-within .sess-applink {
+  text-align: left;
 }
