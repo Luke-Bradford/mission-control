@@ -157,6 +157,7 @@ import { installHubErrorHandlers } from "./runtime/process-errors.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
+import { startCmuxEvents } from "./sessions/events.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
 import { createSessionSidebar } from "./sessions/sidebar.ts";
 import { onSignal } from "./shutdown.ts";
@@ -1038,6 +1039,16 @@ export async function main(): Promise<void> {
     log: (m) => log(m),
   });
   const sessionSidebar = createSessionSidebar({ sessions, cmux, store, log: (m) => log(m) });
+  const cmuxEvents = startCmuxEvents({
+    cmux,
+    cursorFile: join(dirname(dbPath), "cmux-events.cursor"),
+    onChange: () => {
+      sessions.invalidate();
+      bus.emit("sessions");
+      void sessionSidebar.tick();
+    },
+    log: (m) => log(m),
+  });
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
@@ -1238,6 +1249,7 @@ export async function main(): Promise<void> {
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
     sessionSidebar.stop();
+    cmuxEvents.stop();
   });
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};
