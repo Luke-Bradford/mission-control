@@ -149,7 +149,6 @@ import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./run/rotating-log.ts";
-import { CMUX_COMMAND } from "./runtime/cmux.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { watchPreviewParent } from "./runtime/preview-parent.ts";
 import { installHubErrorHandlers } from "./runtime/process-errors.ts";
@@ -686,8 +685,6 @@ export async function main(): Promise<void> {
           log: (line) => log(line),
         });
   const supervisor = createSupervisor({
-    // every Claude seat runs as a cmux workspace the operator can see, type into and clear
-    cmuxCommand: [CMUX_COMMAND],
     auditPack: (seatId) =>
       buildAuditPack({ config, store, busy: supervisor.busy(), now: Date.now(), seatId }),
     flightEnvironment: async () => ({
