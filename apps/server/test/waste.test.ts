@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { PullRequestView, Run, WasteCheck } from "@mc/core";
+import type { PullRequestView, Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { wasteReport } from "../src/spend/waste.ts";
@@ -96,8 +96,6 @@ const mergedPr = (number: number, branch: string, mergedAt: number): PullRequest
 
 const _checkOn = (runId: string, command: string, sha: string, at: number, ok = false) =>
   store.addCheckRun({ runId, command, headSha: sha, ok, exitCode: ok ? 0 : 1, at });
-
-const _REVIEW_ROUNDS: WasteCheck = "review-rounds";
 
 describe("the read route's report", () => {
   it("serves spend per merged change and the building share, with vendor coverage", () => {

@@ -142,6 +142,8 @@ describe("question-asked-back", () => {
       text: "Why again?",
       at: NOW - HOUR + MIN,
     });
+    // the one row is the item's first question, from the legacy discussion
+    expect(rows("question-asked-back")).toMatchObject([{ subject: "needs:5", at: NOW - HOUR }]);
     expect(rows("question-asked-back")).toHaveLength(1);
   });
 });
