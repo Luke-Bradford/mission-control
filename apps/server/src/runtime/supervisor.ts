@@ -5069,7 +5069,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (!(await endAndRemoveKeeper(seatId, runId))) {
         try {
           store.raiseNote({
-            key: `keeper-cleanup:${runId}`,
+            key: `cleanup-keeper:${runId}`,
             kind: "blocked",
             runId,
             seatId,
