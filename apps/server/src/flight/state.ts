@@ -1204,6 +1204,14 @@ export function flightState(i: {
         r.loop?.prNumber != null &&
         mine.some((s) => s.id === r.agentId),
     );
+  // PRs a crew run of this session held in the last day, whether or not that run has ended
+  const crewPrs = new Set(
+    store
+      .loopRuns(now - FLIGHT_METRICS_DAY_MS)
+      .filter((r) => r.repoId === session.repoId && mine.some((s) => s.id === r.agentId))
+      .map((r) => r.loop?.prNumber)
+      .filter((n) => n != null),
+  );
   const stale = store.stalePullRequests(session.repoId);
   const shown = shownPrs(store);
   const failedRounds = new Map(
@@ -1228,6 +1236,22 @@ export function flightState(i: {
         p.headSha === null
           ? null
           : carriedFrom(holder?.loop?.carry, holder?.loop?.reviewWaivedSha, p.headSha);
+      const review =
+        reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
+          ? null
+          : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha };
+      const checks = p.checks ?? [];
+      const failingChecks = checks.filter((c) => c.state === "failing").map((c) => c.name);
+      // nobody holds it and its checks have all reported: the result reaches no seat by itself
+      const unheld =
+        p.state === "open" &&
+        holder === undefined &&
+        p.headSha !== null &&
+        crewPrs.has(p.number) &&
+        checks.length > 0 &&
+        checks.every((c) => c.state !== "pending")
+          ? `${p.headSha}:${failingChecks.length > 0 ? "failing" : "passed"}:${review === null ? "unreviewed" : review.blocking}`
+          : undefined;
       return {
         ref: p.ticket ?? holder?.ticket ?? "",
         pr: p.number,
@@ -1245,12 +1269,10 @@ export function flightState(i: {
         headSha: p.headSha,
         readAt: clockHm(store.pullRequestReadAt(session.repoId, p.number) ?? 0, tz),
         stale: stale.has(p.number),
-        review:
-          reviewed?.verdict == null || (reviewed.sha !== p.headSha && reviewed.sha !== carried)
-            ? null
-            : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
-        failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
+        review,
+        failingChecks,
         reviewRounds: failedRounds.get(p.number) ?? 0,
+        ...(unheld === undefined ? {} : { unheld }),
       };
     });
 
@@ -1276,6 +1298,7 @@ export function flightState(i: {
           ? [`${p.review.blocking} review finding${p.review.blocking === 1 ? "" : "s"}`]
           : []),
         ...(p.awaitingFlight === null || p.awaitingFlight === undefined ? [] : ["FLIGHT merge"]),
+        ...(p.unheld === undefined ? [] : ["a seat: no run holds this PR"]),
       ];
       return { pr: p.pr, waitsOn };
     })
@@ -1736,7 +1759,8 @@ const parkOf = (store: Store, run: Run): FlightPark | null => {
 /**
  * What a wake is about, as a stable string (no times): an operator message, a seat's question, a
  * failure the hub could not settle, or an idle build seat with open tickets. CI, PR flow and free
- * seats are the hub's own timers and show in the digest, never here.
+ * seats are the hub's own timers and show in the digest, never here: except a PR no run holds
+ * (`unheld`), whose settled checks and review the engine has no seat to hand to.
  */
 export function wakeFacts(s: FlightState & TeamsDigestState): string {
   // One stable fact per idle spell, once it has lasted 30 minutes. The digest carries the open
@@ -1748,6 +1772,10 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     .filter((seat) => !delivered.has(idleKey(seat)))
     .map(idleKey);
   const idleAgain = s.wake?.idle?.again ?? null;
+  const unheld = s.prs
+    .filter((p) => p.unheld !== undefined)
+    .map((p) => `${p.pr}:${p.unheld}`)
+    .sort();
   return JSON.stringify({
     // once a day or less: an instruction change, the daily retrospective, an arrival from another team
     instructions:
@@ -1788,6 +1816,7 @@ export function wakeFacts(s: FlightState & TeamsDigestState): string {
     owed: s.wake?.owed ?? [],
     ...(idle.length === 0 ? {} : { idle }),
     ...(idleAgain === null ? {} : { idleAgain: [idleAgain] }),
+    ...(unheld.length === 0 ? {} : { unheld }),
     // blockers and messages; a PR's own steps are the hub's
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
@@ -1840,7 +1869,9 @@ const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker"]);
 /**
  * Fact categories a wake does not wait the gap for: an operator message, a seat's question, an
  * instruction change, FLIGHT's own plan falling due, and the daily retrospective. Each is the
- * operator's or FLIGHT's own doing, or at most daily.
+ * operator's or FLIGHT's own doing, or at most daily. `unheld` is the exception: a PR with settled
+ * checks and no run stands still until FLIGHT gives it a seat, and it changes once per CI or review
+ * result.
  */
 const URGENT_CATEGORIES: readonly string[] = [
   "operator",
@@ -1850,6 +1881,7 @@ const URGENT_CATEGORIES: readonly string[] = [
   "planned",
   "retrospective",
   "audit",
+  "unheld",
 ];
 
 const SEAT_CALL: (typeof FLIGHT_SIGNAL_KINDS)[number] = "seat_call";

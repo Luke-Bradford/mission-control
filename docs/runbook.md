@@ -1343,6 +1343,13 @@ line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reas
 A wait on a person is never the reason a seat idles; only money, direction, irreversible actions and
 security exceptions go to the operator, parked with a brief.
 
+**A PR no run holds.** The engine hands a PR's CI and review results to the run that holds it. An open
+PR that a crew run held in the last day and none holds now (FLIGHT ended the run to pass the PR on, or
+pushed a fix itself) has nobody to hand them to. Once all its checks have reported, the hub wakes
+FLIGHT at once (fact `unheld`: the head, passed or failing, and the review's blocking count), and the
+merge queue shows "a seat: no run holds this PR". The same result is told once; a new head, a new
+check result or a new review is a new fact. A PR opened outside the crew is not covered.
+
 | Signal | Raised when |
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |

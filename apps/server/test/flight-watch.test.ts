@@ -94,9 +94,11 @@ import {
   lastRecordedWake,
   markItemsShown,
   markPrsShown,
+  onlySettled,
   ownReply,
   pending,
   trackIdleSeat,
+  urgentChange,
   wakeFacts,
 } from "../src/flight/state.ts";
 import {
@@ -646,6 +648,81 @@ describe("FLIGHT's evidence", () => {
       headSha: "sha7",
       failingChecks: ["lint"],
       review: { spec: "fail", quality: "pass", blocking: 2, sha: "sha7" },
+    });
+  });
+
+  describe("a PR no run holds", () => {
+    const state = () => flightState({ config, store, busy: [], now: nowMs });
+    const unheld = () => state().prs.find((p) => p.pr === 7)?.unheld;
+    /** A crew run that held PR 7 and has ended without finishing it, as a stopped hand-over leaves it. */
+    const endedHolder = () =>
+      store.upsertRun(
+        run("r-guido", "guido-1", {
+          ticket: "mc#7",
+          endedAt: T0,
+          status: "ok",
+          loop: {
+            ...NEW_LOOP,
+            phase: "parked",
+            prNumber: 7,
+            hold: {
+              kind: null,
+              reason: "run ended (stopped)",
+              ended: true,
+              worktree: null,
+              wake: false,
+            },
+          },
+        }),
+      );
+    const withChecks = (...checks: ReturnType<typeof check>[]) =>
+      store.upsertPullRequests("mc", [stored(7, { checks })], nowMs);
+
+    it("is marked once its checks have all reported, with the head, the result and the review", () => {
+      endedHolder();
+      withChecks(check("lint", "passing"), check("test", "pending"));
+      expect(unheld()).toBeUndefined();
+      withChecks(check("lint", "passing"), check("test", "passing"));
+      expect(unheld()).toBe("sha7:passed:unreviewed");
+      expect(state().mergeQueue?.find((q) => q.pr === 7)?.waitsOn).toContain(
+        "a seat: no run holds this PR",
+      );
+      withChecks(check("lint", "passing"), check("mc/review", "failing"));
+      review("sha7", "fail", 3);
+      expect(unheld()).toBe("sha7:failing:3");
+    });
+
+    it("is not marked while a run holds it, with no checks read, or when no crew run ever held it", () => {
+      withChecks(check("lint", "passing"));
+      expect(unheld()).toBeUndefined(); // a PR opened outside the crew
+      endedHolder();
+      store.upsertPullRequests("mc", [stored(7)], nowMs);
+      expect(unheld()).toBeUndefined(); // checks not read yet
+      withChecks(check("lint", "passing"));
+      expect(unheld()).toBe("sha7:passed:unreviewed");
+      live("guido-1", "r-next");
+      store.setRunLoop("r-next", { ...NEW_LOOP, phase: "ci", prNumber: 7 });
+      expect(unheld()).toBeUndefined();
+    });
+
+    it("wakes FLIGHT at once on each new result, and not when a seat takes the PR", () => {
+      endedHolder();
+      withChecks(check("lint", "pending"));
+      const waiting = wakeFacts(state());
+      expect(JSON.parse(waiting)).not.toHaveProperty("unheld");
+      withChecks(check("lint", "passing"));
+      const green = wakeFacts(state());
+      expect(JSON.parse(green).unheld).toEqual(["7:sha7:passed:unreviewed"]);
+      expect(urgentChange(waiting, green)).toBe(true);
+      // told once: the same result is the same fact
+      expect(wakeFacts(state())).toBe(green);
+      withChecks(check("lint", "passing"), check("mc/review", "failing"));
+      review("sha7", "fail", 3);
+      const reviewed = wakeFacts(state());
+      expect(urgentChange(green, reviewed)).toBe(true);
+      live("guido-1", "r-next");
+      store.setRunLoop("r-next", { ...NEW_LOOP, phase: "working", prNumber: 7 });
+      expect(onlySettled(reviewed, wakeFacts(state()))).toBe(true);
     });
   });
 

@@ -1208,6 +1208,12 @@ export interface FlightState {
     failingChecks: string[];
     /** Reviews of the PR that reported blocking findings or a failed verdict. */
     reviewRounds?: number;
+    /**
+     * Set on an open PR a crew run held in the last day and none holds now, once its checks have
+     * settled: the head, the checks' result and the review's blocking count. No run means the
+     * engine has nobody to hand the result to, so each new value wakes FLIGHT at once.
+     */
+    unheld?: string;
   }[];
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {
