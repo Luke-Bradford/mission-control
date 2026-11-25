@@ -13,6 +13,7 @@ export const TOPICS: readonly Topic[] = [
   "guard",
   "flight",
   "plans",
+  "sessions",
 ];
 
 /** Board columns, in display order. */

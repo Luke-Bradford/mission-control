@@ -158,6 +158,7 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { createSessions, SESSIONS_APP_WATCH_MS } from "./sessions/sessions.ts";
+import { createSessionSidebar } from "./sessions/sidebar.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
@@ -1028,13 +1029,15 @@ export async function main(): Promise<void> {
 
   // Every cmux workspace on this Mac (the Sessions page, and FLIGHT's cmux_sessions and cmux_send).
   // A preview hub reads them but never tells a session its app stopped.
+  const cmux = createCmux([CMUX_COMMAND], (m) => log(m));
   const sessions = createSessions({
-    cmux: createCmux([CMUX_COMMAND], (m) => log(m)),
+    cmux,
     store,
     seatIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     tellApps: process.env.MC_NO_LOOP_WRITES !== "1",
     log: (m) => log(m),
   });
+  const sessionSidebar = createSessionSidebar({ sessions, cmux, store, log: (m) => log(m) });
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
@@ -1229,8 +1232,12 @@ export async function main(): Promise<void> {
   // a session that names its app is told when it stops answering, whether or not the page is open
   if (process.env.MC_NO_LOOP_WRITES !== "1")
     trackTimer(setInterval(() => void sessions.view(), SESSIONS_APP_WATCH_MS)).unref();
+  if (process.env.MC_NO_LOOP_WRITES !== "1") {
+    sessionSidebar.start();
+  }
   app.addHook("onClose", async () => {
     for (const timer of backgroundTimers.splice(0)) clearTimeout(timer);
+    sessionSidebar.stop();
   });
   for (const line of early.splice(0)) log(line);
   let stopDiscovery = () => {};

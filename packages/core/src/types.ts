@@ -944,7 +944,8 @@ export type Topic =
   | "config"
   | "guard"
   | "flight"
-  | "plans";
+  | "plans"
+  | "sessions";
 
 /**
  * One machine reading. null = not measured yet (the first sample has no CPU delta) or failed with
