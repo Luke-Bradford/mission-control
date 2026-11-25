@@ -1037,19 +1037,43 @@ describe("Comms API", () => {
       for (let i = 0; i < n; i++) round(at, on, a, b);
     };
 
-    it("clears once the pair is quiet for the window, on any stored message, and is raised again", () => {
+    it("clears once the pair is quiet for the window, on another pair's message, and is raised again", () => {
       const T = clock; // commsRow moves `clock` on with every row
       rounds(7, T);
       rounds(7, T, "shop-app#708", "gamma", "delta");
       expect(chatterNotes()).toHaveLength(2);
-      // exactly the window after the pair's last message: still open
+      // the other pair keeps talking
+      round(T + HOUR, "shop-app#708", "gamma", "delta");
+      // exactly the window after the quiet pair's last message: still open
       commsRow("omega", "alpha", "a message with no ticket", T + 2 * HOUR);
       expect(chatterNotes()).toHaveLength(2);
-      // the other pair keeps talking; only the quiet pair's note goes, with nobody dismissing it
+      // one millisecond later only the quiet pair's note goes, with nobody dismissing it
       round(T + 2 * HOUR + 1, "shop-app#708", "gamma", "delta");
       expect(chatterNotes().map((note) => note.key)).toEqual(["chatter:shop-app#708:delta:gamma"]);
       rounds(7, T + 5 * HOUR);
       expect(chatterNotes().map((note) => note.key)).toContain(KEY);
+    });
+
+    it("is raised anew, undismissed, when the quiet pair itself is the next to speak", () => {
+      const T = clock;
+      rounds(7, T);
+      expect(store.dismissNote(KEY, T + MIN)).toBe(true);
+      rounds(7, T + 3 * HOUR);
+      const note = chatterNotes()[0];
+      expect(note?.at).toBe(T + 3 * HOUR);
+      expect(note?.dismissedAt).toBeNull();
+    });
+
+    it("clears on a ticket stored with no repo, and such a note belongs to no repo", () => {
+      const T = clock;
+      rounds(7, T, "#706");
+      rounds(7, T, "PR 12", "gamma", "delta");
+      expect(chatterNotes().map((note) => [note.key, note.repoId])).toEqual([
+        ["chatter:#706:alpha:beta", null],
+        ["chatter:PR 12:delta:gamma", null],
+      ]);
+      commsRow("omega", "alpha", "a message with no ticket", T + 3 * HOUR);
+      expect(chatterNotes()).toEqual([]);
     });
 
     it("stays, and stays dismissed, while the pair keeps talking past the first window", () => {

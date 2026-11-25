@@ -191,6 +191,8 @@ export class CommsQueries {
           .get(row.from, rate.since) as { n: number };
         if (count.n >= rate.limit) return;
       }
+      // before the row is stored, so the quiet time is measured to the pair's last message before it
+      this.clearQuietChatterNotes(row.at);
       id = this.insertComms({ ...row, label }, text, replyTo);
       if (
         row.from === COMMS_CAPCOM &&
@@ -211,7 +213,6 @@ export class CommsQueries {
         };
         this.insertComms(context, cutCommsText(context.text), null);
       }
-      this.clearQuietChatterNotes(row.at);
       this.raiseChatterNote(row);
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
@@ -222,14 +223,15 @@ export class CommsQueries {
    * Clears each round note whose pair has stored no message on that ticket for the whole window
    * before `at`, so a note about a conversation that ended waits for nobody to dismiss it. A pair
    * still talking keeps its note (and a dismissal of it); one that crosses the limit again after a
-   * clear raises it anew. Runs as `addComms` stores a message, so a hub storing none keeps the note
-   * until the next one.
+   * clear raises it anew, its own first message after the gap included. Runs as `addComms` stores a
+   * message, so a hub storing none keeps the note until the next one.
    */
   private clearQuietChatterNotes(at: number): void {
     const open = this.host.chatterNoteKeys();
     for (const key of open) {
-      // `chatter:<repo>#<n>:<seat>:<seat>`; a key in any other shape is left alone
-      const parts = /^(.+#\d+):([^:]+):([^:]+)$/.exec(key.slice(CHATTER_NOTE_PREFIX.length));
+      // `chatter:<ticket>:<seat>:<seat>`: a seat id holds no colon, the ticket may ("repo#n", "#n",
+      // "PR n"). A key in any other shape was not built by `chatterNoteKey` and is left alone.
+      const parts = /^(.+):([^:]+):([^:]+)$/.exec(key.slice(CHATTER_NOTE_PREFIX.length));
       if (parts === null) continue;
       const [ticket, a, b] = [parts[1], parts[2], parts[3]] as [string, string, string];
       const last = this.host
@@ -266,7 +268,8 @@ export class CommsQueries {
       kind: "blocked",
       runId: null,
       seatId: null,
-      repoId: row.ticket.slice(0, row.ticket.lastIndexOf("#")),
+      // a ticket stored as "#n" or "PR n" names no repo: null, so FLIGHT can still dismiss the note
+      repoId: /^(.+)#\d+$/.exec(row.ticket)?.[1] ?? null,
       text: `${pair[0]} and ${pair[1]} exceeded ${COMMS_CHATTER_ROUNDS} rounds on ${row.ticket}.`,
       at: row.at,
     });
