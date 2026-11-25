@@ -32,17 +32,19 @@ export const titleOf = (item: AttentionItem): string =>
 export const askerIdOf = (item: AttentionItem): string | null => item.asker ?? item.agentId;
 
 /**
- * Who asks: the seat or loop behind the item by call sign (its id written as one when no crew row
- * names it), else FLIGHT when it briefed the question, else the hub (an alert).
+ * Who asks: the seat or loop behind the item, else FLIGHT when it briefed the question, else the
+ * hub (an alert). With no call sign it is the seat id, which the Needs filters match on.
  */
-export const askerOf = (item: AttentionItem, callSign?: string | null): string => {
-  if (item.alert || needsYouAlert(item)) return "the hub";
+export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
+  item.alert || needsYouAlert(item)
+    ? "the hub"
+    : (callSign ?? askerIdOf(item) ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
+
+/** The call sign the band names: the crew row's, else the seat id written as one. */
+export const bandCallSign = (item: AttentionItem, row: CrewRow | undefined): string | undefined => {
+  if (row) return callSignOf(row);
   const id = askerIdOf(item);
-  return (
-    callSign ??
-    (id === null ? null : seatCallSign(id)) ??
-    (item.brief?.for === "operator" ? "FLIGHT" : "the hub")
-  );
+  return id === null ? undefined : seatCallSign(id);
 };
 
 /** The recommended option's label, when the brief names one. */
@@ -90,7 +92,7 @@ export function QuestionBand({
     <section className="needs-band" aria-label="The question">
       <div className="needs-band-meta">
         <Pill tone={item.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[item.kind]}</Pill>
-        <span className="needs-band-who">{`Asked by ${askerOf(item, row ? callSignOf(row) : undefined)}`}</span>
+        <span className="needs-band-who">{`Asked by ${askerOf(item, bandCallSign(item, row))}`}</span>
         <Raised at={item.at} />
         {actions}
       </div>

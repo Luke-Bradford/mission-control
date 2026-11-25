@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { askerOf } from "../src/needs/QuestionBand.tsx";
+import { askerOf, bandCallSign } from "../src/needs/QuestionBand.tsx";
 import { brief, item } from "./fixtures.ts";
 
 describe("askerOf (#1543)", () => {
@@ -11,7 +11,9 @@ describe("askerOf (#1543)", () => {
     expect(askerOf(item({ agentId: null, brief: brief({ for: "operator" }) }))).toBe("FLIGHT");
     expect(askerOf(item({ agentId: null, brief: undefined }))).toBe("the hub");
   });
-  it("writes a seat id as a call sign when no crew row names it", () => {
-    expect(askerOf(item({ agentId: "guido-1" }))).toBe("GUIDO-1");
+  it("the band writes a seat id as a call sign when no crew row names it", () => {
+    const asked = item({ agentId: "guido-1" });
+    expect(askerOf(asked, bandCallSign(asked, undefined))).toBe("GUIDO-1");
+    expect(askerOf(asked)).toBe("guido-1");
   });
 });
