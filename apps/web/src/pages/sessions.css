@@ -300,9 +300,14 @@ button.sess-inbox[aria-expanded="true"] {
     align-items: flex-start;
     gap: 0;
   }
+  /* Buttons keep their 24 px target, so the text line stacked with one (the name over its unread
+     button, the answer under the app link) gives 1 px to the row's border. */
   .sess-name {
     max-width: 100%;
-    line-height: var(--lh-s);
+    line-height: calc(var(--lh-s) - 1px);
+  }
+  .sess-ans {
+    line-height: calc(var(--lh-s) - 1px);
   }
 }
 
