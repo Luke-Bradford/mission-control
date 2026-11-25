@@ -70,7 +70,7 @@ import {
   FILE_SERVICE_RUNAWAY_KEY,
   MACHINE_CAPACITY_KEY,
 } from "../src/telemetry/machine-capacity.ts";
-import { VERSION_CHECK_MS } from "../src/update.ts";
+import { AUTO_UPDATE_INTERVAL_MS, VERSION_CHECK_MS } from "../src/update.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -2613,12 +2613,12 @@ describe("scheduler", () => {
   });
 
   describe("update job", () => {
-    it("has no timer without an auto-update check, and runs it every 10 minutes with one", async () => {
+    it("has no timer without an auto-update check, and runs it every two minutes with one", async () => {
       vi.useFakeTimers();
       const none = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
       expect(JOBS).toContain("update");
       none.start();
-      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
+      await vi.advanceTimersByTimeAsync(AUTO_UPDATE_INTERVAL_MS);
       await none.stop();
       const autoUpdate = vi.fn(async () => "waiting");
       const s = createScheduler({
@@ -2635,7 +2635,7 @@ describe("scheduler", () => {
       expect(autoUpdate).toHaveBeenCalledTimes(0);
       await vi.advanceTimersByTimeAsync(1);
       expect(autoUpdate).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(VERSION_CHECK_MS);
+      await vi.advanceTimersByTimeAsync(AUTO_UPDATE_INTERVAL_MS);
       expect(autoUpdate).toHaveBeenCalledTimes(2);
       await s.stop();
     });

@@ -3,6 +3,16 @@ import type { ReactNode } from "react";
 import { useLocale, useTz } from "../../clock.ts";
 import { cost, hhmm, kTokens, rel } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
+import {
+  CHECKING,
+  focusOf,
+  NOTHING_WRONG,
+  UNMEASURED,
+  unknownText,
+  VITAL_SHAPE,
+  VITAL_WORD,
+  type Vital,
+} from "./vitals.ts";
 
 export const NOT_RECORDED = "Not recorded yet";
 
@@ -29,7 +39,7 @@ function Stat({
   children,
 }: {
   label: string;
-  definition: string;
+  definition: ReactNode;
   /** A 0 to 100 reading drawn as a thin bar under the value. */
   meter?: number;
   children: ReactNode;
@@ -48,18 +58,77 @@ function Stat({
   );
 }
 
+export const FOCUS_LABEL = "Focus now";
+
+/** A state's shape and word, in its colour. */
+function StateMark({ state }: { state: Vital["state"] }) {
+  return (
+    <span className="fp-vstate">
+      <i className={`fp-shape ${VITAL_SHAPE[state]}`} aria-hidden="true" />
+      {VITAL_WORD[state]}
+    </span>
+  );
+}
+
 /**
- * Four tiles: FLIGHT running or stopped, cost per hour, sessions per hour and context size. A figure
- * the hub does not serve (null) says so rather than show 0.
+ * The worst bad or watch measure and its value, with a way down to every measure. With none
+ * flagged, it says the measures are being checked, or how many have no figure, and is all clear
+ * only when every measure is good.
+ */
+function Focus({ vitals }: { vitals: readonly Vital[] }) {
+  const f = focusOf(vitals, UNMEASURED.length);
+  const notes = [
+    f.kind === "flagged" && f.more > 0 && `${f.more} more bad or on watch.`,
+    f.kind === "flagged" && f.unknown > 0 && `${unknownText(f.unknown)}.`,
+  ].filter(Boolean);
+  return (
+    <Stat
+      label={FOCUS_LABEL}
+      definition={
+        <>
+          {notes.length > 0 && `${notes.join(" ")} `}
+          <a className="fp-focus-all" href="#roomP">
+            All measures
+          </a>
+        </>
+      }
+    >
+      {f.kind === "flagged" ? (
+        <span className={`fp-focus fp-v-${f.worst.state}`}>
+          <StateMark state={f.worst.state} /> {f.worst.label}
+          <small>{f.worst.value}</small>
+        </span>
+      ) : f.kind === "loading" ? (
+        <span className="fp-muted">{CHECKING}</span>
+      ) : f.kind === "unknown" ? (
+        <span className="fp-focus fp-v-none">
+          <StateMark state="none" /> {unknownText(f.unknown)}
+          <small>none bad or on watch</small>
+        </span>
+      ) : (
+        <span className="fp-focus fp-v-ok">
+          <StateMark state="ok" /> {NOTHING_WRONG}
+        </span>
+      )}
+    </Stat>
+  );
+}
+
+/**
+ * Five tiles: FLIGHT running or stopped, the worst measure, cost per hour, sessions per hour and
+ * context size. A figure the hub does not serve (null) says so rather than show 0.
  */
 export function StatusBand({
   run,
   view,
   now,
+  vitals,
 }: {
   run: FlightRun;
   view: FlightView | undefined;
   now: number;
+  /** Every measure, worst first. */
+  vitals: readonly Vital[];
 }) {
   const tz = useTz();
   const locale = useLocale();
@@ -91,6 +160,7 @@ export function StatusBand({
       >
         {state ?? <span className="fp-muted">…</span>}
       </Stat>
+      <Focus vitals={vitals} />
       <Stat
         label="Cost per hour"
         definition="API-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill."

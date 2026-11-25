@@ -159,7 +159,7 @@ import {
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
   TRANSCRIPT_PASS_INTERVAL_MS,
 } from "./transcript/lifecycle.ts";
-import { VERSION_CHECK_MS } from "./update.ts";
+import { AUTO_UPDATE_INTERVAL_MS } from "./update.ts";
 
 export type Job =
   | "teams"
@@ -366,7 +366,7 @@ export interface SchedulerDeps {
    * queued reviews and Ready cards. Only read while no browser is connected.
    */
   startPending?: () => boolean;
-  /** `updates.hub: auto`: the check the `update` job runs every VERSION_CHECK_MS. Absent: no job. */
+  /** `updates.hub: auto`: the check the `update` job runs every two minutes. Absent: no job. */
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
   cliHold?: CliHold;
@@ -1697,7 +1697,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_INTERVAL_MS,
     backfill: BACKFILL_INTERVAL_MS,
     engine: ENGINE_TICK_MS,
-    update: VERSION_CHECK_MS,
+    update: AUTO_UPDATE_INTERVAL_MS,
     cli: CLI_UPDATE_INTERVAL_MS,
     cliAuto: CLI_UPDATE_INTERVAL_MS,
   };

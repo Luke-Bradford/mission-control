@@ -4,8 +4,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { item, NOW, REPOS } from "./fixtures.ts";
+import { item, MIN, NOW, REPOS } from "./fixtures.ts";
 import { flightPageApi, type PageState } from "./flightPageFixtures.ts";
+import { ledgerEntry } from "./flightSummaryFixture.ts";
 
 const { renderAt } = browserSession();
 
@@ -25,7 +26,7 @@ describeRendered("FLIGHT page in a browser", () => {
         page: "test/agentV2Browser.html",
         width: 1280,
         height: 800,
-        search: `?dock=folded&at=${encodeURIComponent("/flight")}`,
+        search: `?dock=folded&at=${encodeURIComponent("/flight#decisionsP")}`,
         api,
       });
       await main.box("#decisions li");
@@ -116,7 +117,7 @@ describeRendered("FLIGHT page in a browser", () => {
             page: "test/flightBrowser.html",
             width,
             height,
-            search: `?view=page&theme=${theme}`,
+            search: `?view=page&theme=${theme}&at=${encodeURIComponent("/flight#heldWatchP")}`,
             colorScheme: theme,
             api: flightPageApi("running", {
               "/api/attention/held": [
@@ -189,7 +190,6 @@ describeRendered("FLIGHT page in a browser", () => {
               clipped: panel ? panel.scrollHeight > panel.clientHeight + 1 : true,
               end: end ? { w: end.width, h: end.height } : null,
               text: panel?.textContent ?? "",
-              decisions: document.querySelectorAll("#decisions li").length,
             };
           }, null);
           const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
@@ -202,7 +202,6 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.end?.h).toBeGreaterThanOrEqual(24);
           expect(r.text).toContain("Review only: no new builds");
           expect(r.text).toContain("Ends: not set");
-          expect(r.decisions).toBeGreaterThanOrEqual(3);
           await page.close();
         },
         BROWSER_TEST_TIMEOUT_MS,
@@ -337,7 +336,7 @@ describeRendered("FLIGHT page in a browser", () => {
               colorScheme: theme,
               api: flightPageApi(state),
             });
-            await page.box("#decisions li");
+            await page.box("#blockers");
             expect(page.errors()).toEqual([]);
             const r = await page.evaluate(() => {
               const doc = document.documentElement;
@@ -355,9 +354,6 @@ describeRendered("FLIGHT page in a browser", () => {
                   };
                 },
               );
-              const list = document.getElementById("decisions") as HTMLElement;
-              const rows = [...list.children];
-              const lastRow = rows.at(-1)?.getBoundingClientRect();
               const small = [...document.querySelectorAll<HTMLElement>("a, button, select, input")]
                 .filter(visible)
                 .filter((el) => {
@@ -383,16 +379,11 @@ describeRendered("FLIGHT page in a browser", () => {
                 doing: document.querySelectorAll("#doing li").length,
                 blockerRows: document.querySelectorAll("#blockers .fp-brow").length,
                 blockers: text("#blockers"),
-                decisions: rows.length,
-                decSub: text("#decH .fp-sub"),
-                decGap: list.getBoundingClientRect().bottom - (lastRow?.bottom ?? 0),
-                decRowH: lastRow?.height ?? 0,
-                decTop:
-                  (rows[0]?.getBoundingClientRect().top ?? 0) - list.getBoundingClientRect().top,
                 tables: document.querySelectorAll("main table").length,
                 board: document
                   .querySelector<HTMLAnchorElement>("a.fp-board")
                   ?.getAttribute("href"),
+                decisionsHere: document.getElementById("decisions") !== null,
                 status: text(".fp-band"),
                 theme: doc.dataset.theme,
               };
@@ -420,6 +411,7 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(r.tiny, `${where}: no text under 11 px`).toEqual([]);
             expect(r.labels).toEqual([
               "FLIGHT",
+              "Focus now",
               "Cost per hour",
               "Sessions per hour",
               "Context size",
@@ -429,18 +421,122 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(r.theme).toBe(theme);
             expect(r.doing, `${where}: Doing now has 1 to 5 lines`).toBeGreaterThan(0);
             expect(r.doing).toBeLessThanOrEqual(5);
-            expect(r.decisions).toBeGreaterThanOrEqual(width >= 2560 ? 12 : 8);
-            expect(r.decSub).toBe(`last ${r.decisions} · newest first`);
-            expect(r.decTop, `${where}: rows start at the top`).toBe(0);
-            expect(r.decGap, `${where}: blank under decisions`).toBeLessThan(r.decRowH);
+            expect(r.decisionsHere, `${where}: Recent decisions is on the Plan tab`).toBe(false);
             expect(r.status).toMatch(state === "stopped" ? /Stopped/ : /Running/);
             if (state === "blocked") expect(r.blockerRows).toBe(3);
             else if (state === "running") expect(r.blockers).toMatch(/Nothing is blocking FLIGHT/);
             else expect(r.blockerRows).toBe(1);
+            // Recent decisions is on the Plan tab: it lists its rows there, newest first.
+            await page.evaluate(
+              () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+              null,
+            );
+            await page.box("#decisions li");
+            const dec = await page.evaluate(
+              () => ({
+                rows: document.querySelectorAll("#decisions li").length,
+                sub: document.querySelector("#decH .fp-sub")?.textContent ?? "",
+                clipped: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].some(
+                  (p) => p.scrollHeight > p.clientHeight + 1,
+                ),
+              }),
+              null,
+            );
+            expect(dec.rows, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(3);
+            expect(dec.sub).toBe(`last ${dec.rows} · newest first`);
+            expect(dec.clipped, `${where}: a Plan panel hides content`).toBe(false);
           },
           BROWSER_TEST_TIMEOUT_MS,
         );
       }
+    }
+  }
+
+  // Plan and Watching grow with their content: a panel body is never squeezed to nothing, and a long
+  // list scrolls inside a set height with a count of what is below, so the page does not run on.
+  for (const [width, height] of SIZES) {
+    for (const count of [0, 50]) {
+      const where = `${width}x${height}, ${count} pointers`;
+      it(
+        `keeps Plan and Watching bodies readable and the pointer list bounded at ${where}`,
+        async () => {
+          const long =
+            "a pointer whose entry title runs long enough to wrap across the row ".repeat(3);
+          const entries = Array.from({ length: count }, (_, i) =>
+            ledgerEntry({
+              key: `watch:${i}`,
+              title: `${long}(${i})`,
+              pointers: [
+                {
+                  kind: "pr",
+                  target: `shop-app#${100 + i}`,
+                  changedAt: NOW - i * 7 * MIN,
+                  change: "CI went green",
+                  readAt: null,
+                },
+              ],
+            }),
+          );
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: "?view=page&theme=dark",
+            colorScheme: "dark",
+            api: flightPageApi("running", {
+              "/api/flight/ledger?status=open": {
+                session: "s1",
+                entries,
+                more: false,
+                nextOffset: null,
+              },
+            }),
+          });
+          await page.box("#fp-tab-plan");
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+            null,
+          );
+          await page.box("#ledgerP");
+          const queue = await page.evaluate(
+            () =>
+              document.querySelector<HTMLElement>("#ledgerP .flight-panel-scroll")?.clientHeight,
+            null,
+          );
+          expect(queue, `${where}: the queue body has height`).toBeGreaterThan(0);
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-watching")?.click(),
+            null,
+          );
+          await page.box("#pointersP");
+          if (count > 0) await page.box("#pointersP .drow");
+          const r = await page.evaluate(() => {
+            const body = document.querySelector<HTMLElement>("#pointersP .fp-slbody");
+            return {
+              triggers:
+                document.querySelector<HTMLElement>("#watchP .flight-panel-scroll")?.clientHeight ??
+                0,
+              listHeight: body?.clientHeight ?? 0,
+              scrolls: body ? body.scrollHeight > body.clientHeight + 1 : false,
+              more: document.querySelector("#pointersP .fp-more")?.textContent ?? "",
+              note: document.querySelector("#pointersP .fp-note")?.textContent ?? "",
+              sideScroll:
+                document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          }, null);
+          expect(r.triggers, `${where}: Revisit triggers has height`).toBeGreaterThan(0);
+          expect(r.sideScroll, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
+          if (count === 0) {
+            expect(r.note).toBe("FLIGHT has not pointed at anything yet.");
+          } else {
+            expect(r.listHeight, `${where}: the list shows rows`).toBeGreaterThan(80);
+            expect(r.listHeight, `${where}: the list is bounded`).toBeLessThanOrEqual(height);
+            expect(r.scrolls, `${where}: the list scrolls inside`).toBe(true);
+            expect(r.more, `${where}: the rest is counted`).toMatch(/more below/);
+          }
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
     }
   }
 
@@ -505,9 +601,12 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.total).toBe(16);
           expect(r.whole, `${where}: blocker rows wholly in view`).toBeGreaterThanOrEqual(6);
           expect(r.rowHeight, `${where}: compact rows`).toBeLessThanOrEqual(64);
-          expect(r.more, `${where}: the hidden count`).toMatch(
-            new RegExp(`^${r.total - r.whole} more below`),
-          );
+          // Rows that all fit say nothing; otherwise the count of the rest is stated.
+          if (r.whole < r.total)
+            expect(r.more, `${where}: the hidden count`).toMatch(
+              new RegExp(`^${r.total - r.whole} more below`),
+            );
+          else expect(r.more, `${where}: nothing hidden`).toBe("");
           // The longest action wraps to two lines and is cut with an ellipsis, not run off one line.
           expect(r.act.wrap, `${where}: the action wraps`).toBe("normal");
           expect(r.act.height, `${where}: closed action is two lines`).toBeGreaterThan(30);
@@ -536,11 +635,20 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(o.cut, `${where}: the owner tag "${o.text}" is cut`).toBeLessThanOrEqual(0);
           }
           expect(r.owners.map((o) => o.text)).toContain("#1572");
-          expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
-            3,
-          );
+          expect(r.decisions, `${where}: Recent decisions is on the Plan tab`).toBe(0);
           for (const p of r.panels)
             expect(p.clipped, `${where}: ${p.id} hides content`).toBe(false);
+          // On the Plan tab, Recent decisions keeps its rows.
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+            null,
+          );
+          await page.box("#decisions li");
+          const planRows = await page.evaluate(
+            () => document.querySelectorAll("#decisions li").length,
+            null,
+          );
+          expect(planRows, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(3);
         },
         BROWSER_TEST_TIMEOUT_MS,
       );
@@ -600,7 +708,6 @@ describeRendered("FLIGHT page in a browser", () => {
               ).length,
               bandBottom: box(".fp-band")?.bottom ?? 0,
               midTop: box(".fp-mid")?.top ?? 0,
-              decTop: box("#decisionsP")?.top ?? 0,
               whole: whole.length,
               total: rows.length,
               more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
@@ -632,22 +739,20 @@ describeRendered("FLIGHT page in a browser", () => {
             r.midTop,
             `${where}: Doing now and Blockers sit under the status band`,
           ).toBeGreaterThanOrEqual(r.bandBottom);
-          expect(r.decTop, `${where}: Recent decisions sits under them`).toBeGreaterThan(r.midTop);
           // Blockers: some rows wholly in view, the rest counted, columns wide enough to read.
           expect(r.total).toBe(16);
           expect(r.whole, `${where}: blocker rows in view`).toBeGreaterThanOrEqual(2);
-          expect(r.more, `${where}: the hidden count`).toMatch(
-            new RegExp(`^${r.total - r.whole} more below`),
-          );
+          if (r.whole < r.total)
+            expect(r.more, `${where}: the hidden count`).toMatch(
+              new RegExp(`^${r.total - r.whole} more below`),
+            );
+          else expect(r.more, `${where}: nothing hidden`).toBe("");
           for (const w of r.columns)
             expect(w, `${where}: blocker and action columns are readable`).toBeGreaterThanOrEqual(
               120,
             );
           for (const cut of r.owners)
             expect(cut, `${where}: an owner tag is cut`).toBeLessThanOrEqual(0);
-          expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
-            3,
-          );
           for (const clipped of r.panels)
             expect(clipped, `${where}: a panel hides content`).toBe(false);
           // Reach: Tab reaches the first row, and the keyboard opens it to the whole action.
@@ -661,6 +766,23 @@ describeRendered("FLIGHT page in a browser", () => {
             return a ? a.scrollHeight - a.clientHeight : 1;
           }, null);
           expect(open, `${where}: the opened action is whole`).toBeLessThanOrEqual(1);
+          // Recent decisions moved to the Plan tab: it opens there and keeps its rows.
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#fp-tab-plan")?.click(),
+            null,
+          );
+          await page.box("#decisionsP");
+          const dec = await page.evaluate(
+            () => ({
+              rows: document.querySelectorAll("#decisions li").length,
+              clipped: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].some(
+                (p) => p.scrollHeight > p.clientHeight + 1,
+              ),
+            }),
+            null,
+          );
+          expect(dec.rows, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(3);
+          expect(dec.clipped, `${where}: a Plan panel hides content`).toBe(false);
         },
         BROWSER_TEST_TIMEOUT_MS,
       );

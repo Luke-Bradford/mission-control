@@ -308,25 +308,100 @@ describe("startStream", () => {
     fetchMock.mock.calls.map((c) => (c as unknown[])[0]);
 
   it("a changed event refetches the resources on that topic, and no others", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     sub("/api/limits", "limits", () => {});
     sub("/api/crew?shape=summary", "agents", () => {});
-    await settle();
+    await vi.advanceTimersByTimeAsync(6000);
     fetchMock.mockClear();
     start();
     const [es] = FakeEventSource.instances;
     expect(es?.url).toBe("/api/stream");
 
     es?.emit("changed", { data: '{"topic":"limits"}' });
-    await settle();
+    await vi.advanceTimersByTimeAsync(10);
     expect(fetched(fetchMock)).toEqual(["/api/limits"]);
 
     fetchMock.mockClear();
     es?.emit("changed", { data: '{"topic":"nope"}' });
     es?.emit("changed", { data: "not json" });
-    await settle();
+    await vi.advanceTimersByTimeAsync(10);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("paces every topic's stream reads: one read per resource per six seconds, the last change kept", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    sub(RESOURCES.attention.path, RESOURCES.attention.topic, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    start();
+    const [es] = FakeEventSource.instances;
+    for (let i = 0; i < 10; i++) {
+      es?.emit("changed", { data: '{"topic":"attention"}' });
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    expect(fetched(fetchMock)).toEqual([RESOURCES.attention.path]);
+    await vi.advanceTimersByTimeAsync(1000);
+    // the opening read, then the events' one read once the pace allows
+    expect(fetched(fetchMock)).toEqual([RESOURCES.attention.path, RESOURCES.attention.path]);
+    // a local refetch (after the operator's own action) is never paced
+    hub.refetchTopic("attention");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fetched(fetchMock)).toHaveLength(3);
+  });
+
+  it("a change that arrives while a paced read waits is read, even after a local refetch", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let version = "v0";
+    const fetchMock = vi.fn(async () => Response.json([version]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { path, topic } = RESOURCES.attention;
+    sub(path, topic, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    start();
+    const [es] = FakeEventSource.instances;
+    version = "v1";
+    es?.emit("changed", { data: '{"topic":"attention"}' });
+    await vi.advanceTimersByTimeAsync(1000);
+    hub.refetch(path);
+    await vi.advanceTimersByTimeAsync(500);
+    version = "v2";
+    es?.emit("changed", { data: '{"topic":"attention"}' });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(hub.snapshot(path, topic).data).toEqual(["v2"]);
+  });
+
+  it("a local refetch of a resource on several topics is not held behind a paced stream read", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    sub(RESOURCES.flight.path, RESOURCES.flight.topic, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    start();
+    FakeEventSource.instances[0]?.emit("changed", { data: '{"topic":"flight"}' });
+    await vi.advanceTimersByTimeAsync(10);
+    fetchMock.mockClear();
+    hub.refetchTopic("flight");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetched(fetchMock)).toEqual([RESOURCES.flight.path]);
+  });
+
+  it("a queued stream read is dropped when a newer read has started since the event", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const fetchMock = vi.fn(async () => new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const off = hub.subscribe(RESOURCES.attention.path, RESOURCES.attention.topic, () => {});
+    await vi.advanceTimersByTimeAsync(10);
+    start();
+    FakeEventSource.instances[0]?.emit("changed", { data: '{"topic":"attention"}' });
+    off();
+    // a page opening after the event reads the resource afresh, which carries the change
+    await vi.advanceTimersByTimeAsync(3000);
+    sub(RESOURCES.attention.path, RESOURCES.attention.topic, () => {});
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(fetched(fetchMock)).toEqual([RESOURCES.attention.path, RESOURCES.attention.path]);
   });
 
   it("paces metrics and FLIGHT's live seat state after an agents event", async () => {
